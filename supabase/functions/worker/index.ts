@@ -242,7 +242,9 @@ async function handleTranslateJob(job: any, supabase: any): Promise<boolean> {
       console.log('GPT-5 Response data:', JSON.stringify(data, null, 2));
       
       // Extract the actual text content from the responses endpoint
-      translatedText = data.content?.[0]?.text || 
+      // Based on the logs, the structure is data.output[1].content[0].text
+      translatedText = data.output?.[1]?.content?.[0]?.text || 
+                      data.content?.[0]?.text || 
                       data.choices?.[0]?.message?.content || 
                       data.text?.content || 
                       data.output?.content || 
