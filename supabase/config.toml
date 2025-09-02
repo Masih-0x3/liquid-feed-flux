@@ -1,1 +1,10 @@
 project_id = "jzirqfzzvlbxwfzndaer"
+
+[functions.webhooks-rssapp]
+verify_jwt = false
+
+[functions.worker]
+verify_jwt = false
+
+[functions.admin-retry]
+verify_jwt = true
