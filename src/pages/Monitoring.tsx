@@ -184,6 +184,66 @@ export default function Monitoring() {
     setEditedContent("");
   };
 
+  const handleRetryTranslation = async (tweetId: string) => {
+    try {
+      // Create a new translation job
+      const { error } = await supabase
+        .from('jobs')
+        .insert({
+          type: 'translate',
+          payload: { tweet_id: tweetId },
+          status: 'pending',
+          attempts: 0
+        });
+
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: "Translation job queued for retry",
+      });
+
+      fetchMonitoringData();
+    } catch (error) {
+      console.error('Error retrying translation:', error);
+      toast({
+        title: "Error",
+        description: "Failed to retry translation",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleRetryDelivery = async (tweetId: string) => {
+    try {
+      // Create a new delivery job
+      const { error } = await supabase
+        .from('jobs')
+        .insert({
+          type: 'deliver',
+          payload: { tweet_id: tweetId },
+          status: 'pending',
+          attempts: 0
+        });
+
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: "Delivery job queued for retry",
+      });
+
+      fetchMonitoringData();
+    } catch (error) {
+      console.error('Error retrying delivery:', error);
+      toast({
+        title: "Error",
+        description: "Failed to retry delivery",
+        variant: "destructive",
+      });
+    }
+  };
+
   const handleResendToTelegram = async (tweetId: string) => {
     try {
       const { error } = await supabase.functions.invoke('admin-retry', {
@@ -289,6 +349,85 @@ export default function Monitoring() {
           <RefreshCw className="w-4 h-4 mr-2" />
           Refresh
         </Button>
+      </div>
+
+      {/* Pipeline Status Summary */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Total Posts</p>
+                <p className="text-2xl font-bold">{entries.length}</p>
+              </div>
+              <Badge variant="outline" className="text-xs">24h</Badge>
+            </div>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Translation Failed</p>
+                <p className="text-2xl font-bold text-red-600">
+                  {entries.filter(e => e.translation_status === 'failed').length}
+                </p>
+              </div>
+              <Button 
+                size="sm" 
+                variant="outline"
+                onClick={() => {
+                  entries.filter(e => e.translation_status === 'failed').forEach(entry => {
+                    handleRetryTranslation(entry.tweet_id);
+                  });
+                }}
+                disabled={entries.filter(e => e.translation_status === 'failed').length === 0}
+              >
+                Retry All
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Delivery Failed</p>
+                <p className="text-2xl font-bold text-red-600">
+                  {entries.filter(e => e.delivery_status === 'failed').length}
+                </p>
+              </div>
+              <Button 
+                size="sm" 
+                variant="outline"
+                onClick={() => {
+                  entries.filter(e => e.delivery_status === 'failed').forEach(entry => {
+                    handleRetryDelivery(entry.tweet_id);
+                  });
+                }}
+                disabled={entries.filter(e => e.delivery_status === 'failed').length === 0}
+              >
+                Retry All
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Successfully Delivered</p>
+                <p className="text-2xl font-bold text-green-600">
+                  {entries.filter(e => e.delivery_status === 'posted').length}
+                </p>
+              </div>
+              <Badge variant="default" className="text-xs">Success</Badge>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Filters */}
@@ -483,7 +622,32 @@ export default function Monitoring() {
                         </div>
 
                         {/* Actions */}
-                        <div className="flex gap-2">
+                        <div className="flex gap-2 flex-wrap">
+                          {/* Translation Actions */}
+                          {entry.translation_status === 'failed' && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleRetryTranslation(entry.tweet_id)}
+                            >
+                              <RefreshCw className="w-3 h-3 mr-1" />
+                              Retry Translation
+                            </Button>
+                          )}
+                          
+                          {/* Delivery Actions */}
+                          {entry.delivery_status === 'failed' && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleRetryDelivery(entry.tweet_id)}
+                            >
+                              <RefreshCw className="w-3 h-3 mr-1" />
+                              Retry Delivery
+                            </Button>
+                          )}
+                          
+                          {/* Force Resend (works for any status) */}
                           <Button
                             size="sm"
                             variant="outline"
@@ -491,7 +655,7 @@ export default function Monitoring() {
                             disabled={entry.delivery_status === 'pending'}
                           >
                             <Send className="w-3 h-3 mr-1" />
-                            Resend to Telegram
+                            Force Resend
                           </Button>
                         </div>
                       </div>
