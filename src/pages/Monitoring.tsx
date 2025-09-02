@@ -49,6 +49,7 @@ interface MonitoringEntry {
   translation_success: boolean;
   delivery_success: boolean;
   delivered_without_translation: boolean;
+  translation_failed: boolean;
 }
 
 export default function Monitoring() {
@@ -115,8 +116,12 @@ export default function Monitoring() {
           (j.payload as any).tweet_id === post.tweet_id
         );
 
-        const translationSuccess = post.text_translated && post.text_translated.trim() !== '';
+        const translationSuccess = post.text_translated && 
+                                 post.text_translated.trim() !== '' && 
+                                 post.text_translated !== post.text_original;
         const deliverySuccess = delivery?.status === 'posted';
+        const translationFailed = translateJob?.status === 'failed' || 
+                                 (deliverySuccess && !translationSuccess);
         
         return {
           tweet_id: post.tweet_id,
@@ -133,11 +138,12 @@ export default function Monitoring() {
           delivery_status: delivery?.status || 'pending',
           delivery_error: delivery?.last_error || '',
           telegram_message_ids: delivery?.telegram_message_ids || [],
-          translation_status: translateJob?.status || (translationSuccess ? 'completed' : 'pending'),
+          translation_status: translateJob?.status || (translationSuccess ? 'completed' : (translationFailed ? 'failed' : 'pending')),
           job_attempts: Math.max(translateJob?.attempts || 0, deliverJob?.attempts || 0),
           translation_success: translationSuccess,
           delivery_success: deliverySuccess,
-          delivered_without_translation: deliverySuccess && !translationSuccess
+          delivered_without_translation: deliverySuccess && !translationSuccess,
+          translation_failed: translationFailed
         };
       });
 
@@ -195,8 +201,11 @@ export default function Monitoring() {
 
   const handleRetryTranslation = async (tweetId: string) => {
     try {
+      // For posts delivered without translation, we want to translate and then resend
+      const entry = entries.find(e => e.tweet_id === tweetId);
+      
       // Create a new translation job
-      const { error } = await supabase
+      const { error: translationError } = await supabase
         .from('jobs')
         .insert({
           type: 'translate',
@@ -205,12 +214,31 @@ export default function Monitoring() {
           attempts: 0
         });
 
-      if (error) throw error;
+      if (translationError) throw translationError;
 
-      toast({
-        title: "Success",
-        description: "Translation job queued for retry",
-      });
+      // If this was delivered without translation, also create a delivery job to resend with translation
+      if (entry?.delivered_without_translation) {
+        const { error: deliveryError } = await supabase
+          .from('jobs')
+          .insert({
+            type: 'deliver',
+            payload: { tweet_id: tweetId },
+            status: 'pending',
+            attempts: 0
+          });
+
+        if (deliveryError) throw deliveryError;
+        
+        toast({
+          title: "Success",
+          description: "Translation and resend jobs queued",
+        });
+      } else {
+        toast({
+          title: "Success",
+          description: "Translation job queued for retry",
+        });
+      }
 
       fetchMonitoringData();
     } catch (error) {
@@ -410,18 +438,18 @@ export default function Monitoring() {
               <div>
                 <p className="text-sm font-medium text-muted-foreground">Translation Failed</p>
                 <p className="text-2xl font-bold text-red-600">
-                  {entries.filter(e => e.translation_status === 'failed' || (!e.translation_success && e.translation_status !== 'pending')).length}
+                  {entries.filter(e => e.translation_failed).length}
                 </p>
               </div>
               <Button 
                 size="sm" 
                 variant="outline"
                 onClick={() => {
-                  entries.filter(e => e.translation_status === 'failed' || (!e.translation_success && e.translation_status !== 'pending')).forEach(entry => {
+                  entries.filter(e => e.translation_failed).forEach(entry => {
                     handleRetryTranslation(entry.tweet_id);
                   });
                 }}
-                disabled={entries.filter(e => e.translation_status === 'failed' || (!e.translation_success && e.translation_status !== 'pending')).length === 0}
+                disabled={entries.filter(e => e.translation_failed).length === 0}
               >
                 Retry All
               </Button>
@@ -611,17 +639,21 @@ export default function Monitoring() {
                           </Button>
                         </div>
                       </div>
-                    ) : (
-                      <div className={`text-sm p-3 rounded border ${
-                        entry.delivered_without_translation 
-                          ? 'bg-yellow-50 border-yellow-200' 
-                          : 'bg-muted/50'
-                      }`}>
-                        {entry.text_translated || (entry.delivered_without_translation 
-                          ? "[Delivered in English - translation failed]" 
-                          : "[Not translated yet]")}
-                      </div>
-                    )}
+                     ) : (
+                       <div className={`text-sm p-3 rounded border ${
+                         entry.delivered_without_translation 
+                           ? 'bg-yellow-50 border-yellow-200' 
+                           : 'bg-muted/50'
+                       }`}>
+                         <div className="whitespace-pre-wrap break-words">
+                           {entry.text_translated && entry.text_translated.trim() ? 
+                             entry.text_translated : 
+                             (entry.delivered_without_translation 
+                               ? "[Delivered in English - translation failed]" 
+                               : "[Not translated yet]")}
+                         </div>
+                       </div>
+                     )}
                   </div>
 
                   {/* Expanded Details */}
