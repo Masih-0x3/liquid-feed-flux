@@ -155,10 +155,10 @@ serve(async (req) => {
         .eq('key', 'telegram_config')
         .single();
 
-      if (!telegramConfig?.value) {
+      if (!telegramConfig?.value || !telegramConfig.value.bot_token || !telegramConfig.value.chat_id) {
         return new Response(JSON.stringify({ 
           success: false, 
-          error: 'Telegram not configured' 
+          error: 'Telegram not configured properly. Please set bot_token and chat_id in Settings.' 
         }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           status: 400
@@ -166,6 +166,12 @@ serve(async (req) => {
       }
 
       const telegramSettings = telegramConfig.value as any;
+
+      console.log('Telegram settings:', {
+        bot_token: telegramSettings.bot_token ? `${telegramSettings.bot_token.substring(0, 10)}...` : 'missing',
+        chat_id: telegramSettings.chat_id,
+        parse_mode: telegramSettings.parse_mode
+      });
 
       // Format message using template
       const message = template
@@ -179,8 +185,13 @@ serve(async (req) => {
         .replace(/{hashtags}/g, settings?.custom_hashtags || '#تست')
         .replace(/{media_info}/g, post.has_media ? '📸 تصویر' : '');
 
+      console.log('Formatted test message:', message);
+
       // Send test message to Telegram
-      const telegramResponse = await fetch(`https://api.telegram.org/bot${telegramSettings.bot_token}/sendMessage`, {
+      const telegramUrl = `https://api.telegram.org/bot${telegramSettings.bot_token}/sendMessage`;
+      console.log('Sending to Telegram API URL:', telegramUrl.replace(telegramSettings.bot_token, 'HIDDEN_TOKEN'));
+      
+      const telegramResponse = await fetch(telegramUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -193,10 +204,16 @@ serve(async (req) => {
         })
       });
 
+      console.log('Telegram response status:', telegramResponse.status);
+      
       if (!telegramResponse.ok) {
         const errorData = await telegramResponse.json();
+        console.error('Telegram API error details:', errorData);
         throw new Error(`Telegram API error: ${errorData.description || 'Unknown error'}`);
       }
+
+      const responseData = await telegramResponse.json();
+      console.log('Telegram response success:', responseData);
 
       return new Response(JSON.stringify({ 
         success: true, 
