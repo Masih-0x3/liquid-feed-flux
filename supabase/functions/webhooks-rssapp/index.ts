@@ -24,83 +24,115 @@ serve(async (req) => {
     console.log('Payload keys:', Object.keys(payload));
     console.log('Payload type:', typeof payload);
 
-    // Parse RSS items from the payload
-    const items = payload.items || [];
-    console.log(`Processing ${items.length} RSS items`);
+    // Parse RSS items from the payload - handle different possible formats
+    let items = [];
+    
+    // Try different payload structures RSS.app might use
+    if (payload.items && Array.isArray(payload.items)) {
+      items = payload.items;
+    } else if (payload.item) {
+      items = Array.isArray(payload.item) ? payload.item : [payload.item];
+    } else if (payload.entries && Array.isArray(payload.entries)) {
+      items = payload.entries;
+    } else if (payload.entry) {
+      items = Array.isArray(payload.entry) ? payload.entry : [payload.entry];
+    } else if (Array.isArray(payload)) {
+      items = payload;
+    } else {
+      // Treat the entire payload as a single item
+      items = [payload];
+    }
+    
+    console.log(`Found ${items.length} items to process`);
+    
+    if (items.length === 0) {
+      console.log('No items found in payload, treating as test notification');
+      return new Response(JSON.stringify({ 
+        success: true, 
+        message: 'Test notification received',
+        processed: 0 
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    let processedCount = 0;
 
     for (const item of items) {
       try {
-        // Extract item data
-        const tweetId = item.guid || item.link || `${Date.now()}-${Math.random()}`;
-        const text = item.title || item.description || '';
-        const url = item.link || '';
-        const publishedAt = item.pubDate ? new Date(item.pubDate) : new Date();
+        console.log('Processing item:', JSON.stringify(item, null, 2));
+        
+        // Extract item data with multiple fallbacks
+        const tweetId = item.guid || item.id || item.link || item.url || `${Date.now()}-${Math.random()}`;
+        const text = item.title || item.description || item.content || item.summary || 'RSS Item';
+        const url = item.link || item.url || '';
+        const publishedAt = item.pubDate || item.published || item.date ? 
+          new Date(item.pubDate || item.published || item.date) : new Date();
 
-        // Find the associated account (assuming RSS.app provides feed info)
-        const feedId = payload.feed?.id || payload.feedId;
+        console.log(`Extracted: tweetId=${tweetId}, text="${text.substring(0, 50)}...", url=${url}`);
+
+        // Find or create a default account first
         let accountId = null;
+        
+        const { data: accounts } = await supabase
+          .from('accounts')
+          .select('*')
+          .eq('enabled', true)
+          .limit(1);
 
-        if (feedId) {
-          const { data: feed } = await supabase
-            .from('feeds')
-            .select('*')
-            .eq('rssapp_feed_id', feedId)
+        if (accounts && accounts.length > 0) {
+          accountId = accounts[0].id;
+          console.log('Using existing account:', accountId);
+        } else {
+          // Create a default account
+          const { data: newAccount, error: accountError } = await supabase
+            .from('accounts')
+            .insert({
+              handle: 'rss-feed',
+              display_name: 'RSS Feed Account'
+            })
+            .select()
             .single();
 
-          if (feed) {
-            // Get the first enabled account or create a default one
-            const { data: accounts } = await supabase
-              .from('accounts')
-              .select('*')
-              .eq('enabled', true)
-              .limit(1);
+          if (accountError) {
+            console.error('Error creating account:', accountError);
+            continue;
+          }
 
-            if (accounts && accounts.length > 0) {
-              accountId = accounts[0].id;
-            } else {
-              // Create a default account if none exists
-              const { data: newAccount } = await supabase
-                .from('accounts')
-                .insert({
-                  handle: 'default',
-                  display_name: 'Default Account'
-                })
-                .select()
-                .single();
-
-              if (newAccount) {
-                accountId = newAccount.id;
-              }
-            }
+          if (newAccount) {
+            accountId = newAccount.id;
+            console.log('Created new account:', accountId);
           }
         }
 
         if (!accountId) {
-          console.log('No account found, skipping item:', tweetId);
+          console.log('No account available, skipping item:', tweetId);
           continue;
         }
 
         // Upsert post to database
-        const { error: postError } = await supabase
+        const { data: post, error: postError } = await supabase
           .from('posts')
           .upsert({
             tweet_id: tweetId,
             account_id: accountId,
             text_original: text,
-            lang_original: 'auto', // Will be detected during translation
+            lang_original: 'auto',
             url: url,
             tweeted_at: publishedAt,
-            has_media: false // Will be updated if media is detected
+            has_media: false
           }, {
             onConflict: 'tweet_id'
-          });
+          })
+          .select()
+          .single();
 
         if (postError) {
           console.error('Error upserting post:', postError);
           continue;
         }
 
-        console.log('Post upserted:', tweetId);
+        console.log('Post upserted successfully:', tweetId);
 
         // Create translation job
         const { error: translationJobError } = await supabase
@@ -110,7 +142,7 @@ serve(async (req) => {
             payload: {
               tweet_id: tweetId,
               text: text,
-              target_lang: 'en' // Default target language
+              target_lang: 'en'
             },
             status: 'pending'
           });
@@ -139,15 +171,20 @@ serve(async (req) => {
           console.log('Delivery job created for:', tweetId);
         }
 
+        processedCount++;
+
       } catch (itemError) {
         console.error('Error processing item:', itemError);
         continue;
       }
     }
 
+    console.log(`Successfully processed ${processedCount} out of ${items.length} items`);
+
     return new Response(JSON.stringify({ 
       success: true, 
-      processed: items.length 
+      processed: processedCount,
+      total: items.length
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
