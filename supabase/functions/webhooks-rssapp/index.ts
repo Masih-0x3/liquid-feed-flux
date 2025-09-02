@@ -24,11 +24,15 @@ serve(async (req) => {
     console.log('Payload keys:', Object.keys(payload));
     console.log('Payload type:', typeof payload);
 
-    // Parse RSS items from the payload - handle different possible formats
+    // Parse RSS items from the payload - handle RSS.app webhook structure
     let items = [];
     
-    // Try different payload structures RSS.app might use
-    if (payload.items && Array.isArray(payload.items)) {
+    // RSS.app webhook structure: { data: { items_new: [...] } }
+    if (payload.data && payload.data.items_new && Array.isArray(payload.data.items_new)) {
+      items = payload.data.items_new;
+    } else if (payload.data && payload.data.items && Array.isArray(payload.data.items)) {
+      items = payload.data.items;
+    } else if (payload.items && Array.isArray(payload.items)) {
       items = payload.items;
     } else if (payload.item) {
       items = Array.isArray(payload.item) ? payload.item : [payload.item];
@@ -65,19 +69,30 @@ serve(async (req) => {
         // Extract item data with multiple fallbacks
         const tweetId = item.guid || item.id || item.link || item.url || `${Date.now()}-${Math.random()}`;
         
-        // Better text extraction with HTML content parsing
+        // Extract content from RSS.app webhook structure
         let text = '';
-        if (item.content && typeof item.content === 'string') {
-          // Remove HTML tags and decode entities
-          text = item.content.replace(/<[^>]*>/g, '').replace(/&[^;]+;/g, ' ').trim();
+        
+        // RSS.app webhook structure: data.items_new[].title and description_text
+        if (item.title && typeof item.title === 'string') {
+          text = item.title.trim();
+        } else if (item.description_text && typeof item.description_text === 'string') {
+          text = item.description_text.trim();
         } else if (item.description && typeof item.description === 'string') {
           text = item.description.replace(/<[^>]*>/g, '').replace(/&[^;]+;/g, ' ').trim();
-        } else if (item.title) {
-          text = item.title;
+        } else if (item.content && typeof item.content === 'string') {
+          text = item.content.replace(/<[^>]*>/g, '').replace(/&[^;]+;/g, ' ').trim();
         } else if (item.summary) {
           text = item.summary;
         } else {
           text = 'RSS Item - No content available';
+        }
+        
+        // Clean up common patterns in RSS content
+        if (text) {
+          // Remove Twitter attribution at the end (— @username date)
+          text = text.replace(/—\s*@\w+.*?(\d{4})?\s*$/, '').trim();
+          // Remove excessive whitespace
+          text = text.replace(/\s+/g, ' ').trim();
         }
         
         const url = item.link || item.url || '';
