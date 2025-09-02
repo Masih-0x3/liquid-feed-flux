@@ -182,6 +182,36 @@ async function handleTranslateJob(job: any, supabase: any): Promise<boolean> {
       max_completion_tokens: settings.max_completion_tokens
     });
 
+    // Prepare request body based on model type
+    const isNewerModel = settings.model.includes('gpt-5') || 
+                        settings.model.includes('gpt-4.1') || 
+                        settings.model.includes('o3') || 
+                        settings.model.includes('o4');
+    
+    const requestBody: any = {
+      model: settings.model,
+      messages: [
+        {
+          role: 'system',
+          content: settings.system_prompt
+        },
+        {
+          role: 'user',
+          content: userPrompt
+        }
+      ]
+    };
+
+    // Add parameters based on model capabilities
+    if (isNewerModel) {
+      // Newer models use max_completion_tokens and don't support temperature
+      requestBody.max_completion_tokens = settings.max_completion_tokens;
+    } else {
+      // Legacy models use max_tokens and support temperature
+      requestBody.max_tokens = settings.max_completion_tokens;
+      requestBody.temperature = settings.temperature;
+    }
+
     // Call OpenAI for translation using configured settings
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -189,21 +219,7 @@ async function handleTranslateJob(job: any, supabase: any): Promise<boolean> {
         'Authorization': `Bearer ${openaiApiKey}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        model: settings.model,
-        messages: [
-          {
-            role: 'system',
-            content: settings.system_prompt
-          },
-          {
-            role: 'user',
-            content: userPrompt
-          }
-        ],
-        temperature: settings.temperature,
-        max_completion_tokens: settings.max_completion_tokens
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {
