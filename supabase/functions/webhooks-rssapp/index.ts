@@ -20,7 +20,9 @@ serve(async (req) => {
     console.log('RSS.app webhook received');
     
     const payload = await req.json();
-    console.log('Webhook payload:', payload);
+    console.log('Full webhook payload:', JSON.stringify(payload, null, 2));
+    console.log('Payload keys:', Object.keys(payload));
+    console.log('Payload type:', typeof payload);
 
     // Parse RSS items from the payload
     const items = payload.items || [];
