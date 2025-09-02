@@ -27,9 +27,8 @@ import { useToast } from "@/hooks/use-toast";
 
 const navigationItems = [
   { title: "Dashboard", url: "/", icon: Home },
-  { title: "Posts", url: "/posts", icon: FileText },
+  { title: "Monitoring", url: "/monitoring", icon: Activity },
   { title: "Threads", url: "/threads", icon: Link2 },
-  { title: "Deliveries & Jobs", url: "/deliveries", icon: Send },
   { title: "Settings", url: "/settings", icon: Settings },
 ];
 

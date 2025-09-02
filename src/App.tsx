@@ -6,12 +6,8 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { AppLayout } from "@/components/layout/AppLayout";
 import Dashboard from "./pages/Dashboard";
-import Feeds from "./pages/Feeds";
-import Accounts from "./pages/Accounts";
-import Posts from "./pages/Posts";
+import Monitoring from "./pages/Monitoring";
 import Threads from "./pages/Threads";
-import Moderation from "./pages/Moderation";
-import Deliveries from "./pages/Deliveries";
 import Settings from "./pages/Settings";
 import AuthPage from "./pages/AuthPage";
 import NotFound from "./pages/NotFound";
@@ -28,12 +24,8 @@ const App = () => (
           <Routes>
             <Route path="/auth" element={<AuthPage />} />
             <Route path="/" element={<AppLayout><Dashboard /></AppLayout>} />
-            <Route path="/feeds" element={<AppLayout><Feeds /></AppLayout>} />
-            <Route path="/accounts" element={<AppLayout><Accounts /></AppLayout>} />
-            <Route path="/posts" element={<AppLayout><Posts /></AppLayout>} />
+            <Route path="/monitoring" element={<AppLayout><Monitoring /></AppLayout>} />
             <Route path="/threads" element={<AppLayout><Threads /></AppLayout>} />
-            <Route path="/moderation" element={<AppLayout><Moderation /></AppLayout>} />
-            <Route path="/deliveries" element={<AppLayout><Deliveries /></AppLayout>} />
             <Route path="/settings" element={<AppLayout><Settings /></AppLayout>} />
             <Route path="*" element={<NotFound />} />
           </Routes>

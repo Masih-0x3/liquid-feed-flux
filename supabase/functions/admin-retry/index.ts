@@ -18,7 +18,69 @@ serve(async (req) => {
     );
 
     const body = await req.json();
-    const { delivery_id, action } = body;
+    const { delivery_id, action, tweet_id } = body;
+
+    // Handle resend delivery action
+    if (action === 'resend_delivery') {
+      if (!tweet_id) {
+        return new Response(JSON.stringify({ 
+          success: false, 
+          error: 'tweet_id is required for resend_delivery action' 
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 400
+        });
+      }
+
+      // Get account ID for the tweet
+      const { data: post, error: postError } = await supabase
+        .from('posts')
+        .select('account_id')
+        .eq('tweet_id', tweet_id)
+        .single();
+
+      if (postError || !post) {
+        return new Response(JSON.stringify({ 
+          success: false, 
+          error: 'Post not found' 
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 404
+        });
+      }
+
+      // Create a new delivery job
+      const { error: jobError } = await supabase
+        .from('jobs')
+        .insert({
+          type: 'deliver',
+          payload: { 
+            tweet_id: tweet_id,
+            account_id: post.account_id
+          },
+          status: 'pending',
+          next_run_at: new Date().toISOString()
+        });
+
+      if (jobError) {
+        console.error('Error creating delivery job:', jobError);
+        return new Response(JSON.stringify({ 
+          success: false, 
+          error: 'Failed to create delivery job' 
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 500
+        });
+      }
+
+      return new Response(JSON.stringify({ 
+        success: true, 
+        message: 'Delivery job created successfully',
+        tweet_id: tweet_id
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
     // Handle test webhook action
     if (action === 'test_webhook') {
