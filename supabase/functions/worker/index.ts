@@ -52,11 +52,11 @@ serve(async (req) => {
       try {
         console.log(`Processing job ${job.id} of type ${job.type}`);
 
-        // Mark job as processing
+        // Mark job as running
         await supabase
           .from('jobs')
           .update({ 
-            status: 'processing',
+            status: 'running',
             attempts: job.attempts + 1
           })
           .eq('id', job.id);
