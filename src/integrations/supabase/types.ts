@@ -14,7 +14,285 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      accounts: {
+        Row: {
+          created_at: string
+          display_name: string | null
+          enabled: boolean
+          handle: string
+          id: string
+          lang_dst: string | null
+          lang_src: string | null
+          last_seen_item_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          display_name?: string | null
+          enabled?: boolean
+          handle: string
+          id?: string
+          lang_dst?: string | null
+          lang_src?: string | null
+          last_seen_item_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          display_name?: string | null
+          enabled?: boolean
+          handle?: string
+          id?: string
+          lang_dst?: string | null
+          lang_src?: string | null
+          last_seen_item_id?: string | null
+        }
+        Relationships: []
+      }
+      deliveries: {
+        Row: {
+          attempts: number | null
+          created_at: string
+          id: string
+          last_error: string | null
+          status: string | null
+          subject_id: string
+          subject_type: string | null
+          telegram_chat_id: string | null
+          telegram_message_ids: string[] | null
+        }
+        Insert: {
+          attempts?: number | null
+          created_at?: string
+          id?: string
+          last_error?: string | null
+          status?: string | null
+          subject_id: string
+          subject_type?: string | null
+          telegram_chat_id?: string | null
+          telegram_message_ids?: string[] | null
+        }
+        Update: {
+          attempts?: number | null
+          created_at?: string
+          id?: string
+          last_error?: string | null
+          status?: string | null
+          subject_id?: string
+          subject_type?: string | null
+          telegram_chat_id?: string | null
+          telegram_message_ids?: string[] | null
+        }
+        Relationships: []
+      }
+      feeds: {
+        Row: {
+          created_at: string
+          enabled: boolean
+          id: string
+          name: string
+          rss_url: string | null
+          rssapp_feed_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          name: string
+          rss_url?: string | null
+          rssapp_feed_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          name?: string
+          rss_url?: string | null
+          rssapp_feed_id?: string | null
+        }
+        Relationships: []
+      }
+      jobs: {
+        Row: {
+          attempts: number | null
+          created_at: string
+          id: string
+          last_error: string | null
+          next_run_at: string | null
+          payload: Json | null
+          status: string | null
+          type: string
+        }
+        Insert: {
+          attempts?: number | null
+          created_at?: string
+          id?: string
+          last_error?: string | null
+          next_run_at?: string | null
+          payload?: Json | null
+          status?: string | null
+          type: string
+        }
+        Update: {
+          attempts?: number | null
+          created_at?: string
+          id?: string
+          last_error?: string | null
+          next_run_at?: string | null
+          payload?: Json | null
+          status?: string | null
+          type?: string
+        }
+        Relationships: []
+      }
+      media: {
+        Row: {
+          created_at: string
+          duration_ms: number | null
+          height: number | null
+          id: string
+          kind: string | null
+          ordering: number | null
+          src_url: string | null
+          tweet_id: string
+          width: number | null
+        }
+        Insert: {
+          created_at?: string
+          duration_ms?: number | null
+          height?: number | null
+          id?: string
+          kind?: string | null
+          ordering?: number | null
+          src_url?: string | null
+          tweet_id: string
+          width?: number | null
+        }
+        Update: {
+          created_at?: string
+          duration_ms?: number | null
+          height?: number | null
+          id?: string
+          kind?: string | null
+          ordering?: number | null
+          src_url?: string | null
+          tweet_id?: string
+          width?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "media_tweet_id_fkey"
+            columns: ["tweet_id"]
+            isOneToOne: false
+            referencedRelation: "posts"
+            referencedColumns: ["tweet_id"]
+          },
+        ]
+      }
+      moderation_events: {
+        Row: {
+          categories: Json | null
+          created_at: string
+          id: string
+          reviewer_id: string | null
+          subject_id: string
+          subject_type: string | null
+          verdict: string | null
+        }
+        Insert: {
+          categories?: Json | null
+          created_at?: string
+          id?: string
+          reviewer_id?: string | null
+          subject_id: string
+          subject_type?: string | null
+          verdict?: string | null
+        }
+        Update: {
+          categories?: Json | null
+          created_at?: string
+          id?: string
+          reviewer_id?: string | null
+          subject_id?: string
+          subject_type?: string | null
+          verdict?: string | null
+        }
+        Relationships: []
+      }
+      posts: {
+        Row: {
+          account_id: string
+          created_at: string
+          has_media: boolean | null
+          lang_original: string | null
+          text_original: string | null
+          text_translated: string | null
+          tweet_id: string
+          tweeted_at: string | null
+          url: string | null
+        }
+        Insert: {
+          account_id: string
+          created_at?: string
+          has_media?: boolean | null
+          lang_original?: string | null
+          text_original?: string | null
+          text_translated?: string | null
+          tweet_id: string
+          tweeted_at?: string | null
+          url?: string | null
+        }
+        Update: {
+          account_id?: string
+          created_at?: string
+          has_media?: boolean | null
+          lang_original?: string | null
+          text_original?: string | null
+          text_translated?: string | null
+          tweet_id?: string
+          tweeted_at?: string | null
+          url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "posts_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      threads: {
+        Row: {
+          account_id: string
+          confidence: number | null
+          created_at: string
+          id: string
+          tweet_ids: string[] | null
+        }
+        Insert: {
+          account_id: string
+          confidence?: number | null
+          created_at?: string
+          id?: string
+          tweet_ids?: string[] | null
+        }
+        Update: {
+          account_id?: string
+          confidence?: number | null
+          created_at?: string
+          id?: string
+          tweet_ids?: string[] | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "threads_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never

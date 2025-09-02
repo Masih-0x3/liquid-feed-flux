@@ -2,95 +2,97 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
-All colors MUST be HSL.
-*/
+/* Apple Liquid Glass Design System */
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    /* Base glass colors - deep blues and purples */
+    --background: 220 25% 6%;
+    --foreground: 220 15% 95%;
 
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    /* Glass material colors with transparency */
+    --card: 220 20% 12%;
+    --card-foreground: 220 15% 95%;
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
+    --glass: 220 30% 15%;
+    --glass-foreground: 220 12% 92%;
+    --glass-border: 220 25% 25%;
 
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
+    --popover: 220 25% 8%;
+    --popover-foreground: 220 15% 95%;
 
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    /* Primary colors - vibrant blue for accents */
+    --primary: 215 85% 60%;
+    --primary-foreground: 220 15% 95%;
+    --primary-glow: 215 100% 70%;
 
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    /* Secondary glass panels */
+    --secondary: 220 20% 18%;
+    --secondary-foreground: 220 12% 88%;
 
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    /* Muted glass elements */
+    --muted: 220 15% 20%;
+    --muted-foreground: 220 8% 65%;
 
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
+    /* Accent highlights */
+    --accent: 280 70% 55%;
+    --accent-foreground: 220 15% 95%;
+    --accent-glow: 280 80% 65%;
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
+    /* Status colors */
+    --destructive: 0 75% 55%;
+    --destructive-foreground: 220 15% 95%;
+    
+    --success: 140 65% 50%;
+    --success-foreground: 220 15% 95%;
+    
+    --warning: 45 85% 60%;
+    --warning-foreground: 220 15% 95%;
 
-    --radius: 0.5rem;
+    /* Glass borders and inputs */
+    --border: 220 25% 25%;
+    --input: 220 20% 15%;
+    --ring: 215 85% 60%;
 
-    --sidebar-background: 0 0% 98%;
+    /* Glass effects */
+    --glass-bg: rgba(255, 255, 255, 0.05);
+    --glass-border-color: rgba(255, 255, 255, 0.1);
+    --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    --glass-shadow-lg: 0 20px 60px rgba(0, 0, 0, 0.4);
 
-    --sidebar-foreground: 240 5.3% 26.1%;
+    /* Gradients */
+    --gradient-glass: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.02));
+    --gradient-primary: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-glow)));
+    --gradient-accent: linear-gradient(135deg, hsl(var(--accent)), hsl(var(--accent-glow)));
 
-    --sidebar-primary: 240 5.9% 10%;
+    /* Blur values */
+    --blur-sm: 8px;
+    --blur-md: 12px;
+    --blur-lg: 16px;
+    --blur-xl: 24px;
 
-    --sidebar-primary-foreground: 0 0% 98%;
+    /* Border radius */
+    --radius: 1rem;
+    --radius-lg: 1.5rem;
 
-    --sidebar-accent: 240 4.8% 95.9%;
+    /* Sidebar colors */
+    --sidebar-background: 220 25% 8%;
+    --sidebar-foreground: 220 12% 88%;
+    --sidebar-primary: 215 85% 60%;
+    --sidebar-primary-foreground: 220 15% 95%;
+    --sidebar-accent: 220 20% 15%;
+    --sidebar-accent-foreground: 220 12% 88%;
+    --sidebar-border: 220 25% 20%;
+    --sidebar-ring: 215 85% 60%;
 
-    --sidebar-accent-foreground: 240 5.9% 10%;
+    /* Typography */
+    --font-display: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    --font-body: 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    --font-mono: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
 
-    --sidebar-border: 220 13% 91%;
-
-    --sidebar-ring: 217.2 91.2% 59.8%;
-  }
-
-  .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
-    --sidebar-background: 240 5.9% 10%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    /* Transitions */
+    --transition-glass: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-fast: all 0.15s ease-out;
   }
 }
 
@@ -100,6 +102,169 @@ All colors MUST be HSL.
   }
 
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-body antialiased;
+    background-image: 
+      radial-gradient(circle at 20% 80%, rgba(120, 119, 198, 0.3) 0%, transparent 50%),
+      radial-gradient(circle at 80% 20%, rgba(255, 119, 198, 0.15) 0%, transparent 50%),
+      radial-gradient(circle at 40% 40%, rgba(120, 119, 255, 0.2) 0%, transparent 50%);
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    line-height: 1.2;
+  }
+}
+
+@layer components {
+  /* Glass panel component */
+  .glass-panel {
+    @apply relative overflow-hidden rounded-xl;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border-color);
+    backdrop-filter: blur(var(--blur-md));
+    box-shadow: var(--glass-shadow);
+    transition: var(--transition-glass);
+  }
+
+  .glass-panel:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.15);
+    transform: translateY(-2px);
+    box-shadow: var(--glass-shadow-lg);
+  }
+
+  /* Glass sidebar */
+  .glass-sidebar {
+    @apply glass-panel border-r-0 rounded-none;
+    background: rgba(255, 255, 255, 0.03);
+    backdrop-filter: blur(var(--blur-lg));
+  }
+
+  /* Glass card variations */
+  .glass-card {
+    @apply glass-panel p-6;
+    background: var(--gradient-glass);
+  }
+
+  .glass-card-lg {
+    @apply glass-card p-8;
+  }
+
+  /* Animated gradient background */
+  .gradient-bg {
+    background: var(--gradient-primary);
+    background-size: 400% 400%;
+    animation: gradientShift 8s ease infinite;
+  }
+
+  .gradient-accent-bg {
+    background: var(--gradient-accent);
+    background-size: 400% 400%;
+    animation: gradientShift 10s ease infinite;
+  }
+
+  /* Glow effects */
+  .glow-primary {
+    box-shadow: 0 0 20px hsla(var(--primary), 0.3), 0 0 40px hsla(var(--primary), 0.1);
+  }
+
+  .glow-accent {
+    box-shadow: 0 0 20px hsla(var(--accent), 0.3), 0 0 40px hsla(var(--accent), 0.1);
+  }
+
+  /* Status indicators */
+  .status-success {
+    @apply bg-success/20 text-success border-success/30;
+  }
+
+  .status-warning {
+    @apply bg-warning/20 text-warning border-warning/30;
+  }
+
+  .status-error {
+    @apply bg-destructive/20 text-destructive border-destructive/30;
+  }
+
+  .status-pending {
+    @apply bg-muted/20 text-muted-foreground border-muted/30;
+  }
+
+  /* Interactive elements */
+  .glass-button {
+    @apply glass-panel px-4 py-2 text-sm font-medium transition-all duration-200;
+    @apply hover:scale-105 active:scale-95;
+  }
+
+  .glass-input {
+    @apply glass-panel px-3 py-2 text-sm bg-transparent;
+    @apply focus:ring-2 focus:ring-primary/50 focus:border-primary/50;
+  }
+}
+
+@layer utilities {
+  /* Animation keyframes */
+  @keyframes gradientShift {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+  }
+
+  @keyframes float {
+    0%, 100% { transform: translateY(0px); }
+    50% { transform: translateY(-10px); }
+  }
+
+  @keyframes pulse-glow {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  @keyframes slide-in-right {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+  }
+
+  @keyframes slide-in-left {
+    from { transform: translateX(-100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+  }
+
+  @keyframes fade-in-up {
+    from { transform: translateY(20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+
+  /* Animation classes */
+  .animate-float {
+    animation: float 6s ease-in-out infinite;
+  }
+
+  .animate-pulse-glow {
+    animation: pulse-glow 2s ease-in-out infinite;
+  }
+
+  .animate-slide-in-right {
+    animation: slide-in-right 0.3s ease-out;
+  }
+
+  .animate-slide-in-left {
+    animation: slide-in-left 0.3s ease-out;
+  }
+
+  .animate-fade-in-up {
+    animation: fade-in-up 0.4s ease-out;
+  }
+
+  /* Backdrop blur utilities */
+  .backdrop-blur-glass {
+    backdrop-filter: blur(var(--blur-md));
+  }
+
+  .backdrop-blur-glass-lg {
+    backdrop-filter: blur(var(--blur-lg));
+  }
+
+  .backdrop-blur-glass-xl {
+    backdrop-filter: blur(var(--blur-xl));
   }
 }
