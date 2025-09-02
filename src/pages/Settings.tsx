@@ -253,7 +253,14 @@ export default function Settings() {
 
   const getPlaceholderValue = (placeholder: any, tweet: any) => {
     switch (placeholder.key) {
-      case '{content}': return tweet?.text_original || 'Sample tweet content...';
+      case '{content}': 
+        // Use actual tweet content, but make sure it's not the fallback text
+        if (tweet?.text_original && 
+            tweet.text_original !== 'RSS Item' && 
+            tweet.text_original !== 'RSS Item - No content available') {
+          return tweet.text_original;
+        }
+        return 'Sample tweet content about an interesting topic that would be translated...';
       case '{author_handle}': return tweet?.accounts?.handle || '@sample_handle';
       case '{author_name}': return tweet?.accounts?.display_name || 'Sample Author';
       case '{tweet_url}': return tweet?.url || 'https://twitter.com/sample/status/123';

@@ -64,7 +64,22 @@ serve(async (req) => {
         
         // Extract item data with multiple fallbacks
         const tweetId = item.guid || item.id || item.link || item.url || `${Date.now()}-${Math.random()}`;
-        const text = item.title || item.description || item.content || item.summary || 'RSS Item';
+        
+        // Better text extraction with HTML content parsing
+        let text = '';
+        if (item.content && typeof item.content === 'string') {
+          // Remove HTML tags and decode entities
+          text = item.content.replace(/<[^>]*>/g, '').replace(/&[^;]+;/g, ' ').trim();
+        } else if (item.description && typeof item.description === 'string') {
+          text = item.description.replace(/<[^>]*>/g, '').replace(/&[^;]+;/g, ' ').trim();
+        } else if (item.title) {
+          text = item.title;
+        } else if (item.summary) {
+          text = item.summary;
+        } else {
+          text = 'RSS Item - No content available';
+        }
+        
         const url = item.link || item.url || '';
         const publishedAt = item.pubDate || item.published || item.date ? 
           new Date(item.pubDate || item.published || item.date) : new Date();
