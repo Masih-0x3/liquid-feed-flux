@@ -810,8 +810,13 @@ export default function Settings() {
                     try {
                       const { data, error } = await supabase.functions.invoke('admin-retry', {
                         body: { 
-                          action: 'resend_delivery',
-                          delivery_id: sampleTweets[selectedSample]?.tweet_id
+                          action: 'test_template',
+                          post: sampleTweets[selectedSample],
+                          template: messageTemplate.template,
+                          settings: {
+                            include_source_links: messageTemplate.include_source_link,
+                            custom_hashtags: messageTemplate.custom_hashtags
+                          }
                         }
                       });
                       if (error) throw error;

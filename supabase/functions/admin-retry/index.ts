@@ -18,7 +18,7 @@ serve(async (req) => {
     );
 
     const body = await req.json();
-    const { delivery_id, action, tweet_id } = body;
+    const { delivery_id, action, tweet_id, post, template, settings } = body;
 
     // Handle resend delivery action
     if (action === 'resend_delivery') {
@@ -129,6 +129,78 @@ serve(async (req) => {
       return new Response(JSON.stringify({ 
         success: true, 
         message: `Created ${retryJobs.length} retry jobs for failed deliveries`
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Handle test template action
+    if (action === 'test_template') {
+      if (!post || !template) {
+        return new Response(JSON.stringify({ 
+          success: false, 
+          error: 'post and template are required for test_template action' 
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 400
+        });
+      }
+
+      console.log('Testing template with post:', post.tweet_id);
+
+      // Get Telegram settings
+      const { data: telegramConfig } = await supabase
+        .from('settings')
+        .select('value')
+        .eq('key', 'telegram_config')
+        .single();
+
+      if (!telegramConfig?.value) {
+        return new Response(JSON.stringify({ 
+          success: false, 
+          error: 'Telegram not configured' 
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 400
+        });
+      }
+
+      const telegramSettings = telegramConfig.value as any;
+
+      // Format message using template
+      const message = template
+        .replace(/{translated_text}/g, post.text_translated || 'Sample translated text')
+        .replace(/{original_text}/g, post.text_original || 'Sample original text')
+        .replace(/{author_handle}/g, post.accounts?.handle || '@sample_handle')
+        .replace(/{author_name}/g, post.accounts?.display_name || 'Sample Author')
+        .replace(/{source_link}/g, settings?.include_source_links ? `<a href="${post.url || 'https://example.com'}">مشاهده اصل</a>` : '')
+        .replace(/{published_date}/g, post.tweeted_at ? new Date(post.tweeted_at).toLocaleDateString('fa-IR') : '۱۴۰۴/۶/۱۲')
+        .replace(/{published_time}/g, post.tweeted_at ? new Date(post.tweeted_at).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }) : '۲۱:۳۵')
+        .replace(/{hashtags}/g, settings?.custom_hashtags || '#تست')
+        .replace(/{media_info}/g, post.has_media ? '📸 تصویر' : '');
+
+      // Send test message to Telegram
+      const telegramResponse = await fetch(`https://api.telegram.org/bot${telegramSettings.bot_token}/sendMessage`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          chat_id: telegramSettings.chat_id,
+          text: `🧪 TEST MESSAGE 🧪\n\n${message}`,
+          parse_mode: 'HTML',
+          disable_web_page_preview: true
+        })
+      });
+
+      if (!telegramResponse.ok) {
+        const errorData = await telegramResponse.json();
+        throw new Error(`Telegram API error: ${errorData.description || 'Unknown error'}`);
+      }
+
+      return new Response(JSON.stringify({ 
+        success: true, 
+        message: 'Test message sent successfully to Telegram' 
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });

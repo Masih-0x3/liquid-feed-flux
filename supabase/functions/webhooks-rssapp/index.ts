@@ -103,7 +103,7 @@ serve(async (req) => {
 
         // Parse media from RSS item
         const mediaItems = parseMediaFromRSSItem(item);
-        console.log(`Found ${mediaItems.length} media items`);
+        console.log(`Found ${mediaItems.length} media items for item:`, JSON.stringify(item, null, 2).substring(0, 500));
 
         // Find or create a default account first
         let accountId = null;
@@ -430,7 +430,9 @@ function getMediaType(mimeType: string, url: string): string | null {
 
 function isImageUrl(url: string): boolean {
   const imageExtensions = /\.(jpg|jpeg|png|gif|webp|svg|bmp|tiff)(\?|$)/i;
-  return imageExtensions.test(url) || url.includes('pbs.twimg.com/media');
+  return imageExtensions.test(url) || 
+         url.includes('pbs.twimg.com/media') || 
+         url.includes('pic.twitter.com');
 }
 
 function isVideoUrl(url: string): boolean {
