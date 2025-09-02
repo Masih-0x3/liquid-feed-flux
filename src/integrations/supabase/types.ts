@@ -146,34 +146,46 @@ export type Database = {
       media: {
         Row: {
           created_at: string
+          downloaded_at: string | null
           duration_ms: number | null
+          file_size: number | null
           height: number | null
           id: string
           kind: string | null
+          mime_type: string | null
           ordering: number | null
           src_url: string | null
+          storage_path: string | null
           tweet_id: string
           width: number | null
         }
         Insert: {
           created_at?: string
+          downloaded_at?: string | null
           duration_ms?: number | null
+          file_size?: number | null
           height?: number | null
           id?: string
           kind?: string | null
+          mime_type?: string | null
           ordering?: number | null
           src_url?: string | null
+          storage_path?: string | null
           tweet_id: string
           width?: number | null
         }
         Update: {
           created_at?: string
+          downloaded_at?: string | null
           duration_ms?: number | null
+          file_size?: number | null
           height?: number | null
           id?: string
           kind?: string | null
+          mime_type?: string | null
           ordering?: number | null
           src_url?: string | null
+          storage_path?: string | null
           tweet_id?: string
           width?: number | null
         }
@@ -325,7 +337,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      get_old_media: {
+        Args: { days_old?: number }
+        Returns: {
+          id: string
+          storage_path: string
+          tweet_id: string
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never
