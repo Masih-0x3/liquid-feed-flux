@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import { useNavigate } from 'react-router-dom';
 import { 
   MessageSquare, 
   CheckCircle, 
@@ -11,7 +13,14 @@ import {
   Activity,
   TrendingUp,
   Clock,
-  AlertTriangle
+  AlertTriangle,
+  RefreshCw,
+  Play,
+  Eye,
+  Zap,
+  Loader2,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
 
 interface MetricCard {
@@ -32,8 +41,17 @@ interface ActivityItem {
   status: 'success' | 'pending' | 'failed';
 }
 
+interface PipelineHealth {
+  successRate: number;
+  avgLatency: number;
+  activeFeeds: number;
+  queueSize: number;
+  isOnline: boolean;
+}
+
 export default function Dashboard() {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [metrics, setMetrics] = useState<MetricCard[]>([
     { title: 'Posts Ingested (24h)', value: 0, icon: MessageSquare, description: 'New posts from RSS feeds', color: 'primary' },
     { title: 'Posts Translated (24h)', value: 0, icon: CheckCircle, description: 'Successfully processed by OpenAI', color: 'success' },
@@ -41,7 +59,16 @@ export default function Dashboard() {
     { title: 'Failed Jobs (24h)', value: 0, icon: XCircle, description: 'Errors requiring attention', color: 'destructive' },
   ]);
   const [activityFeed, setActivityFeed] = useState<ActivityItem[]>([]);
+  const [pipelineHealth, setPipelineHealth] = useState<PipelineHealth>({
+    successRate: 0,
+    avgLatency: 0,
+    activeFeeds: 0,
+    queueSize: 0,
+    isOnline: true
+  });
   const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
 
   useEffect(() => {
     fetchDashboardData();
@@ -81,7 +108,7 @@ export default function Dashboard() {
       twentyFourHoursAgo.setHours(twentyFourHoursAgo.getHours() - 24);
 
       // Fetch 24h metrics
-      const [postsResult, deliveriesResult, jobsResult, recentActivityResult] = await Promise.all([
+      const [postsResult, deliveriesResult, jobsResult, recentActivityResult, accountsResult] = await Promise.all([
         supabase
           .from('posts')
           .select('*')
@@ -98,23 +125,30 @@ export default function Dashboard() {
           .from('posts')
           .select('*, accounts(handle)')
           .order('created_at', { ascending: false })
-          .limit(10)
+          .limit(10),
+        supabase
+          .from('accounts')
+          .select('*')
+          .eq('enabled', true)
       ]);
 
       if (postsResult.error) throw postsResult.error;
       if (deliveriesResult.error) throw deliveriesResult.error;
       if (jobsResult.error) throw jobsResult.error;
       if (recentActivityResult.error) throw recentActivityResult.error;
+      if (accountsResult.error) throw accountsResult.error;
 
       const posts = postsResult.data || [];
       const deliveries = deliveriesResult.data || [];
       const jobs = jobsResult.data || [];
       const recentPosts = recentActivityResult.data || [];
+      const accounts = accountsResult.data || [];
 
       // Calculate metrics
       const translatedPosts = posts.filter(p => p.text_translated);
       const successfulDeliveries = deliveries.filter(d => d.status === 'posted');
       const failedJobs = jobs.filter(j => j.status === 'failed');
+      const pendingJobs = jobs.filter(j => j.status === 'pending');
 
       setMetrics([
         { title: 'Posts Ingested (24h)', value: posts.length, icon: MessageSquare, description: 'New posts from RSS feeds', color: 'primary' },
@@ -122,6 +156,22 @@ export default function Dashboard() {
         { title: 'Posts Delivered (24h)', value: successfulDeliveries.length, icon: Send, description: 'Posted to Telegram channels', color: 'primary' },
         { title: 'Failed Jobs (24h)', value: failedJobs.length, icon: XCircle, description: 'Errors requiring attention', color: 'destructive' },
       ]);
+
+      // Calculate pipeline health
+      const totalJobs = jobs.length;
+      const successfulJobs = jobs.filter(j => j.status === 'completed').length;
+      const successRate = totalJobs > 0 ? (successfulJobs / totalJobs) * 100 : 100;
+      
+      // Calculate average processing time (mock for now)
+      const avgLatency = Math.random() * 2 + 0.5; // Random between 0.5-2.5s
+
+      setPipelineHealth({
+        successRate: Math.round(successRate * 10) / 10,
+        avgLatency: Math.round(avgLatency * 10) / 10,
+        activeFeeds: accounts.length,
+        queueSize: pendingJobs.length,
+        isOnline: true
+      });
 
       // Create activity feed
       const activities: ActivityItem[] = recentPosts.map(post => ({
@@ -134,8 +184,10 @@ export default function Dashboard() {
       }));
 
       setActivityFeed(activities);
+      setLastUpdate(new Date());
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
+      setPipelineHealth(prev => ({ ...prev, isOnline: false }));
       toast({
         title: "Error loading dashboard",
         description: "Failed to fetch dashboard data. Please try again.",
@@ -143,6 +195,60 @@ export default function Dashboard() {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleQuickAction = async (action: string) => {
+    setActionLoading(action);
+    
+    try {
+      switch (action) {
+        case 'view-failed':
+          navigate('/monitoring?filter=failed');
+          break;
+          
+        case 'retry-deliveries':
+          const { data, error } = await supabase.functions.invoke('admin-retry', {
+            body: { action: 'retry_failed_deliveries' }
+          });
+          
+          if (error) throw error;
+          
+          toast({
+            title: "Success",
+            description: "Retry jobs created for failed deliveries",
+          });
+          
+          fetchDashboardData();
+          break;
+          
+        case 'test-pipeline':
+          const testResult = await supabase.functions.invoke('admin-retry', {
+            body: { action: 'test_webhook' }
+          });
+          
+          if (testResult.error) throw testResult.error;
+          
+          toast({
+            title: "Success",
+            description: "Test pipeline completed successfully",
+          });
+          
+          fetchDashboardData();
+          break;
+          
+        default:
+          throw new Error('Unknown action');
+      }
+    } catch (error) {
+      console.error('Quick action error:', error);
+      toast({
+        title: "Error",
+        description: `Failed to execute ${action}. Please try again.`,
+        variant: "destructive",
+      });
+    } finally {
+      setActionLoading(null);
     }
   };
 
@@ -195,9 +301,36 @@ export default function Dashboard() {
           <h1 className="text-3xl font-display font-bold text-glass-foreground">Dashboard</h1>
           <p className="text-muted-foreground mt-1">Monitor your RSS → OpenAI → Telegram pipeline</p>
         </div>
-        <div className="flex items-center space-x-2 glass-panel px-3 py-2 rounded-lg">
-          <Activity className="w-4 h-4 text-success animate-pulse" />
-          <span className="text-sm text-glass-foreground">Live</span>
+        <div className="flex items-center space-x-4">
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={fetchDashboardData}
+            disabled={loading}
+          >
+            {loading ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <RefreshCw className="w-4 h-4 mr-2" />
+            )}
+            Refresh
+          </Button>
+          <div className="flex items-center space-x-2 glass-panel px-3 py-2 rounded-lg">
+            {pipelineHealth.isOnline ? (
+              <>
+                <Wifi className="w-4 h-4 text-success animate-pulse" />
+                <span className="text-sm text-glass-foreground">Online</span>
+              </>
+            ) : (
+              <>
+                <WifiOff className="w-4 h-4 text-destructive" />
+                <span className="text-sm text-destructive">Offline</span>
+              </>
+            )}
+          </div>
+          <div className="text-xs text-muted-foreground">
+            Last updated: {lastUpdate.toLocaleTimeString()}
+          </div>
         </div>
       </div>
 
@@ -266,28 +399,61 @@ export default function Dashboard() {
           </Card>
         </div>
 
-        {/* Quick Stats */}
+        {/* Pipeline Health & Quick Actions */}
         <div className="space-y-6">
           <Card className="glass-card">
             <CardHeader>
-              <CardTitle className="text-lg font-display text-glass-foreground">Pipeline Health</CardTitle>
+              <CardTitle className="text-lg font-display text-glass-foreground flex items-center">
+                {pipelineHealth.isOnline ? (
+                  <Activity className="w-4 h-4 mr-2 text-success animate-pulse" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4 mr-2 text-destructive" />
+                )}
+                Pipeline Health
+              </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex items-center justify-between">
                 <span className="text-sm text-muted-foreground">Success Rate</span>
-                <span className="text-sm font-medium text-success">95.2%</span>
+                <div className="flex items-center space-x-2">
+                  <span className={`text-sm font-medium ${
+                    pipelineHealth.successRate >= 95 ? 'text-success' :
+                    pipelineHealth.successRate >= 80 ? 'text-warning' : 'text-destructive'
+                  }`}>
+                    {pipelineHealth.successRate}%
+                  </span>
+                  <div className="w-16 h-2 bg-muted rounded-full overflow-hidden">
+                    <div 
+                      className={`h-full transition-all duration-500 ${
+                        pipelineHealth.successRate >= 95 ? 'bg-success' :
+                        pipelineHealth.successRate >= 80 ? 'bg-warning' : 'bg-destructive'
+                      }`}
+                      style={{ width: `${pipelineHealth.successRate}%` }}
+                    />
+                  </div>
+                </div>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm text-muted-foreground">Avg Latency</span>
-                <span className="text-sm font-medium text-glass-foreground">1.2s</span>
+                <span className={`text-sm font-medium ${
+                  pipelineHealth.avgLatency <= 2 ? 'text-success' :
+                  pipelineHealth.avgLatency <= 5 ? 'text-warning' : 'text-destructive'
+                }`}>
+                  {pipelineHealth.avgLatency}s
+                </span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm text-muted-foreground">Active Feeds</span>
-                <span className="text-sm font-medium text-glass-foreground">12</span>
+                <span className="text-sm font-medium text-glass-foreground">{pipelineHealth.activeFeeds}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm text-muted-foreground">Queue Size</span>
-                <span className="text-sm font-medium text-warning">3</span>
+                <span className={`text-sm font-medium ${
+                  pipelineHealth.queueSize === 0 ? 'text-success' :
+                  pipelineHealth.queueSize <= 5 ? 'text-warning' : 'text-destructive'
+                }`}>
+                  {pipelineHealth.queueSize}
+                </span>
               </div>
             </CardContent>
           </Card>
@@ -295,20 +461,52 @@ export default function Dashboard() {
           <Card className="glass-card">
             <CardHeader>
               <CardTitle className="text-lg font-display text-glass-foreground flex items-center">
-                <AlertTriangle className="w-4 h-4 mr-2 text-warning" />
+                <Zap className="w-4 h-4 mr-2 text-primary" />
                 Quick Actions
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-2">
-              <button className="w-full glass-button text-left p-3 hover:bg-primary/20 hover:text-primary transition-colors">
+            <CardContent className="space-y-3">
+              <Button
+                variant="outline"
+                className="w-full justify-start"
+                onClick={() => handleQuickAction('view-failed')}
+                disabled={actionLoading === 'view-failed'}
+              >
+                {actionLoading === 'view-failed' ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Eye className="w-4 h-4 mr-2" />
+                )}
                 View Failed Jobs
-              </button>
-              <button className="w-full glass-button text-left p-3 hover:bg-primary/20 hover:text-primary transition-colors">
-                Retry Deliveries
-              </button>
-              <button className="w-full glass-button text-left p-3 hover:bg-primary/20 hover:text-primary transition-colors">
+              </Button>
+              
+              <Button
+                variant="outline"
+                className="w-full justify-start"
+                onClick={() => handleQuickAction('retry-deliveries')}
+                disabled={actionLoading === 'retry-deliveries'}
+              >
+                {actionLoading === 'retry-deliveries' ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <RefreshCw className="w-4 h-4 mr-2" />
+                )}
+                Retry Failed Deliveries
+              </Button>
+              
+              <Button
+                variant="outline"
+                className="w-full justify-start"
+                onClick={() => handleQuickAction('test-pipeline')}
+                disabled={actionLoading === 'test-pipeline'}
+              >
+                {actionLoading === 'test-pipeline' ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Play className="w-4 h-4 mr-2" />
+                )}
                 Test Pipeline
-              </button>
+              </Button>
             </CardContent>
           </Card>
         </div>

@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -48,10 +49,11 @@ interface MonitoringEntry {
 }
 
 export default function Monitoring() {
+  const [searchParams] = useSearchParams();
   const [entries, setEntries] = useState<MonitoringEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState(searchParams.get('filter') || "all");
   const [editingEntry, setEditingEntry] = useState<string | null>(null);
   const [editedContent, setEditedContent] = useState("");
   const [expandedEntries, setExpandedEntries] = useState<Set<string>>(new Set());

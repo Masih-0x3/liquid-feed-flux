@@ -82,6 +82,58 @@ serve(async (req) => {
       });
     }
 
+    // Handle retry failed deliveries action
+    if (action === 'retry_failed_deliveries') {
+      // Get all failed deliveries
+      const { data: failedDeliveries, error: deliveryError } = await supabase
+        .from('deliveries')
+        .select('*')
+        .eq('status', 'failed');
+
+      if (deliveryError) {
+        return new Response(JSON.stringify({ 
+          success: false, 
+          error: 'Failed to fetch failed deliveries' 
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 500
+        });
+      }
+
+      // Create retry jobs for each failed delivery
+      const retryJobs = (failedDeliveries || []).map(delivery => ({
+        type: 'deliver',
+        payload: {
+          tweet_id: delivery.subject_id,
+        },
+        status: 'pending',
+        next_run_at: new Date().toISOString()
+      }));
+
+      if (retryJobs.length > 0) {
+        const { error: jobError } = await supabase
+          .from('jobs')
+          .insert(retryJobs);
+
+        if (jobError) {
+          return new Response(JSON.stringify({ 
+            success: false, 
+            error: 'Failed to create retry jobs' 
+          }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 500
+          });
+        }
+      }
+
+      return new Response(JSON.stringify({ 
+        success: true, 
+        message: `Created ${retryJobs.length} retry jobs for failed deliveries`
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     // Handle test webhook action
     if (action === 'test_webhook') {
       const testRSSItem = {
