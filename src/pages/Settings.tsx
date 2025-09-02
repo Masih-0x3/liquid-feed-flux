@@ -254,19 +254,19 @@ export default function Settings() {
   const getPlaceholderValue = (placeholder: any, tweet: any) => {
     switch (placeholder.key) {
       case '{content}': 
-        // Use actual tweet content, but make sure it's not the fallback text
+        // Use actual tweet content, but fallback to realistic sample if no real content
         if (tweet?.text_original && 
             tweet.text_original !== 'RSS Item' && 
             tweet.text_original !== 'RSS Item - No content available') {
           return tweet.text_original;
         }
-        return 'Sample tweet content about an interesting topic that would be translated...';
-      case '{author_handle}': return tweet?.accounts?.handle || '@sample_handle';
-      case '{author_name}': return tweet?.accounts?.display_name || 'Sample Author';
-      case '{tweet_url}': return tweet?.url || 'https://twitter.com/sample/status/123';
-      case '{published_date}': return tweet?.tweeted_at || new Date().toISOString();
-      case '{has_media}': return tweet?.has_media?.toString() || 'false';
-      case '{media_count}': return '0';
+        return 'Breaking: Major tech announcement today! Company XYZ reveals revolutionary new product that will change the industry. This is a significant development. #TechNews #Innovation';
+      case '{author_handle}': return tweet?.accounts?.handle || '@techinsider';
+      case '{author_name}': return tweet?.accounts?.display_name || 'Tech Insider';
+      case '{tweet_url}': return tweet?.url || 'https://twitter.com/techinsider/status/123456789';
+      case '{published_date}': return tweet?.tweeted_at ? new Date(tweet.tweeted_at).toLocaleDateString() : new Date().toLocaleDateString();
+      case '{has_media}': return tweet?.has_media?.toString() || 'true';
+      case '{media_count}': return tweet?.has_media ? '2' : '0';
       case '{original_language}': return tweet?.lang_original || 'en';
       default: return placeholder.key;
     }
@@ -527,13 +527,35 @@ export default function Settings() {
                 </div>
               )}
 
-              <Button 
-                onClick={handleSaveTranslation} 
-                disabled={loading}
-                className="bg-gradient-primary hover:opacity-90 text-white w-full"
-              >
-                Save Translation Settings
-              </Button>
+              <div className="flex gap-3">
+                <Button 
+                  onClick={handleSaveTranslation} 
+                  disabled={loading}
+                  className="bg-gradient-primary hover:opacity-90 text-white flex-1"
+                >
+                  Save Translation Settings
+                </Button>
+                <Button 
+                  onClick={async () => {
+                    try {
+                      const { data, error } = await supabase.functions.invoke('admin-retry', {
+                        body: { action: 'test_webhook' }
+                      });
+                      if (error) throw error;
+                      toast({ title: "Test webhook sent!", description: "Check the Posts page for new sample content" });
+                      setTimeout(() => loadSampleTweets(), 2000);
+                    } catch (error) {
+                      console.error('Test webhook error:', error);
+                      toast({ title: "Test failed", variant: "destructive" });
+                    }
+                  }}
+                  variant="outline"
+                  disabled={loading}
+                  className="border-primary/50 hover:bg-primary/10"
+                >
+                  Test Pipeline
+                </Button>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>

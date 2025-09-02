@@ -17,8 +17,43 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    const { delivery_id } = await req.json();
+    const body = await req.json();
+    const { delivery_id, action } = body;
+
+    // Handle test webhook action
+    if (action === 'test_webhook') {
+      const testRSSItem = {
+        guid: `test-tweet-${Date.now()}`,
+        title: 'Breaking: Major tech announcement today',
+        description: '<p>Exciting news from the tech world as <strong>Company XYZ</strong> announces revolutionary new product that will change everything. This is a significant development in the industry.</p>',
+        content: 'Exciting news from the tech world as Company XYZ announces revolutionary new product that will change everything. This is a significant development in the industry. #TechNews #Innovation',
+        link: 'https://twitter.com/example/status/123456789',
+        pubDate: new Date().toISOString()
+      };
+
+      console.log('Testing webhook with sample data:', testRSSItem);
+
+      const webhookResponse = await supabase.functions.invoke('webhooks-rssapp', {
+        body: { 
+          items_new: [testRSSItem],
+          test: true 
+        }
+      });
+
+      if (webhookResponse.error) {
+        throw new Error(`Webhook test failed: ${webhookResponse.error.message}`);
+      }
+
+      return new Response(JSON.stringify({ 
+        success: true, 
+        message: 'Test webhook completed',
+        data: webhookResponse.data 
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
     
+    // Original retry logic
     if (!delivery_id) {
       throw new Error('delivery_id is required');
     }
