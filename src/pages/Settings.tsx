@@ -254,20 +254,20 @@ export default function Settings() {
   const getPlaceholderValue = (placeholder: any, tweet: any) => {
     switch (placeholder.key) {
       case '{content}': 
-        // Use actual tweet content, but fallback to realistic sample if no real content
+        // Use actual tweet content if available, otherwise show empty placeholder
         if (tweet?.text_original && 
             tweet.text_original !== 'RSS Item' && 
             tweet.text_original !== 'RSS Item - No content available') {
           return tweet.text_original;
         }
-        return 'Breaking: Major tech announcement today! Company XYZ reveals revolutionary new product that will change the industry. This is a significant development. #TechNews #Innovation';
-      case '{author_handle}': return tweet?.accounts?.handle || '@techinsider';
-      case '{author_name}': return tweet?.accounts?.display_name || 'Tech Insider';
-      case '{tweet_url}': return tweet?.url || 'https://twitter.com/techinsider/status/123456789';
-      case '{published_date}': return tweet?.tweeted_at ? new Date(tweet.tweeted_at).toLocaleDateString() : new Date().toLocaleDateString();
-      case '{has_media}': return tweet?.has_media?.toString() || 'true';
-      case '{media_count}': return tweet?.has_media ? '2' : '0';
-      case '{original_language}': return tweet?.lang_original || 'en';
+        return '[Tweet content will appear here]';
+      case '{author_handle}': return tweet?.accounts?.handle || '[author_handle]';
+      case '{author_name}': return tweet?.accounts?.display_name || '[author_name]';
+      case '{tweet_url}': return tweet?.url || '[tweet_url]';
+      case '{published_date}': return tweet?.tweeted_at ? new Date(tweet.tweeted_at).toLocaleDateString() : '[published_date]';
+      case '{has_media}': return tweet?.has_media?.toString() || '[has_media]';
+      case '{media_count}': return tweet?.has_media ? '[media_count]' : '0';
+      case '{original_language}': return tweet?.lang_original || '[original_language]';
       default: return placeholder.key;
     }
   };

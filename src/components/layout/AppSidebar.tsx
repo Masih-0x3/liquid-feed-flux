@@ -1,12 +1,7 @@
-import { useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import {
-  BarChart3,
-  Rss,
-  Users,
   FileText,
   Link2,
-  ShieldCheck,
   Send,
   Settings,
   Activity,
@@ -32,11 +27,8 @@ import { useToast } from "@/hooks/use-toast";
 
 const navigationItems = [
   { title: "Dashboard", url: "/", icon: Home },
-  { title: "Feeds", url: "/feeds", icon: Rss },
-  { title: "Accounts", url: "/accounts", icon: Users },
   { title: "Posts", url: "/posts", icon: FileText },
   { title: "Threads", url: "/threads", icon: Link2 },
-  { title: "Moderation", url: "/moderation", icon: ShieldCheck },
   { title: "Deliveries & Jobs", url: "/deliveries", icon: Send },
   { title: "Settings", url: "/settings", icon: Settings },
 ];
