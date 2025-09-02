@@ -189,6 +189,22 @@ serve(async (req) => {
             console.error('Error inserting media:', mediaError);
           } else {
             console.log(`Inserted ${mediaItems.length} media items for ${tweetId}`);
+            
+            // Create job to download media
+            await supabase.functions.invoke('media-processor', {
+              body: {
+                action: 'download_media',
+                tweet_id: tweetId
+              }
+            }).then(({ data, error }) => {
+              if (error) {
+                console.error('Failed to trigger media download:', error);
+              } else {
+                console.log('Media download job triggered successfully');
+              }
+            }).catch(err => {
+              console.error('Error triggering media download:', err);
+            });
           }
         }
 
@@ -209,6 +225,25 @@ serve(async (req) => {
           console.error('Error creating translation job:', translationJobError);
         } else {
           console.log('Translation job created for:', tweetId);
+        }
+
+        // Create media download job for tweets with media
+        if (mediaItems.length > 0) {
+          const { error: downloadJobError } = await supabase
+            .from('jobs')
+            .insert({
+              type: 'download_media',
+              payload: {
+                tweet_id: tweetId
+              },
+              status: 'pending'
+            });
+
+          if (downloadJobError) {
+            console.error('Error creating media download job:', downloadJobError);
+          } else {
+            console.log('Media download job created for:', tweetId);
+          }
         }
 
         // Create delivery job
@@ -259,6 +294,15 @@ function parseMediaFromRSSItem(item: any): Array<{type: string, url: string, wid
   const mediaItems: Array<{type: string, url: string, width?: number, height?: number, duration?: number}> = [];
   
   try {
+    // Parse thumbnail from RSS.app webhook (Twitter thumbnails)
+    if (item.thumbnail && typeof item.thumbnail === 'string') {
+      console.log('Found thumbnail:', item.thumbnail);
+      mediaItems.push({
+        type: 'image',
+        url: item.thumbnail
+      });
+    }
+
     // Parse enclosures (RSS standard)
     if (item.enclosure) {
       const enclosures = Array.isArray(item.enclosure) ? item.enclosure : [item.enclosure];
@@ -297,15 +341,17 @@ function parseMediaFromRSSItem(item: any): Array<{type: string, url: string, wid
       }
     }
     
-    // Parse images from description HTML
-    if (item.description || item.content) {
-      const htmlContent = item.description || item.content;
+    // Parse images from description HTML with better regex for Twitter media
+    if (item.description_html || item.description || item.content) {
+      const htmlContent = item.description_html || item.description || item.content;
+      
+      // Enhanced image parsing for Twitter media
       const imgRegex = /<img[^>]+src="([^"]+)"/gi;
       let match;
       
       while ((match = imgRegex.exec(htmlContent)) !== null) {
         const imgUrl = match[1];
-        if (imgUrl && isImageUrl(imgUrl)) {
+        if (imgUrl && isImageUrl(imgUrl) && !mediaItems.some(m => m.url === imgUrl)) {
           mediaItems.push({
             type: 'image',
             url: imgUrl
@@ -317,10 +363,41 @@ function parseMediaFromRSSItem(item: any): Array<{type: string, url: string, wid
       const videoRegex = /<video[^>]+src="([^"]+)"|<source[^>]+src="([^"]+)"/gi;
       while ((match = videoRegex.exec(htmlContent)) !== null) {
         const videoUrl = match[1] || match[2];
-        if (videoUrl && isVideoUrl(videoUrl)) {
+        if (videoUrl && isVideoUrl(videoUrl) && !mediaItems.some(m => m.url === videoUrl)) {
           mediaItems.push({
             type: 'video',
             url: videoUrl
+          });
+        }
+      }
+
+      // Parse Twitter-specific media URLs from HTML
+      const twitterMediaRegex = /https:\/\/pbs\.twimg\.com\/media\/[^"\s]+/g;
+      const twitterMatches = htmlContent.match(twitterMediaRegex);
+      if (twitterMatches) {
+        for (const url of twitterMatches) {
+          if (!mediaItems.some(m => m.url === url)) {
+            mediaItems.push({
+              type: 'image',
+              url: url
+            });
+          }
+        }
+      }
+    }
+    
+    // Parse audio files
+    if (item.description_html || item.description || item.content) {
+      const htmlContent = item.description_html || item.description || item.content;
+      const audioRegex = /<audio[^>]+src="([^"]+)"|<source[^>]+src="([^"]+)"[^>]*type="audio/gi;
+      let match;
+      
+      while ((match = audioRegex.exec(htmlContent)) !== null) {
+        const audioUrl = match[1] || match[2];
+        if (audioUrl && isAudioUrl(audioUrl) && !mediaItems.some(m => m.url === audioUrl)) {
+          mediaItems.push({
+            type: 'audio',
+            url: audioUrl
           });
         }
       }
@@ -343,16 +420,25 @@ function getMediaType(mimeType: string, url: string): string | null {
   if (mimeType.startsWith('video/') || isVideoUrl(url)) {
     return 'video';
   }
+
+  if (mimeType.startsWith('audio/') || isAudioUrl(url)) {
+    return 'audio';
+  }
   
   return null;
 }
 
 function isImageUrl(url: string): boolean {
   const imageExtensions = /\.(jpg|jpeg|png|gif|webp|svg|bmp|tiff)(\?|$)/i;
-  return imageExtensions.test(url);
+  return imageExtensions.test(url) || url.includes('pbs.twimg.com/media');
 }
 
 function isVideoUrl(url: string): boolean {
   const videoExtensions = /\.(mp4|avi|mov|wmv|flv|webm|mkv|m4v)(\?|$)/i;
   return videoExtensions.test(url);
+}
+
+function isAudioUrl(url: string): boolean {
+  const audioExtensions = /\.(mp3|wav|ogg|aac|flac|m4a|wma)(\?|$)/i;
+  return audioExtensions.test(url);
 }

@@ -73,6 +73,9 @@ serve(async (req) => {
             case 'deliver':
               success = await handleDeliverJob(job, supabase);
               break;
+            case 'download_media':
+              success = await handleDownloadMediaJob(job, supabase);
+              break;
             default:
               console.error(`Unknown job type: ${job.type}`);
               success = false;
@@ -349,17 +352,21 @@ async function handleDeliverJob(job: any, supabase: any): Promise<boolean> {
     if (media && media.length > 0) {
       const images = media.filter(m => m.kind === 'image');
       const videos = media.filter(m => m.kind === 'video');
+      const audios = media.filter(m => m.kind === 'audio');
 
       // Handle images
       if (images.length > 0) {
         if (images.length === 1) {
           // Single image
+          const image = images[0];
+          const imageUrl = await getMediaUrl(supabase, image);
+          
           const response = await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendPhoto`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               chat_id: telegramChatId,
-              photo: images[0].src_url,
+              photo: imageUrl,
               caption: message,
               parse_mode: 'HTML'
             })
@@ -373,12 +380,17 @@ async function handleDeliverJob(job: any, supabase: any): Promise<boolean> {
           }
         } else {
           // Multiple images - use media group
-          const mediaGroup = images.slice(0, 10).map((img, index) => ({
-            type: 'photo',
-            media: img.src_url,
-            caption: index === 0 ? message : undefined,
-            parse_mode: index === 0 ? 'HTML' : undefined
-          }));
+          const mediaGroup = [];
+          for (let i = 0; i < Math.min(images.length, 10); i++) {
+            const image = images[i];
+            const imageUrl = await getMediaUrl(supabase, image);
+            mediaGroup.push({
+              type: 'photo',
+              media: imageUrl,
+              caption: i === 0 ? message : undefined,
+              parse_mode: i === 0 ? 'HTML' : undefined
+            });
+          }
 
           const response = await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendMediaGroup`, {
             method: 'POST',
@@ -400,12 +412,13 @@ async function handleDeliverJob(job: any, supabase: any): Promise<boolean> {
 
       // Handle videos separately
       for (const video of videos) {
+        const videoUrl = await getMediaUrl(supabase, video);
         const response = await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendVideo`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             chat_id: telegramChatId,
-            video: video.src_url,
+            video: videoUrl,
             caption: images.length === 0 ? message : message,
             parse_mode: 'HTML'
           })
@@ -416,6 +429,28 @@ async function handleDeliverJob(job: any, supabase: any): Promise<boolean> {
           telegramMessageIds.push(result.result.message_id.toString());
         } else {
           console.warn(`Failed to send video: ${result.description}`);
+        }
+      }
+
+      // Handle audio files
+      for (const audio of audios) {
+        const audioUrl = await getMediaUrl(supabase, audio);
+        const response = await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendAudio`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: telegramChatId,
+            audio: audioUrl,
+            caption: images.length === 0 && videos.length === 0 ? message : `Audio from tweet`,
+            parse_mode: 'HTML'
+          })
+        });
+        
+        const result = await response.json();
+        if (result.ok) {
+          telegramMessageIds.push(result.result.message_id.toString());
+        } else {
+          console.warn(`Failed to send audio: ${result.description}`);
         }
       }
     } else {
@@ -511,5 +546,51 @@ function detectLanguage(text: string): string {
   } else {
     // Non-Latin script
     return 'auto';
+  }
+}
+
+// Helper function to get media URL (storage or external)
+async function getMediaUrl(supabase: any, media: any): Promise<string> {
+  // If media is stored locally, get signed URL
+  if (media.storage_path) {
+    try {
+      const { data } = await supabase.storage
+        .from('temp-media')
+        .createSignedUrl(media.storage_path, 3600); // 1 hour expiry
+      
+      if (data?.signedUrl) {
+        console.log(`Using stored media: ${media.storage_path}`);
+        return data.signedUrl;
+      }
+    } catch (error) {
+      console.warn(`Failed to get signed URL for ${media.storage_path}:`, error);
+    }
+  }
+  
+  // Fallback to external URL
+  console.log(`Using external URL: ${media.src_url}`);
+  return media.src_url;
+}
+
+async function handleDownloadMediaJob(job: any, supabase: any): Promise<boolean> {
+  try {
+    console.log('Handling download media job for:', job.payload.tweet_id);
+    
+    const { data, error } = await supabase.functions.invoke('media-processor', {
+      body: {
+        action: 'download_media',
+        tweet_id: job.payload.tweet_id
+      }
+    });
+
+    if (error) {
+      throw new Error(`Media processor error: ${error.message}`);
+    }
+
+    console.log('Media download completed for:', job.payload.tweet_id, data);
+    return true;
+  } catch (error) {
+    console.error('Media download failed:', error);
+    return false;
   }
 }
