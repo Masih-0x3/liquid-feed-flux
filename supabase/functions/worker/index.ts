@@ -136,6 +136,25 @@ async function handleTranslateJob(job: any, supabase: any): Promise<boolean> {
       throw new Error('OpenAI API key not configured');
     }
 
+    // Get translation settings from database
+    const { data: translationSettings, error: settingsError } = await supabase
+      .from('settings')
+      .select('value')
+      .eq('key', 'translation_prompt')
+      .single();
+
+    if (settingsError) {
+      console.warn('Could not load translation settings, using fallback');
+    }
+
+    const settings = translationSettings?.value || {
+      system_prompt: "You are a professional translator. Translate the given text to Persian. Preserve @mentions, #hashtags, URLs, and line breaks exactly.",
+      user_prompt_template: "{content}",
+      model: "gpt-4o-mini",
+      temperature: 0.2,
+      max_completion_tokens: 1000
+    };
+
     // Get the post to translate
     const { data: post, error } = await supabase
       .from('posts')
@@ -151,7 +170,16 @@ async function handleTranslateJob(job: any, supabase: any): Promise<boolean> {
       throw new Error('No original text to translate');
     }
 
-    // Call OpenAI for translation
+    // Prepare the user prompt with content substitution
+    const userPrompt = settings.user_prompt_template.replace('{content}', post.text_original);
+
+    console.log('Translating with OpenAI:', {
+      model: settings.model,
+      temperature: settings.temperature,
+      max_completion_tokens: settings.max_completion_tokens
+    });
+
+    // Call OpenAI for translation using configured settings
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -159,19 +187,19 @@ async function handleTranslateJob(job: any, supabase: any): Promise<boolean> {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'gpt-4o-mini',
+        model: settings.model,
         messages: [
           {
             role: 'system',
-            content: `You are a professional translator. Translate the given text to ${job.payload.target_lang || 'English'}. Preserve @mentions, #hashtags, URLs, and line breaks exactly. Only translate the actual content, not the special elements. If the text is already in ${job.payload.target_lang || 'English'}, return it unchanged.`
+            content: settings.system_prompt
           },
           {
             role: 'user',
-            content: post.text_original
+            content: userPrompt
           }
         ],
-        temperature: 0,
-        max_tokens: 1000
+        temperature: settings.temperature,
+        max_completion_tokens: settings.max_completion_tokens
       }),
     });
 
