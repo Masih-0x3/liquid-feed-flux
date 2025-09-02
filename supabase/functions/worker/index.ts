@@ -17,7 +17,7 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    console.log('Worker function invoked - processing pending jobs');
+    console.log('Worker function invoked - processing pending jobs, trigger:', req.url);
 
     // Fetch multiple pending jobs for batch processing
     const { data: jobs, error: jobError } = await supabase
