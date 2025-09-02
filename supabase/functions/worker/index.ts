@@ -239,7 +239,15 @@ async function handleTranslateJob(job: any, supabase: any): Promise<boolean> {
       }
 
       const data = await response.json();
-      translatedText = data.text?.value || data.text;
+      console.log('GPT-5 Response data:', JSON.stringify(data, null, 2));
+      
+      // Extract the actual text content from the responses endpoint
+      translatedText = data.content?.[0]?.text || 
+                      data.choices?.[0]?.message?.content || 
+                      data.text?.content || 
+                      data.output?.content || 
+                      data.response?.text ||
+                      'Translation failed - unexpected response format';
     } else {
       // Use legacy chat completions endpoint for older models
       const isNewerModel = settings.model.includes('gpt-4.1') || 
