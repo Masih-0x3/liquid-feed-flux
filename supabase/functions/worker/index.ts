@@ -182,53 +182,111 @@ async function handleTranslateJob(job: any, supabase: any): Promise<boolean> {
       max_completion_tokens: settings.max_completion_tokens
     });
 
-    // Prepare request body based on model type
-    const isNewerModel = settings.model.includes('gpt-5') || 
-                        settings.model.includes('gpt-4.1') || 
-                        settings.model.includes('o3') || 
-                        settings.model.includes('o4');
+    // Check if using new GPT-5 model that requires responses endpoint
+    const isGpt5Model = settings.model.includes('gpt-5');
     
-    const requestBody: any = {
-      model: settings.model,
-      messages: [
-        {
-          role: 'system',
-          content: settings.system_prompt
+    let translatedText;
+    
+    if (isGpt5Model) {
+      // Use new responses endpoint for GPT-5 models
+      const requestBody = {
+        model: settings.model,
+        input: [
+          {
+            role: "developer",
+            content: [
+              {
+                type: "input_text",
+                text: settings.system_prompt
+              }
+            ]
+          },
+          {
+            role: "user", 
+            content: [
+              {
+                type: "input_text",
+                text: userPrompt
+              }
+            ]
+          }
+        ],
+        text: {
+          format: {
+            type: "text"
+          },
+          verbosity: "medium"
         },
-        {
-          role: 'user',
-          content: userPrompt
-        }
-      ]
-    };
+        reasoning: {
+          effort: "medium"
+        },
+        tools: [],
+        store: true
+      };
 
-    // Add parameters based on model capabilities
-    if (isNewerModel) {
-      // Newer models use max_completion_tokens and don't support temperature
-      requestBody.max_completion_tokens = settings.max_completion_tokens;
+      const response = await fetch('https://api.openai.com/v1/responses', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${openaiApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.text();
+        throw new Error(`OpenAI API error: ${response.status} ${errorData}`);
+      }
+
+      const data = await response.json();
+      translatedText = data.text?.value || data.text;
     } else {
-      // Legacy models use max_tokens and support temperature
-      requestBody.max_tokens = settings.max_completion_tokens;
-      requestBody.temperature = settings.temperature;
+      // Use legacy chat completions endpoint for older models
+      const isNewerModel = settings.model.includes('gpt-4.1') || 
+                          settings.model.includes('o3') || 
+                          settings.model.includes('o4');
+      
+      const requestBody: any = {
+        model: settings.model,
+        messages: [
+          {
+            role: 'system',
+            content: settings.system_prompt
+          },
+          {
+            role: 'user',
+            content: userPrompt
+          }
+        ]
+      };
+
+      // Add parameters based on model capabilities
+      if (isNewerModel) {
+        // Newer models use max_completion_tokens and don't support temperature
+        requestBody.max_completion_tokens = settings.max_completion_tokens;
+      } else {
+        // Legacy models use max_tokens and support temperature
+        requestBody.max_tokens = settings.max_completion_tokens;
+        requestBody.temperature = settings.temperature;
+      }
+
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${openaiApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.text();
+        throw new Error(`OpenAI API error: ${response.status} ${errorData}`);
+      }
+
+      const data = await response.json();
+      translatedText = data.choices[0].message.content;
     }
-
-    // Call OpenAI for translation using configured settings
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${openaiApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(requestBody),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.text();
-      throw new Error(`OpenAI API error: ${response.status} ${errorData}`);
-    }
-
-    const data = await response.json();
-    const translatedText = data.choices[0].message.content;
 
     // Update post with translation
     const { error: updateError } = await supabase
