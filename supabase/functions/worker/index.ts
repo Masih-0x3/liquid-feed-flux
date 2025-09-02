@@ -330,6 +330,20 @@ async function handleDeliverJob(job: any, supabase: any): Promise<boolean> {
       .eq('id', job.payload.account_id)
       .single();
 
+    // Get message template settings
+    const { data: messageSettings } = await supabase
+      .from('settings')
+      .select('value')
+      .eq('key', 'message_template')
+      .single();
+
+    const messageTemplate = messageSettings?.value || {
+      template: '{translated_text}\n\n📰 #اخبار',
+      include_source_link: true,
+      source_link_text: 'View original',
+      custom_hashtags: '#اخبار'
+    };
+
     // Get media if available
     const { data: media } = await supabase
       .from('media')
@@ -337,14 +351,8 @@ async function handleDeliverJob(job: any, supabase: any): Promise<boolean> {
       .eq('tweet_id', job.payload.tweet_id)
       .order('ordering');
 
-    // Prepare message text
-    const textToSend = post.text_translated || post.text_original;
-    
-    let message = textToSend;
-    
-    if (post.url) {
-      message += `\n\n<a href="${post.url}">View original</a>`;
-    }
+    // Prepare message using template
+    const message = formatMessageWithTemplate(post, account, messageTemplate);
 
     let telegramMessageIds: string[] = [];
 
@@ -547,6 +555,28 @@ function detectLanguage(text: string): string {
     // Non-Latin script
     return 'auto';
   }
+}
+
+// Helper function to format message using template
+function formatMessageWithTemplate(post: any, account: any, messageTemplate: any): string {
+  const placeholders = {
+    '{translated_text}': post.text_translated || post.text_original,
+    '{original_text}': post.text_original,
+    '{author_handle}': account?.handle || '',
+    '{author_name}': account?.display_name || '',
+    '{source_link}': messageTemplate.include_source_link && post.url ? 
+      `<a href="${post.url}">${messageTemplate.source_link_text}</a>` : '',
+    '{published_date}': post.tweeted_at ? 
+      new Date(post.tweeted_at).toLocaleDateString('fa-IR') : '',
+    '{published_time}': post.tweeted_at ? 
+      new Date(post.tweeted_at).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }) : '',
+    '{hashtags}': messageTemplate.custom_hashtags || '',
+    '{media_info}': post.has_media ? '📸 تصویر' : ''
+  };
+
+  return Object.entries(placeholders).reduce((template, [key, value]) => {
+    return template.replace(new RegExp(key.replace(/[{}]/g, '\\$&'), 'g'), value);
+  }, messageTemplate.template);
 }
 
 // Helper function to get media URL (storage or external)

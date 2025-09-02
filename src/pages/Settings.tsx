@@ -38,6 +38,14 @@ export default function Settings() {
     chat_id: '',
     parse_mode: 'Markdown'
   });
+  const [messageTemplate, setMessageTemplate] = useState({
+    template: '{translated_text}\n\n📰 #اخبار',
+    include_source_link: true,
+    include_hashtags: true,
+    include_media_caption: true,
+    source_link_text: 'View original',
+    custom_hashtags: '#اخبار'
+  });
 
   // Available OpenAI models with their specifications
   const openaiModels = [
@@ -124,7 +132,20 @@ export default function Settings() {
     }
   ];
 
-  // Placeholder definitions with real data mapping
+  // Placeholder definitions for message template
+  const messagePlaceholders = [
+    { key: '{translated_text}', description: 'The translated tweet content', example: 'دولت ترامپ اعلام کرد که...' },
+    { key: '{original_text}', description: 'Original tweet text', example: 'Trump administration announced...' },
+    { key: '{author_handle}', description: 'Twitter handle (@username)', example: '@realDonaldTrump' },
+    { key: '{author_name}', description: 'Display name of the author', example: 'Donald J. Trump' },
+    { key: '{source_link}', description: 'Link to original tweet', example: 'View original' },
+    { key: '{published_date}', description: 'Publication date', example: '2025-09-02' },
+    { key: '{published_time}', description: 'Publication time', example: '21:35' },
+    { key: '{hashtags}', description: 'Custom hashtags', example: '#اخبار #سیاست' },
+    { key: '{media_info}', description: 'Media information if present', example: '📸 تصویر' }
+  ];
+
+  // Placeholder definitions with real data mapping (for translation prompts)
   const placeholders = [
     { key: '{content}', description: 'Original tweet text content', example: 'tweet.text_original' },
     { key: '{author_handle}', description: 'Twitter handle (@username)', example: 'account.handle' },
@@ -179,11 +200,16 @@ export default function Settings() {
               setOpenaiSettings(setting.value as any);
             }
             break;
-          case 'telegram_config':
-            if (setting.value && typeof setting.value === 'object') {
-              setTelegramSettings(setting.value as any);
-            }
-            break;
+            case 'telegram_config':
+              if (setting.value && typeof setting.value === 'object') {
+                setTelegramSettings(setting.value as any);
+              }
+              break;
+            case 'message_template':
+              if (setting.value && typeof setting.value === 'object') {
+                setMessageTemplate(setting.value as any);
+              }
+              break;
         }
       });
     } catch (error) {
@@ -230,6 +256,10 @@ export default function Settings() {
     saveSettings('telegram_config', telegramSettings);
   };
 
+  const handleSaveMessageTemplate = () => {
+    saveSettings('message_template', messageTemplate);
+  };
+
   const selectedModel = openaiModels.find(m => m.id === translationSettings.model);
 
   const insertPlaceholder = (placeholder: string) => {
@@ -272,6 +302,62 @@ export default function Settings() {
     }
   };
 
+  const insertMessagePlaceholder = (placeholder: string) => {
+    const textarea = document.getElementById('message_template') as HTMLTextAreaElement;
+    if (textarea) {
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const text = messageTemplate.template;
+      const before = text.substring(0, start);
+      const after = text.substring(end);
+      const newText = before + placeholder + after;
+      setMessageTemplate(prev => ({ ...prev, template: newText }));
+      
+      // Set cursor position after inserted placeholder
+      setTimeout(() => {
+        textarea.setSelectionRange(start + placeholder.length, start + placeholder.length);
+        textarea.focus();
+      }, 0);
+    }
+  };
+
+  const getMessagePlaceholderValue = (placeholder: any, tweet: any) => {
+    switch (placeholder.key) {
+      case '{translated_text}': 
+        return tweet?.text_translated || 'دولت ترامپ اعلام کرد که قایق حامل مواد مخدر توسط گروه تروریستی "ترن د آرگوآ" اداره می‌شد و ۱۱ تروریست در این عملیات کشته شدند.';
+      case '{original_text}': 
+        return tweet?.text_original || 'Trump said the drug boat was run by Tren de Aragua, and 11 terrorists were killed.';
+      case '{author_handle}': 
+        return tweet?.accounts?.handle || '@JenniferJJacobs';
+      case '{author_name}': 
+        return tweet?.accounts?.display_name || 'Jennifer Jacobs';
+      case '{source_link}': 
+        return messageTemplate.include_source_link ? `<a href="${tweet?.url || 'https://twitter.com/example/status/123'}">${messageTemplate.source_link_text}</a>` : '';
+      case '{published_date}': 
+        return tweet?.tweeted_at ? new Date(tweet.tweeted_at).toLocaleDateString('fa-IR') : '۱۴۰۴/۶/۱۲';
+      case '{published_time}': 
+        return tweet?.tweeted_at ? new Date(tweet.tweeted_at).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }) : '۲۱:۳۵';
+      case '{hashtags}': 
+        return messageTemplate.custom_hashtags;
+      case '{media_info}': 
+        return tweet?.has_media ? '📸 تصویر' : '';
+      default: 
+        return placeholder.key;
+    }
+  };
+
+  const renderMessagePreview = () => {
+    const sampleTweet = sampleTweets[selectedSample];
+    if (!sampleTweet) return '';
+
+    return messagePlaceholders.reduce((template, placeholder) => {
+      return template.replace(
+        new RegExp(placeholder.key.replace(/[{}]/g, '\\$&'), 'g'),
+        getMessagePlaceholderValue(placeholder, sampleTweet)
+      );
+    }, messageTemplate.template);
+  };
+
   return (
     <div className="space-y-6 animate-fade-in-up">
       <div>
@@ -280,10 +366,14 @@ export default function Settings() {
       </div>
 
       <Tabs defaultValue="translation" className="w-full">
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="translation" className="flex items-center gap-2">
             <Brain className="w-4 h-4" />
             Translation
+          </TabsTrigger>
+          <TabsTrigger value="messages" className="flex items-center gap-2">
+            <MessageSquare className="w-4 h-4" />
+            Messages
           </TabsTrigger>
           <TabsTrigger value="openai" className="flex items-center gap-2">
             <Key className="w-4 h-4" />
@@ -554,6 +644,188 @@ export default function Settings() {
                   className="border-primary/50 hover:bg-primary/10"
                 >
                   Test Pipeline
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="messages" className="space-y-6">
+          <Card className="glass-card">
+            <CardHeader>
+              <CardTitle className="flex items-center text-glass-foreground">
+                <MessageSquare className="w-5 h-5 mr-2" />
+                Telegram Message Template
+              </CardTitle>
+              <CardDescription>Configure how your translated messages appear in Telegram</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="message_template">Message Template</Label>
+                  <div className="flex items-center gap-2">
+                    <Eye className="w-4 h-4" />
+                    <span className="text-sm text-muted-foreground">Available Placeholders</span>
+                  </div>
+                </div>
+                
+                {/* Message Placeholders Reference */}
+                <div className="grid grid-cols-2 gap-2">
+                  {messagePlaceholders.map(placeholder => (
+                    <Button
+                      key={placeholder.key}
+                      variant="outline"
+                      size="sm"
+                      onClick={() => insertMessagePlaceholder(placeholder.key)}
+                      className="justify-start h-auto p-3"
+                    >
+                      <div className="text-left">
+                        <div className="font-mono text-xs text-primary">{placeholder.key}</div>
+                        <div className="text-xs text-muted-foreground">{placeholder.description}</div>
+                      </div>
+                    </Button>
+                  ))}
+                </div>
+
+                <Textarea
+                  id="message_template"
+                  value={messageTemplate.template}
+                  onChange={(e) => setMessageTemplate(prev => ({ ...prev, template: e.target.value }))}
+                  className="glass-input min-h-[150px] font-mono text-sm"
+                  placeholder="Enter your message template. Click placeholders above to insert them..."
+                />
+              </div>
+
+              <Separator />
+
+              {/* Additional Options */}
+              <div className="space-y-4">
+                <Label className="text-base font-medium">Message Options</Label>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="include_source_link" className="flex items-center gap-2">
+                      <input
+                        id="include_source_link"
+                        type="checkbox"
+                        checked={messageTemplate.include_source_link}
+                        onChange={(e) => setMessageTemplate(prev => ({ ...prev, include_source_link: e.target.checked }))}
+                        className="rounded"
+                      />
+                      Include Source Link
+                    </Label>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="include_media_caption" className="flex items-center gap-2">
+                      <input
+                        id="include_media_caption"
+                        type="checkbox"
+                        checked={messageTemplate.include_media_caption}
+                        onChange={(e) => setMessageTemplate(prev => ({ ...prev, include_media_caption: e.target.checked }))}
+                        className="rounded"
+                      />
+                      Include Media Caption
+                    </Label>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="source_link_text">Source Link Text</Label>
+                    <Input
+                      id="source_link_text"
+                      value={messageTemplate.source_link_text}
+                      onChange={(e) => setMessageTemplate(prev => ({ ...prev, source_link_text: e.target.value }))}
+                      className="glass-input"
+                      placeholder="View original"
+                    />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="custom_hashtags">Custom Hashtags</Label>
+                    <Input
+                      id="custom_hashtags"
+                      value={messageTemplate.custom_hashtags}
+                      onChange={(e) => setMessageTemplate(prev => ({ ...prev, custom_hashtags: e.target.value }))}
+                      className="glass-input"
+                      placeholder="#اخبار #سیاست"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <Separator />
+
+              {/* Message Preview */}
+              {sampleTweets.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label className="flex items-center gap-2">
+                      <Eye className="w-4 h-4" />
+                      Telegram Message Preview
+                    </Label>
+                    <Select
+                      value={selectedSample.toString()}
+                      onValueChange={(value) => setSelectedSample(parseInt(value))}
+                    >
+                      <SelectTrigger className="w-48">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {sampleTweets.map((tweet: any, index) => (
+                          <SelectItem key={index} value={index.toString()}>
+                            Sample Tweet {index + 1}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <div className="p-4 bg-muted/50 rounded-lg border-2 border-dashed border-muted-foreground/20">
+                    <div className="text-sm font-medium mb-2 flex items-center gap-2">
+                      <Send className="w-4 h-4" />
+                      How it will appear in Telegram:
+                    </div>
+                    <div className="text-sm bg-background p-4 rounded border whitespace-pre-wrap font-sans">
+                      {renderMessagePreview()}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-2">
+                      * Media attachments will be included automatically when available
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-3">
+                <Button 
+                  onClick={handleSaveMessageTemplate} 
+                  disabled={loading}
+                  className="bg-gradient-primary hover:opacity-90 text-white flex-1"
+                >
+                  Save Message Template
+                </Button>
+                <Button 
+                  onClick={async () => {
+                    try {
+                      const { data, error } = await supabase.functions.invoke('admin-retry', {
+                        body: { 
+                          action: 'resend_delivery',
+                          delivery_id: sampleTweets[selectedSample]?.tweet_id
+                        }
+                      });
+                      if (error) throw error;
+                      toast({ title: "Test message sent!", description: "Check your Telegram channel" });
+                    } catch (error) {
+                      console.error('Test message error:', error);
+                      toast({ title: "Test failed", variant: "destructive" });
+                    }
+                  }}
+                  variant="outline"
+                  disabled={loading || sampleTweets.length === 0}
+                  className="border-primary/50 hover:bg-primary/10"
+                >
+                  Test Message
                 </Button>
               </div>
             </CardContent>
