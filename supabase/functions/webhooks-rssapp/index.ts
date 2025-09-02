@@ -122,8 +122,8 @@ serve(async (req) => {
           const { data: newAccount, error: accountError } = await supabase
             .from('accounts')
             .insert({
-              handle: 'rss-feed',
-              display_name: 'RSS Feed Account'
+              handle: 'news-channel',
+              display_name: 'News Channel'
             })
             .select()
             .single();

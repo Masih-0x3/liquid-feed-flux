@@ -336,9 +336,8 @@ async function handleDeliverJob(job: any, supabase: any): Promise<boolean> {
 
     // Prepare message text
     const textToSend = post.text_translated || post.text_original;
-    const accountInfo = account?.display_name || account?.handle || 'RSS Feed';
     
-    let message = `<b>${accountInfo}</b>\n\n${textToSend}`;
+    let message = textToSend;
     
     if (post.url) {
       message += `\n\n<a href="${post.url}">View original</a>`;
@@ -407,7 +406,7 @@ async function handleDeliverJob(job: any, supabase: any): Promise<boolean> {
           body: JSON.stringify({
             chat_id: telegramChatId,
             video: video.src_url,
-            caption: images.length === 0 ? message : `Video from ${accountInfo}`,
+            caption: images.length === 0 ? message : message,
             parse_mode: 'HTML'
           })
         });
