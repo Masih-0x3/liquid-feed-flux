@@ -71,6 +71,10 @@ serve(async (req) => {
 
         console.log(`Extracted: tweetId=${tweetId}, text="${text.substring(0, 50)}...", url=${url}`);
 
+        // Parse media from RSS item
+        const mediaItems = parseMediaFromRSSItem(item);
+        console.log(`Found ${mediaItems.length} media items`);
+
         // Find or create a default account first
         let accountId = null;
         
@@ -120,7 +124,7 @@ serve(async (req) => {
             lang_original: 'auto',
             url: url,
             tweeted_at: publishedAt,
-            has_media: false
+            has_media: mediaItems.length > 0
           }, {
             onConflict: 'tweet_id'
           })
@@ -133,6 +137,30 @@ serve(async (req) => {
         }
 
         console.log('Post upserted successfully:', tweetId);
+
+        // Insert media items
+        if (mediaItems.length > 0) {
+          const { error: mediaError } = await supabase
+            .from('media')
+            .upsert(
+              mediaItems.map((media, index) => ({
+                tweet_id: tweetId,
+                kind: media.type,
+                src_url: media.url,
+                width: media.width,
+                height: media.height,
+                duration_ms: media.duration,
+                ordering: index
+              })),
+              { onConflict: 'tweet_id,ordering' }
+            );
+
+          if (mediaError) {
+            console.error('Error inserting media:', mediaError);
+          } else {
+            console.log(`Inserted ${mediaItems.length} media items for ${tweetId}`);
+          }
+        }
 
         // Create translation job
         const { error: translationJobError } = await supabase
@@ -196,3 +224,105 @@ serve(async (req) => {
     });
   }
 });
+
+function parseMediaFromRSSItem(item: any): Array<{type: string, url: string, width?: number, height?: number, duration?: number}> {
+  const mediaItems: Array<{type: string, url: string, width?: number, height?: number, duration?: number}> = [];
+  
+  try {
+    // Parse enclosures (RSS standard)
+    if (item.enclosure) {
+      const enclosures = Array.isArray(item.enclosure) ? item.enclosure : [item.enclosure];
+      for (const enc of enclosures) {
+        if (enc.url && enc.type) {
+          const mediaType = getMediaType(enc.type, enc.url);
+          if (mediaType) {
+            mediaItems.push({
+              type: mediaType,
+              url: enc.url,
+              width: enc.width ? parseInt(enc.width) : undefined,
+              height: enc.height ? parseInt(enc.height) : undefined,
+              duration: enc.length ? parseInt(enc.length) : undefined
+            });
+          }
+        }
+      }
+    }
+    
+    // Parse media:content (RSS extensions)
+    if (item['media:content']) {
+      const mediaContent = Array.isArray(item['media:content']) ? item['media:content'] : [item['media:content']];
+      for (const media of mediaContent) {
+        if (media.url) {
+          const mediaType = getMediaType(media.type || '', media.url);
+          if (mediaType) {
+            mediaItems.push({
+              type: mediaType,
+              url: media.url,
+              width: media.width ? parseInt(media.width) : undefined,
+              height: media.height ? parseInt(media.height) : undefined,
+              duration: media.duration ? parseInt(media.duration) : undefined
+            });
+          }
+        }
+      }
+    }
+    
+    // Parse images from description HTML
+    if (item.description || item.content) {
+      const htmlContent = item.description || item.content;
+      const imgRegex = /<img[^>]+src="([^"]+)"/gi;
+      let match;
+      
+      while ((match = imgRegex.exec(htmlContent)) !== null) {
+        const imgUrl = match[1];
+        if (imgUrl && isImageUrl(imgUrl)) {
+          mediaItems.push({
+            type: 'image',
+            url: imgUrl
+          });
+        }
+      }
+      
+      // Parse video links
+      const videoRegex = /<video[^>]+src="([^"]+)"|<source[^>]+src="([^"]+)"/gi;
+      while ((match = videoRegex.exec(htmlContent)) !== null) {
+        const videoUrl = match[1] || match[2];
+        if (videoUrl && isVideoUrl(videoUrl)) {
+          mediaItems.push({
+            type: 'video',
+            url: videoUrl
+          });
+        }
+      }
+    }
+    
+  } catch (error) {
+    console.error('Error parsing media from RSS item:', error);
+  }
+  
+  return mediaItems;
+}
+
+function getMediaType(mimeType: string, url: string): string | null {
+  mimeType = mimeType.toLowerCase();
+  
+  if (mimeType.startsWith('image/') || isImageUrl(url)) {
+    return 'image';
+  }
+  
+  if (mimeType.startsWith('video/') || isVideoUrl(url)) {
+    return 'video';
+  }
+  
+  return null;
+}
+
+function isImageUrl(url: string): boolean {
+  const imageExtensions = /\.(jpg|jpeg|png|gif|webp|svg|bmp|tiff)(\?|$)/i;
+  return imageExtensions.test(url);
+}
+
+function isVideoUrl(url: string): boolean {
+  const videoExtensions = /\.(mp4|avi|mov|wmv|flv|webm|mkv|m4v)(\?|$)/i;
+  return videoExtensions.test(url);
+}
