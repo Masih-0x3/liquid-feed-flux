@@ -46,6 +46,9 @@ interface MonitoringEntry {
   telegram_message_ids: string[];
   translation_status: string;
   job_attempts: number;
+  translation_success: boolean;
+  delivery_success: boolean;
+  delivered_without_translation: boolean;
 }
 
 export default function Monitoring() {
@@ -112,6 +115,9 @@ export default function Monitoring() {
           (j.payload as any).tweet_id === post.tweet_id
         );
 
+        const translationSuccess = post.text_translated && post.text_translated.trim() !== '';
+        const deliverySuccess = delivery?.status === 'posted';
+        
         return {
           tweet_id: post.tweet_id,
           account_id: post.account_id,
@@ -127,8 +133,11 @@ export default function Monitoring() {
           delivery_status: delivery?.status || 'pending',
           delivery_error: delivery?.last_error || '',
           telegram_message_ids: delivery?.telegram_message_ids || [],
-          translation_status: translateJob?.status || 'pending',
-          job_attempts: Math.max(translateJob?.attempts || 0, deliverJob?.attempts || 0)
+          translation_status: translateJob?.status || (translationSuccess ? 'completed' : 'pending'),
+          job_attempts: Math.max(translateJob?.attempts || 0, deliverJob?.attempts || 0),
+          translation_success: translationSuccess,
+          delivery_success: deliverySuccess,
+          delivered_without_translation: deliverySuccess && !translationSuccess
         };
       });
 
@@ -352,7 +361,7 @@ export default function Monitoring() {
       </div>
 
       {/* Pipeline Status Summary */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
@@ -360,7 +369,37 @@ export default function Monitoring() {
                 <p className="text-sm font-medium text-muted-foreground">Total Posts</p>
                 <p className="text-2xl font-bold">{entries.length}</p>
               </div>
-              <Badge variant="outline" className="text-xs">24h</Badge>
+              <Badge variant="outline" className="text-xs">Recent</Badge>
+            </div>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Fully Successful</p>
+                <p className="text-2xl font-bold text-green-600">
+                  {entries.filter(e => e.translation_success && e.delivery_success).length}
+                </p>
+                <p className="text-xs text-muted-foreground">Translated + Delivered</p>
+              </div>
+              <Badge variant="default" className="text-xs">Perfect</Badge>
+            </div>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">English Delivered</p>
+                <p className="text-2xl font-bold text-yellow-600">
+                  {entries.filter(e => e.delivered_without_translation).length}
+                </p>
+                <p className="text-xs text-muted-foreground">No translation</p>
+              </div>
+              <Badge variant="secondary" className="text-xs">Partial</Badge>
             </div>
           </CardContent>
         </Card>
@@ -371,18 +410,18 @@ export default function Monitoring() {
               <div>
                 <p className="text-sm font-medium text-muted-foreground">Translation Failed</p>
                 <p className="text-2xl font-bold text-red-600">
-                  {entries.filter(e => e.translation_status === 'failed').length}
+                  {entries.filter(e => e.translation_status === 'failed' || (!e.translation_success && e.translation_status !== 'pending')).length}
                 </p>
               </div>
               <Button 
                 size="sm" 
                 variant="outline"
                 onClick={() => {
-                  entries.filter(e => e.translation_status === 'failed').forEach(entry => {
+                  entries.filter(e => e.translation_status === 'failed' || (!e.translation_success && e.translation_status !== 'pending')).forEach(entry => {
                     handleRetryTranslation(entry.tweet_id);
                   });
                 }}
-                disabled={entries.filter(e => e.translation_status === 'failed').length === 0}
+                disabled={entries.filter(e => e.translation_status === 'failed' || (!e.translation_success && e.translation_status !== 'pending')).length === 0}
               >
                 Retry All
               </Button>
@@ -411,20 +450,6 @@ export default function Monitoring() {
               >
                 Retry All
               </Button>
-            </div>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Successfully Delivered</p>
-                <p className="text-2xl font-bold text-green-600">
-                  {entries.filter(e => e.delivery_status === 'posted').length}
-                </p>
-              </div>
-              <Badge variant="default" className="text-xs">Success</Badge>
             </div>
           </CardContent>
         </Card>
@@ -547,16 +572,24 @@ export default function Monitoring() {
                   <div className="mb-4">
                     <div className="flex items-center justify-between mb-2">
                       <h4 className="font-medium text-sm text-muted-foreground">Translated Content</h4>
-                      {!isEditing && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleEditContent(entry)}
-                        >
-                          <Edit className="w-3 h-3 mr-1" />
-                          Edit
-                        </Button>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {/* Show warning for delivered without translation */}
+                        {entry.delivered_without_translation && (
+                          <Badge variant="secondary" className="text-xs">
+                            ⚠️ Delivered in English
+                          </Badge>
+                        )}
+                        {!isEditing && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleEditContent(entry)}
+                          >
+                            <Edit className="w-3 h-3 mr-1" />
+                            Edit
+                          </Button>
+                        )}
+                      </div>
                     </div>
                     
                     {isEditing ? (
@@ -579,9 +612,15 @@ export default function Monitoring() {
                         </div>
                       </div>
                     ) : (
-                      <p className="text-sm bg-muted/50 p-3 rounded border">
-                        {entry.text_translated || "[Not translated yet]"}
-                      </p>
+                      <div className={`text-sm p-3 rounded border ${
+                        entry.delivered_without_translation 
+                          ? 'bg-yellow-50 border-yellow-200' 
+                          : 'bg-muted/50'
+                      }`}>
+                        {entry.text_translated || (entry.delivered_without_translation 
+                          ? "[Delivered in English - translation failed]" 
+                          : "[Not translated yet]")}
+                      </div>
                     )}
                   </div>
 
@@ -623,15 +662,15 @@ export default function Monitoring() {
 
                         {/* Actions */}
                         <div className="flex gap-2 flex-wrap">
-                          {/* Translation Actions */}
-                          {entry.translation_status === 'failed' && (
+                          {/* Smart Translation Actions */}
+                          {(entry.translation_status === 'failed' || entry.delivered_without_translation) && (
                             <Button
                               size="sm"
                               variant="outline"
                               onClick={() => handleRetryTranslation(entry.tweet_id)}
                             >
                               <RefreshCw className="w-3 h-3 mr-1" />
-                              Retry Translation
+                              {entry.delivered_without_translation ? 'Translate & Resend' : 'Retry Translation'}
                             </Button>
                           )}
                           
@@ -647,16 +686,17 @@ export default function Monitoring() {
                             </Button>
                           )}
                           
-                          {/* Force Resend (works for any status) */}
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleResendToTelegram(entry.tweet_id)}
-                            disabled={entry.delivery_status === 'pending'}
-                          >
-                            <Send className="w-3 h-3 mr-1" />
-                            Force Resend
-                          </Button>
+                          {/* Force Resend (works for any status except pending) */}
+                          {entry.delivery_status !== 'pending' && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleResendToTelegram(entry.tweet_id)}
+                            >
+                              <Send className="w-3 h-3 mr-1" />
+                              Force Resend
+                            </Button>
+                          )}
                         </div>
                       </div>
                     </>
