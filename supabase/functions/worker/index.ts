@@ -44,21 +44,24 @@ serve(async (req) => {
       });
     }
 
-    console.log(`Processing ${jobs.length} jobs`);
-    let processedCount = 0;
-    let failedCount = 0;
+    console.log(`Processing ${jobs.length} jobs in parallel`);
+    
+    // Mark all jobs as running in a single batch update
+    const jobIds = jobs.map(job => job.id);
+    await supabase
+      .from('jobs')
+      .update({ status: 'running' })
+      .in('id', jobIds);
 
-    for (const job of jobs) {
+    // Process all jobs in parallel for maximum efficiency
+    const jobPromises = jobs.map(async (job) => {
       try {
         console.log(`Processing job ${job.id} of type ${job.type}`);
 
-        // Mark job as running
+        // Update attempt count for this specific job
         await supabase
           .from('jobs')
-          .update({ 
-            status: 'running',
-            attempts: job.attempts + 1
-          })
+          .update({ attempts: job.attempts + 1 })
           .eq('id', job.id);
 
         let success = false;
@@ -91,24 +94,41 @@ serve(async (req) => {
               })
               .eq('id', job.id);
             
-            processedCount++;
             console.log(`Job ${job.id} completed successfully`);
+            return { success: true, jobId: job.id };
           } else {
             await handleJobFailure(supabase, job);
-            failedCount++;
+            return { success: false, jobId: job.id };
           }
 
         } catch (error) {
           console.error(`Job ${job.id} failed:`, error);
           await handleJobFailure(supabase, job, error.message);
-          failedCount++;
+          return { success: false, jobId: job.id, error: error.message };
         }
       } catch (error) {
         console.error(`Error processing job ${job.id}:`, error);
         await handleJobFailure(supabase, job, error.message);
-        failedCount++;
+        return { success: false, jobId: job.id, error: error.message };
       }
-    }
+    });
+
+    // Wait for all jobs to complete
+    const results = await Promise.allSettled(jobPromises);
+    
+    let processedCount = 0;
+    let failedCount = 0;
+    
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled' && result.value.success) {
+        processedCount++;
+      } else {
+        failedCount++;
+        if (result.status === 'rejected') {
+          console.error(`Job promise rejected:`, result.reason);
+        }
+      }
+    });
 
     console.log(`Worker completed: ${processedCount} successful, ${failedCount} failed`);
 
