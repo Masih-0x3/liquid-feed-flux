@@ -263,14 +263,39 @@ async function handleTranslateJob(job: any, supabase: any): Promise<boolean> {
       console.log('GPT-5 Response data:', JSON.stringify(data, null, 2));
       
       // Extract the actual text content from the responses endpoint
-      // Based on the logs, the structure is data.output[1].content[0].text
-      translatedText = data.output?.[1]?.content?.[0]?.text || 
-                      data.content?.[0]?.text || 
-                      data.choices?.[0]?.message?.content || 
-                      data.text?.content || 
-                      data.output?.content || 
-                      data.response?.text ||
-                      'Translation failed - unexpected response format';
+      // GPT-5 responses API has different structure than chat completions
+      // The actual text is in the assistant message within output array
+      translatedText = null;
+      
+      // Try multiple extraction paths for GPT-5 responses API
+      if (data.output && Array.isArray(data.output)) {
+        // Look for assistant message in output array
+        for (const output of data.output) {
+          if (output.type === 'message' && output.role === 'assistant' && output.content) {
+            // Extract text from content array
+            for (const content of output.content) {
+              if (content.type === 'output_text' && content.text) {
+                translatedText = content.text;
+                break;
+              }
+            }
+            if (translatedText) break;
+          }
+        }
+      }
+      
+      // Fallback extraction methods if above fails
+      if (!translatedText) {
+        translatedText = data.output?.[1]?.content?.[0]?.text || 
+                        data.content?.[0]?.text || 
+                        data.choices?.[0]?.message?.content || 
+                        data.text?.content || 
+                        data.output?.content || 
+                        data.response?.text ||
+                        'Translation failed - unexpected response format';
+      }
+      
+      console.log('Extracted translation:', translatedText);
     } else {
       // Use legacy chat completions endpoint for older models
       const isNewerModel = settings.model.includes('gpt-4.1') || 
