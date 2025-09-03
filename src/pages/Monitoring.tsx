@@ -273,6 +273,29 @@ export default function Monitoring() {
     }
   };
 
+  const handleReprocessTweet = async (tweetId: string) => {
+    try {
+      // Create a comprehensive reprocess job that will re-extract media and retranslate
+      await supabase.from('jobs').insert({
+        type: 'reprocess',
+        payload: { tweet_id: tweetId },
+        status: 'pending'
+      });
+      
+      toast({
+        title: "Processing started",
+        description: "Tweet has been queued for full reprocessing (media + translation)",
+      });
+    } catch (error) {
+      console.error('Error reprocessing tweet:', error);
+      toast({
+        title: "Error", 
+        description: "Failed to reprocess tweet",
+        variant: "destructive"
+      });
+    }
+  };
+
   const handleReprocessSelected = async () => {
     if (selectedTweets.size === 0) {
       toast({
@@ -285,9 +308,9 @@ export default function Monitoring() {
 
     setIsReprocessing(true);
     try {
-      // Create translation jobs for all selected tweets
+      // Create comprehensive reprocess jobs for all selected tweets
       const jobs = Array.from(selectedTweets).map(tweetId => ({
-        type: 'translate',
+        type: 'reprocess',
         payload: { tweet_id: tweetId },
         status: 'pending'
       }));
@@ -300,7 +323,7 @@ export default function Monitoring() {
 
       toast({
         title: "Success",
-        description: `${selectedTweets.size} tweets queued for reprocessing`,
+        description: `${selectedTweets.size} tweets queued for full reprocessing (media + translation)`,
       });
 
       // Clear selection
@@ -602,6 +625,14 @@ export default function Monitoring() {
                     <div className="flex items-center justify-between mb-2">
                       <h4 className="font-medium text-sm text-muted-foreground">Persian</h4>
                       <div className="flex items-center gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleReprocessTweet(entry.tweet_id)}
+                        >
+                          <RotateCcw className="w-3 h-3 mr-1" />
+                          Reprocess
+                        </Button>
                         {!entry.is_translated && (
                           <Button
                             size="sm"

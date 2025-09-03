@@ -80,6 +80,9 @@ serve(async (req) => {
             case 'download_media':
               success = await handleDownloadMediaJob(job, supabase);
               break;
+            case 'reprocess':
+              success = await handleReprocessJob(job, supabase);
+              break;
             default:
               console.error(`Unknown job type: ${job.type}`);
               success = false;
@@ -637,4 +640,112 @@ async function handleDownloadMediaJob(job: any, supabase: any): Promise<boolean>
     console.error('Media download failed:', error);
     return false;
   }
+}
+
+async function handleReprocessJob(job: any, supabase: any): Promise<boolean> {
+  try {
+    console.log('Handling reprocess job for:', job.payload.tweet_id);
+    
+    // Get the post data
+    const { data: post, error: postError } = await supabase
+      .from('posts')
+      .select('*')
+      .eq('tweet_id', job.payload.tweet_id)
+      .single();
+
+    if (postError || !post) {
+      throw new Error(`Post not found: ${job.payload.tweet_id}`);
+    }
+
+    // Re-extract media from the text content using the same logic as webhook
+    const mediaItems = extractMediaFromText(post.text_original);
+    console.log(`Re-extracted ${mediaItems.length} media items from text:`, post.text_original);
+
+    // Delete existing media records for this tweet to avoid conflicts
+    await supabase
+      .from('media')
+      .delete()
+      .eq('tweet_id', job.payload.tweet_id);
+
+    // Insert new media items if found
+    if (mediaItems.length > 0) {
+      const { error: mediaError } = await supabase
+        .from('media')
+        .insert(
+          mediaItems.map((media, index) => ({
+            tweet_id: job.payload.tweet_id,
+            kind: media.type,
+            src_url: media.url,
+            width: media.width,
+            height: media.height,
+            duration_ms: media.duration,
+            ordering: index
+          }))
+        );
+
+      if (mediaError) {
+        console.error('Error inserting media:', mediaError);
+      } else {
+        console.log(`Inserted ${mediaItems.length} media items for ${job.payload.tweet_id}`);
+        
+        // Update post to mark it as having media
+        await supabase
+          .from('posts')
+          .update({ has_media: true })
+          .eq('tweet_id', job.payload.tweet_id);
+
+        // Create media download job
+        await supabase
+          .from('jobs')
+          .insert({
+            type: 'download_media',
+            payload: { tweet_id: job.payload.tweet_id },
+            status: 'pending'
+          });
+      }
+    } else {
+      // Update post to mark it as not having media
+      await supabase
+        .from('posts')
+        .update({ has_media: false })
+        .eq('tweet_id', job.payload.tweet_id);
+    }
+
+    // Create translation job
+    await supabase
+      .from('jobs')
+      .insert({
+        type: 'translate',
+        payload: { tweet_id: job.payload.tweet_id },
+        status: 'pending'
+      });
+
+    console.log('Reprocess completed for:', job.payload.tweet_id);
+    return true;
+  } catch (error) {
+    console.error('Reprocess failed:', error);
+    return false;
+  }
+}
+
+function extractMediaFromText(text: string): Array<{type: string, url: string, width?: number, height?: number, duration?: number}> {
+  const mediaItems: Array<{type: string, url: string, width?: number, height?: number, duration?: number}> = [];
+  
+  if (text) {
+    // Extract Twitter media URLs from text content
+    const twitterMediaRegex = /pic\.twitter\.com\/[a-zA-Z0-9]+/g;
+    const twitterMatches = text.match(twitterMediaRegex);
+    if (twitterMatches) {
+      for (const match of twitterMatches) {
+        const fullUrl = `https://${match}`;
+        console.log('Found Twitter media URL in text:', fullUrl);
+        mediaItems.push({
+          type: 'image',
+          url: fullUrl
+        });
+      }
+    }
+  }
+  
+  return mediaItems;
 }
