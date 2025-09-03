@@ -19,14 +19,15 @@ serve(async (req) => {
 
     console.log('Worker function invoked - processing pending jobs, trigger:', req.url);
 
-    // Fetch multiple pending jobs for batch processing
+    // Fetch more pending jobs for batch processing (increased from 10 to 20)
+    // This reduces function invocations while maintaining efficiency
     const { data: jobs, error: jobError } = await supabase
       .from('jobs')
       .select('*')
       .eq('status', 'pending')
       .lte('next_run_at', new Date().toISOString())
       .order('created_at', { ascending: true })
-      .limit(10);
+      .limit(20);
 
     if (jobError) {
       console.error('Error fetching jobs:', jobError);
