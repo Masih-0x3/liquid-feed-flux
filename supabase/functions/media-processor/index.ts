@@ -72,6 +72,13 @@ async function downloadMediaForTweet(supabase: any, tweetId: string) {
     try {
       console.log(`Downloading media: ${media.src_url}`);
       
+      // Skip pic.twitter.com URLs as they are not direct media URLs
+      if (media.src_url.includes('pic.twitter.com')) {
+        console.log(`Skipping pic.twitter.com URL: ${media.src_url} - not a direct media URL`);
+        failedCount++;
+        continue;
+      }
+      
       // Download the media file
       const response = await fetch(media.src_url, {
         headers: {

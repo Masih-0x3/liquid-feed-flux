@@ -262,17 +262,26 @@ function parseMediaFromRSSItem(item: any, text?: string): Array<{type: string, u
   const mediaItems: Array<{type: string, url: string, width?: number, height?: number, duration?: number}> = [];
   
   try {
-    // First, check for Twitter media URLs in the text content
+    // First, check for Twitter media URLs in the text content - skip pic.twitter.com as they're not usable
     if (text) {
+      // Skip pic.twitter.com URLs as they are Twitter's short URLs that don't work for direct media access
       const twitterMediaRegex = /pic\.twitter\.com\/[a-zA-Z0-9]+/g;
       const twitterMatches = text.match(twitterMediaRegex);
       if (twitterMatches) {
-        for (const match of twitterMatches) {
-          const fullUrl = `https://${match}`;
-          console.log('Found Twitter media URL in text:', fullUrl);
+        console.log(`Found ${twitterMatches.length} pic.twitter.com URLs in text, but skipping as they are not direct media URLs`);
+        // Skip these URLs as they are not direct media URLs
+      }
+      
+      // Extract direct media URLs (pbs.twimg.com, etc.)
+      const directMediaRegex = /https?:\/\/pbs\.twimg\.com\/[^\s]+\.(jpg|jpeg|png|gif|webp|mp4|mov)/gi;
+      const directMatches = text.match(directMediaRegex);
+      if (directMatches) {
+        for (const match of directMatches) {
+          console.log('Found direct media URL in text:', match);
+          const isVideo = /\.(mp4|mov)$/i.test(match);
           mediaItems.push({
-            type: 'image',
-            url: fullUrl
+            type: isVideo ? 'video' : 'image',
+            url: match
           });
         }
       }
