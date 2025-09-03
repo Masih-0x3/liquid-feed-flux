@@ -244,23 +244,9 @@ serve(async (req) => {
           }
         }
 
-        // Create delivery job
-        const { error: deliveryJobError } = await supabase
-          .from('jobs')
-          .insert({
-            type: 'deliver',
-            payload: {
-              tweet_id: tweetId,
-              account_id: accountId
-            },
-            status: 'pending'
-          });
+        // Don't create delivery job here - let translation job complete first
+        // The worker will handle sequencing: translate -> then deliver
 
-        if (deliveryJobError) {
-          console.error('Error creating delivery job:', deliveryJobError);
-        } else {
-          console.log('Delivery job created for:', tweetId);
-        }
 
         processedCount++;
 

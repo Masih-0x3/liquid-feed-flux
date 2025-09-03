@@ -224,6 +224,24 @@ async function handleTranslateJob(job: any, supabase: any): Promise<boolean> {
     }
 
     console.log('Translation completed for:', job.payload.tweet_id);
+    
+    // After successful translation, create a delivery job
+    const { error: deliveryJobError } = await supabase
+      .from('jobs')
+      .insert({
+        type: 'deliver',
+        payload: {
+          tweet_id: job.payload.tweet_id
+        },
+        status: 'pending'
+      });
+
+    if (deliveryJobError) {
+      console.warn('Failed to create delivery job after translation:', deliveryJobError);
+    } else {
+      console.log('Delivery job created after translation for:', job.payload.tweet_id);
+    }
+    
     return true;
   } catch (error) {
     console.error('Translation failed:', error);
@@ -319,11 +337,11 @@ async function handleDeliverJob(job: any, supabase: any): Promise<boolean> {
       throw new Error(`Post not found: ${job.payload.tweet_id}`);
     }
 
-    // Get account info
+    // Get account info from the post (simplified - no need for account_id in payload)
     const { data: account } = await supabase
       .from('accounts')
       .select('*')
-      .eq('id', job.payload.account_id)
+      .eq('id', post.account_id)
       .single();
 
     // Get message template settings
@@ -372,7 +390,7 @@ async function handleDeliverJob(job: any, supabase: any): Promise<boolean> {
               chat_id: telegramChatId,
               photo: imageUrl,
               caption: message,
-              parse_mode: 'HTML'
+              parse_mode: 'Markdown'
             })
           });
           
@@ -392,7 +410,7 @@ async function handleDeliverJob(job: any, supabase: any): Promise<boolean> {
               type: 'photo',
               media: imageUrl,
               caption: i === 0 ? message : undefined,
-              parse_mode: i === 0 ? 'HTML' : undefined
+              parse_mode: i === 0 ? 'Markdown' : undefined
             });
           }
 
@@ -424,7 +442,7 @@ async function handleDeliverJob(job: any, supabase: any): Promise<boolean> {
             chat_id: telegramChatId,
             video: videoUrl,
             caption: images.length === 0 ? message : message,
-            parse_mode: 'HTML'
+            parse_mode: 'Markdown'
           })
         });
         
@@ -446,7 +464,7 @@ async function handleDeliverJob(job: any, supabase: any): Promise<boolean> {
             chat_id: telegramChatId,
             audio: audioUrl,
             caption: images.length === 0 && videos.length === 0 ? message : `Audio from tweet`,
-            parse_mode: 'HTML'
+            parse_mode: 'Markdown'
           })
         });
         
@@ -465,7 +483,7 @@ async function handleDeliverJob(job: any, supabase: any): Promise<boolean> {
         body: JSON.stringify({
           chat_id: telegramChatId,
           text: message,
-          parse_mode: 'HTML',
+          parse_mode: 'Markdown',
           disable_web_page_preview: false
         })
       });
@@ -561,7 +579,7 @@ function formatMessageWithTemplate(post: any, account: any, messageTemplate: any
     '{author_handle}': account?.handle || '',
     '{author_name}': account?.display_name || '',
     '{source_link}': messageTemplate.include_source_link && post.url ? 
-      `<a href="${post.url}">${messageTemplate.source_link_text}</a>` : '',
+      `[${messageTemplate.source_link_text}](${post.url})` : '',
     '{published_date}': post.tweeted_at ? 
       new Date(post.tweeted_at).toLocaleDateString('fa-IR') : '',
     '{published_time}': post.tweeted_at ? 
