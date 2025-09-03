@@ -189,22 +189,6 @@ serve(async (req) => {
             console.error('Error inserting media:', mediaError);
           } else {
             console.log(`Inserted ${mediaItems.length} media items for ${tweetId}`);
-            
-            // Create job to download media
-            await supabase.functions.invoke('media-processor', {
-              body: {
-                action: 'download_media',
-                tweet_id: tweetId
-              }
-            }).then(({ data, error }) => {
-              if (error) {
-                console.error('Failed to trigger media download:', error);
-              } else {
-                console.log('Media download job triggered successfully');
-              }
-            }).catch(err => {
-              console.error('Error triggering media download:', err);
-            });
           }
         }
 
