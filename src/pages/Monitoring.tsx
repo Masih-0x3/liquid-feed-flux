@@ -29,21 +29,14 @@ interface MonitoringEntry {
   telegram_message_ids: string[];
   is_translated: boolean;
   is_delivered: boolean;
-}
-
-interface JobStatus {
-  id: string;
-  type: string;
-  status: string;
-  tweet_id: string;
-  created_at: string;
-  attempts: number;
-  last_error: string;
+  translation_job_status: string;
+  delivery_job_status: string;
+  translation_error: string;
+  delivery_error: string;
 }
 
 export default function Monitoring() {
   const [entries, setEntries] = useState<MonitoringEntry[]>([]);
-  const [jobs, setJobs] = useState<JobStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [editingEntry, setEditingEntry] = useState<string | null>(null);
@@ -75,7 +68,7 @@ export default function Monitoring() {
       )
       .subscribe();
 
-    // Subscribe to jobs changes for live queue status
+    // Subscribe to jobs changes for live status updates
     const jobsChannel = supabase
       .channel('jobs-changes')
       .on(
@@ -87,7 +80,7 @@ export default function Monitoring() {
         },
         () => {
           console.log('Jobs updated, refreshing data...');
-          fetchJobsData();
+          fetchMonitoringData();
         }
       )
       .subscribe();
@@ -140,11 +133,28 @@ export default function Monitoring() {
 
       if (deliveriesError) throw deliveriesError;
 
-      // Combine the data - simplified
+      // Get jobs data for status tracking
+      const { data: jobsData, error: jobsError } = await supabase
+        .from('jobs')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (jobsError) throw jobsError;
+
+      // Combine the data with job status information
       const combinedData: MonitoringEntry[] = postsData.map(post => {
         const delivery = deliveriesData.find(d => d.subject_id === post.tweet_id);
         const isTranslated = !!(post.text_translated && post.text_translated.trim() && post.text_translated !== post.text_original);
         const isDelivered = delivery?.status === 'posted';
+        
+        // Find latest jobs for this tweet
+        const translateJob = jobsData
+          .filter(j => j.type === 'translate' && j.payload && (j.payload as any).tweet_id === post.tweet_id)
+          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+        
+        const deliverJob = jobsData
+          .filter(j => j.type === 'deliver' && j.payload && (j.payload as any).tweet_id === post.tweet_id)
+          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
         
         return {
           tweet_id: post.tweet_id,
@@ -156,12 +166,15 @@ export default function Monitoring() {
           delivery_status: delivery?.status || 'pending',
           telegram_message_ids: delivery?.telegram_message_ids || [],
           is_translated: isTranslated,
-          is_delivered: isDelivered
+          is_delivered: isDelivered,
+          translation_job_status: translateJob?.status || (isTranslated ? 'completed' : 'pending'),
+          delivery_job_status: deliverJob?.status || (isDelivered ? 'completed' : 'pending'),
+          translation_error: translateJob?.last_error || '',
+          delivery_error: deliverJob?.last_error || delivery?.last_error || ''
         };
       });
 
       setEntries(combinedData);
-      await fetchJobsData();
     } catch (error) {
       console.error('Error fetching monitoring data:', error);
       toast({
@@ -171,33 +184,6 @@ export default function Monitoring() {
       });
     } finally {
       setLoading(false);
-    }
-  };
-
-  const fetchJobsData = async () => {
-    try {
-      // Get recent jobs for queue monitoring
-      const { data: jobsData, error: jobsError } = await supabase
-        .from('jobs')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(50);
-
-      if (jobsError) throw jobsError;
-
-      const formattedJobs: JobStatus[] = jobsData.map(job => ({
-        id: job.id,
-        type: job.type,
-        status: job.status,
-        tweet_id: (job.payload as any)?.tweet_id || 'Unknown',
-        created_at: job.created_at,
-        attempts: job.attempts || 0,
-        last_error: job.last_error || ''
-      }));
-
-      setJobs(formattedJobs);
-    } catch (error) {
-      console.error('Error fetching jobs data:', error);
     }
   };
 
@@ -338,25 +324,80 @@ export default function Monitoring() {
     entry.account_handle.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  // Live stats
+  // Simple stats
   const totalPosts = entries.length;
   const translatedPosts = entries.filter(e => e.is_translated).length;
   const deliveredPosts = entries.filter(e => e.is_delivered).length;
   const needsTranslation = entries.filter(e => !e.is_translated).length;
 
-  // Live job stats
-  const pendingJobs = jobs.filter(j => j.status === 'pending').length;
-  const runningJobs = jobs.filter(j => j.status === 'running').length;
-  const failedJobs = jobs.filter(j => j.status === 'failed').length;
+  // Status indicator component
+  const StatusIndicator = ({ entry }: { entry: MonitoringEntry }) => {
+    const steps = [
+      { 
+        label: 'Translate', 
+        status: entry.translation_job_status,
+        error: entry.translation_error,
+        completed: entry.is_translated 
+      },
+      { 
+        label: 'Deliver', 
+        status: entry.delivery_job_status,
+        error: entry.delivery_error,
+        completed: entry.is_delivered 
+      }
+    ];
 
-  const getJobStatusColor = (status: string) => {
-    switch (status) {
-      case 'pending': return 'text-yellow-600';
-      case 'running': return 'text-blue-600';
-      case 'completed': return 'text-green-600';
-      case 'failed': return 'text-red-600';
-      default: return 'text-gray-600';
-    }
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          {steps.map((step, index) => {
+            let statusColor = 'bg-gray-200';
+            let textColor = 'text-gray-600';
+            let icon = '●';
+
+            if (step.completed) {
+              statusColor = 'bg-green-500';
+              textColor = 'text-green-700';
+              icon = '✓';
+            } else if (step.status === 'running') {
+              statusColor = 'bg-blue-500 animate-pulse';
+              textColor = 'text-blue-700';
+              icon = '●';
+            } else if (step.status === 'failed' || step.error) {
+              statusColor = 'bg-red-500';
+              textColor = 'text-red-700';
+              icon = '✗';
+            } else if (step.status === 'pending') {
+              statusColor = 'bg-yellow-500';
+              textColor = 'text-yellow-700';
+              icon = '●';
+            }
+
+            return (
+              <div key={step.label} className="flex items-center gap-2">
+                <div className={`w-3 h-3 rounded-full ${statusColor} flex items-center justify-center`}>
+                  <span className="text-white text-xs font-bold">{icon}</span>
+                </div>
+                <span className={`text-sm font-medium ${textColor}`}>
+                  {step.label}
+                </span>
+                {index < steps.length - 1 && (
+                  <div className="w-8 h-0.5 bg-gray-300"></div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        
+        {/* Show errors if any */}
+        {(entry.translation_error || entry.delivery_error) && (
+          <div className="text-xs text-red-600 bg-red-50 p-2 rounded">
+            {entry.translation_error && <div>Translation: {entry.translation_error}</div>}
+            {entry.delivery_error && <div>Delivery: {entry.delivery_error}</div>}
+          </div>
+        )}
+      </div>
+    );
   };
 
   if (loading) {
@@ -384,7 +425,7 @@ export default function Monitoring() {
         </Button>
       </div>
 
-      {/* Live Stats */}
+      {/* Simple Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <Card>
           <CardContent className="p-4">
@@ -436,74 +477,6 @@ export default function Monitoring() {
           </CardContent>
         </Card>
       </div>
-
-      {/* Live Job Queue Status */}
-      <Card className="mb-6">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            Live Job Queue
-            {(pendingJobs > 0 || runningJobs > 0) && (
-              <div className="flex items-center gap-1">
-                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                <span className="text-sm font-normal text-muted-foreground">Processing</span>
-              </div>
-            )}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-            <div className="text-center">
-              <p className="text-xl font-bold text-yellow-600">{pendingJobs}</p>
-              <p className="text-sm text-muted-foreground">Pending</p>
-            </div>
-            <div className="text-center">
-              <p className="text-xl font-bold text-blue-600">{runningJobs}</p>
-              <p className="text-sm text-muted-foreground">Running</p>
-            </div>
-            <div className="text-center">
-              <p className="text-xl font-bold text-green-600">
-                {jobs.filter(j => j.status === 'completed').length}
-              </p>
-              <p className="text-sm text-muted-foreground">Completed</p>
-            </div>
-            <div className="text-center">
-              <p className="text-xl font-bold text-red-600">{failedJobs}</p>
-              <p className="text-sm text-muted-foreground">Failed</p>
-            </div>
-          </div>
-          
-          {/* Recent Jobs List */}
-          {jobs.length > 0 && (
-            <div className="space-y-2 max-h-32 overflow-y-auto">
-              <h4 className="font-medium text-sm text-muted-foreground mb-2">Recent Jobs</h4>
-              {jobs.slice(0, 10).map((job) => (
-                <div key={job.id} className="flex items-center justify-between text-sm p-2 bg-muted/50 rounded">
-                  <div className="flex items-center gap-2">
-                    <Badge variant={job.status === 'completed' ? 'default' : 
-                                  job.status === 'failed' ? 'destructive' : 
-                                  job.status === 'running' ? 'secondary' : 'outline'}>
-                      {job.type}
-                    </Badge>
-                    <span className="truncate max-w-[200px]">
-                      {job.tweet_id.split('/').pop()}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className={`font-medium ${getJobStatusColor(job.status)}`}>
-                      {job.status}
-                    </span>
-                    {job.attempts > 1 && (
-                      <Badge variant="outline" className="text-xs">
-                        Attempt {job.attempts}
-                      </Badge>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
 
       {/* Search and Bulk Actions */}
       <Card className="mb-6">
@@ -598,6 +571,10 @@ export default function Monitoring() {
                             </>
                           )}
                         </p>
+                        {/* Live Status Indicator */}
+                        <div className="mt-2">
+                          <StatusIndicator entry={entry} />
+                        </div>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
