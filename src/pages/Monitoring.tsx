@@ -31,8 +31,19 @@ interface MonitoringEntry {
   is_delivered: boolean;
 }
 
+interface JobStatus {
+  id: string;
+  type: string;
+  status: string;
+  tweet_id: string;
+  created_at: string;
+  attempts: number;
+  last_error: string;
+}
+
 export default function Monitoring() {
   const [entries, setEntries] = useState<MonitoringEntry[]>([]);
+  const [jobs, setJobs] = useState<JobStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [editingEntry, setEditingEntry] = useState<string | null>(null);
@@ -43,7 +54,68 @@ export default function Monitoring() {
 
   useEffect(() => {
     fetchMonitoringData();
+    setupRealtimeSubscriptions();
   }, []);
+
+  const setupRealtimeSubscriptions = () => {
+    // Subscribe to posts changes
+    const postsChannel = supabase
+      .channel('posts-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'posts'
+        },
+        () => {
+          console.log('Posts updated, refreshing data...');
+          fetchMonitoringData();
+        }
+      )
+      .subscribe();
+
+    // Subscribe to jobs changes for live queue status
+    const jobsChannel = supabase
+      .channel('jobs-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'jobs'
+        },
+        () => {
+          console.log('Jobs updated, refreshing data...');
+          fetchJobsData();
+        }
+      )
+      .subscribe();
+
+    // Subscribe to deliveries changes
+    const deliveriesChannel = supabase
+      .channel('deliveries-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'deliveries'
+        },
+        () => {
+          console.log('Deliveries updated, refreshing data...');
+          fetchMonitoringData();
+        }
+      )
+      .subscribe();
+
+    // Cleanup function
+    return () => {
+      supabase.removeChannel(postsChannel);
+      supabase.removeChannel(jobsChannel);
+      supabase.removeChannel(deliveriesChannel);
+    };
+  };
 
   const fetchMonitoringData = async () => {
     setLoading(true);
@@ -89,6 +161,7 @@ export default function Monitoring() {
       });
 
       setEntries(combinedData);
+      await fetchJobsData();
     } catch (error) {
       console.error('Error fetching monitoring data:', error);
       toast({
@@ -98,6 +171,33 @@ export default function Monitoring() {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchJobsData = async () => {
+    try {
+      // Get recent jobs for queue monitoring
+      const { data: jobsData, error: jobsError } = await supabase
+        .from('jobs')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      if (jobsError) throw jobsError;
+
+      const formattedJobs: JobStatus[] = jobsData.map(job => ({
+        id: job.id,
+        type: job.type,
+        status: job.status,
+        tweet_id: (job.payload as any)?.tweet_id || 'Unknown',
+        created_at: job.created_at,
+        attempts: job.attempts || 0,
+        last_error: job.last_error || ''
+      }));
+
+      setJobs(formattedJobs);
+    } catch (error) {
+      console.error('Error fetching jobs data:', error);
     }
   };
 
@@ -238,11 +338,26 @@ export default function Monitoring() {
     entry.account_handle.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  // Simple stats
+  // Live stats
   const totalPosts = entries.length;
   const translatedPosts = entries.filter(e => e.is_translated).length;
   const deliveredPosts = entries.filter(e => e.is_delivered).length;
   const needsTranslation = entries.filter(e => !e.is_translated).length;
+
+  // Live job stats
+  const pendingJobs = jobs.filter(j => j.status === 'pending').length;
+  const runningJobs = jobs.filter(j => j.status === 'running').length;
+  const failedJobs = jobs.filter(j => j.status === 'failed').length;
+
+  const getJobStatusColor = (status: string) => {
+    switch (status) {
+      case 'pending': return 'text-yellow-600';
+      case 'running': return 'text-blue-600';
+      case 'completed': return 'text-green-600';
+      case 'failed': return 'text-red-600';
+      default: return 'text-gray-600';
+    }
+  };
 
   if (loading) {
     return (
@@ -260,7 +375,7 @@ export default function Monitoring() {
         <div>
           <h1 className="text-3xl font-bold">Content Monitoring</h1>
           <p className="text-muted-foreground">
-            English → Persian translation pipeline
+            English → Persian translation pipeline • Live updates enabled
           </p>
         </div>
         <Button onClick={fetchMonitoringData} variant="outline">
@@ -269,7 +384,7 @@ export default function Monitoring() {
         </Button>
       </div>
 
-      {/* Simple Stats */}
+      {/* Live Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <Card>
           <CardContent className="p-4">
@@ -321,6 +436,74 @@ export default function Monitoring() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Live Job Queue Status */}
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            Live Job Queue
+            {(pendingJobs > 0 || runningJobs > 0) && (
+              <div className="flex items-center gap-1">
+                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                <span className="text-sm font-normal text-muted-foreground">Processing</span>
+              </div>
+            )}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+            <div className="text-center">
+              <p className="text-xl font-bold text-yellow-600">{pendingJobs}</p>
+              <p className="text-sm text-muted-foreground">Pending</p>
+            </div>
+            <div className="text-center">
+              <p className="text-xl font-bold text-blue-600">{runningJobs}</p>
+              <p className="text-sm text-muted-foreground">Running</p>
+            </div>
+            <div className="text-center">
+              <p className="text-xl font-bold text-green-600">
+                {jobs.filter(j => j.status === 'completed').length}
+              </p>
+              <p className="text-sm text-muted-foreground">Completed</p>
+            </div>
+            <div className="text-center">
+              <p className="text-xl font-bold text-red-600">{failedJobs}</p>
+              <p className="text-sm text-muted-foreground">Failed</p>
+            </div>
+          </div>
+          
+          {/* Recent Jobs List */}
+          {jobs.length > 0 && (
+            <div className="space-y-2 max-h-32 overflow-y-auto">
+              <h4 className="font-medium text-sm text-muted-foreground mb-2">Recent Jobs</h4>
+              {jobs.slice(0, 10).map((job) => (
+                <div key={job.id} className="flex items-center justify-between text-sm p-2 bg-muted/50 rounded">
+                  <div className="flex items-center gap-2">
+                    <Badge variant={job.status === 'completed' ? 'default' : 
+                                  job.status === 'failed' ? 'destructive' : 
+                                  job.status === 'running' ? 'secondary' : 'outline'}>
+                      {job.type}
+                    </Badge>
+                    <span className="truncate max-w-[200px]">
+                      {job.tweet_id.split('/').pop()}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`font-medium ${getJobStatusColor(job.status)}`}>
+                      {job.status}
+                    </span>
+                    {job.attempts > 1 && (
+                      <Badge variant="outline" className="text-xs">
+                        Attempt {job.attempts}
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Search and Bulk Actions */}
       <Card className="mb-6">
