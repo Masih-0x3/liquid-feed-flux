@@ -102,7 +102,7 @@ serve(async (req) => {
         console.log(`Extracted: tweetId=${tweetId}, text="${text.substring(0, 50)}...", url=${url}`);
 
         // Parse media from RSS item
-        const mediaItems = parseMediaFromRSSItem(item);
+        const mediaItems = parseMediaFromRSSItem(item, text);
         console.log(`Found ${mediaItems.length} media items for item:`, JSON.stringify(item, null, 2).substring(0, 500));
 
         // Find or create a default account first
@@ -258,10 +258,25 @@ serve(async (req) => {
   }
 });
 
-function parseMediaFromRSSItem(item: any): Array<{type: string, url: string, width?: number, height?: number, duration?: number}> {
+function parseMediaFromRSSItem(item: any, text?: string): Array<{type: string, url: string, width?: number, height?: number, duration?: number}> {
   const mediaItems: Array<{type: string, url: string, width?: number, height?: number, duration?: number}> = [];
   
   try {
+    // First, check for Twitter media URLs in the text content
+    if (text) {
+      const twitterMediaRegex = /pic\.twitter\.com\/[a-zA-Z0-9]+/g;
+      const twitterMatches = text.match(twitterMediaRegex);
+      if (twitterMatches) {
+        for (const match of twitterMatches) {
+          const fullUrl = `https://${match}`;
+          console.log('Found Twitter media URL in text:', fullUrl);
+          mediaItems.push({
+            type: 'image',
+            url: fullUrl
+          });
+        }
+      }
+    }
     // Parse thumbnail from RSS.app webhook (Twitter thumbnails)
     if (item.thumbnail && typeof item.thumbnail === 'string') {
       console.log('Found thumbnail:', item.thumbnail);
