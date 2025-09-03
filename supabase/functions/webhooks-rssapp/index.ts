@@ -208,15 +208,13 @@ serve(async (req) => {
           }
         }
 
-        // Create translation job
+        // Create translation job (English to Persian only)
         const { error: translationJobError } = await supabase
           .from('jobs')
           .insert({
             type: 'translate',
             payload: {
-              tweet_id: tweetId,
-              text: text,
-              target_lang: 'en'
+              tweet_id: tweetId
             },
             status: 'pending'
           });

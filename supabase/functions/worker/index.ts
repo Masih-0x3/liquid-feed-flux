@@ -160,26 +160,7 @@ async function handleTranslateJob(job: any, supabase: any): Promise<boolean> {
       throw new Error('OpenAI API key not configured');
     }
 
-    // Get translation settings from database
-    const { data: translationSettings, error: settingsError } = await supabase
-      .from('settings')
-      .select('value')
-      .eq('key', 'translation_prompt')
-      .single();
-
-    if (settingsError) {
-      console.warn('Could not load translation settings, using fallback');
-    }
-
-    const settings = translationSettings?.value || {
-      system_prompt: "You are a professional translator. Translate the given text to Persian. Preserve @mentions, #hashtags, URLs, and line breaks exactly.",
-      user_prompt_template: "{content}",
-      model: "gpt-4o-mini",
-      temperature: 0.2,
-      max_completion_tokens: 1000
-    };
-
-    // Get the post to translate
+    // Get the post to translate - simplified logic
     const { data: post, error } = await supabase
       .from('posts')
       .select('*')
@@ -187,173 +168,58 @@ async function handleTranslateJob(job: any, supabase: any): Promise<boolean> {
       .single();
 
     if (error || !post) {
-      throw new Error('Post not found');
+      throw new Error(`Post not found: ${job.payload.tweet_id}`);
     }
 
     if (!post.text_original) {
       throw new Error('No original text to translate');
     }
 
-    // Prepare the user prompt with content substitution
-    const userPrompt = settings.user_prompt_template.replace('{content}', post.text_original);
+    console.log('Translating text:', post.text_original);
 
-    console.log('Translating with OpenAI:', {
-      model: settings.model,
-      temperature: settings.temperature,
-      max_completion_tokens: settings.max_completion_tokens
+    // Simple translation prompt for English to Persian
+    const systemPrompt = "You are a professional translator. Translate the given English text to Persian. Preserve @mentions, #hashtags, URLs, and line breaks exactly. Only return the translated text, nothing else.";
+    
+    // Use GPT-4o-mini for consistent translation
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${openaiApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: post.text_original }
+        ],
+        temperature: 0.2,
+        max_tokens: 1000
+      }),
     });
 
-    // Check if using new GPT-5 model that requires responses endpoint
-    const isGpt5Model = settings.model.includes('gpt-5');
-    
-    let translatedText;
-    
-    if (isGpt5Model) {
-      // Use new responses endpoint for GPT-5 models
-      const requestBody = {
-        model: settings.model,
-        input: [
-          {
-            role: "developer",
-            content: [
-              {
-                type: "input_text",
-                text: settings.system_prompt
-              }
-            ]
-          },
-          {
-            role: "user", 
-            content: [
-              {
-                type: "input_text",
-                text: userPrompt
-              }
-            ]
-          }
-        ],
-        text: {
-          format: {
-            type: "text"
-          },
-          verbosity: "medium"
-        },
-        reasoning: {
-          effort: "medium"
-        },
-        tools: [],
-        store: true
-      };
-
-      const response = await fetch('https://api.openai.com/v1/responses', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${openaiApiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.text();
-        throw new Error(`OpenAI API error: ${response.status} ${errorData}`);
-      }
-
-      const data = await response.json();
-      console.log('GPT-5 Response data:', JSON.stringify(data, null, 2));
-      
-      // Extract the actual text content from the responses endpoint
-      // GPT-5 responses API has different structure than chat completions
-      // The actual text is in the assistant message within output array
-      translatedText = null;
-      
-      // Try multiple extraction paths for GPT-5 responses API
-      if (data.output && Array.isArray(data.output)) {
-        // Look for assistant message in output array
-        for (const output of data.output) {
-          if (output.type === 'message' && output.role === 'assistant' && output.content) {
-            // Extract text from content array
-            for (const content of output.content) {
-              if (content.type === 'output_text' && content.text) {
-                translatedText = content.text;
-                break;
-              }
-            }
-            if (translatedText) break;
-          }
-        }
-      }
-      
-      // Fallback extraction methods if above fails
-      if (!translatedText) {
-        translatedText = data.output?.[1]?.content?.[0]?.text || 
-                        data.content?.[0]?.text || 
-                        data.choices?.[0]?.message?.content || 
-                        data.text?.content || 
-                        data.output?.content || 
-                        data.response?.text ||
-                        'Translation failed - unexpected response format';
-      }
-      
-      console.log('Extracted translation:', translatedText);
-    } else {
-      // Use legacy chat completions endpoint for older models
-      const isNewerModel = settings.model.includes('gpt-4.1') || 
-                          settings.model.includes('o3') || 
-                          settings.model.includes('o4');
-      
-      const requestBody: any = {
-        model: settings.model,
-        messages: [
-          {
-            role: 'system',
-            content: settings.system_prompt
-          },
-          {
-            role: 'user',
-            content: userPrompt
-          }
-        ]
-      };
-
-      // Add parameters based on model capabilities
-      if (isNewerModel) {
-        // Newer models use max_completion_tokens and don't support temperature
-        requestBody.max_completion_tokens = settings.max_completion_tokens;
-      } else {
-        // Legacy models use max_tokens and support temperature
-        requestBody.max_tokens = settings.max_completion_tokens;
-        requestBody.temperature = settings.temperature;
-      }
-
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${openaiApiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.text();
-        throw new Error(`OpenAI API error: ${response.status} ${errorData}`);
-      }
-
-      const data = await response.json();
-      translatedText = data.choices[0].message.content;
+    if (!response.ok) {
+      const errorData = await response.text();
+      console.error('OpenAI API error:', errorData);
+      throw new Error(`OpenAI API error: ${response.status} ${errorData}`);
     }
+
+    const data = await response.json();
+    const translatedText = data.choices[0].message.content;
+
+    console.log('Translation completed:', translatedText);
 
     // Update post with translation
     const { error: updateError } = await supabase
       .from('posts')
       .update({ 
         text_translated: translatedText,
-        lang_original: detectLanguage(post.text_original)
+        lang_original: 'en'
       })
       .eq('tweet_id', job.payload.tweet_id);
 
     if (updateError) {
+      console.error('Error updating post:', updateError);
       throw updateError;
     }
 

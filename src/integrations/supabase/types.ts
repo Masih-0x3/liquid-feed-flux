@@ -21,8 +21,6 @@ export type Database = {
           enabled: boolean
           handle: string
           id: string
-          lang_dst: string | null
-          lang_src: string | null
           last_seen_item_id: string | null
         }
         Insert: {
@@ -31,8 +29,6 @@ export type Database = {
           enabled?: boolean
           handle: string
           id?: string
-          lang_dst?: string | null
-          lang_src?: string | null
           last_seen_item_id?: string | null
         }
         Update: {
@@ -41,8 +37,6 @@ export type Database = {
           enabled?: boolean
           handle?: string
           id?: string
-          lang_dst?: string | null
-          lang_src?: string | null
           last_seen_item_id?: string | null
         }
         Relationships: []
