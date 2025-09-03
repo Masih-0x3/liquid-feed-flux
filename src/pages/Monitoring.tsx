@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { 
   Search, 
@@ -12,7 +13,8 @@ import {
   Edit, 
   Check, 
   X, 
-  ExternalLink
+  ExternalLink,
+  RotateCcw
 } from "lucide-react";
 import { format } from "date-fns";
 
@@ -35,6 +37,8 @@ export default function Monitoring() {
   const [searchTerm, setSearchTerm] = useState("");
   const [editingEntry, setEditingEntry] = useState<string | null>(null);
   const [editedContent, setEditedContent] = useState("");
+  const [selectedTweets, setSelectedTweets] = useState<Set<string>>(new Set());
+  const [isReprocessing, setIsReprocessing] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -165,6 +169,69 @@ export default function Monitoring() {
     }
   };
 
+  const handleSelectTweet = (tweetId: string, checked: boolean) => {
+    const newSelected = new Set(selectedTweets);
+    if (checked) {
+      newSelected.add(tweetId);
+    } else {
+      newSelected.delete(tweetId);
+    }
+    setSelectedTweets(newSelected);
+  };
+
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedTweets(new Set(filteredEntries.map(entry => entry.tweet_id)));
+    } else {
+      setSelectedTweets(new Set());
+    }
+  };
+
+  const handleReprocessSelected = async () => {
+    if (selectedTweets.size === 0) {
+      toast({
+        title: "No Selection",
+        description: "Please select tweets to reprocess",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsReprocessing(true);
+    try {
+      // Create translation jobs for all selected tweets
+      const jobs = Array.from(selectedTweets).map(tweetId => ({
+        type: 'translate',
+        payload: { tweet_id: tweetId },
+        status: 'pending'
+      }));
+
+      const { error } = await supabase
+        .from('jobs')
+        .insert(jobs);
+
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: `${selectedTweets.size} tweets queued for reprocessing`,
+      });
+
+      // Clear selection
+      setSelectedTweets(new Set());
+      fetchMonitoringData();
+    } catch (error) {
+      console.error('Error reprocessing tweets:', error);
+      toast({
+        title: "Error",
+        description: "Failed to reprocess selected tweets",
+        variant: "destructive",
+      });
+    } finally {
+      setIsReprocessing(false);
+    }
+  };
+
   const filteredEntries = entries.filter(entry => 
     entry.text_original.toLowerCase().includes(searchTerm.toLowerCase()) ||
     entry.text_translated.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -255,17 +322,55 @@ export default function Monitoring() {
         </Card>
       </div>
 
-      {/* Search */}
+      {/* Search and Bulk Actions */}
       <Card className="mb-6">
         <CardContent className="p-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
-            <Input
-              placeholder="Search content..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10"
-            />
+          <div className="flex gap-4 items-center">
+            <div className="flex-1">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
+                <Input
+                  placeholder="Search content..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+            </div>
+            
+            {/* Bulk Selection Controls */}
+            <div className="flex items-center gap-2">
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="select-all"
+                  checked={filteredEntries.length > 0 && selectedTweets.size === filteredEntries.length}
+                  onCheckedChange={handleSelectAll}
+                />
+                <label
+                  htmlFor="select-all"
+                  className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                >
+                  Select All ({filteredEntries.length})
+                </label>
+              </div>
+              
+              {selectedTweets.size > 0 && (
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary">
+                    {selectedTweets.size} selected
+                  </Badge>
+                  <Button
+                    onClick={handleReprocessSelected}
+                    disabled={isReprocessing}
+                    variant="outline"
+                    size="sm"
+                  >
+                    <RotateCcw className="w-4 h-4 mr-2" />
+                    {isReprocessing ? "Processing..." : "Reprocess Selected"}
+                  </Button>
+                </div>
+              )}
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -281,29 +386,36 @@ export default function Monitoring() {
         ) : (
           filteredEntries.map((entry) => {
             const isEditing = editingEntry === entry.tweet_id;
+            const isSelected = selectedTweets.has(entry.tweet_id);
             
             return (
-              <Card key={entry.tweet_id}>
+              <Card key={entry.tweet_id} className={isSelected ? "ring-2 ring-primary" : ""}>
                 <CardHeader className="pb-3">
                   <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <CardTitle className="text-lg">@{entry.account_handle}</CardTitle>
-                      <p className="text-sm text-muted-foreground">
-                        {format(new Date(entry.created_at), 'MMM dd, yyyy HH:mm')}
-                        {entry.url && (
-                          <>
-                            {" • "}
-                            <a 
-                              href={entry.url} 
-                              target="_blank" 
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 hover:underline"
-                            >
-                              Source <ExternalLink className="w-3 h-3" />
-                            </a>
-                          </>
-                        )}
-                      </p>
+                    <div className="flex items-center gap-3 flex-1">
+                      <Checkbox
+                        checked={isSelected}
+                        onCheckedChange={(checked) => handleSelectTweet(entry.tweet_id, checked as boolean)}
+                      />
+                      <div className="flex-1">
+                        <CardTitle className="text-lg">@{entry.account_handle}</CardTitle>
+                        <p className="text-sm text-muted-foreground">
+                          {format(new Date(entry.created_at), 'MMM dd, yyyy HH:mm')}
+                          {entry.url && (
+                            <>
+                              {" • "}
+                              <a 
+                                href={entry.url} 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 hover:underline"
+                              >
+                                Source <ExternalLink className="w-3 h-3" />
+                              </a>
+                            </>
+                          )}
+                        </p>
+                      </div>
                     </div>
                     <div className="flex items-center gap-2">
                       <Badge variant={entry.is_translated ? "default" : "secondary"}>
