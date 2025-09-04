@@ -36,7 +36,7 @@ export function AppLayout({ children }: AppLayoutProps) {
             <SidebarTrigger className="glass-button hover:bg-glass-border/20" />
             <div className="ml-4">
               <h1 className="text-xl font-display font-semibold text-glass-foreground">
-                RSS Pipeline Console
+                XOT Panel
               </h1>
               <p className="text-sm text-muted-foreground">
                 Monitor and manage your RSS → OpenAI → Telegram pipeline

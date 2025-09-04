@@ -161,16 +161,43 @@ export default function Dashboard() {
       const totalJobs = jobs.length;
       const successfulJobs = jobs.filter(j => j.status === 'completed').length;
       const successRate = totalJobs > 0 ? (successfulJobs / totalJobs) * 100 : 100;
-      
-      // Calculate average processing time (mock for now)
-      const avgLatency = Math.random() * 2 + 0.5; // Random between 0.5-2.5s
+
+      // Calculate average end-to-end latency based on posted deliveries vs. post creation
+      // We approximate latency as: time from post ingestion -> successful delivery
+      const postCreatedAtById = new Map<string, string>();
+      posts.forEach((p: any) => {
+        if (p?.tweet_id && p?.created_at) {
+          postCreatedAtById.set(p.tweet_id, p.created_at);
+        }
+      });
+
+      const postedDeliveries = deliveries.filter(
+        (d: any) => d?.status === 'posted' && d?.subject_type === 'post'
+      );
+
+      const latenciesSeconds: number[] = postedDeliveries
+        .map((d: any) => {
+          const postCreatedAt = postCreatedAtById.get(d.subject_id);
+          if (!postCreatedAt) return null;
+          const start = new Date(postCreatedAt).getTime();
+          const end = new Date(d.created_at).getTime();
+          const diffMs = end - start;
+          if (!isFinite(diffMs) || diffMs < 0) return null;
+          return diffMs / 1000; // seconds
+        })
+        .filter((s: number | null): s is number => s !== null);
+
+      const avgLatencySec =
+        latenciesSeconds.length > 0
+          ? latenciesSeconds.reduce((a, b) => a + b, 0) / latenciesSeconds.length
+          : 0;
 
       setPipelineHealth({
         successRate: Math.round(successRate * 10) / 10,
-        avgLatency: Math.round(avgLatency * 10) / 10,
+        avgLatency: Math.round(avgLatencySec * 10) / 10,
         activeFeeds: accounts.length,
         queueSize: pendingJobs.length,
-        isOnline: true
+        isOnline: true,
       });
 
       // Create activity feed

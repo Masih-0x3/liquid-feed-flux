@@ -50,7 +50,7 @@ serve(async (req) => {
       }
 
       // Create a new delivery job
-      const { error: jobError } = await supabase
+      const { data: newJob, error: jobError } = await supabase
         .from('jobs')
         .insert({
           type: 'deliver',
@@ -60,7 +60,9 @@ serve(async (req) => {
           },
           status: 'pending',
           next_run_at: new Date().toISOString()
-        });
+        })
+        .select()
+        .single();
 
       if (jobError) {
         console.error('Error creating delivery job:', jobError);
@@ -71,6 +73,22 @@ serve(async (req) => {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           status: 500
         });
+      }
+
+      // Emit pipeline event: deliver queued
+      try {
+        await supabase
+          .from('pipeline_events' as any)
+          .insert({
+            subject_type: 'post',
+            subject_id: tweet_id,
+            step: 'deliver',
+            status: 'queued',
+            started_at: new Date().toISOString(),
+            meta: { source: 'admin-retry' }
+          });
+      } catch (_e) {
+        // best-effort
       }
 
       return new Response(JSON.stringify({ 
@@ -111,9 +129,10 @@ serve(async (req) => {
       }));
 
       if (retryJobs.length > 0) {
-        const { error: jobError } = await supabase
+        const { data: insertedJobs, error: jobError } = await supabase
           .from('jobs')
-          .insert(retryJobs);
+          .insert(retryJobs)
+          .select();
 
         if (jobError) {
           return new Response(JSON.stringify({ 
@@ -124,6 +143,22 @@ serve(async (req) => {
             status: 500
           });
         }
+
+        // Emit pipeline events for each subject
+        try {
+          const uniqueSubjects = Array.from(new Set((failedDeliveries || []).map(d => d.subject_id)));
+          if (uniqueSubjects.length > 0) {
+            const rows = uniqueSubjects.map(sid => ({
+              subject_type: 'post',
+              subject_id: sid,
+              step: 'deliver',
+              status: 'queued',
+              started_at: new Date().toISOString(),
+              meta: { source: 'admin-retry' }
+            }));
+            await supabase.from('pipeline_events' as any).insert(rows);
+          }
+        } catch (_e) {}
       }
 
       return new Response(JSON.stringify({ 

@@ -54,7 +54,7 @@ export function AppSidebar() {
       
       toast({
         title: "Signed out successfully",
-        description: "You have been logged out of the admin console.",
+        description: "You have been logged out of the XOT Panel.",
       });
     } catch (error) {
       toast({
@@ -74,8 +74,8 @@ export function AppSidebar() {
               <Activity className="w-4 h-4 text-white" />
             </div>
             <div>
-              <h2 className="text-lg font-display font-semibold text-glass-foreground">RSS Console</h2>
-              <p className="text-xs text-muted-foreground">Admin Pipeline</p>
+              <h2 className="text-lg font-display font-semibold text-glass-foreground">XOT Panel</h2>
+              <p className="text-xs text-muted-foreground">Admin Panel</p>
             </div>
           </div>
         )}

@@ -4,6 +4,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { 
+  Select as ThemedSelect,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
@@ -17,6 +26,15 @@ import {
   RotateCcw
 } from "lucide-react";
 import { format } from "date-fns";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerDescription,
+  DrawerClose,
+  DrawerFooter,
+} from "@/components/ui/drawer";
 
 interface MonitoringEntry {
   tweet_id: string;
@@ -35,6 +53,17 @@ interface MonitoringEntry {
   delivery_error: string;
 }
 
+interface PipelineEvent {
+  subject_type: string;
+  subject_id: string;
+  step: string;
+  status: string;
+  started_at: string | null;
+  ended_at: string | null;
+  error: string | null;
+  meta?: any;
+}
+
 export default function Monitoring() {
   const [entries, setEntries] = useState<MonitoringEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -43,12 +72,60 @@ export default function Monitoring() {
   const [editedContent, setEditedContent] = useState("");
   const [selectedTweets, setSelectedTweets] = useState<Set<string>>(new Set());
   const [isReprocessing, setIsReprocessing] = useState(false);
+  const [filter, setFilter] = useState<string>("all");
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerTweetId, setDrawerTweetId] = useState<string | null>(null);
+  const [timeline, setTimeline] = useState<PipelineEvent[]>([]);
+  const [realtimeTimer, setRealtimeTimer] = useState<any>(null);
   const { toast } = useToast();
+  const fetchDeliveriesByIds = async (ids: string[]) => {
+    if (!ids || ids.length === 0) return [] as any[];
+    const chunkSize = 50;
+    const chunks: string[][] = [];
+    for (let i = 0; i < ids.length; i += chunkSize) {
+      chunks.push(ids.slice(i, i + chunkSize));
+    }
+    const results: any[] = [];
+    for (const group of chunks) {
+      const { data, error } = await supabase
+        .from('deliveries')
+        .select('*')
+        .eq('subject_type', 'post')
+        .in('subject_id', group)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      results.push(...(data || []));
+    }
+    return results;
+  };
+
+  const fetchPostsByIds = async (ids: string[]) => {
+    if (!ids || ids.length === 0) return [] as any[];
+    const chunkSize = 50;
+    const chunks: string[][] = [];
+    for (let i = 0; i < ids.length; i += chunkSize) {
+      chunks.push(ids.slice(i, i + chunkSize));
+    }
+    const results: any[] = [];
+    for (const group of chunks) {
+      const { data, error } = await supabase
+        .from('posts')
+        .select(`
+          *,
+          accounts!inner(handle, display_name)
+        `)
+        .in('tweet_id', group);
+      if (error) throw error;
+      results.push(...(data || []));
+    }
+    return results;
+  };
 
   useEffect(() => {
     fetchMonitoringData();
-    setupRealtimeSubscriptions();
-  }, []);
+    const cleanup = setupRealtimeSubscriptions();
+    return () => cleanup?.();
+  }, [filter]);
 
   const setupRealtimeSubscriptions = () => {
     // Subscribe to posts changes
@@ -61,10 +138,7 @@ export default function Monitoring() {
           schema: 'public',
           table: 'posts'
         },
-        () => {
-          console.log('Posts updated, refreshing data...');
-          fetchMonitoringData();
-        }
+        () => scheduleRefresh()
       )
       .subscribe();
 
@@ -78,10 +152,7 @@ export default function Monitoring() {
           schema: 'public',
           table: 'jobs'
         },
-        () => {
-          console.log('Jobs updated, refreshing data...');
-          fetchMonitoringData();
-        }
+        () => scheduleRefresh()
       )
       .subscribe();
 
@@ -95,10 +166,7 @@ export default function Monitoring() {
           schema: 'public',
           table: 'deliveries'
         },
-        () => {
-          console.log('Deliveries updated, refreshing data...');
-          fetchMonitoringData();
-        }
+        () => scheduleRefresh()
       )
       .subscribe();
 
@@ -110,28 +178,78 @@ export default function Monitoring() {
     };
   };
 
+  const scheduleRefresh = () => {
+    if (realtimeTimer) {
+      clearTimeout(realtimeTimer);
+    }
+    const t = setTimeout(() => {
+      fetchMonitoringData();
+    }, 300);
+    setRealtimeTimer(t);
+  };
+
   const fetchMonitoringData = async () => {
     setLoading(true);
     try {
-      // Get posts with account info
-      const { data: postsData, error: postsError } = await supabase
-        .from('posts')
-        .select(`
-          *,
-          accounts!inner(handle, display_name)
-        `)
-        .order('created_at', { ascending: false })
-        .limit(100);
+      // Primary dataset depends on filter
+      let postsData: any[] = [];
+      if (filter === 'recently-delivered') {
+        // Fetch last N deliveries, then join to posts
+        const { data: deliveriesRecent, error: delErr } = await supabase
+          .from('deliveries')
+          .select('*')
+          .eq('subject_type', 'post')
+          .eq('status', 'posted')
+          .order('created_at', { ascending: false })
+          .limit(200);
+        if (delErr) throw delErr;
 
-      if (postsError) throw postsError;
+        const ids = Array.from(new Set((deliveriesRecent || []).map((d: any) => d.subject_id)));
+        if (ids.length > 0) {
+          const postsJoined = await fetchPostsByIds(ids);
+          // Order by delivery recency while keeping post rows unique
+          const orderMap = new Map<string, number>();
+          deliveriesRecent.forEach((d: any, idx: number) => {
+            if (!orderMap.has(d.subject_id)) orderMap.set(d.subject_id, idx);
+          });
+          postsData = (postsJoined || []).sort((a: any, b: any) => {
+            return (orderMap.get(a.tweet_id) ?? 999999) - (orderMap.get(b.tweet_id) ?? 999999);
+          });
+        }
+      } else {
+        const { data: pd, error: postsError } = await supabase
+          .from('posts')
+          .select(`
+            *,
+            accounts!inner(handle, display_name)
+          `)
+          .order('created_at', { ascending: false })
+          .limit(100);
+        if (postsError) throw postsError;
+        postsData = pd || [];
+      }
 
-      // Get delivery status for each post
-      const { data: deliveriesData, error: deliveriesError } = await supabase
-        .from('deliveries')
-        .select('*')
-        .eq('subject_type', 'post');
+      // Attempt to fetch consolidated status via RPC for visible posts
+      let statusByTweet: Record<string, any> = {};
+      try {
+        const rpcIds = (postsData || []).map((p: any) => p.tweet_id);
+        if (rpcIds.length > 0) {
+          const { data: rpcData, error: rpcError } = await supabase
+            .rpc('get_post_pipeline_status', { tweet_ids: rpcIds })
+            .select('tweet_id, ingest_at, media_total, media_downloaded, lang_original, translated_at, translate_status, translate_error, delivery_status, posted_at, delivery_error, attempts');
+          if (rpcError) throw rpcError;
+          (rpcData || []).forEach((row: any) => {
+            statusByTweet[row.tweet_id] = row;
+          });
+        }
+      } catch (_e) {
+        // RPC may not be available yet; fallback to manual below
+        statusByTweet = {};
+      }
 
-      if (deliveriesError) throw deliveriesError;
+      // Get delivery status for each post (fallback)
+      const rpcIds = (postsData || []).map((p: any) => p.tweet_id);
+      const deliveriesData = await fetchDeliveriesByIds(rpcIds);
 
       // Get jobs data for status tracking
       const { data: jobsData, error: jobsError } = await supabase
@@ -143,19 +261,20 @@ export default function Monitoring() {
 
       // Combine the data with job status information
       const combinedData: MonitoringEntry[] = postsData.map(post => {
+        // Pick the most recent delivery for this tweet (deliveriesData is ordered desc)
         const delivery = deliveriesData.find(d => d.subject_id === post.tweet_id);
         const isTranslated = !!(post.text_translated && post.text_translated.trim() && post.text_translated !== post.text_original);
         const isDelivered = delivery?.status === 'posted';
-        
-        // Find latest jobs for this tweet
+
+        // Find latest jobs for this tweet (fallback without RPC)
         const translateJob = jobsData
           .filter(j => j.type === 'translate' && j.payload && (j.payload as any).tweet_id === post.tweet_id)
           .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
-        
         const deliverJob = jobsData
           .filter(j => j.type === 'deliver' && j.payload && (j.payload as any).tweet_id === post.tweet_id)
           .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
-        
+
+        const rpc = statusByTweet[post.tweet_id];
         return {
           tweet_id: post.tweet_id,
           text_original: post.text_original || '',
@@ -163,14 +282,14 @@ export default function Monitoring() {
           url: post.url || '',
           created_at: post.created_at,
           account_handle: post.accounts.handle,
-          delivery_status: delivery?.status || 'pending',
+          delivery_status: rpc?.delivery_status || delivery?.status || 'pending',
           telegram_message_ids: delivery?.telegram_message_ids || [],
-          is_translated: isTranslated,
-          is_delivered: isDelivered,
-          translation_job_status: translateJob?.status || (isTranslated ? 'completed' : 'pending'),
-          delivery_job_status: deliverJob?.status || (isDelivered ? 'completed' : 'pending'),
-          translation_error: translateJob?.last_error || '',
-          delivery_error: deliverJob?.last_error || delivery?.last_error || ''
+          is_translated: !!(rpc?.translated_at || post.translated_at || isTranslated),
+          is_delivered: (rpc?.delivery_status || delivery?.status) === 'posted',
+          translation_job_status: rpc?.translate_status || translateJob?.status || (isTranslated ? 'completed' : 'pending'),
+          delivery_job_status: rpc?.delivery_status || deliverJob?.status || (isDelivered ? 'completed' : 'pending'),
+          translation_error: rpc?.translate_error || translateJob?.last_error || '',
+          delivery_error: rpc?.delivery_error || deliverJob?.last_error || delivery?.last_error || ''
         };
       });
 
@@ -228,14 +347,15 @@ export default function Monitoring() {
 
   const handleRetryTranslation = async (tweetId: string) => {
     try {
-      // Create a simple translation job
-      const { error } = await supabase
-        .from('jobs')
-        .insert({
-          type: 'translate',
-          payload: { tweet_id: tweetId },
-          status: 'pending'
-        });
+      // Try RPC first
+      const { error: rpcError } = await supabase.rpc('retry_step', { tweet_id: tweetId, step: 'translate' });
+      if (rpcError) {
+        // Fallback: enqueue job directly
+        const { error } = await supabase
+          .from('jobs')
+          .insert({ type: 'translate', payload: { tweet_id: tweetId }, status: 'pending' });
+        if (error) throw error;
+      }
 
       if (error) throw error;
 
@@ -341,11 +461,26 @@ export default function Monitoring() {
     }
   };
 
-  const filteredEntries = entries.filter(entry => 
-    entry.text_original.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    entry.text_translated.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    entry.account_handle.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredEntries = entries
+    .filter(entry => 
+      entry.text_original.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      entry.text_translated.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      entry.account_handle.toLowerCase().includes(searchTerm.toLowerCase())
+    )
+    .filter(entry => {
+      switch (filter) {
+        case 'needs-translation':
+          return !entry.is_translated;
+        case 'delivery-pending':
+          return entry.delivery_status !== 'posted';
+        case 'failed':
+          return entry.translation_error || entry.delivery_error ? true : false;
+        case 'recently-delivered':
+          return entry.delivery_status === 'posted';
+        default:
+          return true;
+      }
+    });
 
   // Simple stats
   const totalPosts = entries.length;
@@ -353,9 +488,21 @@ export default function Monitoring() {
   const deliveredPosts = entries.filter(e => e.is_delivered).length;
   const needsTranslation = entries.filter(e => !e.is_translated).length;
 
-  // Status indicator component
+  // Status indicator component (Ingest, Media, Translate, Deliver)
   const StatusIndicator = ({ entry }: { entry: MonitoringEntry }) => {
     const steps = [
+      {
+        label: 'Ingest',
+        status: 'completed',
+        error: '',
+        completed: true
+      },
+      {
+        label: 'Media',
+        status: entry.is_translated ? 'completed' : 'pending',
+        error: '',
+        completed: false
+      },
       { 
         label: 'Translate', 
         status: entry.translation_job_status,
@@ -421,6 +568,35 @@ export default function Monitoring() {
         )}
       </div>
     );
+  };
+
+  const openDetails = async (tweetId: string) => {
+    setDrawerTweetId(tweetId);
+    setDrawerOpen(true);
+    try {
+      const { data, error } = await supabase
+        .from('pipeline_events' as any)
+        .select('*')
+        .eq('subject_type', 'post')
+        .eq('subject_id', tweetId)
+        .order('started_at', { ascending: false });
+      if (error) throw error;
+      setTimeline(data || []);
+    } catch (e) {
+      console.error('Failed to load timeline', e);
+      setTimeline([]);
+    }
+  };
+
+  const retryStep = async (tweetId: string, step: string) => {
+    try {
+      const { error: rpcError } = await supabase.rpc('retry_step', { tweet_id: tweetId, step });
+      if (rpcError) throw rpcError;
+      toast({ title: 'Retry queued', description: `${step} retry scheduled` });
+    } catch (e) {
+      console.error('Retry failed', e);
+      toast({ title: 'Retry failed', variant: 'destructive' });
+    }
   };
 
   if (loading) {
@@ -518,7 +694,24 @@ export default function Monitoring() {
             </div>
             
             {/* Bulk Selection Controls */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-4">
+              <div className="w-48">
+                <ThemedSelect value={filter} onValueChange={(v) => setFilter(v)}>
+                  <SelectTrigger className="bg-card text-foreground border-border">
+                    <SelectValue placeholder="All" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-popover text-popover-foreground border-border">
+                    <SelectGroup>
+                      <SelectLabel>Filter</SelectLabel>
+                      <SelectItem value="all">All</SelectItem>
+                      <SelectItem value="needs-translation">Needs translation</SelectItem>
+                      <SelectItem value="delivery-pending">Delivery pending</SelectItem>
+                      <SelectItem value="failed">Failed</SelectItem>
+                      <SelectItem value="recently-delivered">Recently Delivered</SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
+                </ThemedSelect>
+              </div>
               <div className="flex items-center space-x-2">
                 <Checkbox
                   id="select-all"
@@ -652,6 +845,13 @@ export default function Monitoring() {
                             Edit
                           </Button>
                         )}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => openDetails(entry.tweet_id)}
+                        >
+                          Details
+                        </Button>
                       </div>
                     </div>
                     
@@ -675,10 +875,14 @@ export default function Monitoring() {
                         </div>
                       </div>
                      ) : (
-                       <div className={`text-sm p-3 rounded border ${
-                         !entry.is_translated ? 'bg-orange-50 border-orange-200' : 'bg-muted/50'
-                       }`}>
-                         <div className="whitespace-pre-wrap break-words" dir="rtl">
+                       <div
+                         className={`text-sm p-4 rounded border leading-relaxed break-words ${
+                           !entry.is_translated
+                             ? 'bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-900/20 dark:text-amber-100 dark:border-amber-800'
+                             : 'bg-card text-foreground border-border'
+                         }`}
+                       >
+                         <div className="whitespace-pre-wrap" dir="rtl">
                            {entry.text_translated || "[Not translated yet]"}
                          </div>
                        </div>

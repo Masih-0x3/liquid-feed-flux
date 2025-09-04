@@ -1,3 +1,4 @@
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -25,7 +26,7 @@ serve(async (req) => {
       .from('jobs')
       .select('*')
       .eq('status', 'pending')
-      .lte('next_run_at', new Date().toISOString())
+      .or(`next_run_at.lte.${new Date().toISOString()},next_run_at.is.null`)
       .order('created_at', { ascending: true })
       .limit(20);
 
@@ -45,19 +46,80 @@ serve(async (req) => {
       });
     }
 
-    console.log(`Processing ${jobs.length} jobs in parallel`);
-    
-    // Mark all jobs as running in a single batch update
-    const jobIds = jobs.map(job => job.id);
-    await supabase
-      .from('jobs')
-      .update({ status: 'running' })
-      .in('id', jobIds);
+    // Shape queue per chat and adapt spacing based on recent 429s
+    const deliverJobs = (jobs || []).filter(j => j.type === 'deliver');
+    const otherJobs = (jobs || []).filter(j => j.type !== 'deliver');
 
-    // Process all jobs in parallel for maximum efficiency
-    const jobPromises = jobs.map(async (job) => {
+    const spacingMs = await computeAdaptiveSpacing(supabase);
+
+    // Group deliver jobs by chat id (currently env-based; extendable later)
+    const groups: Record<string, any[]> = {};
+    for (const j of deliverJobs) {
+      const key = await getChatIdForJob(j, supabase) || 'default';
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(j);
+    }
+
+    const deliverJobsToRun: any[] = [];
+    const nowMs = Date.now();
+    for (const key of Object.keys(groups)) {
+      const groupJobs = groups[key];
+      if (groupJobs.length === 0) continue;
+      // Sort by created_at to preserve order
+      groupJobs.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+      const [first, ...rest] = groupJobs;
+      deliverJobsToRun.push(first);
+      if (rest.length > 0) {
+        const baseTime = nowMs + spacingMs; // first deferred after spacing
+        for (let i = 0; i < rest.length; i++) {
+          const job = rest[i];
+          const plannedTime = new Date(baseTime + i * spacingMs);
+          const currentNext = job.next_run_at ? new Date(job.next_run_at) : null;
+          const shouldUpdate = !currentNext || currentNext.getTime() < plannedTime.getTime();
+          if (shouldUpdate) {
+            try {
+              await supabase
+                .from('jobs')
+                .update({ next_run_at: plannedTime.toISOString() })
+                .eq('id', job.id);
+            } catch (_e) {}
+          }
+        }
+      }
+    }
+
+    const toRunJobs = [...otherJobs, ...deliverJobsToRun];
+
+    console.log(`Processing ${toRunJobs.length} jobs now (others deferred with spacing)`);
+
+    // Mark only selected jobs as running
+    const jobIds = toRunJobs.map(job => job.id);
+    if (jobIds.length > 0) {
+      await supabase
+        .from('jobs')
+        .update({ status: 'running' })
+        .in('id', jobIds);
+    }
+
+    // Process selected jobs in parallel (deliver is at most 1)
+    const jobPromises = toRunJobs.map(async (job) => {
       try {
         console.log(`Processing job ${job.id} of type ${job.type}`);
+
+        // Initialize started_at and attempts
+        if (!job.started_at) {
+          try {
+            await supabase
+              .from('jobs')
+              .update({ started_at: new Date().toISOString() })
+              .eq('id', job.id);
+          } catch (_e) {
+            // best-effort
+          }
+        }
+
+        // Emit pipeline_events: running
+        await recordPipelineEvent(supabase, job, 'running');
 
         // Update attempt count for this specific job
         await supabase
@@ -94,26 +156,32 @@ serve(async (req) => {
               .from('jobs')
               .update({ 
                 status: 'completed',
-                last_error: null
+                last_error: null,
+                completed_at: new Date().toISOString()
               })
               .eq('id', job.id);
             
+            await recordPipelineEvent(supabase, job, 'completed');
+
             console.log(`Job ${job.id} completed successfully`);
             return { success: true, jobId: job.id };
           } else {
             await handleJobFailure(supabase, job);
+            await recordPipelineEvent(supabase, job, 'failed');
             return { success: false, jobId: job.id };
           }
 
         } catch (error) {
           console.error(`Job ${job.id} failed:`, error);
-          await handleJobFailure(supabase, job, error.message);
-          return { success: false, jobId: job.id, error: error.message };
+          await handleJobFailure(supabase, job, error as any);
+          await recordPipelineEvent(supabase, job, 'failed', (error as any)?.message ?? 'Failed');
+          return { success: false, jobId: job.id, error: (error as any)?.message };
         }
       } catch (error) {
         console.error(`Error processing job ${job.id}:`, error);
-        await handleJobFailure(supabase, job, error.message);
-        return { success: false, jobId: job.id, error: error.message };
+        await handleJobFailure(supabase, job, error as any);
+        await recordPipelineEvent(supabase, job, 'failed', (error as any)?.message ?? 'Failed');
+        return { success: false, jobId: job.id, error: (error as any)?.message };
       }
     });
 
@@ -136,8 +204,32 @@ serve(async (req) => {
 
     console.log(`Worker completed: ${processedCount} successful, ${failedCount} failed`);
 
-    return new Response(JSON.stringify({ 
-      success: true, 
+    // Auto-chain: if next deliver job is due within ~1.5s, invoke worker again
+    try {
+      const THRESHOLD_MS = 1500;
+      const { data: nextDeliver } = await supabase
+        .from('jobs')
+        .select('next_run_at')
+        .eq('status', 'pending')
+        .eq('type', 'deliver')
+        .not('next_run_at', 'is', null)
+        .order('next_run_at', { ascending: true })
+        .limit(1)
+        .single();
+      if (nextDeliver?.next_run_at) {
+        const nextAt = new Date(nextDeliver.next_run_at).getTime();
+        const delta = nextAt - Date.now();
+        if (delta <= THRESHOLD_MS) {
+          console.log(`Auto-chaining worker; next deliver due in ${delta}ms`);
+          await supabase.functions.invoke('worker', { body: { trigger: 'autochain' } });
+        }
+      }
+    } catch (_e) {
+      // best-effort
+    }
+
+    return new Response(JSON.stringify({
+      success: true,
       processed: processedCount,
       failed: failedCount,
       total: jobs.length
@@ -208,16 +300,36 @@ async function handleTranslateJob(job: any, supabase: any): Promise<boolean> {
     }
 
     const data = await response.json();
-    const translatedText = data.choices[0].message.content;
+    const translatedText = data.choices?.[0]?.message?.content ?? '';
 
     console.log('Translation completed:', translatedText);
 
-    // Update post with translation
+    // Update job with result_meta (model, tokens, timings)
+    const nowIso = new Date().toISOString();
+    const resultMeta: any = {
+      model: 'gpt-4o-mini',
+      usage: data.usage ?? null,
+      finished_at: nowIso
+    };
+    try {
+      await supabase
+        .from('jobs')
+        .update({ result_meta: resultMeta })
+        .eq('id', job.id);
+    } catch (_e) {
+      // best-effort
+    }
+
+    // Update post with translation and provenance
     const { error: updateError } = await supabase
       .from('posts')
       .update({ 
         text_translated: translatedText,
-        lang_original: 'en'
+        lang_original: 'en',
+        translated_at: nowIso,
+        translation_model: 'gpt-4o-mini',
+        translation_tokens: data?.usage?.total_tokens ?? null,
+        translation_duration_ms: job.started_at ? (Date.now() - new Date(job.started_at).getTime()) : null
       })
       .eq('tweet_id', job.payload.tweet_id);
 
@@ -229,7 +341,7 @@ async function handleTranslateJob(job: any, supabase: any): Promise<boolean> {
     console.log('Translation completed for:', job.payload.tweet_id);
     
     // After successful translation, create a delivery job
-    const { error: deliveryJobError } = await supabase
+    const { data: newDeliverJob, error: deliveryJobError } = await supabase
       .from('jobs')
       .insert({
         type: 'deliver',
@@ -237,12 +349,40 @@ async function handleTranslateJob(job: any, supabase: any): Promise<boolean> {
           tweet_id: job.payload.tweet_id
         },
         status: 'pending'
-      });
+      })
+      .select()
+      .single();
 
     if (deliveryJobError) {
       console.warn('Failed to create delivery job after translation:', deliveryJobError);
     } else {
       console.log('Delivery job created after translation for:', job.payload.tweet_id);
+      // Queue delivery pipeline event
+      await insertPipelineEvent(supabase, 'post', job.payload.tweet_id, 'deliver', 'queued', null, null, null, { source: 'worker' });
+      // Ensure a pending delivery row exists (for Queue Delivery step visibility)
+      try {
+        const { data: existingDel } = await supabase
+          .from('deliveries')
+          .select('id')
+          .eq('subject_type', 'post')
+          .eq('subject_id', job.payload.tweet_id)
+          .eq('status', 'pending')
+          .limit(1);
+        if (!existingDel || existingDel.length === 0) {
+          await supabase
+            .from('deliveries')
+            .insert({
+              subject_type: 'post',
+              subject_id: job.payload.tweet_id,
+              status: 'pending',
+              last_error: null,
+              attempts: 0,
+              telegram_chat_id: null
+            });
+        }
+      } catch (_e) {
+        // best-effort
+      }
     }
     
     return true;
@@ -368,6 +508,49 @@ async function handleDeliverJob(job: any, supabase: any): Promise<boolean> {
       .eq('tweet_id', job.payload.tweet_id)
       .order('ordering');
 
+    // Idempotency: skip if already posted for this subject/chat
+    try {
+      const { data: existingDelivery } = await supabase
+        .from('deliveries')
+        .select('id')
+        .eq('subject_type', 'post')
+        .eq('subject_id', job.payload.tweet_id)
+        .eq('status', 'posted')
+        .eq('telegram_chat_id', telegramChatId)
+        .limit(1);
+      if (existingDelivery && existingDelivery.length > 0) {
+        console.log('Skipping duplicate delivery (same subject already posted):', job.payload.tweet_id);
+        await insertPipelineEvent(supabase, 'post', job.payload.tweet_id, 'deliver', 'completed', null, new Date().toISOString(), null, { skipped: 'duplicate_subject' });
+        return true;
+      }
+    } catch (_e) {}
+
+    // Cross-subject dedupe by canonical URL (same link tweeted/retweeted)
+    if (post.url) {
+      try {
+        const { data: siblingPosts } = await supabase
+          .from('posts')
+          .select('tweet_id')
+          .eq('url', post.url);
+        const siblingIds = (siblingPosts || []).map((p: any) => p.tweet_id);
+        if (siblingIds.length > 0) {
+          const { data: siblingDeliveries } = await supabase
+            .from('deliveries')
+            .select('id')
+            .eq('status', 'posted')
+            .eq('subject_type', 'post')
+            .in('subject_id', siblingIds)
+            .eq('telegram_chat_id', telegramChatId)
+            .limit(1);
+          if (siblingDeliveries && siblingDeliveries.length > 0) {
+            console.log('Skipping duplicate delivery (same URL already posted):', post.url);
+            await insertPipelineEvent(supabase, 'post', job.payload.tweet_id, 'deliver', 'completed', null, new Date().toISOString(), null, { skipped: 'duplicate_url', url: post.url });
+            return true;
+          }
+        }
+      } catch (_e) {}
+    }
+
     // Prepare message using template
     const message = formatMessageWithTemplate(post, account, messageTemplate);
 
@@ -401,7 +584,33 @@ async function handleDeliverJob(job: any, supabase: any): Promise<boolean> {
           if (result.ok) {
             telegramMessageIds.push(result.result.message_id.toString());
           } else {
+            // Retry once without Markdown on parse errors
+            if (isTelegramParseError(result?.description ?? '')) {
+              const retryPayload = {
+                chat_id: telegramChatId,
+                photo: imageUrl,
+                caption: stripMarkdownToPlain(message)
+              } as any;
+              const retryResp = await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendPhoto`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(retryPayload)
+              });
+              const retryRes = await retryResp.json();
+              if (retryRes?.ok) {
+                telegramMessageIds.push(retryRes.result.message_id.toString());
+              } else {
+                const retryAfter = extractTelegramRetryAfter(result, result?.description ?? '', response.status);
+                if (retryAfter != null) {
+                  throw new TelegramRateLimitError(`Telegram sendPhoto failed: ${result.description}`, retryAfter);
+                }
+                throw new Error(`Telegram sendPhoto failed: ${result.description}`);
+              }
+            } else {
+            const retryAfter = extractTelegramRetryAfter(result, result?.description ?? '', response.status);
+            if (retryAfter != null) {
+              throw new TelegramRateLimitError(`Telegram sendPhoto failed: ${result.description}`, retryAfter);
+            }
             throw new Error(`Telegram sendPhoto failed: ${result.description}`);
+            }
           }
         } else {
           // Multiple images - use media group
@@ -430,7 +639,33 @@ async function handleDeliverJob(job: any, supabase: any): Promise<boolean> {
           if (result.ok) {
             telegramMessageIds = result.result.map((msg: any) => msg.message_id.toString());
           } else {
-            throw new Error(`Telegram sendMediaGroup failed: ${result.description}`);
+            if (isTelegramParseError(result?.description ?? '')) {
+              // Retry without parse_mode on caption
+              const retryGroup = mediaGroup.map((m: any, idx: number) => ({
+                type: m.type,
+                media: m.media,
+                caption: idx === 0 && m.caption ? stripMarkdownToPlain(m.caption) : undefined
+              }));
+              const retryResp = await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendMediaGroup`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: telegramChatId, media: retryGroup })
+              });
+              const retryRes = await retryResp.json();
+              if (retryRes?.ok) {
+                telegramMessageIds = retryRes.result.map((msg: any) => msg.message_id.toString());
+              } else {
+                const retryAfter = extractTelegramRetryAfter(result, result?.description ?? '', response.status);
+                if (retryAfter != null) {
+                  throw new TelegramRateLimitError(`Telegram sendMediaGroup failed: ${result.description}`, retryAfter);
+                }
+                throw new Error(`Telegram sendMediaGroup failed: ${result.description}`);
+              }
+            } else {
+              const retryAfter = extractTelegramRetryAfter(result, result?.description ?? '', response.status);
+              if (retryAfter != null) {
+                throw new TelegramRateLimitError(`Telegram sendMediaGroup failed: ${result.description}`, retryAfter);
+              }
+              throw new Error(`Telegram sendMediaGroup failed: ${result.description}`);
+            }
           }
         }
       }
@@ -453,7 +688,28 @@ async function handleDeliverJob(job: any, supabase: any): Promise<boolean> {
         if (result.ok) {
           telegramMessageIds.push(result.result.message_id.toString());
         } else {
-          console.warn(`Failed to send video: ${result.description}`);
+          if (isTelegramParseError(result?.description ?? '')) {
+            const retryPayload = { chat_id: telegramChatId, video: videoUrl, caption: stripMarkdownToPlain(message) } as any;
+            const retryResp = await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendVideo`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(retryPayload)
+            });
+            const retryRes = await retryResp.json();
+            if (retryRes?.ok) {
+              telegramMessageIds.push(retryRes.result.message_id.toString());
+            } else {
+              const retryAfter = extractTelegramRetryAfter(result, result?.description ?? '', response.status);
+              if (retryAfter != null) {
+                throw new TelegramRateLimitError(`Telegram sendVideo failed: ${result.description}`, retryAfter);
+              }
+              console.warn(`Failed to send video: ${result.description}`);
+            }
+          } else {
+            const retryAfter = extractTelegramRetryAfter(result, result?.description ?? '', response.status);
+            if (retryAfter != null) {
+              throw new TelegramRateLimitError(`Telegram sendVideo failed: ${result.description}`, retryAfter);
+            }
+            console.warn(`Failed to send video: ${result.description}`);
+          }
         }
       }
 
@@ -475,7 +731,28 @@ async function handleDeliverJob(job: any, supabase: any): Promise<boolean> {
         if (result.ok) {
           telegramMessageIds.push(result.result.message_id.toString());
         } else {
-          console.warn(`Failed to send audio: ${result.description}`);
+          if (isTelegramParseError(result?.description ?? '')) {
+            const retryPayload = { chat_id: telegramChatId, audio: audioUrl, caption: images.length === 0 && videos.length === 0 ? stripMarkdownToPlain(message) : 'Audio from tweet' } as any;
+            const retryResp = await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendAudio`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(retryPayload)
+            });
+            const retryRes = await retryResp.json();
+            if (retryRes?.ok) {
+              telegramMessageIds.push(retryRes.result.message_id.toString());
+            } else {
+              const retryAfter = extractTelegramRetryAfter(result, result?.description ?? '', response.status);
+              if (retryAfter != null) {
+                throw new TelegramRateLimitError(`Telegram sendAudio failed: ${result.description}`, retryAfter);
+              }
+              console.warn(`Failed to send audio: ${result.description}`);
+            }
+          } else {
+            const retryAfter = extractTelegramRetryAfter(result, result?.description ?? '', response.status);
+            if (retryAfter != null) {
+              throw new TelegramRateLimitError(`Telegram sendAudio failed: ${result.description}`, retryAfter);
+            }
+            console.warn(`Failed to send audio: ${result.description}`);
+          }
         }
       }
     } else {
@@ -495,7 +772,28 @@ async function handleDeliverJob(job: any, supabase: any): Promise<boolean> {
       if (result.ok) {
         telegramMessageIds.push(result.result.message_id.toString());
       } else {
-        throw new Error(`Telegram sendMessage failed: ${result.description}`);
+        if (isTelegramParseError(result?.description ?? '')) {
+          const retryPayload = { chat_id: telegramChatId, text: stripMarkdownToPlain(message), disable_web_page_preview: false } as any;
+          const retryResp = await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(retryPayload)
+          });
+          const retryRes = await retryResp.json();
+          if (retryRes?.ok) {
+            telegramMessageIds.push(retryRes.result.message_id.toString());
+          } else {
+            const retryAfter = extractTelegramRetryAfter(result, result?.description ?? '', response.status);
+            if (retryAfter != null) {
+              throw new TelegramRateLimitError(`Telegram sendMessage failed: ${result.description}`, retryAfter);
+            }
+            throw new Error(`Telegram sendMessage failed: ${result.description}`);
+          }
+        } else {
+          const retryAfter = extractTelegramRetryAfter(result, result?.description ?? '', response.status);
+          if (retryAfter != null) {
+            throw new TelegramRateLimitError(`Telegram sendMessage failed: ${result.description}`, retryAfter);
+          }
+          throw new Error(`Telegram sendMessage failed: ${result.description}`);
+        }
       }
     }
 
@@ -507,7 +805,10 @@ async function handleDeliverJob(job: any, supabase: any): Promise<boolean> {
         subject_id: job.payload.tweet_id,
         telegram_chat_id: telegramChatId,
         telegram_message_ids: telegramMessageIds,
-        status: 'posted'
+        status: 'posted',
+        posted_at: new Date().toISOString(),
+        last_attempt_at: new Date().toISOString(),
+        attempts: 1
       });
 
     if (deliveryError) {
@@ -515,15 +816,18 @@ async function handleDeliverJob(job: any, supabase: any): Promise<boolean> {
     }
 
     console.log(`Successfully delivered tweet ${job.payload.tweet_id} to Telegram`);
+    // Emit delivery completed pipeline event
+    await insertPipelineEvent(supabase, 'post', job.payload.tweet_id, 'deliver', 'completed', null, new Date().toISOString(), null, { message_ids: telegramMessageIds });
     return true;
 
   } catch (error) {
     console.error('Delivery failed:', error);
+    await insertPipelineEvent(supabase, 'post', job.payload.tweet_id, 'deliver', 'failed', null, null, (error as any)?.message ?? 'Delivery failed');
     return false;
   }
 }
 
-async function handleJobFailure(supabase: any, job: any, errorMessage?: string) {
+async function handleJobFailure(supabase: any, job: any, errorOrMessage?: any) {
   const maxAttempts = 5;
   const baseDelay = 60; // 1 minute base delay
   
@@ -533,26 +837,43 @@ async function handleJobFailure(supabase: any, job: any, errorMessage?: string) 
       .from('jobs')
       .update({ 
         status: 'failed',
-        last_error: errorMessage || 'Max attempts reached'
+        last_error: (typeof errorOrMessage === 'string' ? errorOrMessage : (errorOrMessage?.message || 'Max attempts reached'))
       })
       .eq('id', job.id);
     
     console.log(`Job ${job.id} marked as permanently failed after ${job.attempts} attempts`);
   } else {
-    // Schedule retry with exponential backoff
-    const delayMinutes = baseDelay * Math.pow(2, job.attempts);
-    const nextRunAt = new Date(Date.now() + delayMinutes * 60 * 1000);
-    
+    // Telegram-aware backoff: honor retry_after if available, else exponential backoff
+    let retryAfterSeconds: number | null = null;
+    if (errorOrMessage && typeof errorOrMessage === 'object' && typeof errorOrMessage.retryAfterSeconds === 'number') {
+      retryAfterSeconds = Math.max(1, Math.floor(errorOrMessage.retryAfterSeconds));
+    } else if (typeof errorOrMessage === 'string') {
+      retryAfterSeconds = parseRetryAfterFromMessage(errorOrMessage);
+    } else if (errorOrMessage?.message) {
+      retryAfterSeconds = parseRetryAfterFromMessage(errorOrMessage.message);
+    }
+
+    let nextRunAt: Date;
+    if (retryAfterSeconds != null) {
+      // add small jitter up to +20%
+      const jitter = Math.floor(retryAfterSeconds * (Math.random() * 0.2));
+      const delayMs = (retryAfterSeconds + jitter) * 1000;
+      nextRunAt = new Date(Date.now() + delayMs);
+      console.log(`Job ${job.id} hit Telegram rate limit. Scheduling retry after ~${retryAfterSeconds + jitter}s`);
+    } else {
+      const delayMinutes = baseDelay * Math.pow(2, job.attempts);
+      nextRunAt = new Date(Date.now() + delayMinutes * 60 * 1000);
+      console.log(`Job ${job.id} scheduled for retry in ${delayMinutes} minutes`);
+    }
+
     await supabase
       .from('jobs')
       .update({ 
         status: 'pending',
-        last_error: errorMessage || 'Processing failed',
+        last_error: (typeof errorOrMessage === 'string' ? errorOrMessage : (errorOrMessage?.message || 'Processing failed')),
         next_run_at: nextRunAt.toISOString()
       })
       .eq('id', job.id);
-    
-    console.log(`Job ${job.id} scheduled for retry in ${delayMinutes} minutes`);
   }
 }
 
@@ -622,6 +943,7 @@ async function getMediaUrl(supabase: any, media: any): Promise<string> {
 async function handleDownloadMediaJob(job: any, supabase: any): Promise<boolean> {
   try {
     console.log('Handling download media job for:', job.payload.tweet_id);
+    await insertPipelineEvent(supabase, 'post', job.payload.tweet_id, 'media', 'running', new Date().toISOString());
     
     const { data, error } = await supabase.functions.invoke('media-processor', {
       body: {
@@ -635,9 +957,11 @@ async function handleDownloadMediaJob(job: any, supabase: any): Promise<boolean>
     }
 
     console.log('Media download completed for:', job.payload.tweet_id, data);
+    await insertPipelineEvent(supabase, 'post', job.payload.tweet_id, 'media', 'completed', null, new Date().toISOString());
     return true;
   } catch (error) {
     console.error('Media download failed:', error);
+    await insertPipelineEvent(supabase, 'post', job.payload.tweet_id, 'media', 'failed', null, null, (error as any)?.message ?? 'Download failed');
     return false;
   }
 }
@@ -756,4 +1080,141 @@ function extractMediaFromText(text: string): Array<{type: string, url: string, w
   }
   
   return mediaItems;
+}
+
+// Pipeline events helpers
+async function recordPipelineEvent(supabase: any, job: any, state: 'running' | 'completed' | 'failed', error?: string) {
+  try {
+    const subjectType = job.payload?.subject_type ?? 'post';
+    const subjectId = job.payload?.tweet_id ?? job.payload?.subject_id ?? null;
+    if (!subjectId) return;
+    const step = normalizeStep(job.type);
+    const now = new Date().toISOString();
+    const startedAt = state === 'running' ? now : null;
+    const endedAt = state === 'completed' ? now : null;
+    await insertPipelineEvent(supabase, subjectType, subjectId, step, state, startedAt, endedAt, error);
+  } catch (_e) {
+    // best-effort
+  }
+}
+
+function normalizeStep(type: string): string {
+  switch (type) {
+    case 'translate':
+      return 'translate';
+    case 'deliver':
+      return 'deliver';
+    case 'download_media':
+      return 'media';
+    case 'moderate':
+      return 'moderate';
+    default:
+      return type;
+  }
+}
+
+async function insertPipelineEvent(
+  supabase: any,
+  subjectType: string,
+  subjectId: string,
+  step: string,
+  status: string,
+  startedAt?: string | null,
+  endedAt?: string | null,
+  error?: string | null,
+  meta?: any
+) {
+  try {
+    await supabase
+      .from('pipeline_events' as any)
+      .insert({
+        subject_type: subjectType,
+        subject_id: subjectId,
+        step,
+        status,
+        started_at: startedAt ?? null,
+        ended_at: endedAt ?? null,
+        error: error ?? null,
+        meta: meta ?? null
+      });
+  } catch (_e) {
+    // best-effort
+  }
+}
+
+// Telegram rate limit helpers
+class TelegramRateLimitError extends Error {
+  retryAfterSeconds: number;
+  constructor(message: string, retryAfterSeconds: number) {
+    super(message);
+    this.name = 'TelegramRateLimitError';
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
+function extractTelegramRetryAfter(result: any, description: string, statusCode: number): number | null {
+  try {
+    if (statusCode === 429) {
+      const apiParam = result?.parameters?.retry_after;
+      if (typeof apiParam === 'number' && isFinite(apiParam)) {
+        return Math.max(1, Math.floor(apiParam));
+      }
+    }
+    const parsed = parseRetryAfterFromMessage(description);
+    if (parsed != null) return parsed;
+  } catch (_e) {}
+  return null;
+}
+
+function parseRetryAfterFromMessage(message: string): number | null {
+  if (!message) return null;
+  const m = message.match(/retry\s+after\s+(\d+)/i);
+  if (m && m[1]) {
+    const n = parseInt(m[1], 10);
+    return isFinite(n) ? Math.max(1, n) : null;
+  }
+  return null;
+}
+
+function isTelegramParseError(description: string): boolean {
+  if (!description) return false;
+  return /can't parse entities/i.test(description) || /parse_mode/i.test(description);
+}
+
+function stripMarkdownToPlain(text: string): string {
+  if (!text) return text;
+  // Remove common Markdown special characters that trigger Telegram parser
+  return text
+    .replace(/[\\*_`\[\]()~>#+=|{}.!-]/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+// Adaptive spacing: tighten when no recent 429s; loosen on recent 429s
+async function computeAdaptiveSpacing(supabase: any): Promise<number> {
+  try {
+    // Look back 2 minutes for Too Many Requests
+    const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+    const { count } = await supabase
+      .from('pipeline_events' as any)
+      .select('id', { count: 'exact', head: true })
+      .eq('step', 'deliver')
+      .eq('status', 'failed')
+      .gte('started_at', twoMinutesAgo)
+      .ilike('error', '%Too Many Requests%');
+    if ((count ?? 0) === 0) {
+      return 800; // 0.8s spacing if clear
+    }
+  } catch (_e) {}
+  return 1500; // 1.5s spacing when throttling observed or unknown
+}
+
+// Resolve chat id per job (extendable: map account->chat); default env chat id
+async function getChatIdForJob(_job: any, _supabase: any): Promise<string | null> {
+  try {
+    const chat = (Deno as any).env.get('TELEGRAM_CHAT_ID');
+    return chat || null;
+  } catch (_e) {
+    return null;
+  }
 }

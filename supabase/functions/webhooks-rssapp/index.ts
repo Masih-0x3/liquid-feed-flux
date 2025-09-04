@@ -12,6 +12,29 @@ serve(async (req) => {
   }
 
   try {
+    // Optional shared-secret validation to protect the webhook when verify_jwt=false
+    const urlObj = new URL(req.url);
+    const providedToken = (urlObj.searchParams.get('token')
+      || req.headers.get('x-webhook-token')
+      || req.headers.get('x-rssapp-token')
+      || '').trim();
+    const expectedToken = (Deno.env.get('WEBHOOK_SHARED_SECRET')
+      || Deno.env.get('RSSAPP_WEBHOOK_TOKEN')
+      || Deno.env.get('RSSAPP_TOKEN')
+      || '').trim();
+
+    if (expectedToken) {
+      if (!providedToken || providedToken !== expectedToken) {
+        console.warn('Webhook token missing or invalid');
+        return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+          status: 401,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+    } else {
+      console.warn('No webhook shared secret configured; allowing request. Set WEBHOOK_SHARED_SECRET to enforce.');
+    }
+
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
@@ -193,38 +216,69 @@ serve(async (req) => {
         }
 
         // Create translation job (English to Persian only)
-        const { error: translationJobError } = await supabase
+        const { data: newTranslateJob, error: translationJobError } = await supabase
           .from('jobs')
           .insert({
             type: 'translate',
             payload: {
               tweet_id: tweetId
             },
-            status: 'pending'
-          });
+            status: 'pending',
+            next_run_at: new Date().toISOString()
+          })
+          .select()
+          .single();
 
         if (translationJobError) {
           console.error('Error creating translation job:', translationJobError);
         } else {
           console.log('Translation job created for:', tweetId);
+          // Emit pipeline event: translate queued
+          try {
+            await supabase
+              .from('pipeline_events' as any)
+              .insert({
+                subject_type: 'post',
+                subject_id: tweetId,
+                step: 'translate',
+                status: 'queued',
+                started_at: new Date().toISOString(),
+                meta: { source: 'webhook' }
+              });
+          } catch (_e) {}
         }
 
         // Create media download job for tweets with media
         if (mediaItems.length > 0) {
-          const { error: downloadJobError } = await supabase
+          const { data: newMediaJob, error: downloadJobError } = await supabase
             .from('jobs')
             .insert({
               type: 'download_media',
               payload: {
                 tweet_id: tweetId
               },
-              status: 'pending'
-            });
+              status: 'pending',
+              next_run_at: new Date().toISOString()
+            })
+            .select()
+            .single();
 
           if (downloadJobError) {
             console.error('Error creating media download job:', downloadJobError);
           } else {
             console.log('Media download job created for:', tweetId);
+            try {
+              await supabase
+                .from('pipeline_events' as any)
+                .insert({
+                  subject_type: 'post',
+                  subject_id: tweetId,
+                  step: 'media',
+                  status: 'queued',
+                  started_at: new Date().toISOString(),
+                  meta: { source: 'webhook' }
+                });
+            } catch (_e) {}
           }
         }
 

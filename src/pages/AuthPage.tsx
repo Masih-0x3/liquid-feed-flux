@@ -56,7 +56,7 @@ export default function AuthPage() {
       } else {
         toast({
           title: "Welcome back!",
-          description: "You've successfully signed in to the RSS Console.",
+          description: "You've successfully signed in to the XOT Panel.",
         });
       }
     } catch (error) {
@@ -79,14 +79,14 @@ export default function AuthPage() {
           <div className="w-16 h-16 rounded-2xl bg-gradient-primary flex items-center justify-center mx-auto glow-primary">
             <Activity className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-3xl font-display font-bold text-glass-foreground">RSS Console</h1>
+          <h1 className="text-3xl font-display font-bold text-glass-foreground">XOT Panel</h1>
           <p className="text-muted-foreground">Admin access to your RSS → OpenAI → Telegram pipeline</p>
         </div>
 
         {/* Auth Form */}
         <Card className="glass-card border-glass-border">
           <CardHeader className="text-center">
-            <CardTitle className="text-xl font-display">Access Console</CardTitle>
+            <CardTitle className="text-xl font-display">Access Panel</CardTitle>
             <CardDescription>Sign in to manage your RSS pipeline</CardDescription>
           </CardHeader>
           <CardContent>
