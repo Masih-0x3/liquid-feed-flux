@@ -151,9 +151,10 @@ async function downloadMediaForTweet(supabase: any, tweetId: string) {
 async function cleanupOldMedia(supabase: any) {
   console.log('Starting media cleanup process');
 
-  // Get old media files (older than 30 days)
+  // Get old media files (older than 7 days to stay within storage quota)
+  // Limit batch size to avoid timeout
   const { data: oldMedia, error: queryError } = await supabase
-    .rpc('get_old_media', { days_old: 30 });
+    .rpc('get_old_media', { days_old: 7 });
 
   if (queryError) {
     throw new Error(`Failed to query old media: ${queryError.message}`);
@@ -170,43 +171,45 @@ async function cleanupOldMedia(supabase: any) {
     });
   }
 
+  console.log(`Found ${oldMedia.length} old media files to cleanup`);
+
+  // Batch delete from storage (Supabase storage supports bulk remove)
+  const BATCH_SIZE = 100;
   let deletedCount = 0;
   let failedCount = 0;
 
-  for (const media of oldMedia) {
-    try {
-      if (media.storage_path) {
-        // Delete from storage
-        const { error: storageError } = await supabase.storage
-          .from('temp-media')
-          .remove([media.storage_path]);
+  for (let i = 0; i < oldMedia.length; i += BATCH_SIZE) {
+    const batch = oldMedia.slice(i, i + BATCH_SIZE);
+    const paths = batch.map((m: any) => m.storage_path).filter(Boolean);
+    
+    if (paths.length > 0) {
+      const { error: storageError } = await supabase.storage
+        .from('temp-media')
+        .remove(paths);
 
-        if (storageError) {
-          console.error(`Failed to delete from storage: ${storageError.message}`);
-        }
+      if (storageError) {
+        console.error(`Batch storage delete failed:`, storageError.message);
+        failedCount += paths.length;
+      } else {
+        deletedCount += paths.length;
+        console.log(`Deleted batch ${Math.floor(i/BATCH_SIZE) + 1}: ${paths.length} files`);
       }
+    }
 
-      // Update database record to remove storage references
-      const { error: updateError } = await supabase
-        .from('media')
-        .update({
-          storage_path: null,
-          downloaded_at: null,
-          file_size: null,
-          mime_type: null
-        })
-        .eq('id', media.id);
+    // Update DB records in batch
+    const ids = batch.map((m: any) => m.id);
+    const { error: updateError } = await supabase
+      .from('media')
+      .update({
+        storage_path: null,
+        downloaded_at: null,
+        file_size: null,
+        mime_type: null
+      })
+      .in('id', ids);
 
-      if (updateError) {
-        throw new Error(`Failed to update media record: ${updateError.message}`);
-      }
-
-      deletedCount++;
-      console.log(`Cleaned up media: ${media.storage_path}`);
-
-    } catch (error) {
-      console.error(`Failed to cleanup media ${media.id}:`, error);
-      failedCount++;
+    if (updateError) {
+      console.error(`Batch DB update failed:`, updateError.message);
     }
   }
 

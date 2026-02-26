@@ -30,7 +30,23 @@ serve(async (req) => {
 
     console.log('Cleanup results:', JSON.stringify(data));
 
-    return new Response(JSON.stringify({ success: true, results: data }), {
+    // Also trigger media storage cleanup
+    let mediaResult = null;
+    try {
+      const { data: mediaData, error: mediaError } = await supabase.functions.invoke('media-processor', {
+        body: { action: 'cleanup_old_media' }
+      });
+      if (mediaError) {
+        console.error('Media cleanup error:', mediaError);
+      } else {
+        mediaResult = mediaData;
+        console.log('Media cleanup results:', JSON.stringify(mediaData));
+      }
+    } catch (e) {
+      console.error('Media cleanup invocation failed:', e);
+    }
+
+    return new Response(JSON.stringify({ success: true, results: data, media_cleanup: mediaResult }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (error) {
