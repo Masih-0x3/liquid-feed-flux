@@ -641,7 +641,10 @@ export type Database = {
           total_left: number
         }[]
       }
-      cleanup_old_data: { Args: { retention_days?: number }; Returns: Json }
+      cleanup_old_data: {
+        Args: { batch_limit?: number; retention_days?: number }
+        Returns: Json
+      }
       get_old_media: {
         Args: { days_old?: number }
         Returns: {
