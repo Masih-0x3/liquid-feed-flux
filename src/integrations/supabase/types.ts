@@ -46,10 +46,13 @@ export type Database = {
           attempts: number | null
           created_at: string
           id: string
+          last_attempt_at: string | null
           last_error: string | null
+          posted_at: string | null
           status: string | null
           subject_id: string
           subject_type: string | null
+          target_chat: string | null
           telegram_chat_id: string | null
           telegram_message_ids: string[] | null
         }
@@ -57,10 +60,13 @@ export type Database = {
           attempts?: number | null
           created_at?: string
           id?: string
+          last_attempt_at?: string | null
           last_error?: string | null
+          posted_at?: string | null
           status?: string | null
           subject_id: string
           subject_type?: string | null
+          target_chat?: string | null
           telegram_chat_id?: string | null
           telegram_message_ids?: string[] | null
         }
@@ -68,10 +74,13 @@ export type Database = {
           attempts?: number | null
           created_at?: string
           id?: string
+          last_attempt_at?: string | null
           last_error?: string | null
+          posted_at?: string | null
           status?: string | null
           subject_id?: string
           subject_type?: string | null
+          target_chat?: string | null
           telegram_chat_id?: string | null
           telegram_message_ids?: string[] | null
         }
@@ -107,33 +116,45 @@ export type Database = {
       jobs: {
         Row: {
           attempts: number | null
+          completed_at: string | null
           created_at: string
           id: string
           last_error: string | null
           next_run_at: string | null
           payload: Json | null
+          result_meta: Json | null
+          started_at: string | null
           status: string | null
           type: string
+          updated_at: string | null
         }
         Insert: {
           attempts?: number | null
+          completed_at?: string | null
           created_at?: string
           id?: string
           last_error?: string | null
           next_run_at?: string | null
           payload?: Json | null
+          result_meta?: Json | null
+          started_at?: string | null
           status?: string | null
           type: string
+          updated_at?: string | null
         }
         Update: {
           attempts?: number | null
+          completed_at?: string | null
           created_at?: string
           id?: string
           last_error?: string | null
           next_run_at?: string | null
           payload?: Json | null
+          result_meta?: Json | null
+          started_at?: string | null
           status?: string | null
           type?: string
+          updated_at?: string | null
         }
         Relationships: []
       }
@@ -223,6 +244,48 @@ export type Database = {
         }
         Relationships: []
       }
+      pipeline_events: {
+        Row: {
+          actor: string | null
+          created_at: string
+          ended_at: string | null
+          error: string | null
+          id: string
+          meta: Json | null
+          started_at: string | null
+          status: string
+          step: string
+          subject_id: string
+          subject_type: string
+        }
+        Insert: {
+          actor?: string | null
+          created_at?: string
+          ended_at?: string | null
+          error?: string | null
+          id?: string
+          meta?: Json | null
+          started_at?: string | null
+          status: string
+          step: string
+          subject_id: string
+          subject_type: string
+        }
+        Update: {
+          actor?: string | null
+          created_at?: string
+          ended_at?: string | null
+          error?: string | null
+          id?: string
+          meta?: Json | null
+          started_at?: string | null
+          status?: string
+          step?: string
+          subject_id?: string
+          subject_type?: string
+        }
+        Relationships: []
+      }
       posts: {
         Row: {
           account_id: string
@@ -231,6 +294,11 @@ export type Database = {
           lang_original: string | null
           text_original: string | null
           text_translated: string | null
+          translated_at: string | null
+          translation_duration_ms: number | null
+          translation_job_id: string | null
+          translation_model: string | null
+          translation_tokens: number | null
           tweet_id: string
           tweeted_at: string | null
           url: string | null
@@ -242,6 +310,11 @@ export type Database = {
           lang_original?: string | null
           text_original?: string | null
           text_translated?: string | null
+          translated_at?: string | null
+          translation_duration_ms?: number | null
+          translation_job_id?: string | null
+          translation_model?: string | null
+          translation_tokens?: number | null
           tweet_id: string
           tweeted_at?: string | null
           url?: string | null
@@ -253,6 +326,11 @@ export type Database = {
           lang_original?: string | null
           text_original?: string | null
           text_translated?: string | null
+          translated_at?: string | null
+          translation_duration_ms?: number | null
+          translation_job_id?: string | null
+          translation_model?: string | null
+          translation_tokens?: number | null
           tweet_id?: string
           tweeted_at?: string | null
           url?: string | null
@@ -294,6 +372,197 @@ export type Database = {
         }
         Relationships: []
       }
+      telegram_channel_stats: {
+        Row: {
+          admin_count: number | null
+          chat_id: string
+          created_at: string | null
+          description: string | null
+          has_protected_content: boolean | null
+          id: string
+          invite_link: string | null
+          is_verified: boolean | null
+          member_count: number
+          snapshot_at: string | null
+          title: string | null
+          username: string | null
+        }
+        Insert: {
+          admin_count?: number | null
+          chat_id: string
+          created_at?: string | null
+          description?: string | null
+          has_protected_content?: boolean | null
+          id?: string
+          invite_link?: string | null
+          is_verified?: boolean | null
+          member_count: number
+          snapshot_at?: string | null
+          title?: string | null
+          username?: string | null
+        }
+        Update: {
+          admin_count?: number | null
+          chat_id?: string
+          created_at?: string | null
+          description?: string | null
+          has_protected_content?: boolean | null
+          id?: string
+          invite_link?: string | null
+          is_verified?: boolean | null
+          member_count?: number
+          snapshot_at?: string | null
+          title?: string | null
+          username?: string | null
+        }
+        Relationships: []
+      }
+      telegram_daily_stats: {
+        Row: {
+          avg_delivery_time_ms: number | null
+          chat_id: string
+          created_at: string | null
+          date: string
+          ending_members: number | null
+          id: string
+          joined_count: number | null
+          left_count: number | null
+          messages_failed: number | null
+          messages_sent: number | null
+          starting_members: number | null
+          total_media_sent: number | null
+        }
+        Insert: {
+          avg_delivery_time_ms?: number | null
+          chat_id: string
+          created_at?: string | null
+          date: string
+          ending_members?: number | null
+          id?: string
+          joined_count?: number | null
+          left_count?: number | null
+          messages_failed?: number | null
+          messages_sent?: number | null
+          starting_members?: number | null
+          total_media_sent?: number | null
+        }
+        Update: {
+          avg_delivery_time_ms?: number | null
+          chat_id?: string
+          created_at?: string | null
+          date?: string
+          ending_members?: number | null
+          id?: string
+          joined_count?: number | null
+          left_count?: number | null
+          messages_failed?: number | null
+          messages_sent?: number | null
+          starting_members?: number | null
+          total_media_sent?: number | null
+        }
+        Relationships: []
+      }
+      telegram_member_events: {
+        Row: {
+          chat_id: string
+          created_at: string | null
+          event_data: Json | null
+          event_type: string
+          first_name: string | null
+          id: string
+          is_bot: boolean | null
+          is_premium: boolean | null
+          last_name: string | null
+          occurred_at: string | null
+          user_id: number
+          username: string | null
+        }
+        Insert: {
+          chat_id: string
+          created_at?: string | null
+          event_data?: Json | null
+          event_type: string
+          first_name?: string | null
+          id?: string
+          is_bot?: boolean | null
+          is_premium?: boolean | null
+          last_name?: string | null
+          occurred_at?: string | null
+          user_id: number
+          username?: string | null
+        }
+        Update: {
+          chat_id?: string
+          created_at?: string | null
+          event_data?: Json | null
+          event_type?: string
+          first_name?: string | null
+          id?: string
+          is_bot?: boolean | null
+          is_premium?: boolean | null
+          last_name?: string | null
+          occurred_at?: string | null
+          user_id?: number
+          username?: string | null
+        }
+        Relationships: []
+      }
+      telegram_message_analytics: {
+        Row: {
+          chat_id: string
+          created_at: string | null
+          delivery_status: string
+          error_code: string | null
+          error_message: string | null
+          has_media: boolean | null
+          id: string
+          media_count: number | null
+          post_id: string | null
+          response_time_ms: number | null
+          retry_count: number | null
+          sent_at: string | null
+          telegram_message_id: string | null
+        }
+        Insert: {
+          chat_id: string
+          created_at?: string | null
+          delivery_status: string
+          error_code?: string | null
+          error_message?: string | null
+          has_media?: boolean | null
+          id?: string
+          media_count?: number | null
+          post_id?: string | null
+          response_time_ms?: number | null
+          retry_count?: number | null
+          sent_at?: string | null
+          telegram_message_id?: string | null
+        }
+        Update: {
+          chat_id?: string
+          created_at?: string | null
+          delivery_status?: string
+          error_code?: string | null
+          error_message?: string | null
+          has_media?: boolean | null
+          id?: string
+          media_count?: number | null
+          post_id?: string | null
+          response_time_ms?: number | null
+          retry_count?: number | null
+          sent_at?: string | null
+          telegram_message_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "telegram_message_analytics_post_id_fkey"
+            columns: ["post_id"]
+            isOneToOne: false
+            referencedRelation: "posts"
+            referencedColumns: ["tweet_id"]
+          },
+        ]
+      }
       threads: {
         Row: {
           account_id: string
@@ -328,9 +597,50 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      telegram_channel_current: {
+        Row: {
+          admin_count: number | null
+          chat_id: string | null
+          member_count: number | null
+          snapshot_at: string | null
+          title: string | null
+          username: string | null
+        }
+        Relationships: []
+      }
+      telegram_member_growth: {
+        Row: {
+          chat_id: string | null
+          cumulative_growth: number | null
+          date: string | null
+          joined_count: number | null
+          left_count: number | null
+          net_change: number | null
+        }
+        Relationships: []
+      }
+      telegram_message_performance: {
+        Row: {
+          avg_response_time: number | null
+          date: string | null
+          failed: number | null
+          messages_with_media: number | null
+          successful: number | null
+          total_messages: number | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
+      calculate_growth_rate: {
+        Args: { p_chat_id: string; p_days?: number }
+        Returns: {
+          growth_rate: number
+          net_growth: number
+          total_joined: number
+          total_left: number
+        }[]
+      }
       get_old_media: {
         Args: { days_old?: number }
         Returns: {
@@ -339,6 +649,33 @@ export type Database = {
           tweet_id: string
         }[]
       }
+      get_post_pipeline_status: {
+        Args: { tweet_ids: string[] }
+        Returns: {
+          attempts: number
+          delivery_error: string
+          delivery_status: string
+          ingest_at: string
+          lang_original: string
+          media_downloaded: number
+          media_total: number
+          posted_at: string
+          translate_error: string
+          translate_status: string
+          translated_at: string
+          tweet_id: string
+        }[]
+      }
+      get_top_performing_posts: {
+        Args: { p_limit?: number }
+        Returns: {
+          delivery_time_ms: number
+          post_id: string
+          sent_at: string
+          title: string
+        }[]
+      }
+      retry_step: { Args: { step: string; tweet_id: string }; Returns: boolean }
     }
     Enums: {
       [_ in never]: never
