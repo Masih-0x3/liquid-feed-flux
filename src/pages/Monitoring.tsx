@@ -357,8 +357,6 @@ export default function Monitoring() {
         if (error) throw error;
       }
 
-      if (error) throw error;
-
       toast({
         title: "Success",
         description: "Translation job queued",
@@ -581,7 +579,7 @@ export default function Monitoring() {
         .eq('subject_id', tweetId)
         .order('started_at', { ascending: false });
       if (error) throw error;
-      setTimeline(data || []);
+      setTimeline((data as any[]) || []);
     } catch (e) {
       console.error('Failed to load timeline', e);
       setTimeline([]);
