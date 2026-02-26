@@ -17,11 +17,16 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    const { retention_days = 7, batch_limit = 10000 } = await req.json().catch(() => ({}));
+    const { retention_days = 7, batch_limit = 5000 } = await req.json().catch(() => ({}));
     console.log(`Running cleanup: retention=${retention_days}d, batch=${batch_limit}`);
 
+    // Use the DB function directly which has its own 120s timeout
     const { data, error } = await supabase.rpc('cleanup_old_data', { retention_days, batch_limit });
-    if (error) throw error;
+    
+    if (error) {
+      console.error('RPC error:', error);
+      throw error;
+    }
 
     console.log('Cleanup results:', JSON.stringify(data));
 
