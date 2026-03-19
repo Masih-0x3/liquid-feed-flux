@@ -136,15 +136,8 @@ export default function Threads() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-display font-bold text-glass-foreground">Threads</h1>
-          <p className="text-muted-foreground mt-1">Manage grouped tweet conversations</p>
+          <p className="text-muted-foreground mt-1">View grouped tweet conversations</p>
         </div>
-        <Button
-          onClick={handleMergeThreads}
-          className="bg-gradient-accent hover:opacity-90 text-white"
-        >
-          <Merge className="w-4 h-4 mr-2" />
-          Merge Selected
-        </Button>
       </div>
 
       {/* Threads Table */}
