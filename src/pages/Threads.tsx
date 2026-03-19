@@ -92,31 +92,8 @@ export default function Threads() {
     await fetchThreadPosts(thread);
   };
 
-  const handleSplitThread = async (threadId: string) => {
-    try {
-      // Logic to split thread would go here
-      toast({ title: "Thread split functionality coming soon" });
-    } catch (error) {
-      toast({
-        title: "Error splitting thread",
-        description: "Please try again.",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const handleMergeThreads = async () => {
-    try {
-      // Logic to merge threads would go here
-      toast({ title: "Thread merge functionality coming soon" });
-    } catch (error) {
-      toast({
-        title: "Error merging threads",
-        description: "Please try again.",
-        variant: "destructive",
-      });
-    }
-  };
+  // Split and Merge are not yet implemented (Issue 28/30)
+  // Buttons have been hidden until backend support is ready
 
   const handlePostThread = async (threadId: string) => {
     try {
