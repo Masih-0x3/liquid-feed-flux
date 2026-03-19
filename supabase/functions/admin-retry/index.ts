@@ -6,12 +6,65 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Helper: validate JWT and check admin role
+async function requireAdmin(req: Request): Promise<{ userId: string } | Response> {
+  const authHeader = req.headers.get('Authorization');
+  if (!authHeader?.startsWith('Bearer ')) {
+    return new Response(JSON.stringify({ error: 'Unauthorized: missing token' }), {
+      status: 401,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  const supabaseAuth = createClient(
+    Deno.env.get('SUPABASE_URL') ?? '',
+    Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+    { global: { headers: { Authorization: authHeader } } }
+  );
+
+  const token = authHeader.replace('Bearer ', '');
+  const { data, error } = await supabaseAuth.auth.getUser(token);
+  if (error || !data?.user) {
+    return new Response(JSON.stringify({ error: 'Unauthorized: invalid token' }), {
+      status: 401,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  // Check admin role using service client (bypasses RLS)
+  const serviceClient = createClient(
+    Deno.env.get('SUPABASE_URL') ?? '',
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+  );
+
+  const { data: roleData } = await serviceClient
+    .from('user_roles')
+    .select('role')
+    .eq('user_id', data.user.id)
+    .eq('role', 'admin')
+    .limit(1)
+    .maybeSingle();
+
+  if (!roleData) {
+    return new Response(JSON.stringify({ error: 'Forbidden: admin role required' }), {
+      status: 403,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  return { userId: data.user.id };
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
+    // Require admin auth for all actions
+    const authResult = await requireAdmin(req);
+    if (authResult instanceof Response) return authResult;
+
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
@@ -32,14 +85,13 @@ serve(async (req) => {
         });
       }
 
-      // Get account ID for the tweet
-      const { data: post, error: postError } = await supabase
+      const { data: postData, error: postError } = await supabase
         .from('posts')
         .select('account_id')
         .eq('tweet_id', tweet_id)
         .single();
 
-      if (postError || !post) {
+      if (postError || !postData) {
         return new Response(JSON.stringify({ 
           success: false, 
           error: 'Post not found' 
@@ -49,14 +101,13 @@ serve(async (req) => {
         });
       }
 
-      // Create a new delivery job
-      const { data: newJob, error: jobError } = await supabase
+      const { error: jobError } = await supabase
         .from('jobs')
         .insert({
           type: 'deliver',
           payload: { 
             tweet_id: tweet_id,
-            account_id: post.account_id
+            account_id: postData.account_id
           },
           status: 'pending',
           next_run_at: new Date().toISOString()
@@ -75,21 +126,18 @@ serve(async (req) => {
         });
       }
 
-      // Emit pipeline event: deliver queued
       try {
         await supabase
-          .from('pipeline_events' as any)
+          .from('pipeline_events')
           .insert({
             subject_type: 'post',
             subject_id: tweet_id,
             step: 'deliver',
             status: 'queued',
             started_at: new Date().toISOString(),
-            meta: { source: 'admin-retry' }
+            meta: { source: 'admin-retry', admin_user: authResult.userId }
           });
-      } catch (_e) {
-        // best-effort
-      }
+      } catch (_e) {}
 
       return new Response(JSON.stringify({ 
         success: true, 
@@ -102,7 +150,6 @@ serve(async (req) => {
 
     // Handle retry failed deliveries action
     if (action === 'retry_failed_deliveries') {
-      // Get all failed deliveries
       const { data: failedDeliveries, error: deliveryError } = await supabase
         .from('deliveries')
         .select('*')
@@ -118,21 +165,17 @@ serve(async (req) => {
         });
       }
 
-      // Create retry jobs for each failed delivery
       const retryJobs = (failedDeliveries || []).map(delivery => ({
         type: 'deliver',
-        payload: {
-          tweet_id: delivery.subject_id,
-        },
+        payload: { tweet_id: delivery.subject_id },
         status: 'pending',
         next_run_at: new Date().toISOString()
       }));
 
       if (retryJobs.length > 0) {
-        const { data: insertedJobs, error: jobError } = await supabase
+        const { error: jobError } = await supabase
           .from('jobs')
-          .insert(retryJobs)
-          .select();
+          .insert(retryJobs);
 
         if (jobError) {
           return new Response(JSON.stringify({ 
@@ -144,7 +187,6 @@ serve(async (req) => {
           });
         }
 
-        // Emit pipeline events for each subject
         try {
           const uniqueSubjects = Array.from(new Set((failedDeliveries || []).map(d => d.subject_id)));
           if (uniqueSubjects.length > 0) {
@@ -154,9 +196,9 @@ serve(async (req) => {
               step: 'deliver',
               status: 'queued',
               started_at: new Date().toISOString(),
-              meta: { source: 'admin-retry' }
+              meta: { source: 'admin-retry', admin_user: authResult.userId }
             }));
-            await supabase.from('pipeline_events' as any).insert(rows);
+            await supabase.from('pipeline_events').insert(rows);
           }
         } catch (_e) {}
       }
@@ -183,30 +225,19 @@ serve(async (req) => {
 
       console.log('Testing template with post:', post.tweet_id);
 
-      // Get Telegram settings
-      const { data: telegramConfig } = await supabase
-        .from('settings')
-        .select('value')
-        .eq('key', 'telegram_config')
-        .single();
+      // Use secrets for Telegram config instead of DB settings
+      const botToken = Deno.env.get('TELEGRAM_BOT_TOKEN');
+      const chatId = Deno.env.get('TELEGRAM_CHAT_ID');
 
-      if (!telegramConfig?.value || !telegramConfig.value.bot_token || !telegramConfig.value.chat_id) {
+      if (!botToken || !chatId) {
         return new Response(JSON.stringify({ 
           success: false, 
-          error: 'Telegram not configured properly. Please set bot_token and chat_id in Settings.' 
+          error: 'Telegram secrets not configured. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in Supabase secrets.' 
         }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           status: 400
         });
       }
-
-      const telegramSettings = telegramConfig.value as any;
-
-      console.log('Telegram settings:', {
-        bot_token: telegramSettings.bot_token ? `${telegramSettings.bot_token.substring(0, 10)}...` : 'missing',
-        chat_id: telegramSettings.chat_id,
-        parse_mode: telegramSettings.parse_mode
-      });
 
       // Format message using template
       const message = template
@@ -220,35 +251,23 @@ serve(async (req) => {
         .replace(/{hashtags}/g, settings?.custom_hashtags || '#تست')
         .replace(/{media_info}/g, post.has_media ? '📸 تصویر' : '');
 
-      console.log('Formatted test message:', message);
-
-      // Send test message to Telegram
-      const telegramUrl = `https://api.telegram.org/bot${telegramSettings.bot_token}/sendMessage`;
-      console.log('Sending to Telegram API URL:', telegramUrl.replace(telegramSettings.bot_token, 'HIDDEN_TOKEN'));
+      const telegramUrl = `https://api.telegram.org/bot${botToken}/sendMessage`;
       
       const telegramResponse = await fetch(telegramUrl, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          chat_id: telegramSettings.chat_id,
+          chat_id: chatId,
           text: `🧪 TEST MESSAGE 🧪\n\n${message}`,
           parse_mode: 'HTML',
           disable_web_page_preview: true
         })
       });
-
-      console.log('Telegram response status:', telegramResponse.status);
       
       if (!telegramResponse.ok) {
         const errorData = await telegramResponse.json();
-        console.error('Telegram API error details:', errorData);
         throw new Error(`Telegram API error: ${errorData.description || 'Unknown error'}`);
       }
-
-      const responseData = await telegramResponse.json();
-      console.log('Telegram response success:', responseData);
 
       return new Response(JSON.stringify({ 
         success: true, 
@@ -263,19 +282,14 @@ serve(async (req) => {
       const testRSSItem = {
         guid: `test-tweet-${Date.now()}`,
         title: 'Breaking: Major tech announcement today',
-        description: '<p>Exciting news from the tech world as <strong>Company XYZ</strong> announces revolutionary new product that will change everything. This is a significant development in the industry.</p>',
-        content: 'Exciting news from the tech world as Company XYZ announces revolutionary new product that will change everything. This is a significant development in the industry. #TechNews #Innovation',
+        description: '<p>Exciting news from the tech world.</p>',
+        content: 'Exciting news from the tech world. #TechNews #Innovation',
         link: 'https://twitter.com/example/status/123456789',
         pubDate: new Date().toISOString()
       };
 
-      console.log('Testing webhook with sample data:', testRSSItem);
-
       const webhookResponse = await supabase.functions.invoke('webhooks-rssapp', {
-        body: { 
-          items_new: [testRSSItem],
-          test: true 
-        }
+        body: { items_new: [testRSSItem], test: true }
       });
 
       if (webhookResponse.error) {
@@ -296,9 +310,6 @@ serve(async (req) => {
       throw new Error('delivery_id is required');
     }
 
-    console.log('Retrying delivery:', delivery_id);
-
-    // Get the delivery
     const { data: delivery, error: deliveryError } = await supabase
       .from('deliveries')
       .select('*')
@@ -309,7 +320,6 @@ serve(async (req) => {
       throw new Error('Delivery not found');
     }
 
-    // Create a new delivery job
     const { error: jobError } = await supabase
       .from('jobs')
       .insert([{
@@ -322,11 +332,8 @@ serve(async (req) => {
         next_run_at: new Date().toISOString()
       }]);
 
-    if (jobError) {
-      throw jobError;
-    }
+    if (jobError) throw jobError;
 
-    // Reset delivery status
     const { error: updateError } = await supabase
       .from('deliveries')
       .update({
@@ -336,11 +343,7 @@ serve(async (req) => {
       })
       .eq('id', delivery_id);
 
-    if (updateError) {
-      throw updateError;
-    }
-
-    console.log('Delivery retry scheduled:', delivery_id);
+    if (updateError) throw updateError;
 
     return new Response(JSON.stringify({ 
       success: true, 

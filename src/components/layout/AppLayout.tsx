@@ -3,14 +3,14 @@ import { Navigate } from 'react-router-dom';
 import { SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
 import { AppSidebar } from './AppSidebar';
 import { useAuth } from '@/contexts/AuthContext';
-import { Loader2 } from 'lucide-react';
+import { Loader2, ShieldAlert } from 'lucide-react';
 
 interface AppLayoutProps {
   children: ReactNode;
 }
 
 export function AppLayout({ children }: AppLayoutProps) {
-  const { user, loading } = useAuth();
+  const { user, loading, role, isAdmin } = useAuth();
 
   if (loading) {
     return (
@@ -24,6 +24,21 @@ export function AppLayout({ children }: AppLayoutProps) {
 
   if (!user) {
     return <Navigate to="/auth" replace />;
+  }
+
+  // Block access if user has no admin role
+  if (role !== null && !isAdmin) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="glass-panel p-8 rounded-2xl text-center space-y-4 max-w-md">
+          <ShieldAlert className="w-12 h-12 text-destructive mx-auto" />
+          <h2 className="text-xl font-display font-semibold text-glass-foreground">Access Denied</h2>
+          <p className="text-muted-foreground text-sm">
+            Your account does not have admin access. Contact your administrator to request access.
+          </p>
+        </div>
+      </div>
+    );
   }
 
   return (

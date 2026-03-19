@@ -92,31 +92,8 @@ export default function Threads() {
     await fetchThreadPosts(thread);
   };
 
-  const handleSplitThread = async (threadId: string) => {
-    try {
-      // Logic to split thread would go here
-      toast({ title: "Thread split functionality coming soon" });
-    } catch (error) {
-      toast({
-        title: "Error splitting thread",
-        description: "Please try again.",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const handleMergeThreads = async () => {
-    try {
-      // Logic to merge threads would go here
-      toast({ title: "Thread merge functionality coming soon" });
-    } catch (error) {
-      toast({
-        title: "Error merging threads",
-        description: "Please try again.",
-        variant: "destructive",
-      });
-    }
-  };
+  // Split and Merge are not yet implemented (Issue 28/30)
+  // Buttons have been hidden until backend support is ready
 
   const handlePostThread = async (threadId: string) => {
     try {
@@ -159,15 +136,8 @@ export default function Threads() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-display font-bold text-glass-foreground">Threads</h1>
-          <p className="text-muted-foreground mt-1">Manage grouped tweet conversations</p>
+          <p className="text-muted-foreground mt-1">View grouped tweet conversations</p>
         </div>
-        <Button
-          onClick={handleMergeThreads}
-          className="bg-gradient-accent hover:opacity-90 text-white"
-        >
-          <Merge className="w-4 h-4 mr-2" />
-          Merge Selected
-        </Button>
       </div>
 
       {/* Threads Table */}
@@ -226,14 +196,6 @@ export default function Threads() {
                           className="glass-button h-8 w-8 p-0"
                         >
                           <Eye className="w-3 h-3" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => handleSplitThread(thread.id)}
-                          className="glass-button h-8 w-8 p-0 text-warning hover:bg-warning/20"
-                        >
-                          <Split className="w-3 h-3" />
                         </Button>
                         <Button
                           size="sm"
@@ -316,14 +278,6 @@ export default function Threads() {
                   >
                     <Send className="w-4 h-4 mr-2" />
                     Post Thread
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => selectedThread && handleSplitThread(selectedThread.id)}
-                    className="glass-button"
-                  >
-                    <Split className="w-4 h-4 mr-2" />
-                    Split
                   </Button>
                 </div>
               </>
