@@ -7,7 +7,16 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.admin-retry]
-verify_jwt = true
+verify_jwt = false
 
 [functions.db-cleanup]
+verify_jwt = false
+
+[functions.media-processor]
+verify_jwt = false
+
+[functions.media-cleanup]
+verify_jwt = false
+
+[functions.admin-actions]
 verify_jwt = false
