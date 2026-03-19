@@ -841,19 +841,13 @@ export default function Settings() {
                 <Key className="w-5 h-5 mr-2" />
                 OpenAI Configuration
               </CardTitle>
-              <CardDescription>Configure OpenAI API settings</CardDescription>
+              <CardDescription>Configure OpenAI model settings. API key is managed securely via Supabase secrets.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="openai_key">API Key</Label>
-                <Input
-                  id="openai_key"
-                  type="password"
-                  value={openaiSettings.api_key}
-                  onChange={(e) => setOpenaiSettings(prev => ({ ...prev, api_key: e.target.value }))}
-                  className="glass-input"
-                  placeholder="sk-..."
-                />
+              <div className="p-3 rounded-lg bg-muted/50 border border-muted text-sm text-muted-foreground">
+                <Shield className="w-4 h-4 inline mr-2" />
+                The OpenAI API key is stored securely as a Supabase secret and cannot be viewed or edited here.
+                To update it, go to your Supabase project &gt; Settings &gt; Edge Functions &gt; Secrets.
               </div>
               <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
@@ -907,39 +901,29 @@ export default function Settings() {
                 <Send className="w-5 h-5 mr-2" />
                 Telegram Configuration
               </CardTitle>
-              <CardDescription>Configure Telegram delivery settings</CardDescription>
+              <CardDescription>Configure Telegram delivery settings. Bot token and channel ID are managed securely via Supabase secrets.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="bot_token">Bot Token</Label>
-                <Input
-                  id="bot_token"
-                  type="password"
-                  value={telegramSettings.bot_token}
-                  onChange={(e) => setTelegramSettings(prev => ({ ...prev, bot_token: e.target.value }))}
-                  className="glass-input"
-                  placeholder="123456:ABC-DEF..."
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="chat_id">Channel ID</Label>
-                <Input
-                  id="chat_id"
-                  value={telegramSettings.chat_id}
-                  onChange={(e) => setTelegramSettings(prev => ({ ...prev, chat_id: e.target.value }))}
-                  className="glass-input"
-                  placeholder="@channel_name"
-                />
+              <div className="p-3 rounded-lg bg-muted/50 border border-muted text-sm text-muted-foreground">
+                <Shield className="w-4 h-4 inline mr-2" />
+                The Telegram Bot Token and Channel ID are stored securely as Supabase secrets (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+                and cannot be viewed or edited here. To update them, go to your Supabase project &gt; Settings &gt; Edge Functions &gt; Secrets.
               </div>
               <div className="space-y-2">
                 <Label htmlFor="parse_mode">Parse Mode</Label>
-                <Input
-                  id="parse_mode"
+                <Select
                   value={telegramSettings.parse_mode}
-                  onChange={(e) => setTelegramSettings(prev => ({ ...prev, parse_mode: e.target.value }))}
-                  className="glass-input"
-                  placeholder="Markdown"
-                />
+                  onValueChange={(value) => setTelegramSettings(prev => ({ ...prev, parse_mode: value }))}
+                >
+                  <SelectTrigger className="glass-input">
+                    <SelectValue placeholder="Select parse mode" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Markdown">Markdown</SelectItem>
+                    <SelectItem value="HTML">HTML</SelectItem>
+                    <SelectItem value="MarkdownV2">MarkdownV2</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               <Button 
                 onClick={handleSaveTelegram} 

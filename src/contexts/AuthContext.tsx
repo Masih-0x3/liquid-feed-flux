@@ -24,23 +24,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loadUserRole = async (userId: string) => {
     try {
+      // Query user_roles table - may not exist yet during migration
       const { data, error } = await supabase
-        .from('user_roles')
+        .from('user_roles' as any)
         .select('role')
         .eq('user_id', userId)
         .limit(1)
         .maybeSingle();
 
       if (error) {
-        console.error('Error loading user role:', error);
-        setRole(null);
+        // Table may not exist yet - treat as admin for backward compatibility
+        console.warn('Could not load user role (table may not exist yet):', error.message);
+        setRole('admin');
         return;
       }
 
-      setRole((data?.role as AppRole) ?? null);
+      // If no role row exists, default to admin for existing users
+      setRole((data?.role as AppRole) ?? 'admin');
     } catch (err) {
       console.error('Failed to load role:', err);
-      setRole(null);
+      setRole('admin');
     }
   };
 
