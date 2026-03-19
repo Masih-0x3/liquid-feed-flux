@@ -279,14 +279,6 @@ export default function Threads() {
                     <Send className="w-4 h-4 mr-2" />
                     Post Thread
                   </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => selectedThread && handleSplitThread(selectedThread.id)}
-                    className="glass-button"
-                  >
-                    <Split className="w-4 h-4 mr-2" />
-                    Split
-                  </Button>
                 </div>
               </>
             ) : (
