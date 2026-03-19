@@ -200,14 +200,6 @@ export default function Threads() {
                         <Button
                           size="sm"
                           variant="ghost"
-                          onClick={() => handleSplitThread(thread.id)}
-                          className="glass-button h-8 w-8 p-0 text-warning hover:bg-warning/20"
-                        >
-                          <Split className="w-3 h-3" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
                           onClick={() => handlePostThread(thread.id)}
                           className="glass-button h-8 w-8 p-0 text-success hover:bg-success/20"
                         >
