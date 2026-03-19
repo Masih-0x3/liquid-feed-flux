@@ -28,14 +28,11 @@ export default function Settings() {
     presence_penalty: 0
   });
   const [openaiSettings, setOpenaiSettings] = useState({
-    api_key: '',
     model: 'gpt-4o-mini',
     temperature: 0.2,
     max_completion_tokens: 1000
   });
   const [telegramSettings, setTelegramSettings] = useState({
-    bot_token: '',
-    chat_id: '',
     parse_mode: 'Markdown'
   });
   const [messageTemplate, setMessageTemplate] = useState({
