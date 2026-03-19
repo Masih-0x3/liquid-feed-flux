@@ -40,7 +40,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       // If no role row exists, default to admin for existing users
-      setRole((data?.role as AppRole) ?? 'admin');
+      setRole(((data as any)?.role as AppRole) ?? 'admin');
     } catch (err) {
       console.error('Failed to load role:', err);
       setRole('admin');
