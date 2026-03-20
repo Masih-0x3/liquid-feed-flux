@@ -145,7 +145,7 @@ export default function Monitoring() {
   const openDetails = async (tweetId: string) => {
     setDrawerTweetId(tweetId); setDrawerOpen(true);
     try {
-      const { data, error } = await supabase.from('pipeline_events' as 'pipeline_events').select('subject_type, subject_id, step, status, started_at, ended_at, error, meta').eq('subject_type', 'post').eq('subject_id', tweetId).order('started_at', { ascending: false });
+      const { data, error } = await supabase.from('pipeline_events').select('subject_type, subject_id, step, status, started_at, ended_at, error, meta').eq('subject_type', 'post').eq('subject_id', tweetId).order('started_at', { ascending: false });
       if (error) throw error;
       setTimeline((data as PipelineEvent[]) || []);
     } catch { setTimeline([]); }
