@@ -41,6 +41,45 @@ export type Database = {
         }
         Relationships: []
       }
+      dead_letter_jobs: {
+        Row: {
+          attempts: number | null
+          created_at: string
+          failed_at: string
+          id: string
+          last_error: string | null
+          original_job_id: string | null
+          payload: Json | null
+          result_meta: Json | null
+          source: string | null
+          type: string
+        }
+        Insert: {
+          attempts?: number | null
+          created_at?: string
+          failed_at?: string
+          id?: string
+          last_error?: string | null
+          original_job_id?: string | null
+          payload?: Json | null
+          result_meta?: Json | null
+          source?: string | null
+          type: string
+        }
+        Update: {
+          attempts?: number | null
+          created_at?: string
+          failed_at?: string
+          id?: string
+          last_error?: string | null
+          original_job_id?: string | null
+          payload?: Json | null
+          result_meta?: Json | null
+          source?: string | null
+          type?: string
+        }
+        Relationships: []
+      }
       deliveries: {
         Row: {
           attempts: number | null
@@ -119,9 +158,14 @@ export type Database = {
           completed_at: string | null
           created_at: string
           id: string
+          idempotency_key: string | null
           last_error: string | null
+          lease_expires_at: string | null
+          locked_at: string | null
+          locked_by: string | null
           next_run_at: string | null
           payload: Json | null
+          priority: number | null
           result_meta: Json | null
           started_at: string | null
           status: string | null
@@ -133,9 +177,14 @@ export type Database = {
           completed_at?: string | null
           created_at?: string
           id?: string
+          idempotency_key?: string | null
           last_error?: string | null
+          lease_expires_at?: string | null
+          locked_at?: string | null
+          locked_by?: string | null
           next_run_at?: string | null
           payload?: Json | null
+          priority?: number | null
           result_meta?: Json | null
           started_at?: string | null
           status?: string | null
@@ -147,9 +196,14 @@ export type Database = {
           completed_at?: string | null
           created_at?: string
           id?: string
+          idempotency_key?: string | null
           last_error?: string | null
+          lease_expires_at?: string | null
+          locked_at?: string | null
+          locked_by?: string | null
           next_run_at?: string | null
           payload?: Json | null
+          priority?: number | null
           result_meta?: Json | null
           started_at?: string | null
           status?: string | null
@@ -170,6 +224,7 @@ export type Database = {
           mime_type: string | null
           ordering: number | null
           src_url: string | null
+          src_url_hash: string | null
           storage_path: string | null
           tweet_id: string
           width: number | null
@@ -185,6 +240,7 @@ export type Database = {
           mime_type?: string | null
           ordering?: number | null
           src_url?: string | null
+          src_url_hash?: string | null
           storage_path?: string | null
           tweet_id: string
           width?: number | null
@@ -200,6 +256,7 @@ export type Database = {
           mime_type?: string | null
           ordering?: number | null
           src_url?: string | null
+          src_url_hash?: string | null
           storage_path?: string | null
           tweet_id?: string
           width?: number | null
@@ -662,6 +719,34 @@ export type Database = {
           total_left: number
         }[]
       }
+      claim_jobs: {
+        Args: { batch_size?: number; job_types?: string[]; worker_id?: string }
+        Returns: {
+          attempts: number | null
+          completed_at: string | null
+          created_at: string
+          id: string
+          idempotency_key: string | null
+          last_error: string | null
+          lease_expires_at: string | null
+          locked_at: string | null
+          locked_by: string | null
+          next_run_at: string | null
+          payload: Json | null
+          priority: number | null
+          result_meta: Json | null
+          started_at: string | null
+          status: string | null
+          type: string
+          updated_at: string | null
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "jobs"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       cleanup_old_data: {
         Args: { batch_limit?: number; retention_days?: number }
         Returns: Json
@@ -691,6 +776,7 @@ export type Database = {
           tweet_id: string
         }[]
       }
+      get_system_health: { Args: never; Returns: Json }
       get_top_performing_posts: {
         Args: { p_limit?: number }
         Returns: {
