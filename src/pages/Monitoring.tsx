@@ -122,8 +122,8 @@ export default function Monitoring() {
   };
 
   const filteredEntries = entries
-    .filter(e => e.text_original.toLowerCase().includes(searchTerm.toLowerCase()) || e.text_translated.toLowerCase().includes(searchTerm.toLowerCase()) || e.account_handle.toLowerCase().includes(searchTerm.toLowerCase()))
-    .filter(e => {
+    .filter((e: MonitoringEntry) => e.text_original.toLowerCase().includes(searchTerm.toLowerCase()) || e.text_translated.toLowerCase().includes(searchTerm.toLowerCase()) || e.account_handle.toLowerCase().includes(searchTerm.toLowerCase()))
+    .filter((e: MonitoringEntry) => {
       switch (filter) {
         case 'needs-translation': return !e.is_translated;
         case 'delivery-pending': return e.delivery_status !== 'posted';
