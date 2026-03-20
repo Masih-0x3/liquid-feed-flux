@@ -44,9 +44,12 @@ serve(async (req) => {
       headers: { 'x-internal-token': Deno.env.get('WEBHOOK_SHARED_SECRET') || '' }
     } as Record<string, unknown>);
 
-    if (error) throw new Error(`Media cleanup error: ${error.message}`);
+    if (error) {
+      console.error(JSON.stringify({ function: 'media-cleanup', action: 'invoke_error', error: error.message }));
+      throw new Error(`Media cleanup error: ${error.message}`);
+    }
 
-    console.log(JSON.stringify({ function: 'media-cleanup', action: 'complete', result: data }));
+    console.log(JSON.stringify({ function: 'media-cleanup', action: 'complete', deleted: data?.deleted ?? 0, failed: data?.failed ?? 0 }));
 
     return new Response(JSON.stringify({ success: true, message: 'Media cleanup completed', result: data }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

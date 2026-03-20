@@ -55,7 +55,7 @@ serve(async (req) => {
             status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
         }
-        return await downloadMediaForTweet(supabase, tweet_id);
+        return await downloadMediaForTweet(supabase, tweet_id, dry_run === true);
       case 'cleanup_old_media':
         return await cleanupOldMedia(supabase, dry_run === true);
       case 'get_media_info':
@@ -79,8 +79,8 @@ serve(async (req) => {
   }
 });
 
-async function downloadMediaForTweet(supabase: ReturnType<typeof createClient>, tweetId: string) {
-  console.log(JSON.stringify({ function: 'media-processor', action: 'download_start', tweet_id: tweetId }));
+async function downloadMediaForTweet(supabase: ReturnType<typeof createClient>, tweetId: string, dryRun: boolean) {
+  console.log(JSON.stringify({ function: 'media-processor', action: 'download_start', tweet_id: tweetId, dry_run: dryRun }));
   
   const { data: mediaItems, error: mediaError } = await supabase
     .from('media')
@@ -92,6 +92,12 @@ async function downloadMediaForTweet(supabase: ReturnType<typeof createClient>, 
 
   if (!mediaItems || mediaItems.length === 0) {
     return new Response(JSON.stringify({ success: true, message: 'No media to download', downloaded: 0 }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (dryRun) {
+    return new Response(JSON.stringify({ success: true, dry_run: true, would_download: mediaItems.length, media_ids: mediaItems.map((m: Record<string, unknown>) => m.id) }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
