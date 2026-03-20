@@ -7,6 +7,12 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+async function hashUrl(url: string): Promise<string> {
+  const data = new TextEncoder().encode(url);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 // Internal token validation for cron/service-invoked functions
 function validateInternalToken(req: Request): Response | null {
   const token = req.headers.get('x-internal-token') || '';
@@ -765,12 +771,14 @@ async function handleReprocessJob(job: Record<string, unknown>, supabase: Return
     await supabase.from('media').delete().eq('tweet_id', tweetId);
 
     if (mediaItems.length > 0) {
-      await supabase.from('media').insert(
-        mediaItems.map((media, index) => ({
+      const mediaRows = await Promise.all(
+        mediaItems.map(async (media, index) => ({
           tweet_id: tweetId, kind: media.type, src_url: media.url,
+          src_url_hash: await hashUrl(media.url),
           width: media.width, height: media.height, duration_ms: media.duration, ordering: index
         }))
       );
+      await supabase.from('media').insert(mediaRows);
       await supabase.from('posts').update({ has_media: true }).eq('tweet_id', tweetId);
       await supabase.from('jobs').upsert({
         type: 'download_media', payload: { tweet_id: tweetId }, status: 'pending',

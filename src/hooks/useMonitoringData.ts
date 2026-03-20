@@ -45,7 +45,7 @@ async function fetchMonitoringPage({ pageParam = 0 }: { pageParam: number }): Pr
   if (!postsData || postsData.length === 0) return { entries: [], nextCursor: null };
 
   const tweetIds = postsData.map(p => p.tweet_id);
-  let statusByTweet: Record<string, Record<string, unknown>> = {};
+  const statusByTweet: Record<string, Record<string, unknown>> = {};
   try {
     const { data: rpcData, error: rpcError } = await supabase
       .rpc('get_post_pipeline_status', { tweet_ids: tweetIds });

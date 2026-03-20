@@ -6,6 +6,12 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+async function hashUrl(url: string): Promise<string> {
+  const data = new TextEncoder().encode(url);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -206,20 +212,21 @@ serve(async (req) => {
 
         // Insert media items
         if (mediaItems.length > 0) {
+          const mediaRows = await Promise.all(
+            mediaItems.map(async (media, index) => ({
+              tweet_id: tweetId,
+              kind: media.type,
+              src_url: media.url,
+              src_url_hash: await hashUrl(media.url),
+              width: media.width,
+              height: media.height,
+              duration_ms: media.duration,
+              ordering: index
+            }))
+          );
           const { error: mediaError } = await supabase
             .from('media')
-            .upsert(
-              mediaItems.map((media, index) => ({
-                tweet_id: tweetId,
-                kind: media.type,
-                src_url: media.url,
-                width: media.width,
-                height: media.height,
-                duration_ms: media.duration,
-                ordering: index
-              })),
-              { onConflict: 'tweet_id,ordering' }
-            );
+            .upsert(mediaRows, { onConflict: 'tweet_id,ordering' });
 
           if (mediaError) {
             console.error('Error inserting media:', mediaError);
