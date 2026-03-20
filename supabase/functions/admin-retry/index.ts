@@ -353,8 +353,8 @@ serve(async (req) => {
     });
 
   } catch (error) {
-    console.error('Retry error:', error);
-    return new Response(JSON.stringify({ error: error.message }), {
+    console.error(JSON.stringify({ function: 'admin-retry', action: 'error', error: (error as Error).message }));
+    return new Response(JSON.stringify({ error: (error as Error).message }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
