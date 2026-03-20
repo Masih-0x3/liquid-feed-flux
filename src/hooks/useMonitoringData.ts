@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -30,14 +30,19 @@ export interface PipelineEvent {
   meta?: Record<string, unknown>;
 }
 
-async function fetchMonitoring(): Promise<MonitoringEntry[]> {
+const PAGE_SIZE = 30;
+
+async function fetchMonitoringPage({ pageParam = 0 }: { pageParam: number }): Promise<{ entries: MonitoringEntry[]; nextCursor: number | null }> {
+  const from = pageParam * PAGE_SIZE;
+  const to = from + PAGE_SIZE - 1;
+
   const { data: postsData, error: postsError } = await supabase
     .from('posts')
     .select('tweet_id, text_original, text_translated, url, created_at, translated_at, has_media, lang_original, accounts!inner(handle, display_name)')
     .order('created_at', { ascending: false })
-    .limit(100);
+    .range(from, to);
   if (postsError) throw postsError;
-  if (!postsData || postsData.length === 0) return [];
+  if (!postsData || postsData.length === 0) return { entries: [], nextCursor: null };
 
   const tweetIds = postsData.map(p => p.tweet_id);
   let statusByTweet: Record<string, Record<string, unknown>> = {};
@@ -51,9 +56,10 @@ async function fetchMonitoring(): Promise<MonitoringEntry[]> {
     }
   } catch { /* RPC may not exist */ }
 
-  return postsData.map(post => {
+  const entries: MonitoringEntry[] = postsData.map(post => {
     const rpc = statusByTweet[post.tweet_id] as Record<string, unknown> | undefined;
-    const isTranslated = !!(rpc?.translated_at || post.translated_at || (post.text_translated && post.text_translated !== post.text_original));
+    const translatedAt = rpc?.translated_at || post.translated_at;
+    const isTranslated = !!(translatedAt || (post.text_translated && post.text_translated !== post.text_original));
     const deliveryStatus = (rpc?.delivery_status as string) || 'pending';
 
     return {
@@ -73,16 +79,24 @@ async function fetchMonitoring(): Promise<MonitoringEntry[]> {
       delivery_error: (rpc?.delivery_error as string) || '',
     };
   });
+
+  return {
+    entries,
+    nextCursor: postsData.length === PAGE_SIZE ? pageParam + 1 : null,
+  };
 }
 
 export function useMonitoringData() {
   const queryClient = useQueryClient();
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const query = useQuery({
+  const query = useInfiniteQuery({
     queryKey: ['monitoring'],
-    queryFn: fetchMonitoring,
+    queryFn: fetchMonitoringPage,
+    initialPageParam: 0,
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
     staleTime: 15_000,
+    gcTime: 5 * 60_000,
     refetchOnWindowFocus: false,
   });
 
@@ -90,7 +104,7 @@ export function useMonitoringData() {
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
       queryClient.invalidateQueries({ queryKey: ['monitoring'] });
-    }, 500);
+    }, 1000);
   }, [queryClient]);
 
   useEffect(() => {
@@ -105,5 +119,11 @@ export function useMonitoringData() {
     };
   }, [debouncedInvalidate]);
 
-  return query;
+  // Flatten pages into a single array for consumers
+  const allEntries = query.data?.pages.flatMap(p => p.entries) ?? [];
+
+  return {
+    ...query,
+    entries: allEntries,
+  };
 }
