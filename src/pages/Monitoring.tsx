@@ -117,7 +117,11 @@ export default function Monitoring() {
 
   const handleSelectTweet = (tweetId: string, checked: boolean) => {
     const updated = new Set(selectedTweets);
-    checked ? updated.add(tweetId) : updated.delete(tweetId);
+    if (checked) {
+      updated.add(tweetId);
+    } else {
+      updated.delete(tweetId);
+    }
     setSelectedTweets(updated);
   };
 
