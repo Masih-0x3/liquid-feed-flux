@@ -690,9 +690,11 @@ async function handleJobFailure(supabase: ReturnType<typeof createClient>, job: 
       const jitter = Math.floor(retryAfterSeconds * (Math.random() * 0.2));
       nextRunAt = new Date(Date.now() + (retryAfterSeconds + jitter) * 1000);
     } else {
-      const baseDelay = 60;
-      const delayMinutes = baseDelay * Math.pow(2, attempts);
-      nextRunAt = new Date(Date.now() + delayMinutes * 60 * 1000);
+      // Exponential backoff: 30s, 60s, 120s, 240s, 480s, ...
+      const baseDelaySec = 30;
+      const delaySec = baseDelaySec * Math.pow(2, attempts);
+      const jitterSec = Math.floor(delaySec * Math.random() * 0.2);
+      nextRunAt = new Date(Date.now() + (delaySec + jitterSec) * 1000);
     }
 
     await supabase.from('jobs').update({ 

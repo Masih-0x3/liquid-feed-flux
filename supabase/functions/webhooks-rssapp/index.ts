@@ -58,7 +58,7 @@ serve(async (req) => {
     }
 
     console.log('Payload keys:', typeof payload === 'object' && !Array.isArray(payload) ? Object.keys(payload as Record<string, unknown>) : typeof payload);
-    console.log('Payload type:', typeof payload);
+    
 
     // Parse RSS items from the payload - handle RSS.app webhook structure
     let items = [];

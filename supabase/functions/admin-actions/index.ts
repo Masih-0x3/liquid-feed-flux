@@ -58,6 +58,70 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
+// Schema validation for settings values
+function validateSettingsValue(key: string, value: unknown): string | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return `Value for "${key}" must be a JSON object`;
+  }
+  const v = value as Record<string, unknown>;
+
+  switch (key) {
+    case 'translation_prompt': {
+      if (v.system_prompt !== undefined && typeof v.system_prompt !== 'string') {
+        return 'translation_prompt.system_prompt must be a string';
+      }
+      if (v.system_prompt && (v.system_prompt as string).length > 5000) {
+        return 'translation_prompt.system_prompt must be ≤5000 characters';
+      }
+      break;
+    }
+    case 'openai_config': {
+      if (v.model !== undefined && typeof v.model !== 'string') {
+        return 'openai_config.model must be a string';
+      }
+      if (v.model && !/^[a-zA-Z0-9._-]{1,100}$/.test(v.model as string)) {
+        return 'openai_config.model contains invalid characters';
+      }
+      if (v.temperature !== undefined) {
+        if (typeof v.temperature !== 'number' || v.temperature < 0 || v.temperature > 2) {
+          return 'openai_config.temperature must be a number between 0 and 2';
+        }
+      }
+      if (v.max_tokens !== undefined) {
+        if (typeof v.max_tokens !== 'number' || v.max_tokens < 1 || v.max_tokens > 16000) {
+          return 'openai_config.max_tokens must be between 1 and 16000';
+        }
+      }
+      break;
+    }
+    case 'telegram_config': {
+      if (v.parse_mode !== undefined && !['Markdown', 'MarkdownV2', 'HTML', ''].includes(v.parse_mode as string)) {
+        return 'telegram_config.parse_mode must be Markdown, MarkdownV2, HTML, or empty';
+      }
+      break;
+    }
+    case 'message_template': {
+      if (v.template !== undefined && typeof v.template !== 'string') {
+        return 'message_template.template must be a string';
+      }
+      if (v.template && (v.template as string).length > 2000) {
+        return 'message_template.template must be ≤2000 characters';
+      }
+      if (v.include_source_link !== undefined && typeof v.include_source_link !== 'boolean') {
+        return 'message_template.include_source_link must be a boolean';
+      }
+      if (v.source_link_text !== undefined && typeof v.source_link_text !== 'string') {
+        return 'message_template.source_link_text must be a string';
+      }
+      if (v.custom_hashtags !== undefined && typeof v.custom_hashtags !== 'string') {
+        return 'message_template.custom_hashtags must be a string';
+      }
+      break;
+    }
+  }
+  return null;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
