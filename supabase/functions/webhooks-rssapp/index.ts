@@ -206,20 +206,21 @@ serve(async (req) => {
 
         // Insert media items
         if (mediaItems.length > 0) {
+          const mediaRows = await Promise.all(
+            mediaItems.map(async (media, index) => ({
+              tweet_id: tweetId,
+              kind: media.type,
+              src_url: media.url,
+              src_url_hash: await hashUrl(media.url),
+              width: media.width,
+              height: media.height,
+              duration_ms: media.duration,
+              ordering: index
+            }))
+          );
           const { error: mediaError } = await supabase
             .from('media')
-            .upsert(
-              mediaItems.map((media, index) => ({
-                tweet_id: tweetId,
-                kind: media.type,
-                src_url: media.url,
-                width: media.width,
-                height: media.height,
-                duration_ms: media.duration,
-                ordering: index
-              })),
-              { onConflict: 'tweet_id,ordering' }
-            );
+            .upsert(mediaRows, { onConflict: 'tweet_id,ordering' });
 
           if (mediaError) {
             console.error('Error inserting media:', mediaError);
