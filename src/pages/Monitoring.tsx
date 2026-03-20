@@ -177,7 +177,7 @@ export default function Monitoring() {
         <Card><CardContent className="p-4"><div className="text-center"><p className="text-2xl font-bold text-primary">{deliveredPosts}</p><p className="text-sm text-muted-foreground">Delivered</p></div></CardContent></Card>
         <Card><CardContent className="p-4"><div className="text-center"><p className="text-2xl font-bold text-warning">{needsTranslation}</p><p className="text-sm text-muted-foreground">Needs Translation</p>
           {needsTranslation > 0 && (
-            <Button size="sm" variant="outline" className="mt-2" onClick={() => entries.filter(e => !e.is_translated).forEach(e => handleRetryTranslation(e.tweet_id))}>Retry All</Button>
+            <Button size="sm" variant="outline" className="mt-2" onClick={() => entries.filter((e: MonitoringEntry) => !e.is_translated).forEach((e: MonitoringEntry) => handleRetryTranslation(e.tweet_id))}>Retry All</Button>
           )}
         </div></CardContent></Card>
       </div>
