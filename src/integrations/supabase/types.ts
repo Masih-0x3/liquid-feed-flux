@@ -684,6 +684,22 @@ export type Database = {
           title: string | null
           username: string | null
         }
+        Insert: {
+          admin_count?: number | null
+          chat_id?: string | null
+          member_count?: number | null
+          snapshot_at?: string | null
+          title?: string | null
+          username?: string | null
+        }
+        Update: {
+          admin_count?: number | null
+          chat_id?: string | null
+          member_count?: number | null
+          snapshot_at?: string | null
+          title?: string | null
+          username?: string | null
+        }
         Relationships: []
       }
       telegram_member_growth: {
