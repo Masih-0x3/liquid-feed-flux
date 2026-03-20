@@ -215,28 +215,24 @@ serve(async (req) => {
           }
         }
 
-        // Create translation job (English to Persian only)
-        const { data: newTranslateJob, error: translationJobError } = await supabase
+        // Create translation job with idempotency key
+        const { error: translationJobError } = await supabase
           .from('jobs')
-          .insert({
+          .upsert({
             type: 'translate',
-            payload: {
-              tweet_id: tweetId
-            },
+            payload: { tweet_id: tweetId },
             status: 'pending',
+            idempotency_key: `translate:${tweetId}`,
             next_run_at: new Date().toISOString()
-          })
-          .select()
-          .single();
+          }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
 
         if (translationJobError) {
           console.error('Error creating translation job:', translationJobError);
         } else {
           console.log('Translation job created for:', tweetId);
-          // Emit pipeline event: translate queued
           try {
             await supabase
-              .from('pipeline_events' as any)
+              .from('pipeline_events')
               .insert({
                 subject_type: 'post',
                 subject_id: tweetId,
@@ -250,18 +246,15 @@ serve(async (req) => {
 
         // Create media download job for tweets with media
         if (mediaItems.length > 0) {
-          const { data: newMediaJob, error: downloadJobError } = await supabase
+          const { error: downloadJobError } = await supabase
             .from('jobs')
-            .insert({
+            .upsert({
               type: 'download_media',
-              payload: {
-                tweet_id: tweetId
-              },
+              payload: { tweet_id: tweetId },
               status: 'pending',
+              idempotency_key: `download_media:${tweetId}`,
               next_run_at: new Date().toISOString()
-            })
-            .select()
-            .single();
+            }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
 
           if (downloadJobError) {
             console.error('Error creating media download job:', downloadJobError);
@@ -269,7 +262,7 @@ serve(async (req) => {
             console.log('Media download job created for:', tweetId);
             try {
               await supabase
-                .from('pipeline_events' as any)
+                .from('pipeline_events')
                 .insert({
                   subject_type: 'post',
                   subject_id: tweetId,

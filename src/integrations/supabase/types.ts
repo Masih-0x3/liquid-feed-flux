@@ -793,6 +793,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      reconcile_stuck_jobs: { Args: never; Returns: Json }
       retry_step: { Args: { step: string; tweet_id: string }; Returns: boolean }
     }
     Enums: {
