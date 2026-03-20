@@ -751,6 +751,7 @@ export type Database = {
         Args: { batch_limit?: number; retention_days?: number }
         Returns: Json
       }
+      get_dashboard_summary: { Args: never; Returns: Json }
       get_old_media: {
         Args: { days_old?: number }
         Returns: {

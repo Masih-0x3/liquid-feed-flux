@@ -73,7 +73,7 @@ function StatusIndicator({ entry }: { entry: MonitoringEntry }) {
 }
 
 export default function Monitoring() {
-  const { data: entries = [], isLoading } = useMonitoringData();
+  const { entries, isLoading, hasNextPage, fetchNextPage, isFetchingNextPage } = useMonitoringData();
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
   const [editingEntry, setEditingEntry] = useState<string | null>(null);
@@ -122,8 +122,8 @@ export default function Monitoring() {
   };
 
   const filteredEntries = entries
-    .filter(e => e.text_original.toLowerCase().includes(searchTerm.toLowerCase()) || e.text_translated.toLowerCase().includes(searchTerm.toLowerCase()) || e.account_handle.toLowerCase().includes(searchTerm.toLowerCase()))
-    .filter(e => {
+    .filter((e: MonitoringEntry) => e.text_original.toLowerCase().includes(searchTerm.toLowerCase()) || e.text_translated.toLowerCase().includes(searchTerm.toLowerCase()) || e.account_handle.toLowerCase().includes(searchTerm.toLowerCase()))
+    .filter((e: MonitoringEntry) => {
       switch (filter) {
         case 'needs-translation': return !e.is_translated;
         case 'delivery-pending': return e.delivery_status !== 'posted';
@@ -177,7 +177,7 @@ export default function Monitoring() {
         <Card><CardContent className="p-4"><div className="text-center"><p className="text-2xl font-bold text-primary">{deliveredPosts}</p><p className="text-sm text-muted-foreground">Delivered</p></div></CardContent></Card>
         <Card><CardContent className="p-4"><div className="text-center"><p className="text-2xl font-bold text-warning">{needsTranslation}</p><p className="text-sm text-muted-foreground">Needs Translation</p>
           {needsTranslation > 0 && (
-            <Button size="sm" variant="outline" className="mt-2" onClick={() => entries.filter(e => !e.is_translated).forEach(e => handleRetryTranslation(e.tweet_id))}>Retry All</Button>
+            <Button size="sm" variant="outline" className="mt-2" onClick={() => entries.filter((e: MonitoringEntry) => !e.is_translated).forEach((e: MonitoringEntry) => handleRetryTranslation(e.tweet_id))}>Retry All</Button>
           )}
         </div></CardContent></Card>
       </div>
@@ -283,6 +283,13 @@ export default function Monitoring() {
             </Card>
           );
         })}
+        {hasNextPage && (
+          <div className="flex justify-center pt-4">
+            <Button variant="outline" onClick={() => fetchNextPage()} disabled={isFetchingNextPage}>
+              {isFetchingNextPage ? <><RefreshCw className="w-4 h-4 mr-2 animate-spin" />Loading...</> : 'Load More'}
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Timeline Drawer */}

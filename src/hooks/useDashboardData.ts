@@ -25,71 +25,53 @@ export interface ActivityItem {
   status: 'success' | 'pending' | 'failed';
 }
 
+interface RpcResult {
+  metrics: {
+    posts_ingested: number;
+    posts_translated: number;
+    posts_delivered: number;
+    failed_jobs: number;
+  };
+  health: {
+    success_rate: number;
+    avg_latency: number;
+    active_feeds: number;
+    queue_size: number;
+    is_online: boolean;
+  };
+  recent_posts: Array<{
+    tweet_id: string;
+    text_original: string | null;
+    created_at: string;
+    text_translated: string | null;
+    account_handle: string;
+  }>;
+}
+
 async function fetchDashboard() {
-  const twentyFourHoursAgo = new Date();
-  twentyFourHoursAgo.setHours(twentyFourHoursAgo.getHours() - 24);
-  const since = twentyFourHoursAgo.toISOString();
+  const { data, error } = await supabase.rpc('get_dashboard_summary');
+  if (error) throw error;
 
-  const [postsResult, deliveriesResult, jobsResult, recentResult, accountsResult] = await Promise.all([
-    supabase.from('posts').select('tweet_id, text_translated, created_at').gte('created_at', since),
-    supabase.from('deliveries').select('subject_id, status, created_at, subject_type').gte('created_at', since),
-    supabase.from('jobs').select('status, created_at').gte('created_at', since),
-    supabase.from('posts').select('tweet_id, text_original, created_at, text_translated, accounts(handle)').order('created_at', { ascending: false }).limit(10),
-    supabase.from('accounts').select('id').eq('enabled', true),
-  ]);
-
-  if (postsResult.error) throw postsResult.error;
-  if (deliveriesResult.error) throw deliveriesResult.error;
-  if (jobsResult.error) throw jobsResult.error;
-
-  const posts = postsResult.data || [];
-  const deliveries = deliveriesResult.data || [];
-  const jobs = jobsResult.data || [];
-  const recentPosts = recentResult.data || [];
-  const accounts = accountsResult.data || [];
-
-  const translatedPosts = posts.filter(p => p.text_translated);
-  const successfulDeliveries = deliveries.filter(d => d.status === 'posted');
-  const failedJobs = jobs.filter(j => j.status === 'failed');
-  const pendingJobs = jobs.filter(j => j.status === 'pending');
+  const rpc = data as unknown as RpcResult;
 
   const metrics: DashboardMetrics = {
-    postsIngested: posts.length,
-    postsTranslated: translatedPosts.length,
-    postsDelivered: successfulDeliveries.length,
-    failedJobs: failedJobs.length,
+    postsIngested: rpc.metrics.posts_ingested,
+    postsTranslated: rpc.metrics.posts_translated,
+    postsDelivered: rpc.metrics.posts_delivered,
+    failedJobs: rpc.metrics.failed_jobs,
   };
-
-  const totalJobs = jobs.length;
-  const successfulJobs = jobs.filter(j => j.status === 'completed').length;
-  const successRate = totalJobs > 0 ? (successfulJobs / totalJobs) * 100 : 100;
-
-  // Compute avg latency from posts → deliveries
-  const postCreatedMap = new Map<string, string>();
-  posts.forEach(p => { if (p.tweet_id && p.created_at) postCreatedMap.set(p.tweet_id, p.created_at); });
-  const postedDeliveries = deliveries.filter(d => d.status === 'posted' && d.subject_type === 'post');
-  const latencies = postedDeliveries
-    .map(d => {
-      const pc = postCreatedMap.get(d.subject_id);
-      if (!pc) return null;
-      const diff = new Date(d.created_at).getTime() - new Date(pc).getTime();
-      return diff > 0 && isFinite(diff) ? diff / 1000 : null;
-    })
-    .filter((s): s is number => s !== null);
-
-  const avgLatency = latencies.length > 0 ? latencies.reduce((a, b) => a + b, 0) / latencies.length : 0;
 
   const health: PipelineHealth = {
-    successRate: Math.round(successRate * 10) / 10,
-    avgLatency: Math.round(avgLatency * 10) / 10,
-    activeFeeds: accounts.length,
-    queueSize: pendingJobs.length,
-    isOnline: true,
+    successRate: rpc.health.success_rate,
+    avgLatency: rpc.health.avg_latency,
+    activeFeeds: rpc.health.active_feeds,
+    queueSize: rpc.health.queue_size,
+    isOnline: rpc.health.is_online,
   };
 
-  const activities: ActivityItem[] = recentPosts.map(post => ({
+  const activities: ActivityItem[] = (rpc.recent_posts || []).map(post => ({
     id: post.tweet_id,
-    title: `New post from @${(post.accounts as { handle: string })?.handle || 'unknown'}`,
+    title: `New post from @${post.account_handle || 'unknown'}`,
     description: (post.text_original?.substring(0, 100) || 'No content') + '...',
     timestamp: post.created_at,
     status: post.text_translated ? 'success' as const : 'pending' as const,
@@ -106,6 +88,7 @@ export function useDashboardData() {
     queryKey: ['dashboard'],
     queryFn: fetchDashboard,
     staleTime: 30_000,
+    gcTime: 5 * 60_000,
     refetchOnWindowFocus: false,
   });
 
@@ -113,7 +96,7 @@ export function useDashboardData() {
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-    }, 500);
+    }, 2000);
   }, [queryClient]);
 
   useEffect(() => {
