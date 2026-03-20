@@ -91,6 +91,13 @@ serve(async (req) => {
         if (!allowedKeys.includes(key)) {
           return jsonResponse({ error: `Setting key "${key}" is not allowed` }, 400);
         }
+
+        // Validate value shape per key
+        const validationError = validateSettingsValue(key, value);
+        if (validationError) {
+          return jsonResponse({ error: validationError }, 400);
+        }
+
         const { error } = await supabase
           .from('settings')
           .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' });
