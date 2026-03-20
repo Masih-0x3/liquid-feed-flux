@@ -73,7 +73,7 @@ function StatusIndicator({ entry }: { entry: MonitoringEntry }) {
 }
 
 export default function Monitoring() {
-  const { data: entries = [], isLoading } = useMonitoringData();
+  const { entries, isLoading, hasNextPage, fetchNextPage, isFetchingNextPage } = useMonitoringData();
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
   const [editingEntry, setEditingEntry] = useState<string | null>(null);
