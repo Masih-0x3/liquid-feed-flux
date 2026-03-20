@@ -242,6 +242,7 @@ serve(async (req) => {
             type: 'translate',
             payload: { tweet_id: tweetId },
             status: 'pending',
+            priority: 10,
             idempotency_key: `translate:${tweetId}`,
             next_run_at: new Date().toISOString()
           }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
