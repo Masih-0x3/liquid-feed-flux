@@ -40,11 +40,24 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    console.log('RSS.app webhook received');
+    console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'received' }));
     
-    const payload = await req.json();
-    console.log('Full webhook payload:', JSON.stringify(payload, null, 2));
-    console.log('Payload keys:', Object.keys(payload));
+    let payload: unknown;
+    try {
+      payload = await req.json();
+    } catch (_e) {
+      return new Response(JSON.stringify({ error: 'Invalid JSON body' }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (payload === null || payload === undefined) {
+      return new Response(JSON.stringify({ error: 'Empty payload' }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    console.log('Payload keys:', typeof payload === 'object' && !Array.isArray(payload) ? Object.keys(payload as Record<string, unknown>) : typeof payload);
     console.log('Payload type:', typeof payload);
 
     // Parse RSS items from the payload - handle RSS.app webhook structure
