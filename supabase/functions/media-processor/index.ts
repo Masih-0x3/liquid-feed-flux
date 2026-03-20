@@ -55,7 +55,7 @@ serve(async (req) => {
             status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
         }
-        return await downloadMediaForTweet(supabase, tweet_id);
+        return await downloadMediaForTweet(supabase, tweet_id, dry_run === true);
       case 'cleanup_old_media':
         return await cleanupOldMedia(supabase, dry_run === true);
       case 'get_media_info':
