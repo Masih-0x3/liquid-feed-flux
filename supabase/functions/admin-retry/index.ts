@@ -73,6 +73,8 @@ serve(async (req) => {
     const body = await req.json();
     const { delivery_id, action, tweet_id, post, template, settings } = body;
 
+    console.log(JSON.stringify({ function: 'admin-retry', action: action || 'retry_delivery', admin_user: authResult.userId }));
+
     // Handle resend delivery action
     if (action === 'resend_delivery') {
       if (!tweet_id) {
