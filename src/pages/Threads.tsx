@@ -1,12 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
-import { Link2, Split, Merge, Eye, Send, Loader2, MessageSquare } from 'lucide-react';
+import { Link2, Eye, Send, Loader2, MessageSquare } from 'lucide-react';
 
 interface Thread {
   id: string;
@@ -14,9 +14,7 @@ interface Thread {
   tweet_ids: string[];
   confidence: number;
   created_at: string;
-  accounts: {
-    handle: string;
-  };
+  accounts: { handle: string };
 }
 
 interface Post {
@@ -34,55 +32,36 @@ export default function Threads() {
   const [loading, setLoading] = useState(true);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
-  useEffect(() => {
-    fetchThreads();
-  }, []);
-
-  const fetchThreads = async () => {
+  const fetchThreads = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('threads')
-        .select(`
-          *,
-          accounts (
-            handle
-          )
-        `)
+        .select('id, account_id, tweet_ids, confidence, created_at, accounts(handle)')
         .order('created_at', { ascending: false });
-
       if (error) throw error;
-      setThreads(data || []);
+      setThreads((data as Thread[]) || []);
     } catch (error) {
       console.error('Error fetching threads:', error);
-      toast({
-        title: "Error loading threads",
-        description: "Failed to fetch threads. Please try again.",
-        variant: "destructive",
-      });
+      toast({ title: 'Error loading threads', variant: 'destructive' });
     } finally {
       setLoading(false);
     }
-  };
+  }, [toast]);
+
+  useEffect(() => { fetchThreads(); }, [fetchThreads]);
 
   const fetchThreadPosts = async (thread: Thread) => {
-    if (!thread.tweet_ids || thread.tweet_ids.length === 0) return;
-
+    if (!thread.tweet_ids?.length) return;
     try {
       const { data, error } = await supabase
         .from('posts')
         .select('tweet_id, text_original, text_translated, created_at')
         .in('tweet_id', thread.tweet_ids)
         .order('created_at', { ascending: true });
-
       if (error) throw error;
       setThreadPosts(data || []);
-    } catch (error) {
-      console.error('Error fetching thread posts:', error);
-      toast({
-        title: "Error loading thread posts",
-        description: "Failed to fetch posts for this thread.",
-        variant: "destructive",
-      });
+    } catch {
+      toast({ title: 'Error loading thread posts', variant: 'destructive' });
     }
   };
 
@@ -92,29 +71,15 @@ export default function Threads() {
     await fetchThreadPosts(thread);
   };
 
-  // Split and Merge are not yet implemented (Issue 28/30)
-  // Buttons have been hidden until backend support is ready
-
   const handlePostThread = async (threadId: string) => {
     try {
-      // Create delivery job for the thread
-      const { error } = await supabase
-        .from('deliveries')
-        .insert([{
-          subject_type: 'thread',
-          subject_id: threadId,
-          status: 'pending'
-        }]);
-
-      if (error) throw error;
-      toast({ title: "Thread queued for delivery" });
-    } catch (error) {
-      console.error('Error posting thread:', error);
-      toast({
-        title: "Error posting thread",
-        description: "Please try again.",
-        variant: "destructive",
+      const { error } = await supabase.functions.invoke('admin-actions', {
+        body: { action: 'post_thread', thread_id: threadId },
       });
+      if (error) throw error;
+      toast({ title: 'Thread queued for delivery' });
+    } catch {
+      toast({ title: 'Error posting thread', variant: 'destructive' });
     }
   };
 
@@ -124,15 +89,11 @@ export default function Threads() {
     return 'status-error';
   };
 
-  const assembleThreadBody = (posts: Post[]) => {
-    return posts
-      .map((post, index) => `${index + 1}. ${post.text_translated || post.text_original}`)
-      .join('\n\n');
-  };
+  const assembleThreadBody = (posts: Post[]) =>
+    posts.map((p, i) => `${i + 1}. ${p.text_translated || p.text_original}`).join('\n\n');
 
   return (
     <div className="space-y-6 animate-fade-in-up">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-display font-bold text-glass-foreground">Threads</h1>
@@ -140,16 +101,13 @@ export default function Threads() {
         </div>
       </div>
 
-      {/* Threads Table */}
       <Card className="glass-card">
         <CardHeader>
           <CardTitle className="text-xl font-display text-glass-foreground flex items-center">
             <Link2 className="w-5 h-5 mr-2" />
             Thread Groups
           </CardTitle>
-          <CardDescription>
-            Automatically detected conversation threads
-          </CardDescription>
+          <CardDescription>Automatically detected conversation threads</CardDescription>
         </CardHeader>
         <CardContent>
           {loading ? (
@@ -168,11 +126,9 @@ export default function Threads() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {threads.map((thread) => (
+                {threads.map(thread => (
                   <TableRow key={thread.id} className="border-glass-border hover:bg-glass-border/20">
-                    <TableCell className="font-medium text-glass-foreground">
-                      @{(thread.accounts as any)?.handle || 'unknown'}
-                    </TableCell>
+                    <TableCell className="font-medium text-glass-foreground">@{thread.accounts?.handle || 'unknown'}</TableCell>
                     <TableCell className="text-muted-foreground">
                       <div className="flex items-center space-x-2">
                         <MessageSquare className="w-4 h-4" />
@@ -184,25 +140,13 @@ export default function Threads() {
                         {Math.round((thread.confidence || 0) * 100)}%
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {new Date(thread.created_at).toLocaleDateString()}
-                    </TableCell>
+                    <TableCell className="text-muted-foreground">{new Date(thread.created_at).toLocaleDateString()}</TableCell>
                     <TableCell>
                       <div className="flex items-center space-x-2">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => handlePreview(thread)}
-                          className="glass-button h-8 w-8 p-0"
-                        >
+                        <Button size="sm" variant="ghost" onClick={() => handlePreview(thread)} className="glass-button h-8 w-8 p-0">
                           <Eye className="w-3 h-3" />
                         </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => handlePostThread(thread.id)}
-                          className="glass-button h-8 w-8 p-0 text-success hover:bg-success/20"
-                        >
+                        <Button size="sm" variant="ghost" onClick={() => handlePostThread(thread.id)} className="glass-button h-8 w-8 p-0 text-success hover:bg-success/20">
                           <Send className="w-3 h-3" />
                         </Button>
                       </div>
@@ -221,12 +165,11 @@ export default function Threads() {
         </CardContent>
       </Card>
 
-      {/* Preview Dialog */}
       <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
         <DialogContent className="glass-panel border-glass-border max-w-2xl max-h-[80vh] overflow-hidden">
           <DialogHeader>
             <DialogTitle className="text-glass-foreground">
-              Thread Preview - @{(selectedThread?.accounts as any)?.handle}
+              Thread Preview - @{selectedThread?.accounts?.handle}
             </DialogTitle>
             <DialogDescription>
               Preview of assembled thread content ({threadPosts.length} posts)
@@ -235,47 +178,27 @@ export default function Threads() {
           <div className="space-y-4 overflow-y-auto max-h-96">
             {threadPosts.length > 0 ? (
               <>
-                {/* Individual Posts */}
                 <div className="space-y-3">
                   <h4 className="font-medium text-glass-foreground">Individual Posts:</h4>
                   {threadPosts.map((post, index) => (
                     <div key={post.tweet_id} className="glass-panel p-3 rounded-lg">
                       <div className="flex items-center justify-between mb-2">
-                        <Badge variant="outline" className="text-xs">
-                          Post {index + 1}
-                        </Badge>
-                        <span className="text-xs text-muted-foreground">
-                          {new Date(post.created_at).toLocaleString()}
-                        </span>
+                        <Badge variant="outline" className="text-xs">Post {index + 1}</Badge>
+                        <span className="text-xs text-muted-foreground">{new Date(post.created_at).toLocaleString()}</span>
                       </div>
-                      <p className="text-sm text-glass-foreground mb-2">
-                        <strong>Original:</strong> {post.text_original}
-                      </p>
-                      {post.text_translated && (
-                        <p className="text-sm text-muted-foreground">
-                          <strong>Translated:</strong> {post.text_translated}
-                        </p>
-                      )}
+                      <p className="text-sm text-glass-foreground mb-2"><strong>Original:</strong> {post.text_original}</p>
+                      {post.text_translated && <p className="text-sm text-muted-foreground"><strong>Translated:</strong> {post.text_translated}</p>}
                     </div>
                   ))}
                 </div>
-
-                {/* Assembled Thread */}
                 <div className="border-t border-glass-border pt-4">
                   <h4 className="font-medium text-glass-foreground mb-3">Assembled Thread:</h4>
                   <div className="glass-panel p-4 rounded-lg">
-                    <pre className="whitespace-pre-wrap text-sm text-glass-foreground">
-                      {assembleThreadBody(threadPosts)}
-                    </pre>
+                    <pre className="whitespace-pre-wrap text-sm text-glass-foreground">{assembleThreadBody(threadPosts)}</pre>
                   </div>
                 </div>
-
-                {/* Actions */}
                 <div className="flex space-x-2 pt-4">
-                  <Button
-                    onClick={() => selectedThread && handlePostThread(selectedThread.id)}
-                    className="bg-gradient-primary hover:opacity-90 text-white flex-1"
-                  >
+                  <Button onClick={() => selectedThread && handlePostThread(selectedThread.id)} className="bg-gradient-primary hover:opacity-90 text-white flex-1">
                     <Send className="w-4 h-4 mr-2" />
                     Post Thread
                   </Button>
