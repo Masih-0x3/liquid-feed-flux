@@ -283,6 +283,13 @@ export default function Monitoring() {
             </Card>
           );
         })}
+        {hasNextPage && (
+          <div className="flex justify-center pt-4">
+            <Button variant="outline" onClick={() => fetchNextPage()} disabled={isFetchingNextPage}>
+              {isFetchingNextPage ? <><RefreshCw className="w-4 h-4 mr-2 animate-spin" />Loading...</> : 'Load More'}
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Timeline Drawer */}
