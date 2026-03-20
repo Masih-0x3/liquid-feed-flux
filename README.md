@@ -1,73 +1,107 @@
-# Welcome to your Lovable project
+# Liquid Feed Flux
 
-## Project info
+RSS-to-Telegram content pipeline with an admin dashboard. Ingests tweets via RSS.app webhooks, translates them (OpenAI, EN→FA), and delivers formatted messages to Telegram channels — with full observability.
 
-**URL**: https://lovable.dev/projects/341f9337-c9ce-42d9-bbc1-fea79f039a28
+## Architecture
 
-## How can I edit this code?
+```
+RSS.app Webhook
+  ↓
+webhooks-rssapp (Edge Function)
+  ↓ creates jobs
+worker (Edge Function, cron-triggered)
+  ├─ translate  → OpenAI API → posts.text_translated
+  ├─ deliver    → Telegram Bot API → deliveries.posted_at
+  └─ download_media → fetch + Supabase Storage
+  ↓ audit trail
+pipeline_events table
+  ↓
+React Admin Dashboard (Vite + shadcn/ui)
+  ├─ Dashboard   — 24h metrics, health, recent posts
+  ├─ Monitoring  — Per-post pipeline stepper, filters, detail drawer
+  ├─ Threads     — Grouped tweet threads
+  └─ Settings    — Translation prompts, message templates, accounts
+```
 
-There are several ways of editing your application.
+## Tech Stack
 
-**Use Lovable**
+| Layer | Technology |
+|-------|-----------|
+| Frontend | React 18, Vite, TypeScript, Tailwind CSS, shadcn/ui |
+| State | TanStack Query, Supabase Realtime |
+| Backend | Supabase (Postgres, Edge Functions, Storage, Auth) |
+| External APIs | OpenAI (translation), Telegram Bot API (delivery), RSS.app (ingestion) |
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/341f9337-c9ce-42d9-bbc1-fea79f039a28) and start prompting.
+## Edge Functions
 
-Changes made via Lovable will be committed automatically to this repo.
+| Function | Trigger | Purpose |
+|----------|---------|---------|
+| `webhooks-rssapp` | HTTP (RSS.app webhook) | Ingests posts, creates translate/media jobs |
+| `worker` | Cron (every minute) | Processes job queue: translate, deliver, download_media |
+| `admin-retry` | HTTP (admin UI) | Resend delivery, retry failed, test template/webhook |
+| `admin-actions` | HTTP (admin UI) | Additional admin operations |
+| `media-processor` | HTTP (internal) | Download media, cleanup old files, get media info |
+| `media-cleanup` | Cron | Scheduled media file cleanup |
+| `db-cleanup` | Cron | Purge old jobs, pipeline events, cron/HTTP logs |
 
-**Use your preferred IDE**
+## Database
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+Key tables: `posts`, `media`, `jobs`, `deliveries`, `pipeline_events`, `dead_letter_jobs`, `accounts`, `feeds`, `settings`, `threads`, `moderation_events`, `user_roles`.
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+Telegram analytics: `telegram_channel_stats`, `telegram_daily_stats`, `telegram_member_events`, `telegram_message_analytics`.
 
-Follow these steps:
+RPCs: `claim_jobs`, `get_post_pipeline_status`, `retry_step`, `get_system_health`, `get_dashboard_summary`, `reconcile_stuck_jobs`, `cleanup_old_data`, `calculate_growth_rate`.
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+## Local Development
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
+```bash
+git clone <repo-url>
+cd <project>
+npm install
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+### Prerequisites
+- Node.js 20+
+- npm 10.8+ (pinned via `packageManager` in package.json)
+- Supabase project (connected via `.env`)
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+### Environment Variables
 
-**Use GitHub Codespaces**
+Populated automatically by Lovable/Supabase integration:
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_PUBLISHABLE_KEY`
+- `VITE_SUPABASE_PROJECT_ID`
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+### Edge Function Secrets (Supabase Dashboard → Settings → Edge Functions)
 
-## What technologies are used for this project?
+| Secret | Purpose |
+|--------|---------|
+| `OPENAI_API_KEY` | Translation via OpenAI API |
+| `TELEGRAM_BOT_TOKEN` | Telegram Bot API authentication |
+| `TELEGRAM_CHAT_ID` | Target Telegram channel |
+| `WEBHOOK_SHARED_SECRET` | Internal function-to-function auth |
 
-This project is built with:
+## Scripts
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+| Command | Purpose |
+|---------|---------|
+| `npm run dev` | Start dev server |
+| `npm run build` | Production build |
+| `npm run lint` | ESLint |
+| `npm test` | Run Vitest tests |
+| `npm run test:watch` | Watch mode tests |
 
-## How can I deploy this project?
+## CI/CD
 
-Simply open [Lovable](https://lovable.dev/projects/341f9337-c9ce-42d9-bbc1-fea79f039a28) and click on Share -> Publish.
+GitHub Actions runs lint, test, and build on push/PR to `main`. Pre-commit hooks (husky + lint-staged) run ESLint and TypeScript checks on staged files.
 
-## Can I connect a custom domain to my Lovable project?
+## Deployment
 
-Yes, you can!
+Push to `main` triggers auto-deploy via Lovable. Edge functions deploy automatically. Alternatively, publish from the Lovable dashboard.
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+## Documentation
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+- `docs/todo_monitoring.md` — Pipeline architecture and monitoring details
+- `docs/operations/runbooks.md` — Queue management, prompt/template management, secret rotation, incident response
+- `docs/operations/backup-restore.md` — Backup and restore procedures
