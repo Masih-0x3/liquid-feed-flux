@@ -50,17 +50,13 @@
 **Issue 11**: Telegram config inconsistency.
 - Worker uses env vars for `bot_token` and `chat_id`; admin-retry test_template also uses env vars. This is already consistent. Mark as done after confirming `parse_mode` is read from settings.
 
-### Batch 2: Config Validation & Edge Function Hardening (3 items)
+### Batch 2: Config Validation & Edge Function Hardening (3 items) — ✅ DONE
 
-**Issue 12**: No runtime config validation.
-- Add Zod schemas in `admin-actions` `save_settings` handler to validate each settings key's shape before saving.
+**Issue 12**: ✅ Settings validation added to `admin-actions` with per-key schema checks (type, range, length).
 
-**Issue 13**: Edge functions don't validate request payloads.
-- Add basic JSON validation to `worker` (already somewhat handled), `webhooks-rssapp`, `media-processor`, `media-cleanup`.
-- Return structured 400 errors.
+**Issue 13**: ✅ Payload validation added to `webhooks-rssapp` (JSON parse guard), `db-cleanup` (clamped numeric params). `media-processor` already validated.
 
-**Issue 21**: No standardized retry policy.
-- Worker's `handleJobFailure` needs review. Centralize retry rules: max attempts per type, exponential backoff, Telegram 429 `retry_after` handling, dead-letter after max attempts.
+**Issue 21**: ✅ Retry policy standardized: per-type MAX_ATTEMPTS, exponential backoff (30s base), Telegram 429 `retry_after` handling, dead-lettering after max attempts.
 
 ### Batch 3: Queue Reliability (3 items)
 

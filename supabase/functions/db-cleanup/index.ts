@@ -37,7 +37,10 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    const { retention_days = 7, batch_limit = 5000, dry_run = false } = await req.json().catch(() => ({}));
+    const body = await req.json().catch(() => ({}));
+    const retention_days = typeof body.retention_days === 'number' ? Math.max(1, Math.min(365, Math.floor(body.retention_days))) : 7;
+    const batch_limit = typeof body.batch_limit === 'number' ? Math.max(100, Math.min(50000, Math.floor(body.batch_limit))) : 5000;
+    const dry_run = body.dry_run === true;
     console.log(JSON.stringify({ function: 'db-cleanup', action: 'start', retention_days, batch_limit, dry_run }));
 
     if (dry_run) {
