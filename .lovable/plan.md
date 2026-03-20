@@ -38,10 +38,11 @@
 
 ## Execution Plan
 
-| Round | Scope | Items |
-|-------|-------|-------|
-| B | Tooling | 49, 51, 52, 53 |
-| C | Docs & hardening | 16, 23, 33, 34, 54, 55 |
+| Round | Scope | Items | Status |
+|-------|-------|-------|--------|
+| A | Schema, lint, dedup | 14, 15, 24, 42, 48 | ✅ Done |
+| B | Tooling | 49, 51, 52, 53 | ✅ Done |
+| C | Docs & hardening | 16, 23, 33, 34, 54, 55 | Next |
 
 ### Out of scope (manual/external)
 - **Issue 1** (Git history scrub): requires `git filter-branch` or BFG outside Lovable.
