@@ -331,6 +331,18 @@ serve(async (req) => {
   }
 });
 
+function extractAuthorFromUrl(url: string): string | null {
+  if (!url) return null;
+  const match = url.match(/(?:twitter\.com|x\.com)\/([^/]+)/i);
+  if (match && match[1]) {
+    const handle = match[1].toLowerCase();
+    // Skip non-author paths
+    if (['i', 'search', 'explore', 'home', 'settings', 'messages'].includes(handle)) return null;
+    return handle;
+  }
+  return null;
+}
+
 function parseMediaFromRSSItem(item: any, text?: string): Array<{type: string, url: string, width?: number, height?: number, duration?: number}> {
   const mediaItems: Array<{type: string, url: string, width?: number, height?: number, duration?: number}> = [];
   
