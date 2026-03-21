@@ -323,7 +323,7 @@ async function handleTranslateJob(job: Record<string, unknown>, supabase: Return
 
     const { data: post, error } = await supabase
       .from('posts')
-      .select('tweet_id, text_original, account_id, url, tweeted_at, has_media')
+      .select('tweet_id, text_original, account_id, url, tweeted_at, has_media, author_handle')
       .eq('tweet_id', tweetId)
       .single();
 
@@ -335,41 +335,152 @@ async function handleTranslateJob(job: Record<string, unknown>, supabase: Return
       throw new Error('No original text to translate');
     }
 
-    // Use config from settings table
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${openaiApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: config.openaiModel,
-        messages: [
-          { role: 'system', content: config.translationPrompt },
-          { role: 'user', content: post.text_original }
-        ],
-        temperature: config.openaiTemperature,
-        max_tokens: 1000
-      }),
-    });
+    const filterEnabled = config.contentFilter.enabled;
+    const authorHandle = post.author_handle as string | null;
 
-    if (!response.ok) {
-      const errorData = await response.text();
-      throw new Error(`OpenAI API error: ${response.status} ${errorData}`);
+    // Build OpenAI request — if filtering enabled, use tool calling for combined translate+score
+    let translatedText = '';
+    let importanceScore: number | null = null;
+    let importanceTags: string[] | null = null;
+    let data: Record<string, unknown>;
+
+    if (filterEnabled) {
+      // Combined translate + score via tool calling
+      const scoringGuidelines = config.contentFilter.editorial_guidelines || '';
+      const priorityTopics = config.contentFilter.priority_topics.join(', ') || 'none specified';
+      const lowPriorityTopics = config.contentFilter.low_priority_topics.join(', ') || 'none specified';
+
+      const systemPrompt = `${config.translationPrompt}
+
+ADDITIONAL TASK: After translating, you MUST also call the "classify_importance" tool to score this news item's importance on a scale of 1-10.
+
+Scoring guidelines from the editor:
+${scoringGuidelines || 'Use your best judgment for news importance.'}
+
+High-priority topics (boost score): ${priorityTopics}
+Low-priority topics (lower score): ${lowPriorityTopics}
+
+Score 8-10: Major breaking news, critical geopolitical events, wars, major world events
+Score 5-7: Notable news, regional events, significant developments
+Score 1-4: Minor news, routine updates, entertainment, sports, economy (unless directly related to high-priority topics)`;
+
+      const tools = [{
+        type: 'function',
+        function: {
+          name: 'classify_importance',
+          description: 'Classify the importance of this news item after translating it',
+          parameters: {
+            type: 'object',
+            properties: {
+              translated_text: { type: 'string', description: 'The Persian translation of the original text' },
+              importance_score: { type: 'integer', description: 'Importance score 1-10', minimum: 1, maximum: 10 },
+              tags: { type: 'array', items: { type: 'string' }, description: 'Topic tags (e.g., war, iran, economy, politics)' },
+              reasoning: { type: 'string', description: 'Brief reasoning for the score' }
+            },
+            required: ['translated_text', 'importance_score', 'tags']
+          }
+        }
+      }];
+
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${openaiApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: config.openaiModel,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: post.text_original }
+          ],
+          tools,
+          tool_choice: { type: 'function', function: { name: 'classify_importance' } },
+          max_tokens: 2000
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.text();
+        throw new Error(`OpenAI API error: ${response.status} ${errorData}`);
+      }
+
+      data = await response.json();
+      
+      // Extract from tool call response
+      const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+      if (toolCall?.function?.arguments) {
+        try {
+          const args = JSON.parse(toolCall.function.arguments);
+          translatedText = args.translated_text || '';
+          importanceScore = Math.max(1, Math.min(10, args.importance_score || 5));
+          importanceTags = args.tags || [];
+          console.log(JSON.stringify({ function: 'worker', action: 'scored', tweet_id: tweetId, score: importanceScore, tags: importanceTags, reasoning: args.reasoning }));
+        } catch (parseErr) {
+          console.warn('Failed to parse tool call, falling back to content:', (parseErr as Error).message);
+          translatedText = data.choices?.[0]?.message?.content ?? '';
+        }
+      } else {
+        // Fallback: model returned content instead of tool call
+        translatedText = data.choices?.[0]?.message?.content ?? '';
+      }
+    } else {
+      // No filtering — simple translation
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${openaiApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: config.openaiModel,
+          messages: [
+            { role: 'system', content: config.translationPrompt },
+            { role: 'user', content: post.text_original }
+          ],
+          temperature: config.openaiTemperature,
+          max_tokens: 1000
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.text();
+        throw new Error(`OpenAI API error: ${response.status} ${errorData}`);
+      }
+
+      data = await response.json();
+      translatedText = data.choices?.[0]?.message?.content ?? '';
     }
-
-    const data = await response.json();
-    const translatedText = data.choices?.[0]?.message?.content ?? '';
 
     const nowIso = new Date().toISOString();
     const resultMeta = {
       model: config.openaiModel,
       usage: data.usage ?? null,
-      finished_at: nowIso
+      finished_at: nowIso,
+      importance_score: importanceScore,
     };
     try {
       await supabase.from('jobs').update({ result_meta: resultMeta }).eq('id', job.id);
     } catch (_e) { /* best-effort */ }
+
+    // Determine delivery decision based on content filter
+    let deliveryDecision = 'deliver';
+    if (filterEnabled && importanceScore !== null) {
+      // Check author-specific rules first
+      const authorRule = authorHandle ? config.contentFilter.author_rules[authorHandle] : null;
+      
+      if (authorRule?.rule === 'always_deliver') {
+        deliveryDecision = 'deliver';
+      } else if (authorRule?.rule === 'always_skip') {
+        deliveryDecision = 'skip';
+      } else {
+        const threshold = authorRule?.rule === 'custom_threshold' && authorRule.threshold != null
+          ? authorRule.threshold
+          : config.contentFilter.default_threshold;
+        deliveryDecision = importanceScore >= threshold ? 'deliver' : 'skip';
+      }
+      console.log(JSON.stringify({ function: 'worker', action: 'filter_decision', tweet_id: tweetId, decision: deliveryDecision, score: importanceScore, threshold: config.contentFilter.default_threshold, author: authorHandle }));
+    }
 
     const { error: updateError } = await supabase
       .from('posts')
@@ -379,43 +490,52 @@ async function handleTranslateJob(job: Record<string, unknown>, supabase: Return
         translated_at: nowIso,
         translation_model: config.openaiModel,
         translation_tokens: data?.usage?.total_tokens ?? null,
-        translation_duration_ms: job.started_at ? (Date.now() - new Date(job.started_at as string).getTime()) : null
+        translation_duration_ms: job.started_at ? (Date.now() - new Date(job.started_at as string).getTime()) : null,
+        importance_score: importanceScore,
+        importance_tags: importanceTags,
+        delivery_decision: deliveryDecision,
       })
       .eq('tweet_id', tweetId);
 
     if (updateError) throw updateError;
 
-    // Create delivery job with idempotency key
-    const idempotencyKey = `deliver:${tweetId}`;
-    const { error: deliveryJobError } = await supabase
-      .from('jobs')
-      .upsert({
-        type: 'deliver',
-        payload: { tweet_id: tweetId },
-        status: 'pending',
-        idempotency_key: idempotencyKey,
-        next_run_at: new Date().toISOString()
-      }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+    // Only create delivery job if decision is 'deliver'
+    if (deliveryDecision === 'deliver') {
+      const idempotencyKey = `deliver:${tweetId}`;
+      const { error: deliveryJobError } = await supabase
+        .from('jobs')
+        .upsert({
+          type: 'deliver',
+          payload: { tweet_id: tweetId },
+          status: 'pending',
+          priority: 20,
+          idempotency_key: idempotencyKey,
+          next_run_at: new Date().toISOString()
+        }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
 
-    if (deliveryJobError) {
-      console.warn('Failed to create delivery job:', deliveryJobError);
+      if (deliveryJobError) {
+        console.warn('Failed to create delivery job:', deliveryJobError);
+      } else {
+        await insertPipelineEvent(supabase, 'post', tweetId, 'deliver', 'queued', null, null, null, { source: 'worker' });
+        // Ensure a pending delivery row exists
+        try {
+          const { data: existingDel } = await supabase
+            .from('deliveries')
+            .select('id')
+            .eq('subject_type', 'post')
+            .eq('subject_id', tweetId)
+            .eq('status', 'pending')
+            .limit(1);
+          if (!existingDel || existingDel.length === 0) {
+            await supabase.from('deliveries').insert({
+              subject_type: 'post', subject_id: tweetId, status: 'pending', attempts: 0
+            });
+          }
+        } catch (_e) { /* best-effort */ }
+      }
     } else {
-      await insertPipelineEvent(supabase, 'post', tweetId, 'deliver', 'queued', null, null, null, { source: 'worker' });
-      // Ensure a pending delivery row exists
-      try {
-        const { data: existingDel } = await supabase
-          .from('deliveries')
-          .select('id')
-          .eq('subject_type', 'post')
-          .eq('subject_id', tweetId)
-          .eq('status', 'pending')
-          .limit(1);
-        if (!existingDel || existingDel.length === 0) {
-          await supabase.from('deliveries').insert({
-            subject_type: 'post', subject_id: tweetId, status: 'pending', attempts: 0
-          });
-        }
-      } catch (_e) { /* best-effort */ }
+      console.log(JSON.stringify({ function: 'worker', action: 'delivery_skipped', tweet_id: tweetId, score: importanceScore, decision: deliveryDecision }));
+      await insertPipelineEvent(supabase, 'post', tweetId, 'deliver', 'completed', null, nowIso, null, { skipped: 'content_filter', score: importanceScore, decision: deliveryDecision });
     }
     
     return true;
