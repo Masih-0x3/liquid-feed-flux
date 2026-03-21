@@ -88,6 +88,14 @@ export default function Monitoring() {
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['monitoring'] });
 
+  const handleForceDeliver = async (tweetId: string) => {
+    try {
+      await adminRetryStep(tweetId, 'deliver');
+      toast({ title: 'Force delivery queued', description: 'Post will be delivered shortly' });
+      invalidate();
+    } catch { toast({ title: 'Error', description: 'Failed to force deliver', variant: 'destructive' }); }
+  };
+
   const handleSaveEdit = async () => {
     if (!editingEntry) return;
     try {
