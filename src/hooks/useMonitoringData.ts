@@ -9,6 +9,7 @@ export interface MonitoringEntry {
   url: string;
   created_at: string;
   account_handle: string;
+  author_handle: string | null;
   delivery_status: string;
   telegram_message_ids: string[];
   is_translated: boolean;
@@ -17,6 +18,9 @@ export interface MonitoringEntry {
   delivery_job_status: string;
   translation_error: string;
   delivery_error: string;
+  importance_score: number | null;
+  importance_tags: string[] | null;
+  delivery_decision: string | null;
 }
 
 export interface PipelineEvent {
@@ -38,7 +42,7 @@ async function fetchMonitoringPage({ pageParam = 0 }: { pageParam: number }): Pr
 
   const { data: postsData, error: postsError } = await supabase
     .from('posts')
-    .select('tweet_id, text_original, text_translated, url, created_at, translated_at, has_media, lang_original, accounts!inner(handle, display_name)')
+    .select('tweet_id, text_original, text_translated, url, created_at, translated_at, has_media, lang_original, author_handle, importance_score, importance_tags, delivery_decision, accounts!inner(handle, display_name)')
     .order('created_at', { ascending: false })
     .range(from, to);
   if (postsError) throw postsError;
@@ -69,6 +73,7 @@ async function fetchMonitoringPage({ pageParam = 0 }: { pageParam: number }): Pr
       url: post.url || '',
       created_at: post.created_at,
       account_handle: (post.accounts as { handle: string }).handle,
+      author_handle: post.author_handle || null,
       delivery_status: deliveryStatus,
       telegram_message_ids: [],
       is_translated: isTranslated,
@@ -77,6 +82,9 @@ async function fetchMonitoringPage({ pageParam = 0 }: { pageParam: number }): Pr
       delivery_job_status: deliveryStatus,
       translation_error: (rpc?.translate_error as string) || '',
       delivery_error: (rpc?.delivery_error as string) || '',
+      importance_score: post.importance_score ?? null,
+      importance_tags: post.importance_tags ?? null,
+      delivery_decision: post.delivery_decision ?? null,
     };
   });
 

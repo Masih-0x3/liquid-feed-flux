@@ -10,7 +10,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
-import { Search, RefreshCw, Edit, Check, X, ExternalLink, RotateCcw } from "lucide-react";
+import { Search, RefreshCw, Edit, Check, X, ExternalLink, RotateCcw, Star, Send } from "lucide-react";
 import { format } from "date-fns";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerDescription, DrawerClose, DrawerFooter } from "@/components/ui/drawer";
 import { useMonitoringData, type MonitoringEntry, type PipelineEvent } from "@/hooks/useMonitoringData";
@@ -87,6 +87,14 @@ export default function Monitoring() {
   const { toast } = useToast();
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['monitoring'] });
+
+  const handleForceDeliver = async (tweetId: string) => {
+    try {
+      await adminRetryStep(tweetId, 'deliver');
+      toast({ title: 'Force delivery queued', description: 'Post will be delivered shortly' });
+      invalidate();
+    } catch { toast({ title: 'Error', description: 'Failed to force deliver', variant: 'destructive' }); }
+  };
 
   const handleSaveEdit = async () => {
     if (!editingEntry) return;
@@ -240,15 +248,51 @@ export default function Monitoring() {
                   <div className="flex items-center gap-3 flex-1">
                     <Checkbox checked={isSelected} onCheckedChange={(c) => handleSelectTweet(entry.tweet_id, c as boolean)} />
                     <div className="flex-1">
-                      <CardTitle className="text-lg">@{entry.account_handle}</CardTitle>
-                      <p className="text-sm text-muted-foreground">
-                        {format(new Date(entry.created_at), 'MMM dd, yyyy HH:mm')}
-                        {entry.url && (<>{' • '}<a href={entry.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 hover:underline">Source <ExternalLink className="w-3 h-3" /></a></>)}
-                      </p>
+                      <div className="flex items-center gap-2">
+                        <CardTitle className="text-lg">
+                          {entry.author_handle ? `@${entry.author_handle}` : `@${entry.account_handle}`}
+                        </CardTitle>
+                        {entry.importance_score != null && (
+                          <Badge
+                            className={
+                              entry.importance_score >= 7
+                                ? 'bg-green-500/20 text-green-400 border-green-500/30'
+                                : entry.importance_score >= 4
+                                ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
+                                : 'bg-red-500/20 text-red-400 border-red-500/30'
+                            }
+                          >
+                            <Star className="w-3 h-3 mr-1" />{entry.importance_score}/10
+                          </Badge>
+                        )}
+                        {entry.delivery_decision && entry.delivery_decision !== 'deliver' && (
+                          <Badge variant="outline" className="text-muted-foreground">
+                            {entry.delivery_decision === 'skip' ? 'Skipped' : entry.delivery_decision}
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <p className="text-sm text-muted-foreground">
+                          {format(new Date(entry.created_at), 'MMM dd, yyyy HH:mm')}
+                          {entry.url && (<>{' • '}<a href={entry.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 hover:underline">Source <ExternalLink className="w-3 h-3" /></a></>)}
+                        </p>
+                        {entry.importance_tags && entry.importance_tags.length > 0 && (
+                          <div className="flex gap-1">
+                            {entry.importance_tags.map(tag => (
+                              <Badge key={tag} variant="secondary" className="text-xs px-1.5 py-0">{tag}</Badge>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                       <div className="mt-2"><StatusIndicator entry={entry} /></div>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
+                    {entry.delivery_decision === 'skip' && (
+                      <Button size="sm" variant="outline" onClick={() => handleForceDeliver(entry.tweet_id)}>
+                        <Send className="w-3 h-3 mr-1" />Force Deliver
+                      </Button>
+                    )}
                     <Badge variant={entry.is_translated ? 'default' : 'secondary'}>{entry.is_translated ? 'Translated' : 'Original'}</Badge>
                     <Badge variant={entry.is_delivered ? 'default' : 'outline'}>{entry.is_delivered ? 'Delivered' : 'Pending'}</Badge>
                   </div>
