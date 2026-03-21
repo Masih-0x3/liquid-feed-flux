@@ -42,7 +42,7 @@ async function fetchMonitoringPage({ pageParam = 0 }: { pageParam: number }): Pr
 
   const { data: postsData, error: postsError } = await supabase
     .from('posts')
-    .select('tweet_id, text_original, text_translated, url, created_at, translated_at, has_media, lang_original, accounts!inner(handle, display_name)')
+    .select('tweet_id, text_original, text_translated, url, created_at, translated_at, has_media, lang_original, author_handle, importance_score, importance_tags, delivery_decision, accounts!inner(handle, display_name)')
     .order('created_at', { ascending: false })
     .range(from, to);
   if (postsError) throw postsError;
