@@ -10,11 +10,12 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
-import { Brain, MessageSquare, Eye, Code, Sparkles, Send, Key, Shield, Loader2 } from 'lucide-react';
+import { Brain, MessageSquare, Eye, Code, Sparkles, Send, Key, Shield, Loader2, Filter } from 'lucide-react';
 import {
   useSettingsData, useSaveSettings, openaiModels, messagePlaceholders, promptPlaceholders,
   type TranslationSettings, type OpenAISettings, type TelegramSettings, type MessageTemplateSettings,
 } from '@/hooks/useSettingsData';
+import ContentFilterSettings, { type ContentFilterConfig } from '@/components/settings/ContentFilterSettings';
 
 function insertPlaceholder(placeholder: string, textareaId: string, getter: string, setter: (val: string) => void) {
   const textarea = document.getElementById(textareaId) as HTMLTextAreaElement;
