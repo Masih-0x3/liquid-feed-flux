@@ -138,10 +138,14 @@ serve(async (req) => {
         }
         
         const url = item.link || item.url || '';
+        
+        // Extract author handle from tweet URL
+        const authorHandle = extractAuthorFromUrl(url);
+        
         const publishedAt = item.pubDate || item.published || item.date ? 
           new Date(item.pubDate || item.published || item.date) : new Date();
 
-        console.log(`Extracted: tweetId=${tweetId}, text="${text.substring(0, 50)}...", url=${url}`);
+        console.log(`Extracted: tweetId=${tweetId}, text="${text.substring(0, 50)}...", url=${url}, author=${authorHandle || 'unknown'}`);
 
         // Parse media from RSS item
         const mediaItems = parseMediaFromRSSItem(item, text);
@@ -196,7 +200,8 @@ serve(async (req) => {
             lang_original: 'auto',
             url: url,
             tweeted_at: publishedAt,
-            has_media: mediaItems.length > 0
+            has_media: mediaItems.length > 0,
+            author_handle: authorHandle
           }, {
             onConflict: 'tweet_id'
           })
@@ -325,6 +330,18 @@ serve(async (req) => {
     });
   }
 });
+
+function extractAuthorFromUrl(url: string): string | null {
+  if (!url) return null;
+  const match = url.match(/(?:twitter\.com|x\.com)\/([^/]+)/i);
+  if (match && match[1]) {
+    const handle = match[1].toLowerCase();
+    // Skip non-author paths
+    if (['i', 'search', 'explore', 'home', 'settings', 'messages'].includes(handle)) return null;
+    return handle;
+  }
+  return null;
+}
 
 function parseMediaFromRSSItem(item: any, text?: string): Array<{type: string, url: string, width?: number, height?: number, duration?: number}> {
   const mediaItems: Array<{type: string, url: string, width?: number, height?: number, duration?: number}> = [];

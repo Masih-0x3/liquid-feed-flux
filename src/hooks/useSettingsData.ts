@@ -89,6 +89,14 @@ const defaults = {
     include_source_link: true, include_hashtags: true, include_media_caption: true,
     source_link_text: 'View original', custom_hashtags: '#\u0627\u062E\u0628\u0627\u0631',
   } as MessageTemplateSettings,
+  content_filter: {
+    enabled: false,
+    default_threshold: 6,
+    editorial_guidelines: '',
+    priority_topics: [] as string[],
+    low_priority_topics: [] as string[],
+    author_rules: {} as Record<string, { rule: string; threshold?: number }>,
+  },
 };
 
 async function fetchSettings() {

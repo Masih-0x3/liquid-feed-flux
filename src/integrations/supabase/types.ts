@@ -346,8 +346,12 @@ export type Database = {
       posts: {
         Row: {
           account_id: string
+          author_handle: string | null
           created_at: string
+          delivery_decision: string | null
           has_media: boolean | null
+          importance_score: number | null
+          importance_tags: string[] | null
           lang_original: string | null
           text_original: string | null
           text_translated: string | null
@@ -362,8 +366,12 @@ export type Database = {
         }
         Insert: {
           account_id: string
+          author_handle?: string | null
           created_at?: string
+          delivery_decision?: string | null
           has_media?: boolean | null
+          importance_score?: number | null
+          importance_tags?: string[] | null
           lang_original?: string | null
           text_original?: string | null
           text_translated?: string | null
@@ -378,8 +386,12 @@ export type Database = {
         }
         Update: {
           account_id?: string
+          author_handle?: string | null
           created_at?: string
+          delivery_decision?: string | null
           has_media?: boolean | null
+          importance_score?: number | null
+          importance_tags?: string[] | null
           lang_original?: string | null
           text_original?: string | null
           text_translated?: string | null

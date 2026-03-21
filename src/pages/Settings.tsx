@@ -10,11 +10,12 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
-import { Brain, MessageSquare, Eye, Code, Sparkles, Send, Key, Shield, Loader2 } from 'lucide-react';
+import { Brain, MessageSquare, Eye, Code, Sparkles, Send, Key, Shield, Loader2, Filter } from 'lucide-react';
 import {
   useSettingsData, useSaveSettings, openaiModels, messagePlaceholders, promptPlaceholders,
   type TranslationSettings, type OpenAISettings, type TelegramSettings, type MessageTemplateSettings,
 } from '@/hooks/useSettingsData';
+import ContentFilterSettings, { type ContentFilterConfig } from '@/components/settings/ContentFilterSettings';
 
 function insertPlaceholder(placeholder: string, textareaId: string, getter: string, setter: (val: string) => void) {
   const textarea = document.getElementById(textareaId) as HTMLTextAreaElement;
@@ -104,8 +105,9 @@ export default function Settings() {
       </div>
 
       <Tabs defaultValue="translation" className="w-full">
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="translation" className="flex items-center gap-2"><Brain className="w-4 h-4" />Translation</TabsTrigger>
+          <TabsTrigger value="filter" className="flex items-center gap-2"><Filter className="w-4 h-4" />Content Filter</TabsTrigger>
           <TabsTrigger value="messages" className="flex items-center gap-2"><MessageSquare className="w-4 h-4" />Messages</TabsTrigger>
           <TabsTrigger value="openai" className="flex items-center gap-2"><Key className="w-4 h-4" />OpenAI</TabsTrigger>
           <TabsTrigger value="telegram" className="flex items-center gap-2"><Send className="w-4 h-4" />Telegram</TabsTrigger>
@@ -227,7 +229,11 @@ export default function Settings() {
           </Card>
         </TabsContent>
 
-        {/* Messages Tab */}
+        {/* Content Filter Tab */}
+        <TabsContent value="filter" className="space-y-6">
+          <ContentFilterSettings initialConfig={settings?.content_filter as ContentFilterConfig | undefined} />
+        </TabsContent>
+
         <TabsContent value="messages" className="space-y-6">
           <Card className="glass-card">
             <CardHeader>
