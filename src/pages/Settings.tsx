@@ -229,7 +229,11 @@ export default function Settings() {
           </Card>
         </TabsContent>
 
-        {/* Messages Tab */}
+        {/* Content Filter Tab */}
+        <TabsContent value="filter" className="space-y-6">
+          <ContentFilterSettings initialConfig={settings?.content_filter as ContentFilterConfig | undefined} />
+        </TabsContent>
+
         <TabsContent value="messages" className="space-y-6">
           <Card className="glass-card">
             <CardHeader>
