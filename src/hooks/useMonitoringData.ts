@@ -9,6 +9,7 @@ export interface MonitoringEntry {
   url: string;
   created_at: string;
   account_handle: string;
+  author_handle: string | null;
   delivery_status: string;
   telegram_message_ids: string[];
   is_translated: boolean;
@@ -17,6 +18,9 @@ export interface MonitoringEntry {
   delivery_job_status: string;
   translation_error: string;
   delivery_error: string;
+  importance_score: number | null;
+  importance_tags: string[] | null;
+  delivery_decision: string | null;
 }
 
 export interface PipelineEvent {
