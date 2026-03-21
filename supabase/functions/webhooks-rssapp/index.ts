@@ -138,10 +138,14 @@ serve(async (req) => {
         }
         
         const url = item.link || item.url || '';
+        
+        // Extract author handle from tweet URL
+        const authorHandle = extractAuthorFromUrl(url);
+        
         const publishedAt = item.pubDate || item.published || item.date ? 
           new Date(item.pubDate || item.published || item.date) : new Date();
 
-        console.log(`Extracted: tweetId=${tweetId}, text="${text.substring(0, 50)}...", url=${url}`);
+        console.log(`Extracted: tweetId=${tweetId}, text="${text.substring(0, 50)}...", url=${url}, author=${authorHandle || 'unknown'}`);
 
         // Parse media from RSS item
         const mediaItems = parseMediaFromRSSItem(item, text);
@@ -196,7 +200,8 @@ serve(async (req) => {
             lang_original: 'auto',
             url: url,
             tweeted_at: publishedAt,
-            has_media: mediaItems.length > 0
+            has_media: mediaItems.length > 0,
+            author_handle: authorHandle
           }, {
             onConflict: 'tweet_id'
           })

@@ -44,6 +44,14 @@ async function loadConfig(supabase: ReturnType<typeof createClient>): Promise<{
   openaiModel: string;
   openaiTemperature: number;
   messageTemplate: Record<string, unknown>;
+  contentFilter: {
+    enabled: boolean;
+    default_threshold: number;
+    editorial_guidelines: string;
+    priority_topics: string[];
+    low_priority_topics: string[];
+    author_rules: Record<string, { rule: string; threshold?: number }>;
+  };
 }> {
   const defaults = {
     translationPrompt: "You are a professional translator. Translate the given English text to Persian. Preserve @mentions, #hashtags, URLs, and line breaks exactly. Only return the translated text, nothing else.",
@@ -55,13 +63,21 @@ async function loadConfig(supabase: ReturnType<typeof createClient>): Promise<{
       source_link_text: 'View original',
       custom_hashtags: '#اخبار'
     } as Record<string, unknown>,
+    contentFilter: {
+      enabled: false,
+      default_threshold: 6,
+      editorial_guidelines: '',
+      priority_topics: [] as string[],
+      low_priority_topics: [] as string[],
+      author_rules: {} as Record<string, { rule: string; threshold?: number }>,
+    },
   };
 
   try {
     const { data: settings } = await supabase
       .from('settings')
       .select('key, value')
-      .in('key', ['translation_prompt', 'openai_config', 'message_template']);
+      .in('key', ['translation_prompt', 'openai_config', 'message_template', 'content_filter']);
 
     if (settings) {
       for (const s of settings) {
@@ -76,6 +92,9 @@ async function loadConfig(supabase: ReturnType<typeof createClient>): Promise<{
         }
         if (s.key === 'message_template' && typeof s.value === 'object' && s.value !== null) {
           defaults.messageTemplate = { ...defaults.messageTemplate, ...s.value as Record<string, unknown> };
+        }
+        if (s.key === 'content_filter' && typeof s.value === 'object' && s.value !== null) {
+          defaults.contentFilter = { ...defaults.contentFilter, ...s.value as Record<string, { rule: string; threshold?: number }> };
         }
       }
     }
