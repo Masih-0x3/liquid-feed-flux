@@ -73,6 +73,7 @@ async function fetchMonitoringPage({ pageParam = 0 }: { pageParam: number }): Pr
       url: post.url || '',
       created_at: post.created_at,
       account_handle: (post.accounts as { handle: string }).handle,
+      author_handle: post.author_handle || null,
       delivery_status: deliveryStatus,
       telegram_message_ids: [],
       is_translated: isTranslated,
@@ -81,6 +82,9 @@ async function fetchMonitoringPage({ pageParam = 0 }: { pageParam: number }): Pr
       delivery_job_status: deliveryStatus,
       translation_error: (rpc?.translate_error as string) || '',
       delivery_error: (rpc?.delivery_error as string) || '',
+      importance_score: post.importance_score ?? null,
+      importance_tags: post.importance_tags ?? null,
+      delivery_decision: post.delivery_decision ?? null,
     };
   });
 
