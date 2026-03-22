@@ -51,6 +51,7 @@ async function loadConfig(supabase: ReturnType<typeof createClient>): Promise<{
     priority_topics: string[];
     low_priority_topics: string[];
     author_rules: Record<string, { rule: string; threshold?: number }>;
+      score_only?: boolean;
   };
 }> {
   const defaults = {
@@ -70,6 +71,7 @@ async function loadConfig(supabase: ReturnType<typeof createClient>): Promise<{
       priority_topics: [] as string[],
       low_priority_topics: [] as string[],
       author_rules: {} as Record<string, { rule: string; threshold?: number }>,
+      score_only: false,
     },
   };
 
@@ -335,7 +337,8 @@ async function handleTranslateJob(job: Record<string, unknown>, supabase: Return
       throw new Error('No original text to translate');
     }
 
-    const filterEnabled = config.contentFilter.enabled;
+    const filterEnabled = config.contentFilter.enabled || config.contentFilter.score_only;
+    const scoreOnly = config.contentFilter.score_only && !config.contentFilter.enabled;
     const authorHandle = post.author_handle as string | null;
 
     // Build OpenAI request — if filtering enabled, use tool calling for combined translate+score
@@ -465,7 +468,7 @@ Score 1-4: Minor news, routine updates, entertainment, sports, economy (unless d
 
     // Determine delivery decision based on content filter
     let deliveryDecision = 'deliver';
-    if (filterEnabled && importanceScore !== null) {
+    if (filterEnabled && importanceScore !== null && !scoreOnly) {
       // Check author-specific rules first
       const authorRule = authorHandle ? config.contentFilter.author_rules[authorHandle] : null;
       

@@ -96,6 +96,7 @@ const defaults = {
     priority_topics: [] as string[],
     low_priority_topics: [] as string[],
     author_rules: {} as Record<string, { rule: string; threshold?: number }>,
+    score_only: false,
   },
 };
 
