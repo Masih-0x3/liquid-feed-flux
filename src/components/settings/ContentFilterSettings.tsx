@@ -17,6 +17,7 @@ import { useSaveSettings } from '@/hooks/useSettingsData';
 
 export interface ContentFilterConfig {
   enabled: boolean;
+  score_only?: boolean;
   default_threshold: number;
   editorial_guidelines: string;
   priority_topics: string[];
@@ -26,6 +27,7 @@ export interface ContentFilterConfig {
 
 const defaultConfig: ContentFilterConfig = {
   enabled: false,
+  score_only: false,
   default_threshold: 6,
   editorial_guidelines: '',
   priority_topics: [],
@@ -129,11 +131,26 @@ export default function ContentFilterSettings({ initialConfig }: Props) {
             </div>
             <Switch
               checked={config.enabled}
-              onCheckedChange={(checked) => setConfig({ ...config, enabled: checked })}
+              onCheckedChange={(checked) => setConfig({ ...config, enabled: checked, ...(checked ? { score_only: false } : {}) })}
             />
           </div>
 
-          {config.enabled && (
+          {!config.enabled && (
+            <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg">
+              <div>
+                <Label className="text-base font-medium">Score Only (Preview Mode)</Label>
+                <p className="text-sm text-muted-foreground mt-1">
+                  AI scores each post but everything still gets delivered. Use this to preview scores in Monitoring before enabling the filter.
+                </p>
+              </div>
+              <Switch
+                checked={config.score_only ?? false}
+                onCheckedChange={(checked) => setConfig({ ...config, score_only: checked })}
+              />
+            </div>
+          )}
+
+          {(config.enabled || config.score_only) && (
             <>
               <Separator />
               
@@ -165,7 +182,7 @@ export default function ContentFilterSettings({ initialConfig }: Props) {
         </CardContent>
       </Card>
 
-      {config.enabled && (
+      {(config.enabled || config.score_only) && (
         <>
           {/* Editorial Guidelines */}
           <Card className="glass-card">
