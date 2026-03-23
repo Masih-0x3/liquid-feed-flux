@@ -150,11 +150,11 @@ export default function ContentFilterSettings({ initialConfig }: Props) {
             </div>
           )}
 
-          {(config.enabled || config.score_only) && (
+          {config.enabled && (
             <>
               <Separator />
               
-              {/* Default Threshold */}
+              {/* Default Threshold - only when actively filtering */}
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
