@@ -150,11 +150,11 @@ export default function ContentFilterSettings({ initialConfig }: Props) {
             </div>
           )}
 
-          {(config.enabled || config.score_only) && (
+          {config.enabled && (
             <>
               <Separator />
               
-              {/* Default Threshold */}
+              {/* Default Threshold - only when actively filtering */}
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
@@ -199,7 +199,7 @@ export default function ContentFilterSettings({ initialConfig }: Props) {
                 value={config.editorial_guidelines}
                 onChange={(e) => setConfig({ ...config, editorial_guidelines: e.target.value })}
                 className="glass-input min-h-[120px]"
-                placeholder="e.g., Prioritize anything related to Iran, the war, GCC countries, sanctions, and military developments. Include major world events like significant political events or celebrity deaths. De-prioritize routine economy updates, sports, and entertainment unless directly related to Iran or the Middle East."
+                placeholder="e.g., Prioritize anything related to Iran, the war, GCC countries, sanctions, and military developments..."
               />
 
               {/* Priority Topics */}
