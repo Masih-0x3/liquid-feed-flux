@@ -325,7 +325,7 @@ async function handleTranslateJob(job: Record<string, unknown>, supabase: Return
 
     const { data: post, error } = await supabase
       .from('posts')
-      .select('tweet_id, text_original, account_id, url, tweeted_at, has_media, author_handle')
+      .select('tweet_id, text_original, account_id, url, tweeted_at, has_media, author_handle, accounts!inner(handle, display_name)')
       .eq('tweet_id', tweetId)
       .single();
 
@@ -353,34 +353,61 @@ async function handleTranslateJob(job: Record<string, unknown>, supabase: Return
       const priorityTopics = config.contentFilter.priority_topics.join(', ') || 'none specified';
       const lowPriorityTopics = config.contentFilter.low_priority_topics.join(', ') || 'none specified';
 
-      const systemPrompt = `${config.translationPrompt}
+      // Dual-role system prompt with structured scoring rubric
+      const systemPrompt = `You have two tasks. Complete both carefully.
 
-ADDITIONAL TASK: After translating, you MUST also call the "classify_importance" tool to score this news item's importance on a scale of 1-10.
+## Task 1: Translation
+${config.translationPrompt}
 
-Scoring guidelines from the editor:
-${scoringGuidelines || 'Use your best judgment for news importance.'}
+## Task 2: News Importance Scoring
+You are an editorial assistant scoring news items for a curated Telegram channel. Your score determines whether this item gets delivered to subscribers.
 
-High-priority topics (boost score): ${priorityTopics}
-Low-priority topics (lower score): ${lowPriorityTopics}
+### Scoring Rubric (1-10 scale)
+9-10 — CRITICAL: Direct military action, major sanctions announcements, leader assassinations, war escalation, ceasefire agreements, nuclear developments, major terrorist attacks. These are front-page, stop-the-presses events.
+7-8 — IMPORTANT: Diplomatic shifts, significant policy changes, major regional developments, high-level summits with concrete outcomes, major protest movements, significant military deployments.
+5-6 — NOTEWORTHY: Notable official statements, economic data with geopolitical implications, policy proposals, regional tensions, important personnel changes, significant infrastructure events.
+3-4 — LOW INTEREST: Routine government updates, minor economic data, peripheral coverage, cultural events with no geopolitical angle, procedural political news.
+1-2 — SKIP: Entertainment, sports, celebrity gossip, memes, viral trends, product launches, lifestyle content, weather reports.
 
-Score 8-10: Major breaking news, critical geopolitical events, wars, major world events
-Score 5-7: Notable news, regional events, significant developments
-Score 1-4: Minor news, routine updates, entertainment, sports, economy (unless directly related to high-priority topics)`;
+### Topic Priorities
+High-priority topics (boost score by 1-2 points): ${priorityTopics}
+Low-priority topics (reduce score by 1-2 points): ${lowPriorityTopics}
+
+${scoringGuidelines ? `### Editorial Guidelines (AUTHORITATIVE — these override the default rubric when they conflict)
+---
+${scoringGuidelines}
+---` : ''}
+
+You MUST call the "classify_importance" tool with your translation and score. The "reasoning" field is required — explain your score in 1-2 sentences.`;
+
+      // Enrich user message with metadata for context
+      const accountData = (post as Record<string, unknown>).accounts as Record<string, unknown> | null;
+      const authorDisplay = authorHandle || (accountData?.handle as string) || 'unknown';
+      const accountName = (accountData?.display_name as string) || '';
+      const publishedAt = post.tweeted_at ? new Date(post.tweeted_at as string).toISOString() : 'unknown';
+
+      const userMessage = `Author: @${authorDisplay}${accountName ? ` (${accountName})` : ''}
+Published: ${publishedAt}
+Has media: ${post.has_media ? 'yes' : 'no'}
+URL: ${post.url || 'N/A'}
+
+Content:
+${post.text_original}`;
 
       const tools = [{
         type: 'function',
         function: {
           name: 'classify_importance',
-          description: 'Classify the importance of this news item after translating it',
+          description: 'Provide the Persian translation and importance classification of this news item',
           parameters: {
             type: 'object',
             properties: {
               translated_text: { type: 'string', description: 'The Persian translation of the original text' },
-              importance_score: { type: 'integer', description: 'Importance score 1-10', minimum: 1, maximum: 10 },
-              tags: { type: 'array', items: { type: 'string' }, description: 'Topic tags (e.g., war, iran, economy, politics)' },
-              reasoning: { type: 'string', description: 'Brief reasoning for the score' }
+              importance_score: { type: 'integer', description: 'Importance score 1-10 based on the rubric', minimum: 1, maximum: 10 },
+              tags: { type: 'array', items: { type: 'string' }, description: 'Topic tags (e.g., war, iran, economy, politics, diplomacy, military)' },
+              reasoning: { type: 'string', description: 'Required: 1-2 sentence explanation of why this score was given' }
             },
-            required: ['translated_text', 'importance_score', 'tags']
+            required: ['translated_text', 'importance_score', 'tags', 'reasoning']
           }
         }
       }];
@@ -395,7 +422,7 @@ Score 1-4: Minor news, routine updates, entertainment, sports, economy (unless d
           model: config.openaiModel,
           messages: [
             { role: 'system', content: systemPrompt },
-            { role: 'user', content: post.text_original }
+            { role: 'user', content: userMessage }
           ],
           tools,
           tool_choice: { type: 'function', function: { name: 'classify_importance' } },
