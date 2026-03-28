@@ -325,7 +325,7 @@ async function handleTranslateJob(job: Record<string, unknown>, supabase: Return
 
     const { data: post, error } = await supabase
       .from('posts')
-      .select('tweet_id, text_original, account_id, url, tweeted_at, has_media, author_handle')
+      .select('tweet_id, text_original, account_id, url, tweeted_at, has_media, author_handle, accounts!inner(handle, display_name)')
       .eq('tweet_id', tweetId)
       .single();
 
