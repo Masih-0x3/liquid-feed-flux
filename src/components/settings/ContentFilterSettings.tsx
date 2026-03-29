@@ -159,22 +159,24 @@ export default function ContentFilterSettings({ initialConfig }: Props) {
                 <div className="flex items-center justify-between">
                   <div>
                     <Label className="text-base font-medium">Default Importance Threshold</Label>
-                    <p className="text-sm text-muted-foreground">Posts scoring below this are skipped (1 = deliver almost everything, 10 = only major breaking news)</p>
+                    <p className="text-sm text-muted-foreground">Posts scoring below this are skipped (1 = deliver almost everything, 20 = only critical breaking news)</p>
                   </div>
-                  <Badge variant="outline" className="text-lg px-3 py-1">{config.default_threshold}</Badge>
+                  <Badge variant="outline" className="text-lg px-3 py-1">{config.default_threshold}/20</Badge>
                 </div>
                 <Slider
                   value={[config.default_threshold]}
                   onValueChange={([v]) => setConfig({ ...config, default_threshold: v })}
                   min={1}
-                  max={10}
+                  max={20}
                   step={1}
                   className="w-full"
                 />
                 <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>1 — Deliver almost all</span>
-                  <span>5 — Balanced</span>
-                  <span>10 — Only breaking news</span>
+                  <span>1 — Deliver all</span>
+                  <span>5 — Low bar</span>
+                  <span>10 — Balanced</span>
+                  <span>15 — Selective</span>
+                  <span>20 — Critical only</span>
                 </div>
               </div>
             </>
