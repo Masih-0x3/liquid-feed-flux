@@ -362,11 +362,16 @@ ${config.translationPrompt}
 ## Task 2: News Importance Scoring
 You are an editorial assistant scoring news items for a curated Telegram channel. Your score determines whether this item gets delivered to subscribers.
 
-### Scoring Rubric (1-10 scale)
-9-10 — CRITICAL: Direct military action, major sanctions announcements, leader assassinations, war escalation, ceasefire agreements, nuclear developments, major terrorist attacks. These are front-page, stop-the-presses events.
-7-8 — IMPORTANT: Diplomatic shifts, significant policy changes, major regional developments, high-level summits with concrete outcomes, major protest movements, significant military deployments.
-5-6 — NOTEWORTHY: Notable official statements, economic data with geopolitical implications, policy proposals, regional tensions, important personnel changes, significant infrastructure events.
-3-4 — LOW INTEREST: Routine government updates, minor economic data, peripheral coverage, cultural events with no geopolitical angle, procedural political news.
+### Scoring Rubric (1-20 scale)
+19-20 — CRITICAL: Direct military action, war declarations, ceasefire/peace agreements, nuclear incidents, leader assassinations, major terrorist attacks. Stop-the-presses, history-making events.
+17-18 — VERY HIGH: Major sanctions packages, significant military escalation, breaking crisis developments, emergency UN sessions, regime changes.
+15-16 — HIGH: Diplomatic breakthroughs, high-level summits with concrete outcomes, major policy reversals, large-scale protest movements, significant military deployments.
+13-14 — IMPORTANT: Notable diplomatic meetings, significant policy changes, major regional developments, important alliance shifts, major economic sanctions.
+11-12 — ABOVE AVERAGE: Important official statements, meaningful economic data, notable personnel changes, significant infrastructure events, regional security developments.
+9-10 — MODERATE: Noteworthy but routine diplomatic activity, economic reports, policy proposals, regional tensions without escalation.
+7-8 — BELOW AVERAGE: Minor diplomatic exchanges, routine policy updates, peripheral regional coverage, minor economic indicators.
+5-6 — LOW: Routine government updates, minor administrative changes, tangential coverage, cultural events with minimal geopolitical relevance.
+3-4 — VERY LOW: Soft news, human interest stories, minor local events, routine procedural updates.
 1-2 — SKIP: Entertainment, sports, celebrity gossip, memes, viral trends, product launches, lifestyle content, weather reports.
 
 ### Topic Priorities
@@ -403,7 +408,7 @@ ${post.text_original}`;
             type: 'object',
             properties: {
               translated_text: { type: 'string', description: 'The Persian translation of the original text' },
-              importance_score: { type: 'integer', description: 'Importance score 1-10 based on the rubric', minimum: 1, maximum: 10 },
+              importance_score: { type: 'integer', description: 'Importance score 1-20 based on the rubric', minimum: 1, maximum: 20 },
               tags: { type: 'array', items: { type: 'string' }, description: 'Topic tags (e.g., war, iran, economy, politics, diplomacy, military)' },
               reasoning: { type: 'string', description: 'Required: 1-2 sentence explanation of why this score was given' }
             },
@@ -443,7 +448,7 @@ ${post.text_original}`;
         try {
           const args = JSON.parse(toolCall.function.arguments);
           translatedText = args.translated_text || '';
-          importanceScore = Math.max(1, Math.min(10, args.importance_score || 5));
+          importanceScore = Math.max(1, Math.min(20, args.importance_score || 10));
           importanceTags = args.tags || [];
           console.log(JSON.stringify({ function: 'worker', action: 'scored', tweet_id: tweetId, score: importanceScore, tags: importanceTags, reasoning: args.reasoning }));
         } catch (parseErr) {
