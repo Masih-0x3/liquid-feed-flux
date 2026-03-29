@@ -408,7 +408,7 @@ ${post.text_original}`;
             type: 'object',
             properties: {
               translated_text: { type: 'string', description: 'The Persian translation of the original text' },
-              importance_score: { type: 'integer', description: 'Importance score 1-10 based on the rubric', minimum: 1, maximum: 10 },
+              importance_score: { type: 'integer', description: 'Importance score 1-20 based on the rubric', minimum: 1, maximum: 20 },
               tags: { type: 'array', items: { type: 'string' }, description: 'Topic tags (e.g., war, iran, economy, politics, diplomacy, military)' },
               reasoning: { type: 'string', description: 'Required: 1-2 sentence explanation of why this score was given' }
             },
