@@ -154,13 +154,17 @@ export default function ContentFilterSettings({ initialConfig }: Props) {
             <>
               <Separator />
               
-              {/* Default Threshold - only when actively filtering */}
+              {/* Global Threshold */}
               <div className="space-y-4">
+                <div className="flex items-center gap-2 mb-1">
+                  <Filter className="w-4 h-4 text-primary" />
+                  <Label className="text-base font-semibold">Global Filter (All Posts)</Label>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  This threshold applies to <strong>every post</strong> unless overridden by a per-author rule below.
+                </p>
                 <div className="flex items-center justify-between">
-                  <div>
-                    <Label className="text-base font-medium">Default Importance Threshold</Label>
-                    <p className="text-sm text-muted-foreground">Posts scoring below this are skipped (1 = deliver almost everything, 20 = only critical breaking news)</p>
-                  </div>
+                  <span className="text-sm text-muted-foreground">Minimum score to deliver</span>
                   <Badge variant="outline" className="text-lg px-3 py-1">{config.default_threshold}/20</Badge>
                 </div>
                 <Slider
