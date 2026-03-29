@@ -28,7 +28,7 @@ export interface ContentFilterConfig {
 const defaultConfig: ContentFilterConfig = {
   enabled: false,
   score_only: false,
-  default_threshold: 6,
+  default_threshold: 12,
   editorial_guidelines: '',
   priority_topics: [],
   low_priority_topics: [],
