@@ -4,13 +4,14 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
-import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Filter, Shield, Users, Sparkles, X, Plus, Loader2 } from 'lucide-react';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Filter, Shield, Users, Sparkles, X, Plus, Loader2, ChevronDown } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useSaveSettings } from '@/hooks/useSettingsData';
@@ -18,6 +19,7 @@ import { useSaveSettings } from '@/hooks/useSettingsData';
 export interface ContentFilterConfig {
   enabled: boolean;
   score_only?: boolean;
+  filter_mode?: 'global' | 'granular';
   default_threshold: number;
   editorial_guidelines: string;
   priority_topics: string[];
@@ -28,12 +30,29 @@ export interface ContentFilterConfig {
 const defaultConfig: ContentFilterConfig = {
   enabled: false,
   score_only: false,
+  filter_mode: 'global',
   default_threshold: 12,
   editorial_guidelines: '',
   priority_topics: [],
   low_priority_topics: [],
   author_rules: {},
 };
+
+type FilterStatus = 'off' | 'score_only' | 'active';
+
+function getFilterStatus(config: ContentFilterConfig): FilterStatus {
+  if (config.enabled) return 'active';
+  if (config.score_only) return 'score_only';
+  return 'off';
+}
+
+function applyFilterStatus(config: ContentFilterConfig, status: FilterStatus): ContentFilterConfig {
+  switch (status) {
+    case 'off': return { ...config, enabled: false, score_only: false };
+    case 'score_only': return { ...config, enabled: false, score_only: true };
+    case 'active': return { ...config, enabled: true, score_only: false };
+  }
+}
 
 interface Props {
   initialConfig?: ContentFilterConfig;
@@ -43,6 +62,7 @@ export default function ContentFilterSettings({ initialConfig }: Props) {
   const [config, setConfig] = useState<ContentFilterConfig>({ ...defaultConfig, ...initialConfig });
   const [newPriorityTopic, setNewPriorityTopic] = useState('');
   const [newLowPriorityTopic, setNewLowPriorityTopic] = useState('');
+  const [authorOverridesOpen, setAuthorOverridesOpen] = useState(false);
   const saveMutation = useSaveSettings();
 
   useEffect(() => {
@@ -51,7 +71,9 @@ export default function ContentFilterSettings({ initialConfig }: Props) {
     }
   }, [initialConfig]);
 
-  // Fetch distinct authors with post counts
+  const filterStatus = getFilterStatus(config);
+  const filterMode = config.filter_mode || 'global';
+
   const authorsQuery = useQuery({
     queryKey: ['author-stats'],
     queryFn: async () => {
@@ -60,7 +82,6 @@ export default function ContentFilterSettings({ initialConfig }: Props) {
         .select('author_handle')
         .not('author_handle', 'is', null);
       if (error) throw error;
-      // Count manually since we can't do GROUP BY via PostgREST easily
       const counts: Record<string, number> = {};
       for (const row of data || []) {
         const handle = row.author_handle as string;
@@ -109,59 +130,90 @@ export default function ContentFilterSettings({ initialConfig }: Props) {
     return config.author_rules[handle]?.threshold ?? config.default_threshold;
   };
 
+  const statusOptions: { value: FilterStatus; label: string; desc: string }[] = [
+    { value: 'off', label: 'Off', desc: 'All posts delivered without scoring' },
+    { value: 'score_only', label: 'Score Only', desc: 'AI scores posts but everything is delivered' },
+    { value: 'active', label: 'Active', desc: 'AI scores and filters posts by threshold' },
+  ];
+
   return (
     <div className="space-y-6">
-      {/* Master Toggle */}
+      {/* Filter Status */}
       <Card className="glass-card">
         <CardHeader>
           <CardTitle className="flex items-center text-glass-foreground">
             <Filter className="w-5 h-5 mr-2" />Content Filtering
           </CardTitle>
           <CardDescription>
-            Control which posts get delivered to Telegram based on AI importance scoring
+            Control which posts get delivered to Telegram based on AI importance scoring (1-20 scale)
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg">
-            <div>
-              <Label className="text-base font-medium">Enable Content Filtering</Label>
-              <p className="text-sm text-muted-foreground mt-1">
-                When off, all posts are delivered. When on, AI scores each post and only high-importance ones are sent.
-              </p>
-            </div>
-            <Switch
-              checked={config.enabled}
-              onCheckedChange={(checked) => setConfig({ ...config, enabled: checked, ...(checked ? { score_only: false } : {}) })}
-            />
+          {/* 3-way status selector */}
+          <div className="grid grid-cols-3 gap-3">
+            {statusOptions.map(opt => (
+              <button
+                key={opt.value}
+                onClick={() => setConfig(applyFilterStatus(config, opt.value))}
+                className={`p-4 rounded-lg border-2 text-left transition-all ${
+                  filterStatus === opt.value
+                    ? 'border-primary bg-primary/10'
+                    : 'border-border bg-muted/30 hover:border-muted-foreground/30'
+                }`}
+              >
+                <div className="font-medium text-sm">{opt.label}</div>
+                <div className="text-xs text-muted-foreground mt-1">{opt.desc}</div>
+              </button>
+            ))}
           </div>
 
-          {!config.enabled && (
-            <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg">
-              <div>
-                <Label className="text-base font-medium">Score Only (Preview Mode)</Label>
-                <p className="text-sm text-muted-foreground mt-1">
-                  AI scores each post but everything still gets delivered. Use this to preview scores in Monitoring before enabling the filter.
-                </p>
-              </div>
-              <Switch
-                checked={config.score_only ?? false}
-                onCheckedChange={(checked) => setConfig({ ...config, score_only: checked })}
-              />
-            </div>
-          )}
-
-          {config.enabled && (
+          {filterStatus === 'active' && (
             <>
               <Separator />
-              
+
+              {/* Filter Mode: Global vs Granular */}
+              <div className="space-y-3">
+                <Label className="text-base font-semibold">Filter Mode</Label>
+                <RadioGroup
+                  value={filterMode}
+                  onValueChange={(v) => setConfig({ ...config, filter_mode: v as 'global' | 'granular' })}
+                  className="space-y-3"
+                >
+                  <label className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all ${
+                    filterMode === 'global' ? 'border-primary bg-primary/5' : 'border-border'
+                  }`}>
+                    <RadioGroupItem value="global" className="mt-0.5" />
+                    <div>
+                      <div className="font-medium text-sm">Global Only</div>
+                      <div className="text-xs text-muted-foreground">All posts use one threshold — simple and consistent</div>
+                    </div>
+                  </label>
+                  <label className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all ${
+                    filterMode === 'granular' ? 'border-primary bg-primary/5' : 'border-border'
+                  }`}>
+                    <RadioGroupItem value="granular" className="mt-0.5" />
+                    <div>
+                      <div className="font-medium text-sm">Granular (Per-Author)</div>
+                      <div className="text-xs text-muted-foreground">Set rules per author with global threshold as fallback</div>
+                    </div>
+                  </label>
+                </RadioGroup>
+              </div>
+
+              <Separator />
+
               {/* Global Threshold */}
               <div className="space-y-4">
                 <div className="flex items-center gap-2 mb-1">
                   <Filter className="w-4 h-4 text-primary" />
-                  <Label className="text-base font-semibold">Global Filter (All Posts)</Label>
+                  <Label className="text-base font-semibold">
+                    {filterMode === 'global' ? 'Global Threshold' : 'Default Threshold (Fallback)'}
+                  </Label>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  This threshold applies to <strong>every post</strong> unless overridden by a per-author rule below.
+                  {filterMode === 'global'
+                    ? 'Posts scoring below this are skipped. Applies to all posts.'
+                    : 'Used for authors without a specific override rule.'}
                 </p>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">Minimum score to deliver</span>
@@ -183,158 +235,163 @@ export default function ContentFilterSettings({ initialConfig }: Props) {
                   <span>20 — Critical only</span>
                 </div>
               </div>
+
+              {/* Per-Author Overrides (only in granular mode) */}
+              {filterMode === 'granular' && (
+                <>
+                  <Separator />
+                  <Collapsible open={authorOverridesOpen} onOpenChange={setAuthorOverridesOpen}>
+                    <CollapsibleTrigger className="flex items-center justify-between w-full p-3 rounded-lg bg-muted/50 hover:bg-muted/70 transition-colors">
+                      <div className="flex items-center gap-2">
+                        <Users className="w-4 h-4 text-primary" />
+                        <span className="font-medium text-sm">Per-Author Overrides</span>
+                        {Object.keys(config.author_rules).length > 0 && (
+                          <Badge variant="secondary" className="text-xs">
+                            {Object.keys(config.author_rules).length} rule{Object.keys(config.author_rules).length !== 1 ? 's' : ''}
+                          </Badge>
+                        )}
+                      </div>
+                      <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${authorOverridesOpen ? 'rotate-180' : ''}`} />
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="mt-3">
+                      {authorsQuery.isLoading ? (
+                        <div className="flex items-center justify-center py-8">
+                          <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                        </div>
+                      ) : authors.length === 0 ? (
+                        <p className="text-sm text-muted-foreground text-center py-4">No authors found yet. They will appear as posts are ingested.</p>
+                      ) : (
+                        <div className="rounded-md border">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Author</TableHead>
+                                <TableHead className="text-right">Posts</TableHead>
+                                <TableHead>Rule</TableHead>
+                                <TableHead>Threshold</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {authors.slice(0, 50).map(({ handle, count }) => {
+                                const rule = getAuthorRule(handle);
+                                return (
+                                  <TableRow key={handle}>
+                                    <TableCell className="font-mono text-sm">@{handle}</TableCell>
+                                    <TableCell className="text-right text-muted-foreground">{count.toLocaleString()}</TableCell>
+                                    <TableCell>
+                                      <Select value={rule} onValueChange={(v) => setAuthorRule(handle, v)}>
+                                        <SelectTrigger className="w-[180px]">
+                                          <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value="ai_scoring">Use AI scoring</SelectItem>
+                                          <SelectItem value="always_deliver">Always deliver</SelectItem>
+                                          <SelectItem value="always_skip">Always skip</SelectItem>
+                                          <SelectItem value="custom_threshold">Custom threshold</SelectItem>
+                                        </SelectContent>
+                                      </Select>
+                                    </TableCell>
+                                    <TableCell>
+                                      {rule === 'custom_threshold' ? (
+                                        <div className="flex items-center gap-2">
+                                          <Slider
+                                            value={[getAuthorThreshold(handle)]}
+                                            onValueChange={([v]) => setAuthorRule(handle, 'custom_threshold', v)}
+                                            min={1}
+                                            max={20}
+                                            step={1}
+                                            className="w-24"
+                                          />
+                                          <Badge variant="outline">{getAuthorThreshold(handle)}</Badge>
+                                        </div>
+                                      ) : rule === 'always_deliver' ? (
+                                        <Badge className="bg-green-500/20 text-green-400 border-green-500/30">All</Badge>
+                                      ) : rule === 'always_skip' ? (
+                                        <Badge className="bg-red-500/20 text-red-400 border-red-500/30">None</Badge>
+                                      ) : (
+                                        <span className="text-sm text-muted-foreground">Default ({config.default_threshold})</span>
+                                      )}
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      )}
+                    </CollapsibleContent>
+                  </Collapsible>
+                </>
+              )}
             </>
           )}
         </CardContent>
       </Card>
 
-      {(config.enabled || config.score_only) && (
-        <>
-          {/* Editorial Guidelines */}
-          <Card className="glass-card">
-            <CardHeader>
-              <CardTitle className="flex items-center text-glass-foreground">
-                <Sparkles className="w-5 h-5 mr-2" />Editorial Guidelines
-              </CardTitle>
-              <CardDescription>
-                Tell the AI what matters to your audience in plain language. This is injected directly into the scoring prompt.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <Textarea
-                value={config.editorial_guidelines}
-                onChange={(e) => setConfig({ ...config, editorial_guidelines: e.target.value })}
-                className="glass-input min-h-[120px]"
-                placeholder="e.g., Prioritize anything related to Iran, the war, GCC countries, sanctions, and military developments..."
-              />
+      {/* Editorial Guidelines — visible for Score Only and Active */}
+      {filterStatus !== 'off' && (
+        <Card className="glass-card">
+          <CardHeader>
+            <CardTitle className="flex items-center text-glass-foreground">
+              <Sparkles className="w-5 h-5 mr-2" />Editorial Guidelines
+            </CardTitle>
+            <CardDescription>
+              Tell the AI what matters to your audience in plain language. This is injected directly into the scoring prompt.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <Textarea
+              value={config.editorial_guidelines}
+              onChange={(e) => setConfig({ ...config, editorial_guidelines: e.target.value })}
+              className="glass-input min-h-[120px]"
+              placeholder="e.g., Prioritize anything related to Iran, the war, GCC countries, sanctions, and military developments..."
+            />
 
-              {/* Priority Topics */}
-              <div className="space-y-2">
-                <Label>High Priority Topics (boost score)</Label>
-                <div className="flex gap-2">
-                  <Input
-                    value={newPriorityTopic}
-                    onChange={(e) => setNewPriorityTopic(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && addTopic('priority')}
-                    placeholder="Add topic..."
-                    className="glass-input"
-                  />
-                  <Button variant="outline" size="icon" onClick={() => addTopic('priority')}><Plus className="w-4 h-4" /></Button>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {config.priority_topics.map(topic => (
-                    <Badge key={topic} className="bg-green-500/20 text-green-400 border-green-500/30 gap-1">
-                      {topic}
-                      <X className="w-3 h-3 cursor-pointer" onClick={() => removeTopic('priority', topic)} />
-                    </Badge>
-                  ))}
-                </div>
+            <div className="space-y-2">
+              <Label>High Priority Topics (boost score)</Label>
+              <div className="flex gap-2">
+                <Input
+                  value={newPriorityTopic}
+                  onChange={(e) => setNewPriorityTopic(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && addTopic('priority')}
+                  placeholder="Add topic..."
+                  className="glass-input"
+                />
+                <Button variant="outline" size="icon" onClick={() => addTopic('priority')}><Plus className="w-4 h-4" /></Button>
               </div>
-
-              {/* Low Priority Topics */}
-              <div className="space-y-2">
-                <Label>Low Priority Topics (lower score)</Label>
-                <div className="flex gap-2">
-                  <Input
-                    value={newLowPriorityTopic}
-                    onChange={(e) => setNewLowPriorityTopic(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && addTopic('low_priority')}
-                    placeholder="Add topic..."
-                    className="glass-input"
-                  />
-                  <Button variant="outline" size="icon" onClick={() => addTopic('low_priority')}><Plus className="w-4 h-4" /></Button>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {config.low_priority_topics.map(topic => (
-                    <Badge key={topic} className="bg-orange-500/20 text-orange-400 border-orange-500/30 gap-1">
-                      {topic}
-                      <X className="w-3 h-3 cursor-pointer" onClick={() => removeTopic('low_priority', topic)} />
-                    </Badge>
-                  ))}
-                </div>
+              <div className="flex flex-wrap gap-2">
+                {config.priority_topics.map(topic => (
+                  <Badge key={topic} className="bg-green-500/20 text-green-400 border-green-500/30 gap-1">
+                    {topic}
+                    <X className="w-3 h-3 cursor-pointer" onClick={() => removeTopic('priority', topic)} />
+                  </Badge>
+                ))}
               </div>
-            </CardContent>
-          </Card>
+            </div>
 
-          {/* Author Rules */}
-          <Card className="glass-card">
-            <CardHeader>
-              <CardTitle className="flex items-center text-glass-foreground">
-                <Users className="w-5 h-5 mr-2" />Per-Author Overrides (Granular)
-              </CardTitle>
-              <CardDescription>
-                Override the global filter for specific authors. Authors using "AI scoring" fall back to the global threshold ({config.default_threshold}/20).
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {authorsQuery.isLoading ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-                </div>
-              ) : authors.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-4">No authors found yet. They will appear as posts are ingested.</p>
-              ) : (
-                <div className="rounded-md border">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Author</TableHead>
-                        <TableHead className="text-right">Posts</TableHead>
-                        <TableHead>Rule</TableHead>
-                        <TableHead>Threshold</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {authors.slice(0, 50).map(({ handle, count }) => {
-                        const rule = getAuthorRule(handle);
-                        return (
-                          <TableRow key={handle}>
-                            <TableCell className="font-mono text-sm">@{handle}</TableCell>
-                            <TableCell className="text-right text-muted-foreground">{count.toLocaleString()}</TableCell>
-                            <TableCell>
-                              <Select value={rule} onValueChange={(v) => setAuthorRule(handle, v)}>
-                                <SelectTrigger className="w-[180px]">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="ai_scoring">Use AI scoring</SelectItem>
-                                  <SelectItem value="always_deliver">Always deliver</SelectItem>
-                                  <SelectItem value="always_skip">Always skip</SelectItem>
-                                  <SelectItem value="custom_threshold">Custom threshold</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </TableCell>
-                            <TableCell>
-                              {rule === 'custom_threshold' ? (
-                                <div className="flex items-center gap-2">
-                                  <Slider
-                                    value={[getAuthorThreshold(handle)]}
-                                    onValueChange={([v]) => setAuthorRule(handle, 'custom_threshold', v)}
-                                    min={1}
-                                    max={20}
-                                    step={1}
-                                    className="w-24"
-                                  />
-                                  <Badge variant="outline">{getAuthorThreshold(handle)}</Badge>
-                                </div>
-                              ) : rule === 'always_deliver' ? (
-                                <Badge className="bg-green-500/20 text-green-400 border-green-500/30">All</Badge>
-                              ) : rule === 'always_skip' ? (
-                                <Badge className="bg-red-500/20 text-red-400 border-red-500/30">None</Badge>
-                              ) : (
-                                <span className="text-sm text-muted-foreground">Default ({config.default_threshold})</span>
-                              )}
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </>
+            <div className="space-y-2">
+              <Label>Low Priority Topics (lower score)</Label>
+              <div className="flex gap-2">
+                <Input
+                  value={newLowPriorityTopic}
+                  onChange={(e) => setNewLowPriorityTopic(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && addTopic('low_priority')}
+                  placeholder="Add topic..."
+                  className="glass-input"
+                />
+                <Button variant="outline" size="icon" onClick={() => addTopic('low_priority')}><Plus className="w-4 h-4" /></Button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {config.low_priority_topics.map(topic => (
+                  <Badge key={topic} className="bg-orange-500/20 text-orange-400 border-orange-500/30 gap-1">
+                    {topic}
+                    <X className="w-3 h-3 cursor-pointer" onClick={() => removeTopic('low_priority', topic)} />
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {/* Save Button */}
