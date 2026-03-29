@@ -260,10 +260,10 @@ export default function ContentFilterSettings({ initialConfig }: Props) {
           <Card className="glass-card">
             <CardHeader>
               <CardTitle className="flex items-center text-glass-foreground">
-                <Users className="w-5 h-5 mr-2" />Per-Author Rules
+                <Users className="w-5 h-5 mr-2" />Per-Author Overrides (Granular)
               </CardTitle>
               <CardDescription>
-                Override filtering for specific Twitter authors. Authors are auto-discovered from your feed.
+                Override the global filter for specific authors. Authors using "AI scoring" fall back to the global threshold ({config.default_threshold}/20).
               </CardDescription>
             </CardHeader>
             <CardContent>
