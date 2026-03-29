@@ -307,7 +307,7 @@ export default function ContentFilterSettings({ initialConfig }: Props) {
                                     value={[getAuthorThreshold(handle)]}
                                     onValueChange={([v]) => setAuthorRule(handle, 'custom_threshold', v)}
                                     min={1}
-                                    max={10}
+                                    max={20}
                                     step={1}
                                     className="w-24"
                                   />

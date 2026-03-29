@@ -255,14 +255,14 @@ export default function Monitoring() {
                         {entry.importance_score != null && (
                           <Badge
                             className={
-                              entry.importance_score >= 7
+                              entry.importance_score >= 15
                                 ? 'bg-green-500/20 text-green-400 border-green-500/30'
-                                : entry.importance_score >= 4
+                                : entry.importance_score >= 9
                                 ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
                                 : 'bg-red-500/20 text-red-400 border-red-500/30'
                             }
                           >
-                            <Star className="w-3 h-3 mr-1" />{entry.importance_score}/10
+                            <Star className="w-3 h-3 mr-1" />{entry.importance_score}/20
                           </Badge>
                         )}
                         {entry.delivery_decision && entry.delivery_decision !== 'deliver' && (

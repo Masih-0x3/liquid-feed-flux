@@ -448,7 +448,7 @@ ${post.text_original}`;
         try {
           const args = JSON.parse(toolCall.function.arguments);
           translatedText = args.translated_text || '';
-          importanceScore = Math.max(1, Math.min(10, args.importance_score || 5));
+          importanceScore = Math.max(1, Math.min(20, args.importance_score || 10));
           importanceTags = args.tags || [];
           console.log(JSON.stringify({ function: 'worker', action: 'scored', tweet_id: tweetId, score: importanceScore, tags: importanceTags, reasoning: args.reasoning }));
         } catch (parseErr) {
