@@ -66,7 +66,7 @@ async function loadConfig(supabase: ReturnType<typeof createClient>): Promise<{
     } as Record<string, unknown>,
     contentFilter: {
       enabled: false,
-      default_threshold: 6,
+      default_threshold: 12,
       editorial_guidelines: '',
       priority_topics: [] as string[],
       low_priority_topics: [] as string[],
