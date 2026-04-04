@@ -24,13 +24,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loadUserRole = async (userId: string) => {
     try {
-      // Query user_roles table - may not exist yet during migration
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+
       const { data, error } = await supabase
         .from('user_roles')
         .select('role')
         .eq('user_id', userId)
         .limit(1)
-        .maybeSingle();
+        .maybeSingle()
+        .abortSignal(controller.signal);
+
+      clearTimeout(timeout);
 
       if (error) {
         console.warn('Could not load user role:', error.message);
