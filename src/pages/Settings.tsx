@@ -365,6 +365,75 @@ export default function Settings() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* Digest Tab */}
+        <TabsContent value="digest" className="space-y-6">
+          <Card className="glass-card">
+            <CardHeader>
+              <CardTitle className="flex items-center text-glass-foreground"><Key className="w-5 h-5 mr-2" />Twitter/X API Credentials</CardTitle>
+              <CardDescription>Enter your Twitter API credentials to enable digest posting. These are stored securely in the database (admin-only access).</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Consumer Key (API Key)</Label>
+                  <Input type="password" value={ds.twitter_consumer_key} onChange={(e) => setDigestSettings({ ...ds, twitter_consumer_key: e.target.value })} className="glass-input" placeholder="Enter consumer key" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Consumer Secret (API Secret)</Label>
+                  <Input type="password" value={ds.twitter_consumer_secret} onChange={(e) => setDigestSettings({ ...ds, twitter_consumer_secret: e.target.value })} className="glass-input" placeholder="Enter consumer secret" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Access Token</Label>
+                  <Input type="password" value={ds.twitter_access_token} onChange={(e) => setDigestSettings({ ...ds, twitter_access_token: e.target.value })} className="glass-input" placeholder="Enter access token" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Access Token Secret</Label>
+                  <Input type="password" value={ds.twitter_access_token_secret} onChange={(e) => setDigestSettings({ ...ds, twitter_access_token_secret: e.target.value })} className="glass-input" placeholder="Enter access token secret" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="glass-card">
+            <CardHeader>
+              <CardTitle className="flex items-center text-glass-foreground"><Newspaper className="w-5 h-5 mr-2" />Digest Preferences</CardTitle>
+              <CardDescription>Configure how frequently digests are compiled and their format</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Frequency</Label>
+                  <Select value={ds.frequency_minutes.toString()} onValueChange={(v) => setDigestSettings({ ...ds, frequency_minutes: parseInt(v) })}>
+                    <SelectTrigger className="glass-input"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="30">Every 30 minutes</SelectItem>
+                      <SelectItem value="60">Every 1 hour</SelectItem>
+                      <SelectItem value="120">Every 2 hours</SelectItem>
+                      <SelectItem value="240">Every 4 hours</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Max Bullet Points</Label>
+                  <Input type="number" min="1" max="20" value={ds.max_bullets} onChange={(e) => setDigestSettings({ ...ds, max_bullets: parseInt(e.target.value) || 10 })} className="glass-input" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Min Posts to Trigger</Label>
+                  <Input type="number" min="1" max="50" value={ds.min_posts} onChange={(e) => setDigestSettings({ ...ds, min_posts: parseInt(e.target.value) || 2 })} className="glass-input" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Header Format</Label>
+                  <Input value={ds.header_format} onChange={(e) => setDigestSettings({ ...ds, header_format: e.target.value })} className="glass-input" placeholder="📰 News Digest — {time}" />
+                  <p className="text-xs text-muted-foreground">Use {'{time}'} for the current time</p>
+                </div>
+              </div>
+              <Button onClick={() => saveMutation.mutate({ key: 'digest_config', value: ds })} disabled={saveMutation.isPending} className="bg-gradient-primary hover:opacity-90 text-white w-full">
+                Save Digest Settings
+              </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
     </div>
   );

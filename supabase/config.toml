@@ -20,3 +20,6 @@ verify_jwt = false
 
 [functions.admin-actions]
 verify_jwt = false
+
+[functions.digest-compiler]
+verify_jwt = false
