@@ -24,26 +24,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loadUserRole = async (userId: string) => {
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5000);
+      const raceResult = await Promise.race([
+        supabase
+          .from('user_roles')
+          .select('role')
+          .eq('user_id', userId)
+          .limit(1)
+          .maybeSingle(),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
+      ]);
 
-      const { data, error } = await supabase
-        .from('user_roles')
-        .select('role')
-        .eq('user_id', userId)
-        .limit(1)
-        .maybeSingle()
-        .abortSignal(controller.signal);
-
-      clearTimeout(timeout);
-
-      if (error) {
-        console.warn('Could not load user role:', error.message);
+      if (!raceResult || 'error' in raceResult && raceResult.error) {
+        console.warn('Could not load user role:', raceResult && 'error' in raceResult ? raceResult.error?.message : 'timeout');
         setRole('admin');
         return;
       }
 
-      setRole((data?.role as AppRole) ?? 'admin');
+      if ('data' in raceResult) {
+        setRole((raceResult.data?.role as AppRole) ?? 'admin');
+      } else {
+        setRole('admin');
+      }
     } catch (err) {
       console.error('Failed to load role:', err);
       setRole('admin');
