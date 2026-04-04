@@ -58,7 +58,7 @@ export default function Settings() {
     );
   }
 
-  if (!ts || !os || !tgs || !mt) return null;
+  if (!ts || !os || !tgs || !mt || !ds) return null;
 
   const selectedModel = openaiModels.find(m => m.id === ts.model);
 
