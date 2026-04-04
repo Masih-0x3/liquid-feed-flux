@@ -10,10 +10,10 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
-import { Brain, MessageSquare, Eye, Code, Sparkles, Send, Key, Shield, Loader2, Filter } from 'lucide-react';
+import { Brain, MessageSquare, Eye, Code, Sparkles, Send, Key, Shield, Loader2, Filter, Newspaper } from 'lucide-react';
 import {
   useSettingsData, useSaveSettings, openaiModels, messagePlaceholders, promptPlaceholders,
-  type TranslationSettings, type OpenAISettings, type TelegramSettings, type MessageTemplateSettings,
+  type TranslationSettings, type OpenAISettings, type TelegramSettings, type MessageTemplateSettings, type DigestSettings,
 } from '@/hooks/useSettingsData';
 import ContentFilterSettings, { type ContentFilterConfig } from '@/components/settings/ContentFilterSettings';
 
