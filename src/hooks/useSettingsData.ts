@@ -23,6 +23,17 @@ export interface TelegramSettings {
   parse_mode: string;
 }
 
+export interface DigestSettings {
+  twitter_consumer_key: string;
+  twitter_consumer_secret: string;
+  twitter_access_token: string;
+  twitter_access_token_secret: string;
+  frequency_minutes: number;
+  max_bullets: number;
+  min_posts: number;
+  header_format: string;
+}
+
 export interface MessageTemplateSettings {
   template: string;
   include_source_link: boolean;
