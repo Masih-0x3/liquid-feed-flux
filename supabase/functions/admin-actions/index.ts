@@ -118,6 +118,16 @@ function validateSettingsValue(key: string, value: unknown): string | null {
       }
       break;
     }
+    case 'digest_config': {
+      if (v.twitter_consumer_key !== undefined && typeof v.twitter_consumer_key !== 'string') return 'digest_config.twitter_consumer_key must be a string';
+      if (v.twitter_consumer_secret !== undefined && typeof v.twitter_consumer_secret !== 'string') return 'digest_config.twitter_consumer_secret must be a string';
+      if (v.twitter_access_token !== undefined && typeof v.twitter_access_token !== 'string') return 'digest_config.twitter_access_token must be a string';
+      if (v.twitter_access_token_secret !== undefined && typeof v.twitter_access_token_secret !== 'string') return 'digest_config.twitter_access_token_secret must be a string';
+      if (v.frequency_minutes !== undefined && (typeof v.frequency_minutes !== 'number' || ![30, 60, 120, 240].includes(v.frequency_minutes))) return 'digest_config.frequency_minutes must be 30, 60, 120, or 240';
+      if (v.max_bullets !== undefined && (typeof v.max_bullets !== 'number' || v.max_bullets < 1 || v.max_bullets > 20)) return 'digest_config.max_bullets must be 1-20';
+      if (v.min_posts !== undefined && (typeof v.min_posts !== 'number' || v.min_posts < 1 || v.min_posts > 50)) return 'digest_config.min_posts must be 1-50';
+      break;
+    }
   }
   return null;
 }
@@ -151,7 +161,7 @@ serve(async (req) => {
           return jsonResponse({ error: 'key and value are required' }, 400);
         }
         // Only allow non-secret settings keys
-        const allowedKeys = ['translation_prompt', 'openai_config', 'telegram_config', 'message_template', 'content_filter'];
+        const allowedKeys = ['translation_prompt', 'openai_config', 'telegram_config', 'message_template', 'content_filter', 'digest_config'];
         if (!allowedKeys.includes(key)) {
           return jsonResponse({ error: `Setting key "${key}" is not allowed` }, 400);
         }
