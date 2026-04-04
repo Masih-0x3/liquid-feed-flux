@@ -109,6 +109,16 @@ const defaults = {
     author_rules: {} as Record<string, { rule: string; threshold?: number }>,
     score_only: false,
   },
+  digest_config: {
+    twitter_consumer_key: '',
+    twitter_consumer_secret: '',
+    twitter_access_token: '',
+    twitter_access_token_secret: '',
+    frequency_minutes: 30,
+    max_bullets: 10,
+    min_posts: 2,
+    header_format: '📰 News Digest — {time}',
+  } as DigestSettings,
 };
 
 async function fetchSettings() {
