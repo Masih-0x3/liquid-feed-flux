@@ -41,6 +41,7 @@ export default function Settings() {
   const [openaiSettings, setOpenaiSettings] = useState<OpenAISettings | null>(null);
   const [telegramSettings, setTelegramSettings] = useState<TelegramSettings | null>(null);
   const [messageTemplate, setMessageTemplate] = useState<MessageTemplateSettings | null>(null);
+  const [digestSettings, setDigestSettings] = useState<DigestSettings | null>(null);
 
   // Sync from server on first load
   const ts = translationSettings ?? settings?.translation_prompt;
