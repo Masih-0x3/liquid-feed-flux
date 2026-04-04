@@ -48,6 +48,7 @@ export default function Settings() {
   const os = openaiSettings ?? settings?.openai_config;
   const tgs = telegramSettings ?? settings?.telegram_config;
   const mt = messageTemplate ?? settings?.message_template;
+  const ds = digestSettings ?? settings?.digest_config;
 
   if (settingsQuery.isLoading) {
     return (
