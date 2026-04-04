@@ -125,6 +125,42 @@ export type Database = {
         }
         Relationships: []
       }
+      digests: {
+        Row: {
+          created_at: string
+          error: string | null
+          id: string
+          period_end: string
+          period_start: string
+          post_ids: string[] | null
+          status: string
+          summary_text: string | null
+          twitter_tweet_ids: string[] | null
+        }
+        Insert: {
+          created_at?: string
+          error?: string | null
+          id?: string
+          period_end: string
+          period_start: string
+          post_ids?: string[] | null
+          status?: string
+          summary_text?: string | null
+          twitter_tweet_ids?: string[] | null
+        }
+        Update: {
+          created_at?: string
+          error?: string | null
+          id?: string
+          period_end?: string
+          period_start?: string
+          post_ids?: string[] | null
+          status?: string
+          summary_text?: string | null
+          twitter_tweet_ids?: string[] | null
+        }
+        Relationships: []
+      }
       feeds: {
         Row: {
           created_at: string
