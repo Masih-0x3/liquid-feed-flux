@@ -433,6 +433,95 @@ export default function Settings() {
               </Button>
             </CardContent>
           </Card>
+
+          <Card className="glass-card">
+            <CardHeader>
+              <CardTitle className="flex items-center text-glass-foreground"><Eye className="w-5 h-5 mr-2" />Digest Dry Run</CardTitle>
+              <CardDescription>Test the digest pipeline without posting to Twitter. Shows posts, OpenAI prompt, summary, and formatted tweets.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <Button
+                onClick={async () => {
+                  setDigestTestLoading(true);
+                  setDigestTestResult(null);
+                  try {
+                    const { data, error } = await supabase.functions.invoke('digest-compiler', { body: { dry_run: true } });
+                    if (error) throw error;
+                    setDigestTestResult(data);
+                  } catch (e: any) {
+                    toast({ title: 'Dry run failed', description: e.message, variant: 'destructive' });
+                  } finally {
+                    setDigestTestLoading(false);
+                  }
+                }}
+                disabled={digestTestLoading}
+                variant="outline"
+                className="border-primary/50 hover:bg-primary/10 w-full"
+              >
+                {digestTestLoading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Running Dry Test...</> : <>🧪 Run Dry Test (No Posting)</>}
+              </Button>
+
+              {digestTestResult && (
+                <div className="space-y-4 mt-4">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Badge variant="secondary">{digestTestResult.post_count} posts</Badge>
+                    <span>from {new Date(digestTestResult.period_start).toLocaleTimeString()} → {new Date(digestTestResult.period_end).toLocaleTimeString()}</span>
+                  </div>
+
+                  {/* Posts found */}
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium">📥 Posts Found ({digestTestResult.post_count})</Label>
+                    <div className="max-h-48 overflow-y-auto bg-muted/50 rounded-lg p-3 space-y-2 text-sm">
+                      {digestTestResult.posts?.length > 0 ? digestTestResult.posts.map((p: any, i: number) => (
+                        <div key={i} className="p-2 bg-background rounded border">
+                          <span className="font-mono text-xs text-primary">@{p.author_handle || 'unknown'}</span>
+                          <p className="text-xs mt-1">{p.text_translated || p.text_original}</p>
+                        </div>
+                      )) : <p className="text-xs text-muted-foreground italic">No posts in this period</p>}
+                    </div>
+                  </div>
+
+                  {/* OpenAI System Prompt */}
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium">🤖 OpenAI System Prompt</Label>
+                    <div className="bg-muted/50 rounded-lg p-3 text-xs font-mono whitespace-pre-wrap border">{digestTestResult.openai_system_prompt}</div>
+                  </div>
+
+                  {/* OpenAI User Prompt */}
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium">📝 OpenAI User Prompt (Input)</Label>
+                    <div className="bg-muted/50 rounded-lg p-3 text-xs font-mono whitespace-pre-wrap border max-h-48 overflow-y-auto">{digestTestResult.openai_user_prompt}</div>
+                  </div>
+
+                  {/* OpenAI Response */}
+                  {digestTestResult.openai_response && (
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">✨ OpenAI Summary (Output)</Label>
+                      <div className="bg-muted/50 rounded-lg p-3 text-sm whitespace-pre-wrap border">{digestTestResult.openai_response}</div>
+                    </div>
+                  )}
+
+                  {/* Formatted Tweets */}
+                  {digestTestResult.formatted_tweets?.length > 0 && (
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">🐦 Formatted Tweets ({digestTestResult.formatted_tweets.length} tweet thread)</Label>
+                      <div className="space-y-2">
+                        {digestTestResult.formatted_tweets.map((tweet: string, i: number) => (
+                          <div key={i} className="p-3 bg-background rounded-lg border">
+                            <div className="flex items-center justify-between mb-1">
+                              <Badge variant="outline" className="text-xs">Tweet {i + 1}</Badge>
+                              <span className="text-xs text-muted-foreground">{tweet.length}/280 chars</span>
+                            </div>
+                            <p className="text-sm whitespace-pre-wrap">{tweet}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
     </div>
