@@ -1,5 +1,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-import { corsHeaders } from "https://esm.sh/@supabase/supabase-js@2.95.0/cors";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
 
 const encoder = new TextEncoder();
 
@@ -49,7 +53,6 @@ async function postTweet(
   const body: Record<string, unknown> = { text };
   if (replyToId) body.reply = { in_reply_to_tweet_id: replyToId };
 
-  // Do NOT include POST body params in OAuth signature for JSON requests
   const auth = await oauthHeader("POST", url, {}, ck, cs, at, ats);
   const res = await fetch(url, {
     method: "POST",
@@ -75,6 +78,15 @@ Deno.serve(async (req) => {
     const openaiKey = Deno.env.get("OPENAI_API_KEY")!;
     const sb = createClient(supabaseUrl, serviceKey);
 
+    // Check for dry_run mode
+    let dryRun = false;
+    try {
+      const body = await req.json();
+      dryRun = body?.dry_run === true;
+    } catch {
+      // No body or invalid JSON — normal cron invocation
+    }
+
     // 1. Load config
     const { data: configRow } = await sb.from("settings").select("value").eq("key", "digest_config").single();
     const config = configRow?.value as {
@@ -83,7 +95,7 @@ Deno.serve(async (req) => {
       frequency_minutes: number; max_bullets: number; min_posts: number; header_format: string;
     } | null;
 
-    if (!config || !config.twitter_consumer_key) {
+    if (!config) {
       return new Response(JSON.stringify({ skipped: true, reason: "no_config" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
@@ -103,8 +115,8 @@ Deno.serve(async (req) => {
 
     if (postsErr) throw postsErr;
 
-    if (!posts || posts.length < (config.min_posts || 2)) {
-      // Record skipped digest
+    // In dry_run, skip the min_posts check and don't record anything
+    if (!dryRun && (!posts || posts.length < (config.min_posts || 2))) {
       await sb.from("digests").insert({
         period_start: periodStart.toISOString(),
         period_end: periodEnd.toISOString(),
@@ -118,9 +130,26 @@ Deno.serve(async (req) => {
     }
 
     // 3. Build summary via OpenAI
-    const bulletPrompt = posts.map((p, i) =>
+    const bulletPrompt = (posts || []).map((p, i) =>
       `${i + 1}. @${p.author_handle || "unknown"}: ${p.text_translated || p.text_original}`
     ).join("\n");
+
+    const systemPrompt = `You are a news editor. Summarize the following posts into a concise bullet-point digest. Use at most ${config.max_bullets || 10} bullet points. Each bullet should be one sentence. Write in the same language as the posts. Use emoji bullets (•). Do not include attribution or links.`;
+
+    // If dry_run and no posts, return early with empty preview
+    if (dryRun && (!posts || posts.length === 0)) {
+      return new Response(JSON.stringify({
+        dry_run: true,
+        period_start: periodStart.toISOString(),
+        period_end: periodEnd.toISOString(),
+        post_count: 0,
+        posts: [],
+        openai_system_prompt: systemPrompt,
+        openai_user_prompt: "(no posts in this period)",
+        openai_response: null,
+        formatted_tweets: [],
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
 
     const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -128,10 +157,7 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         model: "gpt-4o-mini",
         messages: [
-          {
-            role: "system",
-            content: `You are a news editor. Summarize the following posts into a concise bullet-point digest. Use at most ${config.max_bullets || 10} bullet points. Each bullet should be one sentence. Write in the same language as the posts. Use emoji bullets (•). Do not include attribution or links.`,
-          },
+          { role: "system", content: systemPrompt },
           { role: "user", content: bulletPrompt },
         ],
         max_tokens: 1500,
@@ -164,7 +190,31 @@ Deno.serve(async (req) => {
     }
     if (current.trim()) tweets.push(current.trim());
 
+    // ── DRY RUN: return everything without posting ──
+    if (dryRun) {
+      return new Response(JSON.stringify({
+        dry_run: true,
+        period_start: periodStart.toISOString(),
+        period_end: periodEnd.toISOString(),
+        post_count: posts?.length || 0,
+        posts: (posts || []).map(p => ({
+          tweet_id: p.tweet_id,
+          author_handle: p.author_handle,
+          text_translated: p.text_translated,
+          text_original: p.text_original,
+        })),
+        openai_system_prompt: systemPrompt,
+        openai_user_prompt: bulletPrompt,
+        openai_response: summary,
+        formatted_tweets: tweets,
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     // 5. Post as Twitter thread
+    if (!config.twitter_consumer_key) {
+      return new Response(JSON.stringify({ skipped: true, reason: "no_twitter_keys" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     const { twitter_consumer_key: ck, twitter_consumer_secret: cs, twitter_access_token: at, twitter_access_token_secret: ats } = config;
     const tweetIds: string[] = [];
     let replyTo: string | null = null;
@@ -179,19 +229,18 @@ Deno.serve(async (req) => {
     await sb.from("digests").insert({
       period_start: periodStart.toISOString(),
       period_end: periodEnd.toISOString(),
-      post_ids: posts.map((p) => p.tweet_id),
+      post_ids: (posts || []).map((p) => p.tweet_id),
       summary_text: summary,
       twitter_tweet_ids: tweetIds,
       status: "posted",
     });
 
-    return new Response(JSON.stringify({ success: true, tweet_count: tweetIds.length, post_count: posts.length }), {
+    return new Response(JSON.stringify({ success: true, tweet_count: tweetIds.length, post_count: posts?.length || 0 }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {
     console.error("digest-compiler error:", err);
 
-    // Try to record failure
     try {
       const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
       await sb.from("digests").insert({
