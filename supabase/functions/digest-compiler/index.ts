@@ -7,6 +7,114 @@ const corsHeaders = {
 
 const encoder = new TextEncoder();
 
+interface DigestConfig {
+  twitter_consumer_key: string;
+  twitter_consumer_secret: string;
+  twitter_access_token: string;
+  twitter_access_token_secret: string;
+  frequency_minutes: number;
+  max_bullets: number;
+  min_posts: number;
+  header_format: string;
+}
+
+interface OpenAIConfig {
+  model: string;
+  temperature: number;
+  max_completion_tokens: number;
+}
+
+const DEFAULT_DIGEST_CONFIG: DigestConfig = {
+  twitter_consumer_key: "",
+  twitter_consumer_secret: "",
+  twitter_access_token: "",
+  twitter_access_token_secret: "",
+  frequency_minutes: 30,
+  max_bullets: 10,
+  min_posts: 2,
+  header_format: "📰 News Digest — {time}",
+};
+
+const DEFAULT_OPENAI_CONFIG: OpenAIConfig = {
+  model: "gpt-4o-mini",
+  temperature: 0.3,
+  max_completion_tokens: 1500,
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function readNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function readDigestConfigOverride(value: unknown): Partial<DigestConfig> {
+  if (!isRecord(value)) return {};
+
+  const frequencyMinutes = readNumber(value.frequency_minutes);
+  const maxBullets = readNumber(value.max_bullets);
+  const minPosts = readNumber(value.min_posts);
+
+  return {
+    ...(readString(value.twitter_consumer_key) !== undefined ? { twitter_consumer_key: readString(value.twitter_consumer_key)! } : {}),
+    ...(readString(value.twitter_consumer_secret) !== undefined ? { twitter_consumer_secret: readString(value.twitter_consumer_secret)! } : {}),
+    ...(readString(value.twitter_access_token) !== undefined ? { twitter_access_token: readString(value.twitter_access_token)! } : {}),
+    ...(readString(value.twitter_access_token_secret) !== undefined ? { twitter_access_token_secret: readString(value.twitter_access_token_secret)! } : {}),
+    ...(frequencyMinutes !== undefined ? { frequency_minutes: Math.max(5, Math.min(1440, Math.round(frequencyMinutes))) } : {}),
+    ...(maxBullets !== undefined ? { max_bullets: Math.max(1, Math.min(20, Math.round(maxBullets))) } : {}),
+    ...(minPosts !== undefined ? { min_posts: Math.max(1, Math.min(50, Math.round(minPosts))) } : {}),
+    ...(readString(value.header_format) !== undefined ? { header_format: readString(value.header_format)! } : {}),
+  };
+}
+
+function readOpenAIConfig(value: unknown): OpenAIConfig {
+  if (!isRecord(value)) return DEFAULT_OPENAI_CONFIG;
+
+  const model = readString(value.model) || DEFAULT_OPENAI_CONFIG.model;
+  const temperature = readNumber(value.temperature);
+  const maxCompletionTokens = readNumber(value.max_completion_tokens) ?? readNumber(value.max_tokens);
+
+  return {
+    model,
+    temperature: temperature !== undefined ? Math.max(0, Math.min(2, temperature)) : DEFAULT_OPENAI_CONFIG.temperature,
+    max_completion_tokens: maxCompletionTokens !== undefined
+      ? Math.max(600, Math.min(4000, Math.round(maxCompletionTokens)))
+      : DEFAULT_OPENAI_CONFIG.max_completion_tokens,
+  };
+}
+
+function usesMaxCompletionTokens(model: string): boolean {
+  return /^(gpt-5|gpt-4\.1|o3|o4)/.test(model);
+}
+
+function supportsTemperature(model: string): boolean {
+  return !usesMaxCompletionTokens(model);
+}
+
+function buildThreadTweets(summary: string, header: string): string[] {
+  const lines = summary.split("\n").map((line) => line.trim()).filter(Boolean);
+  if (lines.length === 0) return [];
+
+  const tweets: string[] = [];
+  let current = `${header}\n\n`;
+
+  for (const line of lines) {
+    if ((current + line + "\n").length > 270) {
+      tweets.push(current.trim());
+      current = "";
+    }
+    current += `${line}\n`;
+  }
+
+  if (current.trim()) tweets.push(current.trim());
+  return tweets;
+}
+
 // ── OAuth 1.0a helpers ──────────────────────────────────────────────
 function percentEncode(s: string): string {
   return encodeURIComponent(s).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
@@ -23,8 +131,13 @@ function oauthNonce(): string {
 }
 
 async function oauthHeader(
-  method: string, url: string, params: Record<string, string>,
-  consumerKey: string, consumerSecret: string, accessToken: string, tokenSecret: string
+  method: string,
+  url: string,
+  params: Record<string, string>,
+  consumerKey: string,
+  consumerSecret: string,
+  accessToken: string,
+  tokenSecret: string,
 ): Promise<string> {
   const oauthParams: Record<string, string> = {
     oauth_consumer_key: consumerKey,
@@ -36,18 +149,28 @@ async function oauthHeader(
   };
 
   const allParams = { ...oauthParams, ...params };
-  const paramString = Object.keys(allParams).sort().map((k) => `${percentEncode(k)}=${percentEncode(allParams[k])}`).join("&");
+  const paramString = Object.keys(allParams)
+    .sort()
+    .map((key) => `${percentEncode(key)}=${percentEncode(allParams[key])}`)
+    .join("&");
   const baseString = `${method.toUpperCase()}&${percentEncode(url)}&${percentEncode(paramString)}`;
   const signingKey = `${percentEncode(consumerSecret)}&${percentEncode(tokenSecret)}`;
   oauthParams.oauth_signature = await hmacSha1(signingKey, baseString);
 
-  return "OAuth " + Object.keys(oauthParams).sort().map((k) => `${percentEncode(k)}="${percentEncode(oauthParams[k])}"`).join(", ");
+  return `OAuth ${Object.keys(oauthParams)
+    .sort()
+    .map((key) => `${percentEncode(key)}="${percentEncode(oauthParams[key])}"`)
+    .join(", ")}`;
 }
 
 // ── Twitter API helpers ─────────────────────────────────────────────
 async function postTweet(
-  text: string, replyToId: string | null,
-  ck: string, cs: string, at: string, ats: string
+  text: string,
+  replyToId: string | null,
+  ck: string,
+  cs: string,
+  at: string,
+  ats: string,
 ): Promise<{ id: string }> {
   const url = "https://api.x.com/2/tweets";
   const body: Record<string, unknown> = { text };
@@ -64,6 +187,7 @@ async function postTweet(
     const errText = await res.text();
     throw new Error(`Twitter API ${res.status}: ${errText}`);
   }
+
   const json = await res.json();
   return { id: json.data.id };
 }
@@ -72,41 +196,55 @@ async function postTweet(
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
+  let dryRun = false;
+
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const openaiKey = Deno.env.get("OPENAI_API_KEY")!;
     const sb = createClient(supabaseUrl, serviceKey);
 
-    // Check for dry_run mode
-    let dryRun = false;
+    let requestBody: Record<string, unknown> = {};
     try {
-      const body = await req.json();
-      dryRun = body?.dry_run === true;
+      const parsed = await req.json();
+      if (isRecord(parsed)) requestBody = parsed;
     } catch {
-      // No body or invalid JSON — normal cron invocation
+      requestBody = {};
     }
 
-    // 1. Load config
-    const { data: configRow } = await sb.from("settings").select("value").eq("key", "digest_config").single();
-    const config = configRow?.value as {
-      twitter_consumer_key: string; twitter_consumer_secret: string;
-      twitter_access_token: string; twitter_access_token_secret: string;
-      frequency_minutes: number; max_bullets: number; min_posts: number; header_format: string;
-    } | null;
+    dryRun = requestBody.dry_run === true;
 
-    if (!config) {
-      return new Response(JSON.stringify({ skipped: true, reason: "no_config" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    const { data: settingsRows, error: settingsError } = await sb
+      .from("settings")
+      .select("key, value")
+      .in("key", ["digest_config", "openai_config"]);
+
+    if (settingsError) throw settingsError;
+
+    const settingsMap = Object.fromEntries((settingsRows || []).map((row) => [row.key, row.value])) as Record<string, unknown>;
+    const hasSavedDigestConfig = isRecord(settingsMap.digest_config);
+
+    const digestConfig = {
+      ...DEFAULT_DIGEST_CONFIG,
+      ...readDigestConfigOverride(settingsMap.digest_config),
+      ...(dryRun ? readDigestConfigOverride(requestBody.config) : {}),
+    } satisfies DigestConfig;
+
+    const openaiConfig = readOpenAIConfig(settingsMap.openai_config);
+
+    if (!dryRun && !hasSavedDigestConfig) {
+      return new Response(JSON.stringify({ skipped: true, reason: "no_config" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    const freqMinutes = config.frequency_minutes || 30;
+    const freqMinutes = digestConfig.frequency_minutes;
     const periodEnd = new Date();
     const periodStart = new Date(periodEnd.getTime() - freqMinutes * 60 * 1000);
 
-    // 2. Fetch recent delivered posts
     const { data: posts, error: postsErr } = await sb
       .from("posts")
-      .select("tweet_id, text_translated, text_original, author_handle, url, has_media, tweeted_at")
+      .select("tweet_id, text_translated, text_original, author_handle, url, has_media, tweeted_at, created_at")
       .gte("created_at", periodStart.toISOString())
       .lte("created_at", periodEnd.toISOString())
       .not("text_translated", "is", null)
@@ -115,54 +253,84 @@ Deno.serve(async (req) => {
 
     if (postsErr) throw postsErr;
 
-    // In dry_run, skip the min_posts check and don't record anything
-    if (!dryRun && (!posts || posts.length < (config.min_posts || 2))) {
+    if (!dryRun && (!posts || posts.length < digestConfig.min_posts)) {
       await sb.from("digests").insert({
         period_start: periodStart.toISOString(),
         period_end: periodEnd.toISOString(),
-        post_ids: (posts || []).map((p) => p.tweet_id),
+        post_ids: (posts || []).map((post) => post.tweet_id),
         status: "skipped",
-        error: `Only ${posts?.length || 0} posts (min: ${config.min_posts || 2})`,
+        error: `Only ${posts?.length || 0} posts (min: ${digestConfig.min_posts})`,
       });
+
       return new Response(JSON.stringify({ skipped: true, post_count: posts?.length || 0 }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // 3. Build summary via OpenAI
-    const bulletPrompt = (posts || []).map((p, i) =>
-      `${i + 1}. @${p.author_handle || "unknown"}: ${p.text_translated || p.text_original}`
-    ).join("\n");
+    const bulletPrompt = (posts || [])
+      .map((post, index) => `${index + 1}. @${post.author_handle || "unknown"}: ${post.text_translated || post.text_original || ""}`)
+      .join("\n");
 
-    const systemPrompt = `You are a news editor. Summarize the following posts into a concise bullet-point digest. Use at most ${config.max_bullets || 10} bullet points. Each bullet should be one sentence. Write in the same language as the posts. Use emoji bullets (•). Do not include attribution or links.`;
+    const systemPrompt = `You are a news editor. Summarize the following posts into a concise bullet-point digest. Use at most ${digestConfig.max_bullets} bullet points. Each bullet should be one sentence. Write in the same language as the posts. Use emoji bullets (•). Do not include attribution or links.`;
 
-    // If dry_run and no posts, return early with empty preview
     if (dryRun && (!posts || posts.length === 0)) {
       return new Response(JSON.stringify({
         dry_run: true,
+        reason: "no_posts",
         period_start: periodStart.toISOString(),
         period_end: periodEnd.toISOString(),
         post_count: 0,
         posts: [],
+        digest_config: {
+          frequency_minutes: digestConfig.frequency_minutes,
+          max_bullets: digestConfig.max_bullets,
+          min_posts: digestConfig.min_posts,
+          header_format: digestConfig.header_format,
+          twitter_credentials_configured: Boolean(
+            digestConfig.twitter_consumer_key &&
+            digestConfig.twitter_consumer_secret &&
+            digestConfig.twitter_access_token &&
+            digestConfig.twitter_access_token_secret,
+          ),
+        },
+        openai_request: {
+          model: openaiConfig.model,
+          ...(usesMaxCompletionTokens(openaiConfig.model)
+            ? { max_completion_tokens: openaiConfig.max_completion_tokens }
+            : { max_tokens: openaiConfig.max_completion_tokens }),
+          ...(supportsTemperature(openaiConfig.model) ? { temperature: openaiConfig.temperature } : {}),
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: "(no posts in this period)" },
+          ],
+        },
         openai_system_prompt: systemPrompt,
         openai_user_prompt: "(no posts in this period)",
-        openai_response: null,
+        openai_response: "",
+        openai_finish_reason: null,
+        openai_usage: null,
         formatted_tweets: [],
-      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
+
+    const openaiRequestPayload: Record<string, unknown> = {
+      model: openaiConfig.model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: bulletPrompt },
+      ],
+      ...(usesMaxCompletionTokens(openaiConfig.model)
+        ? { max_completion_tokens: openaiConfig.max_completion_tokens }
+        : { max_tokens: openaiConfig.max_completion_tokens }),
+      ...(supportsTemperature(openaiConfig.model) ? { temperature: openaiConfig.temperature } : {}),
+    };
 
     const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${openaiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: bulletPrompt },
-        ],
-        max_tokens: 1500,
-        temperature: 0.3,
-      }),
+      body: JSON.stringify(openaiRequestPayload),
     });
 
     if (!openaiRes.ok) {
@@ -171,65 +339,88 @@ Deno.serve(async (req) => {
     }
 
     const openaiJson = await openaiRes.json();
-    const summary = openaiJson.choices?.[0]?.message?.content?.trim() || "";
+    const openaiChoice = openaiJson.choices?.[0];
+    const summary = typeof openaiChoice?.message?.content === "string" ? openaiChoice.message.content.trim() : "";
+    const openaiFinishReason = openaiChoice?.finish_reason ?? null;
+    const openaiUsage = openaiJson.usage ?? null;
 
-    // 4. Format into tweet-sized chunks (280 char limit)
     const timeStr = periodEnd.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
-    const header = (config.header_format || "📰 News Digest — {time}").replace("{time}", timeStr);
+    const header = digestConfig.header_format.replace("{time}", timeStr);
+    const tweets = buildThreadTweets(summary, header);
 
-    const tweets: string[] = [];
-    const lines = summary.split("\n").filter((l: string) => l.trim());
-    let current = header + "\n\n";
-
-    for (const line of lines) {
-      if ((current + line + "\n").length > 270) {
-        tweets.push(current.trim());
-        current = "";
-      }
-      current += line + "\n";
-    }
-    if (current.trim()) tweets.push(current.trim());
-
-    // ── DRY RUN: return everything without posting ──
     if (dryRun) {
       return new Response(JSON.stringify({
         dry_run: true,
         period_start: periodStart.toISOString(),
         period_end: periodEnd.toISOString(),
         post_count: posts?.length || 0,
-        posts: (posts || []).map(p => ({
-          tweet_id: p.tweet_id,
-          author_handle: p.author_handle,
-          text_translated: p.text_translated,
-          text_original: p.text_original,
+        posts: (posts || []).map((post) => ({
+          tweet_id: post.tweet_id,
+          author_handle: post.author_handle,
+          text_translated: post.text_translated,
+          text_original: post.text_original,
+          created_at: post.created_at,
         })),
+        digest_config: {
+          frequency_minutes: digestConfig.frequency_minutes,
+          max_bullets: digestConfig.max_bullets,
+          min_posts: digestConfig.min_posts,
+          header_format: digestConfig.header_format,
+          twitter_credentials_configured: Boolean(
+            digestConfig.twitter_consumer_key &&
+            digestConfig.twitter_consumer_secret &&
+            digestConfig.twitter_access_token &&
+            digestConfig.twitter_access_token_secret,
+          ),
+        },
+        openai_request: openaiRequestPayload,
         openai_system_prompt: systemPrompt,
         openai_user_prompt: bulletPrompt,
         openai_response: summary,
+        openai_finish_reason: openaiFinishReason,
+        openai_usage: openaiUsage,
         formatted_tweets: tweets,
-      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        warning: summary ? null : `OpenAI returned empty summary${openaiFinishReason ? ` (finish_reason: ${openaiFinishReason})` : ""}`,
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    // 5. Post as Twitter thread
-    if (!config.twitter_consumer_key) {
-      return new Response(JSON.stringify({ skipped: true, reason: "no_twitter_keys" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    if (!summary) {
+      throw new Error(`OpenAI returned empty summary${openaiFinishReason ? ` (finish_reason: ${openaiFinishReason})` : ""}`);
     }
 
-    const { twitter_consumer_key: ck, twitter_consumer_secret: cs, twitter_access_token: at, twitter_access_token_secret: ats } = config;
+    if (
+      !digestConfig.twitter_consumer_key ||
+      !digestConfig.twitter_consumer_secret ||
+      !digestConfig.twitter_access_token ||
+      !digestConfig.twitter_access_token_secret
+    ) {
+      return new Response(JSON.stringify({ skipped: true, reason: "no_twitter_keys" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const tweetIds: string[] = [];
     let replyTo: string | null = null;
 
     for (const tweetText of tweets) {
-      const result = await postTweet(tweetText, replyTo, ck, cs, at, ats);
+      const result = await postTweet(
+        tweetText,
+        replyTo,
+        digestConfig.twitter_consumer_key,
+        digestConfig.twitter_consumer_secret,
+        digestConfig.twitter_access_token,
+        digestConfig.twitter_access_token_secret,
+      );
       tweetIds.push(result.id);
       replyTo = result.id;
     }
 
-    // 6. Record digest
     await sb.from("digests").insert({
       period_start: periodStart.toISOString(),
       period_end: periodEnd.toISOString(),
-      post_ids: (posts || []).map((p) => p.tweet_id),
+      post_ids: (posts || []).map((post) => post.tweet_id),
       summary_text: summary,
       twitter_tweet_ids: tweetIds,
       status: "posted",
@@ -241,15 +432,19 @@ Deno.serve(async (req) => {
   } catch (err) {
     console.error("digest-compiler error:", err);
 
-    try {
-      const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-      await sb.from("digests").insert({
-        period_start: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-        period_end: new Date().toISOString(),
-        status: "failed",
-        error: (err as Error).message?.substring(0, 500),
-      });
-    } catch { /* ignore */ }
+    if (!dryRun) {
+      try {
+        const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+        await sb.from("digests").insert({
+          period_start: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+          period_end: new Date().toISOString(),
+          status: "failed",
+          error: (err as Error).message?.substring(0, 500),
+        });
+      } catch {
+        // ignore logging failure
+      }
+    }
 
     return new Response(JSON.stringify({ error: (err as Error).message }), {
       status: 500,
