@@ -42,6 +42,8 @@ export default function Settings() {
   const [telegramSettings, setTelegramSettings] = useState<TelegramSettings | null>(null);
   const [messageTemplate, setMessageTemplate] = useState<MessageTemplateSettings | null>(null);
   const [digestSettings, setDigestSettings] = useState<DigestSettings | null>(null);
+  const [digestTestLoading, setDigestTestLoading] = useState(false);
+  const [digestTestResult, setDigestTestResult] = useState<any>(null);
 
   // Sync from server on first load
   const ts = translationSettings ?? settings?.translation_prompt;
