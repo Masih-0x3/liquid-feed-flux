@@ -271,7 +271,19 @@ Deno.serve(async (req) => {
       .map((post, index) => `${index + 1}. @${post.author_handle || "unknown"}: ${post.text_translated || post.text_original || ""}`)
       .join("\n");
 
-    const systemPrompt = `You are a news editor. Summarize the following posts into a concise bullet-point digest. Use at most ${digestConfig.max_bullets} bullet points. Each bullet should be one sentence. Write in the same language as the posts. Use emoji bullets (•). Do not include attribution or links.`;
+    const systemPrompt = `You are a senior news editor at a respected wire service. Your task is to compile the following raw posts into a polished, editorial-quality news digest.
+
+Guidelines:
+- Write at most ${digestConfig.max_bullets} news items using bullet points (•).
+- Each item should be a clear, informative sentence that provides context — not just a headline. Include key details (who, what, why, implications) when available.
+- Group related stories together and order them by significance (most important first).
+- If multiple posts cover the same event, merge them into a single, richer bullet that synthesizes the information.
+- Maintain a neutral, authoritative journalistic tone throughout.
+- Ensure the digest reads as a cohesive briefing — transitions between topics should feel natural, not disjointed.
+- Write in the same language as the source posts (Persian/Farsi if the posts are translated to Persian).
+- Do NOT include usernames, handles, links, or source attribution.
+- Do NOT repeat the same fact across multiple bullets.
+- Prioritize geopolitical, military, sanctions, and breaking news over routine or minor stories.`;
 
     if (dryRun && (!posts || posts.length === 0)) {
       return new Response(JSON.stringify({
