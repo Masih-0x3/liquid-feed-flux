@@ -374,6 +374,9 @@ You are an editorial assistant scoring news items for a curated Telegram channel
 3-4 — VERY LOW: Soft news, human interest stories, minor local events, routine procedural updates.
 1-2 — SKIP: Entertainment, sports, celebrity gossip, memes, viral trends, product launches, lifestyle content, weather reports.
 
+### CRITICAL — Iran/Middle East Relevance Gate
+If the content has NO direct connection to Iran, the Middle East region, or entities that directly affect Iran (e.g., sanctions, nuclear negotiations, proxy conflicts), cap the score at 8 MAXIMUM — regardless of how globally significant the event is. Only content with a clear Iran/Middle East nexus should score above 8.
+
 ### Topic Priorities
 High-priority topics (boost score by 1-2 points): ${priorityTopics}
 Low-priority topics (reduce score by 1-2 points): ${lowPriorityTopics}
