@@ -1,76 +1,35 @@
 
 
-## Plan: Twitter Digest System with UI Configuration
+## Problem Analysis
 
-### Summary
-Build the complete Twitter Digest feature: database table, edge function, cron job, and a new "Digest" tab in Settings where Twitter API credentials and digest preferences are configured via the existing `settings` table pattern.
+Your content filter has two weaknesses:
 
-### What Changes
+1. **Threshold too low (10/20)**: 62 posts at score 10 and 41 at score 11 are getting delivered — these are mostly non-Iran content (stock markets, Hungary politics, routine China diplomacy). Raising to **14** would cut delivered posts roughly in half, keeping only genuinely Iran/Middle East relevant content.
 
-**1. Database Migration — `digests` table**
+2. **Scoring prompt not Iran-focused enough**: The rubric treats all geopolitical news equally. A China ceasefire comment gets 13, same as an Iran sanctions story. The prompt needs to explicitly deprioritize non-Iran/Middle East content and give Iran-specific events a scoring boost.
 
-Create `public.digests` with columns: `id`, `period_start`, `period_end`, `post_ids` (text[]), `summary_text`, `twitter_tweet_ids` (text[]), `status` (pending/posted/failed/skipped), `error`, `created_at`. Simple RLS: authenticated users can read, admins can manage (same pattern as all other tables).
+## Proposed Changes
 
-**2. Settings UI — New "Digest" tab in Settings page**
+### 1. Raise default threshold from 10 to 14
+Update the `content_filter` setting in the database. This alone would have blocked 103 low-relevance posts in the last 24h.
 
-Add a 6th tab called "Digest" (icon: Newspaper) to `src/pages/Settings.tsx` with:
+### 2. Strengthen the editorial guidelines
+Replace the current editorial guidelines with a more explicit Iran-gate:
 
-- **Twitter API Credentials** — 4 password-type inputs stored in `settings` table under key `digest_config`:
-  - Consumer Key, Consumer Secret, Access Token, Access Token Secret
-  - Note: These are stored in the `settings` table (admin-only access via RLS), not as Supabase secrets. The edge function will read them from the DB at runtime.
+> "This channel is exclusively focused on Iran and the broader Middle East. Content MUST have a direct connection to Iran, its government, military, economy, sanctions, nuclear program, proxies, or regional conflicts involving Iran. General world news (e.g., US stocks, European politics, China domestic policy) should score 8 or below UNLESS it directly impacts Iran. Only deliver content that a dedicated Iran-watcher would find essential."
 
-- **Digest Preferences**:
-  - Frequency (select: 30min, 1hr, 2hr, 4hr)
-  - Max bullet points (number input, default 10)
-  - Min posts to trigger (number input, default 2)
-  - Header format (text input, default "📰 News Digest — {time}")
+### 3. Update priority/low-priority topics
+- **Priority topics**: Iran, IRGC, Hormuz, sanctions, nuclear, Hezbollah, Houthis, Israel-Iran, Persian Gulf, Middle East
+- **Low-priority topics**: stocks, crypto, earnings, sports, entertainment, EU internal politics, US domestic, China domestic
 
-- Save button using existing `useSaveSettings` mutation
+### 4. Add a relevance gate to the scoring rubric
+Add an explicit instruction in the worker's system prompt: "If the content has NO direct connection to Iran or the Middle East region, cap the score at 8 regardless of how important the event is globally."
 
-**3. Update `useSettingsData.ts`**
+## Technical Implementation
 
-Add `DigestSettings` interface and default values for `digest_config` key. The edge function reads these at runtime.
+1. **Database migration**: Update the `content_filter` setting with new threshold (14), updated editorial guidelines, and expanded topic lists
+2. **Worker edge function**: Add an Iran-relevance cap rule to the scoring system prompt (lines 357-386 of `worker/index.ts`) — a single paragraph addition telling the AI to cap non-Iran scores at 8
+3. **Redeploy worker** function with the updated prompt
 
-**4. Edge Function — `supabase/functions/digest-compiler/index.ts`**
-
-Single file implementing:
-1. Read `digest_config` from `settings` table (Twitter creds + preferences)
-2. Query `posts` from last N minutes where `text_translated IS NOT NULL` and `delivery_decision = 'deliver'`
-3. Skip if fewer than min_posts (insert `skipped` digest record)
-4. Send to OpenAI for bullet-point summarization (reuses existing `OPENAI_API_KEY` secret)
-5. Format into tweet-sized chunks (280 char limit, thread structure)
-6. Upload images to Twitter media endpoint via OAuth 1.0a
-7. Post thread to X via `POST https://api.x.com/2/tweets`
-8. Record result in `digests` table
-
-OAuth 1.0a signature generation implemented inline (HMAC-SHA1).
-
-**5. Config — `supabase/config.toml`**
-
-Add `[functions.digest-compiler]` with `verify_jwt = false`.
-
-**6. Cron Job**
-
-Insert via SQL (not migration): `cron.schedule` to call `digest-compiler` every 30 minutes using `net.http_post`.
-
-### Files Changed/Created
-
-| File | Action |
-|------|--------|
-| `supabase/migrations/XXXX_create_digests.sql` | Create — digests table + RLS |
-| `supabase/functions/digest-compiler/index.ts` | Create — main edge function |
-| `supabase/config.toml` | Edit — add digest-compiler entry |
-| `src/pages/Settings.tsx` | Edit — add Digest tab with Twitter creds + preferences |
-| `src/hooks/useSettingsData.ts` | Edit — add DigestSettings type + defaults |
-| Cron SQL (via insert tool) | Insert — 30-min schedule |
-
-### Implementation Order
-
-1. Create `digests` table migration
-2. Update `useSettingsData.ts` with digest config types
-3. Add Digest tab to Settings page
-4. Build `digest-compiler` edge function
-5. Update `config.toml`
-6. Deploy and set up cron job
-7. Test end-to-end
+These changes work together: the prompt makes the AI score non-Iran content lower, the threshold filters out anything that still slips through, and the editorial guidelines provide authoritative overrides.
 
