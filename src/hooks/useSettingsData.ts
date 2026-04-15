@@ -24,10 +24,6 @@ export interface TelegramSettings {
 }
 
 export interface DigestSettings {
-  twitter_consumer_key: string;
-  twitter_consumer_secret: string;
-  twitter_access_token: string;
-  twitter_access_token_secret: string;
   frequency_minutes: number;
   max_bullets: number;
   min_posts: number;
@@ -110,10 +106,6 @@ const defaults = {
     score_only: false,
   },
   digest_config: {
-    twitter_consumer_key: '',
-    twitter_consumer_secret: '',
-    twitter_access_token: '',
-    twitter_access_token_secret: '',
     frequency_minutes: 30,
     max_bullets: 10,
     min_posts: 2,
