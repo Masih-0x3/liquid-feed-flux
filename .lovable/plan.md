@@ -1,35 +1,125 @@
 
 
-## Problem Analysis
+## Disk I/O Optimization Plan
 
-Your content filter has two weaknesses:
+### Problem Summary
 
-1. **Threshold too low (10/20)**: 62 posts at score 10 and 41 at score 11 are getting delivered — these are mostly non-Iran content (stock markets, Hungary politics, routine China diplomacy). Raising to **14** would cut delivered posts roughly in half, keeping only genuinely Iran/Middle East relevant content.
+Your Supabase database is burning through disk I/O bandwidth due to three root causes:
 
-2. **Scoring prompt not Iran-focused enough**: The rubric treats all geopolitical news equally. A China ceasefire comment gets 13, same as an Iran sanctions story. The prompt needs to explicitly deprioritize non-Iran/Middle East content and give Iran-specific events a scoring boost.
+1. **`posts` table: 1.08 billion sequential tuple reads** across 9,235 full table scans (125K rows scanned repeatedly)
+2. **`settings` and `accounts` tables: 46K and 36K sequential scans** respectively — tiny tables read on every worker invocation
+3. **`get_post_pipeline_status` RPC: 6 correlated subqueries** per row, each scanning `jobs`, `deliveries`, and `media` independently
 
-## Proposed Changes
+### What We Will Change
 
-### 1. Raise default threshold from 10 to 14
-Update the `content_filter` setting in the database. This alone would have blocked 103 low-relevance posts in the last 24h.
+**Step 1 — Replace the ASC index on `posts.created_at` with a DESC index**
 
-### 2. Strengthen the editorial guidelines
-Replace the current editorial guidelines with a more explicit Iran-gate:
+The existing `idx_posts_created_at` is ascending. Every query in the system orders by `created_at DESC` (monitoring page, dashboard summary, reconciliation). We will drop the old index and create a DESC one. This is a safe swap — Postgres can use a DESC index for ASC queries via backward scan, but not vice versa with equal efficiency.
 
-> "This channel is exclusively focused on Iran and the broader Middle East. Content MUST have a direct connection to Iran, its government, military, economy, sanctions, nuclear program, proxies, or regional conflicts involving Iran. General world news (e.g., US stocks, European politics, China domestic policy) should score 8 or below UNLESS it directly impacts Iran. Only deliver content that a dedicated Iran-watcher would find essential."
+**Step 2 — Add a targeted index on `jobs` for pipeline status lookups**
 
-### 3. Update priority/low-priority topics
-- **Priority topics**: Iran, IRGC, Hormuz, sanctions, nuclear, Hezbollah, Houthis, Israel-Iran, Persian Gulf, Middle East
-- **Low-priority topics**: stocks, crypto, earnings, sports, entertainment, EU internal politics, US domestic, China domestic
+The `get_post_pipeline_status` function does `WHERE j.type = 'translate' AND (j.payload->>'tweet_id') = p.tweet_id ORDER BY j.created_at DESC LIMIT 1` — this hits the GIN index on `payload` but still requires sorting. A B-tree expression index on `(type, (payload->>'tweet_id'), created_at DESC)` will make these lookups index-only.
 
-### 4. Add a relevance gate to the scoring rubric
-Add an explicit instruction in the worker's system prompt: "If the content has NO direct connection to Iran or the Middle East region, cap the score at 8 regardless of how important the event is globally."
+**Step 3 — Rewrite `get_post_pipeline_status` to use JOINs with LATERAL**
 
-## Technical Implementation
+Replace the 6 correlated subqueries with 3 `LEFT JOIN LATERAL` clauses (one each for jobs-translate, jobs-deliver, deliveries). This lets Postgres execute each lateral once per row using the new index, instead of 6 independent subquery scans.
 
-1. **Database migration**: Update the `content_filter` setting with new threshold (14), updated editorial guidelines, and expanded topic lists
-2. **Worker edge function**: Add an Iran-relevance cap rule to the scoring system prompt (lines 357-386 of `worker/index.ts`) — a single paragraph addition telling the AI to cap non-Iran scores at 8
-3. **Redeploy worker** function with the updated prompt
+**Step 4 — Reduce worker cron frequency**
 
-These changes work together: the prompt makes the AI score non-Iran content lower, the threshold filters out anything that still slips through, and the editorial guidelines provide authoritative overrides.
+The worker runs every minute (`* * * * *`). With only ~3,900 live jobs (most completed), this is excessive. We will update it to every 2 minutes (`*/2 * * * *`). This halves the settings/accounts table scan frequency while still processing jobs within acceptable latency.
+
+### What We Will NOT Change
+
+- No changes to the monitoring page frontend code — it already uses cursor pagination correctly
+- No changes to realtime subscriptions — the 1-second debounce is already reasonable
+- No schema changes to any table
+- No changes to the `claim_jobs` RPC — it already uses `FOR UPDATE SKIP LOCKED` efficiently
+- The `settings` and `accounts` seq scans (46K/36K) are on tiny tables (5-6 rows) — the reads are cheap per-scan; reducing cron frequency is sufficient
+
+### Technical Details
+
+**Migration SQL (single migration file):**
+
+```sql
+-- 1. Replace posts created_at index (ASC → DESC)
+DROP INDEX IF EXISTS public.idx_posts_created_at;
+CREATE INDEX idx_posts_created_at_desc ON public.posts
+  USING btree (created_at DESC);
+
+-- 2. Expression index for pipeline status lookups on jobs
+CREATE INDEX idx_jobs_type_tweet_created
+  ON public.jobs (type, ((payload->>'tweet_id')), created_at DESC);
+
+-- 3. Rewrite get_post_pipeline_status with LATERAL joins
+CREATE OR REPLACE FUNCTION public.get_post_pipeline_status(tweet_ids text[])
+RETURNS TABLE(
+  tweet_id text, ingest_at timestamptz,
+  media_total int, media_downloaded int,
+  lang_original text, translated_at timestamptz,
+  translate_status text, translate_error text,
+  delivery_status text, posted_at timestamptz,
+  delivery_error text, attempts int
+)
+LANGUAGE sql STABLE
+SET search_path TO 'public'
+AS $$
+  SELECT
+    p.tweet_id,
+    p.created_at AS ingest_at,
+    coalesce(mc.total, 0)  AS media_total,
+    coalesce(mc.downloaded, 0) AS media_downloaded,
+    p.lang_original,
+    p.translated_at,
+    coalesce(tj.status, CASE WHEN p.translated_at IS NOT NULL THEN 'completed' ELSE 'pending' END) AS translate_status,
+    tj.last_error AS translate_error,
+    coalesce(dl.status, 'pending') AS delivery_status,
+    dl.posted_at,
+    coalesce(dl.last_error, dj.last_error) AS delivery_error,
+    coalesce(dl.attempts, 0) AS attempts
+  FROM public.posts p
+  LEFT JOIN LATERAL (
+    SELECT count(*) AS total,
+           count(*) FILTER (WHERE m.downloaded_at IS NOT NULL) AS downloaded
+    FROM public.media m WHERE m.tweet_id = p.tweet_id
+  ) mc ON true
+  LEFT JOIN LATERAL (
+    SELECT j.status, j.last_error
+    FROM public.jobs j
+    WHERE j.type = 'translate' AND (j.payload->>'tweet_id') = p.tweet_id
+    ORDER BY j.created_at DESC LIMIT 1
+  ) tj ON true
+  LEFT JOIN LATERAL (
+    SELECT j.last_error
+    FROM public.jobs j
+    WHERE j.type = 'deliver' AND (j.payload->>'tweet_id') = p.tweet_id
+    ORDER BY j.created_at DESC LIMIT 1
+  ) dj ON true
+  LEFT JOIN LATERAL (
+    SELECT d.status, d.posted_at, d.last_error, d.attempts
+    FROM public.deliveries d
+    WHERE d.subject_type = 'post' AND d.subject_id = p.tweet_id
+    ORDER BY d.created_at DESC LIMIT 1
+  ) dl ON true
+  WHERE p.tweet_id = ANY(tweet_ids)
+  ORDER BY p.created_at DESC;
+$$;
+```
+
+**Cron update (via Supabase insert tool):**
+
+```sql
+SELECT cron.alter_job(8, schedule := '*/2 * * * *');
+```
+
+### Risk Assessment
+
+- **Index swap**: Zero downtime. The new DESC index is created before the old one is dropped (Postgres handles this atomically in a migration). Queries will use the new index immediately.
+- **RPC rewrite**: The return type signature is identical — no frontend changes needed. The `useMonitoringData` hook and any other callers will work without modification.
+- **Cron change**: Jobs will wait at most 2 minutes instead of 1 minute. Given the current workload (mostly idle), this is negligible.
+
+### Expected Impact
+
+- Sequential reads on `posts` should drop by ~95% (index scan replaces seq scan)
+- Pipeline status queries will be 3-6x faster (LATERAL + expression index vs. correlated subqueries)
+- Overall disk I/O reduced by roughly 50-70%
 
