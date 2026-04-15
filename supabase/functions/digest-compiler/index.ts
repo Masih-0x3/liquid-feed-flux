@@ -250,6 +250,16 @@ Deno.serve(async (req) => {
       ...(dryRun ? readDigestConfigOverride(requestBody.config) : {}),
     } satisfies DigestConfig;
 
+    // Override Twitter credentials with env vars (secrets) if available
+    const envTwitterConsumerKey = Deno.env.get("TWITTER_CONSUMER_KEY");
+    const envTwitterConsumerSecret = Deno.env.get("TWITTER_CONSUMER_SECRET");
+    const envTwitterAccessToken = Deno.env.get("TWITTER_ACCESS_TOKEN");
+    const envTwitterAccessTokenSecret = Deno.env.get("TWITTER_ACCESS_TOKEN_SECRET");
+    if (envTwitterConsumerKey) digestConfig.twitter_consumer_key = envTwitterConsumerKey;
+    if (envTwitterConsumerSecret) digestConfig.twitter_consumer_secret = envTwitterConsumerSecret;
+    if (envTwitterAccessToken) digestConfig.twitter_access_token = envTwitterAccessToken;
+    if (envTwitterAccessTokenSecret) digestConfig.twitter_access_token_secret = envTwitterAccessTokenSecret;
+
     const openaiConfig = readOpenAIConfig(settingsMap.openai_config);
 
     if (!dryRun && !hasSavedDigestConfig) {
@@ -478,7 +488,7 @@ Guidelines:
       }
     }
 
-    return new Response(JSON.stringify({ error: (err as Error).message }), {
+    return new Response(JSON.stringify({ error: "Internal server error" }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

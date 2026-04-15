@@ -370,30 +370,15 @@ export default function Settings() {
 
         {/* Digest Tab */}
         <TabsContent value="digest" className="space-y-6">
-          <Card className="glass-card">
+         <Card className="glass-card">
             <CardHeader>
               <CardTitle className="flex items-center text-glass-foreground"><Key className="w-5 h-5 mr-2" />Twitter/X API Credentials</CardTitle>
-              <CardDescription>Enter your Twitter API credentials to enable digest posting. These are stored securely in the database (admin-only access).</CardDescription>
+              <CardDescription>Twitter API credentials are now managed as Supabase Edge Function secrets for improved security. Set them in the Supabase dashboard under Edge Function settings.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Consumer Key (API Key)</Label>
-                  <Input type="password" value={ds.twitter_consumer_key} onChange={(e) => setDigestSettings({ ...ds, twitter_consumer_key: e.target.value })} className="glass-input" placeholder="Enter consumer key" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Consumer Secret (API Secret)</Label>
-                  <Input type="password" value={ds.twitter_consumer_secret} onChange={(e) => setDigestSettings({ ...ds, twitter_consumer_secret: e.target.value })} className="glass-input" placeholder="Enter consumer secret" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Access Token</Label>
-                  <Input type="password" value={ds.twitter_access_token} onChange={(e) => setDigestSettings({ ...ds, twitter_access_token: e.target.value })} className="glass-input" placeholder="Enter access token" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Access Token Secret</Label>
-                  <Input type="password" value={ds.twitter_access_token_secret} onChange={(e) => setDigestSettings({ ...ds, twitter_access_token_secret: e.target.value })} className="glass-input" placeholder="Enter access token secret" />
-                </div>
-              </div>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">
+                Required secrets: <code>TWITTER_CONSUMER_KEY</code>, <code>TWITTER_CONSUMER_SECRET</code>, <code>TWITTER_ACCESS_TOKEN</code>, <code>TWITTER_ACCESS_TOKEN_SECRET</code>
+              </p>
             </CardContent>
           </Card>
 
