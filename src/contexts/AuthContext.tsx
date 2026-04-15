@@ -36,18 +36,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (!raceResult || 'error' in raceResult && raceResult.error) {
         console.warn('Could not load user role:', raceResult && 'error' in raceResult ? raceResult.error?.message : 'timeout');
-        setRole('admin');
+        setRole('viewer');
         return;
       }
 
       if ('data' in raceResult) {
-        setRole((raceResult.data?.role as AppRole) ?? 'admin');
+        setRole((raceResult.data?.role as AppRole) ?? 'viewer');
       } else {
-        setRole('admin');
+        setRole('viewer');
       }
     } catch (err) {
       console.error('Failed to load role:', err);
-      setRole('admin');
+      setRole('viewer');
     }
   };
 
