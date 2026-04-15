@@ -193,8 +193,28 @@ async function postTweet(
 }
 
 // ── Main handler ────────────────────────────────────────────────────
+function validateInternalToken(req: Request): Response | null {
+  const token = req.headers.get('x-internal-token') || '';
+  const expected = Deno.env.get('WEBHOOK_SHARED_SECRET') || '';
+  const authHeader = req.headers.get('Authorization') || '';
+  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY') || '';
+
+  if (expected && token === expected) return null;
+  if (serviceKey && authHeader === `Bearer ${serviceKey}`) return null;
+  if (anonKey && authHeader === `Bearer ${anonKey}`) return null;
+  if (!expected) return null;
+
+  return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+    status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
+  const authError = validateInternalToken(req);
+  if (authError) return authError;
 
   let dryRun = false;
 
