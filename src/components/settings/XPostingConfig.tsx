@@ -196,7 +196,7 @@ export default function XPostingConfig({ initial }: Props) {
             <Eye className="w-3.5 h-3.5" /><span>Live preview</span>
             <Badge variant="outline" className="ml-auto text-xs">{previewText.length}/{cfg.max_chars}</Badge>
           </div>
-          <div className="whitespace-pre-wrap text-sm text-glass-foreground bg-background/50 p-3 rounded">{previewText || '(empty)'}</div>
+          <div dir="rtl" lang="fa" className="whitespace-pre-wrap text-sm text-glass-foreground bg-background/50 p-3 rounded text-right">{previewText || '(empty)'}</div>
         </div>
 
         {/* Actions */}
