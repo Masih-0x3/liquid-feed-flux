@@ -10,7 +10,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
-import { Search, RefreshCw, Edit, Check, X, ExternalLink, RotateCcw, Star, Send, Scissors, Sparkles } from "lucide-react";
+import { Search, RefreshCw, Edit, Check, X, ExternalLink, RotateCcw, Star, Send, Scissors, Sparkles, Twitter } from "lucide-react";
 import { format } from "date-fns";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerDescription, DrawerClose, DrawerFooter } from "@/components/ui/drawer";
 import { useMonitoringData, type MonitoringEntry, type PipelineEvent } from "@/hooks/useMonitoringData";
@@ -37,6 +37,11 @@ async function adminRescorePost(tweetId: string) {
   const { data, error } = await supabase.functions.invoke('admin-actions', { body: { action: 'rescore_post', tweet_id: tweetId } });
   if (error) throw error;
   return data as { ok: boolean; score?: number; decision?: string; reasoning?: string; error?: string };
+}
+async function adminRetryXPost(tweetId: string) {
+  const { data, error } = await supabase.functions.invoke('admin-actions', { body: { action: 'retry_x_post', tweet_id: tweetId } });
+  if (error) throw error;
+  return data as { ok: boolean; error?: string; status?: string; x_tweet_id?: string };
 }
 
 function StatusIndicator({ entry }: { entry: MonitoringEntry }) {
@@ -118,6 +123,17 @@ export default function Monitoring() {
   const handleReprocessTweet = async (tweetId: string) => {
     try { await adminReprocess(tweetId); toast({ title: 'Processing started', description: 'Tweet queued for full reprocessing' }); }
     catch { toast({ title: 'Error', description: 'Failed to reprocess tweet', variant: 'destructive' }); }
+  };
+
+  const handleRetryXPost = async (tweetId: string) => {
+    try {
+      const res = await adminRetryXPost(tweetId);
+      if (!res.ok) throw new Error(res.error || 'X retry failed');
+      toast({ title: 'X post queued', description: res.x_tweet_id ? `Posted: ${res.x_tweet_id}` : `Status: ${res.status ?? 'queued'}` });
+      invalidate();
+    } catch (e) {
+      toast({ title: 'X retry failed', description: (e as Error).message, variant: 'destructive' });
+    }
   };
 
   const handleRescorePost = async (tweetId: string) => {
@@ -326,6 +342,29 @@ export default function Monitoring() {
                     )}
                     <Badge variant={entry.is_translated ? 'default' : 'secondary'}>{entry.is_translated ? 'Translated' : 'Original'}</Badge>
                     <Badge variant={entry.is_delivered ? 'default' : 'outline'}>{entry.is_delivered ? 'Delivered' : 'Pending'}</Badge>
+                    {(() => {
+                      const xs = entry.x_status;
+                      if (!xs) return null;
+                      const cls =
+                        xs === 'posted' ? 'bg-green-500/20 text-green-400 border-green-500/30'
+                        : xs === 'failed' ? 'bg-destructive/20 text-destructive border-destructive/30'
+                        : xs === 'skipped' ? 'bg-muted text-muted-foreground border-border'
+                        : 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30';
+                      const label = xs === 'posted' ? 'X: Posted' : xs === 'failed' ? 'X: Failed' : xs === 'skipped' ? `X: Skipped${entry.x_skip_reason ? ` (${entry.x_skip_reason})` : ''}` : 'X: Pending';
+                      const inner = (
+                        <Badge className={cls} title={entry.x_error || entry.x_skip_reason || ''}>
+                          <Twitter className="w-3 h-3 mr-1" />{label}
+                        </Badge>
+                      );
+                      return xs === 'posted' && entry.x_tweet_id ? (
+                        <a href={`https://x.com/i/status/${entry.x_tweet_id}`} target="_blank" rel="noopener noreferrer">{inner}</a>
+                      ) : inner;
+                    })()}
+                    {(entry.x_status === 'failed' || entry.x_status === 'skipped' || (entry.is_delivered && !entry.x_status)) && (
+                      <Button size="sm" variant="outline" onClick={() => handleRetryXPost(entry.tweet_id)} title="Retry posting to X">
+                        <Twitter className="w-3 h-3 mr-1" />Retry on X
+                      </Button>
+                    )}
                   </div>
                 </div>
               </CardHeader>
