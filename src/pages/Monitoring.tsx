@@ -359,6 +359,16 @@ export default function Monitoring() {
                     </div>
                   )}
                 </div>
+                {entry.importance_reasoning && (
+                  <details className="mt-3 text-xs">
+                    <summary className="cursor-pointer text-muted-foreground hover:text-foreground select-none">
+                      Why this score? ({entry.importance_score ?? '—'}/20)
+                    </summary>
+                    <div className="mt-2 p-3 rounded border border-border bg-muted/30 text-foreground whitespace-pre-wrap leading-relaxed">
+                      {entry.importance_reasoning}
+                    </div>
+                  </details>
+                )}
               </CardContent>
             </Card>
           );
