@@ -30,6 +30,7 @@ function insertPlaceholder(placeholder: string, textareaId: string, getter: stri
     setter(getter.substring(0, start) + placeholder + getter.substring(end));
     setTimeout(() => { textarea.setSelectionRange(start + placeholder.length, start + placeholder.length); textarea.focus(); }, 0);
   }
+}
 
 type DigestTestPost = { author_handle?: string; created_at?: string; text_translated?: string; text_original?: string };
 type DigestTestResult = {
