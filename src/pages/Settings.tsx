@@ -20,6 +20,7 @@ import {
 import ContentFilterSettings, { type ContentFilterConfig } from '@/components/settings/ContentFilterSettings';
 import XAutomationSettings from '@/components/settings/XAutomationSettings';
 import TranslationPlayground from '@/components/settings/TranslationPlayground';
+import PromptEditor from '@/components/settings/PromptEditor';
 
 function insertPlaceholder(placeholder: string, textareaId: string, getter: string, setter: (val: string) => void) {
   const textarea = document.getElementById(textareaId) as HTMLTextAreaElement;
@@ -187,7 +188,15 @@ export default function Settings() {
             <CardContent className="space-y-6">
               <div className="space-y-2">
                 <Label htmlFor="system_prompt">System Prompt</Label>
-                <Textarea id="system_prompt" value={ts.system_prompt} onChange={(e) => setTranslationSettings({ ...ts, system_prompt: e.target.value })} className="glass-input min-h-[200px] font-mono text-sm" placeholder="Enter the system prompt for translation..." />
+                <PromptEditor
+                  id="system_prompt"
+                  value={ts.system_prompt}
+                  onChange={(v) => setTranslationSettings({ ...ts, system_prompt: v })}
+                  placeholder="Enter the system prompt for translation..."
+                  minHeight={360}
+                  maxLength={20000}
+                  title="System Prompt"
+                />
               </div>
               <Separator />
               <div className="space-y-4">
@@ -202,7 +211,15 @@ export default function Settings() {
                     </Button>
                   ))}
                 </div>
-                <Textarea id="user_prompt_template" value={ts.user_prompt_template} onChange={(e) => setTranslationSettings({ ...ts, user_prompt_template: e.target.value })} className="glass-input min-h-[120px] font-mono text-sm" placeholder="Enter the user prompt template..." />
+                <PromptEditor
+                  id="user_prompt_template"
+                  value={ts.user_prompt_template}
+                  onChange={(v) => setTranslationSettings({ ...ts, user_prompt_template: v })}
+                  placeholder="Enter the user prompt template..."
+                  minHeight={240}
+                  maxLength={10000}
+                  title="User Prompt Template"
+                />
               </div>
               <Separator />
               {sampleTweets.length > 0 && (
@@ -249,19 +266,16 @@ export default function Settings() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              <Textarea
+              <PromptEditor
                 value={ts.scoring_system_prompt ?? DEFAULT_SCORING_SYSTEM_PROMPT}
-                onChange={(e) => setTranslationSettings({ ...ts, scoring_system_prompt: e.target.value })}
-                className="glass-input min-h-[300px] font-mono text-xs"
+                onChange={(v) => setTranslationSettings({ ...ts, scoring_system_prompt: v })}
+                placeholder="Enter the scoring rubric system prompt..."
+                minHeight={420}
+                maxLength={20000}
+                title="Scoring Rubric (System Prompt)"
+                onReset={() => setTranslationSettings({ ...ts, scoring_system_prompt: DEFAULT_SCORING_SYSTEM_PROMPT })}
               />
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setTranslationSettings({ ...ts, scoring_system_prompt: DEFAULT_SCORING_SYSTEM_PROMPT })}
-                >
-                  Reset to default
-                </Button>
+              <div className="flex justify-end">
                 <Button
                   size="sm"
                   onClick={() => saveMutation.mutate({ key: 'translation_prompt', value: ts })}
@@ -283,19 +297,17 @@ export default function Settings() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              <Textarea
+              <PromptEditor
                 value={ts.classifier_tool_schema ?? DEFAULT_CLASSIFIER_TOOL_SCHEMA}
-                onChange={(e) => setTranslationSettings({ ...ts, classifier_tool_schema: e.target.value })}
-                className="glass-input min-h-[280px] font-mono text-xs"
+                onChange={(v) => setTranslationSettings({ ...ts, classifier_tool_schema: v })}
+                placeholder="Enter the JSON schema..."
+                minHeight={360}
+                maxLength={20000}
+                title="Classifier Tool Schema"
+                onReset={() => setTranslationSettings({ ...ts, classifier_tool_schema: DEFAULT_CLASSIFIER_TOOL_SCHEMA })}
               />
-              <div className="flex gap-2 items-center">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setTranslationSettings({ ...ts, classifier_tool_schema: DEFAULT_CLASSIFIER_TOOL_SCHEMA })}
-                >
-                  Reset to default
-                </Button>
+              <div className="flex gap-2 items-center justify-end">
+                <span className="text-xs text-muted-foreground mr-auto">JSON validated on save</span>
                 <Button
                   size="sm"
                   onClick={() => {
@@ -311,7 +323,6 @@ export default function Settings() {
                 >
                   Save tool schema
                 </Button>
-                <span className="text-xs text-muted-foreground">JSON validated on save</span>
               </div>
             </CardContent>
           </Card>
