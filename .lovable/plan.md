@@ -1,191 +1,77 @@
 
 
-Let me explore the codebase to understand the translation pipeline and Twitter integration before planning.
-<lov-tool-use id="toolu_vrtx_01RyFXGjWqe1ivN4oAtRjhJC" name="code--view" integration-id="code" data="{\"file_path\": \"supabase/functions/worker/index.ts\", \"lines\": \"1-100\"}">
-</lov-tool-use>
-
-<lov-tool-use id="toolu_vrtx_01A81HpCWGG9F6XCuU1NKQdB" name="code--search_files" integration-id="code" data="{\"query\": \"TWITTER_CONSUMER|TWITTER_ACCESS|api.x.com|twitter.*oauth\", \"search_dir\": \"supabase/functions\"}">
-</lov-tool-use>
-
-<lov-tool-use id="toolu_vrtx_013NZx2KpgGHqnGD731cgN4L" name="code--search_files" integration-id="code" data="{\"query\": \"translate|text_original\", \"search_dir\": \"supabase/functions/worker\"}">
-</lov-tool-use>
-
-<lov-tool-use id="toolu_vrtx_01TA7WBpLvseCtRUzP5uwPgo" name="code--search_files" integration-id="code" data="{\"query\": \"TWITTER_CONSUMER|api.x.com|note_tweet\", \"search_dir\": \"supabase/functions\"}">
-</lov-tool-use>
-
-<lov-tool-use id="toolu_vrtx_019hG4mkgeaftwbVqprzQwzh" name="code--search_files" integration-id="code" data="{\"query\": \"translate\", \"search_dir\": \"supabase/functions/worker\"}">
-</lov-tool-use>
-
-<lov-tool-use id="toolu_vrtx_01MEx9TLU1ckYyfz1NxZZvat" name="code--list_dir" integration-id="code" data="{\"dir_path\": \"supabase/functions/worker\"}">
-</lov-tool-use>
-
-<lov-tool-use id="toolu_vrtx_01HeqjZpYtK7HhCL66B4w9re" name="code--view" integration-id="code" data="{\"file_path\": \"supabase/functions/worker/index.ts\", \"lines\": \"180-260\"}">
-</lov-tool-use>
-
-<lov-tool-use id="toolu_vrtx_01REe3uwhSzPWi4YmFU8ZtCT" name="code--view" integration-id="code" data="{\"file_path\": \"supabase/functions/worker/index.ts\", \"lines\": \"820-900\"}">
-</lov-tool-use>
-I have enough context. Let me present the plan.
-
-<lov-plan>
-
-## Plan: Hydrate Truncated Tweets via X API Before Translation
+## Plan: "X Automation" Settings Tab
 
 ### Goal
-When RSS delivers a truncated tweet, fetch the full text from the X API v2 (`note_tweet` field) **before** translation runs — so we never translate the truncated version, then re-translate the full version. Surface API usage on the dashboard.
+Add a new **X Automation** tab in `/settings` that consolidates everything related to the Twitter/X integration in one place: credential status, API usage, hydration toggle, and a test-tweet console for verifying the pipeline works end-to-end.
 
-### Strategy: Gate translation behind hydration
-
-The cleanest way to avoid duplicate translation work is to **insert a new pipeline step** between ingest and translate, but only for posts flagged as truncated. Non-truncated posts skip the new step entirely and behave exactly as today.
-
-```text
-Current: webhook → translate job → deliver job
-New:     webhook → [if truncated] hydrate_tweet job → translate job → deliver job
-                  [if not]        translate job → deliver job
-```
-
-The translate job already reads `text_original` from the DB at runtime, so once `hydrate_tweet` updates `text_original`, translate sees the full text — no logic change inside translate itself.
+Currently this is scattered across the **Digest** tab (credential note, hydration toggle, usage cards) and missing key pieces (no way to send a test tweet, no way to verify creds without running a digest dry-run).
 
 ---
 
-### Step 1 — Schema additions (single migration)
+### What the new tab will contain
 
-Add three columns to `posts` (all nullable, no defaults that affect existing rows):
+The tab will have 4 cards, top to bottom:
 
-- `is_truncated boolean default false` — set by the webhook based on detection
-- `hydrated_at timestamptz` — set by the new hydrate job on success
-- `hydration_source text` — `'x_api'` when fetched, null otherwise
+**1. Credentials & Connection Status**
+- Visual status badges for the four required Supabase secrets: `TWITTER_CONSUMER_KEY`, `TWITTER_CONSUMER_SECRET`, `TWITTER_ACCESS_TOKEN`, `TWITTER_ACCESS_TOKEN_SECRET`
+- "Configured ✓" / "Missing ✗" badge per secret (we cannot read the values, only check existence — done via a new lightweight admin-action `get_x_status` that returns booleans)
+- "Verify connection" button → calls X API v2 `GET /2/users/me` via a new admin-action `x_verify_credentials` and shows the authenticated handle + permission level (read vs read+write)
+- Help text explaining secrets are managed in Supabase Edge Function settings (link out)
 
-Add one column to `settings` data (no schema change — uses existing `settings` table) via a seeded row:
-- `key = 'twitter_hydration'`, value = `{ enabled: true, max_attempts: 3 }`
+**2. Tweet Hydration**
+- Move the existing "Hydrate truncated tweets" toggle here from the Digest tab
+- Move the X API usage stats cards (24h calls, total, last call, last error) here
+- Add a **monthly projection card**: estimated calls/month based on last 24h × 30, with a colored warning when projected > 15K (Basic tier limit)
 
-No changes to existing columns. No index changes.
+**3. Test Tweet Console**
+- A textarea (max 280 chars, with live counter) prefilled with a default test message
+- Optional "Reply to tweet ID" input (so test stays out of public timeline if desired)
+- Two buttons:
+  - **"Send test tweet"** → posts via X API using the same OAuth 1.0a signing the worker/digest uses
+  - **"Dry run (don't post)"** → just validates credentials and shows the signed request preview
+- Result panel showing: success/failure, posted tweet ID + link, response body, error details
+- Backend: new admin-action `send_test_tweet` in `admin-actions/index.ts` that reuses the OAuth signing helper
+- Safeguard: rate-limited to 1 test tweet per minute per admin (in-memory), and validation rejects empty / >280 char text
 
----
-
-### Step 2 — Truncation detection in `webhooks-rssapp`
-
-Add a small `detectTruncation(text)` helper. A post is flagged truncated if **any** of:
-- Ends with `…`, `...`, `[…]`, or `[...]`
-- Ends with (case-insensitive) `Show more`, `Show this thread`, `Read more`
-- Length ≥ 270 chars AND no terminal punctuation (`.`, `!`, `?`, `؟`, `"`, `)`)
-
-When detected:
-1. Set `is_truncated = true` on the post upsert
-2. **Do NOT** create a `translate` job (the new flow is what creates it)
-3. Create a new `hydrate_tweet` job instead, with idempotency key `hydrate:${tweetId}`
-4. Pipeline event: `step='hydrate', status='queued'`
-
-When NOT truncated: behavior is unchanged — translate job is created exactly as today.
-
----
-
-### Step 3 — New worker handler `handleHydrateTweetJob`
-
-Lives in `supabase/functions/worker/index.ts` alongside the others. Logic:
-
-1. Load post by `tweet_id`. If `hydrated_at` already set → success (idempotent).
-2. Read Twitter creds from env (already wired: `TWITTER_CONSUMER_KEY/SECRET`, `TWITTER_ACCESS_TOKEN/SECRET`) — same OAuth 1.0a signing helper that `digest-compiler` uses (we'll extract it into a shared call within the worker file, no new file).
-3. Call `GET https://api.x.com/2/tweets/{id}?tweet.fields=note_tweet,text,lang`
-4. Extract `data.note_tweet.text` if present, else `data.text`. Update post:
-   - `text_original = <full text>`
-   - `is_truncated = false` (now resolved)
-   - `hydrated_at = now()`
-   - `hydration_source = 'x_api'`
-   - `lang_original = response lang if available`
-5. Increment a counter in `settings` row `key='x_api_usage'` (JSONB: `{ total: N, last_24h: [...timestamps], last_call_at: ... }`) — single row, atomic via `update ... set value = ...`. Worker reads-modifies-writes inside the same job, fine for low volume.
-6. Insert the `translate` job with idempotency key `translate:${tweetId}` (same key the webhook would have used — guarantees no duplicate even if the webhook had also inserted one).
-7. Pipeline event: `hydrate / completed`.
-
-**Failure handling:**
-- 404 (tweet deleted) → mark hydrated with `hydration_source = 'x_api_404'`, fall through to translate the truncated version (better than nothing). Do NOT retry.
-- 429 (rate limited) → respect `x-rate-limit-reset` header for backoff. Reuse existing `handleJobFailure` retry path.
-- 401/403 (creds bad) → fail fast, dead-letter after 3 attempts. Translate job is NOT created — admin must intervene.
-- Network/5xx → exponential backoff up to `MAX_ATTEMPTS.hydrate_tweet = 3`.
-
-After max attempts: **fallback path** — create translate job for the truncated text anyway, log `result_meta = { fallback: 'truncated' }`. We never silently lose a post.
-
-`MAX_ATTEMPTS` gets a new entry: `hydrate_tweet: 3`.
+**4. Hydration Test**
+- Input for a tweet ID + button **"Test hydrate"** that calls the X API `GET /2/tweets/:id?tweet.fields=note_tweet` and shows the full text returned, without writing to DB
+- Lets you verify the hydration pipeline can actually reach long tweets before relying on it for live posts
+- Backend: another admin-action `test_hydrate_tweet`
 
 ---
 
-### Step 4 — Anti-duplicate guarantees
+### Files to change
 
-Three layers ensure no double-translate:
+**Frontend**
+- `src/pages/Settings.tsx`
+  - Add 7th `TabsTrigger` "X Automation" with a `Twitter`/`AtSign` icon
+  - Change `grid-cols-6` → `grid-cols-7`
+  - Add new `<TabsContent value="x-automation">` with the 4 cards above
+  - Remove the hydration card and credential note from the Digest tab (they move here)
+- `src/components/settings/XAutomationSettings.tsx` *(new)* — extract the tab body into its own component to keep `Settings.tsx` from growing further. Owns local state for test-tweet text, results, loading flags.
+- `src/hooks/useSettingsData.ts` — add a small `useXAutomation()` hook exporting mutations: `verifyCredentials`, `sendTestTweet`, `testHydrate`, `getCredentialStatus`. All go through `supabase.functions.invoke('admin-actions', ...)`.
 
-1. **Webhook**: only creates `translate:${tweetId}` if `is_truncated = false`. If truncated, only creates `hydrate:${tweetId}`.
-2. **Hydrate job**: creates translate job with `idempotency_key = translate:${tweetId}` and `onConflict: idempotency_key, ignoreDuplicates: true` — so even if a translate job somehow exists, it's a no-op.
-3. **Translate handler**: already checks `text_translated` is null before working. We add an early return if `is_truncated = true AND hydrated_at IS NULL` (defense in depth — should never trigger).
+**Backend**
+- `supabase/functions/admin-actions/index.ts` — add 4 new actions inside the existing switch:
+  - `get_x_status` → returns `{ has_consumer_key: boolean, has_consumer_secret: boolean, has_access_token: boolean, has_access_token_secret: boolean }` based on `Deno.env.get(...)` checks (no values returned)
+  - `x_verify_credentials` → calls `GET https://api.x.com/2/users/me` with OAuth 1.0a, returns `{ ok, handle, id, scopes_hint }` or error
+  - `send_test_tweet` → Zod-validates `{ text: string(1..280), in_reply_to_tweet_id?: string }`, posts to `POST https://api.x.com/2/tweets`, returns the created tweet payload
+  - `test_hydrate_tweet` → Zod-validates `{ tweet_id: string }`, calls `GET /2/tweets/:id?tweet.fields=note_tweet,text,lang`, returns the response without DB writes
+  - All four reuse a small OAuth 1.0a helper extracted from the existing pattern in `worker/index.ts` (we'll inline it inside `admin-actions/index.ts` — no shared file, same approach the codebase already uses)
 
----
-
-### Step 5 — Reconciliation safety
-
-Update `reconcile_stuck_jobs()` RPC to also reconcile posts where `is_truncated = true AND hydrated_at IS NULL AND created_at > now() - interval '7 days'` and no pending/running `hydrate_tweet` job exists → re-queue hydration. Identical pattern to existing missing-deliveries reconciliation.
-
----
-
-### Step 6 — Dashboard & Monitoring metrics
-
-**Dashboard** (`get_dashboard_summary` RPC):
-Add to the `metrics` JSON:
-- `posts_truncated_24h` — count of posts with `is_truncated = true OR hydrated_at IS NOT NULL` in last 24h
-- `posts_hydrated_24h` — count where `hydration_source = 'x_api'` in last 24h
-- `x_api_calls_24h` — read from the `settings` `x_api_usage` row, filtered to last 24h
-
-Add a small card to `DashboardMetrics.tsx`: "X API calls (24h)" + "Hydrated tweets (24h)".
-
-**Monitoring page** (`get_post_pipeline_status` RPC):
-Add two columns to the return type:
-- `is_truncated boolean`
-- `hydrated_at timestamptz`
-
-Render a small badge on each post row in the Monitoring table: "Truncated" (amber) or "Hydrated" (green) when applicable. Type signature change → frontend hook `useMonitoringData` types regenerate automatically from `types.ts` after migration.
+**No DB changes.** No new migrations. No new secrets (we use the four already-required `TWITTER_*` Supabase secrets).
 
 ---
 
-### Step 7 — Settings UI (small)
+### Anti-breakage guarantees
+- Digest tab keeps working — only the hydration & credential cards move; the digest preferences card and dry-run console stay
+- All new backend actions are admin-gated through the existing `requireAdmin` helper in `admin-actions`
+- Test-tweet uses the same OAuth helper signature as the digest poster, so if digests work, test tweets work
+- No changes to the worker, the hydration pipeline, or any RPC
 
-Add a toggle in `Settings.tsx` (under existing content filter / digest section): **"Hydrate truncated tweets via X API"** — writes to the `twitter_hydration.enabled` settings row through the existing `admin-actions` Edge Function. When disabled, the webhook skips creating `hydrate_tweet` jobs and falls back to today's behavior (translate the truncated text directly).
-
-Add a read-only status line: "X API calls this month: N" (from `x_api_usage` settings row).
-
----
-
-### What we will NOT change
-
-- `handleTranslateJob` internals — unchanged
-- `handleDeliverJob` — unchanged
-- Cron schedules — unchanged (worker still runs every 2 min, picks up `hydrate_tweet` jobs alongside others)
-- Existing indexes
-- OAuth signing for the digest function (we reuse the same pattern locally in worker)
-- Any RLS policy
-
----
-
-### Risk Assessment
-
-- **Truncated detection false positives**: A normal tweet ending in `...` would trigger hydration and burn 1 API call. Mitigation: detection rules require ellipsis-at-end **plus** length ≥ 200, OR explicit "Show more" markers — tuned conservative.
-- **X API outage**: Fallback path translates truncated text after 3 failed attempts → no posts lost.
-- **Rate limit (Basic tier = 15K reads/mo ≈ 500/day)**: With current ingest volume (~dozens/day) this is well within budget. Settings counter exposes usage for monitoring.
-- **Schema migration**: All new columns nullable with safe defaults → zero impact on existing posts.
-- **Deploy order**: Migration first → worker deploy → webhook deploy. Until webhook is updated, no `hydrate_tweet` jobs are created, so worker handler sits idle. Until worker is deployed, the migration alone is harmless. Order is safe in either direction.
-
----
-
-### Required Secret Confirmation
-
-The X API call needs the four `TWITTER_*` secrets. From the existing config they appear to be **already used by `digest-compiler`** but I do not see them in the secrets list in this context. **Before implementation**, I will verify they exist; if missing, I will request you add them via the secrets tool before deploying the worker change.
-
----
-
-### Files to be touched
-
-- `supabase/migrations/<new>.sql` — schema additions, RPC updates (`get_dashboard_summary`, `get_post_pipeline_status`, `reconcile_stuck_jobs`), seed `twitter_hydration` + `x_api_usage` settings rows
-- `supabase/functions/webhooks-rssapp/index.ts` — truncation detection + branched job creation
-- `supabase/functions/worker/index.ts` — new `handleHydrateTweetJob`, OAuth helper, `MAX_ATTEMPTS.hydrate_tweet`, switch case
-- `supabase/functions/admin-actions/index.ts` — validation for `twitter_hydration` settings key
-- `src/components/dashboard/DashboardMetrics.tsx` — two new metric cards
-- `src/pages/Monitoring.tsx` (and/or `useMonitoringData.ts` consumer) — render truncated/hydrated badges
-- `src/pages/Settings.tsx` — toggle + usage display
-- `mem://features/twitter-hydration` (new memory) + index update
+### Risks / notes
+- **A real test tweet posts to your live X account.** The button will have a confirmation dialog with the exact text being sent before posting.
+- Verify-credentials and test-hydrate both consume 1 X API call each — counted toward your monthly Basic-tier quota and recorded in `x_api_usage`.
+- If `TWITTER_*` secrets aren't set, the Credentials card surfaces this clearly instead of failing silently.
 
