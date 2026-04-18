@@ -265,16 +265,36 @@ serve(async (req) => {
           return jsonResponse({ error: validationError }, 400);
         }
 
-        // Auto-stamp `start_posting_from` when X posting transitions disabled→enabled,
-        // so the worker only considers posts created from that moment onward.
+        // Auto-stamp `start_posting_from` to "now" on any change that could
+        // make previously-ingested posts newly eligible (forward-only guarantee):
+        //  - disabled → enabled
+        //  - min_score lowered
+        //  - require_media turned off
+        //  - post_only_decision_deliver turned off
+        // The user can still override by explicitly passing start_posting_from in the payload.
         let valueToSave = value;
         if (key === 'x_posting_config' && value && typeof value === 'object') {
           const { data: prev } = await supabase.from('settings').select('value').eq('key', 'x_posting_config').maybeSingle();
-          const prevEnabled = !!(prev?.value as Record<string, unknown> | null)?.enabled;
-          const nextEnabled = !!(value as Record<string, unknown>).enabled;
-          const hasStart = typeof (value as Record<string, unknown>).start_posting_from === 'string';
-          if (nextEnabled && !prevEnabled && !hasStart) {
-            valueToSave = { ...(value as Record<string, unknown>), start_posting_from: new Date().toISOString() };
+          const prevCfg = (prev?.value ?? {}) as Record<string, unknown>;
+          const nextCfg = value as Record<string, unknown>;
+          const userProvidedStart = typeof nextCfg.start_posting_from === 'string';
+
+          const prevEnabled = !!prevCfg.enabled;
+          const nextEnabled = !!nextCfg.enabled;
+          const enableTransition = nextEnabled && !prevEnabled;
+
+          const prevMin = typeof prevCfg.min_score === 'number' ? prevCfg.min_score as number : 14;
+          const nextMin = typeof nextCfg.min_score === 'number' ? nextCfg.min_score as number : prevMin;
+          const thresholdLowered = nextEnabled && nextMin < prevMin;
+
+          const mediaLoosened = nextEnabled && prevCfg.require_media === true && nextCfg.require_media === false;
+          const decisionGateLoosened = nextEnabled && prevCfg.post_only_decision_deliver === true && nextCfg.post_only_decision_deliver === false;
+
+          if (!userProvidedStart && (enableTransition || thresholdLowered || mediaLoosened || decisionGateLoosened)) {
+            valueToSave = { ...nextCfg, start_posting_from: new Date().toISOString() };
+            console.log('[admin-actions] re-stamped x_posting_config.start_posting_from', {
+              enableTransition, thresholdLowered, mediaLoosened, decisionGateLoosened, prevMin, nextMin,
+            });
           }
         }
 
