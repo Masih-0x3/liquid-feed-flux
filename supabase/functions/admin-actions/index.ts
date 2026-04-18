@@ -113,11 +113,26 @@ function validateSettingsValue(key: string, value: unknown): string | null {
 
   switch (key) {
     case 'translation_prompt': {
-      if (v.system_prompt !== undefined && typeof v.system_prompt !== 'string') {
-        return 'translation_prompt.system_prompt must be a string';
+      const stringFields: Array<[string, number]> = [
+        ['system_prompt', 20000],
+        ['user_prompt_template', 10000],
+        ['model', 100],
+        ['scoring_system_prompt', 20000],
+        ['classifier_tool_schema', 20000],
+      ];
+      for (const [field, max] of stringFields) {
+        if (v[field] !== undefined && typeof v[field] !== 'string') {
+          return `translation_prompt.${field} must be a string`;
+        }
+        if (typeof v[field] === 'string' && (v[field] as string).length > max) {
+          return `translation_prompt.${field} must be ≤${max} characters`;
+        }
       }
-      if (v.system_prompt && (v.system_prompt as string).length > 5000) {
-        return 'translation_prompt.system_prompt must be ≤5000 characters';
+      const numFields = ['temperature', 'max_completion_tokens', 'top_p', 'frequency_penalty', 'presence_penalty'];
+      for (const f of numFields) {
+        if (v[f] !== undefined && typeof v[f] !== 'number') {
+          return `translation_prompt.${f} must be a number`;
+        }
       }
       break;
     }
