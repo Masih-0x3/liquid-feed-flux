@@ -1,74 +1,129 @@
 
+## X (Twitter) Posting Pipeline — Implementation Plan
 
-## Goal
-Fix scoring so substantive Iran-related content (polls about the Iran war, public-opinion shifts, leadership statements) doesn't get buried at 8. Two structural problems must be solved together:
-
-**Problem A — Live worker ignores the editable rubric.** `supabase/functions/worker/index.ts` hardcodes the rubric (lines 360–392). The Settings UI saves `scoring_system_prompt` and `classifier_tool_schema` to the `settings` table, but only the *playground* uses them. So no matter how you edit the rubric, the production pipeline keeps using the old hardcoded one. This must be fixed first or any rubric change is cosmetic.
-
-**Problem B — The rubric itself misclassifies the Politico tweet.**
-The current rubric has these gaps:
-- No tier for **public-opinion polls / sentiment data** about ongoing wars or Iran policy.
-- The "Iran/Middle East Relevance Gate" is binary and over-aggressive: a tweet framed around "Trump / Americans" can trip the cap-at-8 rule even when the *subject* is the Iran war.
-- The "13–14 IMPORTANT" tier requires a "diplomatic meeting / policy change" — a poll about war legitimacy slips through the cracks.
-- No tier for **leadership rhetoric, contested narratives, war-legitimacy shifts**.
-
-## Plan
-
-### Step 1 — Wire worker to editable rubric (parity fix)
-Change `supabase/functions/worker/index.ts` (the `filterEnabled` branch around lines 353–467) to:
-- Read `scoring_system_prompt` and `classifier_tool_schema` from settings (the loader at the top of the file already loads `translation_prompt`; extend it to load these two fields).
-- Build the system prompt by substituting `{translation_prompt}`, `{priority_topics}`, `{low_priority_topics}`, `{editorial_guidelines_block}` placeholders — same logic the playground already uses in `admin-actions/index.ts`.
-- Fall back to the current hardcoded text if the setting is empty (safety net).
-- Use the editable tool schema if present, else fall back to the hardcoded one.
-
-This makes the playground and live worker behave identically — the whole point of the playground.
-
-### Step 2 — Rewrite the default scoring rubric
-Update `DEFAULT_SCORING_SYSTEM_PROMPT` in `src/hooks/useSettingsData.ts` and the matching block in the worker. New rubric introduces:
-
-**New explicit tier descriptions** that include polls/sentiment/legitimacy:
-- **15–16 HIGH** — adds: *"public-opinion shifts on active wars/conflicts where Iran or US-Iran relations are the subject; major polling that contradicts official narratives on Iran policy; significant leadership rhetoric on Iran."*
-- **13–14 IMPORTANT** — adds: *"polling/sentiment data on Iran-related foreign policy; contested-narrative reporting on Iran war goals or strikes; notable analyst/think-tank assessments."*
-- **11–12 ABOVE AVERAGE** — adds: *"general US/Western public-opinion data with indirect Iran relevance."*
-
-**Replace the binary Iran-gate with a 3-level relevance scale:**
-- **Direct Iran subject** (Iran government, IRGC, Iranian territory, nuclear program, Hormuz, proxies, sanctions on Iran, Israel-Iran, US-Iran war/strikes): no cap, score on merit.
-- **Indirect Iran-adjacent** (Iran is the *subject* of foreign discussion, e.g. polls about the Iran war, Western debate over Iran policy, analyst reports on Iran): cap at **16**, not 8.
-- **No Iran nexus** (pure US domestic, EU internal, China domestic, etc.): cap at **8**.
-
-This single change fixes the Politico tweet — it's "indirect Iran-adjacent" (US polling about the *Iran war*), so it can score 13–15 instead of being capped at 8.
-
-**Add anti-bias guardrails:**
-- "Do not down-score because the framing is American or Western — score on whether the subject matter is Iran/Middle East."
-- "A poll, leak, or analyst report can be as important as a primary event if it materially changes the public or political picture of an active Iran-related conflict."
-- "When in doubt between two adjacent tiers, prefer the higher tier."
-
-**Tighten the reasoning requirement:**
-- Require the model to state, in `reasoning`, (a) which relevance level it assigned, (b) which rubric tier and why, (c) any cap applied.
-
-### Step 3 — Re-tune threshold defaults
-- Lower `default_threshold` from **14 → 12** in `content_filter` so "important Iran-adjacent" content (13–14 band) is delivered. Anything below 12 still gets filtered.
-- This is editable in Settings; just changing the default.
-
-### Step 4 — Backfill / re-score the Politico tweet (verification)
-Add a one-off action: re-run the translation+scoring on that specific tweet using the new rubric so you can see the new score immediately, without waiting for a fresh tweet. Reuse the existing `preview_translation` plumbing but add an `apply: true` flag that writes the new score back to `posts`.
-
-### Step 5 — Surface scoring reasoning in Monitoring
-Right now `reasoning` is logged but not visible. Add a small "Why this score?" expandable row in the Monitoring table showing the AI's reasoning text (already stored in worker logs; we'll persist it on the `posts` row via a new nullable `importance_reasoning` column). This gives you a debug loop next time a score looks wrong.
+### Goal
+Mirror the Telegram pipeline for X. Score-gated, **media-required** posts get formatted (`📰 + translated text + media`) and posted to X via OAuth 1.0a v2 with media upload. All settings configurable from a new **"X Posting"** section in the X Automation tab. Full metrics surfaced on Dashboard + Monitoring.
 
 ---
 
-## Files to change
+### 1. Database changes (one migration)
 
-| File | Change |
-|---|---|
-| `supabase/functions/worker/index.ts` | Load editable scoring prompt + tool schema from settings; substitute placeholders; persist `importance_reasoning` |
-| `src/hooks/useSettingsData.ts` | New `DEFAULT_SCORING_SYSTEM_PROMPT` (3-tier relevance, poll/sentiment tiers, anti-bias notes); lower `default_threshold` to 12 |
-| `supabase/functions/admin-actions/index.ts` | Add `rescore_post` action (re-runs scoring for a given `tweet_id` and writes back) |
-| `src/pages/Monitoring.tsx` (+ `useMonitoringData.ts`) | Show `importance_reasoning` in expandable row; add "Re-score" button per post |
-| Migration | Add `posts.importance_reasoning text` column |
-| `mem://ai/translation-settings` + `mem://features/ai-content-curation` | Update memory: rubric now has 3-level relevance gate, default threshold 12, worker reads rubric from settings |
+**`settings` rows (new, JSON-driven, no hardcoded values):**
+- `x_posting_config` — `{ enabled, min_score, require_media, allow_video, post_template, leading_emoji, hashtags, max_chars, dedupe_window_hours, post_only_decision_deliver }`
+- `x_rate_limits` — `{ posts_per_hour, posts_per_day, monthly_post_budget, media_uploads_per_day }`
 
-## Expected outcome for the Politico tweet
-Under the new rubric: subject = US public opinion on the **Iran war** + Trump's claimed Iran war goals → "indirect Iran-adjacent" (cap 16) → falls in 13–15 band (significant polling that contradicts official narrative on an active Iran conflict) → **delivered** at threshold 12.
+**New table `x_deliveries`** (parallels `deliveries`):
+```
+id uuid pk, post_id text (tweet_id of source post), x_tweet_id text,
+status text ('pending'|'posted'|'failed'|'skipped'),
+skip_reason text, attempts int, last_error text,
+media_count int, media_bytes bigint, media_kind text,
+posted_at timestamptz, latency_ms int,
+api_response jsonb, created_at timestamptz default now()
+```
+RLS: admin manage / authenticated select (same pattern as `deliveries`).
 
+**Extend `settings.x_api_usage`** (no schema change — just new JSON keys):
+- `posts_24h: string[]`, `posts_total`, `media_uploads_24h: string[]`, `media_bytes_24h`, `last_post_error`.
+
+**New RPC `get_x_posting_summary()`** → returns 24h posted/failed/skipped counts, success rate, avg latency, projected monthly posts, media upload total — fed to Dashboard.
+
+---
+
+### 2. Edge function: `x-poster` (new)
+
+Worker-style function invoked by `pg_cron` every ~60s and on-demand from `admin-actions`.
+
+Pipeline per candidate post:
+1. **Select candidates**: `posts` where `delivery_decision='deliver'`, `importance_score >= x_posting_config.min_score`, `has_media=true` (if `require_media`), no row in `x_deliveries` (dedupe), within `dedupe_window_hours`.
+2. **Quota check**: read `x_api_usage`, refuse if hourly/daily/monthly caps exceeded → insert `x_deliveries` row `status='skipped' skip_reason='rate_limit'`.
+3. **Media validation** (before any API call):
+   - Confirm `media` rows exist with `downloaded_at IS NOT NULL` and `storage_path` set.
+   - Filter unsupported MIME types; cap at 4 images OR 1 video per X rules.
+   - If `allow_video=false`, skip videos.
+   - If validation fails → `skipped, skip_reason='no_media'`. **No API call made → no cost.**
+4. **Media upload** — `POST https://upload.twitter.com/1.1/media/upload.json` (chunked INIT/APPEND/FINALIZE for video, simple base64 for images). OAuth 1.0a (reuse helpers from `digest-compiler`). Track `media_uploads_24h` / `media_bytes_24h`.
+5. **Format text** from `x_posting_config.post_template` — placeholders `{leading_emoji}`, `{translated_text}`, `{hashtags}`, `{author_handle}`. Default: `{leading_emoji} {translated_text}\n\n{hashtags}`. Truncate to `max_chars` (default 280) with ellipsis.
+6. **Post tweet** — `POST https://api.x.com/2/tweets` with `media.media_ids`. Record latency.
+7. **Persist** → `x_deliveries` row `status='posted'`, `x_tweet_id`, `latency_ms`, `api_response`. Increment `x_api_usage.posts_24h/posts_total`.
+8. **Errors**: 429 → backoff, increment `attempts`, status stays `pending` (retry next tick); 4xx → `failed` (no retry); 5xx → retry up to 3 with exponential backoff.
+
+All quotas/templates read from `settings` — zero hardcoded values (per established memory rule).
+
+---
+
+### 3. Frontend: new sub-section in X Automation tab
+
+Extend `XAutomationSettings.tsx` with two new cards (no new tab — keeps it grouped):
+
+**Card A: "X Posting Configuration"**
+- Enable toggle.
+- Min importance score slider (1–20, default reads from settings).
+- "Require media" + "Allow video" checkboxes.
+- `PromptEditor` for `post_template` with placeholder buttons (`{leading_emoji}`, `{translated_text}`, `{hashtags}`, `{author_handle}`).
+- Leading emoji input (default `📰`), hashtags input, max chars number.
+- Live preview using a sample post (reuses `samplesQuery`).
+- "Save" + "Post a sample now" (dry-run that picks the most recent eligible post, validates media, returns formatted preview WITHOUT calling X API).
+
+**Card B: "Rate Limits & Quotas"**
+- Inputs for posts/hour, posts/day, monthly budget, media uploads/day.
+- Live readout of current usage from `x_api_usage` with progress bars (green/amber/red at 70/90%).
+
+All changes routed through `useSaveSettings` → `admin-actions` (existing validated mutation pattern). Add `x_posting_config` and `x_rate_limits` to the validator in `admin-actions/index.ts`.
+
+---
+
+### 4. Dashboard & Monitoring integration
+
+**Dashboard (`useDashboardData` + `DashboardMetrics`)**
+- Extend `get_dashboard_summary()` RPC to merge `get_x_posting_summary()` output.
+- New metric cards: "X Posts (24h)", "X Failures (24h)", "X Media Uploads (24h)", "X Posts Skipped — no media".
+- Add X channel to `DashboardHealth` (success rate, projected monthly vs. budget).
+
+**Monitoring (`useMonitoringData` + Monitoring page)**
+- Extend `get_post_pipeline_status` RPC to also LATERAL-join `x_deliveries` → expose `x_status`, `x_tweet_id`, `x_posted_at`, `x_error`, `x_skip_reason`.
+- Add an "X" status pill column (posted / pending / failed / skipped) with link to `https://x.com/i/status/{x_tweet_id}`.
+- Add "Retry on X" action (calls `admin-actions` with `action: 'retry_x_post', tweet_id`).
+
+---
+
+### 5. Cron + admin-actions wiring
+
+- pg_cron job `x-poster-tick` every 60s → calls `x-poster` with hardcoded URL+service-role header (per existing cron memory rule).
+- `admin-actions` gains: `get_x_posting_status`, `dry_run_x_post`, `retry_x_post`, plus validators for the two new settings keys.
+
+---
+
+### 6. Engagement metrics (phase 2 — included in plan, optional flag)
+
+Optional `x-engagement-poller` cron (every 6h) fetches `public_metrics` (likes, retweets, replies, impressions) for posted tweets ≤7 days old and stores into `x_deliveries.api_response.metrics`. Off by default to preserve quota.
+
+---
+
+### Files touched
+
+**New**
+- `supabase/migrations/<ts>_x_posting.sql` (table, settings rows, RPC, cron)
+- `supabase/functions/x-poster/index.ts`
+- `src/components/settings/XPostingConfig.tsx`
+- `src/components/settings/XRateLimits.tsx`
+- `src/hooks/useXDeliveries.ts`
+
+**Modified**
+- `supabase/functions/admin-actions/index.ts` (+ new actions, + validators for `x_posting_config` / `x_rate_limits`)
+- `src/components/settings/XAutomationSettings.tsx` (mount the two new cards)
+- `src/hooks/useSettingsData.ts` (types + defaults)
+- `src/hooks/useDashboardData.ts` + `DashboardMetrics.tsx` + `DashboardHealth.tsx`
+- `src/hooks/useMonitoringData.ts` + Monitoring page columns
+- DB function `get_dashboard_summary` and `get_post_pipeline_status` (extended)
+
+---
+
+### Open questions
+
+Before I implement, please confirm a few choices:
+
+1. **Where should the X posting controls live?** Inside the existing X Automation tab (recommended) or a brand-new top-level "X Posting" tab?
+2. **Should video uploads be enabled by default** (chunked upload is heavier and slower) or images-only at launch?
+3. **What hard monthly post budget** should we cap at (X Basic tier = 3,000 writes/mo)? Suggest defaulting to **2,500** to leave headroom for hydration + retries.
+4. **Engagement polling (phase 2)** — include now behind an off-by-default toggle, or defer entirely?
