@@ -599,7 +599,10 @@ serve(async (req) => {
         const oc = settingsMap['openai_config'] || {};
         const cf = settingsMap['content_filter'] || {};
 
-        const model = typeof oc.model === 'string' ? oc.model as string : 'gpt-4o-mini';
+        // translation_prompt.model is authoritative (matches the Settings UI); openai_config.model is legacy fallback.
+        const model = typeof tp.model === 'string' && (tp.model as string).trim()
+          ? tp.model as string
+          : (typeof oc.model === 'string' ? oc.model as string : 'gpt-4o-mini');
         const translationPrompt = typeof tp.system_prompt === 'string' && (tp.system_prompt as string).trim()
           ? tp.system_prompt as string
           : 'You are a professional translator. Translate the given English text to Persian. Preserve @mentions, #hashtags, URLs, and line breaks exactly. Only return the translated text, nothing else.';

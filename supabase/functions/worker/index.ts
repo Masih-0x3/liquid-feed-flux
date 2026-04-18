@@ -86,21 +86,27 @@ async function loadConfig(supabase: ReturnType<typeof createClient>): Promise<{
       .in('key', ['translation_prompt', 'openai_config', 'message_template', 'content_filter']);
 
     if (settings) {
+      // First pass: legacy openai_config (lowest priority)
+      for (const s of settings) {
+        if (s.key === 'openai_config' && typeof s.value === 'object' && s.value !== null) {
+          const v = s.value as Record<string, unknown>;
+          if (v.model) defaults.openaiModel = String(v.model);
+          if (typeof v.temperature === 'number') defaults.openaiTemperature = v.temperature;
+        }
+      }
+      // Second pass: translation_prompt (authoritative — overrides openai_config)
       for (const s of settings) {
         if (s.key === 'translation_prompt' && typeof s.value === 'object' && s.value !== null) {
           const v = s.value as Record<string, unknown>;
           if (v.system_prompt) defaults.translationPrompt = String(v.system_prompt);
+          if (typeof v.model === 'string' && (v.model as string).trim()) defaults.openaiModel = String(v.model);
+          if (typeof v.temperature === 'number') defaults.openaiTemperature = v.temperature;
           if (typeof v.scoring_system_prompt === 'string' && v.scoring_system_prompt.trim()) {
             defaults.scoringSystemPrompt = v.scoring_system_prompt as string;
           }
           if (typeof v.classifier_tool_schema === 'string' && v.classifier_tool_schema.trim()) {
             defaults.classifierToolSchema = v.classifier_tool_schema as string;
           }
-        }
-        if (s.key === 'openai_config' && typeof s.value === 'object' && s.value !== null) {
-          const v = s.value as Record<string, unknown>;
-          if (v.model) defaults.openaiModel = String(v.model);
-          if (typeof v.temperature === 'number') defaults.openaiTemperature = v.temperature;
         }
         if (s.key === 'message_template' && typeof s.value === 'object' && s.value !== null) {
           defaults.messageTemplate = { ...defaults.messageTemplate, ...s.value as Record<string, unknown> };
