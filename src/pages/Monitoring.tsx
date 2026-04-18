@@ -339,6 +339,7 @@ export default function Monitoring() {
                     <h4 className="font-medium text-sm text-muted-foreground">Persian</h4>
                     <div className="flex items-center gap-2">
                       <Button size="sm" variant="outline" onClick={() => handleReprocessTweet(entry.tweet_id)}><RotateCcw className="w-3 h-3 mr-1" />Reprocess</Button>
+                      <Button size="sm" variant="outline" onClick={() => handleRescorePost(entry.tweet_id)} title="Re-run scoring with current rubric"><Star className="w-3 h-3 mr-1" />Re-score</Button>
                       {!entry.is_translated && <Button size="sm" variant="outline" onClick={() => handleRetryTranslation(entry.tweet_id)}>Translate</Button>}
                       {!isEditing && <Button variant="outline" size="sm" onClick={() => { setEditingEntry(entry.tweet_id); setEditedContent(entry.text_translated || entry.text_original); }}><Edit className="w-3 h-3 mr-1" />Edit</Button>}
                       <Button size="sm" variant="outline" onClick={() => openDetails(entry.tweet_id)}>Details</Button>
