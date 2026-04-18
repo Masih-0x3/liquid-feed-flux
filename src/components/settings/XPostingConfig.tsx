@@ -97,7 +97,7 @@ export default function XPostingConfig({ initial }: Props) {
           <Newspaper className="w-5 h-5 mr-2" />X Posting Configuration
         </CardTitle>
         <CardDescription>
-          Score-gated, media-required posts are formatted and posted to your X account. Disabled by default.
+          Score-gated posts are formatted and posted to your X account. Images are attached when available; text-only posts go through without a media-upload call.
         </CardDescription>
       </CardHeader>
 
@@ -123,11 +123,11 @@ export default function XPostingConfig({ initial }: Props) {
 
         {/* Media rules */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <label className="flex items-start gap-3 p-3 bg-muted/30 rounded-lg cursor-pointer">
-            <Checkbox checked={cfg.require_media} onCheckedChange={(v) => update({ require_media: !!v })} />
+          <label className="flex items-start gap-3 p-3 bg-muted/30 rounded-lg cursor-pointer opacity-70">
+            <Checkbox checked disabled />
             <div>
-              <p className="text-sm font-medium flex items-center gap-1.5"><ImageIcon className="w-3.5 h-3.5" />Require media</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Skip posts that have no downloaded media (saves API cost).</p>
+              <p className="text-sm font-medium flex items-center gap-1.5"><ImageIcon className="w-3.5 h-3.5" />Attach media when available</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Posts with downloaded images attach them automatically. Posts without media are still posted as text-only — no media-upload API call is made.</p>
             </div>
           </label>
           <label className="flex items-start gap-3 p-3 bg-muted/30 rounded-lg cursor-pointer">
