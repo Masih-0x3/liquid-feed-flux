@@ -1,0 +1,371 @@
+import { useEffect, useState } from 'react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Separator } from '@/components/ui/separator';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
+import { useToast } from '@/hooks/use-toast';
+import { supabase } from '@/integrations/supabase/client';
+import { useSaveSettings } from '@/hooks/useSettingsData';
+import { Key, Shield, CheckCircle2, XCircle, Send, Sparkles, Loader2, AtSign, AlertTriangle, ExternalLink } from 'lucide-react';
+
+interface Props {
+  twitterHydration?: { enabled?: boolean; max_attempts?: number };
+  xApiUsage?: { total?: number; calls_24h?: string[]; last_call_at?: string | null; last_error?: string | null };
+}
+
+const SECRET_KEYS = [
+  { key: 'TWITTER_CONSUMER_KEY', label: 'Consumer Key' },
+  { key: 'TWITTER_CONSUMER_SECRET', label: 'Consumer Secret' },
+  { key: 'TWITTER_ACCESS_TOKEN', label: 'Access Token' },
+  { key: 'TWITTER_ACCESS_TOKEN_SECRET', label: 'Access Token Secret' },
+] as const;
+
+const DEFAULT_TEST_TWEET = 'Test tweet from automation pipeline ✅ — please ignore.';
+const BASIC_TIER_MONTHLY_LIMIT = 15000;
+
+export default function XAutomationSettings({ twitterHydration, xApiUsage }: Props) {
+  const { toast } = useToast();
+  const saveMutation = useSaveSettings();
+
+  const [statusMap, setStatusMap] = useState<Record<string, boolean> | null>(null);
+  const [statusLoading, setStatusLoading] = useState(false);
+  const [verifyLoading, setVerifyLoading] = useState(false);
+  const [verifyResult, setVerifyResult] = useState<{ ok: boolean; handle?: string; id?: string; error?: string } | null>(null);
+
+  const [tweetText, setTweetText] = useState(DEFAULT_TEST_TWEET);
+  const [replyTo, setReplyTo] = useState('');
+  const [sendLoading, setSendLoading] = useState(false);
+  const [tweetResult, setTweetResult] = useState<{ ok: boolean; tweet_id?: string; response?: unknown; error?: string } | null>(null);
+  const [lastSendAt, setLastSendAt] = useState<number>(0);
+
+  const [hydrateId, setHydrateId] = useState('');
+  const [hydrateLoading, setHydrateLoading] = useState(false);
+  const [hydrateResult, setHydrateResult] = useState<{ ok: boolean; text?: string; note_tweet?: string; lang?: string; raw?: unknown; error?: string } | null>(null);
+
+  const calls24h = Array.isArray(xApiUsage?.calls_24h)
+    ? xApiUsage!.calls_24h!.filter((ts) => {
+        try { return new Date(ts).getTime() > Date.now() - 24 * 60 * 60 * 1000; } catch { return false; }
+      }).length
+    : 0;
+  const projectedMonthly = calls24h * 30;
+  const overBudget = projectedMonthly > BASIC_TIER_MONTHLY_LIMIT;
+  const tweetCharCount = tweetText.length;
+  const tweetTooLong = tweetCharCount > 280;
+
+  const refreshStatus = async () => {
+    setStatusLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('admin-actions', { body: { action: 'get_x_status' } });
+      if (error) throw error;
+      setStatusMap(data?.status ?? {});
+    } catch (e) {
+      toast({ title: 'Could not load credential status', description: (e as Error).message, variant: 'destructive' });
+    } finally {
+      setStatusLoading(false);
+    }
+  };
+
+  useEffect(() => { refreshStatus(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+
+  const verifyConnection = async () => {
+    setVerifyLoading(true);
+    setVerifyResult(null);
+    try {
+      const { data, error } = await supabase.functions.invoke('admin-actions', { body: { action: 'x_verify_credentials' } });
+      if (error) throw error;
+      setVerifyResult(data);
+      toast({ title: data?.ok ? 'Connection OK' : 'Connection failed', description: data?.handle ? `Authenticated as @${data.handle}` : data?.error, variant: data?.ok ? 'default' : 'destructive' });
+    } catch (e) {
+      const msg = (e as Error).message;
+      setVerifyResult({ ok: false, error: msg });
+      toast({ title: 'Verification failed', description: msg, variant: 'destructive' });
+    } finally {
+      setVerifyLoading(false);
+    }
+  };
+
+  const sendTestTweet = async () => {
+    if (Date.now() - lastSendAt < 60_000) {
+      toast({ title: 'Rate limited', description: 'Please wait a minute between test tweets.', variant: 'destructive' });
+      return;
+    }
+    if (tweetTooLong || tweetText.trim().length === 0) {
+      toast({ title: 'Invalid tweet', description: 'Tweet must be 1-280 characters.', variant: 'destructive' });
+      return;
+    }
+    setSendLoading(true);
+    setTweetResult(null);
+    try {
+      const { data, error } = await supabase.functions.invoke('admin-actions', {
+        body: { action: 'send_test_tweet', text: tweetText.trim(), in_reply_to_tweet_id: replyTo.trim() || undefined },
+      });
+      if (error) throw error;
+      setTweetResult(data);
+      setLastSendAt(Date.now());
+      toast({ title: data?.ok ? 'Tweet posted' : 'Tweet failed', description: data?.tweet_id ? `ID: ${data.tweet_id}` : data?.error, variant: data?.ok ? 'default' : 'destructive' });
+    } catch (e) {
+      const msg = (e as Error).message;
+      setTweetResult({ ok: false, error: msg });
+      toast({ title: 'Send failed', description: msg, variant: 'destructive' });
+    } finally {
+      setSendLoading(false);
+    }
+  };
+
+  const testHydrate = async () => {
+    if (!hydrateId.trim()) {
+      toast({ title: 'Tweet ID required', variant: 'destructive' });
+      return;
+    }
+    setHydrateLoading(true);
+    setHydrateResult(null);
+    try {
+      const { data, error } = await supabase.functions.invoke('admin-actions', {
+        body: { action: 'test_hydrate_tweet', tweet_id: hydrateId.trim() },
+      });
+      if (error) throw error;
+      setHydrateResult(data);
+      toast({ title: data?.ok ? 'Hydration OK' : 'Hydration failed', description: data?.note_tweet ? 'note_tweet field returned' : data?.error });
+    } catch (e) {
+      const msg = (e as Error).message;
+      setHydrateResult({ ok: false, error: msg });
+      toast({ title: 'Hydration test failed', description: msg, variant: 'destructive' });
+    } finally {
+      setHydrateLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* 1. Credentials */}
+      <Card className="glass-card">
+        <CardHeader>
+          <CardTitle className="flex items-center text-glass-foreground"><Key className="w-5 h-5 mr-2" />Credentials &amp; Connection</CardTitle>
+          <CardDescription>X API credentials are stored as Supabase Edge Function secrets. Manage them in your Supabase dashboard.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {SECRET_KEYS.map(({ key, label }) => {
+              const present = statusMap?.[key];
+              return (
+                <div key={key} className="flex items-center justify-between p-3 bg-muted/40 rounded-lg">
+                  <div>
+                    <p className="text-sm font-medium text-glass-foreground">{label}</p>
+                    <code className="text-xs text-muted-foreground">{key}</code>
+                  </div>
+                  {statusLoading || statusMap === null ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+                  ) : present ? (
+                    <Badge className="bg-emerald-500/15 text-emerald-600 border-emerald-500/30 hover:bg-emerald-500/20"><CheckCircle2 className="w-3 h-3 mr-1" />Configured</Badge>
+                  ) : (
+                    <Badge variant="destructive"><XCircle className="w-3 h-3 mr-1" />Missing</Badge>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button onClick={verifyConnection} disabled={verifyLoading} variant="outline" className="border-primary/50 hover:bg-primary/10">
+              {verifyLoading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Verifying...</> : <><Shield className="w-4 h-4 mr-2" />Verify connection</>}
+            </Button>
+            <Button onClick={refreshStatus} disabled={statusLoading} variant="ghost" size="sm">Refresh status</Button>
+            <a href="https://supabase.com/dashboard/project/jzirqfzzvlbxwfzndaer/settings/functions" target="_blank" rel="noreferrer" className="text-xs text-primary inline-flex items-center hover:underline">
+              Manage secrets <ExternalLink className="w-3 h-3 ml-1" />
+            </a>
+          </div>
+
+          {verifyResult && (
+            <div className={`rounded-lg border p-3 text-sm ${verifyResult.ok ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-destructive/30 bg-destructive/5'}`}>
+              {verifyResult.ok ? (
+                <div className="flex items-center gap-2"><AtSign className="w-4 h-4 text-emerald-600" /><span className="font-medium">Authenticated as @{verifyResult.handle}</span><span className="text-muted-foreground">(id: {verifyResult.id})</span></div>
+              ) : (
+                <div className="flex items-start gap-2"><XCircle className="w-4 h-4 text-destructive mt-0.5" /><span>{verifyResult.error || 'Unknown error'}</span></div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* 2. Tweet Hydration */}
+      <Card className="glass-card">
+        <CardHeader>
+          <CardTitle className="flex items-center text-glass-foreground"><Sparkles className="w-5 h-5 mr-2" />Tweet Hydration &amp; API Usage</CardTitle>
+          <CardDescription>When RSS delivers a truncated tweet, fetch the full text from the X API v2 before translation.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+            <div>
+              <Label htmlFor="hydration_enabled" className="font-medium">Hydrate truncated tweets</Label>
+              <p className="text-xs text-muted-foreground mt-1">When off, truncated tweets will be translated as-is.</p>
+            </div>
+            <Checkbox
+              id="hydration_enabled"
+              checked={twitterHydration?.enabled !== false}
+              onCheckedChange={(checked) => {
+                const next = { ...(twitterHydration ?? { enabled: true, max_attempts: 3 }), enabled: !!checked };
+                saveMutation.mutate({ key: 'twitter_hydration', value: next });
+              }}
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+            <div className="p-3 bg-muted/30 rounded-lg">
+              <p className="text-xs text-muted-foreground">Calls (last 24h)</p>
+              <p className="text-2xl font-bold text-glass-foreground">{calls24h}</p>
+            </div>
+            <div className="p-3 bg-muted/30 rounded-lg">
+              <p className="text-xs text-muted-foreground">Total (all time)</p>
+              <p className="text-2xl font-bold text-glass-foreground">{xApiUsage?.total ?? 0}</p>
+              {xApiUsage?.last_call_at && <p className="text-xs text-muted-foreground mt-1">Last: {new Date(xApiUsage.last_call_at).toLocaleString()}</p>}
+            </div>
+            <div className={`p-3 rounded-lg ${overBudget ? 'bg-destructive/10 border border-destructive/30' : 'bg-muted/30'}`}>
+              <p className="text-xs text-muted-foreground">Projected monthly</p>
+              <p className={`text-2xl font-bold ${overBudget ? 'text-destructive' : 'text-glass-foreground'}`}>{projectedMonthly.toLocaleString()}</p>
+              <p className="text-xs text-muted-foreground mt-1">Basic tier: {BASIC_TIER_MONTHLY_LIMIT.toLocaleString()}/mo</p>
+            </div>
+          </div>
+
+          {overBudget && (
+            <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">
+              <AlertTriangle className="w-4 h-4 text-destructive mt-0.5" />
+              <span>Projected monthly usage exceeds the Basic tier limit. Consider disabling hydration or upgrading your X API plan.</span>
+            </div>
+          )}
+
+          {xApiUsage?.last_error && <p className="text-xs text-destructive">Last error: {String(xApiUsage.last_error)}</p>}
+        </CardContent>
+      </Card>
+
+      {/* 3. Test Tweet */}
+      <Card className="glass-card">
+        <CardHeader>
+          <CardTitle className="flex items-center text-glass-foreground"><Send className="w-5 h-5 mr-2" />Test Tweet Console</CardTitle>
+          <CardDescription>Send a real tweet to your authenticated X account to verify posting works end-to-end.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="test_tweet_text">Tweet text</Label>
+              <span className={`text-xs ${tweetTooLong ? 'text-destructive' : 'text-muted-foreground'}`}>{tweetCharCount}/280</span>
+            </div>
+            <Textarea id="test_tweet_text" value={tweetText} onChange={(e) => setTweetText(e.target.value)} className="glass-input min-h-[100px]" placeholder="What's happening?" />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="reply_to">Reply to tweet ID (optional)</Label>
+            <Input id="reply_to" value={replyTo} onChange={(e) => setReplyTo(e.target.value)} placeholder="e.g. 1234567890" className="glass-input" />
+            <p className="text-xs text-muted-foreground">Posting as a reply keeps the test out of your main timeline.</p>
+          </div>
+
+          <div className="flex flex-wrap gap-3">
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button disabled={sendLoading || tweetTooLong || tweetText.trim().length === 0} className="bg-gradient-primary hover:opacity-90 text-white">
+                  {sendLoading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Posting...</> : <><Send className="w-4 h-4 mr-2" />Send test tweet</>}
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Post this test tweet?</AlertDialogTitle>
+                  <AlertDialogDescription asChild>
+                    <div>
+                      <span>This will post the following to your authenticated X account:</span>
+                      <div className="mt-2 p-3 bg-muted rounded text-sm whitespace-pre-wrap text-foreground">{tweetText}</div>
+                      {replyTo && <p className="mt-2 text-xs">As a reply to tweet ID: <code>{replyTo}</code></p>}
+                    </div>
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={sendTestTweet}>Post tweet</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
+
+          {tweetResult && (
+            <div className={`rounded-lg border p-3 text-sm space-y-2 ${tweetResult.ok ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-destructive/30 bg-destructive/5'}`}>
+              {tweetResult.ok ? (
+                <>
+                  <div className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-600" /><span className="font-medium">Tweet posted</span></div>
+                  {tweetResult.tweet_id && (
+                    <a href={`https://x.com/i/status/${tweetResult.tweet_id}`} target="_blank" rel="noreferrer" className="text-primary text-xs inline-flex items-center hover:underline">
+                      View on X <ExternalLink className="w-3 h-3 ml-1" />
+                    </a>
+                  )}
+                </>
+              ) : (
+                <div className="flex items-start gap-2"><XCircle className="w-4 h-4 text-destructive mt-0.5" /><span>{tweetResult.error || 'Unknown error'}</span></div>
+              )}
+              {tweetResult.response !== undefined && (
+                <details className="text-xs">
+                  <summary className="cursor-pointer text-muted-foreground">Response payload</summary>
+                  <pre className="mt-1 p-2 bg-background rounded overflow-x-auto">{JSON.stringify(tweetResult.response, null, 2)}</pre>
+                </details>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* 4. Hydration Test */}
+      <Card className="glass-card">
+        <CardHeader>
+          <CardTitle className="flex items-center text-glass-foreground"><Sparkles className="w-5 h-5 mr-2" />Hydration Test</CardTitle>
+          <CardDescription>Fetch a tweet's full <code>note_tweet</code> text via the X API without writing to the database.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="hydrate_id">Tweet ID</Label>
+            <div className="flex gap-2">
+              <Input id="hydrate_id" value={hydrateId} onChange={(e) => setHydrateId(e.target.value)} placeholder="e.g. 1234567890123456789" className="glass-input" />
+              <Button onClick={testHydrate} disabled={hydrateLoading} variant="outline" className="border-primary/50 hover:bg-primary/10 shrink-0">
+                {hydrateLoading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Testing...</> : 'Test hydrate'}
+              </Button>
+            </div>
+          </div>
+
+          {hydrateResult && (
+            <div className={`rounded-lg border p-3 text-sm space-y-2 ${hydrateResult.ok ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-destructive/30 bg-destructive/5'}`}>
+              {hydrateResult.ok ? (
+                <>
+                  <div className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-600" /><span className="font-medium">Fetched successfully</span>{hydrateResult.lang && <Badge variant="outline" className="text-xs">{hydrateResult.lang}</Badge>}</div>
+                  {hydrateResult.note_tweet && (
+                    <div>
+                      <Label className="text-xs">note_tweet (full text)</Label>
+                      <div className="p-2 bg-background rounded border text-sm whitespace-pre-wrap mt-1">{hydrateResult.note_tweet}</div>
+                    </div>
+                  )}
+                  {hydrateResult.text && (
+                    <div>
+                      <Label className="text-xs">text (truncated field)</Label>
+                      <div className="p-2 bg-background rounded border text-sm whitespace-pre-wrap mt-1">{hydrateResult.text}</div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="flex items-start gap-2"><XCircle className="w-4 h-4 text-destructive mt-0.5" /><span>{hydrateResult.error || 'Unknown error'}</span></div>
+              )}
+              {hydrateResult.raw !== undefined && (
+                <details className="text-xs">
+                  <summary className="cursor-pointer text-muted-foreground">Raw response</summary>
+                  <pre className="mt-1 p-2 bg-background rounded overflow-x-auto">{JSON.stringify(hydrateResult.raw, null, 2)}</pre>
+                </details>
+              )}
+            </div>
+          )}
+          <Separator />
+          <p className="text-xs text-muted-foreground">Note: each verification, hydration test, and posted tweet consumes one X API call counted toward your monthly quota.</p>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

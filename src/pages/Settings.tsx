@@ -11,12 +11,13 @@ import { Separator } from '@/components/ui/separator';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
-import { Brain, MessageSquare, Eye, Code, Sparkles, Send, Key, Shield, Loader2, Filter, Newspaper } from 'lucide-react';
+import { Brain, MessageSquare, Eye, Code, Sparkles, Send, Key, Shield, Loader2, Filter, Newspaper, AtSign } from 'lucide-react';
 import {
   useSettingsData, useSaveSettings, openaiModels, messagePlaceholders, promptPlaceholders,
   type TranslationSettings, type OpenAISettings, type TelegramSettings, type MessageTemplateSettings, type DigestSettings,
 } from '@/hooks/useSettingsData';
 import ContentFilterSettings, { type ContentFilterConfig } from '@/components/settings/ContentFilterSettings';
+import XAutomationSettings from '@/components/settings/XAutomationSettings';
 
 function insertPlaceholder(placeholder: string, textareaId: string, getter: string, setter: (val: string) => void) {
   const textarea = document.getElementById(textareaId) as HTMLTextAreaElement;
@@ -110,13 +111,14 @@ export default function Settings() {
       </div>
 
       <Tabs defaultValue="translation" className="w-full">
-        <TabsList className="grid w-full grid-cols-6">
+        <TabsList className="grid w-full grid-cols-7">
           <TabsTrigger value="translation" className="flex items-center gap-2"><Brain className="w-4 h-4" />Translation</TabsTrigger>
           <TabsTrigger value="filter" className="flex items-center gap-2"><Filter className="w-4 h-4" />Content Filter</TabsTrigger>
           <TabsTrigger value="messages" className="flex items-center gap-2"><MessageSquare className="w-4 h-4" />Messages</TabsTrigger>
           <TabsTrigger value="openai" className="flex items-center gap-2"><Key className="w-4 h-4" />OpenAI</TabsTrigger>
           <TabsTrigger value="telegram" className="flex items-center gap-2"><Send className="w-4 h-4" />Telegram</TabsTrigger>
           <TabsTrigger value="digest" className="flex items-center gap-2"><Newspaper className="w-4 h-4" />Digest</TabsTrigger>
+          <TabsTrigger value="x-automation" className="flex items-center gap-2"><AtSign className="w-4 h-4" />X Automation</TabsTrigger>
         </TabsList>
 
         {/* Translation Tab */}
