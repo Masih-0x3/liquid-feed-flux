@@ -131,11 +131,22 @@ function selectUploadable(rows: MediaRow[]): { ok: MediaRow[]; reason?: string }
 }
 
 // ─── X media upload (image, simple base64) ───────────────────────────
+function bytesToBase64(bytes: Uint8Array): string {
+  // Chunked conversion to avoid "Maximum call stack size exceeded" on large images
+  // (String.fromCharCode(...bytes) blows the stack at ~100KB+).
+  let binary = '';
+  const chunkSize = 0x8000; // 32KB chunks
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
 async function uploadImage(
   bytes: Uint8Array, mime: string, ck: string, cs: string, at: string, ats: string,
 ): Promise<string> {
   const url = 'https://upload.twitter.com/1.1/media/upload.json';
-  const b64 = btoa(String.fromCharCode(...bytes));
+  const b64 = bytesToBase64(bytes);
   const params: Record<string, string> = { media_data: b64 };
   const auth = await oauthHeader('POST', url, params, ck, cs, at, ats);
   const body = new URLSearchParams(params);
