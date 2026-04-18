@@ -388,6 +388,7 @@ export type Database = {
           has_media: boolean | null
           hydrated_at: string | null
           hydration_source: string | null
+          importance_reasoning: string | null
           importance_score: number | null
           importance_tags: string[] | null
           is_truncated: boolean
@@ -411,6 +412,7 @@ export type Database = {
           has_media?: boolean | null
           hydrated_at?: string | null
           hydration_source?: string | null
+          importance_reasoning?: string | null
           importance_score?: number | null
           importance_tags?: string[] | null
           is_truncated?: boolean
@@ -434,6 +436,7 @@ export type Database = {
           has_media?: boolean | null
           hydrated_at?: string | null
           hydration_source?: string | null
+          importance_reasoning?: string | null
           importance_score?: number | null
           importance_tags?: string[] | null
           is_truncated?: boolean
