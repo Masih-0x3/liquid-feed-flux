@@ -32,6 +32,23 @@ function insertPlaceholder(placeholder: string, textareaId: string, getter: stri
   }
 }
 
+type DigestTestPost = { author_handle?: string; created_at?: string; text_translated?: string; text_original?: string };
+type DigestTestResult = {
+  post_count?: number;
+  period_start?: string;
+  period_end?: string;
+  reason?: string;
+  openai_finish_reason?: string;
+  warning?: string;
+  posts?: DigestTestPost[];
+  openai_request?: unknown;
+  openai_system_prompt?: string;
+  openai_user_prompt?: string;
+  openai_response?: string;
+  openai_usage?: unknown;
+  formatted_tweets?: string[];
+};
+
 export default function Settings() {
   const { toast } = useToast();
   const { settingsQuery, samplesQuery } = useSettingsData();
@@ -48,7 +65,7 @@ export default function Settings() {
   const [messageTemplate, setMessageTemplate] = useState<MessageTemplateSettings | null>(null);
   const [digestSettings, setDigestSettings] = useState<DigestSettings | null>(null);
   const [digestTestLoading, setDigestTestLoading] = useState(false);
-  const [digestTestResult, setDigestTestResult] = useState<any>(null);
+  const [digestTestResult, setDigestTestResult] = useState<DigestTestResult | null>(null);
 
   // Sync from server on first load
   const ts = translationSettings ?? settings?.translation_prompt;
@@ -541,8 +558,8 @@ export default function Settings() {
                     });
                     if (error) throw error;
                     setDigestTestResult(data);
-                  } catch (e: any) {
-                    toast({ title: 'Dry run failed', description: e.message, variant: 'destructive' });
+                  } catch (e: unknown) {
+                    toast({ title: 'Dry run failed', description: e instanceof Error ? e.message : String(e), variant: 'destructive' });
                   } finally {
                     setDigestTestLoading(false);
                   }
@@ -574,7 +591,7 @@ export default function Settings() {
                   <div className="space-y-2">
                     <Label className="text-sm font-medium">📥 Posts Found ({digestTestResult.post_count ?? 0})</Label>
                     <div className="max-h-56 overflow-y-auto bg-muted/50 rounded-lg p-3 space-y-2 text-sm">
-                      {digestTestResult.posts?.length > 0 ? digestTestResult.posts.map((p: any, i: number) => (
+                      {digestTestResult.posts?.length ? digestTestResult.posts.map((p, i: number) => (
                         <div key={i} className="p-2 bg-background rounded border">
                           <div className="flex items-center justify-between gap-2">
                             <span className="font-mono text-xs text-primary">@{p.author_handle || 'unknown'}</span>
