@@ -64,13 +64,14 @@ export default function XPostingConfig({ initial }: Props) {
 
   const insertPlaceholder = (ph: string) => update({ post_template: cfg.post_template + ' ' + ph });
 
-  const previewText = cfg.post_template
+  const RLM = '\u200F';
+  const previewText = RLM + cfg.post_template
     .split('{leading_emoji}').join(cfg.leading_emoji)
     .split('{translated_text}').join('این یک نمونه‌ی پیش‌نمایش از پست خبری ترجمه‌شده است.')
     .split('{hashtags}').join(cfg.hashtags)
     .split('{author_handle}').join('example_user')
     .replace(/\n{3,}/g, '\n\n').trim()
-    .slice(0, cfg.max_chars);
+    .slice(0, Math.max(1, cfg.max_chars - 1));
 
   const runDryRun = async () => {
     setDryRunLoading(true);
@@ -195,7 +196,7 @@ export default function XPostingConfig({ initial }: Props) {
             <Eye className="w-3.5 h-3.5" /><span>Live preview</span>
             <Badge variant="outline" className="ml-auto text-xs">{previewText.length}/{cfg.max_chars}</Badge>
           </div>
-          <div className="whitespace-pre-wrap text-sm text-glass-foreground bg-background/50 p-3 rounded">{previewText || '(empty)'}</div>
+          <div dir="rtl" lang="fa" className="whitespace-pre-wrap text-sm text-glass-foreground bg-background/50 p-3 rounded text-right">{previewText || '(empty)'}</div>
         </div>
 
         {/* Actions */}
