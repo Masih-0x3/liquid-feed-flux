@@ -131,11 +131,22 @@ function selectUploadable(rows: MediaRow[]): { ok: MediaRow[]; reason?: string }
 }
 
 // ─── X media upload (image, simple base64) ───────────────────────────
+function bytesToBase64(bytes: Uint8Array): string {
+  // Chunked conversion to avoid "Maximum call stack size exceeded" on large images
+  // (String.fromCharCode(...bytes) blows the stack at ~100KB+).
+  let binary = '';
+  const chunkSize = 0x8000; // 32KB chunks
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
 async function uploadImage(
   bytes: Uint8Array, mime: string, ck: string, cs: string, at: string, ats: string,
 ): Promise<string> {
   const url = 'https://upload.twitter.com/1.1/media/upload.json';
-  const b64 = btoa(String.fromCharCode(...bytes));
+  const b64 = bytesToBase64(bytes);
   const params: Record<string, string> = { media_data: b64 };
   const auth = await oauthHeader('POST', url, params, ck, cs, at, ats);
   const body = new URLSearchParams(params);
@@ -286,6 +297,7 @@ Deno.serve(async (req) => {
     let mediaCount = 0;
     let mediaBytes = 0;
     let mediaKind: string | null = null;
+    let mediaWarning: string | null = null;
 
     if (mediaRows && mediaRows.length > 0) {
       const sel = selectUploadable(mediaRows as MediaRow[]);
@@ -308,6 +320,7 @@ Deno.serve(async (req) => {
           mediaCount = 0;
           mediaBytes = 0;
           mediaKind = null;
+          mediaWarning = `media_upload_failed: ${(e as Error).message}`.slice(0, 500);
           console.warn(`[x-poster] media upload failed for ${tweetId}, posting text-only: ${(e as Error).message}`);
         }
       } else if (sel.ok.length > 0 && dryRun) {
@@ -339,6 +352,7 @@ Deno.serve(async (req) => {
         post_id: tweetId, x_tweet_id: xId, status: 'posted',
         media_count: mediaCount, media_bytes: mediaBytes, media_kind: mediaKind,
         posted_at: new Date().toISOString(), latency_ms: latency, api_response: raw, attempts: 1,
+        last_error: mediaWarning,
       });
       results.push({ tweet_id: tweetId, status: 'posted', x_tweet_id: xId, latency_ms: latency });
     } catch (e) {
