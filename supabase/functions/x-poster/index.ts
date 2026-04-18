@@ -352,6 +352,7 @@ Deno.serve(async (req) => {
         post_id: tweetId, x_tweet_id: xId, status: 'posted',
         media_count: mediaCount, media_bytes: mediaBytes, media_kind: mediaKind,
         posted_at: new Date().toISOString(), latency_ms: latency, api_response: raw, attempts: 1,
+        last_error: mediaWarning,
       });
       results.push({ tweet_id: tweetId, status: 'posted', x_tweet_id: xId, latency_ms: latency });
     } catch (e) {
