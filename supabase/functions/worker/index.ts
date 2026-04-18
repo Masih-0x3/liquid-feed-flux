@@ -44,6 +44,8 @@ async function loadConfig(supabase: ReturnType<typeof createClient>): Promise<{
   openaiModel: string;
   openaiTemperature: number;
   messageTemplate: Record<string, unknown>;
+  scoringSystemPrompt: string | null;
+  classifierToolSchema: string | null;
   contentFilter: {
     enabled: boolean;
     default_threshold: number;
@@ -64,6 +66,8 @@ async function loadConfig(supabase: ReturnType<typeof createClient>): Promise<{
       source_link_text: 'View original',
       custom_hashtags: '#اخبار'
     } as Record<string, unknown>,
+    scoringSystemPrompt: null as string | null,
+    classifierToolSchema: null as string | null,
     contentFilter: {
       enabled: false,
       default_threshold: 12,
@@ -86,6 +90,12 @@ async function loadConfig(supabase: ReturnType<typeof createClient>): Promise<{
         if (s.key === 'translation_prompt' && typeof s.value === 'object' && s.value !== null) {
           const v = s.value as Record<string, unknown>;
           if (v.system_prompt) defaults.translationPrompt = String(v.system_prompt);
+          if (typeof v.scoring_system_prompt === 'string' && v.scoring_system_prompt.trim()) {
+            defaults.scoringSystemPrompt = v.scoring_system_prompt as string;
+          }
+          if (typeof v.classifier_tool_schema === 'string' && v.classifier_tool_schema.trim()) {
+            defaults.classifierToolSchema = v.classifier_tool_schema as string;
+          }
         }
         if (s.key === 'openai_config' && typeof s.value === 'object' && s.value !== null) {
           const v = s.value as Record<string, unknown>;
