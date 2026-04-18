@@ -11,7 +11,57 @@ export interface TranslationSettings {
   top_p: number;
   frequency_penalty: number;
   presence_penalty: number;
+  /** Editable scoring rubric (system prompt) used when content_filter is enabled */
+  scoring_system_prompt?: string;
+  /** Editable JSON schema (string) for the classify_importance tool call */
+  classifier_tool_schema?: string;
 }
+
+export const DEFAULT_SCORING_SYSTEM_PROMPT = `You have two tasks. Complete both carefully.
+
+## Task 1: Translation
+{translation_prompt}
+
+## Task 2: News Importance Scoring
+You are an editorial assistant scoring news items for a curated Telegram channel. Your score determines whether this item gets delivered to subscribers.
+
+### Scoring Rubric (1-20 scale)
+19-20 — CRITICAL: Direct military action, war declarations, ceasefire/peace agreements, nuclear incidents, leader assassinations, major terrorist attacks. Stop-the-presses, history-making events.
+17-18 — VERY HIGH: Major sanctions packages, significant military escalation, breaking crisis developments, emergency UN sessions, regime changes.
+15-16 — HIGH: Diplomatic breakthroughs, high-level summits with concrete outcomes, major policy reversals, large-scale protest movements, significant military deployments.
+13-14 — IMPORTANT: Notable diplomatic meetings, significant policy changes, major regional developments, important alliance shifts, major economic sanctions.
+11-12 — ABOVE AVERAGE: Important official statements, meaningful economic data, notable personnel changes, significant infrastructure events, regional security developments.
+9-10 — MODERATE: Noteworthy but routine diplomatic activity, economic reports, policy proposals, regional tensions without escalation.
+7-8 — BELOW AVERAGE: Minor diplomatic exchanges, routine policy updates, peripheral regional coverage, minor economic indicators.
+5-6 — LOW: Routine government updates, minor administrative changes, tangential coverage, cultural events with minimal geopolitical relevance.
+3-4 — VERY LOW: Soft news, human interest stories, minor local events, routine procedural updates.
+1-2 — SKIP: Entertainment, sports, celebrity gossip, memes, viral trends, product launches, lifestyle content, weather reports.
+
+### CRITICAL — Iran/Middle East Relevance Gate
+If the content has NO direct connection to Iran, the Middle East region, or entities that directly affect Iran (e.g., sanctions, nuclear negotiations, proxy conflicts), cap the score at 8 MAXIMUM — regardless of how globally significant the event is. Only content with a clear Iran/Middle East nexus should score above 8.
+
+### Topic Priorities
+High-priority topics (boost score by 1-2 points): {priority_topics}
+Low-priority topics (reduce score by 1-2 points): {low_priority_topics}
+
+{editorial_guidelines_block}
+
+You MUST call the "classify_importance" tool with your translation and score. The "reasoning" field is required — explain your score in 1-2 sentences.`;
+
+export const DEFAULT_CLASSIFIER_TOOL_SCHEMA = JSON.stringify({
+  name: 'classify_importance',
+  description: 'Provide the Persian translation and importance classification of this news item',
+  parameters: {
+    type: 'object',
+    properties: {
+      translated_text: { type: 'string', description: 'The Persian translation of the original text' },
+      importance_score: { type: 'integer', description: 'Importance score 1-20 based on the rubric', minimum: 1, maximum: 20 },
+      tags: { type: 'array', items: { type: 'string' }, description: 'Topic tags (e.g., war, iran, economy, politics, diplomacy, military)' },
+      reasoning: { type: 'string', description: 'Required: 1-2 sentence explanation of why this score was given' },
+    },
+    required: ['translated_text', 'importance_score', 'tags', 'reasoning'],
+  },
+}, null, 2);
 
 export interface OpenAISettings {
   model: string;
