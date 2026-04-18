@@ -11,7 +11,57 @@ export interface TranslationSettings {
   top_p: number;
   frequency_penalty: number;
   presence_penalty: number;
+  /** Editable scoring rubric (system prompt) used when content_filter is enabled */
+  scoring_system_prompt?: string;
+  /** Editable JSON schema (string) for the classify_importance tool call */
+  classifier_tool_schema?: string;
 }
+
+export const DEFAULT_SCORING_SYSTEM_PROMPT = `You have two tasks. Complete both carefully.
+
+## Task 1: Translation
+{translation_prompt}
+
+## Task 2: News Importance Scoring
+You are an editorial assistant scoring news items for a curated Telegram channel. Your score determines whether this item gets delivered to subscribers.
+
+### Scoring Rubric (1-20 scale)
+19-20 — CRITICAL: Direct military action, war declarations, ceasefire/peace agreements, nuclear incidents, leader assassinations, major terrorist attacks. Stop-the-presses, history-making events.
+17-18 — VERY HIGH: Major sanctions packages, significant military escalation, breaking crisis developments, emergency UN sessions, regime changes.
+15-16 — HIGH: Diplomatic breakthroughs, high-level summits with concrete outcomes, major policy reversals, large-scale protest movements, significant military deployments.
+13-14 — IMPORTANT: Notable diplomatic meetings, significant policy changes, major regional developments, important alliance shifts, major economic sanctions.
+11-12 — ABOVE AVERAGE: Important official statements, meaningful economic data, notable personnel changes, significant infrastructure events, regional security developments.
+9-10 — MODERATE: Noteworthy but routine diplomatic activity, economic reports, policy proposals, regional tensions without escalation.
+7-8 — BELOW AVERAGE: Minor diplomatic exchanges, routine policy updates, peripheral regional coverage, minor economic indicators.
+5-6 — LOW: Routine government updates, minor administrative changes, tangential coverage, cultural events with minimal geopolitical relevance.
+3-4 — VERY LOW: Soft news, human interest stories, minor local events, routine procedural updates.
+1-2 — SKIP: Entertainment, sports, celebrity gossip, memes, viral trends, product launches, lifestyle content, weather reports.
+
+### CRITICAL — Iran/Middle East Relevance Gate
+If the content has NO direct connection to Iran, the Middle East region, or entities that directly affect Iran (e.g., sanctions, nuclear negotiations, proxy conflicts), cap the score at 8 MAXIMUM — regardless of how globally significant the event is. Only content with a clear Iran/Middle East nexus should score above 8.
+
+### Topic Priorities
+High-priority topics (boost score by 1-2 points): {priority_topics}
+Low-priority topics (reduce score by 1-2 points): {low_priority_topics}
+
+{editorial_guidelines_block}
+
+You MUST call the "classify_importance" tool with your translation and score. The "reasoning" field is required — explain your score in 1-2 sentences.`;
+
+export const DEFAULT_CLASSIFIER_TOOL_SCHEMA = JSON.stringify({
+  name: 'classify_importance',
+  description: 'Provide the Persian translation and importance classification of this news item',
+  parameters: {
+    type: 'object',
+    properties: {
+      translated_text: { type: 'string', description: 'The Persian translation of the original text' },
+      importance_score: { type: 'integer', description: 'Importance score 1-20 based on the rubric', minimum: 1, maximum: 20 },
+      tags: { type: 'array', items: { type: 'string' }, description: 'Topic tags (e.g., war, iran, economy, politics, diplomacy, military)' },
+      reasoning: { type: 'string', description: 'Required: 1-2 sentence explanation of why this score was given' },
+    },
+    required: ['translated_text', 'importance_score', 'tags', 'reasoning'],
+  },
+}, null, 2);
 
 export interface OpenAISettings {
   model: string;
@@ -39,6 +89,8 @@ export interface MessageTemplateSettings {
   custom_hashtags: string;
 }
 
+export type ModelTier = 'latest' | 'flagship' | 'reasoning' | 'legacy';
+
 export interface OpenAIModel {
   id: string;
   name: string;
@@ -47,18 +99,25 @@ export interface OpenAIModel {
   maxTokens: number;
   useMaxCompletionTokens: boolean;
   supportsTemperature: boolean;
+  tier: ModelTier;
 }
 
 export const openaiModels: OpenAIModel[] = [
-  { id: 'gpt-5-2025-08-07', name: 'GPT-5', description: 'Most capable model', supports: ['text', 'vision'], maxTokens: 200000, useMaxCompletionTokens: true, supportsTemperature: false },
-  { id: 'gpt-5-mini-2025-08-07', name: 'GPT-5 Mini', description: 'Fast and efficient version of GPT-5', supports: ['text', 'vision'], maxTokens: 200000, useMaxCompletionTokens: true, supportsTemperature: false },
-  { id: 'gpt-5-nano-2025-08-07', name: 'GPT-5 Nano', description: 'Fastest, cheapest version', supports: ['text'], maxTokens: 200000, useMaxCompletionTokens: true, supportsTemperature: false },
-  { id: 'gpt-4.1-2025-04-14', name: 'GPT-4.1', description: 'Flagship GPT-4 model', supports: ['text', 'vision'], maxTokens: 128000, useMaxCompletionTokens: true, supportsTemperature: false },
-  { id: 'gpt-4.1-mini-2025-04-14', name: 'GPT-4.1 Mini', description: 'Efficient GPT-4 model', supports: ['text', 'vision'], maxTokens: 128000, useMaxCompletionTokens: true, supportsTemperature: false },
-  { id: 'o3-2025-04-16', name: 'O3', description: 'Powerful reasoning model', supports: ['text', 'code', 'vision'], maxTokens: 200000, useMaxCompletionTokens: true, supportsTemperature: false },
-  { id: 'o4-mini-2025-04-16', name: 'O4 Mini', description: 'Fast reasoning model', supports: ['text', 'code', 'vision'], maxTokens: 200000, useMaxCompletionTokens: true, supportsTemperature: false },
-  { id: 'gpt-4o-mini', name: 'GPT-4o Mini (Legacy)', description: 'Fast and cheap legacy model', supports: ['text', 'vision'], maxTokens: 16384, useMaxCompletionTokens: false, supportsTemperature: true },
-  { id: 'gpt-4o', name: 'GPT-4o (Legacy)', description: 'Powerful legacy model', supports: ['text', 'vision'], maxTokens: 4096, useMaxCompletionTokens: false, supportsTemperature: true },
+  // Latest (2026)
+  { id: 'gpt-5.1', name: 'GPT-5.1', description: 'Newest flagship — best reasoning, vision, 400K context', supports: ['text', 'vision'], maxTokens: 400000, useMaxCompletionTokens: true, supportsTemperature: false, tier: 'latest' },
+  { id: 'gpt-5.1-mini', name: 'GPT-5.1 Mini', description: 'Fast, cost-efficient version of GPT-5.1', supports: ['text', 'vision'], maxTokens: 400000, useMaxCompletionTokens: true, supportsTemperature: false, tier: 'latest' },
+  // Flagship (current production)
+  { id: 'gpt-5-2025-08-07', name: 'GPT-5', description: 'Highly capable, proven in production', supports: ['text', 'vision'], maxTokens: 200000, useMaxCompletionTokens: true, supportsTemperature: false, tier: 'flagship' },
+  { id: 'gpt-5-mini-2025-08-07', name: 'GPT-5 Mini', description: 'Fast and efficient version of GPT-5', supports: ['text', 'vision'], maxTokens: 200000, useMaxCompletionTokens: true, supportsTemperature: false, tier: 'flagship' },
+  { id: 'gpt-5-nano-2025-08-07', name: 'GPT-5 Nano', description: 'Fastest, cheapest GPT-5 variant', supports: ['text'], maxTokens: 200000, useMaxCompletionTokens: true, supportsTemperature: false, tier: 'flagship' },
+  { id: 'gpt-4.1-2025-04-14', name: 'GPT-4.1', description: 'Stable GPT-4 flagship', supports: ['text', 'vision'], maxTokens: 128000, useMaxCompletionTokens: true, supportsTemperature: false, tier: 'flagship' },
+  { id: 'gpt-4.1-mini-2025-04-14', name: 'GPT-4.1 Mini', description: 'Efficient GPT-4 model', supports: ['text', 'vision'], maxTokens: 128000, useMaxCompletionTokens: true, supportsTemperature: false, tier: 'flagship' },
+  // Reasoning
+  { id: 'o3-2025-04-16', name: 'o3', description: 'Deep reasoning model — slow, high quality', supports: ['text', 'code', 'vision'], maxTokens: 200000, useMaxCompletionTokens: true, supportsTemperature: false, tier: 'reasoning' },
+  { id: 'o4-mini-2025-04-16', name: 'o4-mini', description: 'Fast reasoning model', supports: ['text', 'code', 'vision'], maxTokens: 200000, useMaxCompletionTokens: true, supportsTemperature: false, tier: 'reasoning' },
+  // Legacy
+  { id: 'gpt-4o-mini', name: 'GPT-4o Mini', description: 'Legacy — current default in worker, cheap & fast', supports: ['text', 'vision'], maxTokens: 16384, useMaxCompletionTokens: false, supportsTemperature: true, tier: 'legacy' },
+  { id: 'gpt-4o', name: 'GPT-4o', description: 'Legacy multimodal model', supports: ['text', 'vision'], maxTokens: 4096, useMaxCompletionTokens: false, supportsTemperature: true, tier: 'legacy' },
 ];
 
 export const messagePlaceholders = [
@@ -88,6 +147,8 @@ const defaults = {
   translation_prompt: {
     system_prompt: '', user_prompt_template: '', model: 'gpt-4o-mini',
     temperature: 0.2, max_completion_tokens: 1000, top_p: 1, frequency_penalty: 0, presence_penalty: 0,
+    scoring_system_prompt: DEFAULT_SCORING_SYSTEM_PROMPT,
+    classifier_tool_schema: DEFAULT_CLASSIFIER_TOOL_SCHEMA,
   } as TranslationSettings,
   openai_config: { model: 'gpt-4o-mini', temperature: 0.2, max_completion_tokens: 1000 } as OpenAISettings,
   telegram_config: { parse_mode: 'Markdown' } as TelegramSettings,
@@ -179,6 +240,48 @@ export function useSaveSettings() {
     },
     onError: () => {
       toast({ title: 'Error saving settings', description: 'Could not save settings', variant: 'destructive' });
+    },
+  });
+}
+
+export interface PreviewTranslationInput {
+  text: string;
+  translation_settings: TranslationSettings;
+  content_filter?: {
+    enabled: boolean;
+    score_only?: boolean;
+    editorial_guidelines?: string;
+    priority_topics?: string[];
+    low_priority_topics?: string[];
+  };
+  author_handle?: string;
+}
+
+export interface PreviewTranslationResult {
+  translated_text: string;
+  importance_score: number | null;
+  importance_tags: string[] | null;
+  reasoning: string | null;
+  model: string;
+  usage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null;
+  duration_ms: number;
+  used_filter: boolean;
+  raw?: unknown;
+}
+
+export function useTranslationPreview() {
+  const { toast } = useToast();
+  return useMutation<PreviewTranslationResult, Error, PreviewTranslationInput>({
+    mutationFn: async (input) => {
+      const { data, error } = await supabase.functions.invoke('admin-actions', {
+        body: { action: 'preview_translation', ...input },
+      });
+      if (error) throw error;
+      if (!data?.ok) throw new Error(data?.error || 'Preview failed');
+      return data.result as PreviewTranslationResult;
+    },
+    onError: (err) => {
+      toast({ title: 'Translation preview failed', description: err.message, variant: 'destructive' });
     },
   });
 }

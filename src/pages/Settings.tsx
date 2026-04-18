@@ -14,10 +14,12 @@ import { supabase } from '@/integrations/supabase/client';
 import { Brain, MessageSquare, Eye, Code, Sparkles, Send, Key, Shield, Loader2, Filter, Newspaper, AtSign } from 'lucide-react';
 import {
   useSettingsData, useSaveSettings, openaiModels, messagePlaceholders, promptPlaceholders,
+  DEFAULT_SCORING_SYSTEM_PROMPT, DEFAULT_CLASSIFIER_TOOL_SCHEMA,
   type TranslationSettings, type OpenAISettings, type TelegramSettings, type MessageTemplateSettings, type DigestSettings,
 } from '@/hooks/useSettingsData';
 import ContentFilterSettings, { type ContentFilterConfig } from '@/components/settings/ContentFilterSettings';
 import XAutomationSettings from '@/components/settings/XAutomationSettings';
+import TranslationPlayground from '@/components/settings/TranslationPlayground';
 
 function insertPlaceholder(placeholder: string, textareaId: string, getter: string, setter: (val: string) => void) {
   const textarea = document.getElementById(textareaId) as HTMLTextAreaElement;
@@ -138,6 +140,7 @@ export default function Settings() {
                       <SelectItem key={model.id} value={model.id}>
                         <div className="flex items-center gap-2">
                           <span className="font-medium">{model.name}</span>
+                          <Badge variant={model.tier === 'latest' ? 'default' : model.tier === 'legacy' ? 'outline' : 'secondary'} className="text-[10px] uppercase">{model.tier}</Badge>
                           <div className="flex gap-1">{model.supports.map(s => <Badge key={s} variant="secondary" className="text-xs">{s}</Badge>)}</div>
                         </div>
                       </SelectItem>
@@ -235,6 +238,90 @@ export default function Settings() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Scoring Rubric (System Prompt for combined translate+score call) */}
+          <Card className="glass-card">
+            <CardHeader>
+              <CardTitle className="flex items-center text-glass-foreground"><Shield className="w-5 h-5 mr-2" />Scoring Rubric (System Prompt)</CardTitle>
+              <CardDescription>
+                Used only when Content Filter is enabled. Combined with the translation prompt above for the dual translate+score call.
+                Placeholders: <code className="text-xs">{'{translation_prompt}'}</code>, <code className="text-xs">{'{priority_topics}'}</code>, <code className="text-xs">{'{low_priority_topics}'}</code>, <code className="text-xs">{'{editorial_guidelines_block}'}</code>
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Textarea
+                value={ts.scoring_system_prompt ?? DEFAULT_SCORING_SYSTEM_PROMPT}
+                onChange={(e) => setTranslationSettings({ ...ts, scoring_system_prompt: e.target.value })}
+                className="glass-input min-h-[300px] font-mono text-xs"
+              />
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setTranslationSettings({ ...ts, scoring_system_prompt: DEFAULT_SCORING_SYSTEM_PROMPT })}
+                >
+                  Reset to default
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => saveMutation.mutate({ key: 'translation_prompt', value: ts })}
+                  disabled={saveMutation.isPending}
+                  className="bg-gradient-primary hover:opacity-90 text-white"
+                >
+                  Save scoring prompt
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Classifier Tool Schema */}
+          <Card className="glass-card">
+            <CardHeader>
+              <CardTitle className="flex items-center text-glass-foreground"><Code className="w-5 h-5 mr-2" />Classifier Tool Schema</CardTitle>
+              <CardDescription>
+                JSON schema for the <code className="text-xs">classify_importance</code> function the model is forced to call. Edit field names, descriptions, or constraints. Must be valid JSON.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Textarea
+                value={ts.classifier_tool_schema ?? DEFAULT_CLASSIFIER_TOOL_SCHEMA}
+                onChange={(e) => setTranslationSettings({ ...ts, classifier_tool_schema: e.target.value })}
+                className="glass-input min-h-[280px] font-mono text-xs"
+              />
+              <div className="flex gap-2 items-center">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setTranslationSettings({ ...ts, classifier_tool_schema: DEFAULT_CLASSIFIER_TOOL_SCHEMA })}
+                >
+                  Reset to default
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    try {
+                      JSON.parse(ts.classifier_tool_schema ?? DEFAULT_CLASSIFIER_TOOL_SCHEMA);
+                      saveMutation.mutate({ key: 'translation_prompt', value: ts });
+                    } catch (e) {
+                      toast({ title: 'Invalid JSON', description: (e as Error).message, variant: 'destructive' });
+                    }
+                  }}
+                  disabled={saveMutation.isPending}
+                  className="bg-gradient-primary hover:opacity-90 text-white"
+                >
+                  Save tool schema
+                </Button>
+                <span className="text-xs text-muted-foreground">JSON validated on save</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Live Translation Playground */}
+          <TranslationPlayground
+            translationSettings={ts}
+            contentFilter={(settings?.content_filter ?? { enabled: false }) as ContentFilterConfig}
+            sampleTweets={sampleTweets}
+          />
         </TabsContent>
 
         {/* Content Filter Tab */}
