@@ -241,7 +241,9 @@ Deno.serve(async (req) => {
   else {
     candidatesQ = candidatesQ.gte('importance_score', cfg.min_score);
     if (cfg.post_only_decision_deliver) candidatesQ = candidatesQ.eq('delivery_decision', 'deliver');
-    if (cfg.require_media) candidatesQ = candidatesQ.eq('has_media', true);
+    // NOTE: require_media is intentionally NOT applied as a DB filter.
+    // We post all eligible items; media is attached only when present & valid.
+    // The legacy `require_media` flag is kept in the type for back-compat but no longer gates posting.
     candidatesQ = candidatesQ.order('created_at', { ascending: false }).limit(5);
   }
 
