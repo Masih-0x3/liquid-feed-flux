@@ -273,21 +273,16 @@ Deno.serve(async (req) => {
       continue;
     }
 
-    // Media validation
+    // Media handling: attach images if present & valid; otherwise post text-only.
+    // We never SKIP a post for missing/invalid media — we just omit the media upload.
     let mediaIds: string[] = [];
     let mediaCount = 0;
     let mediaBytes = 0;
     let mediaKind: string | null = null;
-    if (cfg.require_media || (mediaRows && mediaRows.length > 0)) {
-      const sel = selectUploadable((mediaRows || []) as MediaRow[]);
-      if (sel.ok.length === 0 && cfg.require_media) {
-        if (!dryRun) await sb.from('x_deliveries').insert({ post_id: tweetId, status: 'skipped', skip_reason: sel.reason || 'no_media' });
-        results.push({ tweet_id: tweetId, status: 'skipped', reason: sel.reason || 'no_media' });
-        continue;
-      }
 
-      // Upload media (skipped on dry run)
-      if (!dryRun) {
+    if (mediaRows && mediaRows.length > 0) {
+      const sel = selectUploadable(mediaRows as MediaRow[]);
+      if (sel.ok.length > 0 && !dryRun) {
         try {
           for (const m of sel.ok) {
             const { data: blob, error: dlErr } = await sb.storage.from('temp-media').download(m.storage_path!);
@@ -301,12 +296,14 @@ Deno.serve(async (req) => {
           }
           mediaKind = 'image';
         } catch (e) {
-          const errMsg = (e as Error).message;
-          await sb.from('x_deliveries').insert({ post_id: tweetId, status: 'failed', last_error: `media: ${errMsg}`, attempts: 1 });
-          results.push({ tweet_id: tweetId, status: 'failed', error: `media: ${errMsg}` });
-          continue;
+          // Media upload failed — fall back to text-only rather than dropping the post.
+          mediaIds = [];
+          mediaCount = 0;
+          mediaBytes = 0;
+          mediaKind = null;
+          console.warn(`[x-poster] media upload failed for ${tweetId}, posting text-only: ${(e as Error).message}`);
         }
-      } else {
+      } else if (sel.ok.length > 0 && dryRun) {
         mediaCount = sel.ok.length;
         mediaKind = 'image';
       }
