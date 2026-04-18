@@ -434,6 +434,10 @@ serve(async (req) => {
           : 'You are a professional translator. Translate the given English text to Persian. Preserve @mentions, #hashtags, URLs, and line breaks exactly. Only return the translated text, nothing else.';
         const temperature = typeof ts.temperature === 'number' ? ts.temperature : 0.2;
         const maxTokens = typeof ts.max_completion_tokens === 'number' ? Math.min(8000, Math.max(1, ts.max_completion_tokens)) : 2000;
+        // GPT-5.x, GPT-4.1, o-series and any modern model use `max_completion_tokens`.
+        // Only legacy gpt-4o / gpt-4 / gpt-3.5 still accept `max_tokens`.
+        const useMaxCompletion = !/^(gpt-4o($|-)|gpt-4($|-)|gpt-3\.5)/i.test(model);
+        const tokenParam = useMaxCompletion ? 'max_completion_tokens' : 'max_tokens';
         const customScoringPrompt = typeof ts.scoring_system_prompt === 'string' && ts.scoring_system_prompt.trim() ? ts.scoring_system_prompt as string : null;
         const customToolSchema = typeof ts.classifier_tool_schema === 'string' && ts.classifier_tool_schema.trim() ? ts.classifier_tool_schema as string : null;
 
@@ -502,7 +506,7 @@ serve(async (req) => {
                 ],
                 tools: [{ type: 'function', function: toolFunction }],
                 tool_choice: { type: 'function', function: { name: (toolFunction.name as string) || 'classify_importance' } },
-                max_tokens: maxTokens,
+                [tokenParam]: maxTokens,
               }),
             });
             const respText = await resp.text();
@@ -532,7 +536,7 @@ serve(async (req) => {
                 { role: 'system', content: translationPrompt },
                 { role: 'user', content: text },
               ],
-              max_tokens: maxTokens,
+              [tokenParam]: maxTokens,
             };
             // Only attach temperature for legacy models that support it (worker logic mirror)
             if (!/^gpt-(5|4\.1)|^o[34]/i.test(model)) callBody.temperature = temperature;
