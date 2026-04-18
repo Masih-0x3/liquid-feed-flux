@@ -20,6 +20,7 @@ export interface MonitoringEntry {
   delivery_error: string;
   importance_score: number | null;
   importance_tags: string[] | null;
+  importance_reasoning: string | null;
   delivery_decision: string | null;
   is_truncated: boolean;
   hydrated_at: string | null;
@@ -45,7 +46,7 @@ async function fetchMonitoringPage({ pageParam = 0 }: { pageParam: number }): Pr
 
   const { data: postsData, error: postsError } = await supabase
     .from('posts')
-    .select('tweet_id, text_original, text_translated, url, created_at, translated_at, has_media, lang_original, author_handle, importance_score, importance_tags, delivery_decision, accounts!inner(handle, display_name)')
+    .select('tweet_id, text_original, text_translated, url, created_at, translated_at, has_media, lang_original, author_handle, importance_score, importance_tags, importance_reasoning, delivery_decision, accounts!inner(handle, display_name)')
     .order('created_at', { ascending: false })
     .range(from, to);
   if (postsError) throw postsError;
@@ -90,6 +91,7 @@ async function fetchMonitoringPage({ pageParam = 0 }: { pageParam: number }): Pr
       delivery_error: (rpc?.delivery_error as string) || '',
       importance_score: post.importance_score ?? null,
       importance_tags: post.importance_tags ?? null,
+      importance_reasoning: (post as { importance_reasoning?: string | null }).importance_reasoning ?? null,
       delivery_decision: post.delivery_decision ?? null,
       is_truncated: isTruncated,
       hydrated_at: hydratedAt,

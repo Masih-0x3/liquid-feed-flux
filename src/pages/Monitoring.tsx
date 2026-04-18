@@ -33,6 +33,11 @@ async function adminBulkReprocess(tweetIds: string[]) {
   const { error } = await supabase.functions.invoke('admin-actions', { body: { action: 'bulk_reprocess', tweet_ids: tweetIds } });
   if (error) throw error;
 }
+async function adminRescorePost(tweetId: string) {
+  const { data, error } = await supabase.functions.invoke('admin-actions', { body: { action: 'rescore_post', tweet_id: tweetId } });
+  if (error) throw error;
+  return data as { ok: boolean; score?: number; decision?: string; reasoning?: string; error?: string };
+}
 
 function StatusIndicator({ entry }: { entry: MonitoringEntry }) {
   const steps = [
@@ -113,6 +118,17 @@ export default function Monitoring() {
   const handleReprocessTweet = async (tweetId: string) => {
     try { await adminReprocess(tweetId); toast({ title: 'Processing started', description: 'Tweet queued for full reprocessing' }); }
     catch { toast({ title: 'Error', description: 'Failed to reprocess tweet', variant: 'destructive' }); }
+  };
+
+  const handleRescorePost = async (tweetId: string) => {
+    try {
+      const res = await adminRescorePost(tweetId);
+      if (!res.ok) throw new Error(res.error || 'Re-score failed');
+      toast({ title: `New score: ${res.score}/20`, description: `Decision: ${res.decision}${res.reasoning ? ` — ${res.reasoning.slice(0, 120)}` : ''}` });
+      invalidate();
+    } catch (e) {
+      toast({ title: 'Re-score failed', description: (e as Error).message, variant: 'destructive' });
+    }
   };
 
   const handleReprocessSelected = async () => {
@@ -323,6 +339,7 @@ export default function Monitoring() {
                     <h4 className="font-medium text-sm text-muted-foreground">Persian</h4>
                     <div className="flex items-center gap-2">
                       <Button size="sm" variant="outline" onClick={() => handleReprocessTweet(entry.tweet_id)}><RotateCcw className="w-3 h-3 mr-1" />Reprocess</Button>
+                      <Button size="sm" variant="outline" onClick={() => handleRescorePost(entry.tweet_id)} title="Re-run scoring with current rubric"><Star className="w-3 h-3 mr-1" />Re-score</Button>
                       {!entry.is_translated && <Button size="sm" variant="outline" onClick={() => handleRetryTranslation(entry.tweet_id)}>Translate</Button>}
                       {!isEditing && <Button variant="outline" size="sm" onClick={() => { setEditingEntry(entry.tweet_id); setEditedContent(entry.text_translated || entry.text_original); }}><Edit className="w-3 h-3 mr-1" />Edit</Button>}
                       <Button size="sm" variant="outline" onClick={() => openDetails(entry.tweet_id)}>Details</Button>
@@ -342,6 +359,16 @@ export default function Monitoring() {
                     </div>
                   )}
                 </div>
+                {entry.importance_reasoning && (
+                  <details className="mt-3 text-xs">
+                    <summary className="cursor-pointer text-muted-foreground hover:text-foreground select-none">
+                      Why this score? ({entry.importance_score ?? '—'}/20)
+                    </summary>
+                    <div className="mt-2 p-3 rounded border border-border bg-muted/30 text-foreground whitespace-pre-wrap leading-relaxed">
+                      {entry.importance_reasoning}
+                    </div>
+                  </details>
+                )}
               </CardContent>
             </Card>
           );
