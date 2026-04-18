@@ -65,6 +65,8 @@ interface PostingConfig {
   max_chars: number;
   dedupe_window_hours: number;
   post_only_decision_deliver: boolean;
+  /** ISO timestamp — only posts created at/after this are eligible. Set when posting is (re)enabled. */
+  start_posting_from?: string | null;
 }
 interface RateLimits {
   posts_per_hour: number;
