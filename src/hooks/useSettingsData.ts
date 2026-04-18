@@ -103,6 +103,17 @@ export interface OpenAIModel {
 }
 
 export const openaiModels: OpenAIModel[] = [
+  // Latest (GPT-5.4 family — released Mar 5, 2026, per platform.openai.com/docs/models)
+  { id: 'gpt-5.4', name: 'GPT-5.4', description: 'Flagship — frontier reasoning & coding, 1M context. $2.50/$15 per MTok', supports: ['text', 'vision'], maxTokens: 1050000, useMaxCompletionTokens: true, supportsTemperature: false, tier: 'latest' },
+  { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini', description: 'Strong mini model — coding & computer use, 400K context. $0.75/$4.50 per MTok', supports: ['text', 'vision'], maxTokens: 400000, useMaxCompletionTokens: true, supportsTemperature: false, tier: 'latest' },
+  { id: 'gpt-5.4-nano', name: 'GPT-5.4 Nano', description: 'Cheapest GPT-5.4 — high-volume tasks, 400K context. $0.20/$1.25 per MTok', supports: ['text', 'vision'], maxTokens: 400000, useMaxCompletionTokens: true, supportsTemperature: false, tier: 'latest' },
+  // Reasoning specialists
+  { id: 'o4-mini', name: 'o4-mini', description: 'Fast reasoning model — strong on code & logic', supports: ['text', 'code', 'vision'], maxTokens: 200000, useMaxCompletionTokens: true, supportsTemperature: false, tier: 'reasoning' },
+  // Legacy fallback (only the one currently used by the worker)
+  { id: 'gpt-4o-mini', name: 'GPT-4o Mini', description: 'Legacy — current worker default, cheap & fast', supports: ['text', 'vision'], maxTokens: 16384, useMaxCompletionTokens: false, supportsTemperature: true, tier: 'legacy' },
+];
+
+const _unusedKeptForReference: OpenAIModel[] = [
   // Latest (GPT-5.4 family — released Mar 5, 2026)
   { id: 'gpt-5.4', name: 'GPT-5.4', description: 'Newest flagship — frontier reasoning & coding, 1M context, $2.50/$15 per MTok', supports: ['text', 'vision'], maxTokens: 1050000, useMaxCompletionTokens: true, supportsTemperature: false, tier: 'latest' },
   { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini', description: 'Strong mini model — coding & computer use, 400K context, $0.75/$4.50 per MTok', supports: ['text', 'vision'], maxTokens: 400000, useMaxCompletionTokens: true, supportsTemperature: false, tier: 'latest' },
