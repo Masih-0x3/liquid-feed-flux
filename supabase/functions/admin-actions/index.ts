@@ -58,7 +58,53 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
-// Schema validation for settings values
+// ─── X API OAuth 1.0a helpers (mirrors worker/index.ts) ──────────────
+const X_TEXT_ENCODER = new TextEncoder();
+function xPercentEncode(s: string): string {
+  return encodeURIComponent(s).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+async function xHmacSha1(key: string, data: string): Promise<string> {
+  const cryptoKey = await crypto.subtle.importKey('raw', X_TEXT_ENCODER.encode(key), { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']);
+  const sig = await crypto.subtle.sign('HMAC', cryptoKey, X_TEXT_ENCODER.encode(data));
+  return btoa(String.fromCharCode(...new Uint8Array(sig)));
+}
+async function xOauthHeader(method: string, baseUrl: string, queryParams: Record<string, string>, ck: string, cs: string, at: string, ats: string): Promise<string> {
+  const oauthParams: Record<string, string> = {
+    oauth_consumer_key: ck,
+    oauth_nonce: crypto.randomUUID().replace(/-/g, ''),
+    oauth_signature_method: 'HMAC-SHA1',
+    oauth_timestamp: Math.floor(Date.now() / 1000).toString(),
+    oauth_token: at,
+    oauth_version: '1.0',
+  };
+  const allParams = { ...oauthParams, ...queryParams };
+  const paramString = Object.keys(allParams).sort().map((k) => `${xPercentEncode(k)}=${xPercentEncode(allParams[k])}`).join('&');
+  const baseString = `${method.toUpperCase()}&${xPercentEncode(baseUrl)}&${xPercentEncode(paramString)}`;
+  const signingKey = `${xPercentEncode(cs)}&${xPercentEncode(ats)}`;
+  oauthParams.oauth_signature = await xHmacSha1(signingKey, baseString);
+  return `OAuth ${Object.keys(oauthParams).sort().map((k) => `${xPercentEncode(k)}="${xPercentEncode(oauthParams[k])}"`).join(', ')}`;
+}
+function getXCreds(): { ck: string; cs: string; at: string; ats: string } | null {
+  const ck = Deno.env.get('TWITTER_CONSUMER_KEY');
+  const cs = Deno.env.get('TWITTER_CONSUMER_SECRET');
+  const at = Deno.env.get('TWITTER_ACCESS_TOKEN');
+  const ats = Deno.env.get('TWITTER_ACCESS_TOKEN_SECRET');
+  if (!ck || !cs || !at || !ats) return null;
+  return { ck, cs, at, ats };
+}
+async function recordXApiCall(supabase: ReturnType<typeof createClient>, error?: string) {
+  try {
+    const { data } = await supabase.from('settings').select('value').eq('key', 'x_api_usage').maybeSingle();
+    const current = (data?.value as { total?: number; calls_24h?: string[] } | null) ?? { total: 0, calls_24h: [] };
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    const trimmed = (current.calls_24h ?? []).filter((ts) => { try { return new Date(ts).getTime() > cutoff; } catch { return false; } });
+    trimmed.push(new Date().toISOString());
+    const next = { total: (current.total ?? 0) + 1, calls_24h: trimmed, last_call_at: new Date().toISOString(), last_error: error ?? null };
+    await supabase.from('settings').upsert({ key: 'x_api_usage', value: next, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+  } catch (e) { console.error('recordXApiCall failed', e); }
+}
+
+
 function validateSettingsValue(key: string, value: unknown): string | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return `Value for "${key}" must be a JSON object`;
