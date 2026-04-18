@@ -85,12 +85,18 @@ const DEFAULT_LIMITS: RateLimits = {
 // ─── Helpers ─────────────────────────────────────────────────────────
 function isRecord(v: unknown): v is Record<string, unknown> { return typeof v === 'object' && v !== null && !Array.isArray(v); }
 
+// U+200F = Right-to-Left Mark. Forces X/Twitter to render the entire tweet RTL,
+// even when it begins with emoji, hashtags, digits, or Latin punctuation.
+const RLM = '\u200F';
+
 function formatTweet(tpl: string, vars: Record<string, string>, max: number): string {
   let out = tpl;
   for (const [k, v] of Object.entries(vars)) out = out.split(`{${k}}`).join(v);
   out = out.replace(/\n{3,}/g, '\n\n').trim();
-  if (out.length > max) out = out.slice(0, max - 1).trimEnd() + '…';
-  return out;
+  // Reserve 1 char for the leading RLM so we never exceed max after prepending.
+  const budget = Math.max(1, max - 1);
+  if (out.length > budget) out = out.slice(0, budget - 1).trimEnd() + '…';
+  return RLM + out;
 }
 
 async function trimRollingWindow(arr: string[], windowMs: number): Promise<string[]> {
