@@ -11,12 +11,13 @@ import { Separator } from '@/components/ui/separator';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
-import { Brain, MessageSquare, Eye, Code, Sparkles, Send, Key, Shield, Loader2, Filter, Newspaper } from 'lucide-react';
+import { Brain, MessageSquare, Eye, Code, Sparkles, Send, Key, Shield, Loader2, Filter, Newspaper, AtSign } from 'lucide-react';
 import {
   useSettingsData, useSaveSettings, openaiModels, messagePlaceholders, promptPlaceholders,
   type TranslationSettings, type OpenAISettings, type TelegramSettings, type MessageTemplateSettings, type DigestSettings,
 } from '@/hooks/useSettingsData';
 import ContentFilterSettings, { type ContentFilterConfig } from '@/components/settings/ContentFilterSettings';
+import XAutomationSettings from '@/components/settings/XAutomationSettings';
 
 function insertPlaceholder(placeholder: string, textareaId: string, getter: string, setter: (val: string) => void) {
   const textarea = document.getElementById(textareaId) as HTMLTextAreaElement;
@@ -110,13 +111,14 @@ export default function Settings() {
       </div>
 
       <Tabs defaultValue="translation" className="w-full">
-        <TabsList className="grid w-full grid-cols-6">
+        <TabsList className="grid w-full grid-cols-7">
           <TabsTrigger value="translation" className="flex items-center gap-2"><Brain className="w-4 h-4" />Translation</TabsTrigger>
           <TabsTrigger value="filter" className="flex items-center gap-2"><Filter className="w-4 h-4" />Content Filter</TabsTrigger>
           <TabsTrigger value="messages" className="flex items-center gap-2"><MessageSquare className="w-4 h-4" />Messages</TabsTrigger>
           <TabsTrigger value="openai" className="flex items-center gap-2"><Key className="w-4 h-4" />OpenAI</TabsTrigger>
           <TabsTrigger value="telegram" className="flex items-center gap-2"><Send className="w-4 h-4" />Telegram</TabsTrigger>
           <TabsTrigger value="digest" className="flex items-center gap-2"><Newspaper className="w-4 h-4" />Digest</TabsTrigger>
+          <TabsTrigger value="x-automation" className="flex items-center gap-2"><AtSign className="w-4 h-4" />X Automation</TabsTrigger>
         </TabsList>
 
         {/* Translation Tab */}
@@ -371,62 +373,13 @@ export default function Settings() {
 
         {/* Digest Tab */}
         <TabsContent value="digest" className="space-y-6">
-         <Card className="glass-card">
-            <CardHeader>
-              <CardTitle className="flex items-center text-glass-foreground"><Key className="w-5 h-5 mr-2" />Twitter/X API Credentials</CardTitle>
-              <CardDescription>Twitter API credentials are now managed as Supabase Edge Function secrets for improved security. Set them in the Supabase dashboard under Edge Function settings.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted-foreground">
-                Required secrets: <code>TWITTER_CONSUMER_KEY</code>, <code>TWITTER_CONSUMER_SECRET</code>, <code>TWITTER_ACCESS_TOKEN</code>, <code>TWITTER_ACCESS_TOKEN_SECRET</code>
-              </p>
-            </CardContent>
-          </Card>
-
           <Card className="glass-card">
             <CardHeader>
-              <CardTitle className="flex items-center text-glass-foreground"><Sparkles className="w-5 h-5 mr-2" />Tweet Hydration (X API)</CardTitle>
-              <CardDescription>When RSS delivers a truncated tweet, fetch the full text from the X API v2 before translation. Uses the same Twitter credentials configured above.</CardDescription>
+              <CardTitle className="flex items-center text-glass-foreground"><Key className="w-5 h-5 mr-2" />Twitter/X API Credentials</CardTitle>
+              <CardDescription>Credential status, hydration, API usage, and test tools have moved to the <strong>X Automation</strong> tab.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
-                <div>
-                  <Label htmlFor="hydration_enabled" className="font-medium">Hydrate truncated tweets</Label>
-                  <p className="text-xs text-muted-foreground mt-1">When off, truncated tweets will be translated as-is.</p>
-                </div>
-                <Checkbox
-                  id="hydration_enabled"
-                  checked={settings?.twitter_hydration?.enabled !== false}
-                  onCheckedChange={(checked) => {
-                    const next = { ...(settings?.twitter_hydration ?? { enabled: true, max_attempts: 3 }), enabled: !!checked };
-                    saveMutation.mutate({ key: 'twitter_hydration', value: next });
-                  }}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div className="p-3 bg-muted/30 rounded-lg">
-                  <p className="text-xs text-muted-foreground">X API calls (last 24h)</p>
-                  <p className="text-2xl font-bold text-glass-foreground">
-                    {Array.isArray(settings?.x_api_usage?.calls_24h)
-                      ? (settings.x_api_usage.calls_24h as string[]).filter((ts) => {
-                          try { return new Date(ts).getTime() > Date.now() - 24 * 60 * 60 * 1000; } catch { return false; }
-                        }).length
-                      : 0}
-                  </p>
-                </div>
-                <div className="p-3 bg-muted/30 rounded-lg">
-                  <p className="text-xs text-muted-foreground">Total calls (all time)</p>
-                  <p className="text-2xl font-bold text-glass-foreground">{settings?.x_api_usage?.total ?? 0}</p>
-                  {settings?.x_api_usage?.last_call_at && (
-                    <p className="text-xs text-muted-foreground mt-1">Last: {new Date(settings.x_api_usage.last_call_at as string).toLocaleString()}</p>
-                  )}
-                </div>
-              </div>
-              {settings?.x_api_usage?.last_error && (
-                <p className="text-xs text-destructive">Last error: {String(settings.x_api_usage.last_error)}</p>
-              )}
-            </CardContent>
           </Card>
+
           <Card className="glass-card">
             <CardHeader>
               <CardTitle className="flex items-center text-glass-foreground"><Newspaper className="w-5 h-5 mr-2" />Digest Preferences</CardTitle>
@@ -581,7 +534,16 @@ export default function Settings() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* X Automation Tab */}
+        <TabsContent value="x-automation" className="space-y-6">
+          <XAutomationSettings
+            twitterHydration={settings?.twitter_hydration as { enabled?: boolean; max_attempts?: number } | undefined}
+            xApiUsage={settings?.x_api_usage as { total?: number; calls_24h?: string[]; last_call_at?: string | null; last_error?: string | null } | undefined}
+          />
+        </TabsContent>
       </Tabs>
     </div>
   );
 }
+
