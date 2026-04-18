@@ -11,7 +11,19 @@ import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Filter, Shield, Users, Sparkles, X, Plus, Loader2, ChevronDown } from 'lucide-react';
+import { Filter, Shield, Users, Sparkles, X, Plus, Loader2, ChevronDown, Wand2 } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
+
+const RECOMMENDED_IRAN_RUBRIC: ContentFilterConfig = {
+  enabled: true,
+  score_only: false,
+  filter_mode: 'global',
+  default_threshold: 12,
+  priority_topics: ['Iran', 'IRGC', 'Hormuz', 'sanctions', 'nuclear', 'Hezbollah', 'Houthis', 'Israel-Iran', 'Persian Gulf', 'Middle East', 'GCC', 'Syria', 'Iraq', 'Yemen', 'Pahlavi'],
+  low_priority_topics: ['stocks', 'crypto', 'earnings', 'sports', 'entertainment', 'celebrity', 'tech launches', 'weather'],
+  author_rules: {},
+  editorial_guidelines: 'This channel covers Iran and the broader Middle East. Score on whether the SUBJECT MATTER touches Iran/Middle East — NOT on the framing or dateline. Polls, leaks, analyst reports, and foreign leadership rhetoric ABOUT Iran, the Iran war, or US-Iran relations are INDIRECT Iran-adjacent (cap 16) and should score 13–16 when they materially shift the public or political picture of an active Iran-related conflict. Only pure US/EU/China domestic news with NO Iran nexus should fall to 8 or below. When in doubt between two tiers, prefer the higher tier.',
+};
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useSaveSettings } from '@/hooks/useSettingsData';
@@ -64,6 +76,24 @@ export default function ContentFilterSettings({ initialConfig }: Props) {
   const [newLowPriorityTopic, setNewLowPriorityTopic] = useState('');
   const [authorOverridesOpen, setAuthorOverridesOpen] = useState(false);
   const saveMutation = useSaveSettings();
+  const { toast } = useToast();
+
+  const applyRecommendedDefaults = () => {
+    setConfig(RECOMMENDED_IRAN_RUBRIC);
+    saveMutation.mutate(
+      { key: 'content_filter', value: RECOMMENDED_IRAN_RUBRIC },
+      {
+        onSuccess: () => {
+          // Also sync the OpenAI model to the latest rubric-tuned model
+          saveMutation.mutate({
+            key: 'openai_config',
+            value: { model: 'gpt-5.4-mini', temperature: 0.2, max_completion_tokens: 1000, api_key: '' },
+          });
+          toast({ title: 'Recommended Iran-rubric defaults applied', description: 'Threshold 12, updated guidelines, model gpt-5.4-mini.' });
+        },
+      }
+    );
+  };
 
   useEffect(() => {
     if (initialConfig) {
@@ -394,15 +424,27 @@ export default function ContentFilterSettings({ initialConfig }: Props) {
         </Card>
       )}
 
-      {/* Save Button */}
-      <Button
-        onClick={() => saveMutation.mutate({ key: 'content_filter', value: config })}
-        disabled={saveMutation.isPending}
-        className="bg-gradient-primary hover:opacity-90 text-white w-full"
-      >
-        {saveMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Shield className="w-4 h-4 mr-2" />}
-        Save Content Filter Settings
-      </Button>
+      {/* Action Buttons */}
+      <div className="flex flex-col sm:flex-row gap-3">
+        <Button
+          onClick={() => saveMutation.mutate({ key: 'content_filter', value: config })}
+          disabled={saveMutation.isPending}
+          className="bg-gradient-primary hover:opacity-90 text-white flex-1"
+        >
+          {saveMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Shield className="w-4 h-4 mr-2" />}
+          Save Content Filter Settings
+        </Button>
+        <Button
+          onClick={applyRecommendedDefaults}
+          disabled={saveMutation.isPending}
+          variant="outline"
+          className="sm:w-auto"
+          title="Sets threshold to 12, replaces editorial guidelines with the bias-corrected version, and switches the OpenAI model to gpt-5.4-mini."
+        >
+          <Wand2 className="w-4 h-4 mr-2" />
+          Apply Recommended Iran-Rubric Defaults
+        </Button>
+      </div>
     </div>
   );
 }
