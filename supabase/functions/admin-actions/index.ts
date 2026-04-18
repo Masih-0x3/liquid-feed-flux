@@ -313,6 +313,111 @@ serve(async (req) => {
         return jsonResponse({ success: true, health: data });
       }
 
+
+      // ===== X API: credential status =====
+      case 'get_x_status': {
+        return jsonResponse({
+          success: true,
+          status: {
+            TWITTER_CONSUMER_KEY: !!Deno.env.get('TWITTER_CONSUMER_KEY'),
+            TWITTER_CONSUMER_SECRET: !!Deno.env.get('TWITTER_CONSUMER_SECRET'),
+            TWITTER_ACCESS_TOKEN: !!Deno.env.get('TWITTER_ACCESS_TOKEN'),
+            TWITTER_ACCESS_TOKEN_SECRET: !!Deno.env.get('TWITTER_ACCESS_TOKEN_SECRET'),
+          },
+        });
+      }
+
+      // ===== X API: verify credentials =====
+      case 'x_verify_credentials': {
+        const creds = getXCreds();
+        if (!creds) return jsonResponse({ ok: false, error: 'One or more TWITTER_* secrets are missing' }, 200);
+        const url = 'https://api.x.com/2/users/me';
+        try {
+          const auth = await xOauthHeader('GET', url, {}, creds.ck, creds.cs, creds.at, creds.ats);
+          const resp = await fetch(url, { headers: { Authorization: auth } });
+          const text = await resp.text();
+          let body: unknown;
+          try { body = JSON.parse(text); } catch { body = text; }
+          await recordXApiCall(supabase, resp.ok ? undefined : `verify: HTTP ${resp.status}`);
+          if (!resp.ok) return jsonResponse({ ok: false, error: `HTTP ${resp.status}: ${text.slice(0, 300)}`, raw: body });
+          const user = (body as { data?: { id?: string; username?: string; name?: string } })?.data;
+          return jsonResponse({ ok: true, id: user?.id, handle: user?.username, name: user?.name, raw: body });
+        } catch (e) {
+          await recordXApiCall(supabase, `verify: ${(e as Error).message}`);
+          return jsonResponse({ ok: false, error: (e as Error).message });
+        }
+      }
+
+      // ===== X API: send test tweet =====
+      case 'send_test_tweet': {
+        const text = typeof body.text === 'string' ? body.text.trim() : '';
+        const replyTo = typeof body.in_reply_to_tweet_id === 'string' ? body.in_reply_to_tweet_id.trim() : '';
+        if (text.length === 0 || text.length > 280) {
+          return jsonResponse({ ok: false, error: 'text must be 1-280 characters' }, 400);
+        }
+        if (replyTo && !/^\d{1,25}$/.test(replyTo)) {
+          return jsonResponse({ ok: false, error: 'in_reply_to_tweet_id must be a numeric tweet ID' }, 400);
+        }
+        const creds = getXCreds();
+        if (!creds) return jsonResponse({ ok: false, error: 'One or more TWITTER_* secrets are missing' }, 200);
+        const url = 'https://api.x.com/2/tweets';
+        const payload: Record<string, unknown> = { text };
+        if (replyTo) payload.reply = { in_reply_to_tweet_id: replyTo };
+        try {
+          // Per X docs, POST body params are NOT included in OAuth signature for /2/tweets JSON body
+          const auth = await xOauthHeader('POST', url, {}, creds.ck, creds.cs, creds.at, creds.ats);
+          const resp = await fetch(url, {
+            method: 'POST',
+            headers: { Authorization: auth, 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          const respText = await resp.text();
+          let respBody: unknown;
+          try { respBody = JSON.parse(respText); } catch { respBody = respText; }
+          await recordXApiCall(supabase, resp.ok ? undefined : `send_test: HTTP ${resp.status}`);
+          if (!resp.ok) return jsonResponse({ ok: false, error: `HTTP ${resp.status}: ${respText.slice(0, 300)}`, response: respBody });
+          const created = (respBody as { data?: { id?: string; text?: string } })?.data;
+          return jsonResponse({ ok: true, tweet_id: created?.id, response: respBody });
+        } catch (e) {
+          await recordXApiCall(supabase, `send_test: ${(e as Error).message}`);
+          return jsonResponse({ ok: false, error: (e as Error).message });
+        }
+      }
+
+      // ===== X API: test hydration (no DB write) =====
+      case 'test_hydrate_tweet': {
+        const tweetId = typeof body.tweet_id === 'string' ? body.tweet_id.trim() : '';
+        if (!/^\d{1,25}$/.test(tweetId)) {
+          return jsonResponse({ ok: false, error: 'tweet_id must be a numeric tweet ID' }, 400);
+        }
+        const creds = getXCreds();
+        if (!creds) return jsonResponse({ ok: false, error: 'One or more TWITTER_* secrets are missing' }, 200);
+        const baseUrl = `https://api.x.com/2/tweets/${tweetId}`;
+        const queryParams = { 'tweet.fields': 'note_tweet,text,lang' };
+        try {
+          const auth = await xOauthHeader('GET', baseUrl, queryParams, creds.ck, creds.cs, creds.at, creds.ats);
+          const url = `${baseUrl}?${Object.entries(queryParams).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&')}`;
+          const resp = await fetch(url, { headers: { Authorization: auth } });
+          const respText = await resp.text();
+          let respBody: unknown;
+          try { respBody = JSON.parse(respText); } catch { respBody = respText; }
+          await recordXApiCall(supabase, resp.ok ? undefined : `test_hydrate: HTTP ${resp.status}`);
+          if (!resp.ok) return jsonResponse({ ok: false, error: `HTTP ${resp.status}: ${respText.slice(0, 300)}`, raw: respBody });
+          const data = (respBody as { data?: { text?: string; lang?: string; note_tweet?: { text?: string } } })?.data;
+          return jsonResponse({
+            ok: true,
+            tweet_id: tweetId,
+            text: data?.text,
+            lang: data?.lang,
+            note_tweet: data?.note_tweet?.text,
+            raw: respBody,
+          });
+        } catch (e) {
+          await recordXApiCall(supabase, `test_hydrate: ${(e as Error).message}`);
+          return jsonResponse({ ok: false, error: (e as Error).message });
+        }
+      }
+
       default:
         return jsonResponse({ error: `Unknown action: ${action}` }, 400);
     }
