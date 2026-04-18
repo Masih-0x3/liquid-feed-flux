@@ -195,7 +195,7 @@ function validateSettingsValue(key: string, value: unknown): string | null {
         break;
       }
       case 'x_posting_config': {
-        const bools = ['enabled', 'require_media', 'allow_video', 'post_only_decision_deliver'];
+        const bools = ['enabled', 'require_media', 'post_only_decision_deliver'];
         for (const f of bools) if (v[f] !== undefined && typeof v[f] !== 'boolean') return `x_posting_config.${f} must be a boolean`;
         if (v.min_score !== undefined && (typeof v.min_score !== 'number' || v.min_score < 1 || v.min_score > 20)) return 'x_posting_config.min_score must be 1-20';
         if (v.max_chars !== undefined && (typeof v.max_chars !== 'number' || v.max_chars < 50 || v.max_chars > 4000)) return 'x_posting_config.max_chars must be 50-4000';
