@@ -14,10 +14,12 @@ import { supabase } from '@/integrations/supabase/client';
 import { Brain, MessageSquare, Eye, Code, Sparkles, Send, Key, Shield, Loader2, Filter, Newspaper, AtSign } from 'lucide-react';
 import {
   useSettingsData, useSaveSettings, openaiModels, messagePlaceholders, promptPlaceholders,
+  DEFAULT_SCORING_SYSTEM_PROMPT, DEFAULT_CLASSIFIER_TOOL_SCHEMA,
   type TranslationSettings, type OpenAISettings, type TelegramSettings, type MessageTemplateSettings, type DigestSettings,
 } from '@/hooks/useSettingsData';
 import ContentFilterSettings, { type ContentFilterConfig } from '@/components/settings/ContentFilterSettings';
 import XAutomationSettings from '@/components/settings/XAutomationSettings';
+import TranslationPlayground from '@/components/settings/TranslationPlayground';
 
 function insertPlaceholder(placeholder: string, textareaId: string, getter: string, setter: (val: string) => void) {
   const textarea = document.getElementById(textareaId) as HTMLTextAreaElement;
@@ -138,6 +140,7 @@ export default function Settings() {
                       <SelectItem key={model.id} value={model.id}>
                         <div className="flex items-center gap-2">
                           <span className="font-medium">{model.name}</span>
+                          <Badge variant={model.tier === 'latest' ? 'default' : model.tier === 'legacy' ? 'outline' : 'secondary'} className="text-[10px] uppercase">{model.tier}</Badge>
                           <div className="flex gap-1">{model.supports.map(s => <Badge key={s} variant="secondary" className="text-xs">{s}</Badge>)}</div>
                         </div>
                       </SelectItem>
