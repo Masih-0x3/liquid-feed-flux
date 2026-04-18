@@ -189,14 +189,41 @@ function validateSettingsValue(key: string, value: unknown): string | null {
       if (v.min_posts !== undefined && (typeof v.min_posts !== 'number' || v.min_posts < 1 || v.min_posts > 50)) return 'digest_config.min_posts must be 1-50';
       break;
     }
-    case 'twitter_hydration': {
-      if (v.enabled !== undefined && typeof v.enabled !== 'boolean') return 'twitter_hydration.enabled must be a boolean';
-      if (v.max_attempts !== undefined && (typeof v.max_attempts !== 'number' || v.max_attempts < 1 || v.max_attempts > 10)) return 'twitter_hydration.max_attempts must be 1-10';
-      break;
+      case 'twitter_hydration': {
+        if (v.enabled !== undefined && typeof v.enabled !== 'boolean') return 'twitter_hydration.enabled must be a boolean';
+        if (v.max_attempts !== undefined && (typeof v.max_attempts !== 'number' || v.max_attempts < 1 || v.max_attempts > 10)) return 'twitter_hydration.max_attempts must be 1-10';
+        break;
+      }
+      case 'x_posting_config': {
+        const bools = ['enabled', 'require_media', 'allow_video', 'post_only_decision_deliver'];
+        for (const f of bools) if (v[f] !== undefined && typeof v[f] !== 'boolean') return `x_posting_config.${f} must be a boolean`;
+        if (v.min_score !== undefined && (typeof v.min_score !== 'number' || v.min_score < 1 || v.min_score > 20)) return 'x_posting_config.min_score must be 1-20';
+        if (v.max_chars !== undefined && (typeof v.max_chars !== 'number' || v.max_chars < 50 || v.max_chars > 4000)) return 'x_posting_config.max_chars must be 50-4000';
+        if (v.dedupe_window_hours !== undefined && (typeof v.dedupe_window_hours !== 'number' || v.dedupe_window_hours < 1 || v.dedupe_window_hours > 720)) return 'x_posting_config.dedupe_window_hours must be 1-720';
+        const strs: Array<[string, number]> = [['post_template', 1000], ['leading_emoji', 32], ['hashtags', 500]];
+        for (const [f, max] of strs) {
+          if (v[f] !== undefined && typeof v[f] !== 'string') return `x_posting_config.${f} must be a string`;
+          if (typeof v[f] === 'string' && (v[f] as string).length > max) return `x_posting_config.${f} must be ≤${max} characters`;
+        }
+        break;
+      }
+      case 'x_rate_limits': {
+        const nums: Array<[string, number, number]> = [
+          ['posts_per_hour', 1, 1000],
+          ['posts_per_day', 1, 10000],
+          ['monthly_post_budget', 1, 1000000],
+          ['media_uploads_per_day', 1, 10000],
+        ];
+        for (const [f, min, max] of nums) {
+          if (v[f] !== undefined && (typeof v[f] !== 'number' || (v[f] as number) < min || (v[f] as number) > max)) {
+            return `x_rate_limits.${f} must be ${min}-${max}`;
+          }
+        }
+        break;
+      }
     }
+    return null;
   }
-  return null;
-}
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -227,7 +254,7 @@ serve(async (req) => {
           return jsonResponse({ error: 'key and value are required' }, 400);
         }
         // Only allow non-secret settings keys
-        const allowedKeys = ['translation_prompt', 'openai_config', 'telegram_config', 'message_template', 'content_filter', 'digest_config', 'twitter_hydration'];
+        const allowedKeys = ['translation_prompt', 'openai_config', 'telegram_config', 'message_template', 'content_filter', 'digest_config', 'twitter_hydration', 'x_posting_config', 'x_rate_limits'];
         if (!allowedKeys.includes(key)) {
           return jsonResponse({ error: `Setting key "${key}" is not allowed` }, 400);
         }
