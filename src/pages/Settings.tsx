@@ -48,7 +48,7 @@ export default function Settings() {
   const [messageTemplate, setMessageTemplate] = useState<MessageTemplateSettings | null>(null);
   const [digestSettings, setDigestSettings] = useState<DigestSettings | null>(null);
   const [digestTestLoading, setDigestTestLoading] = useState(false);
-  const [digestTestResult, setDigestTestResult] = useState<Record<string, unknown> | null>(null);
+  const [digestTestResult, setDigestTestResult] = useState<DigestTestResult | null>(null);
 
   // Sync from server on first load
   const ts = translationSettings ?? settings?.translation_prompt;
@@ -574,7 +574,7 @@ export default function Settings() {
                   <div className="space-y-2">
                     <Label className="text-sm font-medium">📥 Posts Found ({digestTestResult.post_count ?? 0})</Label>
                     <div className="max-h-56 overflow-y-auto bg-muted/50 rounded-lg p-3 space-y-2 text-sm">
-                      {(digestTestResult.posts as Array<Record<string, unknown>> | undefined)?.length ? (digestTestResult.posts as Array<Record<string, unknown>>).map((p, i: number) => (
+                      {digestTestResult.posts?.length ? digestTestResult.posts.map((p, i: number) => (
                         <div key={i} className="p-2 bg-background rounded border">
                           <div className="flex items-center justify-between gap-2">
                             <span className="font-mono text-xs text-primary">@{p.author_handle || 'unknown'}</span>
