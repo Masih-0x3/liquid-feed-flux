@@ -585,6 +585,7 @@ ${post.text_original}`;
         translation_duration_ms: job.started_at ? (Date.now() - new Date(job.started_at as string).getTime()) : null,
         importance_score: importanceScore,
         importance_tags: importanceTags,
+        importance_reasoning: importanceReasoning,
         delivery_decision: deliveryDecision,
       })
       .eq('tweet_id', tweetId);
