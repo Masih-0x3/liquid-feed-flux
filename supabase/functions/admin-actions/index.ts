@@ -506,7 +506,7 @@ serve(async (req) => {
                 ],
                 tools: [{ type: 'function', function: toolFunction }],
                 tool_choice: { type: 'function', function: { name: (toolFunction.name as string) || 'classify_importance' } },
-                max_tokens: maxTokens,
+                [tokenParam]: maxTokens,
               }),
             });
             const respText = await resp.text();
