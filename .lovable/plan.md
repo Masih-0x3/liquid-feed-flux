@@ -1,125 +1,191 @@
 
 
-## Disk I/O Optimization Plan
+Let me explore the codebase to understand the translation pipeline and Twitter integration before planning.
+<lov-tool-use id="toolu_vrtx_01RyFXGjWqe1ivN4oAtRjhJC" name="code--view" integration-id="code" data="{\"file_path\": \"supabase/functions/worker/index.ts\", \"lines\": \"1-100\"}">
+</lov-tool-use>
 
-### Problem Summary
+<lov-tool-use id="toolu_vrtx_01A81HpCWGG9F6XCuU1NKQdB" name="code--search_files" integration-id="code" data="{\"query\": \"TWITTER_CONSUMER|TWITTER_ACCESS|api.x.com|twitter.*oauth\", \"search_dir\": \"supabase/functions\"}">
+</lov-tool-use>
 
-Your Supabase database is burning through disk I/O bandwidth due to three root causes:
+<lov-tool-use id="toolu_vrtx_013NZx2KpgGHqnGD731cgN4L" name="code--search_files" integration-id="code" data="{\"query\": \"translate|text_original\", \"search_dir\": \"supabase/functions/worker\"}">
+</lov-tool-use>
 
-1. **`posts` table: 1.08 billion sequential tuple reads** across 9,235 full table scans (125K rows scanned repeatedly)
-2. **`settings` and `accounts` tables: 46K and 36K sequential scans** respectively — tiny tables read on every worker invocation
-3. **`get_post_pipeline_status` RPC: 6 correlated subqueries** per row, each scanning `jobs`, `deliveries`, and `media` independently
+<lov-tool-use id="toolu_vrtx_01TA7WBpLvseCtRUzP5uwPgo" name="code--search_files" integration-id="code" data="{\"query\": \"TWITTER_CONSUMER|api.x.com|note_tweet\", \"search_dir\": \"supabase/functions\"}">
+</lov-tool-use>
 
-### What We Will Change
+<lov-tool-use id="toolu_vrtx_019hG4mkgeaftwbVqprzQwzh" name="code--search_files" integration-id="code" data="{\"query\": \"translate\", \"search_dir\": \"supabase/functions/worker\"}">
+</lov-tool-use>
 
-**Step 1 — Replace the ASC index on `posts.created_at` with a DESC index**
+<lov-tool-use id="toolu_vrtx_01MEx9TLU1ckYyfz1NxZZvat" name="code--list_dir" integration-id="code" data="{\"dir_path\": \"supabase/functions/worker\"}">
+</lov-tool-use>
 
-The existing `idx_posts_created_at` is ascending. Every query in the system orders by `created_at DESC` (monitoring page, dashboard summary, reconciliation). We will drop the old index and create a DESC one. This is a safe swap — Postgres can use a DESC index for ASC queries via backward scan, but not vice versa with equal efficiency.
+<lov-tool-use id="toolu_vrtx_01HeqjZpYtK7HhCL66B4w9re" name="code--view" integration-id="code" data="{\"file_path\": \"supabase/functions/worker/index.ts\", \"lines\": \"180-260\"}">
+</lov-tool-use>
 
-**Step 2 — Add a targeted index on `jobs` for pipeline status lookups**
+<lov-tool-use id="toolu_vrtx_01REe3uwhSzPWi4YmFU8ZtCT" name="code--view" integration-id="code" data="{\"file_path\": \"supabase/functions/worker/index.ts\", \"lines\": \"820-900\"}">
+</lov-tool-use>
+I have enough context. Let me present the plan.
 
-The `get_post_pipeline_status` function does `WHERE j.type = 'translate' AND (j.payload->>'tweet_id') = p.tweet_id ORDER BY j.created_at DESC LIMIT 1` — this hits the GIN index on `payload` but still requires sorting. A B-tree expression index on `(type, (payload->>'tweet_id'), created_at DESC)` will make these lookups index-only.
+<lov-plan>
 
-**Step 3 — Rewrite `get_post_pipeline_status` to use JOINs with LATERAL**
+## Plan: Hydrate Truncated Tweets via X API Before Translation
 
-Replace the 6 correlated subqueries with 3 `LEFT JOIN LATERAL` clauses (one each for jobs-translate, jobs-deliver, deliveries). This lets Postgres execute each lateral once per row using the new index, instead of 6 independent subquery scans.
+### Goal
+When RSS delivers a truncated tweet, fetch the full text from the X API v2 (`note_tweet` field) **before** translation runs — so we never translate the truncated version, then re-translate the full version. Surface API usage on the dashboard.
 
-**Step 4 — Reduce worker cron frequency**
+### Strategy: Gate translation behind hydration
 
-The worker runs every minute (`* * * * *`). With only ~3,900 live jobs (most completed), this is excessive. We will update it to every 2 minutes (`*/2 * * * *`). This halves the settings/accounts table scan frequency while still processing jobs within acceptable latency.
+The cleanest way to avoid duplicate translation work is to **insert a new pipeline step** between ingest and translate, but only for posts flagged as truncated. Non-truncated posts skip the new step entirely and behave exactly as today.
 
-### What We Will NOT Change
-
-- No changes to the monitoring page frontend code — it already uses cursor pagination correctly
-- No changes to realtime subscriptions — the 1-second debounce is already reasonable
-- No schema changes to any table
-- No changes to the `claim_jobs` RPC — it already uses `FOR UPDATE SKIP LOCKED` efficiently
-- The `settings` and `accounts` seq scans (46K/36K) are on tiny tables (5-6 rows) — the reads are cheap per-scan; reducing cron frequency is sufficient
-
-### Technical Details
-
-**Migration SQL (single migration file):**
-
-```sql
--- 1. Replace posts created_at index (ASC → DESC)
-DROP INDEX IF EXISTS public.idx_posts_created_at;
-CREATE INDEX idx_posts_created_at_desc ON public.posts
-  USING btree (created_at DESC);
-
--- 2. Expression index for pipeline status lookups on jobs
-CREATE INDEX idx_jobs_type_tweet_created
-  ON public.jobs (type, ((payload->>'tweet_id')), created_at DESC);
-
--- 3. Rewrite get_post_pipeline_status with LATERAL joins
-CREATE OR REPLACE FUNCTION public.get_post_pipeline_status(tweet_ids text[])
-RETURNS TABLE(
-  tweet_id text, ingest_at timestamptz,
-  media_total int, media_downloaded int,
-  lang_original text, translated_at timestamptz,
-  translate_status text, translate_error text,
-  delivery_status text, posted_at timestamptz,
-  delivery_error text, attempts int
-)
-LANGUAGE sql STABLE
-SET search_path TO 'public'
-AS $$
-  SELECT
-    p.tweet_id,
-    p.created_at AS ingest_at,
-    coalesce(mc.total, 0)  AS media_total,
-    coalesce(mc.downloaded, 0) AS media_downloaded,
-    p.lang_original,
-    p.translated_at,
-    coalesce(tj.status, CASE WHEN p.translated_at IS NOT NULL THEN 'completed' ELSE 'pending' END) AS translate_status,
-    tj.last_error AS translate_error,
-    coalesce(dl.status, 'pending') AS delivery_status,
-    dl.posted_at,
-    coalesce(dl.last_error, dj.last_error) AS delivery_error,
-    coalesce(dl.attempts, 0) AS attempts
-  FROM public.posts p
-  LEFT JOIN LATERAL (
-    SELECT count(*) AS total,
-           count(*) FILTER (WHERE m.downloaded_at IS NOT NULL) AS downloaded
-    FROM public.media m WHERE m.tweet_id = p.tweet_id
-  ) mc ON true
-  LEFT JOIN LATERAL (
-    SELECT j.status, j.last_error
-    FROM public.jobs j
-    WHERE j.type = 'translate' AND (j.payload->>'tweet_id') = p.tweet_id
-    ORDER BY j.created_at DESC LIMIT 1
-  ) tj ON true
-  LEFT JOIN LATERAL (
-    SELECT j.last_error
-    FROM public.jobs j
-    WHERE j.type = 'deliver' AND (j.payload->>'tweet_id') = p.tweet_id
-    ORDER BY j.created_at DESC LIMIT 1
-  ) dj ON true
-  LEFT JOIN LATERAL (
-    SELECT d.status, d.posted_at, d.last_error, d.attempts
-    FROM public.deliveries d
-    WHERE d.subject_type = 'post' AND d.subject_id = p.tweet_id
-    ORDER BY d.created_at DESC LIMIT 1
-  ) dl ON true
-  WHERE p.tweet_id = ANY(tweet_ids)
-  ORDER BY p.created_at DESC;
-$$;
+```text
+Current: webhook → translate job → deliver job
+New:     webhook → [if truncated] hydrate_tweet job → translate job → deliver job
+                  [if not]        translate job → deliver job
 ```
 
-**Cron update (via Supabase insert tool):**
+The translate job already reads `text_original` from the DB at runtime, so once `hydrate_tweet` updates `text_original`, translate sees the full text — no logic change inside translate itself.
 
-```sql
-SELECT cron.alter_job(8, schedule := '*/2 * * * *');
-```
+---
+
+### Step 1 — Schema additions (single migration)
+
+Add three columns to `posts` (all nullable, no defaults that affect existing rows):
+
+- `is_truncated boolean default false` — set by the webhook based on detection
+- `hydrated_at timestamptz` — set by the new hydrate job on success
+- `hydration_source text` — `'x_api'` when fetched, null otherwise
+
+Add one column to `settings` data (no schema change — uses existing `settings` table) via a seeded row:
+- `key = 'twitter_hydration'`, value = `{ enabled: true, max_attempts: 3 }`
+
+No changes to existing columns. No index changes.
+
+---
+
+### Step 2 — Truncation detection in `webhooks-rssapp`
+
+Add a small `detectTruncation(text)` helper. A post is flagged truncated if **any** of:
+- Ends with `…`, `...`, `[…]`, or `[...]`
+- Ends with (case-insensitive) `Show more`, `Show this thread`, `Read more`
+- Length ≥ 270 chars AND no terminal punctuation (`.`, `!`, `?`, `؟`, `"`, `)`)
+
+When detected:
+1. Set `is_truncated = true` on the post upsert
+2. **Do NOT** create a `translate` job (the new flow is what creates it)
+3. Create a new `hydrate_tweet` job instead, with idempotency key `hydrate:${tweetId}`
+4. Pipeline event: `step='hydrate', status='queued'`
+
+When NOT truncated: behavior is unchanged — translate job is created exactly as today.
+
+---
+
+### Step 3 — New worker handler `handleHydrateTweetJob`
+
+Lives in `supabase/functions/worker/index.ts` alongside the others. Logic:
+
+1. Load post by `tweet_id`. If `hydrated_at` already set → success (idempotent).
+2. Read Twitter creds from env (already wired: `TWITTER_CONSUMER_KEY/SECRET`, `TWITTER_ACCESS_TOKEN/SECRET`) — same OAuth 1.0a signing helper that `digest-compiler` uses (we'll extract it into a shared call within the worker file, no new file).
+3. Call `GET https://api.x.com/2/tweets/{id}?tweet.fields=note_tweet,text,lang`
+4. Extract `data.note_tweet.text` if present, else `data.text`. Update post:
+   - `text_original = <full text>`
+   - `is_truncated = false` (now resolved)
+   - `hydrated_at = now()`
+   - `hydration_source = 'x_api'`
+   - `lang_original = response lang if available`
+5. Increment a counter in `settings` row `key='x_api_usage'` (JSONB: `{ total: N, last_24h: [...timestamps], last_call_at: ... }`) — single row, atomic via `update ... set value = ...`. Worker reads-modifies-writes inside the same job, fine for low volume.
+6. Insert the `translate` job with idempotency key `translate:${tweetId}` (same key the webhook would have used — guarantees no duplicate even if the webhook had also inserted one).
+7. Pipeline event: `hydrate / completed`.
+
+**Failure handling:**
+- 404 (tweet deleted) → mark hydrated with `hydration_source = 'x_api_404'`, fall through to translate the truncated version (better than nothing). Do NOT retry.
+- 429 (rate limited) → respect `x-rate-limit-reset` header for backoff. Reuse existing `handleJobFailure` retry path.
+- 401/403 (creds bad) → fail fast, dead-letter after 3 attempts. Translate job is NOT created — admin must intervene.
+- Network/5xx → exponential backoff up to `MAX_ATTEMPTS.hydrate_tweet = 3`.
+
+After max attempts: **fallback path** — create translate job for the truncated text anyway, log `result_meta = { fallback: 'truncated' }`. We never silently lose a post.
+
+`MAX_ATTEMPTS` gets a new entry: `hydrate_tweet: 3`.
+
+---
+
+### Step 4 — Anti-duplicate guarantees
+
+Three layers ensure no double-translate:
+
+1. **Webhook**: only creates `translate:${tweetId}` if `is_truncated = false`. If truncated, only creates `hydrate:${tweetId}`.
+2. **Hydrate job**: creates translate job with `idempotency_key = translate:${tweetId}` and `onConflict: idempotency_key, ignoreDuplicates: true` — so even if a translate job somehow exists, it's a no-op.
+3. **Translate handler**: already checks `text_translated` is null before working. We add an early return if `is_truncated = true AND hydrated_at IS NULL` (defense in depth — should never trigger).
+
+---
+
+### Step 5 — Reconciliation safety
+
+Update `reconcile_stuck_jobs()` RPC to also reconcile posts where `is_truncated = true AND hydrated_at IS NULL AND created_at > now() - interval '7 days'` and no pending/running `hydrate_tweet` job exists → re-queue hydration. Identical pattern to existing missing-deliveries reconciliation.
+
+---
+
+### Step 6 — Dashboard & Monitoring metrics
+
+**Dashboard** (`get_dashboard_summary` RPC):
+Add to the `metrics` JSON:
+- `posts_truncated_24h` — count of posts with `is_truncated = true OR hydrated_at IS NOT NULL` in last 24h
+- `posts_hydrated_24h` — count where `hydration_source = 'x_api'` in last 24h
+- `x_api_calls_24h` — read from the `settings` `x_api_usage` row, filtered to last 24h
+
+Add a small card to `DashboardMetrics.tsx`: "X API calls (24h)" + "Hydrated tweets (24h)".
+
+**Monitoring page** (`get_post_pipeline_status` RPC):
+Add two columns to the return type:
+- `is_truncated boolean`
+- `hydrated_at timestamptz`
+
+Render a small badge on each post row in the Monitoring table: "Truncated" (amber) or "Hydrated" (green) when applicable. Type signature change → frontend hook `useMonitoringData` types regenerate automatically from `types.ts` after migration.
+
+---
+
+### Step 7 — Settings UI (small)
+
+Add a toggle in `Settings.tsx` (under existing content filter / digest section): **"Hydrate truncated tweets via X API"** — writes to the `twitter_hydration.enabled` settings row through the existing `admin-actions` Edge Function. When disabled, the webhook skips creating `hydrate_tweet` jobs and falls back to today's behavior (translate the truncated text directly).
+
+Add a read-only status line: "X API calls this month: N" (from `x_api_usage` settings row).
+
+---
+
+### What we will NOT change
+
+- `handleTranslateJob` internals — unchanged
+- `handleDeliverJob` — unchanged
+- Cron schedules — unchanged (worker still runs every 2 min, picks up `hydrate_tweet` jobs alongside others)
+- Existing indexes
+- OAuth signing for the digest function (we reuse the same pattern locally in worker)
+- Any RLS policy
+
+---
 
 ### Risk Assessment
 
-- **Index swap**: Zero downtime. The new DESC index is created before the old one is dropped (Postgres handles this atomically in a migration). Queries will use the new index immediately.
-- **RPC rewrite**: The return type signature is identical — no frontend changes needed. The `useMonitoringData` hook and any other callers will work without modification.
-- **Cron change**: Jobs will wait at most 2 minutes instead of 1 minute. Given the current workload (mostly idle), this is negligible.
+- **Truncated detection false positives**: A normal tweet ending in `...` would trigger hydration and burn 1 API call. Mitigation: detection rules require ellipsis-at-end **plus** length ≥ 200, OR explicit "Show more" markers — tuned conservative.
+- **X API outage**: Fallback path translates truncated text after 3 failed attempts → no posts lost.
+- **Rate limit (Basic tier = 15K reads/mo ≈ 500/day)**: With current ingest volume (~dozens/day) this is well within budget. Settings counter exposes usage for monitoring.
+- **Schema migration**: All new columns nullable with safe defaults → zero impact on existing posts.
+- **Deploy order**: Migration first → worker deploy → webhook deploy. Until webhook is updated, no `hydrate_tweet` jobs are created, so worker handler sits idle. Until worker is deployed, the migration alone is harmless. Order is safe in either direction.
 
-### Expected Impact
+---
 
-- Sequential reads on `posts` should drop by ~95% (index scan replaces seq scan)
-- Pipeline status queries will be 3-6x faster (LATERAL + expression index vs. correlated subqueries)
-- Overall disk I/O reduced by roughly 50-70%
+### Required Secret Confirmation
+
+The X API call needs the four `TWITTER_*` secrets. From the existing config they appear to be **already used by `digest-compiler`** but I do not see them in the secrets list in this context. **Before implementation**, I will verify they exist; if missing, I will request you add them via the secrets tool before deploying the worker change.
+
+---
+
+### Files to be touched
+
+- `supabase/migrations/<new>.sql` — schema additions, RPC updates (`get_dashboard_summary`, `get_post_pipeline_status`, `reconcile_stuck_jobs`), seed `twitter_hydration` + `x_api_usage` settings rows
+- `supabase/functions/webhooks-rssapp/index.ts` — truncation detection + branched job creation
+- `supabase/functions/worker/index.ts` — new `handleHydrateTweetJob`, OAuth helper, `MAX_ATTEMPTS.hydrate_tweet`, switch case
+- `supabase/functions/admin-actions/index.ts` — validation for `twitter_hydration` settings key
+- `src/components/dashboard/DashboardMetrics.tsx` — two new metric cards
+- `src/pages/Monitoring.tsx` (and/or `useMonitoringData.ts` consumer) — render truncated/hydrated badges
+- `src/pages/Settings.tsx` — toggle + usage display
+- `mem://features/twitter-hydration` (new memory) + index update
 
