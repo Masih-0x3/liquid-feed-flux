@@ -25,6 +25,11 @@ export interface MonitoringEntry {
   is_truncated: boolean;
   hydrated_at: string | null;
   hydration_source: string | null;
+  x_status: string | null;
+  x_tweet_id: string | null;
+  x_posted_at: string | null;
+  x_error: string | null;
+  x_skip_reason: string | null;
 }
 
 export interface PipelineEvent {
@@ -96,6 +101,11 @@ async function fetchMonitoringPage({ pageParam = 0 }: { pageParam: number }): Pr
       is_truncated: isTruncated,
       hydrated_at: hydratedAt,
       hydration_source: hydrationSource,
+      x_status: (rpc?.x_status as string) ?? null,
+      x_tweet_id: (rpc?.x_tweet_id as string) ?? null,
+      x_posted_at: (rpc?.x_posted_at as string) ?? null,
+      x_error: (rpc?.x_error as string) ?? null,
+      x_skip_reason: (rpc?.x_skip_reason as string) ?? null,
     };
   });
 
