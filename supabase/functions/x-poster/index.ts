@@ -59,7 +59,6 @@ interface PostingConfig {
   enabled: boolean;
   min_score: number;
   require_media: boolean;
-  allow_video: boolean;
   post_template: string;
   leading_emoji: string;
   hashtags: string;
@@ -75,7 +74,7 @@ interface RateLimits {
 }
 
 const DEFAULT_CFG: PostingConfig = {
-  enabled: false, min_score: 14, require_media: true, allow_video: false,
+  enabled: false, min_score: 14, require_media: true,
   post_template: '{leading_emoji} {translated_text}', leading_emoji: '📰',
   hashtags: '', max_chars: 280, dedupe_window_hours: 48, post_only_decision_deliver: true,
 };
