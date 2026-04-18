@@ -80,6 +80,24 @@ export function DashboardHealth({ health }: Props) {
             <span className="text-sm text-muted-foreground">Queue Size</span>
             <span className={`text-sm font-medium ${health.queueSize === 0 ? 'text-success' : health.queueSize <= 5 ? 'text-warning' : 'text-destructive'}`}>{health.queueSize}</span>
           </div>
+          <div className="border-t border-border/50 pt-3 mt-3 space-y-2">
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">X Posting</p>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Success Rate (24h)</span>
+              <span className={`text-sm font-medium ${health.xSuccessRate >= 95 ? 'text-success' : health.xSuccessRate >= 80 ? 'text-warning' : 'text-destructive'}`}>{health.xSuccessRate}%</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Monthly Budget</span>
+              <div className="flex items-center space-x-2">
+                <span className={`text-sm font-medium ${health.xBudgetUsedPct >= 90 ? 'text-destructive' : health.xBudgetUsedPct >= 70 ? 'text-warning' : 'text-success'}`}>
+                  {health.xMonthlyPosts}/{health.xMonthlyBudget}
+                </span>
+                <div className="w-16 h-2 bg-muted rounded-full overflow-hidden">
+                  <div className={`h-full ${health.xBudgetUsedPct >= 90 ? 'bg-destructive' : health.xBudgetUsedPct >= 70 ? 'bg-warning' : 'bg-success'}`} style={{ width: `${Math.min(100, health.xBudgetUsedPct)}%` }} />
+                </div>
+              </div>
+            </div>
+          </div>
         </CardContent>
       </Card>
 
