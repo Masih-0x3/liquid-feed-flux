@@ -24,6 +24,8 @@ export interface XPostingConfigValue {
   max_chars: number;
   dedupe_window_hours: number;
   post_only_decision_deliver: boolean;
+  /** Forward-only floor — preserved across saves; server re-stamps on rule loosening. */
+  start_posting_from?: string | null;
 }
 
 const DEFAULTS: XPostingConfigValue = {
