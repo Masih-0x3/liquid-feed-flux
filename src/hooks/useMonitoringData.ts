@@ -20,6 +20,7 @@ export interface MonitoringEntry {
   delivery_error: string;
   importance_score: number | null;
   importance_tags: string[] | null;
+  importance_reasoning: string | null;
   delivery_decision: string | null;
   is_truncated: boolean;
   hydrated_at: string | null;
