@@ -15,10 +15,15 @@ import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { useSaveSettings } from '@/hooks/useSettingsData';
 import { Key, Shield, CheckCircle2, XCircle, Send, Sparkles, Loader2, AtSign, AlertTriangle, ExternalLink } from 'lucide-react';
+import XPostingConfig, { type XPostingConfigValue } from '@/components/settings/XPostingConfig';
+import XRateLimits, { type XRateLimitsValue } from '@/components/settings/XRateLimits';
+import { useXMonthlyPostsCount } from '@/hooks/useXDeliveries';
 
 interface Props {
   twitterHydration?: { enabled?: boolean; max_attempts?: number };
-  xApiUsage?: { total?: number; calls_24h?: string[]; last_call_at?: string | null; last_error?: string | null };
+  xApiUsage?: { total?: number; calls_24h?: string[]; last_call_at?: string | null; last_error?: string | null; posts_24h?: string[]; media_uploads_24h?: string[] };
+  xPostingConfig?: Partial<XPostingConfigValue>;
+  xRateLimits?: Partial<XRateLimitsValue>;
 }
 
 const SECRET_KEYS = [
@@ -31,7 +36,8 @@ const SECRET_KEYS = [
 const DEFAULT_TEST_TWEET = 'Test tweet from automation pipeline ✅ — please ignore.';
 const BASIC_TIER_MONTHLY_LIMIT = 15000;
 
-export default function XAutomationSettings({ twitterHydration, xApiUsage }: Props) {
+export default function XAutomationSettings({ twitterHydration, xApiUsage, xPostingConfig, xRateLimits }: Props) {
+  const { data: monthlyCount } = useXMonthlyPostsCount();
   const { toast } = useToast();
   const saveMutation = useSaveSettings();
 
@@ -366,6 +372,16 @@ export default function XAutomationSettings({ twitterHydration, xApiUsage }: Pro
           <p className="text-xs text-muted-foreground">Note: each verification, hydration test, and posted tweet consumes one X API call counted toward your monthly quota.</p>
         </CardContent>
       </Card>
+
+      {/* 5. X Posting Configuration */}
+      <XPostingConfig initial={xPostingConfig} />
+
+      {/* 6. Rate Limits & Quotas */}
+      <XRateLimits
+        initial={xRateLimits}
+        usage={{ posts_24h: xApiUsage?.posts_24h, media_uploads_24h: xApiUsage?.media_uploads_24h }}
+        monthlyPostsCount={monthlyCount ?? 0}
+      />
     </div>
   );
 }

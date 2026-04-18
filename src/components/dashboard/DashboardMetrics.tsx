@@ -1,5 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { MessageSquare, CheckCircle, Send, XCircle, Scissors, Sparkles } from 'lucide-react';
+import { MessageSquare, CheckCircle, Send, XCircle, Scissors, Sparkles, Twitter, ImageOff } from 'lucide-react';
 import type { DashboardMetrics as Metrics } from '@/hooks/useDashboardData';
 
 interface Props {
@@ -13,6 +13,10 @@ const metricConfig = [
   { key: 'failedJobs' as const, title: 'Failed Jobs (24h)', icon: XCircle, description: 'Errors requiring attention', color: 'destructive' },
   { key: 'postsHydrated24h' as const, title: 'Hydrated Tweets (24h)', icon: Sparkles, description: 'Full text fetched from X API', color: 'success' },
   { key: 'xApiCalls24h' as const, title: 'X API Calls (24h)', icon: Scissors, description: 'Hydration requests to X API v2', color: 'primary' },
+  { key: 'xPosts24h' as const, title: 'X Posts (24h)', icon: Twitter, description: 'Successfully posted to X', color: 'success' },
+  { key: 'xFailed24h' as const, title: 'X Failures (24h)', icon: XCircle, description: 'Failed X posting attempts', color: 'destructive' },
+  { key: 'xMediaUploads24h' as const, title: 'X Media Uploads (24h)', icon: Sparkles, description: 'Images/videos uploaded to X', color: 'primary' },
+  { key: 'xSkippedNoMedia24h' as const, title: 'X Skipped — No Media (24h)', icon: ImageOff, description: 'Posts skipped because media was missing', color: 'primary' },
 ] as const;
 
 export function DashboardMetrics({ metrics }: Props) {

@@ -10,6 +10,10 @@ export interface DashboardMetrics {
   postsTruncated24h: number;
   postsHydrated24h: number;
   xApiCalls24h: number;
+  xPosts24h: number;
+  xFailed24h: number;
+  xSkippedNoMedia24h: number;
+  xMediaUploads24h: number;
 }
 
 export interface PipelineHealth {
@@ -18,6 +22,10 @@ export interface PipelineHealth {
   activeFeeds: number;
   queueSize: number;
   isOnline: boolean;
+  xSuccessRate: number;
+  xMonthlyPosts: number;
+  xMonthlyBudget: number;
+  xBudgetUsedPct: number;
 }
 
 export interface ActivityItem {
@@ -37,6 +45,10 @@ interface RpcResult {
     posts_truncated_24h?: number;
     posts_hydrated_24h?: number;
     x_api_calls_24h?: number;
+    x_posts_24h?: number;
+    x_failed_24h?: number;
+    x_skipped_no_media_24h?: number;
+    x_media_uploads_24h?: number;
   };
   health: {
     success_rate: number;
@@ -44,6 +56,10 @@ interface RpcResult {
     active_feeds: number;
     queue_size: number;
     is_online: boolean;
+    x_success_rate?: number;
+    x_monthly_posts?: number;
+    x_monthly_budget?: number;
+    x_budget_used_pct?: number;
   };
   recent_posts: Array<{
     tweet_id: string;
@@ -68,6 +84,10 @@ async function fetchDashboard() {
     postsTruncated24h: rpc.metrics.posts_truncated_24h ?? 0,
     postsHydrated24h: rpc.metrics.posts_hydrated_24h ?? 0,
     xApiCalls24h: rpc.metrics.x_api_calls_24h ?? 0,
+    xPosts24h: rpc.metrics.x_posts_24h ?? 0,
+    xFailed24h: rpc.metrics.x_failed_24h ?? 0,
+    xSkippedNoMedia24h: rpc.metrics.x_skipped_no_media_24h ?? 0,
+    xMediaUploads24h: rpc.metrics.x_media_uploads_24h ?? 0,
   };
 
   const health: PipelineHealth = {
@@ -76,6 +96,10 @@ async function fetchDashboard() {
     activeFeeds: rpc.health.active_feeds,
     queueSize: rpc.health.queue_size,
     isOnline: rpc.health.is_online,
+    xSuccessRate: rpc.health.x_success_rate ?? 100,
+    xMonthlyPosts: rpc.health.x_monthly_posts ?? 0,
+    xMonthlyBudget: rpc.health.x_monthly_budget ?? 2500,
+    xBudgetUsedPct: rpc.health.x_budget_used_pct ?? 0,
   };
 
   const activities: ActivityItem[] = (rpc.recent_posts || []).map(post => ({

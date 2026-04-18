@@ -733,6 +733,60 @@ export type Database = {
         }
         Relationships: []
       }
+      x_deliveries: {
+        Row: {
+          api_response: Json | null
+          attempts: number
+          created_at: string
+          id: string
+          last_error: string | null
+          latency_ms: number | null
+          media_bytes: number
+          media_count: number
+          media_kind: string | null
+          post_id: string
+          posted_at: string | null
+          skip_reason: string | null
+          status: string
+          updated_at: string
+          x_tweet_id: string | null
+        }
+        Insert: {
+          api_response?: Json | null
+          attempts?: number
+          created_at?: string
+          id?: string
+          last_error?: string | null
+          latency_ms?: number | null
+          media_bytes?: number
+          media_count?: number
+          media_kind?: string | null
+          post_id: string
+          posted_at?: string | null
+          skip_reason?: string | null
+          status?: string
+          updated_at?: string
+          x_tweet_id?: string | null
+        }
+        Update: {
+          api_response?: Json | null
+          attempts?: number
+          created_at?: string
+          id?: string
+          last_error?: string | null
+          latency_ms?: number | null
+          media_bytes?: number
+          media_count?: number
+          media_kind?: string | null
+          post_id?: string
+          posted_at?: string | null
+          skip_reason?: string | null
+          status?: string
+          updated_at?: string
+          x_tweet_id?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       telegram_channel_current: {
@@ -854,6 +908,11 @@ export type Database = {
           translate_status: string
           translated_at: string
           tweet_id: string
+          x_error: string
+          x_posted_at: string
+          x_skip_reason: string
+          x_status: string
+          x_tweet_id: string
         }[]
       }
       get_system_health: { Args: never; Returns: Json }
@@ -866,6 +925,7 @@ export type Database = {
           title: string
         }[]
       }
+      get_x_posting_summary: { Args: never; Returns: Json }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
