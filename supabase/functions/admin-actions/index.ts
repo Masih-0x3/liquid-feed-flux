@@ -418,6 +418,156 @@ serve(async (req) => {
         }
       }
 
+      // ===== Translation Playground (no DB writes) =====
+      case 'preview_translation': {
+        const text = typeof body.text === 'string' ? body.text.trim() : '';
+        if (!text) return jsonResponse({ ok: false, error: 'text is required' }, 400);
+        if (text.length > 8000) return jsonResponse({ ok: false, error: 'text must be ≤8000 characters' }, 400);
+
+        const ts = (body.translation_settings ?? {}) as Record<string, unknown>;
+        const cf = (body.content_filter ?? {}) as Record<string, unknown>;
+        const authorHandle = typeof body.author_handle === 'string' ? body.author_handle.trim() : '';
+
+        const model = typeof ts.model === 'string' && /^[a-zA-Z0-9._-]{1,100}$/.test(ts.model) ? ts.model : 'gpt-4o-mini';
+        const translationPrompt = typeof ts.system_prompt === 'string' && ts.system_prompt.trim()
+          ? ts.system_prompt as string
+          : 'You are a professional translator. Translate the given English text to Persian. Preserve @mentions, #hashtags, URLs, and line breaks exactly. Only return the translated text, nothing else.';
+        const temperature = typeof ts.temperature === 'number' ? ts.temperature : 0.2;
+        const maxTokens = typeof ts.max_completion_tokens === 'number' ? Math.min(8000, Math.max(1, ts.max_completion_tokens)) : 2000;
+        const customScoringPrompt = typeof ts.scoring_system_prompt === 'string' && ts.scoring_system_prompt.trim() ? ts.scoring_system_prompt as string : null;
+        const customToolSchema = typeof ts.classifier_tool_schema === 'string' && ts.classifier_tool_schema.trim() ? ts.classifier_tool_schema as string : null;
+
+        const filterEnabled = cf.enabled === true || cf.score_only === true;
+
+        const openaiApiKey = Deno.env.get('OPENAI_API_KEY');
+        if (!openaiApiKey) return jsonResponse({ ok: false, error: 'OPENAI_API_KEY is not configured' }, 500);
+
+        const startedAt = Date.now();
+        let translatedText = '';
+        let importanceScore: number | null = null;
+        let importanceTags: string[] | null = null;
+        let reasoning: string | null = null;
+        let raw: Record<string, unknown> = {};
+
+        try {
+          if (filterEnabled) {
+            const priorityTopics = Array.isArray(cf.priority_topics) ? (cf.priority_topics as string[]).join(', ') : 'none specified';
+            const lowPriorityTopics = Array.isArray(cf.low_priority_topics) ? (cf.low_priority_topics as string[]).join(', ') : 'none specified';
+            const guidelines = typeof cf.editorial_guidelines === 'string' ? cf.editorial_guidelines : '';
+            const guidelinesBlock = guidelines.trim()
+              ? `### Editorial Guidelines (AUTHORITATIVE — these override the default rubric when they conflict)\n---\n${guidelines}\n---`
+              : '';
+
+            // Use editable scoring system prompt with placeholder substitution
+            const scoringTemplate = customScoringPrompt ?? `You have two tasks. Complete both carefully.\n\n## Task 1: Translation\n{translation_prompt}\n\n## Task 2: News Importance Scoring\nYou are an editorial assistant. Score 1-20 based on importance to an Iran/Middle East news channel. Cap non-Iran content at 8.\n\nHigh-priority: {priority_topics}\nLow-priority: {low_priority_topics}\n\n{editorial_guidelines_block}\n\nYou MUST call the "classify_importance" tool.`;
+            const systemPrompt = scoringTemplate
+              .replace('{translation_prompt}', translationPrompt)
+              .replace('{priority_topics}', priorityTopics)
+              .replace('{low_priority_topics}', lowPriorityTopics)
+              .replace('{editorial_guidelines_block}', guidelinesBlock);
+
+            // Parse tool schema (with safe fallback)
+            let toolFunction: Record<string, unknown>;
+            try {
+              toolFunction = customToolSchema
+                ? JSON.parse(customToolSchema)
+                : {
+                    name: 'classify_importance',
+                    description: 'Provide the Persian translation and importance classification of this news item',
+                    parameters: {
+                      type: 'object',
+                      properties: {
+                        translated_text: { type: 'string' },
+                        importance_score: { type: 'integer', minimum: 1, maximum: 20 },
+                        tags: { type: 'array', items: { type: 'string' } },
+                        reasoning: { type: 'string' },
+                      },
+                      required: ['translated_text', 'importance_score', 'tags', 'reasoning'],
+                    },
+                  };
+            } catch (e) {
+              return jsonResponse({ ok: false, error: `Invalid classifier_tool_schema JSON: ${(e as Error).message}` }, 400);
+            }
+
+            const userMessage = `Author: @${authorHandle || 'preview'}\nPublished: ${new Date().toISOString()}\nHas media: no\nURL: N/A\n\nContent:\n${text}`;
+
+            const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${openaiApiKey}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                model,
+                messages: [
+                  { role: 'system', content: systemPrompt },
+                  { role: 'user', content: userMessage },
+                ],
+                tools: [{ type: 'function', function: toolFunction }],
+                tool_choice: { type: 'function', function: { name: (toolFunction.name as string) || 'classify_importance' } },
+                max_tokens: maxTokens,
+              }),
+            });
+            const respText = await resp.text();
+            try { raw = JSON.parse(respText); } catch { raw = { raw_text: respText }; }
+            if (!resp.ok) return jsonResponse({ ok: false, error: `OpenAI ${resp.status}: ${respText.slice(0, 500)}`, result: { raw } });
+
+            const toolCall = (raw as { choices?: Array<{ message?: { tool_calls?: Array<{ function?: { arguments?: string } }>; content?: string } }> }).choices?.[0]?.message?.tool_calls?.[0];
+            if (toolCall?.function?.arguments) {
+              try {
+                const args = JSON.parse(toolCall.function.arguments);
+                translatedText = args.translated_text || '';
+                importanceScore = Math.max(1, Math.min(20, args.importance_score || 10));
+                importanceTags = Array.isArray(args.tags) ? args.tags : [];
+                reasoning = typeof args.reasoning === 'string' ? args.reasoning : null;
+              } catch (parseErr) {
+                translatedText = (raw as { choices?: Array<{ message?: { content?: string } }> }).choices?.[0]?.message?.content ?? '';
+                reasoning = `Tool-call parse error: ${(parseErr as Error).message}`;
+              }
+            } else {
+              translatedText = (raw as { choices?: Array<{ message?: { content?: string } }> }).choices?.[0]?.message?.content ?? '';
+            }
+          } else {
+            // Simple translation only
+            const callBody: Record<string, unknown> = {
+              model,
+              messages: [
+                { role: 'system', content: translationPrompt },
+                { role: 'user', content: text },
+              ],
+              max_tokens: maxTokens,
+            };
+            // Only attach temperature for legacy models that support it (worker logic mirror)
+            if (!/^gpt-(5|4\.1)|^o[34]/i.test(model)) callBody.temperature = temperature;
+
+            const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${openaiApiKey}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify(callBody),
+            });
+            const respText = await resp.text();
+            try { raw = JSON.parse(respText); } catch { raw = { raw_text: respText }; }
+            if (!resp.ok) return jsonResponse({ ok: false, error: `OpenAI ${resp.status}: ${respText.slice(0, 500)}`, result: { raw } });
+            translatedText = (raw as { choices?: Array<{ message?: { content?: string } }> }).choices?.[0]?.message?.content ?? '';
+          }
+
+          const usage = (raw as { usage?: Record<string, number> }).usage ?? null;
+          return jsonResponse({
+            ok: true,
+            result: {
+              translated_text: translatedText,
+              importance_score: importanceScore,
+              importance_tags: importanceTags,
+              reasoning,
+              model,
+              usage,
+              duration_ms: Date.now() - startedAt,
+              used_filter: filterEnabled,
+              raw,
+            },
+          });
+        } catch (e) {
+          return jsonResponse({ ok: false, error: (e as Error).message });
+        }
+      }
+
       default:
         return jsonResponse({ error: `Unknown action: ${action}` }, 400);
     }
