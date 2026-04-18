@@ -1,6 +1,7 @@
-// X Poster — score-gated, media-required posting pipeline.
+// X Poster — score-gated posting pipeline.
 // Cron-driven worker that posts qualifying posts to X via OAuth 1.0a v2 with
 // optional media upload. All quotas/templates read from the `settings` table.
+// Deployed with verify_jwt=false; auth handled in checkAuth().
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1';
 
