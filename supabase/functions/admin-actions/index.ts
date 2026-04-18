@@ -355,6 +355,30 @@ serve(async (req) => {
         return jsonResponse({ success: true, health: data });
       }
 
+      // ===== X Posting: dry run / retry =====
+      case 'dry_run_x_post':
+      case 'retry_x_post': {
+        const tweetId = typeof body.tweet_id === 'string' ? body.tweet_id.trim() : null;
+        const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+        const svcKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+        try {
+          const resp = await fetch(`${supabaseUrl}/functions/v1/x-poster`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${svcKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              dry_run: action === 'dry_run_x_post',
+              ...(tweetId ? { tweet_id: tweetId } : {}),
+            }),
+          });
+          const text = await resp.text();
+          let parsed: unknown; try { parsed = JSON.parse(text); } catch { parsed = text; }
+          if (!resp.ok) return jsonResponse({ ok: false, error: `x-poster ${resp.status}: ${text.slice(0, 300)}`, raw: parsed }, 200);
+          return jsonResponse({ ok: true, ...(parsed as Record<string, unknown>) });
+        } catch (e) {
+          return jsonResponse({ ok: false, error: (e as Error).message }, 200);
+        }
+      }
+
 
       // ===== X API: credential status =====
       case 'get_x_status': {
