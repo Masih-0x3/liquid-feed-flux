@@ -354,10 +354,10 @@ async function handleTranslateJob(job: Record<string, unknown>, supabase: Return
     const scoreOnly = config.contentFilter.score_only && !config.contentFilter.enabled;
     const authorHandle = post.author_handle as string | null;
 
-    // Build OpenAI request — if filtering enabled, use tool calling for combined translate+score
     let translatedText = '';
     let importanceScore: number | null = null;
     let importanceTags: string[] | null = null;
+    let importanceReasoning: string | null = null;
     let data: Record<string, unknown>;
 
     if (filterEnabled) {
@@ -365,41 +365,59 @@ async function handleTranslateJob(job: Record<string, unknown>, supabase: Return
       const scoringGuidelines = config.contentFilter.editorial_guidelines || '';
       const priorityTopics = config.contentFilter.priority_topics.join(', ') || 'none specified';
       const lowPriorityTopics = config.contentFilter.low_priority_topics.join(', ') || 'none specified';
+      const guidelinesBlock = scoringGuidelines.trim()
+        ? `### Editorial Guidelines (AUTHORITATIVE — these override the default rubric when they conflict)\n---\n${scoringGuidelines}\n---`
+        : '';
 
-      // Dual-role system prompt with structured scoring rubric
-      const systemPrompt = `You have two tasks. Complete both carefully.
+      // Hardcoded fallback rubric (used only if no editable rubric is in settings).
+      // Mirrors DEFAULT_SCORING_SYSTEM_PROMPT in src/hooks/useSettingsData.ts.
+      const fallbackRubric = `You have two tasks. Complete both carefully.
 
 ## Task 1: Translation
-${config.translationPrompt}
+{translation_prompt}
 
 ## Task 2: News Importance Scoring
-You are an editorial assistant scoring news items for a curated Telegram channel. Your score determines whether this item gets delivered to subscribers.
+You are an editorial assistant scoring news items for a curated Telegram channel focused on Iran and the Middle East.
 
-### Scoring Rubric (1-20 scale)
-19-20 — CRITICAL: Direct military action, war declarations, ceasefire/peace agreements, nuclear incidents, leader assassinations, major terrorist attacks. Stop-the-presses, history-making events.
-17-18 — VERY HIGH: Major sanctions packages, significant military escalation, breaking crisis developments, emergency UN sessions, regime changes.
-15-16 — HIGH: Diplomatic breakthroughs, high-level summits with concrete outcomes, major policy reversals, large-scale protest movements, significant military deployments.
-13-14 — IMPORTANT: Notable diplomatic meetings, significant policy changes, major regional developments, important alliance shifts, major economic sanctions.
-11-12 — ABOVE AVERAGE: Important official statements, meaningful economic data, notable personnel changes, significant infrastructure events, regional security developments.
-9-10 — MODERATE: Noteworthy but routine diplomatic activity, economic reports, policy proposals, regional tensions without escalation.
-7-8 — BELOW AVERAGE: Minor diplomatic exchanges, routine policy updates, peripheral regional coverage, minor economic indicators.
-5-6 — LOW: Routine government updates, minor administrative changes, tangential coverage, cultural events with minimal geopolitical relevance.
-3-4 — VERY LOW: Soft news, human interest stories, minor local events, routine procedural updates.
-1-2 — SKIP: Entertainment, sports, celebrity gossip, memes, viral trends, product launches, lifestyle content, weather reports.
+### STEP A — Assign Relevance Level (state in reasoning)
+- DIRECT (Iran gov/IRGC/nuclear/Hormuz/proxies/Israel-Iran/US-Iran war/sanctions on Iran): no cap.
+- INDIRECT (Iran is the SUBJECT of foreign discussion — polls about Iran war, Western debate on Iran policy, analyst reports on Iran, leaks about Iran strategy, foreign-leader rhetoric on Iran): cap at 16.
+- NO IRAN NEXUS (pure US/EU/China domestic): cap at 8.
 
-### CRITICAL — Iran/Middle East Relevance Gate
-If the content has NO direct connection to Iran, the Middle East region, or entities that directly affect Iran (e.g., sanctions, nuclear negotiations, proxy conflicts), cap the score at 8 MAXIMUM — regardless of how globally significant the event is. Only content with a clear Iran/Middle East nexus should score above 8.
+### STEP B — Score 1-20
+19-20 CRITICAL military action / war declarations / nuclear incidents.
+17-18 VERY HIGH major sanctions / escalation / regime changes.
+15-16 HIGH diplomatic breakthroughs, major policy reversals, large protests, plus public-opinion shifts on Iran-related conflicts and major polling contradicting Iran narratives.
+13-14 IMPORTANT notable diplomatic meetings, policy changes, plus polling/sentiment data on Iran policy and analyst reports on Iran.
+11-12 ABOVE AVERAGE official statements, economic data, plus general Western public opinion with indirect Iran relevance.
+9-10 MODERATE routine activity.
+7-8 BELOW AVERAGE minor exchanges, peripheral coverage.
+5-6 LOW administrative.
+3-4 VERY LOW soft news.
+1-2 SKIP entertainment/sports/memes.
 
-### Topic Priorities
-High-priority topics (boost score by 1-2 points): ${priorityTopics}
-Low-priority topics (reduce score by 1-2 points): ${lowPriorityTopics}
+### Anti-Bias Guardrails
+- Do NOT down-score because framing is American/Western — score on whether subject matter is Iran/Middle East.
+- Polls, leaks, analyst reports about active Iran conflicts can be as important as primary events.
+- When in doubt between two tiers, prefer the higher tier.
 
-${scoringGuidelines ? `### Editorial Guidelines (AUTHORITATIVE — these override the default rubric when they conflict)
----
-${scoringGuidelines}
----` : ''}
+### Topics
+High-priority (boost 1-2): {priority_topics}
+Low-priority (reduce 1-2): {low_priority_topics}
 
-You MUST call the "classify_importance" tool with your translation and score. The "reasoning" field is required — explain your score in 1-2 sentences.`;
+{editorial_guidelines_block}
+
+### Reasoning (REQUIRED)
+State: (1) relevance level (DIRECT/INDIRECT/NO NEXUS) and why, (2) tier and why, (3) any cap applied.
+
+You MUST call the "classify_importance" tool.`;
+
+      const scoringTemplate = config.scoringSystemPrompt ?? fallbackRubric;
+      const systemPrompt = scoringTemplate
+        .replace('{translation_prompt}', config.translationPrompt)
+        .replace('{priority_topics}', priorityTopics)
+        .replace('{low_priority_topics}', lowPriorityTopics)
+        .replace('{editorial_guidelines_block}', guidelinesBlock);
 
       // Enrich user message with metadata for context
       const accountData = (post as Record<string, unknown>).accounts as Record<string, unknown> | null;
@@ -415,23 +433,45 @@ URL: ${post.url || 'N/A'}
 Content:
 ${post.text_original}`;
 
-      const tools = [{
-        type: 'function',
-        function: {
+      // Build tool schema (editable from settings, with safe fallback)
+      let toolFunction: Record<string, unknown>;
+      try {
+        toolFunction = config.classifierToolSchema
+          ? JSON.parse(config.classifierToolSchema)
+          : {
+              name: 'classify_importance',
+              description: 'Provide the Persian translation and importance classification of this news item',
+              parameters: {
+                type: 'object',
+                properties: {
+                  translated_text: { type: 'string', description: 'The Persian translation of the original text' },
+                  importance_score: { type: 'integer', description: 'Importance score 1-20 based on the rubric', minimum: 1, maximum: 20 },
+                  tags: { type: 'array', items: { type: 'string' }, description: 'Topic tags (e.g., war, iran, economy, politics, diplomacy, military)' },
+                  reasoning: { type: 'string', description: 'Required: state relevance level, tier, and any cap applied' },
+                },
+                required: ['translated_text', 'importance_score', 'tags', 'reasoning'],
+              },
+            };
+      } catch (e) {
+        console.warn('Invalid classifier_tool_schema in settings, using fallback:', (e as Error).message);
+        toolFunction = {
           name: 'classify_importance',
-          description: 'Provide the Persian translation and importance classification of this news item',
           parameters: {
             type: 'object',
             properties: {
-              translated_text: { type: 'string', description: 'The Persian translation of the original text' },
-              importance_score: { type: 'integer', description: 'Importance score 1-20 based on the rubric', minimum: 1, maximum: 20 },
-              tags: { type: 'array', items: { type: 'string' }, description: 'Topic tags (e.g., war, iran, economy, politics, diplomacy, military)' },
-              reasoning: { type: 'string', description: 'Required: 1-2 sentence explanation of why this score was given' }
+              translated_text: { type: 'string' },
+              importance_score: { type: 'integer', minimum: 1, maximum: 20 },
+              tags: { type: 'array', items: { type: 'string' } },
+              reasoning: { type: 'string' },
             },
-            required: ['translated_text', 'importance_score', 'tags', 'reasoning']
-          }
-        }
-      }];
+            required: ['translated_text', 'importance_score', 'tags', 'reasoning'],
+          },
+        };
+      }
+
+      // Modern OpenAI models (gpt-5.x, gpt-4.1, o-series) require max_completion_tokens.
+      const useMaxCompletion = !/^(gpt-4o($|-)|gpt-4($|-)|gpt-3\.5)/i.test(config.openaiModel);
+      const tokenParam = useMaxCompletion ? 'max_completion_tokens' : 'max_tokens';
 
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
@@ -445,9 +485,9 @@ ${post.text_original}`;
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userMessage }
           ],
-          tools,
-          tool_choice: { type: 'function', function: { name: 'classify_importance' } },
-          max_tokens: 2000
+          tools: [{ type: 'function', function: toolFunction }],
+          tool_choice: { type: 'function', function: { name: (toolFunction.name as string) || 'classify_importance' } },
+          [tokenParam]: 2000,
         }),
       });
 
@@ -457,7 +497,7 @@ ${post.text_original}`;
       }
 
       data = await response.json();
-      
+
       // Extract from tool call response
       const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
       if (toolCall?.function?.arguments) {
@@ -466,7 +506,8 @@ ${post.text_original}`;
           translatedText = args.translated_text || '';
           importanceScore = Math.max(1, Math.min(20, args.importance_score || 10));
           importanceTags = args.tags || [];
-          console.log(JSON.stringify({ function: 'worker', action: 'scored', tweet_id: tweetId, score: importanceScore, tags: importanceTags, reasoning: args.reasoning }));
+          importanceReasoning = typeof args.reasoning === 'string' ? args.reasoning : null;
+          console.log(JSON.stringify({ function: 'worker', action: 'scored', tweet_id: tweetId, score: importanceScore, tags: importanceTags, reasoning: importanceReasoning }));
         } catch (parseErr) {
           console.warn('Failed to parse tool call, falling back to content:', (parseErr as Error).message);
           translatedText = data.choices?.[0]?.message?.content ?? '';
