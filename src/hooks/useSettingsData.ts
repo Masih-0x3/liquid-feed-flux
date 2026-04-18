@@ -199,7 +199,6 @@ const defaults = {
     enabled: false,
     min_score: 14,
     require_media: true,
-    allow_video: false,
     post_template: '{leading_emoji} {translated_text}',
     leading_emoji: '📰',
     hashtags: '',

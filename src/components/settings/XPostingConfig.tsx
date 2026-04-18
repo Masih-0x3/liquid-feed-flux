@@ -12,13 +12,12 @@ import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { useSaveSettings } from '@/hooks/useSettingsData';
 import { PromptEditor } from '@/components/settings/PromptEditor';
-import { Newspaper, Save, Sparkles, Loader2, ImageIcon, Video, Eye } from 'lucide-react';
+import { Newspaper, Save, Sparkles, Loader2, ImageIcon, Eye } from 'lucide-react';
 
 export interface XPostingConfigValue {
   enabled: boolean;
   min_score: number;
   require_media: boolean;
-  allow_video: boolean;
   post_template: string;
   leading_emoji: string;
   hashtags: string;
@@ -31,7 +30,6 @@ const DEFAULTS: XPostingConfigValue = {
   enabled: false,
   min_score: 14,
   require_media: true,
-  allow_video: false,
   post_template: '{leading_emoji} {translated_text}',
   leading_emoji: '📰',
   hashtags: '',
@@ -132,13 +130,6 @@ export default function XPostingConfig({ initial }: Props) {
             </div>
           </label>
           <label className="flex items-start gap-3 p-3 bg-muted/30 rounded-lg cursor-pointer">
-            <Checkbox checked={cfg.allow_video} onCheckedChange={(v) => update({ allow_video: !!v })} />
-            <div>
-              <p className="text-sm font-medium flex items-center gap-1.5"><Video className="w-3.5 h-3.5" />Allow video</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Off by default — chunked video upload is heavier.</p>
-            </div>
-          </label>
-          <label className="flex items-start gap-3 p-3 bg-muted/30 rounded-lg cursor-pointer sm:col-span-2">
             <Checkbox checked={cfg.post_only_decision_deliver} onCheckedChange={(v) => update({ post_only_decision_deliver: !!v })} />
             <div>
               <p className="text-sm font-medium">Only post items already approved for Telegram delivery</p>

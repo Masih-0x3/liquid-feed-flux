@@ -59,7 +59,6 @@ interface PostingConfig {
   enabled: boolean;
   min_score: number;
   require_media: boolean;
-  allow_video: boolean;
   post_template: string;
   leading_emoji: string;
   hashtags: string;
@@ -75,7 +74,7 @@ interface RateLimits {
 }
 
 const DEFAULT_CFG: PostingConfig = {
-  enabled: false, min_score: 14, require_media: true, allow_video: false,
+  enabled: false, min_score: 14, require_media: true,
   post_template: '{leading_emoji} {translated_text}', leading_emoji: '📰',
   hashtags: '', max_chars: 280, dedupe_window_hours: 48, post_only_decision_deliver: true,
 };
@@ -99,9 +98,8 @@ async function trimRollingWindow(arr: string[], windowMs: number): Promise<strin
   return (arr || []).filter((ts) => { try { return new Date(ts).getTime() > cutoff; } catch { return false; } });
 }
 
-// ─── Media validation ────────────────────────────────────────────────
+// ─── Media validation (images only — RSS.app does not provide native videos) ──
 const ALLOWED_IMAGE = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-const ALLOWED_VIDEO = ['video/mp4'];
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB per X spec
 
 interface MediaRow {
@@ -113,14 +111,12 @@ interface MediaRow {
   kind: string | null;
 }
 
-function selectUploadable(rows: MediaRow[], allowVideo: boolean): { ok: MediaRow[]; reason?: string } {
+function selectUploadable(rows: MediaRow[]): { ok: MediaRow[]; reason?: string } {
   const downloaded = rows.filter((r) => r.downloaded_at && r.storage_path);
   if (downloaded.length === 0) return { ok: [], reason: 'no_media' };
 
-  const videos = downloaded.filter((r) => (r.mime_type || '').startsWith('video/') && ALLOWED_VIDEO.includes(r.mime_type || ''));
   const images = downloaded.filter((r) => ALLOWED_IMAGE.includes(r.mime_type || '') && (r.file_size ?? 0) <= MAX_IMAGE_BYTES);
 
-  if (allowVideo && videos.length > 0) return { ok: [videos[0]] }; // 1 video
   if (images.length > 0) return { ok: images.slice(0, 4) };
   return { ok: [], reason: 'no_supported_media' };
 }
@@ -275,7 +271,7 @@ Deno.serve(async (req) => {
     let mediaBytes = 0;
     let mediaKind: string | null = null;
     if (cfg.require_media || (mediaRows && mediaRows.length > 0)) {
-      const sel = selectUploadable((mediaRows || []) as MediaRow[], cfg.allow_video);
+      const sel = selectUploadable((mediaRows || []) as MediaRow[]);
       if (sel.ok.length === 0 && cfg.require_media) {
         if (!dryRun) await sb.from('x_deliveries').insert({ post_id: tweetId, status: 'skipped', skip_reason: sel.reason || 'no_media' });
         results.push({ tweet_id: tweetId, status: 'skipped', reason: sel.reason || 'no_media' });
@@ -295,7 +291,7 @@ Deno.serve(async (req) => {
             mediaCount += 1;
             mediaUp24hArr.push(new Date().toISOString());
           }
-          mediaKind = (sel.ok[0].mime_type || 'image').startsWith('video/') ? 'video' : 'image';
+          mediaKind = 'image';
         } catch (e) {
           const errMsg = (e as Error).message;
           await sb.from('x_deliveries').insert({ post_id: tweetId, status: 'failed', last_error: `media: ${errMsg}`, attempts: 1 });
@@ -304,7 +300,7 @@ Deno.serve(async (req) => {
         }
       } else {
         mediaCount = sel.ok.length;
-        mediaKind = (sel.ok[0]?.mime_type || 'image').startsWith('video/') ? 'video' : 'image';
+        mediaKind = 'image';
       }
     }
 
