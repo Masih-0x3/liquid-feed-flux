@@ -224,6 +224,11 @@ serve(async (req) => {
           continue;
         }
 
+        // Detect truncation BEFORE upsert so we can persist the flag
+        const isTruncated = detectTruncation(text);
+        const hydrationEnabled = isTruncated ? await isHydrationEnabled(supabase) : false;
+        const willHydrate = isTruncated && hydrationEnabled;
+
         // Upsert post to database
         const { data: post, error: postError } = await supabase
           .from('posts')
@@ -235,7 +240,8 @@ serve(async (req) => {
             url: url,
             tweeted_at: publishedAt,
             has_media: mediaItems.length > 0,
-            author_handle: authorHandle
+            author_handle: authorHandle,
+            is_truncated: isTruncated,
           }, {
             onConflict: 'tweet_id'
           })
@@ -247,7 +253,7 @@ serve(async (req) => {
           continue;
         }
 
-        console.log('Post upserted successfully:', tweetId);
+        console.log(`Post upserted: ${tweetId} (truncated=${isTruncated}, willHydrate=${willHydrate})`);
 
         // Insert media items
         if (mediaItems.length > 0) {
@@ -274,34 +280,64 @@ serve(async (req) => {
           }
         }
 
-        // Create translation job with idempotency key
-        const { error: translationJobError } = await supabase
-          .from('jobs')
-          .upsert({
-            type: 'translate',
-            payload: { tweet_id: tweetId },
-            status: 'pending',
-            priority: 10,
-            idempotency_key: `translate:${tweetId}`,
-            next_run_at: new Date().toISOString()
-          }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+        if (willHydrate) {
+          // Queue hydration first; the hydrate job will create the translate job after success
+          const { error: hydrateJobError } = await supabase
+            .from('jobs')
+            .upsert({
+              type: 'hydrate_tweet',
+              payload: { tweet_id: tweetId },
+              status: 'pending',
+              priority: 15,
+              idempotency_key: `hydrate:${tweetId}`,
+              next_run_at: new Date().toISOString()
+            }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
 
-        if (translationJobError) {
-          console.error('Error creating translation job:', translationJobError);
+          if (hydrateJobError) {
+            console.error('Error creating hydrate job:', hydrateJobError);
+          } else {
+            console.log('Hydrate job created for:', tweetId);
+            try {
+              await supabase
+                .from('pipeline_events')
+                .insert({
+                  subject_type: 'post', subject_id: tweetId,
+                  step: 'hydrate', status: 'queued',
+                  started_at: new Date().toISOString(),
+                  meta: { source: 'webhook', text_length: text.length }
+                });
+            } catch (_e) {}
+          }
         } else {
-          console.log('Translation job created for:', tweetId);
-          try {
-            await supabase
-              .from('pipeline_events')
-              .insert({
-                subject_type: 'post',
-                subject_id: tweetId,
-                step: 'translate',
-                status: 'queued',
-                started_at: new Date().toISOString(),
-                meta: { source: 'webhook' }
-              });
-          } catch (_e) {}
+          // Standard path: create translation job directly
+          const { error: translationJobError } = await supabase
+            .from('jobs')
+            .upsert({
+              type: 'translate',
+              payload: { tweet_id: tweetId },
+              status: 'pending',
+              priority: 10,
+              idempotency_key: `translate:${tweetId}`,
+              next_run_at: new Date().toISOString()
+            }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+
+          if (translationJobError) {
+            console.error('Error creating translation job:', translationJobError);
+          } else {
+            console.log('Translation job created for:', tweetId);
+            try {
+              await supabase
+                .from('pipeline_events')
+                .insert({
+                  subject_type: 'post',
+                  subject_id: tweetId,
+                  step: 'translate',
+                  status: 'queued',
+                  started_at: new Date().toISOString(),
+                  meta: { source: 'webhook' }
+                });
+            } catch (_e) {}
+          }
         }
 
         // Create media download job for tweets with media
