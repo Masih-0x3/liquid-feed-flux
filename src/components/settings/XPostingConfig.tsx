@@ -123,11 +123,11 @@ export default function XPostingConfig({ initial }: Props) {
 
         {/* Media rules */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <label className="flex items-start gap-3 p-3 bg-muted/30 rounded-lg cursor-pointer">
-            <Checkbox checked={cfg.require_media} onCheckedChange={(v) => update({ require_media: !!v })} />
+          <label className="flex items-start gap-3 p-3 bg-muted/30 rounded-lg cursor-pointer opacity-70">
+            <Checkbox checked disabled />
             <div>
-              <p className="text-sm font-medium flex items-center gap-1.5"><ImageIcon className="w-3.5 h-3.5" />Require media</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Skip posts that have no downloaded media (saves API cost).</p>
+              <p className="text-sm font-medium flex items-center gap-1.5"><ImageIcon className="w-3.5 h-3.5" />Attach media when available</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Posts with downloaded images attach them automatically. Posts without media are still posted as text-only — no media-upload API call is made.</p>
             </div>
           </label>
           <label className="flex items-start gap-3 p-3 bg-muted/30 rounded-lg cursor-pointer">
