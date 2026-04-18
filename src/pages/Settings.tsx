@@ -188,7 +188,15 @@ export default function Settings() {
             <CardContent className="space-y-6">
               <div className="space-y-2">
                 <Label htmlFor="system_prompt">System Prompt</Label>
-                <Textarea id="system_prompt" value={ts.system_prompt} onChange={(e) => setTranslationSettings({ ...ts, system_prompt: e.target.value })} className="glass-input min-h-[200px] font-mono text-sm" placeholder="Enter the system prompt for translation..." />
+                <PromptEditor
+                  id="system_prompt"
+                  value={ts.system_prompt}
+                  onChange={(v) => setTranslationSettings({ ...ts, system_prompt: v })}
+                  placeholder="Enter the system prompt for translation..."
+                  minHeight={360}
+                  maxLength={20000}
+                  title="System Prompt"
+                />
               </div>
               <Separator />
               <div className="space-y-4">
@@ -203,7 +211,15 @@ export default function Settings() {
                     </Button>
                   ))}
                 </div>
-                <Textarea id="user_prompt_template" value={ts.user_prompt_template} onChange={(e) => setTranslationSettings({ ...ts, user_prompt_template: e.target.value })} className="glass-input min-h-[120px] font-mono text-sm" placeholder="Enter the user prompt template..." />
+                <PromptEditor
+                  id="user_prompt_template"
+                  value={ts.user_prompt_template}
+                  onChange={(v) => setTranslationSettings({ ...ts, user_prompt_template: v })}
+                  placeholder="Enter the user prompt template..."
+                  minHeight={240}
+                  maxLength={10000}
+                  title="User Prompt Template"
+                />
               </div>
               <Separator />
               {sampleTweets.length > 0 && (
