@@ -372,6 +372,16 @@ export default function XAutomationSettings({ twitterHydration, xApiUsage, xPost
           <p className="text-xs text-muted-foreground">Note: each verification, hydration test, and posted tweet consumes one X API call counted toward your monthly quota.</p>
         </CardContent>
       </Card>
+
+      {/* 5. X Posting Configuration */}
+      <XPostingConfig initial={xPostingConfig} />
+
+      {/* 6. Rate Limits & Quotas */}
+      <XRateLimits
+        initial={xRateLimits}
+        usage={{ posts_24h: xApiUsage?.posts_24h, media_uploads_24h: xApiUsage?.media_uploads_24h }}
+        monthlyPostsCount={monthlyCount ?? 0}
+      />
     </div>
   );
 }
