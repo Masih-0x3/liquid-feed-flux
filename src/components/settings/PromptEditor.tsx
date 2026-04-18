@@ -53,7 +53,7 @@ export function PromptEditor({
 
   const counterClass = cn(
     'tabular-nums',
-    overLimit ? 'text-destructive font-medium' : nearLimit ? 'text-amber-500' : 'text-muted-foreground',
+    overLimit ? 'text-destructive font-medium' : nearLimit ? 'text-primary' : 'text-muted-foreground',
   );
 
   return (
