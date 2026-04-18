@@ -218,6 +218,9 @@ serve(async (req) => {
             case 'reprocess':
               success = await handleReprocessJob(job, supabase);
               break;
+            case 'hydrate_tweet':
+              success = await handleHydrateTweetJob(job, supabase);
+              break;
             default:
               console.error(`Unknown job type: ${job.type}`);
               success = false;
@@ -833,6 +836,7 @@ const MAX_ATTEMPTS: Record<string, number> = {
   download_media: 3,
   moderate: 3,
   reprocess: 3,
+  hydrate_tweet: 3,
 };
 
 async function handleJobFailure(supabase: ReturnType<typeof createClient>, job: Record<string, unknown>, errorOrMessage?: Error | string) {
@@ -1011,6 +1015,7 @@ function normalizeStep(type: string): string {
     case 'deliver': return 'deliver';
     case 'download_media': return 'media';
     case 'moderate': return 'moderate';
+    case 'hydrate_tweet': return 'hydrate';
     default: return type;
   }
 }
