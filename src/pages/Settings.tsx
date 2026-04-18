@@ -30,7 +30,23 @@ function insertPlaceholder(placeholder: string, textareaId: string, getter: stri
     setter(getter.substring(0, start) + placeholder + getter.substring(end));
     setTimeout(() => { textarea.setSelectionRange(start + placeholder.length, start + placeholder.length); textarea.focus(); }, 0);
   }
-}
+
+type DigestTestPost = { author_handle?: string; created_at?: string; text_translated?: string; text_original?: string };
+type DigestTestResult = {
+  post_count?: number;
+  period_start?: string;
+  period_end?: string;
+  reason?: string;
+  openai_finish_reason?: string;
+  warning?: string;
+  posts?: DigestTestPost[];
+  openai_request?: unknown;
+  openai_system_prompt?: string;
+  openai_user_prompt?: string;
+  openai_response?: string;
+  openai_usage?: unknown;
+  formatted_tweets?: string[];
+};
 
 export default function Settings() {
   const { toast } = useToast();
