@@ -111,6 +111,16 @@ const defaults = {
     min_posts: 2,
     header_format: '📰 News Digest — {time}',
   } as DigestSettings,
+  twitter_hydration: {
+    enabled: true,
+    max_attempts: 3,
+  },
+  x_api_usage: {
+    total: 0,
+    calls_24h: [] as string[],
+    last_call_at: null as string | null,
+    last_error: null as string | null,
+  },
 };
 
 async function fetchSettings() {
