@@ -243,3 +243,45 @@ export function useSaveSettings() {
     },
   });
 }
+
+export interface PreviewTranslationInput {
+  text: string;
+  translation_settings: TranslationSettings;
+  content_filter?: {
+    enabled: boolean;
+    score_only?: boolean;
+    editorial_guidelines?: string;
+    priority_topics?: string[];
+    low_priority_topics?: string[];
+  };
+  author_handle?: string;
+}
+
+export interface PreviewTranslationResult {
+  translated_text: string;
+  importance_score: number | null;
+  importance_tags: string[] | null;
+  reasoning: string | null;
+  model: string;
+  usage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null;
+  duration_ms: number;
+  used_filter: boolean;
+  raw?: unknown;
+}
+
+export function useTranslationPreview() {
+  const { toast } = useToast();
+  return useMutation<PreviewTranslationResult, Error, PreviewTranslationInput>({
+    mutationFn: async (input) => {
+      const { data, error } = await supabase.functions.invoke('admin-actions', {
+        body: { action: 'preview_translation', ...input },
+      });
+      if (error) throw error;
+      if (!data?.ok) throw new Error(data?.error || 'Preview failed');
+      return data.result as PreviewTranslationResult;
+    },
+    onError: (err) => {
+      toast({ title: 'Translation preview failed', description: err.message, variant: 'destructive' });
+    },
+  });
+}
