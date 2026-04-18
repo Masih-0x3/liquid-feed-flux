@@ -97,7 +97,7 @@ export default function XPostingConfig({ initial }: Props) {
           <Newspaper className="w-5 h-5 mr-2" />X Posting Configuration
         </CardTitle>
         <CardDescription>
-          Score-gated, media-required posts are formatted and posted to your X account. Disabled by default.
+          Score-gated posts are formatted and posted to your X account. Images are attached when available; text-only posts go through without a media-upload call.
         </CardDescription>
       </CardHeader>
 
