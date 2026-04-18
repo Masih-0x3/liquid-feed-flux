@@ -120,6 +120,17 @@ export default function Monitoring() {
     catch { toast({ title: 'Error', description: 'Failed to reprocess tweet', variant: 'destructive' }); }
   };
 
+  const handleRescorePost = async (tweetId: string) => {
+    try {
+      const res = await adminRescorePost(tweetId);
+      if (!res.ok) throw new Error(res.error || 'Re-score failed');
+      toast({ title: `New score: ${res.score}/20`, description: `Decision: ${res.decision}${res.reasoning ? ` — ${res.reasoning.slice(0, 120)}` : ''}` });
+      invalidate();
+    } catch (e) {
+      toast({ title: 'Re-score failed', description: (e as Error).message, variant: 'destructive' });
+    }
+  };
+
   const handleReprocessSelected = async () => {
     if (selectedTweets.size === 0) { toast({ title: 'No Selection', description: 'Please select tweets to reprocess', variant: 'destructive' }); return; }
     setIsReprocessing(true);
