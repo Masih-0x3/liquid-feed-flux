@@ -20,6 +20,7 @@ import {
 import ContentFilterSettings, { type ContentFilterConfig } from '@/components/settings/ContentFilterSettings';
 import XAutomationSettings from '@/components/settings/XAutomationSettings';
 import TranslationPlayground from '@/components/settings/TranslationPlayground';
+import PromptEditor from '@/components/settings/PromptEditor';
 
 function insertPlaceholder(placeholder: string, textareaId: string, getter: string, setter: (val: string) => void) {
   const textarea = document.getElementById(textareaId) as HTMLTextAreaElement;
