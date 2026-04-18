@@ -33,6 +33,11 @@ async function adminBulkReprocess(tweetIds: string[]) {
   const { error } = await supabase.functions.invoke('admin-actions', { body: { action: 'bulk_reprocess', tweet_ids: tweetIds } });
   if (error) throw error;
 }
+async function adminRescorePost(tweetId: string) {
+  const { data, error } = await supabase.functions.invoke('admin-actions', { body: { action: 'rescore_post', tweet_id: tweetId } });
+  if (error) throw error;
+  return data as { ok: boolean; score?: number; decision?: string; reasoning?: string; error?: string };
+}
 
 function StatusIndicator({ entry }: { entry: MonitoringEntry }) {
   const steps = [
