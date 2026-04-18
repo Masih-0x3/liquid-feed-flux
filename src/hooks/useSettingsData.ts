@@ -147,6 +147,8 @@ const defaults = {
   translation_prompt: {
     system_prompt: '', user_prompt_template: '', model: 'gpt-4o-mini',
     temperature: 0.2, max_completion_tokens: 1000, top_p: 1, frequency_penalty: 0, presence_penalty: 0,
+    scoring_system_prompt: DEFAULT_SCORING_SYSTEM_PROMPT,
+    classifier_tool_schema: DEFAULT_CLASSIFIER_TOOL_SCHEMA,
   } as TranslationSettings,
   openai_config: { model: 'gpt-4o-mini', temperature: 0.2, max_completion_tokens: 1000 } as OpenAISettings,
   telegram_config: { parse_mode: 'Markdown' } as TelegramSettings,
