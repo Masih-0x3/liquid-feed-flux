@@ -572,6 +572,142 @@ serve(async (req) => {
         }
       }
 
+      // ===== Re-score an existing post using current settings =====
+      case 'rescore_post': {
+        const tweetId = typeof body.tweet_id === 'string' ? body.tweet_id.trim() : '';
+        if (!tweetId) return jsonResponse({ ok: false, error: 'tweet_id is required' }, 400);
+
+        const { data: post, error: postErr } = await supabase
+          .from('posts')
+          .select('tweet_id, text_original, author_handle, tweeted_at, has_media, url')
+          .eq('tweet_id', tweetId)
+          .single();
+        if (postErr || !post) return jsonResponse({ ok: false, error: `Post not found: ${tweetId}` }, 404);
+        if (!post.text_original) return jsonResponse({ ok: false, error: 'Post has no original text to score' }, 400);
+
+        // Load current settings
+        const { data: settings } = await supabase
+          .from('settings')
+          .select('key, value')
+          .in('key', ['translation_prompt', 'openai_config', 'content_filter']);
+
+        const settingsMap: Record<string, Record<string, unknown>> = {};
+        for (const s of settings ?? []) {
+          if (s.value && typeof s.value === 'object') settingsMap[s.key] = s.value as Record<string, unknown>;
+        }
+        const tp = settingsMap['translation_prompt'] || {};
+        const oc = settingsMap['openai_config'] || {};
+        const cf = settingsMap['content_filter'] || {};
+
+        const model = typeof oc.model === 'string' ? oc.model as string : 'gpt-4o-mini';
+        const translationPrompt = typeof tp.system_prompt === 'string' && (tp.system_prompt as string).trim()
+          ? tp.system_prompt as string
+          : 'You are a professional translator. Translate the given English text to Persian. Preserve @mentions, #hashtags, URLs, and line breaks exactly. Only return the translated text, nothing else.';
+        const customScoringPrompt = typeof tp.scoring_system_prompt === 'string' && (tp.scoring_system_prompt as string).trim() ? tp.scoring_system_prompt as string : null;
+        const customToolSchema = typeof tp.classifier_tool_schema === 'string' && (tp.classifier_tool_schema as string).trim() ? tp.classifier_tool_schema as string : null;
+        const useMaxCompletion = !/^(gpt-4o($|-)|gpt-4($|-)|gpt-3\.5)/i.test(model);
+        const tokenParam = useMaxCompletion ? 'max_completion_tokens' : 'max_tokens';
+
+        const openaiApiKey = Deno.env.get('OPENAI_API_KEY');
+        if (!openaiApiKey) return jsonResponse({ ok: false, error: 'OPENAI_API_KEY is not configured' }, 500);
+
+        const priorityTopics = Array.isArray(cf.priority_topics) ? (cf.priority_topics as string[]).join(', ') : 'none specified';
+        const lowPriorityTopics = Array.isArray(cf.low_priority_topics) ? (cf.low_priority_topics as string[]).join(', ') : 'none specified';
+        const guidelines = typeof cf.editorial_guidelines === 'string' ? cf.editorial_guidelines as string : '';
+        const guidelinesBlock = guidelines.trim()
+          ? `### Editorial Guidelines (AUTHORITATIVE — these override the default rubric when they conflict)\n---\n${guidelines}\n---`
+          : '';
+
+        const scoringTemplate = customScoringPrompt ?? `You have two tasks. Complete both carefully.\n\n## Task 1: Translation\n{translation_prompt}\n\n## Task 2: News Importance Scoring\nScore 1-20 with 3-level relevance: DIRECT (no cap), INDIRECT Iran-adjacent (cap 16), NO NEXUS (cap 8). Polls/leaks/analyst reports about Iran conflicts can score 13-16. Do NOT down-score because framing is Western. Prefer higher tier when in doubt.\n\nHigh-priority: {priority_topics}\nLow-priority: {low_priority_topics}\n\n{editorial_guidelines_block}\n\nReasoning MUST state: relevance level, tier, any cap. Call "classify_importance".`;
+        const systemPrompt = scoringTemplate
+          .replace('{translation_prompt}', translationPrompt)
+          .replace('{priority_topics}', priorityTopics)
+          .replace('{low_priority_topics}', lowPriorityTopics)
+          .replace('{editorial_guidelines_block}', guidelinesBlock);
+
+        let toolFunction: Record<string, unknown>;
+        try {
+          toolFunction = customToolSchema ? JSON.parse(customToolSchema) : {
+            name: 'classify_importance',
+            parameters: {
+              type: 'object',
+              properties: {
+                translated_text: { type: 'string' },
+                importance_score: { type: 'integer', minimum: 1, maximum: 20 },
+                tags: { type: 'array', items: { type: 'string' } },
+                reasoning: { type: 'string' },
+              },
+              required: ['translated_text', 'importance_score', 'tags', 'reasoning'],
+            },
+          };
+        } catch (e) {
+          return jsonResponse({ ok: false, error: `Invalid classifier_tool_schema JSON: ${(e as Error).message}` }, 400);
+        }
+
+        const userMessage = `Author: @${post.author_handle || 'unknown'}\nPublished: ${post.tweeted_at ? new Date(post.tweeted_at as string).toISOString() : 'unknown'}\nHas media: ${post.has_media ? 'yes' : 'no'}\nURL: ${post.url || 'N/A'}\n\nContent:\n${post.text_original}`;
+
+        const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${openaiApiKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userMessage },
+            ],
+            tools: [{ type: 'function', function: toolFunction }],
+            tool_choice: { type: 'function', function: { name: (toolFunction.name as string) || 'classify_importance' } },
+            [tokenParam]: 2000,
+          }),
+        });
+        const respText = await resp.text();
+        let raw: Record<string, unknown> = {};
+        try { raw = JSON.parse(respText); } catch { raw = { raw_text: respText }; }
+        if (!resp.ok) return jsonResponse({ ok: false, error: `OpenAI ${resp.status}: ${respText.slice(0, 500)}`, raw });
+
+        const toolCall = (raw as { choices?: Array<{ message?: { tool_calls?: Array<{ function?: { arguments?: string } }> } }> }).choices?.[0]?.message?.tool_calls?.[0];
+        if (!toolCall?.function?.arguments) return jsonResponse({ ok: false, error: 'Model did not return a tool call', raw });
+
+        let args: { translated_text?: string; importance_score?: number; tags?: string[]; reasoning?: string };
+        try { args = JSON.parse(toolCall.function.arguments); }
+        catch (e) { return jsonResponse({ ok: false, error: `Tool-call parse error: ${(e as Error).message}`, raw }); }
+
+        const newScore = Math.max(1, Math.min(20, args.importance_score || 10));
+        const newTags = Array.isArray(args.tags) ? args.tags : [];
+        const newReasoning = typeof args.reasoning === 'string' ? args.reasoning : null;
+        const newTranslated = typeof args.translated_text === 'string' ? args.translated_text : null;
+
+        // Determine new delivery decision
+        const threshold = typeof cf.default_threshold === 'number' ? cf.default_threshold as number : 12;
+        const newDecision = newScore >= threshold ? 'deliver' : 'skip';
+
+        const updatePayload: Record<string, unknown> = {
+          importance_score: newScore,
+          importance_tags: newTags,
+          importance_reasoning: newReasoning,
+          delivery_decision: newDecision,
+        };
+        if (newTranslated) {
+          updatePayload.text_translated = newTranslated;
+          updatePayload.translated_at = new Date().toISOString();
+          updatePayload.translation_model = model;
+        }
+
+        const { error: upErr } = await supabase.from('posts').update(updatePayload).eq('tweet_id', tweetId);
+        if (upErr) return jsonResponse({ ok: false, error: upErr.message }, 500);
+
+        return jsonResponse({
+          ok: true,
+          tweet_id: tweetId,
+          score: newScore,
+          tags: newTags,
+          reasoning: newReasoning,
+          decision: newDecision,
+          threshold,
+          model,
+        });
+      }
+
       default:
         return jsonResponse({ error: `Unknown action: ${action}` }, 400);
     }
