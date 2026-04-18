@@ -266,19 +266,16 @@ export default function Settings() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              <Textarea
+              <PromptEditor
                 value={ts.scoring_system_prompt ?? DEFAULT_SCORING_SYSTEM_PROMPT}
-                onChange={(e) => setTranslationSettings({ ...ts, scoring_system_prompt: e.target.value })}
-                className="glass-input min-h-[300px] font-mono text-xs"
+                onChange={(v) => setTranslationSettings({ ...ts, scoring_system_prompt: v })}
+                placeholder="Enter the scoring rubric system prompt..."
+                minHeight={420}
+                maxLength={20000}
+                title="Scoring Rubric (System Prompt)"
+                onReset={() => setTranslationSettings({ ...ts, scoring_system_prompt: DEFAULT_SCORING_SYSTEM_PROMPT })}
               />
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setTranslationSettings({ ...ts, scoring_system_prompt: DEFAULT_SCORING_SYSTEM_PROMPT })}
-                >
-                  Reset to default
-                </Button>
+              <div className="flex justify-end">
                 <Button
                   size="sm"
                   onClick={() => saveMutation.mutate({ key: 'translation_prompt', value: ts })}
