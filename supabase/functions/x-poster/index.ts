@@ -297,6 +297,7 @@ Deno.serve(async (req) => {
     let mediaCount = 0;
     let mediaBytes = 0;
     let mediaKind: string | null = null;
+    let mediaWarning: string | null = null;
 
     if (mediaRows && mediaRows.length > 0) {
       const sel = selectUploadable(mediaRows as MediaRow[]);
@@ -319,6 +320,7 @@ Deno.serve(async (req) => {
           mediaCount = 0;
           mediaBytes = 0;
           mediaKind = null;
+          mediaWarning = `media_upload_failed: ${(e as Error).message}`.slice(0, 500);
           console.warn(`[x-poster] media upload failed for ${tweetId}, posting text-only: ${(e as Error).message}`);
         }
       } else if (sel.ok.length > 0 && dryRun) {
