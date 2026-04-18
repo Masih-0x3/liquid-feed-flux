@@ -10,7 +10,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
-import { Search, RefreshCw, Edit, Check, X, ExternalLink, RotateCcw, Star, Send } from "lucide-react";
+import { Search, RefreshCw, Edit, Check, X, ExternalLink, RotateCcw, Star, Send, Scissors, Sparkles } from "lucide-react";
 import { format } from "date-fns";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerDescription, DrawerClose, DrawerFooter } from "@/components/ui/drawer";
 import { useMonitoringData, type MonitoringEntry, type PipelineEvent } from "@/hooks/useMonitoringData";
@@ -268,6 +268,21 @@ export default function Monitoring() {
                         {entry.delivery_decision && entry.delivery_decision !== 'deliver' && (
                           <Badge variant="outline" className="text-muted-foreground">
                             {entry.delivery_decision === 'skip' ? 'Skipped' : entry.delivery_decision}
+                          </Badge>
+                        )}
+                        {entry.hydration_source === 'x_api' && (
+                          <Badge className="bg-green-500/20 text-green-400 border-green-500/30">
+                            <Sparkles className="w-3 h-3 mr-1" />Hydrated
+                          </Badge>
+                        )}
+                        {entry.is_truncated && !entry.hydrated_at && (
+                          <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30">
+                            <Scissors className="w-3 h-3 mr-1" />Truncated
+                          </Badge>
+                        )}
+                        {entry.hydrated_at && entry.hydration_source && entry.hydration_source !== 'x_api' && (
+                          <Badge variant="outline" className="text-muted-foreground" title={entry.hydration_source}>
+                            <Scissors className="w-3 h-3 mr-1" />Truncated (fallback)
                           </Badge>
                         )}
                       </div>
