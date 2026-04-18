@@ -23,3 +23,6 @@ verify_jwt = false
 
 [functions.digest-compiler]
 verify_jwt = false
+
+[functions.x-poster]
+verify_jwt = false
