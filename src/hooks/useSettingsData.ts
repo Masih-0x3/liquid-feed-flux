@@ -39,6 +39,8 @@ export interface MessageTemplateSettings {
   custom_hashtags: string;
 }
 
+export type ModelTier = 'latest' | 'flagship' | 'reasoning' | 'legacy';
+
 export interface OpenAIModel {
   id: string;
   name: string;
@@ -47,18 +49,25 @@ export interface OpenAIModel {
   maxTokens: number;
   useMaxCompletionTokens: boolean;
   supportsTemperature: boolean;
+  tier: ModelTier;
 }
 
 export const openaiModels: OpenAIModel[] = [
-  { id: 'gpt-5-2025-08-07', name: 'GPT-5', description: 'Most capable model', supports: ['text', 'vision'], maxTokens: 200000, useMaxCompletionTokens: true, supportsTemperature: false },
-  { id: 'gpt-5-mini-2025-08-07', name: 'GPT-5 Mini', description: 'Fast and efficient version of GPT-5', supports: ['text', 'vision'], maxTokens: 200000, useMaxCompletionTokens: true, supportsTemperature: false },
-  { id: 'gpt-5-nano-2025-08-07', name: 'GPT-5 Nano', description: 'Fastest, cheapest version', supports: ['text'], maxTokens: 200000, useMaxCompletionTokens: true, supportsTemperature: false },
-  { id: 'gpt-4.1-2025-04-14', name: 'GPT-4.1', description: 'Flagship GPT-4 model', supports: ['text', 'vision'], maxTokens: 128000, useMaxCompletionTokens: true, supportsTemperature: false },
-  { id: 'gpt-4.1-mini-2025-04-14', name: 'GPT-4.1 Mini', description: 'Efficient GPT-4 model', supports: ['text', 'vision'], maxTokens: 128000, useMaxCompletionTokens: true, supportsTemperature: false },
-  { id: 'o3-2025-04-16', name: 'O3', description: 'Powerful reasoning model', supports: ['text', 'code', 'vision'], maxTokens: 200000, useMaxCompletionTokens: true, supportsTemperature: false },
-  { id: 'o4-mini-2025-04-16', name: 'O4 Mini', description: 'Fast reasoning model', supports: ['text', 'code', 'vision'], maxTokens: 200000, useMaxCompletionTokens: true, supportsTemperature: false },
-  { id: 'gpt-4o-mini', name: 'GPT-4o Mini (Legacy)', description: 'Fast and cheap legacy model', supports: ['text', 'vision'], maxTokens: 16384, useMaxCompletionTokens: false, supportsTemperature: true },
-  { id: 'gpt-4o', name: 'GPT-4o (Legacy)', description: 'Powerful legacy model', supports: ['text', 'vision'], maxTokens: 4096, useMaxCompletionTokens: false, supportsTemperature: true },
+  // Latest (2026)
+  { id: 'gpt-5.1', name: 'GPT-5.1', description: 'Newest flagship — best reasoning, vision, 400K context', supports: ['text', 'vision'], maxTokens: 400000, useMaxCompletionTokens: true, supportsTemperature: false, tier: 'latest' },
+  { id: 'gpt-5.1-mini', name: 'GPT-5.1 Mini', description: 'Fast, cost-efficient version of GPT-5.1', supports: ['text', 'vision'], maxTokens: 400000, useMaxCompletionTokens: true, supportsTemperature: false, tier: 'latest' },
+  // Flagship (current production)
+  { id: 'gpt-5-2025-08-07', name: 'GPT-5', description: 'Highly capable, proven in production', supports: ['text', 'vision'], maxTokens: 200000, useMaxCompletionTokens: true, supportsTemperature: false, tier: 'flagship' },
+  { id: 'gpt-5-mini-2025-08-07', name: 'GPT-5 Mini', description: 'Fast and efficient version of GPT-5', supports: ['text', 'vision'], maxTokens: 200000, useMaxCompletionTokens: true, supportsTemperature: false, tier: 'flagship' },
+  { id: 'gpt-5-nano-2025-08-07', name: 'GPT-5 Nano', description: 'Fastest, cheapest GPT-5 variant', supports: ['text'], maxTokens: 200000, useMaxCompletionTokens: true, supportsTemperature: false, tier: 'flagship' },
+  { id: 'gpt-4.1-2025-04-14', name: 'GPT-4.1', description: 'Stable GPT-4 flagship', supports: ['text', 'vision'], maxTokens: 128000, useMaxCompletionTokens: true, supportsTemperature: false, tier: 'flagship' },
+  { id: 'gpt-4.1-mini-2025-04-14', name: 'GPT-4.1 Mini', description: 'Efficient GPT-4 model', supports: ['text', 'vision'], maxTokens: 128000, useMaxCompletionTokens: true, supportsTemperature: false, tier: 'flagship' },
+  // Reasoning
+  { id: 'o3-2025-04-16', name: 'o3', description: 'Deep reasoning model — slow, high quality', supports: ['text', 'code', 'vision'], maxTokens: 200000, useMaxCompletionTokens: true, supportsTemperature: false, tier: 'reasoning' },
+  { id: 'o4-mini-2025-04-16', name: 'o4-mini', description: 'Fast reasoning model', supports: ['text', 'code', 'vision'], maxTokens: 200000, useMaxCompletionTokens: true, supportsTemperature: false, tier: 'reasoning' },
+  // Legacy
+  { id: 'gpt-4o-mini', name: 'GPT-4o Mini', description: 'Legacy — current default in worker, cheap & fast', supports: ['text', 'vision'], maxTokens: 16384, useMaxCompletionTokens: false, supportsTemperature: true, tier: 'legacy' },
+  { id: 'gpt-4o', name: 'GPT-4o', description: 'Legacy multimodal model', supports: ['text', 'vision'], maxTokens: 4096, useMaxCompletionTokens: false, supportsTemperature: true, tier: 'legacy' },
 ];
 
 export const messagePlaceholders = [
