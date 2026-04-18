@@ -78,21 +78,19 @@ export default function ContentFilterSettings({ initialConfig }: Props) {
   const saveMutation = useSaveSettings();
   const { toast } = useToast();
 
-  const applyRecommendedDefaults = () => {
+  const applyRecommendedDefaults = async () => {
     setConfig(RECOMMENDED_IRAN_RUBRIC);
-    saveMutation.mutate(
-      { key: 'content_filter', value: RECOMMENDED_IRAN_RUBRIC },
-      {
-        onSuccess: () => {
-          // Also sync the OpenAI model to the latest rubric-tuned model
-          saveMutation.mutate({
-            key: 'openai_config',
-            value: { model: 'gpt-5.4-mini', temperature: 0.2, max_completion_tokens: 1000, api_key: '' },
-          });
-          toast({ title: 'Recommended Iran-rubric defaults applied', description: 'Threshold 12, updated guidelines, model gpt-5.4-mini.' });
-        },
-      }
-    );
+    try {
+      // Run sequentially via mutateAsync so the second call doesn't cancel the first
+      await saveMutation.mutateAsync({ key: 'content_filter', value: RECOMMENDED_IRAN_RUBRIC });
+      await saveMutation.mutateAsync({
+        key: 'openai_config',
+        value: { model: 'gpt-5.4-mini', temperature: 0.2, max_completion_tokens: 1000, api_key: '' },
+      });
+      toast({ title: 'Recommended Iran-rubric defaults applied', description: 'Threshold 12, updated guidelines, model gpt-5.4-mini.' });
+    } catch (e) {
+      // useSaveSettings already shows an error toast
+    }
   };
 
   useEffect(() => {
