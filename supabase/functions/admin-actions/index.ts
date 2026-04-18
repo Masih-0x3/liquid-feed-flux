@@ -265,9 +265,22 @@ serve(async (req) => {
           return jsonResponse({ error: validationError }, 400);
         }
 
+        // Auto-stamp `start_posting_from` when X posting transitions disabled→enabled,
+        // so the worker only considers posts created from that moment onward.
+        let valueToSave = value;
+        if (key === 'x_posting_config' && value && typeof value === 'object') {
+          const { data: prev } = await supabase.from('settings').select('value').eq('key', 'x_posting_config').maybeSingle();
+          const prevEnabled = !!(prev?.value as Record<string, unknown> | null)?.enabled;
+          const nextEnabled = !!(value as Record<string, unknown>).enabled;
+          const hasStart = typeof (value as Record<string, unknown>).start_posting_from === 'string';
+          if (nextEnabled && !prevEnabled && !hasStart) {
+            valueToSave = { ...(value as Record<string, unknown>), start_posting_from: new Date().toISOString() };
+          }
+        }
+
         const { error } = await supabase
           .from('settings')
-          .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+          .upsert({ key, value: valueToSave, updated_at: new Date().toISOString() }, { onConflict: 'key' });
         if (error) throw error;
         return jsonResponse({ success: true, message: `Settings "${key}" saved` });
       }

@@ -65,6 +65,8 @@ interface PostingConfig {
   max_chars: number;
   dedupe_window_hours: number;
   post_only_decision_deliver: boolean;
+  /** ISO timestamp — only posts created at/after this are eligible. Set when posting is (re)enabled. */
+  start_posting_from?: string | null;
 }
 interface RateLimits {
   posts_per_hour: number;
@@ -229,12 +231,16 @@ Deno.serve(async (req) => {
 
   // Select candidates
   const dedupeCutoff = new Date(Date.now() - cfg.dedupe_window_hours * 3600 * 1000).toISOString();
+  // Hard floor: never look at posts created before X posting was enabled.
+  const startFrom = cfg.start_posting_from || null;
+  const effectiveCutoff = startFrom && startFrom > dedupeCutoff ? startFrom : dedupeCutoff;
+
   const { data: existingRows } = await sb.from('x_deliveries').select('post_id').gte('created_at', dedupeCutoff);
   const existing = new Set((existingRows || []).map((r) => r.post_id as string));
 
   let candidatesQ = sb.from('posts')
     .select('tweet_id, text_translated, text_original, author_handle, has_media, importance_score, delivery_decision, url, accounts!inner(handle)')
-    .gte('created_at', dedupeCutoff)
+    .gte('created_at', effectiveCutoff)
     .not('text_translated', 'is', null);
 
   if (onlyTweetId) candidatesQ = candidatesQ.eq('tweet_id', onlyTweetId);
