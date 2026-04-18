@@ -27,6 +27,7 @@ Updated: today
 - [Message Templates](mem://features/message-templates) — Telegram template system with live previews
 - [System Health](mem://features/system-health-monitoring) — Server-side RPC metrics and JSON logging for observability
 - [Twitter Digest](mem://features/twitter-digest) — 30-minute Persian editorial digest via OAuth 1.0a
+- [X Posting Pipeline](mem://features/x-posting-pipeline) — Score-gated, media-required individual post mirroring to X with quotas and dedupe
 - [Twitter Hydration](mem://features/twitter-hydration) — Truncated RSS tweets fetched via X API note_tweet before translation
 - [Cron Config](mem://infrastructure/cron-configuration) — pg_cron hardcoded header constraints for Supabase
 - [Video Limitations](mem://limitations/video-ingestion) — Video thumbnail fallback due to RSS.app constraints
