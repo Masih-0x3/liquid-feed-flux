@@ -297,19 +297,17 @@ export default function Settings() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              <Textarea
+              <PromptEditor
                 value={ts.classifier_tool_schema ?? DEFAULT_CLASSIFIER_TOOL_SCHEMA}
-                onChange={(e) => setTranslationSettings({ ...ts, classifier_tool_schema: e.target.value })}
-                className="glass-input min-h-[280px] font-mono text-xs"
+                onChange={(v) => setTranslationSettings({ ...ts, classifier_tool_schema: v })}
+                placeholder="Enter the JSON schema..."
+                minHeight={360}
+                maxLength={20000}
+                title="Classifier Tool Schema"
+                onReset={() => setTranslationSettings({ ...ts, classifier_tool_schema: DEFAULT_CLASSIFIER_TOOL_SCHEMA })}
               />
-              <div className="flex gap-2 items-center">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setTranslationSettings({ ...ts, classifier_tool_schema: DEFAULT_CLASSIFIER_TOOL_SCHEMA })}
-                >
-                  Reset to default
-                </Button>
+              <div className="flex gap-2 items-center justify-end">
+                <span className="text-xs text-muted-foreground mr-auto">JSON validated on save</span>
                 <Button
                   size="sm"
                   onClick={() => {
@@ -325,7 +323,6 @@ export default function Settings() {
                 >
                   Save tool schema
                 </Button>
-                <span className="text-xs text-muted-foreground">JSON validated on save</span>
               </div>
             </CardContent>
           </Card>
