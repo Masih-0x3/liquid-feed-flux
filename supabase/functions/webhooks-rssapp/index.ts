@@ -12,6 +12,40 @@ async function hashUrl(url: string): Promise<string> {
   return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+// Detect whether an RSS-ingested tweet text appears truncated.
+// Conservative: require explicit markers OR (long text + no terminal punctuation).
+function detectTruncation(text: string): boolean {
+  if (!text) return false;
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return false;
+
+  // Explicit "show more" markers (case-insensitive)
+  if (/(^|\s)(show\s+more|show\s+this\s+thread|read\s+more)\s*$/i.test(trimmed)) return true;
+
+  // Trailing ellipsis variants: …, ..., […], [...]
+  const endsWithEllipsis = /(\u2026|\.{3}|\[\u2026\]|\[\.{3}\])\s*$/.test(trimmed);
+  if (endsWithEllipsis && trimmed.length >= 200) return true;
+
+  // Hard length cliff (RSS.app commonly cuts around 270-280 chars) with no terminal punctuation
+  if (trimmed.length >= 270) {
+    const lastChar = trimmed.charAt(trimmed.length - 1);
+    const terminalPunct = ['.', '!', '?', '\u061F', '"', ')', '\u201D', '\u300D'];
+    if (!terminalPunct.includes(lastChar)) return true;
+  }
+
+  return false;
+}
+
+// Read the twitter_hydration setting; default to enabled if missing.
+async function isHydrationEnabled(supabase: ReturnType<typeof createClient>): Promise<boolean> {
+  try {
+    const { data } = await supabase.from('settings').select('value').eq('key', 'twitter_hydration').maybeSingle();
+    if (!data || !data.value || typeof data.value !== 'object') return true;
+    const v = data.value as Record<string, unknown>;
+    return v.enabled !== false;
+  } catch { return true; }
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -190,6 +224,11 @@ serve(async (req) => {
           continue;
         }
 
+        // Detect truncation BEFORE upsert so we can persist the flag
+        const isTruncated = detectTruncation(text);
+        const hydrationEnabled = isTruncated ? await isHydrationEnabled(supabase) : false;
+        const willHydrate = isTruncated && hydrationEnabled;
+
         // Upsert post to database
         const { data: post, error: postError } = await supabase
           .from('posts')
@@ -201,7 +240,8 @@ serve(async (req) => {
             url: url,
             tweeted_at: publishedAt,
             has_media: mediaItems.length > 0,
-            author_handle: authorHandle
+            author_handle: authorHandle,
+            is_truncated: isTruncated,
           }, {
             onConflict: 'tweet_id'
           })
@@ -213,7 +253,7 @@ serve(async (req) => {
           continue;
         }
 
-        console.log('Post upserted successfully:', tweetId);
+        console.log(`Post upserted: ${tweetId} (truncated=${isTruncated}, willHydrate=${willHydrate})`);
 
         // Insert media items
         if (mediaItems.length > 0) {
@@ -240,34 +280,64 @@ serve(async (req) => {
           }
         }
 
-        // Create translation job with idempotency key
-        const { error: translationJobError } = await supabase
-          .from('jobs')
-          .upsert({
-            type: 'translate',
-            payload: { tweet_id: tweetId },
-            status: 'pending',
-            priority: 10,
-            idempotency_key: `translate:${tweetId}`,
-            next_run_at: new Date().toISOString()
-          }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+        if (willHydrate) {
+          // Queue hydration first; the hydrate job will create the translate job after success
+          const { error: hydrateJobError } = await supabase
+            .from('jobs')
+            .upsert({
+              type: 'hydrate_tweet',
+              payload: { tweet_id: tweetId },
+              status: 'pending',
+              priority: 15,
+              idempotency_key: `hydrate:${tweetId}`,
+              next_run_at: new Date().toISOString()
+            }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
 
-        if (translationJobError) {
-          console.error('Error creating translation job:', translationJobError);
+          if (hydrateJobError) {
+            console.error('Error creating hydrate job:', hydrateJobError);
+          } else {
+            console.log('Hydrate job created for:', tweetId);
+            try {
+              await supabase
+                .from('pipeline_events')
+                .insert({
+                  subject_type: 'post', subject_id: tweetId,
+                  step: 'hydrate', status: 'queued',
+                  started_at: new Date().toISOString(),
+                  meta: { source: 'webhook', text_length: text.length }
+                });
+            } catch (_e) {}
+          }
         } else {
-          console.log('Translation job created for:', tweetId);
-          try {
-            await supabase
-              .from('pipeline_events')
-              .insert({
-                subject_type: 'post',
-                subject_id: tweetId,
-                step: 'translate',
-                status: 'queued',
-                started_at: new Date().toISOString(),
-                meta: { source: 'webhook' }
-              });
-          } catch (_e) {}
+          // Standard path: create translation job directly
+          const { error: translationJobError } = await supabase
+            .from('jobs')
+            .upsert({
+              type: 'translate',
+              payload: { tweet_id: tweetId },
+              status: 'pending',
+              priority: 10,
+              idempotency_key: `translate:${tweetId}`,
+              next_run_at: new Date().toISOString()
+            }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+
+          if (translationJobError) {
+            console.error('Error creating translation job:', translationJobError);
+          } else {
+            console.log('Translation job created for:', tweetId);
+            try {
+              await supabase
+                .from('pipeline_events')
+                .insert({
+                  subject_type: 'post',
+                  subject_id: tweetId,
+                  step: 'translate',
+                  status: 'queued',
+                  started_at: new Date().toISOString(),
+                  meta: { source: 'webhook' }
+                });
+            } catch (_e) {}
+          }
         }
 
         // Create media download job for tweets with media

@@ -386,8 +386,11 @@ export type Database = {
           created_at: string
           delivery_decision: string | null
           has_media: boolean | null
+          hydrated_at: string | null
+          hydration_source: string | null
           importance_score: number | null
           importance_tags: string[] | null
+          is_truncated: boolean
           lang_original: string | null
           text_original: string | null
           text_translated: string | null
@@ -406,8 +409,11 @@ export type Database = {
           created_at?: string
           delivery_decision?: string | null
           has_media?: boolean | null
+          hydrated_at?: string | null
+          hydration_source?: string | null
           importance_score?: number | null
           importance_tags?: string[] | null
+          is_truncated?: boolean
           lang_original?: string | null
           text_original?: string | null
           text_translated?: string | null
@@ -426,8 +432,11 @@ export type Database = {
           created_at?: string
           delivery_decision?: string | null
           has_media?: boolean | null
+          hydrated_at?: string | null
+          hydration_source?: string | null
           importance_score?: number | null
           importance_tags?: string[] | null
+          is_truncated?: boolean
           lang_original?: string | null
           text_original?: string | null
           text_translated?: string | null
@@ -830,7 +839,10 @@ export type Database = {
           attempts: number
           delivery_error: string
           delivery_status: string
+          hydrated_at: string
+          hydration_source: string
           ingest_at: string
+          is_truncated: boolean
           lang_original: string
           media_downloaded: number
           media_total: number

@@ -218,6 +218,9 @@ serve(async (req) => {
             case 'reprocess':
               success = await handleReprocessJob(job, supabase);
               break;
+            case 'hydrate_tweet':
+              success = await handleHydrateTweetJob(job, supabase);
+              break;
             default:
               console.error(`Unknown job type: ${job.type}`);
               success = false;
@@ -833,6 +836,7 @@ const MAX_ATTEMPTS: Record<string, number> = {
   download_media: 3,
   moderate: 3,
   reprocess: 3,
+  hydrate_tweet: 3,
 };
 
 async function handleJobFailure(supabase: ReturnType<typeof createClient>, job: Record<string, unknown>, errorOrMessage?: Error | string) {
@@ -1011,6 +1015,7 @@ function normalizeStep(type: string): string {
     case 'deliver': return 'deliver';
     case 'download_media': return 'media';
     case 'moderate': return 'moderate';
+    case 'hydrate_tweet': return 'hydrate';
     default: return type;
   }
 }
@@ -1082,4 +1087,266 @@ async function computeAdaptiveSpacing(supabase: ReturnType<typeof createClient>)
 
 async function getChatIdForJob(_job: Record<string, unknown>, _supabase: ReturnType<typeof createClient>): Promise<string | null> {
   try { return Deno.env.get('TELEGRAM_CHAT_ID') || null; } catch (_e) { return null; }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Tweet hydration via X API v2 (for truncated tweets)
+// ─────────────────────────────────────────────────────────────────────
+
+const HYDRATE_TEXT_ENCODER = new TextEncoder();
+
+function hydratePercentEncode(s: string): string {
+  return encodeURIComponent(s).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
+async function hydrateHmacSha1(key: string, data: string): Promise<string> {
+  const cryptoKey = await crypto.subtle.importKey("raw", HYDRATE_TEXT_ENCODER.encode(key), { name: "HMAC", hash: "SHA-1" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", cryptoKey, HYDRATE_TEXT_ENCODER.encode(data));
+  return btoa(String.fromCharCode(...new Uint8Array(sig)));
+}
+
+async function hydrateOauthHeader(
+  method: string,
+  baseUrl: string,
+  queryParams: Record<string, string>,
+  consumerKey: string,
+  consumerSecret: string,
+  accessToken: string,
+  tokenSecret: string,
+): Promise<string> {
+  const oauthParams: Record<string, string> = {
+    oauth_consumer_key: consumerKey,
+    oauth_nonce: crypto.randomUUID().replace(/-/g, ""),
+    oauth_signature_method: "HMAC-SHA1",
+    oauth_timestamp: Math.floor(Date.now() / 1000).toString(),
+    oauth_token: accessToken,
+    oauth_version: "1.0",
+  };
+  const allParams = { ...oauthParams, ...queryParams };
+  const paramString = Object.keys(allParams).sort()
+    .map((k) => `${hydratePercentEncode(k)}=${hydratePercentEncode(allParams[k])}`).join("&");
+  const baseString = `${method.toUpperCase()}&${hydratePercentEncode(baseUrl)}&${hydratePercentEncode(paramString)}`;
+  const signingKey = `${hydratePercentEncode(consumerSecret)}&${hydratePercentEncode(tokenSecret)}`;
+  oauthParams.oauth_signature = await hydrateHmacSha1(signingKey, baseString);
+  return `OAuth ${Object.keys(oauthParams).sort()
+    .map((k) => `${hydratePercentEncode(k)}="${hydratePercentEncode(oauthParams[k])}"`).join(", ")}`;
+}
+
+// Reads Twitter creds from env first; falls back to digest_config settings row (same pattern as digest-compiler).
+async function getTwitterCreds(supabase: ReturnType<typeof createClient>): Promise<{ ck: string; cs: string; at: string; ats: string } | null> {
+  let ck = Deno.env.get("TWITTER_CONSUMER_KEY") || "";
+  let cs = Deno.env.get("TWITTER_CONSUMER_SECRET") || "";
+  let at = Deno.env.get("TWITTER_ACCESS_TOKEN") || "";
+  let ats = Deno.env.get("TWITTER_ACCESS_TOKEN_SECRET") || "";
+  if (!ck || !cs || !at || !ats) {
+    try {
+      const { data } = await supabase.from('settings').select('value').eq('key', 'digest_config').maybeSingle();
+      const v = (data?.value || {}) as Record<string, unknown>;
+      ck = ck || String(v.twitter_consumer_key || "");
+      cs = cs || String(v.twitter_consumer_secret || "");
+      at = at || String(v.twitter_access_token || "");
+      ats = ats || String(v.twitter_access_token_secret || "");
+    } catch { /* fall through */ }
+  }
+  if (!ck || !cs || !at || !ats) return null;
+  return { ck, cs, at, ats };
+}
+
+// Best-effort increment of x_api_usage settings counter (rolling 24h).
+async function recordXApiCall(supabase: ReturnType<typeof createClient>, errorMsg?: string | null): Promise<void> {
+  try {
+    const { data } = await supabase.from('settings').select('value').eq('key', 'x_api_usage').maybeSingle();
+    const cur = (data?.value || {}) as Record<string, unknown>;
+    const total = (typeof cur.total === 'number' ? cur.total : 0) + 1;
+    const calls = Array.isArray(cur.calls_24h) ? (cur.calls_24h as string[]) : [];
+    const now = new Date();
+    const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const trimmed = calls.filter((ts) => { try { return new Date(ts) >= cutoff; } catch { return false; } });
+    trimmed.push(now.toISOString());
+    await supabase.from('settings').update({
+      value: { total, calls_24h: trimmed, last_call_at: now.toISOString(), last_error: errorMsg ?? null },
+      updated_at: now.toISOString(),
+    }).eq('key', 'x_api_usage');
+  } catch (e) {
+    console.warn('recordXApiCall failed:', (e as Error).message);
+  }
+}
+
+async function queueTranslateAfterHydrate(supabase: ReturnType<typeof createClient>, tweetId: string, fallback: boolean): Promise<void> {
+  await supabase.from('jobs').upsert({
+    type: 'translate',
+    payload: { tweet_id: tweetId },
+    status: 'pending',
+    priority: 10,
+    idempotency_key: `translate:${tweetId}`,
+    next_run_at: new Date().toISOString(),
+    result_meta: fallback ? { fallback: 'truncated' } : null,
+  }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+
+  try {
+    await supabase.from('pipeline_events').insert({
+      subject_type: 'post', subject_id: tweetId,
+      step: 'translate', status: 'queued',
+      started_at: new Date().toISOString(),
+      meta: { source: fallback ? 'hydrate_fallback' : 'hydrate' },
+    });
+  } catch { /* best-effort */ }
+}
+
+// Extract numeric tweet id from RSS guid/url. Twitter tweet IDs are 18-19 digit numbers.
+function extractNumericTweetId(rawTweetId: string, url?: string | null): string | null {
+  const candidates: string[] = [rawTweetId];
+  if (url) candidates.push(url);
+  for (const c of candidates) {
+    if (!c) continue;
+    // /status/123456789 — most reliable
+    const m1 = c.match(/status\/(\d{5,25})/);
+    if (m1) return m1[1];
+    // raw long digit string
+    const m2 = c.match(/(?:^|[^0-9])(\d{15,25})(?:$|[^0-9])/);
+    if (m2) return m2[1];
+  }
+  return null;
+}
+
+async function handleHydrateTweetJob(job: Record<string, unknown>, supabase: ReturnType<typeof createClient>): Promise<boolean> {
+  const payload = (job.payload || {}) as Record<string, unknown>;
+  const tweetId = String(payload.tweet_id || '');
+  if (!tweetId) {
+    console.error('hydrate_tweet: missing tweet_id');
+    return false;
+  }
+
+  // Load post; idempotent if already hydrated
+  const { data: post, error: postErr } = await supabase
+    .from('posts')
+    .select('tweet_id, text_original, url, hydrated_at, is_truncated')
+    .eq('tweet_id', tweetId)
+    .maybeSingle();
+
+  if (postErr || !post) {
+    console.error('hydrate_tweet: post not found', tweetId, postErr?.message);
+    return false;
+  }
+
+  if (post.hydrated_at) {
+    console.log('hydrate_tweet: already hydrated, ensuring translate job exists', tweetId);
+    await queueTranslateAfterHydrate(supabase, tweetId, false);
+    return true;
+  }
+
+  const numericId = extractNumericTweetId(tweetId, post.url as string | null);
+  if (!numericId) {
+    console.warn('hydrate_tweet: cannot extract numeric tweet id, falling back to translate', tweetId);
+    await supabase.from('posts').update({
+      hydrated_at: new Date().toISOString(),
+      hydration_source: 'no_id_fallback',
+    }).eq('tweet_id', tweetId);
+    await queueTranslateAfterHydrate(supabase, tweetId, true);
+    return true;
+  }
+
+  const creds = await getTwitterCreds(supabase);
+  if (!creds) {
+    console.error('hydrate_tweet: Twitter creds not configured, falling back to truncated translate', tweetId);
+    await supabase.from('posts').update({
+      hydrated_at: new Date().toISOString(),
+      hydration_source: 'no_creds_fallback',
+    }).eq('tweet_id', tweetId);
+    await queueTranslateAfterHydrate(supabase, tweetId, true);
+    await recordXApiCall(supabase, 'no_creds');
+    return true;
+  }
+
+  const baseUrl = `https://api.x.com/2/tweets/${numericId}`;
+  const queryParams = { 'tweet.fields': 'note_tweet,text,lang' };
+  const fullUrl = `${baseUrl}?${Object.entries(queryParams).map(([k, v]) => `${hydratePercentEncode(k)}=${hydratePercentEncode(v)}`).join('&')}`;
+
+  let auth: string;
+  try {
+    auth = await hydrateOauthHeader('GET', baseUrl, queryParams, creds.ck, creds.cs, creds.at, creds.ats);
+  } catch (e) {
+    console.error('hydrate_tweet: oauth signing failed', (e as Error).message);
+    return false;
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(fullUrl, { method: 'GET', headers: { Authorization: auth } });
+  } catch (e) {
+    console.error('hydrate_tweet: network error', (e as Error).message);
+    await recordXApiCall(supabase, `network: ${(e as Error).message}`);
+    return false; // retryable via handleJobFailure
+  }
+
+  await recordXApiCall(supabase, res.ok ? null : `http_${res.status}`);
+
+  if (res.status === 404) {
+    console.warn('hydrate_tweet: tweet not found on X (404), falling back to truncated translate', tweetId);
+    await supabase.from('posts').update({
+      hydrated_at: new Date().toISOString(),
+      hydration_source: 'x_api_404',
+    }).eq('tweet_id', tweetId);
+    await queueTranslateAfterHydrate(supabase, tweetId, true);
+    return true;
+  }
+
+  if (res.status === 429) {
+    const retryAfter = parseInt(res.headers.get('x-rate-limit-reset') || '0', 10);
+    const waitSec = retryAfter > 0 ? Math.max(60, retryAfter - Math.floor(Date.now() / 1000)) : 900;
+    throw new Error(`hydrate_tweet rate limited, retry after ${waitSec}s`);
+  }
+
+  if (res.status === 401 || res.status === 403) {
+    const txt = await res.text().catch(() => '');
+    console.error(`hydrate_tweet: auth failed ${res.status}`, txt.slice(0, 300));
+    return false; // will retry, then dead-letter; admin must rotate creds
+  }
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    console.error(`hydrate_tweet: HTTP ${res.status}`, txt.slice(0, 300));
+    return false;
+  }
+
+  let json: Record<string, unknown>;
+  try {
+    json = await res.json();
+  } catch (e) {
+    console.error('hydrate_tweet: invalid JSON', (e as Error).message);
+    return false;
+  }
+
+  const data = (json.data || {}) as Record<string, unknown>;
+  const noteTweet = (data.note_tweet || {}) as Record<string, unknown>;
+  const fullText = (noteTweet.text as string) || (data.text as string) || '';
+  const lang = (data.lang as string) || null;
+
+  if (!fullText) {
+    console.warn('hydrate_tweet: empty text from X API, falling back', tweetId);
+    await supabase.from('posts').update({
+      hydrated_at: new Date().toISOString(),
+      hydration_source: 'x_api_empty',
+    }).eq('tweet_id', tweetId);
+    await queueTranslateAfterHydrate(supabase, tweetId, true);
+    return true;
+  }
+
+  const updatePayload: Record<string, unknown> = {
+    text_original: fullText,
+    hydrated_at: new Date().toISOString(),
+    hydration_source: 'x_api',
+    is_truncated: false,
+  };
+  if (lang) updatePayload.lang_original = lang;
+
+  const { error: updErr } = await supabase.from('posts').update(updatePayload).eq('tweet_id', tweetId);
+  if (updErr) {
+    console.error('hydrate_tweet: post update failed', updErr.message);
+    return false;
+  }
+
+  console.log(`hydrate_tweet: success ${tweetId} (orig=${(post.text_original || '').length} chars → full=${fullText.length} chars)`);
+  await queueTranslateAfterHydrate(supabase, tweetId, false);
+  return true;
 }

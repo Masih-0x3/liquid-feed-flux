@@ -21,6 +21,9 @@ export interface MonitoringEntry {
   importance_score: number | null;
   importance_tags: string[] | null;
   delivery_decision: string | null;
+  is_truncated: boolean;
+  hydrated_at: string | null;
+  hydration_source: string | null;
 }
 
 export interface PipelineEvent {
@@ -65,6 +68,9 @@ async function fetchMonitoringPage({ pageParam = 0 }: { pageParam: number }): Pr
     const translatedAt = rpc?.translated_at || post.translated_at;
     const isTranslated = !!(translatedAt || (post.text_translated && post.text_translated !== post.text_original));
     const deliveryStatus = (rpc?.delivery_status as string) || 'pending';
+    const isTruncated = (rpc?.is_truncated as boolean) ?? false;
+    const hydratedAt = (rpc?.hydrated_at as string) ?? null;
+    const hydrationSource = (rpc?.hydration_source as string) ?? null;
 
     return {
       tweet_id: post.tweet_id,
@@ -85,6 +91,9 @@ async function fetchMonitoringPage({ pageParam = 0 }: { pageParam: number }): Pr
       importance_score: post.importance_score ?? null,
       importance_tags: post.importance_tags ?? null,
       delivery_decision: post.delivery_decision ?? null,
+      is_truncated: isTruncated,
+      hydrated_at: hydratedAt,
+      hydration_source: hydrationSource,
     };
   });
 

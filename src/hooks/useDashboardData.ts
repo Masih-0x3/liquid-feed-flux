@@ -7,6 +7,9 @@ export interface DashboardMetrics {
   postsTranslated: number;
   postsDelivered: number;
   failedJobs: number;
+  postsTruncated24h: number;
+  postsHydrated24h: number;
+  xApiCalls24h: number;
 }
 
 export interface PipelineHealth {
@@ -31,6 +34,9 @@ interface RpcResult {
     posts_translated: number;
     posts_delivered: number;
     failed_jobs: number;
+    posts_truncated_24h?: number;
+    posts_hydrated_24h?: number;
+    x_api_calls_24h?: number;
   };
   health: {
     success_rate: number;
@@ -59,6 +65,9 @@ async function fetchDashboard() {
     postsTranslated: rpc.metrics.posts_translated,
     postsDelivered: rpc.metrics.posts_delivered,
     failedJobs: rpc.metrics.failed_jobs,
+    postsTruncated24h: rpc.metrics.posts_truncated_24h ?? 0,
+    postsHydrated24h: rpc.metrics.posts_hydrated_24h ?? 0,
+    xApiCalls24h: rpc.metrics.x_api_calls_24h ?? 0,
   };
 
   const health: PipelineHealth = {
