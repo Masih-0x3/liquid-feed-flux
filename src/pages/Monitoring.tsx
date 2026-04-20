@@ -334,17 +334,12 @@ export default function Monitoring() {
                       <div className="mt-2"><StatusIndicator entry={entry} /></div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    {entry.delivery_decision === 'skip' && (
-                      <Button size="sm" variant="outline" onClick={() => handleForceDeliver(entry.tweet_id)}>
-                        <Send className="w-3 h-3 mr-1" />Force Deliver
-                      </Button>
-                    )}
+                  <div className="flex items-center gap-2 flex-wrap justify-end">
                     <Badge variant={entry.is_translated ? 'default' : 'secondary'}>{entry.is_translated ? 'Translated' : 'Original'}</Badge>
                     <Badge variant={entry.is_delivered ? 'default' : 'outline'}>{entry.is_delivered ? 'Delivered' : 'Pending'}</Badge>
                     {(() => {
                       const xs = entry.x_status;
-                      if (!xs) return null;
+                      if (!xs) return <Badge variant="outline" className="text-muted-foreground"><Twitter className="w-3 h-3 mr-1" />X: —</Badge>;
                       const cls =
                         xs === 'posted' ? 'bg-green-500/20 text-green-400 border-green-500/30'
                         : xs === 'failed' ? 'bg-destructive/20 text-destructive border-destructive/30'
@@ -360,11 +355,23 @@ export default function Monitoring() {
                         <a href={`https://x.com/i/status/${entry.x_tweet_id}`} target="_blank" rel="noopener noreferrer">{inner}</a>
                       ) : inner;
                     })()}
-                    {(entry.x_status === 'failed' || entry.x_status === 'skipped' || (entry.is_delivered && !entry.x_status)) && (
-                      <Button size="sm" variant="outline" onClick={() => handleRetryXPost(entry.tweet_id)} title="Retry posting to X">
-                        <Twitter className="w-3 h-3 mr-1" />Retry on X
-                      </Button>
-                    )}
+                    {/* Force actions — always available so admins can override any decision/state */}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleForceDeliver(entry.tweet_id)}
+                      title={entry.is_delivered ? 'Re-deliver to Telegram (overrides previous delivery)' : 'Force delivery to Telegram'}
+                    >
+                      <Send className="w-3 h-3 mr-1" />{entry.is_delivered ? 'Re-deliver' : 'Force Deliver'}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleRetryXPost(entry.tweet_id)}
+                      title={entry.x_status === 'posted' ? 'Re-post to X (overrides previous post)' : 'Force post to X'}
+                    >
+                      <Twitter className="w-3 h-3 mr-1" />{entry.x_status === 'posted' ? 'Re-post on X' : 'Force on X'}
+                    </Button>
                   </div>
                 </div>
               </CardHeader>
