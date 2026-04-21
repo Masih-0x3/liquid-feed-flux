@@ -15,6 +15,7 @@ import { format } from "date-fns";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerDescription, DrawerClose, DrawerFooter } from "@/components/ui/drawer";
 import { useMonitoringData, type MonitoringEntry, type PipelineEvent } from "@/hooks/useMonitoringData";
 import { useQueryClient } from "@tanstack/react-query";
+import { MediaThumbnails } from "@/components/monitoring/MediaThumbnails";
 
 // Admin action helpers
 async function adminEditTranslation(tweetId: string, text: string) {
@@ -376,6 +377,7 @@ export default function Monitoring() {
                 </div>
               </CardHeader>
               <CardContent>
+                <MediaThumbnails tweetId={entry.tweet_id} />
                 <div className="mb-4">
                   <h4 className="font-medium mb-2 text-sm text-muted-foreground">English</h4>
                   <p className="text-sm bg-muted/50 p-3 rounded border">{entry.text_original || '[No content]'}</p>
