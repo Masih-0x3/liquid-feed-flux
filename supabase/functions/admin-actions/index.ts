@@ -517,6 +517,84 @@ serve(async (req) => {
         }
       }
 
+      // ===== Backfill: re-hydrate recent truncated tweets matching new heuristics =====
+      case 'rehydrate_recent_truncated': {
+        const hours = typeof body.hours === 'number' && body.hours > 0 && body.hours <= 168 ? body.hours : 24;
+        const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+
+        // Pull recent posts that haven't been hydrated yet. Cap at 500 to stay safe.
+        const { data: posts, error: fetchErr } = await supabase
+          .from('posts')
+          .select('tweet_id, text_original, url')
+          .is('hydrated_at', null)
+          .gte('created_at', since)
+          .order('created_at', { ascending: false })
+          .limit(500);
+
+        if (fetchErr) return jsonResponse({ ok: false, error: fetchErr.message }, 500);
+
+        // Re-implement the same heuristics as webhooks-rssapp/detectTruncation
+        const looksTruncated = (raw: string | null | undefined): boolean => {
+          if (!raw) return false;
+          const t = raw.trim();
+          if (!t) return false;
+          if (/(^|\s)(show\s+more|show\s+this\s+thread|read\s+more)\s*$/i.test(t)) return true;
+          if (/(\u2026|\.{3}|\[\u2026\]|\[\.{3}\])\s*$/.test(t) && t.length >= 200) return true;
+          if (t.length >= 270) {
+            const last = t.charAt(t.length - 1);
+            if (!['.', '!', '?', '\u061F', '"', ')', '\u201D', '\u300D'].includes(last)) return true;
+          }
+          if (/\b(pic\.?|pic\.t|pic\.tw(?:itter)?(?:\.c(?:om?)?)?\/?)\s*$/i.test(t)) return true;
+          if (t.length >= 240 && /(\u2026|\[\u2026\]|\.{3}|\[\.{3}\])/.test(t)) {
+            const last = t.charAt(t.length - 1);
+            if (!['"', ')', '\u201D', '\u300D', ']', '}'].includes(last)) return true;
+          }
+          if (t.length >= 240) {
+            const tokens = t.split(/\s+/);
+            const lastToken = tokens[tokens.length - 1] || '';
+            if (/^(a|an|the|to|of|in|on|for|and|or|but|with|by|at|as|is|was|are|were|has|have|had)\.?$/i.test(lastToken)) return true;
+          }
+          return false;
+        };
+
+        const matches = (posts ?? []).filter((p) => looksTruncated(p.text_original as string | null));
+        let queued = 0;
+        const errors: string[] = [];
+
+        for (const p of matches) {
+          const tweetId = p.tweet_id as string;
+          // Mark as truncated so worker behavior is consistent
+          const { error: upErr } = await supabase
+            .from('posts')
+            .update({ is_truncated: true })
+            .eq('tweet_id', tweetId);
+          if (upErr) { errors.push(`update ${tweetId}: ${upErr.message}`); continue; }
+
+          const { error: jobErr } = await supabase
+            .from('jobs')
+            .upsert({
+              type: 'hydrate_tweet',
+              payload: { tweet_id: tweetId },
+              status: 'pending',
+              priority: 15,
+              idempotency_key: `hydrate:backfill:${tweetId}`,
+              next_run_at: new Date().toISOString(),
+            }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+
+          if (jobErr) { errors.push(`job ${tweetId}: ${jobErr.message}`); continue; }
+          queued++;
+        }
+
+        return jsonResponse({
+          ok: true,
+          scanned: posts?.length ?? 0,
+          matched: matches.length,
+          queued,
+          hours,
+          errors: errors.slice(0, 10),
+        });
+      }
+
       // ===== Translation Playground (no DB writes) =====
       case 'preview_translation': {
         const text = typeof body.text === 'string' ? body.text.trim() : '';

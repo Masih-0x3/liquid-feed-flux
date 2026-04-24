@@ -56,6 +56,9 @@ export default function XAutomationSettings({ twitterHydration, xApiUsage, xPost
   const [hydrateLoading, setHydrateLoading] = useState(false);
   const [hydrateResult, setHydrateResult] = useState<{ ok: boolean; text?: string; note_tweet?: string; lang?: string; raw?: unknown; error?: string } | null>(null);
 
+  const [backfillLoading, setBackfillLoading] = useState(false);
+  const [backfillResult, setBackfillResult] = useState<{ ok: boolean; scanned?: number; matched?: number; queued?: number; hours?: number; error?: string } | null>(null);
+
   const calls24h = Array.isArray(xApiUsage?.calls_24h)
     ? xApiUsage!.calls_24h!.filter((ts) => {
         try { return new Date(ts).getTime() > Date.now() - 24 * 60 * 60 * 1000; } catch { return false; }
@@ -146,6 +149,31 @@ export default function XAutomationSettings({ twitterHydration, xApiUsage, xPost
       toast({ title: 'Hydration test failed', description: msg, variant: 'destructive' });
     } finally {
       setHydrateLoading(false);
+    }
+  };
+
+  const runBackfill = async () => {
+    setBackfillLoading(true);
+    setBackfillResult(null);
+    try {
+      const { data, error } = await supabase.functions.invoke('admin-actions', {
+        body: { action: 'rehydrate_recent_truncated', hours: 24 },
+      });
+      if (error) throw error;
+      setBackfillResult(data);
+      toast({
+        title: data?.ok ? 'Backfill complete' : 'Backfill failed',
+        description: data?.ok
+          ? `Scanned ${data.scanned}, matched ${data.matched}, queued ${data.queued}.`
+          : data?.error,
+        variant: data?.ok ? 'default' : 'destructive',
+      });
+    } catch (e) {
+      const msg = (e as Error).message;
+      setBackfillResult({ ok: false, error: msg });
+      toast({ title: 'Backfill failed', description: msg, variant: 'destructive' });
+    } finally {
+      setBackfillLoading(false);
     }
   };
 
@@ -248,6 +276,29 @@ export default function XAutomationSettings({ twitterHydration, xApiUsage, xPost
           )}
 
           {xApiUsage?.last_error && <p className="text-xs text-destructive">Last error: {String(xApiUsage.last_error)}</p>}
+
+          <Separator />
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div>
+                <p className="text-sm font-medium text-glass-foreground">Re-hydrate recent truncated tweets</p>
+                <p className="text-xs text-muted-foreground">Scans posts from the last 24h, finds ones that look truncated (e.g. ending in <code>pic.</code>, mid-sentence ellipsis, dangling articles), and queues them for X API hydration.</p>
+              </div>
+              <Button onClick={runBackfill} disabled={backfillLoading} variant="outline" className="border-primary/50 hover:bg-primary/10">
+                {backfillLoading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Scanning...</> : <><Sparkles className="w-4 h-4 mr-2" />Run backfill (24h)</>}
+              </Button>
+            </div>
+            {backfillResult && (
+              <div className={`rounded-lg border p-3 text-xs ${backfillResult.ok ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-destructive/30 bg-destructive/5'}`}>
+                {backfillResult.ok ? (
+                  <span>Scanned <strong>{backfillResult.scanned}</strong> · matched <strong>{backfillResult.matched}</strong> · queued <strong>{backfillResult.queued}</strong> hydrate jobs.</span>
+                ) : (
+                  <span className="text-destructive">{backfillResult.error || 'Unknown error'}</span>
+                )}
+              </div>
+            )}
+          </div>
         </CardContent>
       </Card>
 
