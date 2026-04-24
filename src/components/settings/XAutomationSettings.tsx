@@ -276,6 +276,29 @@ export default function XAutomationSettings({ twitterHydration, xApiUsage, xPost
           )}
 
           {xApiUsage?.last_error && <p className="text-xs text-destructive">Last error: {String(xApiUsage.last_error)}</p>}
+
+          <Separator />
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div>
+                <p className="text-sm font-medium text-glass-foreground">Re-hydrate recent truncated tweets</p>
+                <p className="text-xs text-muted-foreground">Scans posts from the last 24h, finds ones that look truncated (e.g. ending in <code>pic.</code>, mid-sentence ellipsis, dangling articles), and queues them for X API hydration.</p>
+              </div>
+              <Button onClick={runBackfill} disabled={backfillLoading} variant="outline" className="border-primary/50 hover:bg-primary/10">
+                {backfillLoading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Scanning...</> : <><Sparkles className="w-4 h-4 mr-2" />Run backfill (24h)</>}
+              </Button>
+            </div>
+            {backfillResult && (
+              <div className={`rounded-lg border p-3 text-xs ${backfillResult.ok ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-destructive/30 bg-destructive/5'}`}>
+                {backfillResult.ok ? (
+                  <span>Scanned <strong>{backfillResult.scanned}</strong> · matched <strong>{backfillResult.matched}</strong> · queued <strong>{backfillResult.queued}</strong> hydrate jobs.</span>
+                ) : (
+                  <span className="text-destructive">{backfillResult.error || 'Unknown error'}</span>
+                )}
+              </div>
+            )}
+          </div>
         </CardContent>
       </Card>
 
