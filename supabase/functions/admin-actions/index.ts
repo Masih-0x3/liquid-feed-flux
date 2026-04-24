@@ -594,6 +594,8 @@ serve(async (req) => {
           errors: errors.slice(0, 10),
         });
       }
+
+      // ===== Translation Playground (no DB writes) =====
       case 'preview_translation': {
         const text = typeof body.text === 'string' ? body.text.trim() : '';
         if (!text) return jsonResponse({ ok: false, error: 'text is required' }, 400);
