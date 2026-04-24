@@ -33,6 +33,30 @@ function detectTruncation(text: string): boolean {
     if (!terminalPunct.includes(lastChar)) return true;
   }
 
+  // --- Additional RSS.app-specific truncation signals ---
+
+  // 1) Trailing pic.twitter.com URL fragment (e.g. "...make a… pic.", "...pic.twitt", "...pic.twitter.co")
+  //    RSS.app frequently cuts inside the auto-appended pic.twitter.com/<id> URL.
+  if (/\b(pic\.?|pic\.t|pic\.tw(?:itter)?(?:\.c(?:om?)?)?\/?)\s*$/i.test(trimmed)) return true;
+
+  // 2) Mid-text ellipsis on long content with non-closing final char
+  //    Catches "...make a… pic." style where the ellipsis sits inside the body.
+  if (trimmed.length >= 240 && /(\u2026|\[\u2026\]|\.{3}|\[\.{3}\])/.test(trimmed)) {
+    const lastChar = trimmed.charAt(trimmed.length - 1);
+    const closingChars = ['"', ')', '\u201D', '\u300D', ']', '}'];
+    if (!closingChars.includes(lastChar)) return true;
+  }
+
+  // 3) Long text ending on a dangling article / preposition / conjunction
+  //    (optionally followed by a stray period). Real sentences don't end this way.
+  if (trimmed.length >= 240) {
+    const tokens = trimmed.split(/\s+/);
+    const lastToken = tokens[tokens.length - 1] || '';
+    if (/^(a|an|the|to|of|in|on|for|and|or|but|with|by|at|as|is|was|are|were|has|have|had)\.?$/i.test(lastToken)) {
+      return true;
+    }
+  }
+
   return false;
 }
 
