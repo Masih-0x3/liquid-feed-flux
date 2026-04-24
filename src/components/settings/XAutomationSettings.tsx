@@ -56,6 +56,9 @@ export default function XAutomationSettings({ twitterHydration, xApiUsage, xPost
   const [hydrateLoading, setHydrateLoading] = useState(false);
   const [hydrateResult, setHydrateResult] = useState<{ ok: boolean; text?: string; note_tweet?: string; lang?: string; raw?: unknown; error?: string } | null>(null);
 
+  const [backfillLoading, setBackfillLoading] = useState(false);
+  const [backfillResult, setBackfillResult] = useState<{ ok: boolean; scanned?: number; matched?: number; queued?: number; hours?: number; error?: string } | null>(null);
+
   const calls24h = Array.isArray(xApiUsage?.calls_24h)
     ? xApiUsage!.calls_24h!.filter((ts) => {
         try { return new Date(ts).getTime() > Date.now() - 24 * 60 * 60 * 1000; } catch { return false; }
