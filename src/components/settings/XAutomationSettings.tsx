@@ -152,6 +152,31 @@ export default function XAutomationSettings({ twitterHydration, xApiUsage, xPost
     }
   };
 
+  const runBackfill = async () => {
+    setBackfillLoading(true);
+    setBackfillResult(null);
+    try {
+      const { data, error } = await supabase.functions.invoke('admin-actions', {
+        body: { action: 'rehydrate_recent_truncated', hours: 24 },
+      });
+      if (error) throw error;
+      setBackfillResult(data);
+      toast({
+        title: data?.ok ? 'Backfill complete' : 'Backfill failed',
+        description: data?.ok
+          ? `Scanned ${data.scanned}, matched ${data.matched}, queued ${data.queued}.`
+          : data?.error,
+        variant: data?.ok ? 'default' : 'destructive',
+      });
+    } catch (e) {
+      const msg = (e as Error).message;
+      setBackfillResult({ ok: false, error: msg });
+      toast({ title: 'Backfill failed', description: msg, variant: 'destructive' });
+    } finally {
+      setBackfillLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* 1. Credentials */}
