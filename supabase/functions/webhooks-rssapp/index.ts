@@ -61,7 +61,8 @@ function detectTruncation(text: string): boolean {
 }
 
 // Read the twitter_hydration setting; default to enabled if missing.
-async function isHydrationEnabled(supabase: ReturnType<typeof createClient>): Promise<boolean> {
+async function isHydrationEnabled(// deno-lint-ignore no-explicit-any
+supabase: any): Promise<boolean> {
   try {
     const { data } = await supabase.from('settings').select('value').eq('key', 'twitter_hydration').maybeSingle();
     if (!data || !data.value || typeof data.value !== 'object') return true;
