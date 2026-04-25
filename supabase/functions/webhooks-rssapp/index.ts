@@ -133,16 +133,16 @@ serve(async (req) => {
     // RSS.app webhook structure: { data: { items_new: [...] } }
     if (payloadAny.data && payloadAny.data.items_new && Array.isArray(payloadAny.data.items_new)) {
       items = payloadAny.data.items_new;
-    } else if (payload.data && payload.data.items && Array.isArray(payload.data.items)) {
-      items = payload.data.items;
-    } else if (payload.items && Array.isArray(payload.items)) {
-      items = payload.items;
-    } else if (payload.item) {
-      items = Array.isArray(payload.item) ? payload.item : [payload.item];
-    } else if (payload.entries && Array.isArray(payload.entries)) {
-      items = payload.entries;
-    } else if (payload.entry) {
-      items = Array.isArray(payload.entry) ? payload.entry : [payload.entry];
+    } else if (payloadAny.data && payloadAny.data.items && Array.isArray(payloadAny.data.items)) {
+      items = payloadAny.data.items;
+    } else if (payloadAny.items && Array.isArray(payloadAny.items)) {
+      items = payloadAny.items;
+    } else if (payloadAny.item) {
+      items = Array.isArray(payloadAny.item) ? payloadAny.item : [payloadAny.item];
+    } else if (payloadAny.entries && Array.isArray(payloadAny.entries)) {
+      items = payloadAny.entries;
+    } else if (payloadAny.entry) {
+      items = Array.isArray(payloadAny.entry) ? payloadAny.entry : [payloadAny.entry];
     } else if (Array.isArray(payload)) {
       items = payload;
     } else {
