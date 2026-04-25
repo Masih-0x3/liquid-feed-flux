@@ -127,10 +127,12 @@ serve(async (req) => {
 
     // Parse RSS items from the payload - handle RSS.app webhook structure
     let items = [];
+    // deno-lint-ignore no-explicit-any
+    const payloadAny = payload as any;
     
     // RSS.app webhook structure: { data: { items_new: [...] } }
-    if (payload.data && payload.data.items_new && Array.isArray(payload.data.items_new)) {
-      items = payload.data.items_new;
+    if (payloadAny.data && payloadAny.data.items_new && Array.isArray(payloadAny.data.items_new)) {
+      items = payloadAny.data.items_new;
     } else if (payload.data && payload.data.items && Array.isArray(payload.data.items)) {
       items = payload.data.items;
     } else if (payload.items && Array.isArray(payload.items)) {
