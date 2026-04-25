@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -32,7 +32,7 @@ serve(async (req) => {
   if (authError) return authError;
 
   try {
-    const supabase = createClient(
+    const supabase = createClient<any, any>(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
@@ -79,7 +79,8 @@ serve(async (req) => {
   }
 });
 
-async function downloadMediaForTweet(supabase: ReturnType<typeof createClient>, tweetId: string, dryRun: boolean) {
+async function downloadMediaForTweet(// deno-lint-ignore no-explicit-any
+supabase: any, tweetId: string, dryRun: boolean) {
   console.log(JSON.stringify({ function: 'media-processor', action: 'download_start', tweet_id: tweetId, dry_run: dryRun }));
   
   const { data: mediaItems, error: mediaError } = await supabase
@@ -105,7 +106,7 @@ async function downloadMediaForTweet(supabase: ReturnType<typeof createClient>, 
   let downloadedCount = 0;
   let failedCount = 0;
 
-  for (const media of mediaItems) {
+  for (const media of mediaItems as any[]) {
     try {
       if (!media.src_url || media.src_url.includes('pic.twitter.com')) {
         failedCount++;
@@ -170,21 +171,23 @@ async function downloadMediaForTweet(supabase: ReturnType<typeof createClient>, 
   });
 }
 
-async function cleanupOldMedia(supabase: ReturnType<typeof createClient>, dryRun: boolean) {
+async function cleanupOldMedia(// deno-lint-ignore no-explicit-any
+supabase: any, dryRun: boolean) {
   console.log(JSON.stringify({ function: 'media-processor', action: 'cleanup_start', dry_run: dryRun }));
 
   const { data: oldMedia, error: queryError } = await supabase.rpc('get_old_media', { days_old: 7 });
+  const oldMediaArr: any[] = (oldMedia as any[]) ?? [];
 
   if (queryError) throw new Error(`Failed to query old media: ${queryError.message}`);
 
-  if (!oldMedia || oldMedia.length === 0) {
+  if (!oldMediaArr || oldMediaArr.length === 0) {
     return new Response(JSON.stringify({ success: true, message: 'No old media to cleanup', deleted: 0 }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 
   if (dryRun) {
-    return new Response(JSON.stringify({ success: true, dry_run: true, would_delete: oldMedia.length }), {
+    return new Response(JSON.stringify({ success: true, dry_run: true, would_delete: oldMediaArr.length }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
@@ -193,8 +196,8 @@ async function cleanupOldMedia(supabase: ReturnType<typeof createClient>, dryRun
   let deletedCount = 0;
   let failedCount = 0;
 
-  for (let i = 0; i < oldMedia.length; i += BATCH_SIZE) {
-    const batch = oldMedia.slice(i, i + BATCH_SIZE);
+  for (let i = 0; i < oldMediaArr.length; i += BATCH_SIZE) {
+    const batch = oldMediaArr.slice(i, i + BATCH_SIZE);
     const paths = batch.map((m: Record<string, unknown>) => m.storage_path as string).filter(Boolean);
     
     if (paths.length > 0) {
@@ -210,12 +213,13 @@ async function cleanupOldMedia(supabase: ReturnType<typeof createClient>, dryRun
 
   console.log(JSON.stringify({ function: 'media-processor', action: 'cleanup_complete', deleted: deletedCount, failed: failedCount }));
 
-  return new Response(JSON.stringify({ success: true, deleted: deletedCount, failed: failedCount, total: oldMedia.length }), {
+  return new Response(JSON.stringify({ success: true, deleted: deletedCount, failed: failedCount, total: oldMediaArr.length }), {
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
 }
 
-async function getMediaInfo(supabase: ReturnType<typeof createClient>, mediaIds: string[]) {
+async function getMediaInfo(// deno-lint-ignore no-explicit-any
+supabase: any, mediaIds: string[]) {
   const { data: mediaInfo, error } = await supabase.from('media').select('*').in('id', mediaIds);
   if (error) throw new Error(`Failed to fetch media info: ${error.message}`);
   return new Response(JSON.stringify({ success: true, media: mediaInfo }), {

@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -39,7 +39,8 @@ function validateInternalToken(req: Request): Response | null {
 }
 
 // Load config from settings table with fallback defaults
-async function loadConfig(supabase: ReturnType<typeof createClient>): Promise<{
+async function loadConfig(// deno-lint-ignore no-explicit-any
+supabase: any): Promise<{
   translationPrompt: string;
   openaiModel: string;
   openaiTemperature: number;
@@ -133,7 +134,7 @@ serve(async (req) => {
   if (authError) return authError;
 
   try {
-    const supabase = createClient(
+    const supabase = createClient<any, any>(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
@@ -331,7 +332,8 @@ serve(async (req) => {
   }
 });
 
-async function handleTranslateJob(job: Record<string, unknown>, supabase: ReturnType<typeof createClient>, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean> {
+async function handleTranslateJob(job: Record<string, unknown>, // deno-lint-ignore no-explicit-any
+supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean> {
   try {
     const payload = job.payload as Record<string, unknown>;
     const tweetId = payload.tweet_id as string;
@@ -644,7 +646,8 @@ ${post.text_original}`;
   }
 }
 
-async function handleModerateJob(job: Record<string, unknown>, supabase: ReturnType<typeof createClient>): Promise<boolean> {
+async function handleModerateJob(job: Record<string, unknown>, // deno-lint-ignore no-explicit-any
+supabase: any): Promise<boolean> {
   try {
     const payload = job.payload as Record<string, unknown>;
     const subjectId = payload.subject_id as string;
@@ -688,7 +691,8 @@ async function handleModerateJob(job: Record<string, unknown>, supabase: ReturnT
   }
 }
 
-async function handleDeliverJob(job: Record<string, unknown>, supabase: ReturnType<typeof createClient>, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean> {
+async function handleDeliverJob(job: Record<string, unknown>, // deno-lint-ignore no-explicit-any
+supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean> {
   const payload = job.payload as Record<string, unknown>;
   const tweetId = payload.tweet_id as string;
   try {
@@ -897,7 +901,8 @@ const MAX_ATTEMPTS: Record<string, number> = {
   hydrate_tweet: 3,
 };
 
-async function handleJobFailure(supabase: ReturnType<typeof createClient>, job: Record<string, unknown>, errorOrMessage?: Error | string) {
+async function handleJobFailure(// deno-lint-ignore no-explicit-any
+supabase: any, job: Record<string, unknown>, errorOrMessage?: Error | string) {
   const jobType = job.type as string;
   const maxAttempts = MAX_ATTEMPTS[jobType] ?? 5;
   const attempts = (job.attempts as number) ?? 0;
@@ -968,7 +973,8 @@ function formatMessageWithTemplate(post: Record<string, unknown>, account: Recor
   }, String(messageTemplate.template || '{translated_text}'));
 }
 
-async function getMediaUrl(supabase: ReturnType<typeof createClient>, media: Record<string, unknown>): Promise<string> {
+async function getMediaUrl(// deno-lint-ignore no-explicit-any
+supabase: any, media: Record<string, unknown>): Promise<string> {
   if (media.storage_path) {
     try {
       const { data } = await supabase.storage.from('temp-media').createSignedUrl(media.storage_path as string, 3600);
@@ -978,7 +984,8 @@ async function getMediaUrl(supabase: ReturnType<typeof createClient>, media: Rec
   return media.src_url as string;
 }
 
-async function handleDownloadMediaJob(job: Record<string, unknown>, supabase: ReturnType<typeof createClient>): Promise<boolean> {
+async function handleDownloadMediaJob(job: Record<string, unknown>, // deno-lint-ignore no-explicit-any
+supabase: any): Promise<boolean> {
   const payload = job.payload as Record<string, unknown>;
   const tweetId = payload.tweet_id as string;
   try {
@@ -998,7 +1005,8 @@ async function handleDownloadMediaJob(job: Record<string, unknown>, supabase: Re
   }
 }
 
-async function handleReprocessJob(job: Record<string, unknown>, supabase: ReturnType<typeof createClient>): Promise<boolean> {
+async function handleReprocessJob(job: Record<string, unknown>, // deno-lint-ignore no-explicit-any
+supabase: any): Promise<boolean> {
   const payload = job.payload as Record<string, unknown>;
   const tweetId = payload.tweet_id as string;
   try {
@@ -1055,7 +1063,8 @@ function extractMediaFromText(text: string): Array<{type: string, url: string, w
 }
 
 // Pipeline events helpers
-async function recordPipelineEvent(supabase: ReturnType<typeof createClient>, job: Record<string, unknown>, state: 'running' | 'completed' | 'failed', error?: string) {
+async function recordPipelineEvent(// deno-lint-ignore no-explicit-any
+supabase: any, job: Record<string, unknown>, state: 'running' | 'completed' | 'failed', error?: string) {
   try {
     const payload = job.payload as Record<string, unknown> | null;
     const subjectType = (payload?.subject_type as string) ?? 'post';
@@ -1079,7 +1088,8 @@ function normalizeStep(type: string): string {
 }
 
 async function insertPipelineEvent(
-  supabase: ReturnType<typeof createClient>, subjectType: string, subjectId: string,
+  // deno-lint-ignore no-explicit-any
+supabase: any, subjectType: string, subjectId: string,
   step: string, status: string, startedAt?: string | null, endedAt?: string | null,
   error?: string | null, meta?: Record<string, unknown> | null
 ) {
@@ -1129,7 +1139,8 @@ function stripMarkdownToPlain(text: string): string {
   return text.replace(/[\\*_`\[\]()~>#+=|{}.!-]/g, ' ').replace(/\s{2,}/g, ' ').trim();
 }
 
-async function computeAdaptiveSpacing(supabase: ReturnType<typeof createClient>): Promise<number> {
+async function computeAdaptiveSpacing(// deno-lint-ignore no-explicit-any
+supabase: any): Promise<number> {
   try {
     const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
     const { count } = await supabase
@@ -1143,7 +1154,8 @@ async function computeAdaptiveSpacing(supabase: ReturnType<typeof createClient>)
   return 1500;
 }
 
-async function getChatIdForJob(_job: Record<string, unknown>, _supabase: ReturnType<typeof createClient>): Promise<string | null> {
+// deno-lint-ignore no-explicit-any
+async function getChatIdForJob(_job: Record<string, unknown>, _supabase: any): Promise<string | null> {
   try { return Deno.env.get('TELEGRAM_CHAT_ID') || null; } catch (_e) { return null; }
 }
 
@@ -1191,7 +1203,8 @@ async function hydrateOauthHeader(
 }
 
 // Reads Twitter creds from env first; falls back to digest_config settings row (same pattern as digest-compiler).
-async function getTwitterCreds(supabase: ReturnType<typeof createClient>): Promise<{ ck: string; cs: string; at: string; ats: string } | null> {
+async function getTwitterCreds(// deno-lint-ignore no-explicit-any
+supabase: any): Promise<{ ck: string; cs: string; at: string; ats: string } | null> {
   let ck = Deno.env.get("TWITTER_CONSUMER_KEY") || "";
   let cs = Deno.env.get("TWITTER_CONSUMER_SECRET") || "";
   let at = Deno.env.get("TWITTER_ACCESS_TOKEN") || "";
@@ -1211,7 +1224,8 @@ async function getTwitterCreds(supabase: ReturnType<typeof createClient>): Promi
 }
 
 // Best-effort increment of x_api_usage settings counter (rolling 24h).
-async function recordXApiCall(supabase: ReturnType<typeof createClient>, errorMsg?: string | null): Promise<void> {
+async function recordXApiCall(// deno-lint-ignore no-explicit-any
+supabase: any, errorMsg?: string | null): Promise<void> {
   try {
     const { data } = await supabase.from('settings').select('value').eq('key', 'x_api_usage').maybeSingle();
     const cur = (data?.value || {}) as Record<string, unknown>;
@@ -1230,7 +1244,8 @@ async function recordXApiCall(supabase: ReturnType<typeof createClient>, errorMs
   }
 }
 
-async function queueTranslateAfterHydrate(supabase: ReturnType<typeof createClient>, tweetId: string, fallback: boolean): Promise<void> {
+async function queueTranslateAfterHydrate(// deno-lint-ignore no-explicit-any
+supabase: any, tweetId: string, fallback: boolean): Promise<void> {
   await supabase.from('jobs').upsert({
     type: 'translate',
     payload: { tweet_id: tweetId },
@@ -1267,7 +1282,8 @@ function extractNumericTweetId(rawTweetId: string, url?: string | null): string 
   return null;
 }
 
-async function handleHydrateTweetJob(job: Record<string, unknown>, supabase: ReturnType<typeof createClient>): Promise<boolean> {
+async function handleHydrateTweetJob(job: Record<string, unknown>, // deno-lint-ignore no-explicit-any
+supabase: any): Promise<boolean> {
   const payload = (job.payload || {}) as Record<string, unknown>;
   const tweetId = String(payload.tweet_id || '');
   if (!tweetId) {

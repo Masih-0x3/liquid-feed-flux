@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -61,7 +61,8 @@ function detectTruncation(text: string): boolean {
 }
 
 // Read the twitter_hydration setting; default to enabled if missing.
-async function isHydrationEnabled(supabase: ReturnType<typeof createClient>): Promise<boolean> {
+async function isHydrationEnabled(// deno-lint-ignore no-explicit-any
+supabase: any): Promise<boolean> {
   try {
     const { data } = await supabase.from('settings').select('value').eq('key', 'twitter_hydration').maybeSingle();
     if (!data || !data.value || typeof data.value !== 'object') return true;
@@ -99,7 +100,7 @@ serve(async (req) => {
       console.warn('No webhook shared secret configured; allowing request. Set WEBHOOK_SHARED_SECRET to enforce.');
     }
 
-    const supabase = createClient(
+    const supabase = createClient<any, any>(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
@@ -126,20 +127,22 @@ serve(async (req) => {
 
     // Parse RSS items from the payload - handle RSS.app webhook structure
     let items = [];
+    // deno-lint-ignore no-explicit-any
+    const payloadAny = payload as any;
     
     // RSS.app webhook structure: { data: { items_new: [...] } }
-    if (payload.data && payload.data.items_new && Array.isArray(payload.data.items_new)) {
-      items = payload.data.items_new;
-    } else if (payload.data && payload.data.items && Array.isArray(payload.data.items)) {
-      items = payload.data.items;
-    } else if (payload.items && Array.isArray(payload.items)) {
-      items = payload.items;
-    } else if (payload.item) {
-      items = Array.isArray(payload.item) ? payload.item : [payload.item];
-    } else if (payload.entries && Array.isArray(payload.entries)) {
-      items = payload.entries;
-    } else if (payload.entry) {
-      items = Array.isArray(payload.entry) ? payload.entry : [payload.entry];
+    if (payloadAny.data && payloadAny.data.items_new && Array.isArray(payloadAny.data.items_new)) {
+      items = payloadAny.data.items_new;
+    } else if (payloadAny.data && payloadAny.data.items && Array.isArray(payloadAny.data.items)) {
+      items = payloadAny.data.items;
+    } else if (payloadAny.items && Array.isArray(payloadAny.items)) {
+      items = payloadAny.items;
+    } else if (payloadAny.item) {
+      items = Array.isArray(payloadAny.item) ? payloadAny.item : [payloadAny.item];
+    } else if (payloadAny.entries && Array.isArray(payloadAny.entries)) {
+      items = payloadAny.entries;
+    } else if (payloadAny.entry) {
+      items = Array.isArray(payloadAny.entry) ? payloadAny.entry : [payloadAny.entry];
     } else if (Array.isArray(payload)) {
       items = payload;
     } else {

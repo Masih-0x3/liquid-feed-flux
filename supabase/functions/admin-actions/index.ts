@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -15,7 +15,7 @@ async function requireAdmin(req: Request): Promise<{ userId: string } | Response
     });
   }
 
-  const supabaseAuth = createClient(
+  const supabaseAuth = createClient<any, any>(
     Deno.env.get('SUPABASE_URL') ?? '',
     Deno.env.get('SUPABASE_ANON_KEY') ?? '',
     { global: { headers: { Authorization: authHeader } } }
@@ -29,7 +29,7 @@ async function requireAdmin(req: Request): Promise<{ userId: string } | Response
     });
   }
 
-  const serviceClient = createClient(
+  const serviceClient = createClient<any, any>(
     Deno.env.get('SUPABASE_URL') ?? '',
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
   );
@@ -92,7 +92,8 @@ function getXCreds(): { ck: string; cs: string; at: string; ats: string } | null
   if (!ck || !cs || !at || !ats) return null;
   return { ck, cs, at, ats };
 }
-async function recordXApiCall(supabase: ReturnType<typeof createClient>, error?: string) {
+// deno-lint-ignore no-explicit-any
+async function recordXApiCall(supabase: any, error?: string) {
   try {
     const { data } = await supabase.from('settings').select('value').eq('key', 'x_api_usage').maybeSingle();
     const current = (data?.value as { total?: number; calls_24h?: string[] } | null) ?? { total: 0, calls_24h: [] };
@@ -234,7 +235,7 @@ serve(async (req) => {
     const authResult = await requireAdmin(req);
     if (authResult instanceof Response) return authResult;
 
-    const supabase = createClient(
+    const supabase = createClient<any, any>(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
@@ -886,6 +887,25 @@ serve(async (req) => {
           threshold,
           model,
         });
+      }
+
+      // ===== Run X followers snapshot manually =====
+      case 'run_followers_snapshot': {
+        const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+        const svcKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+        try {
+          const resp = await fetch(`${supabaseUrl}/functions/v1/x-followers-snapshot`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${svcKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ trigger: 'manual' }),
+          });
+          const text = await resp.text();
+          let parsed: unknown; try { parsed = JSON.parse(text); } catch { parsed = text; }
+          if (!resp.ok) return jsonResponse({ ok: false, error: `snapshot ${resp.status}: ${text.slice(0, 300)}`, raw: parsed }, 200);
+          return jsonResponse({ ok: true, ...(parsed as Record<string, unknown>) });
+        } catch (e) {
+          return jsonResponse({ ok: false, error: (e as Error).message }, 200);
+        }
       }
 
       default:

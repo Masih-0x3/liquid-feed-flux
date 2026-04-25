@@ -787,6 +787,129 @@ export type Database = {
         }
         Relationships: []
       }
+      x_follower_changes: {
+        Row: {
+          change_type: string
+          created_at: string
+          curr_snapshot_id: string | null
+          detected_at: string
+          id: string
+          name: string | null
+          prev_snapshot_id: string | null
+          profile_image_url: string | null
+          user_id: string
+          username: string | null
+        }
+        Insert: {
+          change_type: string
+          created_at?: string
+          curr_snapshot_id?: string | null
+          detected_at?: string
+          id?: string
+          name?: string | null
+          prev_snapshot_id?: string | null
+          profile_image_url?: string | null
+          user_id: string
+          username?: string | null
+        }
+        Update: {
+          change_type?: string
+          created_at?: string
+          curr_snapshot_id?: string | null
+          detected_at?: string
+          id?: string
+          name?: string | null
+          prev_snapshot_id?: string | null
+          profile_image_url?: string | null
+          user_id?: string
+          username?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "x_follower_changes_curr_snapshot_id_fkey"
+            columns: ["curr_snapshot_id"]
+            isOneToOne: false
+            referencedRelation: "x_follower_snapshots"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "x_follower_changes_prev_snapshot_id_fkey"
+            columns: ["prev_snapshot_id"]
+            isOneToOne: false
+            referencedRelation: "x_follower_snapshots"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      x_follower_snapshots: {
+        Row: {
+          api_calls_used: number
+          created_at: string
+          error: string | null
+          follower_count: number
+          follower_ids: string[]
+          id: string
+          next_token: string | null
+          pages_fetched: number
+          status: string
+          taken_at: string
+          trigger: string
+        }
+        Insert: {
+          api_calls_used?: number
+          created_at?: string
+          error?: string | null
+          follower_count?: number
+          follower_ids?: string[]
+          id?: string
+          next_token?: string | null
+          pages_fetched?: number
+          status?: string
+          taken_at?: string
+          trigger?: string
+        }
+        Update: {
+          api_calls_used?: number
+          created_at?: string
+          error?: string | null
+          follower_count?: number
+          follower_ids?: string[]
+          id?: string
+          next_token?: string | null
+          pages_fetched?: number
+          status?: string
+          taken_at?: string
+          trigger?: string
+        }
+        Relationships: []
+      }
+      x_followers_cache: {
+        Row: {
+          first_seen_at: string
+          last_seen_at: string
+          name: string | null
+          profile_image_url: string | null
+          user_id: string
+          username: string | null
+        }
+        Insert: {
+          first_seen_at?: string
+          last_seen_at?: string
+          name?: string | null
+          profile_image_url?: string | null
+          user_id: string
+          username?: string | null
+        }
+        Update: {
+          first_seen_at?: string
+          last_seen_at?: string
+          name?: string | null
+          profile_image_url?: string | null
+          user_id?: string
+          username?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       telegram_channel_current: {
