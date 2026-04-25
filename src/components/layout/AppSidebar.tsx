@@ -6,7 +6,8 @@ import {
   Settings,
   Activity,
   LogOut,
-  Home
+  Home,
+  Users
 } from "lucide-react";
 import {
   Sidebar,
@@ -29,6 +30,7 @@ const navigationItems = [
   { title: "Dashboard", url: "/", icon: Home },
   { title: "Monitoring", url: "/monitoring", icon: Activity },
   { title: "Threads", url: "/threads", icon: Link2 },
+  { title: "My X", url: "/x-account", icon: Users },
   { title: "Settings", url: "/settings", icon: Settings },
 ];
 
