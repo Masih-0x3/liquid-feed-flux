@@ -1,55 +1,134 @@
+## Add "My X" tab — daily follower snapshots & unfollower detection (pay-as-you-go optimized)
 
+### What you'll get
 
-## Fix: Improve truncation detection so RSS-cut tweets get hydrated
+A new sidebar entry **"My X"** at `/x-account` with:
+- Current follower count + 7/30-day delta
+- **Unfollowers list** — handle, name, avatar, when they unfollowed, profile link
+- **New followers list**
+- Snapshot history table (date, total, +N / −N, API cost estimate)
+- **"Run snapshot now"** button (manual, no daily-cap enforcement) with a confirm dialog showing estimated API cost
 
-### Root cause
+### Cost model & API budget
 
-The example tweet ends with:
+X pay-as-you-go: `GET /2/users/:id/followers` is billed per request, returning up to 1,000 users/page. So for F followers, one full snapshot = `ceil(F / 1000)` API calls.
 
+To keep cost minimal:
+
+1. **Hard cap: 1 automated snapshot per 24h.** Cron triggers at 03:00 UTC; the function checks for an existing snapshot in the last 23h and **exits early** if found. This prevents accidental double-runs (cron retries, redeploys).
+2. **Manual runs bypass the cap** but require an explicit click + confirmation showing "this will cost ~N API calls (~F followers ÷ 1000)".
+3. **Skip `/users/me` after first run** — cache your X user ID in `settings.x_self_id` permanently; saves 1 call per snapshot forever.
+4. **Skip profile hydration unless changed** — only fetch `user.fields=username,name,profile_image_url` for IDs that aren't in `x_followers_cache` OR were last seen >30 days ago. The followers endpoint itself returns these fields inline, so this is effectively free — no extra calls needed.
+5. **Snapshot only stores IDs + diffs** — profile metadata is cached separately and re-used across snapshots; we never re-fetch profiles for users we already know.
+
+Net: with F followers, daily cost = exactly `ceil(F / 1000)` calls. No hidden multipliers.
+
+### Architecture
+
+**1. Tables** (migration)
+
+```text
+x_follower_snapshots
+  id uuid pk
+  taken_at timestamptz default now()
+  trigger text                    -- 'cron' | 'manual'
+  follower_count int
+  follower_ids text[]             -- full ID list at snapshot time
+  status text                     -- 'complete' | 'partial' | 'failed'
+  pages_fetched int
+  api_calls_used int
+  error text
+  created_at timestamptz
+
+x_followers_cache
+  user_id text pk
+  username text
+  name text
+  profile_image_url text
+  first_seen_at timestamptz
+  last_seen_at timestamptz
+
+x_follower_changes
+  id uuid pk
+  detected_at timestamptz
+  user_id text
+  username text                   -- snapshot of handle at change time
+  name text
+  profile_image_url text
+  change_type text                -- 'unfollowed' | 'followed'
+  prev_snapshot_id uuid
+  curr_snapshot_id uuid
 ```
-…If Iran doesn't want to make a… pic.
+
+RLS: admin manage, authenticated read (matches existing tables).
+
+**2. Edge function: `x-followers-snapshot`**
+
+Body: `{ trigger: 'cron' | 'manual' }` (defaults to 'cron').
+
+Logic:
+1. If `trigger === 'cron'`: query latest snapshot; if `taken_at > now() - 23h`, return `{skipped: true, reason: 'daily_cap'}` with HTTP 200. **No API call made.**
+2. Resolve self ID (cached in `settings.x_self_id`).
+3. Insert snapshot row with `status='partial'`, `trigger`, `pages_fetched=0`.
+4. Page through `GET /2/users/:id/followers?max_results=1000&user.fields=username,name,profile_image_url` until `next_token` is null.
+5. On each page: accumulate IDs, upsert profiles into `x_followers_cache` (cheap DB op, no API).
+6. Increment `api_calls_used`, call `recordXApiCall` for dashboard usage tracking.
+7. On 429 (rate limit): persist progress in a `jobs` row of type `x_followers_page` with the cursor; worker resumes after the rate window. Snapshot stays `status='partial'`.
+8. When complete: set `status='complete'`, then diff vs previous **complete** snapshot:
+   - `prev - curr` → unfollowers
+   - `curr - prev` → new followers
+   - Insert into `x_follower_changes` with cached profile snapshot (so changes survive cache eviction).
+9. Return `{snapshot_id, follower_count, api_calls_used, unfollowed: N, followed: M}`.
+
+**3. Cron schedule** (daily, defensive)
+
+```sql
+select cron.schedule(
+  'x-followers-snapshot-daily', '0 3 * * *',
+  $$ select net.http_post(
+    url:='https://jzirqfzzvlbxwfzndaer.supabase.co/functions/v1/x-followers-snapshot',
+    headers:='{"Content-Type":"application/json","Authorization":"Bearer <anon>"}'::jsonb,
+    body:='{"trigger":"cron"}'::jsonb
+  ); $$
+);
 ```
 
-Two things made the current detector in `webhooks-rssapp/index.ts` (`detectTruncation`) say "not truncated":
+The 23h check inside the function is the real guard — cron is just the trigger.
 
-1. The ellipsis `…` is **mid-text** (`make a…`), not at the very end, so the "trailing ellipsis" rule doesn't match.
-2. The string ends with `.` (the leftover dot from `pic.twitter.com/...` that RSS.app chopped). `.` is in the "terminal punctuation" allowlist, so the "hard length cliff" rule also bails out.
+**4. Frontend**
 
-Result: `is_truncated=false` → no `hydrate_tweet` job queued → translation runs on the truncated text → Telegram/X get the cut version. The earlier hydration fix only handles cases where the cut is clean (ellipsis at the very end or no terminal punct).
+- Add **My X** nav item in `AppSidebar.tsx` (icon: `Users`).
+- New route `/x-account` in `App.tsx` → lazy-loaded `pages/XAccount.tsx`.
+- Hook `useXAccountData.ts` querying latest snapshot, last 30 snapshots, recent changes (default filter: unfollowed, last 30d).
+- Components:
+  - `XAccountOverview.tsx` — KPIs: current count, 24h/7d/30d Δ, last snapshot time, **next automated run**, total API calls this month
+  - `UnfollowersList.tsx` — avatar, @handle, name, unfollowed date, link to `https://x.com/<handle>`
+  - `FollowersChart.tsx` — line chart over time
+  - `SnapshotHistoryTable.tsx` — date, count, Δ, trigger (cron/manual), API calls used
+  - **Manual run button**: opens confirm dialog "This will use ~N API calls. Continue?" → calls new `admin-actions` action `run_followers_snapshot` with `trigger:'manual'`.
 
-### Fix (one-file change)
+**5. First-run UX**
 
-Tighten `detectTruncation` in `supabase/functions/webhooks-rssapp/index.ts` with three additional, conservative signals that target the exact RSS.app failure modes we see:
+Banner on first snapshot: "Baseline captured (F followers). Unfollowers will appear after the next snapshot."
 
-1. **Trailing-`pic.` / `pic.t…` artifact** — RSS.app routinely cuts inside the auto-appended `pic.twitter.com/<id>` URL. If the trimmed text ends with the regex `/\bpic\.?(\s|$)|\bpic\.t(\s|$)|\bpic\.tw(itter)?(\.com)?\/?$/i`, mark truncated. This is a near-certain truncation indicator and very low false-positive risk (real sentences don't end with the bare token "pic." after long content).
-2. **Mid-text ellipsis + length** — if any `…` / `[…]` / `...` appears in the body AND `length >= 240` AND last char isn't a closing quote/paren, mark truncated. Catches cases where Twitter's own "show more" replacement leaves an inline ellipsis followed by a chopped fragment.
-3. **Trailing single-letter or article token after long text** — if `length >= 240` and the last whitespace-separated token matches `/^(a|an|the|to|of|in|on|for|and|or|but|with|by)\.?$/i`, mark truncated. Sentences don't naturally end on dangling articles/prepositions; this is a very strong "cut mid-sentence" signal even when followed by a stray period.
+### Files
 
-These three rules are added **in addition to** the existing two; nothing existing is loosened.
+**Create**:
+- `supabase/functions/x-followers-snapshot/index.ts`
+- `src/pages/XAccount.tsx`
+- `src/components/x-account/{XAccountOverview,UnfollowersList,FollowersChart,SnapshotHistoryTable,ManualSnapshotButton}.tsx`
+- `src/hooks/useXAccountData.ts`
+- Migration: 3 tables + RLS + cron job
 
-### Backfill (one-shot, optional but recommended)
+**Modify**:
+- `src/App.tsx` — add route
+- `src/components/layout/AppSidebar.tsx` — add nav item
+- `supabase/functions/admin-actions/index.ts` — add `run_followers_snapshot` action (admin-only, calls the snapshot function with `trigger:'manual'`)
 
-Add a one-shot admin action `rehydrate_recent_truncated` in `admin-actions/index.ts` that:
+No new secrets — reuses existing `TWITTER_*` OAuth1 creds.
 
-- Scans `posts` from the last 24h where `hydrated_at IS NULL` AND text matches the new heuristics (re-runs the same predicate in SQL via `text_original ILIKE` patterns).
-- For each match, sets `is_truncated=true` and inserts a `hydrate_tweet` job with idempotency key `hydrate:backfill:<tweet_id>`.
-- Returns `{ scanned, queued }`.
+### Quick confirms before I build
 
-UI: a small "Re-hydrate recent truncated tweets" button in Settings → Twitter Hydration card that calls this action. Lets you fix the existing tweet (and any others from the past day) without waiting for new ones.
-
-### Verification plan
-
-After the change:
-1. New tweets ingested via webhook with `pic.` / dangling-article endings will be flagged `is_truncated=true` and routed through `hydrate_tweet` → full text from X API v2 → translate → deliver.
-2. Run the backfill action once to reprocess the example tweet and any siblings from the last 24h.
-3. Watch Monitoring: affected posts should show `hydrated_at` populated and `hydration_source = 'x_api'`, with the Persian translation reflecting the full tweet.
-
-### Files touched
-
-**Modified (3)**:
-- `supabase/functions/webhooks-rssapp/index.ts` — extend `detectTruncation` with the three new rules.
-- `supabase/functions/admin-actions/index.ts` — add `rehydrate_recent_truncated` action.
-- `src/components/settings/PromptEditor.tsx` (or wherever the Twitter Hydration card lives — I'll confirm during implementation) — add the "Re-hydrate recent truncated tweets" button wired to the new action.
-
-No DB migration, no schema changes, no new secrets.
-
+1. **03:00 UTC** for the daily run, or different hour?
+2. **Snapshot retention** — keep all snapshots forever, or prune `follower_ids` arrays older than 90 days (changes table preserved)? Keeping all forever is fine for a few thousand followers but the array column grows.
+3. **Telegram alert** when someone unfollows? Or just in-app for now?
