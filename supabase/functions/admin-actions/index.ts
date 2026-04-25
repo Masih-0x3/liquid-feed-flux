@@ -889,6 +889,25 @@ serve(async (req) => {
         });
       }
 
+      // ===== Run X followers snapshot manually =====
+      case 'run_followers_snapshot': {
+        const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+        const svcKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+        try {
+          const resp = await fetch(`${supabaseUrl}/functions/v1/x-followers-snapshot`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${svcKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ trigger: 'manual' }),
+          });
+          const text = await resp.text();
+          let parsed: unknown; try { parsed = JSON.parse(text); } catch { parsed = text; }
+          if (!resp.ok) return jsonResponse({ ok: false, error: `snapshot ${resp.status}: ${text.slice(0, 300)}`, raw: parsed }, 200);
+          return jsonResponse({ ok: true, ...(parsed as Record<string, unknown>) });
+        } catch (e) {
+          return jsonResponse({ ok: false, error: (e as Error).message }, 200);
+        }
+      }
+
       default:
         return jsonResponse({ error: `Unknown action: ${action}` }, 400);
     }
