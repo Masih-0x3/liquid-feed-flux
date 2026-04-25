@@ -92,7 +92,8 @@ function getXCreds(): { ck: string; cs: string; at: string; ats: string } | null
   if (!ck || !cs || !at || !ats) return null;
   return { ck, cs, at, ats };
 }
-async function recordXApiCall(supabase: ReturnType<typeof createClient>, error?: string) {
+// deno-lint-ignore no-explicit-any
+async function recordXApiCall(supabase: any, error?: string) {
   try {
     const { data } = await supabase.from('settings').select('value').eq('key', 'x_api_usage').maybeSingle();
     const current = (data?.value as { total?: number; calls_24h?: string[] } | null) ?? { total: 0, calls_24h: [] };
