@@ -222,7 +222,7 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const openaiKey = Deno.env.get("OPENAI_API_KEY")!;
-    const sb = createClient(supabaseUrl, serviceKey);
+    const sb = createClient<any, any>(supabaseUrl, serviceKey);
 
     let requestBody: Record<string, unknown> = {};
     try {
@@ -476,7 +476,7 @@ Guidelines:
 
     if (!dryRun) {
       try {
-        const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+        const sb = createClient<any, any>(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
         await sb.from("digests").insert({
           period_start: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
           period_end: new Date().toISOString(),

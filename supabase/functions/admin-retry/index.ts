@@ -16,7 +16,7 @@ async function requireAdmin(req: Request): Promise<{ userId: string } | Response
     });
   }
 
-  const supabaseAuth = createClient(
+  const supabaseAuth = createClient<any, any>(
     Deno.env.get('SUPABASE_URL') ?? '',
     Deno.env.get('SUPABASE_ANON_KEY') ?? '',
     { global: { headers: { Authorization: authHeader } } }
@@ -32,7 +32,7 @@ async function requireAdmin(req: Request): Promise<{ userId: string } | Response
   }
 
   // Check admin role using service client (bypasses RLS)
-  const serviceClient = createClient(
+  const serviceClient = createClient<any, any>(
     Deno.env.get('SUPABASE_URL') ?? '',
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
   );
@@ -65,7 +65,7 @@ serve(async (req) => {
     const authResult = await requireAdmin(req);
     if (authResult instanceof Response) return authResult;
 
-    const supabase = createClient(
+    const supabase = createClient<any, any>(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );

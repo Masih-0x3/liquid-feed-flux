@@ -101,7 +101,7 @@ async function fetchFollowerPage(userId: string, paginationToken: string | null,
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
 
-  const supabase = createClient(
+  const supabase = createClient<any, any>(
     Deno.env.get('SUPABASE_URL') ?? '',
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
   );

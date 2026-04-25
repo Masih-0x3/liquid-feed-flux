@@ -99,7 +99,7 @@ serve(async (req) => {
       console.warn('No webhook shared secret configured; allowing request. Set WEBHOOK_SHARED_SECRET to enforce.');
     }
 
-    const supabase = createClient(
+    const supabase = createClient<any, any>(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );

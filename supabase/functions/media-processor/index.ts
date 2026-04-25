@@ -32,7 +32,7 @@ serve(async (req) => {
   if (authError) return authError;
 
   try {
-    const supabase = createClient(
+    const supabase = createClient<any, any>(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
