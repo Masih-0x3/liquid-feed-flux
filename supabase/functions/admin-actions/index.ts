@@ -92,12 +92,13 @@ function getXCreds(): { ck: string; cs: string; at: string; ats: string } | null
   if (!ck || !cs || !at || !ats) return null;
   return { ck, cs, at, ats };
 }
-async function recordXApiCall(supabase: ReturnType<typeof createClient>, error?: string) {
+// deno-lint-ignore no-explicit-any
+async function recordXApiCall(supabase: any, error?: string) {
   try {
     const { data } = await supabase.from('settings').select('value').eq('key', 'x_api_usage').maybeSingle();
     const current = (data?.value as { total?: number; calls_24h?: string[] } | null) ?? { total: 0, calls_24h: [] };
     const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-    const trimmed = (current.calls_24h ?? []).filter((ts) => { try { return new Date(ts).getTime() > cutoff; } catch { return false; } });
+    const trimmed = (current.calls_24h ?? []).filter((ts: string) => { try { return new Date(ts).getTime() > cutoff; } catch { return false; } });
     trimmed.push(new Date().toISOString());
     const next = { total: (current.total ?? 0) + 1, calls_24h: trimmed, last_call_at: new Date().toISOString(), last_error: error ?? null };
     await supabase.from('settings').upsert({ key: 'x_api_usage', value: next, updated_at: new Date().toISOString() }, { onConflict: 'key' });
