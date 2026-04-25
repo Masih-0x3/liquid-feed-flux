@@ -42,12 +42,13 @@ function getCreds() {
   return { ck, cs, at, ats };
 }
 
-async function recordApiCall(supabase: ReturnType<typeof createClient>, error?: string) {
+// deno-lint-ignore no-explicit-any
+async function recordApiCall(supabase: any, error?: string) {
   try {
     const { data } = await supabase.from('settings').select('value').eq('key', 'x_api_usage').maybeSingle();
     const cur = (data?.value as { total?: number; calls_24h?: string[] } | null) ?? { total: 0, calls_24h: [] };
     const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-    const trimmed = (cur.calls_24h ?? []).filter((ts) => { try { return new Date(ts).getTime() > cutoff; } catch { return false; } });
+    const trimmed = (cur.calls_24h ?? []).filter((ts: string) => { try { return new Date(ts).getTime() > cutoff; } catch { return false; } });
     trimmed.push(new Date().toISOString());
     await supabase.from('settings').upsert(
       { key: 'x_api_usage', value: { total: (cur.total ?? 0) + 1, calls_24h: trimmed, last_call_at: new Date().toISOString(), last_error: error ?? null }, updated_at: new Date().toISOString() },
@@ -56,7 +57,8 @@ async function recordApiCall(supabase: ReturnType<typeof createClient>, error?: 
   } catch (e) { console.error('recordApiCall failed', e); }
 }
 
-async function getSelfId(supabase: ReturnType<typeof createClient>, creds: { ck: string; cs: string; at: string; ats: string }): Promise<string> {
+// deno-lint-ignore no-explicit-any
+async function getSelfId(supabase: any, creds: { ck: string; cs: string; at: string; ats: string }): Promise<string> {
   const { data: setting } = await supabase.from('settings').select('value').eq('key', 'x_self_id').maybeSingle();
   const cached = (setting?.value as { id?: string } | null)?.id;
   if (cached) return cached;
