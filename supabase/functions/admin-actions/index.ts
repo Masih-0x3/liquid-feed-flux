@@ -240,11 +240,16 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    const body = await req.json().catch(() => ({}));
+    const rawText = await req.text();
+    let body: any = {};
+    try { body = rawText ? JSON.parse(rawText) : {}; } catch (e) {
+      console.error('[admin-actions] body parse failed', { rawText: rawText.slice(0, 200), err: (e as Error).message });
+    }
     const { action } = body;
 
     if (!action) {
-      return jsonResponse({ error: 'Missing action parameter' }, 400);
+      console.error('[admin-actions] missing action', { rawText: rawText.slice(0, 200), contentType: req.headers.get('content-type') });
+      return jsonResponse({ error: 'Missing action parameter', received: rawText.slice(0, 200) }, 400);
     }
 
     switch (action) {
