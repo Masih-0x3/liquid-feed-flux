@@ -1154,8 +1154,8 @@ supabase: any): Promise<number> {
   return 1500;
 }
 
-async function getChatIdForJob(_job: Record<string, unknown>, _// deno-lint-ignore no-explicit-any
-supabase: any): Promise<string | null> {
+// deno-lint-ignore no-explicit-any
+async function getChatIdForJob(_job: Record<string, unknown>, _supabase: any): Promise<string | null> {
   try { return Deno.env.get('TELEGRAM_CHAT_ID') || null; } catch (_e) { return null; }
 }
 
