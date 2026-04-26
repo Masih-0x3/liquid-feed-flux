@@ -212,6 +212,11 @@ serve(async (req) => {
         const mediaItems = parseMediaFromRSSItem(item, text);
         console.log(`Found ${mediaItems.length} media items for item:`, JSON.stringify(item, null, 2).substring(0, 500));
 
+        // Detect a likely video attachment that RSS cannot deliver directly.
+        // Triggers a `resolve_media` job that uses the public fxtwitter/vxtwitter
+        // proxy (zero X API quota) to fetch the real MP4 URL.
+        const hasVideoSignal = detectVideoSignal(item, text, mediaItems);
+
         // Find or create a default account first
         let accountId = null;
         
