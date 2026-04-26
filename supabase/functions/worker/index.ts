@@ -902,6 +902,7 @@ const MAX_ATTEMPTS: Record<string, number> = {
   moderate: 3,
   reprocess: 3,
   hydrate_tweet: 3,
+  resolve_media: 4,
 };
 
 async function handleJobFailure(// deno-lint-ignore no-explicit-any
@@ -1086,6 +1087,7 @@ function normalizeStep(type: string): string {
     case 'download_media': return 'media';
     case 'moderate': return 'moderate';
     case 'hydrate_tweet': return 'hydrate';
+    case 'resolve_media': return 'resolve_media';
     default: return type;
   }
 }
