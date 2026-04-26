@@ -212,6 +212,11 @@ serve(async (req) => {
         const mediaItems = parseMediaFromRSSItem(item, text);
         console.log(`Found ${mediaItems.length} media items for item:`, JSON.stringify(item, null, 2).substring(0, 500));
 
+        // Detect a likely video attachment that RSS cannot deliver directly.
+        // Triggers a `resolve_media` job that uses the public fxtwitter/vxtwitter
+        // proxy (zero X API quota) to fetch the real MP4 URL.
+        const hasVideoSignal = detectVideoSignal(item, text, mediaItems);
+
         // Find or create a default account first
         let accountId = null;
         
@@ -398,6 +403,35 @@ serve(async (req) => {
           }
         }
 
+        // Enqueue resolve_media when a video is suspected. The job uses the
+        // public fxtwitter/vxtwitter proxy (no X API quota) to discover the
+        // real MP4 URL, then triggers the normal download_media flow.
+        if (hasVideoSignal) {
+          const { error: resolveJobError } = await supabase
+            .from('jobs')
+            .upsert({
+              type: 'resolve_media',
+              payload: { tweet_id: tweetId },
+              status: 'pending',
+              priority: 12,
+              idempotency_key: `resolve_media:${tweetId}`,
+              next_run_at: new Date().toISOString()
+            }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+
+          if (resolveJobError) {
+            console.error('Error creating resolve_media job:', resolveJobError);
+          } else {
+            console.log('resolve_media job created for:', tweetId);
+            try {
+              await supabase.from('pipeline_events').insert({
+                subject_type: 'post', subject_id: tweetId,
+                step: 'resolve_media', status: 'queued',
+                started_at: new Date().toISOString(),
+                meta: { source: 'webhook' }
+              });
+            } catch (_e) {}
+          }
+        }
         // Don't create delivery job here - let translation job complete first
         // The worker will handle sequencing: translate -> then deliver
 
@@ -438,6 +472,35 @@ function extractAuthorFromUrl(url: string): string | null {
     return handle;
   }
   return null;
+}
+
+// Heuristic detector: returns true when an RSS item looks like it carries a
+// native X video/GIF that the RSS feed can't expose directly. Used to trigger
+// the resolve_media job which fetches the real MP4 via the public proxy.
+function detectVideoSignal(
+  // deno-lint-ignore no-explicit-any
+  item: any,
+  text: string | undefined,
+  mediaItems: Array<{ type: string; url: string }>,
+): boolean {
+  if (mediaItems.some((m) => m.type === 'video')) return true;
+
+  const haystacks: string[] = [];
+  if (text) haystacks.push(text);
+  if (item?.description_html) haystacks.push(String(item.description_html));
+  if (item?.description) haystacks.push(String(item.description));
+  if (item?.content) haystacks.push(String(item.content));
+  if (item?.thumbnail) haystacks.push(String(item.thumbnail));
+  for (const m of mediaItems) haystacks.push(m.url);
+
+  const blob = haystacks.join(' ');
+  if (/video\.twimg\.com/i.test(blob)) return true;
+  if (/(tweet_video_thumb|amplify_video_thumb|ext_tw_video_thumb)/i.test(blob)) return true;
+  // pic.twitter.com short links accompany native videos when no image media row exists
+  if (/pic\.twitter\.com\//i.test(blob) && !mediaItems.some((m) => m.type === 'image' && /pbs\.twimg\.com/.test(m.url))) {
+    return true;
+  }
+  return false;
 }
 
 function parseMediaFromRSSItem(item: any, text?: string): Array<{type: string, url: string, width?: number, height?: number, duration?: number}> {
