@@ -1429,3 +1429,198 @@ supabase: any): Promise<boolean> {
   await queueTranslateAfterHydrate(supabase, tweetId, false);
   return true;
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// resolve_media: zero-X-API video/media discovery via public proxies.
+// Mirrors the client-side Downloader page logic so we don't burn quota.
+// ───────────────────────────────────────────────────────────────────────────
+
+type ResolvedVariant = { url: string; bitrate?: number; content_type?: string };
+type ResolvedMediaRow = {
+  kind: 'video' | 'image' | 'gif';
+  url: string;
+  width?: number;
+  height?: number;
+  duration_ms?: number;
+};
+
+function rmUpgradeImageUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    if (u.hostname.endsWith('twimg.com')) {
+      u.searchParams.set('name', 'orig');
+      return u.toString();
+    }
+  } catch { /* noop */ }
+  return url;
+}
+
+function rmPickBestVariant(variants: ResolvedVariant[]): ResolvedVariant | undefined {
+  const mp4s = variants.filter((v) => (v.content_type ?? '').includes('mp4') || v.url.includes('.mp4'));
+  const pool = mp4s.length ? mp4s : variants;
+  return [...pool].sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0))[0];
+}
+
+async function rmFetchFromFx(handle: string, id: string): Promise<ResolvedMediaRow[] | null> {
+  try {
+    const res = await fetch(`https://api.fxtwitter.com/${handle}/status/${id}`);
+    if (!res.ok) return null;
+    const json = await res.json() as Record<string, unknown>;
+    const t = (json?.tweet ?? {}) as Record<string, unknown>;
+    const media = (t.media ?? {}) as Record<string, unknown>;
+    const out: ResolvedMediaRow[] = [];
+
+    const videos = (media.videos as Array<Record<string, unknown>> | undefined) ?? [];
+    for (const v of videos) {
+      const variants = (v.variants as ResolvedVariant[] | undefined) ?? [];
+      let url = (v.url as string) || '';
+      if (variants.length) {
+        const best = rmPickBestVariant(variants);
+        if (best?.url) url = best.url;
+      }
+      if (!url) continue;
+      out.push({
+        kind: (v.type as string) === 'gif' ? 'gif' : 'video',
+        url,
+        width: v.width as number | undefined,
+        height: v.height as number | undefined,
+        duration_ms: v.duration as number | undefined,
+      });
+    }
+
+    const photos = (media.photos as Array<Record<string, unknown>> | undefined) ?? [];
+    for (const p of photos) {
+      const url = p.url as string | undefined;
+      if (!url) continue;
+      out.push({
+        kind: 'image',
+        url: rmUpgradeImageUrl(url),
+        width: p.width as number | undefined,
+        height: p.height as number | undefined,
+      });
+    }
+    return out.length ? out : null;
+  } catch (e) {
+    console.warn('resolve_media: fxtwitter failed', (e as Error).message);
+    return null;
+  }
+}
+
+async function rmFetchFromVx(handle: string, id: string): Promise<ResolvedMediaRow[] | null> {
+  try {
+    const res = await fetch(`https://api.vxtwitter.com/${handle}/status/${id}`);
+    if (!res.ok) return null;
+    const json = await res.json() as Record<string, unknown>;
+    const extended = (json.media_extended as Array<Record<string, unknown>> | undefined) ?? [];
+    const out: ResolvedMediaRow[] = [];
+    for (const m of extended) {
+      const type = String(m.type || '');
+      const url = m.url as string | undefined;
+      if (!url) continue;
+      if (type === 'video' || type === 'gif') {
+        out.push({
+          kind: type === 'gif' ? 'gif' : 'video',
+          url,
+          duration_ms: m.duration_millis as number | undefined,
+        });
+      } else if (type === 'image') {
+        out.push({ kind: 'image', url: rmUpgradeImageUrl(url) });
+      }
+    }
+    return out.length ? out : null;
+  } catch (e) {
+    console.warn('resolve_media: vxtwitter failed', (e as Error).message);
+    return null;
+  }
+}
+
+async function handleResolveMediaJob(job: Record<string, unknown>, // deno-lint-ignore no-explicit-any
+supabase: any): Promise<boolean> {
+  const payload = (job.payload || {}) as Record<string, unknown>;
+  const tweetId = String(payload.tweet_id || '');
+  if (!tweetId) {
+    console.error('resolve_media: missing tweet_id');
+    return false;
+  }
+
+  const { data: post, error: postErr } = await supabase
+    .from('posts')
+    .select('tweet_id, url, author_handle, has_media')
+    .eq('tweet_id', tweetId)
+    .maybeSingle();
+
+  if (postErr || !post) {
+    console.error('resolve_media: post not found', tweetId, postErr?.message);
+    return false;
+  }
+
+  const numericId = extractNumericTweetId(tweetId, post.url as string | null);
+  const handle = (post.author_handle as string | null) || extractHandleFromUrl(post.url as string | null) || 'i';
+  if (!numericId) {
+    console.warn('resolve_media: cannot extract numeric tweet id, giving up', tweetId);
+    // Don't block delivery — proceed with whatever media we already have.
+    return true;
+  }
+
+  let resolved = await rmFetchFromFx(handle, numericId);
+  let source: 'fxtwitter' | 'vxtwitter' | null = resolved ? 'fxtwitter' : null;
+  if (!resolved) {
+    resolved = await rmFetchFromVx(handle, numericId);
+    if (resolved) source = 'vxtwitter';
+  }
+
+  if (!resolved || resolved.length === 0) {
+    console.warn('resolve_media: no media found via proxies', tweetId);
+    await insertPipelineEvent(supabase, 'post', tweetId, 'resolve_media', 'failed',
+      null, new Date().toISOString(), 'no_media_via_proxy', { handle, numericId });
+    // Don't fail the job hard — let delivery proceed with text.
+    return true;
+  }
+
+  // Replace existing media rows for this tweet so we don't keep low-quality
+  // RSS thumbnails alongside the resolved high-quality assets.
+  const { error: delErr } = await supabase.from('media').delete().eq('tweet_id', tweetId);
+  if (delErr) console.warn('resolve_media: failed clearing old media rows', delErr.message);
+
+  const rows = await Promise.all(resolved.map(async (m, index) => ({
+    tweet_id: tweetId,
+    kind: m.kind,
+    src_url: m.url,
+    src_url_hash: await hashUrl(m.url),
+    width: m.width ?? null,
+    height: m.height ?? null,
+    duration_ms: m.duration_ms ?? null,
+    ordering: index,
+  })));
+
+  const { error: insErr } = await supabase.from('media').upsert(rows, { onConflict: 'tweet_id,ordering' });
+  if (insErr) {
+    console.error('resolve_media: insert failed', insErr.message);
+    return false;
+  }
+
+  // Make sure has_media is true so deliver attaches files.
+  await supabase.from('posts').update({ has_media: true }).eq('tweet_id', tweetId);
+
+  // Trigger the existing download_media flow to pull bytes into temp-media.
+  const { error: dlErr } = await supabase.from('jobs').upsert({
+    type: 'download_media',
+    payload: { tweet_id: tweetId },
+    status: 'pending',
+    idempotency_key: `download_media:${tweetId}`,
+    next_run_at: new Date().toISOString(),
+  }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+  if (dlErr) console.warn('resolve_media: failed to enqueue download_media', dlErr.message);
+
+  await insertPipelineEvent(supabase, 'post', tweetId, 'resolve_media', 'completed',
+    null, new Date().toISOString(), null, { source, count: rows.length });
+
+  console.log(`resolve_media: ${tweetId} resolved ${rows.length} item(s) via ${source}`);
+  return true;
+}
+
+function extractHandleFromUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const m = url.match(/(?:twitter\.com|x\.com)\/([A-Za-z0-9_]+)\/status\//i);
+  return m ? m[1] : null;
+}
