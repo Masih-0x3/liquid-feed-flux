@@ -1427,7 +1427,55 @@ supabase: any): Promise<boolean> {
 
   console.log(`hydrate_tweet: success ${tweetId} (orig=${(post.text_original || '').length} chars → full=${fullText.length} chars)`);
   await queueTranslateAfterHydrate(supabase, tweetId, false);
+  await maybeEnqueueResolveMedia(supabase, tweetId, fullText);
   return true;
+}
+
+// Inspect existing media rows + (optionally) hydrated text and enqueue a
+// resolve_media job if any video signal is present. Safe to call multiple
+// times; idempotency_key guards against duplicates.
+async function maybeEnqueueResolveMedia(// deno-lint-ignore no-explicit-any
+  supabase: any, tweetId: string, extraText?: string): Promise<void> {
+  try {
+    const { data: mediaRows } = await supabase
+      .from('media')
+      .select('kind, src_url')
+      .eq('tweet_id', tweetId);
+
+    const haystack: string[] = [];
+    if (extraText) haystack.push(extraText);
+    let hasVideoKind = false;
+    for (const m of (mediaRows || []) as Array<{ kind?: string; src_url?: string }>) {
+      if (m.kind === 'video' || m.kind === 'gif') hasVideoKind = true;
+      if (m.src_url) haystack.push(m.src_url);
+    }
+    const blob = haystack.join(' ');
+    const hasSignal = hasVideoKind
+      || /video\.twimg\.com/i.test(blob)
+      || /(tweet_video_thumb|amplify_video_thumb|ext_tw_video_thumb)/i.test(blob)
+      || /pic\.twitter\.com\//i.test(blob);
+
+    if (!hasSignal) return;
+
+    const { error: jobErr } = await supabase.from('jobs').upsert({
+      type: 'resolve_media',
+      payload: { tweet_id: tweetId },
+      status: 'pending',
+      priority: 12,
+      idempotency_key: `resolve_media:${tweetId}`,
+      next_run_at: new Date().toISOString(),
+    }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+
+    if (jobErr) {
+      console.warn('maybeEnqueueResolveMedia: job upsert failed', jobErr.message);
+      return;
+    }
+    await insertPipelineEvent(supabase, 'post', tweetId, 'resolve_media', 'queued',
+      null, new Date().toISOString(), null, { source: 'hydrate' });
+    console.log('maybeEnqueueResolveMedia: enqueued resolve_media for', tweetId);
+  } catch (e) {
+    console.warn('maybeEnqueueResolveMedia: unexpected error', (e as Error).message);
+  }
 }
 
 // ───────────────────────────────────────────────────────────────────────────
