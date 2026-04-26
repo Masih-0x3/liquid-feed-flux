@@ -16,6 +16,7 @@ const Monitoring = lazy(() => import("./pages/Monitoring"));
 const Threads = lazy(() => import("./pages/Threads"));
 const Settings = lazy(() => import("./pages/Settings"));
 const XAccount = lazy(() => import("./pages/XAccount"));
+const Downloader = lazy(() => import("./pages/Downloader"));
 
 const queryClient = new QueryClient();
 
@@ -41,6 +42,7 @@ const App = () => (
               <Route path="/monitoring" element={<AppLayout><Monitoring /></AppLayout>} />
               <Route path="/threads" element={<AppLayout><Threads /></AppLayout>} />
               <Route path="/x-account" element={<AppLayout><XAccount /></AppLayout>} />
+              <Route path="/downloader" element={<AppLayout><Downloader /></AppLayout>} />
               <Route path="/settings" element={<AppLayout><Settings /></AppLayout>} />
               <Route path="*" element={<NotFound />} />
             </Routes>
