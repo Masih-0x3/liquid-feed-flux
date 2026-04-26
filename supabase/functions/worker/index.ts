@@ -238,6 +238,9 @@ serve(async (req) => {
             case 'hydrate_tweet':
               success = await handleHydrateTweetJob(job, supabase);
               break;
+            case 'resolve_media':
+              success = await handleResolveMediaJob(job, supabase);
+              break;
             default:
               console.error(`Unknown job type: ${job.type}`);
               success = false;
