@@ -403,6 +403,35 @@ serve(async (req) => {
           }
         }
 
+        // Enqueue resolve_media when a video is suspected. The job uses the
+        // public fxtwitter/vxtwitter proxy (no X API quota) to discover the
+        // real MP4 URL, then triggers the normal download_media flow.
+        if (hasVideoSignal) {
+          const { error: resolveJobError } = await supabase
+            .from('jobs')
+            .upsert({
+              type: 'resolve_media',
+              payload: { tweet_id: tweetId },
+              status: 'pending',
+              priority: 12,
+              idempotency_key: `resolve_media:${tweetId}`,
+              next_run_at: new Date().toISOString()
+            }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+
+          if (resolveJobError) {
+            console.error('Error creating resolve_media job:', resolveJobError);
+          } else {
+            console.log('resolve_media job created for:', tweetId);
+            try {
+              await supabase.from('pipeline_events').insert({
+                subject_type: 'post', subject_id: tweetId,
+                step: 'resolve_media', status: 'queued',
+                started_at: new Date().toISOString(),
+                meta: { source: 'webhook' }
+              });
+            } catch (_e) {}
+          }
+        }
         // Don't create delivery job here - let translation job complete first
         // The worker will handle sequencing: translate -> then deliver
 
