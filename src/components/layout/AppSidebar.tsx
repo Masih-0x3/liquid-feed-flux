@@ -7,7 +7,8 @@ import {
   Activity,
   LogOut,
   Home,
-  Users
+  Users,
+  Download
 } from "lucide-react";
 import {
   Sidebar,
@@ -31,6 +32,7 @@ const navigationItems = [
   { title: "Monitoring", url: "/monitoring", icon: Activity },
   { title: "Threads", url: "/threads", icon: Link2 },
   { title: "My X", url: "/x-account", icon: Users },
+  { title: "Downloader", url: "/downloader", icon: Download },
   { title: "Settings", url: "/settings", icon: Settings },
 ];
 
