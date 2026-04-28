@@ -3,7 +3,7 @@ import { Activity, AlertTriangle, AlertOctagon } from 'lucide-react';
 import type { IngestHeartbeat } from '@/hooks/useDashboardData';
 
 interface Props {
-  heartbeat: IngestHeartbeat;
+  heartbeat?: IngestHeartbeat;
 }
 
 function formatAge(seconds: number | null): string {
@@ -18,6 +18,7 @@ function formatAge(seconds: number | null): string {
 }
 
 export function IngestHeartbeatAlert({ heartbeat }: Props) {
+  if (!heartbeat) return null;
   const { state, lastPostAt, ageSeconds, warnMinutes, criticalMinutes } = heartbeat;
 
   const variants = {
