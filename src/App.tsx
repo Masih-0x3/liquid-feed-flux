@@ -10,13 +10,33 @@ import { Loader2 } from "lucide-react";
 import AuthPage from "./pages/AuthPage";
 import NotFound from "./pages/NotFound";
 
+// Wrap dynamic import to auto-recover from stale chunk errors after deploys/HMR.
+// If a code-split chunk 404s (because the build hash changed), force a one-time reload.
+function lazyWithRetry<T extends React.ComponentType<unknown>>(
+  factory: () => Promise<{ default: T }>
+) {
+  return lazy(async () => {
+    try {
+      return await factory();
+    } catch (err) {
+      const reloadKey = "lovable_chunk_reloaded";
+      if (!sessionStorage.getItem(reloadKey)) {
+        sessionStorage.setItem(reloadKey, "1");
+        window.location.reload();
+        return new Promise<{ default: T }>(() => {});
+      }
+      throw err;
+    }
+  });
+}
+
 // Lazy-loaded pages (Issue 39: route-level code splitting)
-const Dashboard = lazy(() => import("./pages/Dashboard"));
-const Monitoring = lazy(() => import("./pages/Monitoring"));
-const Threads = lazy(() => import("./pages/Threads"));
-const Settings = lazy(() => import("./pages/Settings"));
-const XAccount = lazy(() => import("./pages/XAccount"));
-const Downloader = lazy(() => import("./pages/Downloader"));
+const Dashboard = lazyWithRetry(() => import("./pages/Dashboard"));
+const Monitoring = lazyWithRetry(() => import("./pages/Monitoring"));
+const Threads = lazyWithRetry(() => import("./pages/Threads"));
+const Settings = lazyWithRetry(() => import("./pages/Settings"));
+const XAccount = lazyWithRetry(() => import("./pages/XAccount"));
+const Downloader = lazyWithRetry(() => import("./pages/Downloader"));
 
 const queryClient = new QueryClient();
 
