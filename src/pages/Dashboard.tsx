@@ -5,6 +5,7 @@ import { useDashboardData } from '@/hooks/useDashboardData';
 import { DashboardMetrics } from '@/components/dashboard/DashboardMetrics';
 import { DashboardActivity } from '@/components/dashboard/DashboardActivity';
 import { DashboardHealth } from '@/components/dashboard/DashboardHealth';
+import { IngestHeartbeatAlert } from '@/components/dashboard/IngestHeartbeatAlert';
 import { useQueryClient } from '@tanstack/react-query';
 
 export default function Dashboard() {
