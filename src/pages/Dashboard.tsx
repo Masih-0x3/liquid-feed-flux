@@ -57,6 +57,8 @@ export default function Dashboard() {
         </div>
       </div>
 
+      <IngestHeartbeatAlert heartbeat={heartbeat} />
+
       <DashboardMetrics metrics={metrics} />
 
       <div className="grid gap-6 lg:grid-cols-3">
