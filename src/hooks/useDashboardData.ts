@@ -28,6 +28,14 @@ export interface PipelineHealth {
   xBudgetUsedPct: number;
 }
 
+export interface IngestHeartbeat {
+  state: 'ok' | 'warning' | 'critical';
+  lastPostAt: string | null;
+  ageSeconds: number | null;
+  warnMinutes: number;
+  criticalMinutes: number;
+}
+
 export interface ActivityItem {
   id: string;
   title: string;

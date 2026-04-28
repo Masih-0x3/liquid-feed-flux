@@ -1005,6 +1005,7 @@ export type Database = {
         Returns: Json
       }
       get_dashboard_summary: { Args: never; Returns: Json }
+      get_ingest_heartbeat: { Args: never; Returns: Json }
       get_old_media: {
         Args: { days_old?: number }
         Returns: {
