@@ -125,7 +125,16 @@ async function fetchDashboard() {
     status: post.text_translated ? 'success' as const : 'pending' as const,
   }));
 
-  return { metrics, health, activities };
+  const hb = rpc.ingest_heartbeat;
+  const heartbeat: IngestHeartbeat = {
+    state: hb?.state ?? 'ok',
+    lastPostAt: hb?.last_post_at ?? null,
+    ageSeconds: hb?.age_seconds ?? null,
+    warnMinutes: hb?.warn_minutes ?? 120,
+    criticalMinutes: hb?.critical_minutes ?? 360,
+  };
+
+  return { metrics, health, activities, heartbeat };
 }
 
 export function useDashboardData() {
