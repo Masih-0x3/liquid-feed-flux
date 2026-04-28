@@ -5,6 +5,7 @@ import { useDashboardData } from '@/hooks/useDashboardData';
 import { DashboardMetrics } from '@/components/dashboard/DashboardMetrics';
 import { DashboardActivity } from '@/components/dashboard/DashboardActivity';
 import { DashboardHealth } from '@/components/dashboard/DashboardHealth';
+import { IngestHeartbeatAlert } from '@/components/dashboard/IngestHeartbeatAlert';
 import { useQueryClient } from '@tanstack/react-query';
 
 export default function Dashboard() {
@@ -30,7 +31,7 @@ export default function Dashboard() {
     );
   }
 
-  const { metrics, health, activities } = data;
+  const { metrics, health, activities, heartbeat } = data;
 
   return (
     <div className="space-y-6 animate-fade-in-up">
@@ -55,6 +56,8 @@ export default function Dashboard() {
           <div className="text-xs text-muted-foreground">Last updated: {new Date(dataUpdatedAt).toLocaleTimeString()}</div>
         </div>
       </div>
+
+      <IngestHeartbeatAlert heartbeat={heartbeat} />
 
       <DashboardMetrics metrics={metrics} />
 

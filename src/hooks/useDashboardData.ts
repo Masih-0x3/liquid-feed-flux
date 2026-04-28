@@ -28,6 +28,14 @@ export interface PipelineHealth {
   xBudgetUsedPct: number;
 }
 
+export interface IngestHeartbeat {
+  state: 'ok' | 'warning' | 'critical';
+  lastPostAt: string | null;
+  ageSeconds: number | null;
+  warnMinutes: number;
+  criticalMinutes: number;
+}
+
 export interface ActivityItem {
   id: string;
   title: string;
@@ -68,6 +76,13 @@ interface RpcResult {
     text_translated: string | null;
     account_handle: string;
   }>;
+  ingest_heartbeat?: {
+    state: 'ok' | 'warning' | 'critical';
+    last_post_at: string | null;
+    age_seconds: number | null;
+    warn_minutes: number;
+    critical_minutes: number;
+  };
 }
 
 async function fetchDashboard() {
@@ -110,7 +125,16 @@ async function fetchDashboard() {
     status: post.text_translated ? 'success' as const : 'pending' as const,
   }));
 
-  return { metrics, health, activities };
+  const hb = rpc.ingest_heartbeat;
+  const heartbeat: IngestHeartbeat = {
+    state: hb?.state ?? 'ok',
+    lastPostAt: hb?.last_post_at ?? null,
+    ageSeconds: hb?.age_seconds ?? null,
+    warnMinutes: hb?.warn_minutes ?? 120,
+    criticalMinutes: hb?.critical_minutes ?? 360,
+  };
+
+  return { metrics, health, activities, heartbeat };
 }
 
 export function useDashboardData() {
