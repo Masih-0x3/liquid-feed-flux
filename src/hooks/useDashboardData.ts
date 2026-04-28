@@ -157,13 +157,11 @@ export function useDashboardData() {
   }, [queryClient]);
 
   useEffect(() => {
-    const ch1 = supabase.channel('dash-posts').on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, debouncedInvalidate).subscribe();
-    const ch2 = supabase.channel('dash-del').on('postgres_changes', { event: '*', schema: 'public', table: 'deliveries' }, debouncedInvalidate).subscribe();
-    const ch3 = supabase.channel('dash-jobs').on('postgres_changes', { event: '*', schema: 'public', table: 'jobs' }, debouncedInvalidate).subscribe();
+    // Only subscribe to posts to reduce realtime I/O. Jobs/deliveries churn too fast
+    // and the dashboard refetches on the posts signal anyway.
+    const ch1 = supabase.channel('dash-posts').on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'posts' }, debouncedInvalidate).subscribe();
     return () => {
       supabase.removeChannel(ch1);
-      supabase.removeChannel(ch2);
-      supabase.removeChannel(ch3);
       if (timerRef.current) clearTimeout(timerRef.current);
     };
   }, [debouncedInvalidate]);
