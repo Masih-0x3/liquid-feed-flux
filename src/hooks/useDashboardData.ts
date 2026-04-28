@@ -76,6 +76,13 @@ interface RpcResult {
     text_translated: string | null;
     account_handle: string;
   }>;
+  ingest_heartbeat?: {
+    state: 'ok' | 'warning' | 'critical';
+    last_post_at: string | null;
+    age_seconds: number | null;
+    warn_minutes: number;
+    critical_minutes: number;
+  };
 }
 
 async function fetchDashboard() {
