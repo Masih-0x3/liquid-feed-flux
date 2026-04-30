@@ -1279,6 +1279,46 @@ supabase: any, errorMsg?: string | null): Promise<void> {
   }
 }
 
+// Load hydration toggle + daily budget from settings.
+// - twitter_hydration.enabled (default true): master kill switch
+// - x_rate_limits.hydrations_per_day (default 100): max X reads per 24h for hydration
+async function loadHydrationSettings(// deno-lint-ignore no-explicit-any
+supabase: any): Promise<{ enabled: boolean; daily_budget: number }> {
+  let enabled = true;
+  let daily_budget = 100;
+  try {
+    const { data: th } = await supabase.from('settings').select('value').eq('key', 'twitter_hydration').maybeSingle();
+    if (th?.value && typeof th.value === 'object') {
+      const v = th.value as Record<string, unknown>;
+      if (v.enabled === false) enabled = false;
+    }
+  } catch { /* keep default */ }
+  try {
+    const { data: rl } = await supabase.from('settings').select('value').eq('key', 'x_rate_limits').maybeSingle();
+    if (rl?.value && typeof rl.value === 'object') {
+      const v = rl.value as Record<string, unknown>;
+      const n = Number(v.hydrations_per_day);
+      if (Number.isFinite(n) && n > 0) daily_budget = Math.floor(n);
+    }
+  } catch { /* keep default */ }
+  return { enabled, daily_budget };
+}
+
+// Count hydration X API calls in the last 24h. We use posts.hydrated_at with
+// hydration_source='x_api' (the only source that consumed an actual X read).
+async function countDailyHydrationsUsed(// deno-lint-ignore no-explicit-any
+supabase: any): Promise<number> {
+  try {
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const { count } = await supabase
+      .from('posts')
+      .select('tweet_id', { count: 'exact', head: true })
+      .eq('hydration_source', 'x_api')
+      .gte('hydrated_at', since);
+    return Number(count || 0);
+  } catch { return 0; }
+}
+
 async function queueTranslateAfterHydrate(// deno-lint-ignore no-explicit-any
 supabase: any, tweetId: string, fallback: boolean): Promise<void> {
   await supabase.from('jobs').upsert({
