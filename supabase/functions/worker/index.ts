@@ -603,8 +603,38 @@ ${post.text_original}`;
 
     if (updateError) throw updateError;
 
-    // Only create delivery job if decision is 'deliver'
-    if (deliveryDecision === 'deliver') {
+    // Decide what to enqueue next based on filter decision + truncation state.
+    // NEW FLOW: If a tweet PASSED the editorial gate AND is still truncated AND
+    // not yet hydrated, enqueue hydrate_tweet instead of deliver. The hydrate
+    // job will re-enqueue translate on success, which will fall through to
+    // deliver on the second pass (is_truncated will be false by then).
+    const isTruncated = (post as Record<string, unknown>).is_truncated === true;
+    const alreadyHydrated = !!(post as Record<string, unknown>).hydrated_at;
+    const hydrationCfg = await loadHydrationSettings(supabase);
+    const shouldHydrateNow =
+      deliveryDecision === 'deliver'
+      && isTruncated
+      && !alreadyHydrated
+      && hydrationCfg.enabled;
+
+    if (shouldHydrateNow) {
+      console.log(JSON.stringify({ function: 'worker', action: 'hydration_gated_enqueue', tweet_id: tweetId, score: importanceScore }));
+      const { error: hydrateJobError } = await supabase
+        .from('jobs')
+        .upsert({
+          type: 'hydrate_tweet',
+          payload: { tweet_id: tweetId },
+          status: 'pending',
+          priority: 15,
+          idempotency_key: `hydrate:post-translate:${tweetId}`,
+          next_run_at: new Date().toISOString()
+        }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+      if (hydrateJobError) {
+        console.warn('Failed to create post-translate hydrate job:', hydrateJobError);
+      } else {
+        await insertPipelineEvent(supabase, 'post', tweetId, 'hydrate', 'queued', null, null, null, { source: 'post-score-gate', score: importanceScore });
+      }
+    } else if (deliveryDecision === 'deliver') {
       const idempotencyKey = `deliver:${tweetId}`;
       const { error: deliveryJobError } = await supabase
         .from('jobs')
