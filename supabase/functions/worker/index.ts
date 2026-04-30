@@ -349,7 +349,7 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
 
     const { data: post, error } = await supabase
       .from('posts')
-      .select('tweet_id, text_original, account_id, url, tweeted_at, has_media, author_handle, accounts!inner(handle, display_name)')
+      .select('tweet_id, text_original, account_id, url, tweeted_at, has_media, author_handle, is_truncated, hydrated_at, accounts!inner(handle, display_name)')
       .eq('tweet_id', tweetId)
       .single();
 
