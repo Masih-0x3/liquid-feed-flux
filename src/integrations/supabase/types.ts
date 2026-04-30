@@ -961,6 +961,57 @@ export type Database = {
         }
         Relationships: []
       }
+      x_deliveries_safe: {
+        Row: {
+          attempts: number | null
+          created_at: string | null
+          id: string | null
+          last_error: string | null
+          latency_ms: number | null
+          media_bytes: number | null
+          media_count: number | null
+          media_kind: string | null
+          post_id: string | null
+          posted_at: string | null
+          skip_reason: string | null
+          status: string | null
+          updated_at: string | null
+          x_tweet_id: string | null
+        }
+        Insert: {
+          attempts?: number | null
+          created_at?: string | null
+          id?: string | null
+          last_error?: string | null
+          latency_ms?: number | null
+          media_bytes?: number | null
+          media_count?: number | null
+          media_kind?: string | null
+          post_id?: string | null
+          posted_at?: string | null
+          skip_reason?: string | null
+          status?: string | null
+          updated_at?: string | null
+          x_tweet_id?: string | null
+        }
+        Update: {
+          attempts?: number | null
+          created_at?: string | null
+          id?: string | null
+          last_error?: string | null
+          latency_ms?: number | null
+          media_bytes?: number | null
+          media_count?: number | null
+          media_kind?: string | null
+          post_id?: string | null
+          posted_at?: string | null
+          skip_reason?: string | null
+          status?: string | null
+          updated_at?: string | null
+          x_tweet_id?: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       calculate_growth_rate: {
