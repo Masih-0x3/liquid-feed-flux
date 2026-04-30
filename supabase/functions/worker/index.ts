@@ -349,7 +349,7 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
 
     const { data: post, error } = await supabase
       .from('posts')
-      .select('tweet_id, text_original, account_id, url, tweeted_at, has_media, author_handle, accounts!inner(handle, display_name)')
+      .select('tweet_id, text_original, account_id, url, tweeted_at, has_media, author_handle, is_truncated, hydrated_at, accounts!inner(handle, display_name)')
       .eq('tweet_id', tweetId)
       .single();
 
@@ -603,8 +603,38 @@ ${post.text_original}`;
 
     if (updateError) throw updateError;
 
-    // Only create delivery job if decision is 'deliver'
-    if (deliveryDecision === 'deliver') {
+    // Decide what to enqueue next based on filter decision + truncation state.
+    // NEW FLOW: If a tweet PASSED the editorial gate AND is still truncated AND
+    // not yet hydrated, enqueue hydrate_tweet instead of deliver. The hydrate
+    // job will re-enqueue translate on success, which will fall through to
+    // deliver on the second pass (is_truncated will be false by then).
+    const isTruncated = (post as Record<string, unknown>).is_truncated === true;
+    const alreadyHydrated = !!(post as Record<string, unknown>).hydrated_at;
+    const hydrationCfg = await loadHydrationSettings(supabase);
+    const shouldHydrateNow =
+      deliveryDecision === 'deliver'
+      && isTruncated
+      && !alreadyHydrated
+      && hydrationCfg.enabled;
+
+    if (shouldHydrateNow) {
+      console.log(JSON.stringify({ function: 'worker', action: 'hydration_gated_enqueue', tweet_id: tweetId, score: importanceScore }));
+      const { error: hydrateJobError } = await supabase
+        .from('jobs')
+        .upsert({
+          type: 'hydrate_tweet',
+          payload: { tweet_id: tweetId },
+          status: 'pending',
+          priority: 15,
+          idempotency_key: `hydrate:post-translate:${tweetId}`,
+          next_run_at: new Date().toISOString()
+        }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+      if (hydrateJobError) {
+        console.warn('Failed to create post-translate hydrate job:', hydrateJobError);
+      } else {
+        await insertPipelineEvent(supabase, 'post', tweetId, 'hydrate', 'queued', null, null, null, { source: 'post-score-gate', score: importanceScore });
+      }
+    } else if (deliveryDecision === 'deliver') {
       const idempotencyKey = `deliver:${tweetId}`;
       const { error: deliveryJobError } = await supabase
         .from('jobs')
@@ -1249,6 +1279,46 @@ supabase: any, errorMsg?: string | null): Promise<void> {
   }
 }
 
+// Load hydration toggle + daily budget from settings.
+// - twitter_hydration.enabled (default true): master kill switch
+// - x_rate_limits.hydrations_per_day (default 100): max X reads per 24h for hydration
+async function loadHydrationSettings(// deno-lint-ignore no-explicit-any
+supabase: any): Promise<{ enabled: boolean; daily_budget: number }> {
+  let enabled = true;
+  let daily_budget = 100;
+  try {
+    const { data: th } = await supabase.from('settings').select('value').eq('key', 'twitter_hydration').maybeSingle();
+    if (th?.value && typeof th.value === 'object') {
+      const v = th.value as Record<string, unknown>;
+      if (v.enabled === false) enabled = false;
+    }
+  } catch { /* keep default */ }
+  try {
+    const { data: rl } = await supabase.from('settings').select('value').eq('key', 'x_rate_limits').maybeSingle();
+    if (rl?.value && typeof rl.value === 'object') {
+      const v = rl.value as Record<string, unknown>;
+      const n = Number(v.hydrations_per_day);
+      if (Number.isFinite(n) && n > 0) daily_budget = Math.floor(n);
+    }
+  } catch { /* keep default */ }
+  return { enabled, daily_budget };
+}
+
+// Count hydration X API calls in the last 24h. We use posts.hydrated_at with
+// hydration_source='x_api' (the only source that consumed an actual X read).
+async function countDailyHydrationsUsed(// deno-lint-ignore no-explicit-any
+supabase: any): Promise<number> {
+  try {
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const { count } = await supabase
+      .from('posts')
+      .select('tweet_id', { count: 'exact', head: true })
+      .eq('hydration_source', 'x_api')
+      .gte('hydrated_at', since);
+    return Number(count || 0);
+  } catch { return 0; }
+}
+
 async function queueTranslateAfterHydrate(// deno-lint-ignore no-explicit-any
 supabase: any, tweetId: string, fallback: boolean): Promise<void> {
   await supabase.from('jobs').upsert({
@@ -1311,6 +1381,38 @@ supabase: any): Promise<boolean> {
   if (post.hydrated_at) {
     console.log('hydrate_tweet: already hydrated, ensuring translate job exists', tweetId);
     await queueTranslateAfterHydrate(supabase, tweetId, false);
+    return true;
+  }
+
+  // Kill switch + daily budget gate. If hydration is disabled or the daily
+  // X-API budget is exhausted, mark the post as a budget fallback (no read
+  // consumed) and let the existing flow continue with the truncated text.
+  const hydrationCfg = await loadHydrationSettings(supabase);
+  if (!hydrationCfg.enabled) {
+    console.warn('hydrate_tweet: disabled by settings, falling back', tweetId);
+    await supabase.from('posts').update({
+      hydrated_at: new Date().toISOString(),
+      hydration_source: 'disabled_fallback',
+    }).eq('tweet_id', tweetId);
+    await queueTranslateAfterHydrate(supabase, tweetId, true);
+    return true;
+  }
+  const used24h = await countDailyHydrationsUsed(supabase);
+  if (used24h >= hydrationCfg.daily_budget) {
+    console.warn(`hydrate_tweet: daily budget exhausted (${used24h}/${hydrationCfg.daily_budget}), falling back`, tweetId);
+    await supabase.from('posts').update({
+      hydrated_at: new Date().toISOString(),
+      hydration_source: 'budget_exhausted_fallback',
+    }).eq('tweet_id', tweetId);
+    await queueTranslateAfterHydrate(supabase, tweetId, true);
+    try {
+      await supabase.from('pipeline_events').insert({
+        subject_type: 'post', subject_id: tweetId,
+        step: 'hydrate', status: 'completed',
+        ended_at: new Date().toISOString(),
+        meta: { fallback: 'budget_exhausted', used_24h: used24h, budget: hydrationCfg.daily_budget }
+      });
+    } catch { /* best-effort */ }
     return true;
   }
 

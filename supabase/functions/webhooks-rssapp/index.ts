@@ -256,10 +256,11 @@ serve(async (req) => {
           continue;
         }
 
-        // Detect truncation BEFORE upsert so we can persist the flag
+        // Detect truncation BEFORE upsert so we can persist the flag.
+        // NOTE: We no longer hydrate here. Hydration is deferred to the worker
+        // and only triggered AFTER scoring, for tweets that pass the editorial
+        // threshold. This avoids spending X API reads on tweets that get filtered out.
         const isTruncated = detectTruncation(text);
-        const hydrationEnabled = isTruncated ? await isHydrationEnabled(supabase) : false;
-        const willHydrate = isTruncated && hydrationEnabled;
 
         // Upsert post to database
         const { data: post, error: postError } = await supabase
@@ -285,7 +286,7 @@ serve(async (req) => {
           continue;
         }
 
-        console.log(`Post upserted: ${tweetId} (truncated=${isTruncated}, willHydrate=${willHydrate})`);
+        console.log(`Post upserted: ${tweetId} (truncated=${isTruncated}, hydration_deferred_to_post_score=${isTruncated})`);
 
         // Insert media items
         if (mediaItems.length > 0) {
@@ -312,36 +313,10 @@ serve(async (req) => {
           }
         }
 
-        if (willHydrate) {
-          // Queue hydration first; the hydrate job will create the translate job after success
-          const { error: hydrateJobError } = await supabase
-            .from('jobs')
-            .upsert({
-              type: 'hydrate_tweet',
-              payload: { tweet_id: tweetId },
-              status: 'pending',
-              priority: 15,
-              idempotency_key: `hydrate:${tweetId}`,
-              next_run_at: new Date().toISOString()
-            }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
-
-          if (hydrateJobError) {
-            console.error('Error creating hydrate job:', hydrateJobError);
-          } else {
-            console.log('Hydrate job created for:', tweetId);
-            try {
-              await supabase
-                .from('pipeline_events')
-                .insert({
-                  subject_type: 'post', subject_id: tweetId,
-                  step: 'hydrate', status: 'queued',
-                  started_at: new Date().toISOString(),
-                  meta: { source: 'webhook', text_length: text.length }
-                });
-            } catch (_e) {}
-          }
-        } else {
-          // Standard path: create translation job directly
+        // ALWAYS enqueue translate first (even for truncated posts).
+        // The worker will gate hydration on the resulting score: only tweets
+        // that pass the editorial threshold AND are truncated will be hydrated.
+        {
           const { error: translationJobError } = await supabase
             .from('jobs')
             .upsert({
@@ -366,7 +341,7 @@ serve(async (req) => {
                   step: 'translate',
                   status: 'queued',
                   started_at: new Date().toISOString(),
-                  meta: { source: 'webhook' }
+                  meta: { source: 'webhook', is_truncated: isTruncated }
                 });
             } catch (_e) {}
           }
