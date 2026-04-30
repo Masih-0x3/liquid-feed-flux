@@ -286,7 +286,7 @@ serve(async (req) => {
           continue;
         }
 
-        console.log(`Post upserted: ${tweetId} (truncated=${isTruncated}, willHydrate=${willHydrate})`);
+        console.log(`Post upserted: ${tweetId} (truncated=${isTruncated}, hydration_deferred_to_post_score=${isTruncated})`);
 
         // Insert media items
         if (mediaItems.length > 0) {
