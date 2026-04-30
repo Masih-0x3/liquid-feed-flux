@@ -256,10 +256,11 @@ serve(async (req) => {
           continue;
         }
 
-        // Detect truncation BEFORE upsert so we can persist the flag
+        // Detect truncation BEFORE upsert so we can persist the flag.
+        // NOTE: We no longer hydrate here. Hydration is deferred to the worker
+        // and only triggered AFTER scoring, for tweets that pass the editorial
+        // threshold. This avoids spending X API reads on tweets that get filtered out.
         const isTruncated = detectTruncation(text);
-        const hydrationEnabled = isTruncated ? await isHydrationEnabled(supabase) : false;
-        const willHydrate = isTruncated && hydrationEnabled;
 
         // Upsert post to database
         const { data: post, error: postError } = await supabase
