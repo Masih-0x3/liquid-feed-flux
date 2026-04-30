@@ -1,64 +1,80 @@
 ## Goal
 
-When a tweet contains a video (or GIF), automatically resolve the highest-quality MP4 using the **same fxtwitter / vxtwitter proxy** logic that powers the `/downloader` page, download it into our `temp-media` bucket, and attach it to the translated Telegram post — all **without consuming X API quota**.
+Stop spending X API reads on tweets that get filtered out anyway. Hydrate only after a tweet has been translated, scored, and confirmed to be above the delivery threshold.
 
-## Why this works (and avoids X API)
+## Why this works
 
-- The known limitation `mem://limitations/video-ingestion`: RSS only delivers `pic.twitter.com` short-links and image thumbnails — never direct `video.twimg.com` URLs.
-- The `/downloader` page already proves we can resolve any tweet's full media list (including bitrate-ranked MP4 variants) via the **public fxtwitter API** with zero auth. Falling back to `vxtwitter` covers edge cases.
-- We only need the numeric tweet ID + author handle, both already stored on `posts` (`tweet_id`, `url`, `author_handle`).
-- X API hydration stays reserved for **text** truncation (current behavior, untouched).
+Last 7 days of real data:
 
-## Detection rule (decide once, at ingest)
+- 477 tweets were hydrated (= 477 X API reads)
+- Only 149 of them (31%) ended up delivered
+- 328 (69%) were hydrated and then skipped because their score was below 14
 
-In `webhooks-rssapp/index.ts`, after `parseMediaFromRSSItem`, check for a **video signal**:
-1. RSS already produced a `kind = 'video'` row, OR
-2. RSS body contains `pic.twitter.com/...` AND/OR a `video.twimg.com` reference, OR
-3. RSS thumbnail looks like a video poster (`tweet_video_thumb` / `amplify_video_thumb` / `ext_tw_video_thumb` in the URL — strong indicator that a video exists).
+Hydrating only winners projects to **~149 reads/week** instead of ~477 — roughly a **70% reduction** in X API read usage, with no loss in published content quality.
 
-If any of those is true → enqueue a new `resolve_media` job (priority similar to `hydrate_tweet`, idempotency key `resolve_media:${tweetId}`). If false → keep current path (image-only `download_media` job as today).
+## New pipeline order
 
-## New worker job: `resolve_media`
-
-A new handler in `supabase/functions/worker/index.ts` mirroring `hydrate_tweet` style:
-
-1. Load post (`tweet_id`, `url`, `author_handle`).
-2. Extract numeric ID + handle.
-3. Call `https://api.fxtwitter.com/{handle}/status/{id}` — pick highest-bitrate MP4 from `media.videos[].variants[]` (reuse the exact `pickBestVideoVariant` logic from `Downloader.tsx`).
-4. Fallback to `https://api.vxtwitter.com/{handle}/status/{id}` if fx fails.
-5. Also collect any `media.photos` upgraded with `?name=orig` (reuse `upgradeImageUrl`) — overwrites the lower-quality RSS thumbnail.
-6. Upsert resolved rows into `media` table:
-   - For videos: `kind='video'`, real `src_url`, `width`, `height`, `duration_ms`, fresh `src_url_hash`.
-   - For images: replace the placeholder thumbnail row with the orig URL.
-7. Enqueue a `download_media` job (existing handler in `media-processor`) so files land in the `temp-media` bucket exactly as today.
-8. On total failure (both proxies down / no media found) → log, mark post `has_media=false` so delivery isn't blocked, and proceed.
-
-No new secrets, no X API calls, no schema changes. Resilient: if proxies are temporarily down the job retries via the existing job-retry/lease machinery; ultimately falls through to text-only delivery.
-
-## Pipeline sequencing
-
-Current order (per `mem://architecture/pipeline-sequencing`): ingest → (hydrate?) → translate → download_media → deliver.
-
-New order when video detected:
 ```text
-ingest → resolve_media (proxy, no X API) → download_media → translate (parallel-safe) → deliver
+RSS webhook
+  └─> ingest post (mark is_truncated if detected, but DO NOT enqueue hydration)
+        └─> translate + score the truncated text (1 OpenAI call, no X read)
+              ├─ score < threshold  → mark skip, done. Zero X reads spent.
+              └─ score >= threshold AND is_truncated
+                    └─> enqueue hydrate_tweet  (1 X API read)
+                          └─> re-translate + re-score the full text (1 OpenAI call)
+                                └─> enqueue deliver
 ```
-`resolve_media` is enqueued in parallel with `hydrate_tweet`/`translate`. Delivery already waits for `translated_at`; we add a small guard in the deliver handler to also wait until `media` rows for that tweet either have `storage_path` set OR `failed` flag set, so the video is attached. (Same guard pattern used today for image-only posts — verify and reuse.)
 
-## UI / Monitoring touch
+Tweets that aren't truncated keep the current flow (translate -> score -> deliver, no hydration ever needed).
 
-- `Monitoring` page already shows media counts via `MediaThumbnails`; will pick up resolved videos automatically.
-- Add a tiny pipeline_event for visibility: `step='resolve_media'`, `status='completed'|'failed'`, with `meta.source='fxtwitter'|'vxtwitter'`.
+## Changes required
 
-## Files to change / create
+### 1. `webhooks-rssapp/index.ts` — stop pre-hydrating
+- Keep `detectTruncation()` and keep persisting `is_truncated` on the post (we still need the flag).
+- Remove the block that enqueues a `hydrate_tweet` job when `isTruncated && hydration enabled`.
+- Always enqueue a `translate` job instead, even for truncated posts.
 
-- **edit** `supabase/functions/webhooks-rssapp/index.ts` — add video-signal detection + enqueue `resolve_media` job.
-- **edit** `supabase/functions/worker/index.ts` — add `resolve_media` case in switch + new `handleResolveMediaJob` function (proxy logic copied from `Downloader.tsx`, server-flavored).
-- **edit** `supabase/functions/worker/index.ts` — small deliver-side guard so video posts wait for `storage_path` (only if not already in place).
-- **no DB migration needed** — `media`, `jobs`, `pipeline_events` already support everything required.
-- **no secrets needed**.
+### 2. `worker/index.ts` — gate hydration on score
+- After the `translate` step computes `importance_score` and `delivery_decision`:
+  - If `delivery_decision === 'deliver'` AND `post.is_truncated === true` AND `post.hydrated_at IS NULL` AND hydration is enabled:
+    - Do NOT enqueue `deliver` yet.
+    - Enqueue `hydrate_tweet` (priority 15) with idempotency key `hydrate:post-translate:<tweet_id>`.
+  - Otherwise behave exactly as today (enqueue `deliver` if approved, or skip).
+- After `hydrate_tweet` completes successfully, the existing logic already enqueues a follow-up `translate` job — keep that. The re-translation will re-score on the full text and then go through the same gate; the second time `is_truncated` is `false` (we set it false on hydration success) so it falls through to `deliver`.
 
-## Out of scope
+### 3. `reconcile_stuck_jobs()` RPC — narrow the safety net
+- Currently re-creates `hydrate_tweet` for every truncated, un-hydrated post in the last 7 days. That re-introduces wasted reads.
+- Change it to only re-enqueue hydration for posts that ALSO have `delivery_decision = 'deliver'` (or are still un-translated and un-scored — those will re-enter the new flow naturally).
+- Tighten window from 7 days to 24 hours.
 
-- Live-stream / Twitter Spaces audio.
-- Posting the video back to X (the existing `x-poster` flow already supports videos when `media.storage_path` is filled, so it benefits automatically).
+### 4. Add a daily hydration budget (defensive)
+- Add `hydrations_per_day` (default 100) to the existing `x_rate_limits` settings row.
+- In `worker/index.ts` `hydrate_tweet` handler, before calling X API: count `pipeline_events` of step `hydrate` with status `running`/`completed` in the last 24h. If >= budget, mark the job completed with `hydration_source = 'budget_exhausted_fallback'`, leave `text_translated` as the truncated translation, and enqueue `deliver`.
+- Surface the budget + today's usage in the dashboard later (out of scope for this change).
+
+### 5. UI surfacing (small)
+- Add a tooltip / helper text on the X API metric card explaining "Reads only fire for tweets that pass the score threshold."
+- No new screens or settings UI in this round — the budget can be tuned via SQL until we add a control.
+
+## What stays the same
+
+- Truncation detection heuristics (no changes; we still need the flag).
+- Translation model, scoring rubric, threshold, author rules.
+- Telegram delivery formatting.
+- X posting (write) flow — completely untouched.
+
+## Trade-off to be aware of
+
+The first translation/score is done on truncated text, which is slightly less informative than the full tweet. A small number of tweets that *would* have scored ≥14 with full text might score 12–13 on the truncated version and get dropped. To mitigate:
+- The score is "best signal available" — RSS.app truncation usually preserves the lede, which is what scoring keys on.
+- We can lower the threshold by 1 (e.g. 14 -> 13) for posts where `is_truncated = true` to compensate. I recommend NOT doing this in v1 — let's measure first. If we see legitimate news being filtered, we add the truncated-tweet score bonus in a follow-up.
+
+## Expected impact
+
+| Metric | Today (7d) | After change | Change |
+|---|---|---|---|
+| X API reads | ~477 | ~150 | -69% |
+| OpenAI translate calls | ~2,622 | ~2,770 (slight increase: re-translate winners) | +6% |
+| Delivered tweets | 484 | ~484 (unchanged) | 0% |
+
+Net: large drop in your most-expensive resource (X API), tiny increase in OpenAI cost, identical user-facing output.
