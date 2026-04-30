@@ -1384,6 +1384,38 @@ supabase: any): Promise<boolean> {
     return true;
   }
 
+  // Kill switch + daily budget gate. If hydration is disabled or the daily
+  // X-API budget is exhausted, mark the post as a budget fallback (no read
+  // consumed) and let the existing flow continue with the truncated text.
+  const hydrationCfg = await loadHydrationSettings(supabase);
+  if (!hydrationCfg.enabled) {
+    console.warn('hydrate_tweet: disabled by settings, falling back', tweetId);
+    await supabase.from('posts').update({
+      hydrated_at: new Date().toISOString(),
+      hydration_source: 'disabled_fallback',
+    }).eq('tweet_id', tweetId);
+    await queueTranslateAfterHydrate(supabase, tweetId, true);
+    return true;
+  }
+  const used24h = await countDailyHydrationsUsed(supabase);
+  if (used24h >= hydrationCfg.daily_budget) {
+    console.warn(`hydrate_tweet: daily budget exhausted (${used24h}/${hydrationCfg.daily_budget}), falling back`, tweetId);
+    await supabase.from('posts').update({
+      hydrated_at: new Date().toISOString(),
+      hydration_source: 'budget_exhausted_fallback',
+    }).eq('tweet_id', tweetId);
+    await queueTranslateAfterHydrate(supabase, tweetId, true);
+    try {
+      await supabase.from('pipeline_events').insert({
+        subject_type: 'post', subject_id: tweetId,
+        step: 'hydrate', status: 'completed',
+        ended_at: new Date().toISOString(),
+        meta: { fallback: 'budget_exhausted', used_24h: used24h, budget: hydrationCfg.daily_budget }
+      });
+    } catch { /* best-effort */ }
+    return true;
+  }
+
   const numericId = extractNumericTweetId(tweetId, post.url as string | null);
   if (!numericId) {
     console.warn('hydrate_tweet: cannot extract numeric tweet id, falling back to translate', tweetId);
