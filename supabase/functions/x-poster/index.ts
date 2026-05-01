@@ -251,7 +251,7 @@ Deno.serve(async (req) => {
   const existing = new Set((existingRows || []).map((r) => r.post_id as string));
 
   let candidatesQ = sb.from('posts')
-    .select('tweet_id, text_translated, text_original, author_handle, has_media, importance_score, delivery_decision, url, accounts!inner(handle)')
+    .select('tweet_id, text_translated, text_original, author_handle, has_media, importance_score, delivery_decision, url, is_truncated, hydrated_at, accounts!inner(handle)')
     .gte('created_at', effectiveCutoff)
     .not('text_translated', 'is', null);
 
@@ -259,6 +259,10 @@ Deno.serve(async (req) => {
   else {
     candidatesQ = candidatesQ.gte('importance_score', cfg.min_score);
     if (cfg.post_only_decision_deliver) candidatesQ = candidatesQ.eq('delivery_decision', 'deliver');
+    // Hydration gate: skip posts that are still truncated and awaiting hydration.
+    // Without this, x-poster can publish the truncated first translation before
+    // the hydrate_tweet job completes (~1-2 min later).
+    candidatesQ = candidatesQ.or('is_truncated.eq.false,hydrated_at.not.is.null');
     // NOTE: require_media is intentionally NOT applied as a DB filter.
     // We post all eligible items; media is attached only when present & valid.
     // The legacy `require_media` flag is kept in the type for back-compat but no longer gates posting.
