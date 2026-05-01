@@ -1,0 +1,1 @@
+UPDATE public.settings SET value = COALESCE(value, '{}'::jsonb) || jsonb_build_object('hydrations_per_day', 400), updated_at = now() WHERE key = 'x_rate_limits';
