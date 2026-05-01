@@ -29,6 +29,7 @@ Updated: today
 - [Twitter Digest](mem://features/twitter-digest) — 30-minute Persian editorial digest via OAuth 1.0a
 - [X Posting Pipeline](mem://features/x-posting-pipeline) — Score-gated, media-required individual post mirroring to X with quotas and dedupe
 - [Twitter Hydration](mem://features/twitter-hydration) — Truncated RSS tweets fetched via X API note_tweet before translation
+- [Hydration Re-translation](mem://architecture/hydration-retranslation) — Idempotency key + stale-translation invalidation invariants
 - [Cron Config](mem://infrastructure/cron-configuration) — pg_cron hardcoded header constraints for Supabase
 - [Video Limitations](mem://limitations/video-ingestion) — Video thumbnail fallback due to RSS.app constraints
 - [DB Retention](mem://maintenance/database-retention) — Automated 7-day data cleanup via batched pg_cron tasks
