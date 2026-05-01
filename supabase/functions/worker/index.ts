@@ -1522,6 +1522,11 @@ supabase: any): Promise<boolean> {
     hydrated_at: new Date().toISOString(),
     hydration_source: 'x_api',
     is_truncated: false,
+    // CRITICAL: invalidate the stale truncated translation so downstream
+    // delivery gates (x-poster, telegram) won't pick up the old text before
+    // the post-hydrate re-translation completes.
+    translated_at: null,
+    text_translated: null,
   };
   if (lang) updatePayload.lang_original = lang;
 
