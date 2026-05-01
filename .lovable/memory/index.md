@@ -10,7 +10,7 @@ Updated: today
 - Database: pg_cron tasks must use hardcoded Supabase URLs and Keys in headers because `current_setting` fails in SQL cron context.
 - UI: Use React Query. Server-side RPCs required for complex dashboard metrics and health checks.
 - Telegram: Messages must strictly use Markdown parse mode.
-- Truncated RSS tweets are hydrated via X API v2 before translation; never translate twice.
+- Truncated RSS tweets are hydrated via X API v2; post-hydrate re-translate MUST use key `translate:hydrate:<id>` AND hydrate handler MUST null `translated_at` + `text_translated` to gate publishers.
 
 ## Memories
 - [Translation & Scoring](mem://ai/translation-settings) — gpt-4o-mini single-call translation and AI scoring
