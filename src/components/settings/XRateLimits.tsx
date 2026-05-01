@@ -13,6 +13,7 @@ export interface XRateLimitsValue {
   posts_per_day: number;
   monthly_post_budget: number;
   media_uploads_per_day: number;
+  hydrations_per_day: number;
 }
 
 const DEFAULTS: XRateLimitsValue = {
@@ -20,6 +21,7 @@ const DEFAULTS: XRateLimitsValue = {
   posts_per_day: 100,
   monthly_post_budget: 2500,
   media_uploads_per_day: 200,
+  hydrations_per_day: 400,
 };
 
 interface Props {
