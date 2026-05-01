@@ -1321,12 +1321,16 @@ supabase: any): Promise<number> {
 
 async function queueTranslateAfterHydrate(// deno-lint-ignore no-explicit-any
 supabase: any, tweetId: string, fallback: boolean): Promise<void> {
+  // CRITICAL: must use a key DISTINCT from the initial `translate:${tweetId}`
+  // job. Otherwise the upsert is ignored (idempotency collision) and the
+  // truncated translation is never replaced with the full hydrated text,
+  // causing the x-poster / Telegram pipeline to deliver stale truncated copy.
   await supabase.from('jobs').upsert({
     type: 'translate',
-    payload: { tweet_id: tweetId },
+    payload: { tweet_id: tweetId, post_hydrate: true },
     status: 'pending',
     priority: 10,
-    idempotency_key: `translate:${tweetId}`,
+    idempotency_key: `translate:hydrate:${tweetId}`,
     next_run_at: new Date().toISOString(),
     result_meta: fallback ? { fallback: 'truncated' } : null,
   }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
