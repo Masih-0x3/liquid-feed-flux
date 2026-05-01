@@ -10,7 +10,7 @@ Updated: today
 - Database: pg_cron tasks must use hardcoded Supabase URLs and Keys in headers because `current_setting` fails in SQL cron context.
 - UI: Use React Query. Server-side RPCs required for complex dashboard metrics and health checks.
 - Telegram: Messages must strictly use Markdown parse mode.
-- Truncated RSS tweets are hydrated via X API v2 before translation; never translate twice.
+- Truncated RSS tweets are hydrated via X API v2; post-hydrate re-translate MUST use key `translate:hydrate:<id>` AND hydrate handler MUST null `translated_at` + `text_translated` to gate publishers.
 
 ## Memories
 - [Translation & Scoring](mem://ai/translation-settings) — gpt-4o-mini single-call translation and AI scoring
@@ -29,6 +29,7 @@ Updated: today
 - [Twitter Digest](mem://features/twitter-digest) — 30-minute Persian editorial digest via OAuth 1.0a
 - [X Posting Pipeline](mem://features/x-posting-pipeline) — Score-gated, media-required individual post mirroring to X with quotas and dedupe
 - [Twitter Hydration](mem://features/twitter-hydration) — Truncated RSS tweets fetched via X API note_tweet before translation
+- [Hydration Re-translation](mem://architecture/hydration-retranslation) — Idempotency key + stale-translation invalidation invariants
 - [Cron Config](mem://infrastructure/cron-configuration) — pg_cron hardcoded header constraints for Supabase
 - [Video Limitations](mem://limitations/video-ingestion) — Video thumbnail fallback due to RSS.app constraints
 - [DB Retention](mem://maintenance/database-retention) — Automated 7-day data cleanup via batched pg_cron tasks
