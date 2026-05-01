@@ -13,6 +13,7 @@ export interface XRateLimitsValue {
   posts_per_day: number;
   monthly_post_budget: number;
   media_uploads_per_day: number;
+  hydrations_per_day: number;
 }
 
 const DEFAULTS: XRateLimitsValue = {
@@ -20,6 +21,7 @@ const DEFAULTS: XRateLimitsValue = {
   posts_per_day: 100,
   monthly_post_budget: 2500,
   media_uploads_per_day: 200,
+  hydrations_per_day: 400,
 };
 
 interface Props {
@@ -112,6 +114,12 @@ export default function XRateLimits({ initial, usage, monthlyPostsCount = 0 }: P
             <Label htmlFor="media_uploads_per_day">Media uploads / day</Label>
             <Input id="media_uploads_per_day" type="number" min={1} max={10000} value={cfg.media_uploads_per_day}
               onChange={(e) => update({ media_uploads_per_day: Math.max(1, Number(e.target.value) || 1) })} className="glass-input" />
+          </div>
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label htmlFor="hydrations_per_day">Tweet hydrations / day (X API reads)</Label>
+            <Input id="hydrations_per_day" type="number" min={1} max={10000} value={cfg.hydrations_per_day}
+              onChange={(e) => update({ hydrations_per_day: Math.max(1, Number(e.target.value) || 1) })} className="glass-input" />
+            <p className="text-xs text-muted-foreground">Daily cap on X API reads used to hydrate truncated high-scoring tweets. X Basic allows ~500/day; default 400 leaves headroom.</p>
           </div>
         </div>
 
