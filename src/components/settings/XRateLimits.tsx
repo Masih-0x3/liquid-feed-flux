@@ -115,6 +115,12 @@ export default function XRateLimits({ initial, usage, monthlyPostsCount = 0 }: P
             <Input id="media_uploads_per_day" type="number" min={1} max={10000} value={cfg.media_uploads_per_day}
               onChange={(e) => update({ media_uploads_per_day: Math.max(1, Number(e.target.value) || 1) })} className="glass-input" />
           </div>
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label htmlFor="hydrations_per_day">Tweet hydrations / day (X API reads)</Label>
+            <Input id="hydrations_per_day" type="number" min={1} max={10000} value={cfg.hydrations_per_day}
+              onChange={(e) => update({ hydrations_per_day: Math.max(1, Number(e.target.value) || 1) })} className="glass-input" />
+            <p className="text-xs text-muted-foreground">Daily cap on X API reads used to hydrate truncated high-scoring tweets. X Basic allows ~500/day; default 400 leaves headroom.</p>
+          </div>
         </div>
 
         <Button onClick={handleSave} disabled={save.isPending} className="bg-gradient-primary hover:opacity-90 text-white">
