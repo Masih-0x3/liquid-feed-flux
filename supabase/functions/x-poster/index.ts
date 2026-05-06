@@ -396,19 +396,34 @@ Deno.serve(async (req) => {
       continue;
     }
 
-    // Media handling: attach images if present & valid; otherwise post text-only.
-    // We never SKIP a post for missing/invalid media — we just omit the media upload.
+    // Media tier handling — cost-first:
+    //   text  → no media/upload calls at all
+    //   image → upload up to 4 images
+    //   video → upload only the video (one media_id), ignore any images
+    // We never SKIP a post for missing/invalid media — we just omit the upload.
     let mediaIds: string[] = [];
     let mediaCount = 0;
     let mediaBytes = 0;
     let mediaKind: string | null = null;
     let mediaWarning: string | null = null;
 
-    if (mediaRows && mediaRows.length > 0) {
-      const sel = selectUploadable(mediaRows as MediaRow[]);
-      if (sel.ok.length > 0 && !dryRun) {
-        try {
-          for (const m of sel.ok) {
+    const sel = selectMediaTier((mediaRows as MediaRow[]) || []);
+
+    if (sel.tier !== 'text' && !dryRun) {
+      try {
+        if (sel.tier === 'video') {
+          const m = sel.items[0];
+          const { data: blob, error: dlErr } = await sb.storage.from('temp-media').download(m.storage_path!);
+          if (dlErr || !blob) throw new Error(`download ${m.storage_path}: ${dlErr?.message || 'no blob'}`);
+          const buf = new Uint8Array(await blob.arrayBuffer());
+          const id = await uploadVideoChunked(buf, m.mime_type || 'video/mp4', ck, cs, at, ats);
+          mediaIds.push(id);
+          mediaBytes += buf.length;
+          mediaCount = 1;
+          mediaKind = 'video';
+          mediaUp24hArr.push(new Date().toISOString());
+        } else {
+          for (const m of sel.items) {
             const { data: blob, error: dlErr } = await sb.storage.from('temp-media').download(m.storage_path!);
             if (dlErr || !blob) throw new Error(`download ${m.storage_path}: ${dlErr?.message || 'no blob'}`);
             const buf = new Uint8Array(await blob.arrayBuffer());
@@ -419,19 +434,19 @@ Deno.serve(async (req) => {
             mediaUp24hArr.push(new Date().toISOString());
           }
           mediaKind = 'image';
-        } catch (e) {
-          // Media upload failed — fall back to text-only rather than dropping the post.
-          mediaIds = [];
-          mediaCount = 0;
-          mediaBytes = 0;
-          mediaKind = null;
-          mediaWarning = `media_upload_failed: ${(e as Error).message}`.slice(0, 500);
-          console.warn(`[x-poster] media upload failed for ${tweetId}, posting text-only: ${(e as Error).message}`);
         }
-      } else if (sel.ok.length > 0 && dryRun) {
-        mediaCount = sel.ok.length;
-        mediaKind = 'image';
+      } catch (e) {
+        // Upload failed — fall back to text-only rather than dropping the post.
+        mediaIds = [];
+        mediaCount = 0;
+        mediaBytes = 0;
+        mediaKind = null;
+        mediaWarning = `media_upload_failed(${sel.tier}): ${(e as Error).message}`.slice(0, 500);
+        console.warn(`[x-poster] ${sel.tier} upload failed for ${tweetId}, posting text-only: ${(e as Error).message}`);
       }
+    } else if (sel.tier !== 'text' && dryRun) {
+      mediaCount = sel.items.length;
+      mediaKind = sel.tier;
     }
 
     // Format text
