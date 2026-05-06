@@ -1762,11 +1762,15 @@ supabase: any): Promise<boolean> {
   await supabase.from('posts').update({ has_media: true }).eq('tweet_id', tweetId);
 
   // Trigger the existing download_media flow to pull bytes into temp-media.
+  // Use a distinct idempotency key from the initial RSS-thumbnail download:
+  // the original `download_media:<tweet_id>` job is already `completed`, so reusing
+  // it would no-op (ignoreDuplicates) and the freshly-resolved video/image rows
+  // would never be fetched into storage.
   const { error: dlErr } = await supabase.from('jobs').upsert({
     type: 'download_media',
     payload: { tweet_id: tweetId },
     status: 'pending',
-    idempotency_key: `download_media:${tweetId}`,
+    idempotency_key: `download_media:resolve:${tweetId}`,
     next_run_at: new Date().toISOString(),
   }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
   if (dlErr) console.warn('resolve_media: failed to enqueue download_media', dlErr.message);

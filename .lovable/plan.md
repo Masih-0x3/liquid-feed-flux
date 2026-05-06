@@ -1,80 +1,70 @@
-## Goal
+# Fix Video Delivery + Cost-Aware X Media Tiering
 
-Stop spending X API reads on tweets that get filtered out anyway. Hydrate only after a tweet has been translated, scored, and confirmed to be above the delivery threshold.
+## Goals
+1. Native Twitter videos actually get downloaded into `temp-media`.
+2. `x-poster` can upload videos to X via chunked upload.
+3. X posting strictly follows a media-tier policy to avoid any wasted upload-API calls:
+   - **Text only** → `tweets` only, no `media/upload` calls.
+   - **Has image, no video** → upload up to 4 images, attach.
+   - **Has video** (with or without images) → upload **only the video**, ignore images.
 
-## Why this works
+## Bug 1 — `resolve_media` never re-downloads the video
 
-Last 7 days of real data:
+`worker/index.ts` (line ~1765) re-enqueues `download_media` with key `download_media:<tweet_id>`, but the original RSS-thumbnail download already used that exact key and is `completed`. With `ignoreDuplicates: true`, the upsert is a no-op, so the freshly-inserted video row stays at `storage_path = NULL` forever.
 
-- 477 tweets were hydrated (= 477 X API reads)
-- Only 149 of them (31%) ended up delivered
-- 328 (69%) were hydrated and then skipped because their score was below 14
+**Fix**
+- In `resolve_media` success path, enqueue with a distinct key: `download_media:resolve:<tweet_id>`.
+- Same pattern as the recent `translate:hydrate:` fix.
+- Optional safety: also clear `downloaded_at`/`storage_path` on any leftover rows (already handled by the `delete()` before insert, so no extra change needed).
 
-Hydrating only winners projects to **~149 reads/week** instead of ~477 — roughly a **70% reduction** in X API read usage, with no loss in published content quality.
+## Bug 2 — `x-poster` cannot upload video, and over-uses the upload API
 
-## New pipeline order
+Today `selectUploadable` only accepts `image/jpeg|png|webp|gif`. Video rows fall through to `skip_reason = no_supported_media`. There is no chunked `INIT/APPEND/FINALIZE` path and no STATUS polling.
 
-```text
-RSS webhook
-  └─> ingest post (mark is_truncated if detected, but DO NOT enqueue hydration)
-        └─> translate + score the truncated text (1 OpenAI call, no X read)
-              ├─ score < threshold  → mark skip, done. Zero X reads spent.
-              └─ score >= threshold AND is_truncated
-                    └─> enqueue hydrate_tweet  (1 X API read)
-                          └─> re-translate + re-score the full text (1 OpenAI call)
-                                └─> enqueue deliver
+**Fix — media tier selection (cost-first)**
+
+Replace `selectUploadable` with a tiered selector that runs *before* any X API call:
+
+```
+downloaded = rows where storage_path AND downloaded_at
+video      = first downloaded row with kind=video OR mime starts with 'video/'
+images     = downloaded rows with mime in ALLOWED_IMAGE and size <= 5MB
+
+if video exists and within video limits → return { tier: 'video', items: [video] }
+else if images.length > 0               → return { tier: 'image', items: images.slice(0,4) }
+else                                     → return { tier: 'text',  items: [] }
 ```
 
-Tweets that aren't truncated keep the current flow (translate -> score -> deliver, no hydration ever needed).
+Then in the main handler:
+- `tier === 'text'` → call `postTweet(text, [], ...)` directly. **Zero `media/upload` calls.**
+- `tier === 'image'` → call `uploadImage` for each (existing path).
+- `tier === 'video'` → call new `uploadVideoChunked` once, attach single media_id.
 
-## Changes required
+This guarantees we never invoke `media/upload` for media we don't physically have, and never upload images when a video will be attached.
 
-### 1. `webhooks-rssapp/index.ts` — stop pre-hydrating
-- Keep `detectTruncation()` and keep persisting `is_truncated` on the post (we still need the flag).
-- Remove the block that enqueues a `hydrate_tweet` job when `isTruncated && hydration enabled`.
-- Always enqueue a `translate` job instead, even for truncated posts.
+**Fix — chunked video upload** (`x-poster/index.ts`)
 
-### 2. `worker/index.ts` — gate hydration on score
-- After the `translate` step computes `importance_score` and `delivery_decision`:
-  - If `delivery_decision === 'deliver'` AND `post.is_truncated === true` AND `post.hydrated_at IS NULL` AND hydration is enabled:
-    - Do NOT enqueue `deliver` yet.
-    - Enqueue `hydrate_tweet` (priority 15) with idempotency key `hydrate:post-translate:<tweet_id>`.
-  - Otherwise behave exactly as today (enqueue `deliver` if approved, or skip).
-- After `hydrate_tweet` completes successfully, the existing logic already enqueues a follow-up `translate` job — keep that. The re-translation will re-score on the full text and then go through the same gate; the second time `is_truncated` is `false` (we set it false on hydration success) so it falls through to `deliver`.
+Add `uploadVideoChunked(bytes, mime, ...)` implementing X v1.1 upload:
+1. `INIT` — POST `command=INIT&media_type=<mime>&total_bytes=<n>&media_category=tweet_video`
+2. `APPEND` — POST `command=APPEND&media_id=...&segment_index=i` with 4 MB chunks (`multipart/form-data`, field `media`)
+3. `FINALIZE` — POST `command=FINALIZE&media_id=...`
+4. If response contains `processing_info` → poll `command=STATUS&media_id=...` every `check_after_secs` until `state=succeeded` (or fail on `failed`); cap total wait at 60s to stay within Edge Function budget.
 
-### 3. `reconcile_stuck_jobs()` RPC — narrow the safety net
-- Currently re-creates `hydrate_tweet` for every truncated, un-hydrated post in the last 7 days. That re-introduces wasted reads.
-- Change it to only re-enqueue hydration for posts that ALSO have `delivery_decision = 'deliver'` (or are still un-translated and un-scored — those will re-enter the new flow naturally).
-- Tighten window from 7 days to 24 hours.
+Guards (skip + log `skip_reason='video_too_large'` instead of attempting upload, to stay cheap):
+- `mime` must start with `video/` (prefer `video/mp4`).
+- `file_size <= 50 MB` (well under X's 512MB cap; protects function memory + time).
+- Optional: skip if `duration_ms > 140_000` when known.
 
-### 4. Add a daily hydration budget (defensive)
-- Add `hydrations_per_day` (default 100) to the existing `x_rate_limits` settings row.
-- In `worker/index.ts` `hydrate_tweet` handler, before calling X API: count `pipeline_events` of step `hydrate` with status `running`/`completed` in the last 24h. If >= budget, mark the job completed with `hydration_source = 'budget_exhausted_fallback'`, leave `text_translated` as the truncated translation, and enqueue `deliver`.
-- Surface the budget + today's usage in the dashboard later (out of scope for this change).
+Use the existing OAuth 1.0a `oauthHeader` helper. For `APPEND`, OAuth signs only the URL + query params (the multipart body is not part of the signature base) — same approach as the standard Twitter docs.
 
-### 5. UI surfacing (small)
-- Add a tooltip / helper text on the X API metric card explaining "Reads only fire for tweets that pass the score threshold."
-- No new screens or settings UI in this round — the budget can be tuned via SQL until we add a control.
+## Files to change
 
-## What stays the same
+- `supabase/functions/worker/index.ts` — change one line: idempotency key in `resolve_media` re-enqueue.
+- `supabase/functions/x-poster/index.ts` — replace `selectUploadable`, add `uploadVideoChunked` + `pollMediaStatus`, branch in main handler by tier.
 
-- Truncation detection heuristics (no changes; we still need the flag).
-- Translation model, scoring rubric, threshold, author rules.
-- Telegram delivery formatting.
-- X posting (write) flow — completely untouched.
+## Out of scope
+- No backfill of historical tweets that already shipped without video (per your earlier preference).
+- Telegram already has a `sendVideo` path; once Bug 1 is fixed the storage_path will exist and Telegram videos will start working again automatically — no Telegram code change needed.
 
-## Trade-off to be aware of
-
-The first translation/score is done on truncated text, which is slightly less informative than the full tweet. A small number of tweets that *would* have scored ≥14 with full text might score 12–13 on the truncated version and get dropped. To mitigate:
-- The score is "best signal available" — RSS.app truncation usually preserves the lede, which is what scoring keys on.
-- We can lower the threshold by 1 (e.g. 14 -> 13) for posts where `is_truncated = true` to compensate. I recommend NOT doing this in v1 — let's measure first. If we see legitimate news being filtered, we add the truncated-tweet score bonus in a follow-up.
-
-## Expected impact
-
-| Metric | Today (7d) | After change | Change |
-|---|---|---|---|
-| X API reads | ~477 | ~150 | -69% |
-| OpenAI translate calls | ~2,622 | ~2,770 (slight increase: re-translate winners) | +6% |
-| Delivered tweets | 484 | ~484 (unchanged) | 0% |
-
-Net: large drop in your most-expensive resource (X API), tiny increase in OpenAI cost, identical user-facing output.
+## Memory update
+Add a Core rule: "X posting is media-tiered: video > image > text. Never call X media/upload for media we don't have downloaded. Video uses chunked INIT/APPEND/FINALIZE/STATUS." Plus a memory file under `mem://features/x-posting-pipeline` covering tier rules and the `resolve_media` re-download key.
