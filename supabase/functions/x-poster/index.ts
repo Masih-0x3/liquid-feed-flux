@@ -107,9 +107,16 @@ async function trimRollingWindow(arr: string[], windowMs: number): Promise<strin
   return (arr || []).filter((ts) => { try { return new Date(ts).getTime() > cutoff; } catch { return false; } });
 }
 
-// ─── Media validation (images only — RSS.app does not provide native videos) ──
+// ─── Media validation & tier selection ───────────────────────────────
+// Cost-first policy:
+//   - text only        → no media/upload calls at all
+//   - has image(s)     → upload up to 4 images
+//   - has video        → upload ONLY the video (ignore images), one media_id
 const ALLOWED_IMAGE = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB per X spec
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;        // 5MB per X spec
+const MAX_VIDEO_BYTES = 50 * 1024 * 1024;       // 50MB safety cap (X allows up to 512MB)
+const VIDEO_CHUNK_BYTES = 4 * 1024 * 1024;      // 4MB chunks for APPEND
+const VIDEO_PROCESS_TIMEOUT_MS = 55 * 1000;     // total polling budget
 
 interface MediaRow {
   id: string;
@@ -120,45 +127,139 @@ interface MediaRow {
   kind: string | null;
 }
 
-function selectUploadable(rows: MediaRow[]): { ok: MediaRow[]; reason?: string } {
+type Tier = 'text' | 'image' | 'video';
+interface TierSelection { tier: Tier; items: MediaRow[]; reason?: string }
+
+function selectMediaTier(rows: MediaRow[]): TierSelection {
   const downloaded = rows.filter((r) => r.downloaded_at && r.storage_path);
-  if (downloaded.length === 0) return { ok: [], reason: 'no_media' };
+  if (downloaded.length === 0) return { tier: 'text', items: [], reason: 'no_downloaded_media' };
 
-  const images = downloaded.filter((r) => ALLOWED_IMAGE.includes(r.mime_type || '') && (r.file_size ?? 0) <= MAX_IMAGE_BYTES);
+  const video = downloaded.find((r) =>
+    (r.kind === 'video' || (r.mime_type || '').startsWith('video/'))
+    && (r.mime_type || '').startsWith('video/')
+    && (r.file_size ?? 0) > 0
+    && (r.file_size ?? 0) <= MAX_VIDEO_BYTES,
+  );
+  if (video) return { tier: 'video', items: [video] };
 
-  if (images.length > 0) return { ok: images.slice(0, 4) };
-  return { ok: [], reason: 'no_supported_media' };
+  const images = downloaded.filter(
+    (r) => ALLOWED_IMAGE.includes(r.mime_type || '') && (r.file_size ?? 0) <= MAX_IMAGE_BYTES,
+  );
+  if (images.length > 0) return { tier: 'image', items: images.slice(0, 4) };
+
+  return { tier: 'text', items: [], reason: 'no_supported_media' };
 }
 
 // ─── X media upload (image, simple base64) ───────────────────────────
 function bytesToBase64(bytes: Uint8Array): string {
-  // Chunked conversion to avoid "Maximum call stack size exceeded" on large images
-  // (String.fromCharCode(...bytes) blows the stack at ~100KB+).
   let binary = '';
-  const chunkSize = 0x8000; // 32KB chunks
+  const chunkSize = 0x8000;
   for (let i = 0; i < bytes.length; i += chunkSize) {
     binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
   }
   return btoa(binary);
 }
 
+const UPLOAD_URL = 'https://upload.twitter.com/1.1/media/upload.json';
+
 async function uploadImage(
   bytes: Uint8Array, mime: string, ck: string, cs: string, at: string, ats: string,
 ): Promise<string> {
-  const url = 'https://upload.twitter.com/1.1/media/upload.json';
   const b64 = bytesToBase64(bytes);
   const params: Record<string, string> = { media_data: b64 };
-  const auth = await oauthHeader('POST', url, params, ck, cs, at, ats);
-  const body = new URLSearchParams(params);
-  const resp = await fetch(url, {
+  const auth = await oauthHeader('POST', UPLOAD_URL, params, ck, cs, at, ats);
+  const resp = await fetch(UPLOAD_URL, {
     method: 'POST',
     headers: { Authorization: auth, 'Content-Type': 'application/x-www-form-urlencoded' },
-    body,
+    body: new URLSearchParams(params),
   });
   const text = await resp.text();
   if (!resp.ok) throw new Error(`media upload ${resp.status}: ${text.slice(0, 300)} (mime=${mime})`);
   const json = JSON.parse(text);
   return String(json.media_id_string || json.media_id);
+}
+
+// ─── X media upload (video, chunked INIT/APPEND/FINALIZE/STATUS) ─────
+async function uploadVideoChunked(
+  bytes: Uint8Array, mime: string, ck: string, cs: string, at: string, ats: string,
+): Promise<string> {
+  // INIT
+  const initParams: Record<string, string> = {
+    command: 'INIT',
+    media_type: mime,
+    total_bytes: String(bytes.length),
+    media_category: 'tweet_video',
+  };
+  const initAuth = await oauthHeader('POST', UPLOAD_URL, initParams, ck, cs, at, ats);
+  const initResp = await fetch(UPLOAD_URL, {
+    method: 'POST',
+    headers: { Authorization: initAuth, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams(initParams),
+  });
+  const initText = await initResp.text();
+  if (!initResp.ok) throw new Error(`video INIT ${initResp.status}: ${initText.slice(0, 300)}`);
+  const initJson = JSON.parse(initText);
+  const mediaId = String(initJson.media_id_string || initJson.media_id);
+
+  // APPEND — multipart/form-data; OAuth signs URL + query params (body excluded).
+  let segment = 0;
+  for (let offset = 0; offset < bytes.length; offset += VIDEO_CHUNK_BYTES) {
+    const chunk = bytes.subarray(offset, Math.min(offset + VIDEO_CHUNK_BYTES, bytes.length));
+    const appendParams: Record<string, string> = {
+      command: 'APPEND',
+      media_id: mediaId,
+      segment_index: String(segment),
+    };
+    const qs = new URLSearchParams(appendParams).toString();
+    const appendAuth = await oauthHeader('POST', UPLOAD_URL, appendParams, ck, cs, at, ats);
+    const form = new FormData();
+    form.append('media', new Blob([chunk], { type: 'application/octet-stream' }));
+    const appendResp = await fetch(`${UPLOAD_URL}?${qs}`, {
+      method: 'POST',
+      headers: { Authorization: appendAuth },
+      body: form,
+    });
+    const appendText = await appendResp.text();
+    if (!appendResp.ok) throw new Error(`video APPEND seg=${segment} ${appendResp.status}: ${appendText.slice(0, 300)}`);
+    segment += 1;
+  }
+
+  // FINALIZE
+  const finParams: Record<string, string> = { command: 'FINALIZE', media_id: mediaId };
+  const finAuth = await oauthHeader('POST', UPLOAD_URL, finParams, ck, cs, at, ats);
+  const finResp = await fetch(UPLOAD_URL, {
+    method: 'POST',
+    headers: { Authorization: finAuth, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams(finParams),
+  });
+  const finText = await finResp.text();
+  if (!finResp.ok) throw new Error(`video FINALIZE ${finResp.status}: ${finText.slice(0, 300)}`);
+  const finJson = JSON.parse(finText);
+
+  // STATUS poll if async processing
+  let processing = finJson.processing_info as { state?: string; check_after_secs?: number; error?: { message?: string } } | undefined;
+  const deadline = Date.now() + VIDEO_PROCESS_TIMEOUT_MS;
+  while (processing && processing.state && processing.state !== 'succeeded') {
+    if (processing.state === 'failed') {
+      throw new Error(`video processing failed: ${processing.error?.message || 'unknown'}`);
+    }
+    if (Date.now() > deadline) throw new Error('video processing timeout');
+    const wait = Math.max(1, processing.check_after_secs ?? 2) * 1000;
+    await new Promise((r) => setTimeout(r, wait));
+    const statusParams: Record<string, string> = { command: 'STATUS', media_id: mediaId };
+    const qs = new URLSearchParams(statusParams).toString();
+    const statusAuth = await oauthHeader('GET', UPLOAD_URL, statusParams, ck, cs, at, ats);
+    const statusResp = await fetch(`${UPLOAD_URL}?${qs}`, {
+      method: 'GET',
+      headers: { Authorization: statusAuth },
+    });
+    const statusText = await statusResp.text();
+    if (!statusResp.ok) throw new Error(`video STATUS ${statusResp.status}: ${statusText.slice(0, 300)}`);
+    const statusJson = JSON.parse(statusText);
+    processing = statusJson.processing_info;
+  }
+
+  return mediaId;
 }
 
 // ─── Post tweet ──────────────────────────────────────────────────────
