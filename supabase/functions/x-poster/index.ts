@@ -352,7 +352,7 @@ Deno.serve(async (req) => {
   const existing = new Set((existingRows || []).map((r) => r.post_id as string));
 
   let candidatesQ = sb.from('posts')
-    .select('tweet_id, text_translated, text_original, author_handle, has_media, importance_score, delivery_decision, url, is_truncated, hydrated_at, accounts!inner(handle)')
+    .select('tweet_id, text_translated, text_original, author_handle, has_media, importance_score, delivery_decision, url, is_truncated, hydrated_at, created_at, accounts!inner(handle)')
     .gte('created_at', effectiveCutoff)
     .not('text_translated', 'is', null);
 
