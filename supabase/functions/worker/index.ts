@@ -1741,11 +1741,9 @@ supabase: any): Promise<boolean> {
     return true;
   }
 
-  // Replace existing media rows for this tweet so we don't keep low-quality
-  // RSS thumbnails alongside the resolved high-quality assets.
-  const { error: delErr } = await supabase.from('media').delete().eq('tweet_id', tweetId);
-  if (delErr) console.warn('resolve_media: failed clearing old media rows', delErr.message);
-
+  // Build rows FIRST (and validate). Only after a successful upsert do we
+  // prune stale rows. Previous flow deleted everything up-front, so any
+  // insert error (e.g. type mismatch) wiped the tweet's media permanently.
   const rows = await Promise.all(resolved.map(async (m, index) => ({
     tweet_id: tweetId,
     kind: m.kind,
@@ -1760,8 +1758,15 @@ supabase: any): Promise<boolean> {
   const { error: insErr } = await supabase.from('media').upsert(rows, { onConflict: 'tweet_id,ordering' });
   if (insErr) {
     console.error('resolve_media: insert failed', insErr.message);
+    await insertPipelineEvent(supabase, 'post', tweetId, 'resolve_media', 'failed',
+      null, new Date().toISOString(), `upsert_failed: ${insErr.message}`, { handle, numericId, count: rows.length });
     return false;
   }
+
+  // Prune any leftover higher-ordering rows from a previous (longer) resolution.
+  const { error: prnErr } = await supabase.from('media')
+    .delete().eq('tweet_id', tweetId).gte('ordering', rows.length);
+  if (prnErr) console.warn('resolve_media: prune leftover rows failed', prnErr.message);
 
   // Make sure has_media is true so deliver attaches files.
   await supabase.from('posts').update({ has_media: true }).eq('tweet_id', tweetId);

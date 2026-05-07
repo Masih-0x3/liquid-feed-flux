@@ -1,92 +1,77 @@
-# Plan — Video Delivery Hardening
+# Video Delivery Hardening
 
-## Context
-Root cause of the missing Osint613 video was a type mismatch:
-`api.fxtwitter.com` returns `duration` as **seconds (float, e.g. 5.9)** but
-`media.duration_ms` is **INTEGER** → `resolve_media` insert blew up with
-`invalid input syntax for type integer: "5.9"`. Since the handler `DELETE`s
-existing media rows *before* re-inserting, the tweet was left with **zero**
-media rows, `download_media` never ran, and `x-poster` posted text-only.
+The Osint613 video missed X because `resolve_media` tried to insert
+fxtwitter's `duration: 5.9` (seconds) into `media.duration_ms` (integer).
+That insert failure was already preceded by a `DELETE` of all media rows
+for the tweet, leaving zero downloadable assets — so x-poster posted
+text-only. The seconds→ms conversion is already deployed; this plan
+prevents the broader class of bug.
 
-The seconds→ms + rounding fix is already deployed (last turn). This plan
-addresses the broader class of bugs to prevent recurrence.
+**Hands-off:** Tweet `2052532719637180730` was posted manually. The
+reconcile step explicitly excludes it.
 
-> **Hands-off:** Osint613 tweet `2052532719637180730` was manually posted
-> with the video. Do **not** re-deliver it. The pending `resolve_media` job
-> for it should be marked completed so the worker doesn't reprocess it.
+## Changes
 
-## Audit findings & fixes
+### 1. `supabase/functions/worker/index.ts` — `resolve_media` safe upsert
+Today: `DELETE` rows, then `INSERT`. Any insert error wipes media.
+New flow:
+- Build & validate rows (rounding numerics) first.
+- `upsert` on `(tweet_id, ordering)` in one call.
+- Only after a successful upsert, `DELETE` rows whose `ordering >= rows.length`.
+- On insert error: log to `pipeline_events` (`status='failed'`,
+  `error=<db msg>`) and return `false` so the job retries with old rows
+  intact.
 
-### 1. ✅ FIXED — fxtwitter `duration` seconds vs `duration_ms` int
-- Convert seconds → ms with `Math.round(v.duration * 1000)`
-- Round `width`, `height`, `duration_ms` to int defensively in the insert row
+### 2. `supabase/functions/x-poster/index.ts` — media-pending gate
+After fetching `mediaRows` for a candidate:
+- If `posts.has_media = true` AND no row has `downloaded_at`, query
+  `jobs` for any pending/running `resolve_media` or `download_media`
+  for that tweet.
+- If a job is in flight AND post age < 10 min → skip iteration WITHOUT
+  inserting into `x_deliveries` (so it remains eligible next tick). Log
+  `media_pending`.
+- If post age ≥ 10 min → fall through to text-only as today (with
+  `last_error='media_pending_timeout'`).
 
-### 2. Destructive delete-then-insert in `resolve_media`
-**Risk:** Any future insert error wipes all media for the tweet permanently
-until the next scheduled retry. Same class of failure mode that masked bug #1.
+### 3. `supabase/functions/media-processor/index.ts` — MIME normalization
+When upstream `Content-Type` is missing, generic
+(`application/octet-stream`, `binary/octet-stream`) or doesn't start
+with `image/`/`video/`, infer from URL extension:
+- `.mp4` → `video/mp4`, `.mov` → `video/quicktime`,
+  `.webm` → `video/webm`, `.m4v` → `video/mp4`
+- `.jpg`/`.jpeg` → `image/jpeg`, `.png` → `image/png`,
+  `.webp` → `image/webp`, `.gif` → `image/gif`
+- Fallback: keep original.
 
-**Fix:** Reorder — build & validate the rows first, then *upsert* on
-`(tweet_id, ordering)` in one call, and only `DELETE` rows whose `ordering`
-is no longer present after a successful upsert. If the upsert errors, the
-old rows survive.
+Persist the normalized value as `mime_type` so x-poster's
+`selectMediaTier` matches `video/` correctly.
 
-### 3. x-poster race with in-flight `resolve_media` / `download_media`
-**Risk:** If a post passes the editorial gate before `resolve_media` +
-`download_media` complete, x-poster will post text-only (selectMediaTier
-returns `text` because `downloaded_at` is null), permanently spending the
-post's one chance.
+### 4. Surface `resolve_media` / `download_media` failures
+Add a `pipeline_events` row with `status='failed'` whenever an
+upsert/upload error occurs in `resolve_media` (worker) or
+`downloadMediaForTweet` (media-processor). Keeps monitoring honest.
 
-**Fix:** In `x-poster` candidate selection, if `posts.has_media = true`
-AND the tweet has any media row with `downloaded_at IS NULL` AND there's
-a pending/running `resolve_media` or `download_media` job for that tweet
-→ skip this iteration with `skip_reason='media_pending'` (do **not** insert
-into `x_deliveries` so it remains eligible next tick). Cap the wait so
-posts don't get stuck forever (e.g. 10 min after `posts.created_at` →
-post text-only as fallback).
+### 5. One-shot SQL reconcile (data, not schema → insert tool)
+For posts created in the last 24h where:
+- `has_media = true`
+- AND no `media` row with `downloaded_at IS NOT NULL`
+- AND no pending/running `resolve_media` or `download_media` job
+- AND `tweet_id <> 'https://twitter.com/Osint613/status/2052532719637180730'`
 
-### 4. MIME normalization in `media-processor`
-**Risk:** If the upstream server returns `application/octet-stream` or a
-generic `binary/octet-stream`, x-poster's `selectMediaTier` won't match
-the `video/` prefix and will demote the post to text-only.
+Insert a `resolve_media` job with idempotency key
+`resolve_media:audit:<tweet_id>`.
 
-**Fix:** In `media-processor.downloadMediaForTweet`, when `Content-Type`
-doesn't start with `image/` or `video/`, infer from the file extension
-(`.mp4 → video/mp4`, `.mov → video/quicktime`, `.webp → image/webp`,
-etc.) before persisting `mime_type`. Also persist the resolved `kind`
-when it disagrees with the URL-derived guess from `resolve_media`.
+Also mark the existing stuck `resolve_media` job for the Osint613 tweet
+as `completed` so the worker doesn't reprocess it.
 
-### 5. vxtwitter duration_millis defensive rounding
-Already covered by the global `Math.round(m.duration_ms)` we added in the
-upsert row builder, but make sure the same helper is used for both source
-adapters and any future ones.
+## Out of scope
+- Telegram delivery loop (already correctly iterates `videos` via `sendVideo`).
+- Chunked X video upload (correct).
+- Schema change for `duration_ms` — int is fine once we round.
 
-### 6. Surface insert/upsert failures as `pipeline_events`
-`resolve_media` currently only `console.error`s an insert failure and
-returns `false`. Add a `pipeline_events` row with `status='failed'` and
-the DB error message so monitoring/dashboard surfaces the problem instead
-of silently retrying. Same for `download_media` upload errors that loop.
-
-### 7. Reconcile bad media rows
-A one-shot SQL cleanup to re-enqueue `resolve_media` for any post in the
-last 24h where:
-- `posts.has_media = true`
-- no `media` row with `downloaded_at IS NOT NULL` exists, AND
-- no `pending/running` `resolve_media` job exists.
-
-Use idempotency key `resolve_media:audit:<tweet_id>` so it can't collide
-with existing keys.
-
-## Out of scope (not changing)
-- Telegram delivery path: already iterates `videos` correctly via
-  `sendVideo`; bug #3 is about x-poster only.
-- The chunked X video upload (`uploadVideoChunked`): code is correct.
-- Bumping `media.duration_ms` to `bigint` — int is fine once we round.
-
-## Rollout order
-1. Code: x-poster `media_pending` gate (#3) + media-processor MIME
-   normalization (#4) + resolve_media safe-upsert (#2) + pipeline_events
-   on failure (#6).
-2. SQL one-shot: mark Osint613 `resolve_media` job completed; reconcile
-   bad media rows (#7).
-3. Deploy `worker`, `media-processor`, `x-poster`. Watch logs for one
-   ingest cycle to confirm a video tweet flows end-to-end.
+## Rollout
+1. Edit three edge functions.
+2. Run the one-shot SQL reconcile via insert tool.
+3. Auto-deploy + watch worker / x-poster logs through one ingest cycle
+   to confirm a video tweet flows end-to-end (resolve → download →
+   x-poster picks tier `video` → chunked upload → posted).
