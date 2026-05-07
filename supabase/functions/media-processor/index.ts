@@ -250,3 +250,23 @@ function getFileExtension(contentType: string, url: string): string {
   if (contentType.startsWith('audio/')) return '.mp3';
   return '.bin';
 }
+
+// Normalize Content-Type. Some CDNs return application/octet-stream or empty
+// values for video/image bytes. Without normalization, x-poster's tier
+// selection would not see "video/" prefix and would post text-only.
+function normalizeMime(rawCT: string, url: string): string {
+  const ct = (rawCT || '').toLowerCase().split(';')[0].trim();
+  const isUseful = ct.startsWith('image/') || ct.startsWith('video/') || ct.startsWith('audio/');
+  if (isUseful) return ct;
+  const m = (url || '').toLowerCase().match(/\.([a-z0-9]+)(\?|#|$)/);
+  const ext = m ? m[1] : '';
+  const extMap: Record<string, string> = {
+    mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime',
+    webm: 'video/webm', mkv: 'video/x-matroska',
+    jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
+    webp: 'image/webp', gif: 'image/gif',
+    mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg',
+  };
+  return extMap[ext] || ct || 'application/octet-stream';
+}
+
