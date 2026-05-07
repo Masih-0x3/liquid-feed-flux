@@ -1751,9 +1751,9 @@ supabase: any): Promise<boolean> {
     kind: m.kind,
     src_url: m.url,
     src_url_hash: await hashUrl(m.url),
-    width: m.width ?? null,
-    height: m.height ?? null,
-    duration_ms: m.duration_ms ?? null,
+    width: m.width != null ? Math.round(m.width) : null,
+    height: m.height != null ? Math.round(m.height) : null,
+    duration_ms: m.duration_ms != null ? Math.round(m.duration_ms) : null,
     ordering: index,
   })));
 
