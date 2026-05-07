@@ -388,6 +388,28 @@ Deno.serve(async (req) => {
       .eq('tweet_id', tweetId)
       .order('ordering', { ascending: true });
 
+    // Media-pending gate: if the post claims to have media but nothing has
+    // been downloaded yet AND a resolve_media/download_media job is still
+    // pending/running, defer this iteration so we don't burn the post on
+    // text-only. Cap at 10 minutes after ingestion to avoid getting stuck.
+    const POST_AGE_CAP_MS = 10 * 60 * 1000;
+    const postAgeMs = Date.now() - new Date((post as { created_at: string }).created_at).getTime();
+    const hasMediaFlag = (post as { has_media?: boolean }).has_media === true;
+    const anyDownloaded = (mediaRows || []).some((m) => (m as MediaRow).downloaded_at);
+    if (!onlyTweetId && hasMediaFlag && !anyDownloaded && postAgeMs < POST_AGE_CAP_MS) {
+      const { data: pendingJobs } = await sb.from('jobs')
+        .select('id').in('type', ['resolve_media', 'download_media'])
+        .in('status', ['pending', 'running'])
+        .filter('payload->>tweet_id', 'eq', tweetId).limit(1);
+      if (pendingJobs && pendingJobs.length > 0) {
+        // Do NOT insert into x_deliveries — keep the post eligible for the
+        // next tick once media lands.
+        results.push({ tweet_id: tweetId, status: 'deferred', reason: 'media_pending', age_ms: postAgeMs });
+        console.log(`[x-poster] deferring ${tweetId}: media still resolving (age=${Math.round(postAgeMs/1000)}s)`);
+        continue;
+      }
+    }
+
     // Quota check (per-iteration in case prior iterations posted)
     const blocked = quotaBlock();
     if (blocked) {
