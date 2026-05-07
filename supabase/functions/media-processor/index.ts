@@ -138,7 +138,8 @@ supabase: any, tweetId: string, dryRun: boolean) {
 
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
-      const contentType = response.headers.get('content-type') || 'application/octet-stream';
+      const rawContentType = response.headers.get('content-type') || '';
+      const contentType = normalizeMime(rawContentType, media.src_url);
       const fileExtension = getFileExtension(contentType, media.src_url);
       const fileName = `${media.tweet_id.replace(/[^a-zA-Z0-9]/g, '_')}_${media.ordering}${fileExtension}`;
       const storagePath = `${new Date().getFullYear()}/${new Date().getMonth() + 1}/${fileName}`;
@@ -160,6 +161,14 @@ supabase: any, tweetId: string, dryRun: boolean) {
       downloadedCount++;
     } catch (error) {
       console.error(JSON.stringify({ function: 'media-processor', action: 'download_fail', src_url: media.src_url, error: (error as Error).message }));
+      // Surface to pipeline_events so monitoring can see media download failures.
+      try {
+        await supabase.from('pipeline_events').insert({
+          subject_type: 'post', subject_id: media.tweet_id, step: 'download_media',
+          status: 'failed', error: (error as Error).message,
+          meta: { src_url: media.src_url, media_id: media.id },
+        });
+      } catch (_e) { /* best-effort */ }
       failedCount++;
     }
   }
