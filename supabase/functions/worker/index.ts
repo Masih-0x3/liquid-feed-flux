@@ -1638,12 +1638,17 @@ async function rmFetchFromFx(handle: string, id: string): Promise<ResolvedMediaR
         if (best?.url) url = best.url;
       }
       if (!url) continue;
+      // fxtwitter returns `duration` in SECONDS (often fractional, e.g. 5.9).
+      // Our media.duration_ms column is INTEGER → must convert + round.
+      const rawDur = v.duration as number | undefined;
+      const durMs = typeof rawDur === 'number' && isFinite(rawDur)
+        ? Math.round(rawDur * 1000) : null;
       out.push({
         kind: (v.type as string) === 'gif' ? 'gif' : 'video',
         url,
         width: v.width as number | undefined,
         height: v.height as number | undefined,
-        duration_ms: v.duration as number | undefined,
+        duration_ms: durMs ?? undefined,
       });
     }
 
