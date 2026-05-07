@@ -1,70 +1,92 @@
-# Fix Video Delivery + Cost-Aware X Media Tiering
+# Plan — Video Delivery Hardening
 
-## Goals
-1. Native Twitter videos actually get downloaded into `temp-media`.
-2. `x-poster` can upload videos to X via chunked upload.
-3. X posting strictly follows a media-tier policy to avoid any wasted upload-API calls:
-   - **Text only** → `tweets` only, no `media/upload` calls.
-   - **Has image, no video** → upload up to 4 images, attach.
-   - **Has video** (with or without images) → upload **only the video**, ignore images.
+## Context
+Root cause of the missing Osint613 video was a type mismatch:
+`api.fxtwitter.com` returns `duration` as **seconds (float, e.g. 5.9)** but
+`media.duration_ms` is **INTEGER** → `resolve_media` insert blew up with
+`invalid input syntax for type integer: "5.9"`. Since the handler `DELETE`s
+existing media rows *before* re-inserting, the tweet was left with **zero**
+media rows, `download_media` never ran, and `x-poster` posted text-only.
 
-## Bug 1 — `resolve_media` never re-downloads the video
+The seconds→ms + rounding fix is already deployed (last turn). This plan
+addresses the broader class of bugs to prevent recurrence.
 
-`worker/index.ts` (line ~1765) re-enqueues `download_media` with key `download_media:<tweet_id>`, but the original RSS-thumbnail download already used that exact key and is `completed`. With `ignoreDuplicates: true`, the upsert is a no-op, so the freshly-inserted video row stays at `storage_path = NULL` forever.
+> **Hands-off:** Osint613 tweet `2052532719637180730` was manually posted
+> with the video. Do **not** re-deliver it. The pending `resolve_media` job
+> for it should be marked completed so the worker doesn't reprocess it.
 
-**Fix**
-- In `resolve_media` success path, enqueue with a distinct key: `download_media:resolve:<tweet_id>`.
-- Same pattern as the recent `translate:hydrate:` fix.
-- Optional safety: also clear `downloaded_at`/`storage_path` on any leftover rows (already handled by the `delete()` before insert, so no extra change needed).
+## Audit findings & fixes
 
-## Bug 2 — `x-poster` cannot upload video, and over-uses the upload API
+### 1. ✅ FIXED — fxtwitter `duration` seconds vs `duration_ms` int
+- Convert seconds → ms with `Math.round(v.duration * 1000)`
+- Round `width`, `height`, `duration_ms` to int defensively in the insert row
 
-Today `selectUploadable` only accepts `image/jpeg|png|webp|gif`. Video rows fall through to `skip_reason = no_supported_media`. There is no chunked `INIT/APPEND/FINALIZE` path and no STATUS polling.
+### 2. Destructive delete-then-insert in `resolve_media`
+**Risk:** Any future insert error wipes all media for the tweet permanently
+until the next scheduled retry. Same class of failure mode that masked bug #1.
 
-**Fix — media tier selection (cost-first)**
+**Fix:** Reorder — build & validate the rows first, then *upsert* on
+`(tweet_id, ordering)` in one call, and only `DELETE` rows whose `ordering`
+is no longer present after a successful upsert. If the upsert errors, the
+old rows survive.
 
-Replace `selectUploadable` with a tiered selector that runs *before* any X API call:
+### 3. x-poster race with in-flight `resolve_media` / `download_media`
+**Risk:** If a post passes the editorial gate before `resolve_media` +
+`download_media` complete, x-poster will post text-only (selectMediaTier
+returns `text` because `downloaded_at` is null), permanently spending the
+post's one chance.
 
-```
-downloaded = rows where storage_path AND downloaded_at
-video      = first downloaded row with kind=video OR mime starts with 'video/'
-images     = downloaded rows with mime in ALLOWED_IMAGE and size <= 5MB
+**Fix:** In `x-poster` candidate selection, if `posts.has_media = true`
+AND the tweet has any media row with `downloaded_at IS NULL` AND there's
+a pending/running `resolve_media` or `download_media` job for that tweet
+→ skip this iteration with `skip_reason='media_pending'` (do **not** insert
+into `x_deliveries` so it remains eligible next tick). Cap the wait so
+posts don't get stuck forever (e.g. 10 min after `posts.created_at` →
+post text-only as fallback).
 
-if video exists and within video limits → return { tier: 'video', items: [video] }
-else if images.length > 0               → return { tier: 'image', items: images.slice(0,4) }
-else                                     → return { tier: 'text',  items: [] }
-```
+### 4. MIME normalization in `media-processor`
+**Risk:** If the upstream server returns `application/octet-stream` or a
+generic `binary/octet-stream`, x-poster's `selectMediaTier` won't match
+the `video/` prefix and will demote the post to text-only.
 
-Then in the main handler:
-- `tier === 'text'` → call `postTweet(text, [], ...)` directly. **Zero `media/upload` calls.**
-- `tier === 'image'` → call `uploadImage` for each (existing path).
-- `tier === 'video'` → call new `uploadVideoChunked` once, attach single media_id.
+**Fix:** In `media-processor.downloadMediaForTweet`, when `Content-Type`
+doesn't start with `image/` or `video/`, infer from the file extension
+(`.mp4 → video/mp4`, `.mov → video/quicktime`, `.webp → image/webp`,
+etc.) before persisting `mime_type`. Also persist the resolved `kind`
+when it disagrees with the URL-derived guess from `resolve_media`.
 
-This guarantees we never invoke `media/upload` for media we don't physically have, and never upload images when a video will be attached.
+### 5. vxtwitter duration_millis defensive rounding
+Already covered by the global `Math.round(m.duration_ms)` we added in the
+upsert row builder, but make sure the same helper is used for both source
+adapters and any future ones.
 
-**Fix — chunked video upload** (`x-poster/index.ts`)
+### 6. Surface insert/upsert failures as `pipeline_events`
+`resolve_media` currently only `console.error`s an insert failure and
+returns `false`. Add a `pipeline_events` row with `status='failed'` and
+the DB error message so monitoring/dashboard surfaces the problem instead
+of silently retrying. Same for `download_media` upload errors that loop.
 
-Add `uploadVideoChunked(bytes, mime, ...)` implementing X v1.1 upload:
-1. `INIT` — POST `command=INIT&media_type=<mime>&total_bytes=<n>&media_category=tweet_video`
-2. `APPEND` — POST `command=APPEND&media_id=...&segment_index=i` with 4 MB chunks (`multipart/form-data`, field `media`)
-3. `FINALIZE` — POST `command=FINALIZE&media_id=...`
-4. If response contains `processing_info` → poll `command=STATUS&media_id=...` every `check_after_secs` until `state=succeeded` (or fail on `failed`); cap total wait at 60s to stay within Edge Function budget.
+### 7. Reconcile bad media rows
+A one-shot SQL cleanup to re-enqueue `resolve_media` for any post in the
+last 24h where:
+- `posts.has_media = true`
+- no `media` row with `downloaded_at IS NOT NULL` exists, AND
+- no `pending/running` `resolve_media` job exists.
 
-Guards (skip + log `skip_reason='video_too_large'` instead of attempting upload, to stay cheap):
-- `mime` must start with `video/` (prefer `video/mp4`).
-- `file_size <= 50 MB` (well under X's 512MB cap; protects function memory + time).
-- Optional: skip if `duration_ms > 140_000` when known.
+Use idempotency key `resolve_media:audit:<tweet_id>` so it can't collide
+with existing keys.
 
-Use the existing OAuth 1.0a `oauthHeader` helper. For `APPEND`, OAuth signs only the URL + query params (the multipart body is not part of the signature base) — same approach as the standard Twitter docs.
+## Out of scope (not changing)
+- Telegram delivery path: already iterates `videos` correctly via
+  `sendVideo`; bug #3 is about x-poster only.
+- The chunked X video upload (`uploadVideoChunked`): code is correct.
+- Bumping `media.duration_ms` to `bigint` — int is fine once we round.
 
-## Files to change
-
-- `supabase/functions/worker/index.ts` — change one line: idempotency key in `resolve_media` re-enqueue.
-- `supabase/functions/x-poster/index.ts` — replace `selectUploadable`, add `uploadVideoChunked` + `pollMediaStatus`, branch in main handler by tier.
-
-## Out of scope
-- No backfill of historical tweets that already shipped without video (per your earlier preference).
-- Telegram already has a `sendVideo` path; once Bug 1 is fixed the storage_path will exist and Telegram videos will start working again automatically — no Telegram code change needed.
-
-## Memory update
-Add a Core rule: "X posting is media-tiered: video > image > text. Never call X media/upload for media we don't have downloaded. Video uses chunked INIT/APPEND/FINALIZE/STATUS." Plus a memory file under `mem://features/x-posting-pipeline` covering tier rules and the `resolve_media` re-download key.
+## Rollout order
+1. Code: x-poster `media_pending` gate (#3) + media-processor MIME
+   normalization (#4) + resolve_media safe-upsert (#2) + pipeline_events
+   on failure (#6).
+2. SQL one-shot: mark Osint613 `resolve_media` job completed; reconcile
+   bad media rows (#7).
+3. Deploy `worker`, `media-processor`, `x-poster`. Watch logs for one
+   ingest cycle to confirm a video tweet flows end-to-end.
