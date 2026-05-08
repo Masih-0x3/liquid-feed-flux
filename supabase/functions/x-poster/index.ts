@@ -386,15 +386,14 @@ Deno.serve(async (req) => {
       .eq('tweet_id', tweetId)
       .order('ordering', { ascending: true });
 
-    // Media-pending gate: if the post claims to have media but nothing has
-    // been downloaded yet AND a resolve_media/download_media job is still
-    // pending/running, defer this iteration so we don't burn the post on
-    // text-only. Cap at 10 minutes after ingestion to avoid getting stuck.
-    const POST_AGE_CAP_MS = 10 * 60 * 1000;
+    // Media-required gate: if a post is known to have media, X must not post
+    // text-only. Telegram can fetch remote media URLs directly, but X requires
+    // uploaded bytes, so missing/invalid media must defer or fail instead of
+    // silently burning the post as text.
     const postAgeMs = Date.now() - new Date((post as { created_at: string }).created_at).getTime();
     const hasMediaFlag = (post as { has_media?: boolean }).has_media === true;
     const anyDownloaded = (mediaRows || []).some((m) => (m as MediaRow).downloaded_at);
-    if (!onlyTweetId && hasMediaFlag && !anyDownloaded && postAgeMs < POST_AGE_CAP_MS) {
+    if (hasMediaFlag && !anyDownloaded) {
       const { data: pendingJobs } = await sb.from('jobs')
         .select('id').in('type', ['resolve_media', 'download_media'])
         .in('status', ['pending', 'running'])
@@ -421,6 +420,18 @@ Deno.serve(async (req) => {
         console.log(`[x-poster] self-healed missing download for ${tweetId}, deferring`);
         continue;
       }
+
+      await sb.from('jobs').insert({
+        type: 'resolve_media',
+        payload: { tweet_id: tweetId },
+        status: 'pending',
+        idempotency_key: `resolve_media:xposter_heal:${tweetId}:${Date.now()}`,
+        next_run_at: new Date().toISOString(),
+        priority: 12,
+      });
+      results.push({ tweet_id: tweetId, status: 'deferred', reason: 'media_missing_self_healed', age_ms: postAgeMs });
+      console.log(`[x-poster] self-healed missing media rows for ${tweetId}, deferring`);
+      continue;
     }
 
     // Quota check (per-iteration in case prior iterations posted)
