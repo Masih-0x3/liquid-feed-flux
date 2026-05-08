@@ -185,10 +185,10 @@ supabase: any, tweetId: string, dryRun: boolean) {
 }
 
 async function cleanupOldMedia(// deno-lint-ignore no-explicit-any
-supabase: any, dryRun: boolean) {
-  console.log(JSON.stringify({ function: 'media-processor', action: 'cleanup_start', dry_run: dryRun }));
+supabase: any, dryRun: boolean, daysOld = 1) {
+  console.log(JSON.stringify({ function: 'media-processor', action: 'cleanup_start', dry_run: dryRun, days_old: daysOld }));
 
-  const { data: oldMedia, error: queryError } = await supabase.rpc('get_old_media', { days_old: 7 });
+  const { data: oldMedia, error: queryError } = await supabase.rpc('get_old_media', { days_old: daysOld });
   const oldMediaArr: any[] = (oldMedia as any[]) ?? [];
 
   if (queryError) throw new Error(`Failed to query old media: ${queryError.message}`);
