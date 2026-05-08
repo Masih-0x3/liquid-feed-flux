@@ -866,6 +866,98 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
   }
 }
 
+// Download image bytes from temp-media bucket so we can multipart-upload them
+// to Telegram. Telegram renders inline photos when given real bytes with a
+// proper filename + image/* content-type; passing only a signed URL sometimes
+// causes Telegram to fall back to "document" rendering.
+async function fetchImageBytes(// deno-lint-ignore no-explicit-any
+supabase: any, image: Record<string, unknown>): Promise<{ blob: Blob; filename: string } | null> {
+  const storagePath = image.storage_path as string | null;
+  if (!storagePath) return null;
+  try {
+    const { data, error } = await supabase.storage.from('temp-media').download(storagePath);
+    if (error || !data) return null;
+    const mime = (image.mime_type as string | undefined) || (data as Blob).type || 'image/jpeg';
+    const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : mime.includes('gif') ? 'gif' : 'jpg';
+    const base = storagePath.split('/').pop()?.replace(/\.[^.]+$/, '') || `photo_${image.id}`;
+    const blob = new Blob([await (data as Blob).arrayBuffer()], { type: mime.startsWith('image/') ? mime : 'image/jpeg' });
+    return { blob, filename: `${base}.${ext}` };
+  } catch (_e) {
+    return null;
+  }
+}
+
+async function sendTelegramPhotoFromStorage(// deno-lint-ignore no-explicit-any
+supabase: any, botToken: string, chatId: string, image: Record<string, unknown>, caption: string): Promise<string[]> {
+  const bytes = await fetchImageBytes(supabase, image);
+  if (!bytes) {
+    // Fallback to URL-based send if bytes unavailable
+    const imageUrl = await getMediaUrl(supabase, image);
+    return await sendTelegramMedia('sendPhoto', botToken, chatId, { photo: imageUrl }, caption);
+  }
+  const send = async (cap: string, useMarkdown: boolean): Promise<Response> => {
+    const fd = new FormData();
+    fd.append('chat_id', chatId);
+    fd.append('caption', cap);
+    if (useMarkdown) fd.append('parse_mode', 'Markdown');
+    fd.append('photo', bytes.blob, bytes.filename);
+    return await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, { method: 'POST', body: fd });
+  };
+  const resp = await send(caption, true);
+  const result = await resp.json();
+  if (result.ok) return [String(result.result.message_id)];
+  if (isTelegramParseError(result?.description ?? '')) {
+    const retry = await send(stripMarkdownToPlain(caption), false);
+    const r = await retry.json();
+    if (r?.ok) return [String(r.result.message_id)];
+  }
+  throwTelegramError('sendPhoto', result, resp.status);
+  return [];
+}
+
+async function sendTelegramPhotoGroupFromStorage(// deno-lint-ignore no-explicit-any
+supabase: any, botToken: string, chatId: string, images: Record<string, unknown>[], caption: string): Promise<string[]> {
+  const attachments: { blob: Blob; filename: string; attachName: string }[] = [];
+  const mediaArr: Record<string, unknown>[] = [];
+  for (let i = 0; i < images.length; i++) {
+    const bytes = await fetchImageBytes(supabase, images[i]);
+    if (bytes) {
+      const attachName = `photo${i}`;
+      attachments.push({ ...bytes, attachName });
+      const m: Record<string, unknown> = { type: 'photo', media: `attach://${attachName}` };
+      if (i === 0) { m.caption = caption; m.parse_mode = 'Markdown'; }
+      mediaArr.push(m);
+    } else {
+      const url = await getMediaUrl(supabase, images[i]);
+      const m: Record<string, unknown> = { type: 'photo', media: url };
+      if (i === 0) { m.caption = caption; m.parse_mode = 'Markdown'; }
+      mediaArr.push(m);
+    }
+  }
+  const build = (mArr: Record<string, unknown>[]): FormData => {
+    const fd = new FormData();
+    fd.append('chat_id', chatId);
+    fd.append('media', JSON.stringify(mArr));
+    for (const a of attachments) fd.append(a.attachName, a.blob, a.filename);
+    return fd;
+  };
+  const resp = await fetch(`https://api.telegram.org/bot${botToken}/sendMediaGroup`, { method: 'POST', body: build(mediaArr) });
+  const result = await resp.json();
+  if (result.ok) return result.result.map((m: Record<string, unknown>) => String(m.message_id));
+  if (isTelegramParseError(result?.description ?? '')) {
+    const retryArr = mediaArr.map((m, idx) => {
+      const out: Record<string, unknown> = { type: m.type, media: m.media };
+      if (idx === 0 && m.caption) out.caption = stripMarkdownToPlain(String(m.caption));
+      return out;
+    });
+    const retryResp = await fetch(`https://api.telegram.org/bot${botToken}/sendMediaGroup`, { method: 'POST', body: build(retryArr) });
+    const r = await retryResp.json();
+    if (r?.ok) return r.result.map((m: Record<string, unknown>) => String(m.message_id));
+  }
+  throwTelegramError('sendMediaGroup', result, resp.status);
+  return [];
+}
+
 // Helper to send a single Telegram media message with parse error retry
 async function sendTelegramMedia(method: string, botToken: string, chatId: string, mediaPayload: Record<string, string>, caption: string): Promise<string[]> {
   const body = { chat_id: chatId, ...mediaPayload, caption, parse_mode: 'Markdown' };
