@@ -1787,13 +1787,19 @@ supabase: any): Promise<boolean> {
   // the original `download_media:<tweet_id>` job is already `completed`, so reusing
   // it would no-op (ignoreDuplicates) and the freshly-resolved video/image rows
   // would never be fetched into storage.
-  const { error: dlErr } = await supabase.from('jobs').upsert({
+  // Use a per-invocation unique idempotency key. A static
+  // `download_media:resolve:<tweet_id>` key would collide with a previously
+  // completed job from an earlier resolve attempt and (with
+  // ignoreDuplicates) get silently dropped — leaving freshly-resolved rows
+  // with storage_path=null and causing text-only posts.
+  const dlKey = `download_media:resolve:${tweetId}:${Date.now()}`;
+  const { error: dlErr } = await supabase.from('jobs').insert({
     type: 'download_media',
     payload: { tweet_id: tweetId },
     status: 'pending',
-    idempotency_key: `download_media:resolve:${tweetId}`,
+    idempotency_key: dlKey,
     next_run_at: new Date().toISOString(),
-  }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+  });
   if (dlErr) console.warn('resolve_media: failed to enqueue download_media', dlErr.message);
 
   await insertPipelineEvent(supabase, 'post', tweetId, 'resolve_media', 'completed',
