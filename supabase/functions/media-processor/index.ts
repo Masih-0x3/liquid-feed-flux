@@ -56,8 +56,12 @@ serve(async (req) => {
           });
         }
         return await downloadMediaForTweet(supabase, tweet_id, dry_run === true);
-      case 'cleanup_old_media':
-        return await cleanupOldMedia(supabase, dry_run === true);
+      case 'cleanup_old_media': {
+        const daysOld = typeof (body as Record<string, unknown>).days_old === 'number'
+          ? Math.max(1, Math.min(365, Math.floor((body as Record<string, number>).days_old)))
+          : 1;
+        return await cleanupOldMedia(supabase, dry_run === true, daysOld);
+      }
       case 'get_media_info':
         if (!media_ids || !Array.isArray(media_ids)) {
           return new Response(JSON.stringify({ error: 'media_ids array is required' }), {
@@ -181,10 +185,10 @@ supabase: any, tweetId: string, dryRun: boolean) {
 }
 
 async function cleanupOldMedia(// deno-lint-ignore no-explicit-any
-supabase: any, dryRun: boolean) {
-  console.log(JSON.stringify({ function: 'media-processor', action: 'cleanup_start', dry_run: dryRun }));
+supabase: any, dryRun: boolean, daysOld = 1) {
+  console.log(JSON.stringify({ function: 'media-processor', action: 'cleanup_start', dry_run: dryRun, days_old: daysOld }));
 
-  const { data: oldMedia, error: queryError } = await supabase.rpc('get_old_media', { days_old: 7 });
+  const { data: oldMedia, error: queryError } = await supabase.rpc('get_old_media', { days_old: daysOld });
   const oldMediaArr: any[] = (oldMedia as any[]) ?? [];
 
   if (queryError) throw new Error(`Failed to query old media: ${queryError.message}`);

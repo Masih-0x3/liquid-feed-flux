@@ -39,8 +39,12 @@ serve(async (req) => {
 
     console.log(JSON.stringify({ function: 'media-cleanup', action: 'start' }));
 
+    const reqBody = await req.json().catch(() => ({} as Record<string, unknown>));
+    const daysOld = typeof reqBody.days_old === 'number' ? Math.max(1, Math.min(365, Math.floor(reqBody.days_old))) : 1;
+    console.log(JSON.stringify({ function: 'media-cleanup', action: 'invoke_processor', days_old: daysOld }));
+
     const { data, error } = await supabase.functions.invoke('media-processor', {
-      body: { action: 'cleanup_old_media' },
+      body: { action: 'cleanup_old_media', days_old: daysOld },
       headers: { 'x-internal-token': Deno.env.get('WEBHOOK_SHARED_SECRET') || '' }
     } as Record<string, unknown>);
 
