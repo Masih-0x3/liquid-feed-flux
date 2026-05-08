@@ -402,10 +402,25 @@ Deno.serve(async (req) => {
         .in('status', ['pending', 'running'])
         .filter('payload->>tweet_id', 'eq', tweetId).limit(1);
       if (pendingJobs && pendingJobs.length > 0) {
-        // Do NOT insert into x_deliveries — keep the post eligible for the
-        // next tick once media lands.
         results.push({ tweet_id: tweetId, status: 'deferred', reason: 'media_pending', age_ms: postAgeMs });
         console.log(`[x-poster] deferring ${tweetId}: media still resolving (age=${Math.round(postAgeMs/1000)}s)`);
+        continue;
+      }
+      // No pending job but media is missing — likely a dropped/collided
+      // download_media job. Self-heal: enqueue a unique-keyed download and
+      // defer this iteration so we never post text-only when media exists.
+      const hasMediaRowWithSrc = (mediaRows || []).some((m) => (m as MediaRow & { id: string }).id);
+      if (hasMediaRowWithSrc) {
+        await sb.from('jobs').insert({
+          type: 'download_media',
+          payload: { tweet_id: tweetId },
+          status: 'pending',
+          idempotency_key: `download_media:xposter_heal:${tweetId}:${Date.now()}`,
+          next_run_at: new Date().toISOString(),
+          priority: 12,
+        });
+        results.push({ tweet_id: tweetId, status: 'deferred', reason: 'media_pending_self_healed', age_ms: postAgeMs });
+        console.log(`[x-poster] self-healed missing download for ${tweetId}, deferring`);
         continue;
       }
     }
