@@ -803,38 +803,11 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
       if (images.length > 0) {
         if (images.length === 1) {
           const image = images[0];
-          const imageUrl = await getMediaUrl(supabase, image);
-          const msgIds = await sendTelegramMedia('sendPhoto', telegramBotToken, telegramChatId, { photo: imageUrl }, message);
+          const msgIds = await sendTelegramPhotoFromStorage(supabase, telegramBotToken, telegramChatId, image, message);
           telegramMessageIds.push(...msgIds);
         } else {
-          const mediaGroup = [];
-          for (let i = 0; i < Math.min(images.length, 10); i++) {
-            const imageUrl = await getMediaUrl(supabase, images[i]);
-            mediaGroup.push({ type: 'photo', media: imageUrl, caption: i === 0 ? message : undefined, parse_mode: i === 0 ? 'Markdown' : undefined });
-          }
-          const response = await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendMediaGroup`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chat_id: telegramChatId, media: mediaGroup })
-          });
-          const result = await response.json();
-          if (result.ok) {
-            telegramMessageIds = result.result.map((msg: Record<string, unknown>) => String(msg.message_id));
-          } else {
-            if (isTelegramParseError(result?.description ?? '')) {
-              const retryGroup = mediaGroup.map((m, idx) => ({ type: m.type, media: m.media, caption: idx === 0 && m.caption ? stripMarkdownToPlain(m.caption) : undefined }));
-              const retryResp = await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendMediaGroup`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: telegramChatId, media: retryGroup })
-              });
-              const retryRes = await retryResp.json();
-              if (retryRes?.ok) {
-                telegramMessageIds = retryRes.result.map((msg: Record<string, unknown>) => String(msg.message_id));
-              } else {
-                throwTelegramError('sendMediaGroup', result, response.status);
-              }
-            } else {
-              throwTelegramError('sendMediaGroup', result, response.status);
-            }
-          }
+          const msgIds = await sendTelegramPhotoGroupFromStorage(supabase, telegramBotToken, telegramChatId, images.slice(0, 10), message);
+          telegramMessageIds.push(...msgIds);
         }
       }
 
