@@ -60,6 +60,7 @@ interface PostingConfig {
   enabled: boolean;
   min_score: number;
   require_media: boolean;
+  allow_video?: boolean;
   post_template: string;
   leading_emoji: string;
   hashtags: string;
@@ -205,16 +206,13 @@ async function uploadVideoChunked(
   let segment = 0;
   for (let offset = 0; offset < bytes.length; offset += VIDEO_CHUNK_BYTES) {
     const chunk = bytes.subarray(offset, Math.min(offset + VIDEO_CHUNK_BYTES, bytes.length));
-    const appendParams: Record<string, string> = {
-      command: 'APPEND',
-      media_id: mediaId,
-      segment_index: String(segment),
-    };
-    const qs = new URLSearchParams(appendParams).toString();
-    const appendAuth = await oauthHeader('POST', UPLOAD_URL, appendParams, ck, cs, at, ats);
+    const appendAuth = await oauthHeader('POST', UPLOAD_URL, {}, ck, cs, at, ats);
     const form = new FormData();
+    form.append('command', 'APPEND');
+    form.append('media_id', mediaId);
+    form.append('segment_index', String(segment));
     form.append('media', new Blob([chunk], { type: 'application/octet-stream' }));
-    const appendResp = await fetch(`${UPLOAD_URL}?${qs}`, {
+    const appendResp = await fetch(UPLOAD_URL, {
       method: 'POST',
       headers: { Authorization: appendAuth },
       body: form,
@@ -348,7 +346,7 @@ Deno.serve(async (req) => {
   const startFrom = cfg.start_posting_from || null;
   const effectiveCutoff = startFrom && startFrom > dedupeCutoff ? startFrom : dedupeCutoff;
 
-  const { data: existingRows } = await sb.from('x_deliveries').select('post_id').gte('created_at', dedupeCutoff);
+  const { data: existingRows } = await sb.from('x_deliveries').select('post_id').eq('status', 'posted').gte('created_at', dedupeCutoff);
   const existing = new Set((existingRows || []).map((r) => r.post_id as string));
 
   let candidatesQ = sb.from('posts')
@@ -388,15 +386,14 @@ Deno.serve(async (req) => {
       .eq('tweet_id', tweetId)
       .order('ordering', { ascending: true });
 
-    // Media-pending gate: if the post claims to have media but nothing has
-    // been downloaded yet AND a resolve_media/download_media job is still
-    // pending/running, defer this iteration so we don't burn the post on
-    // text-only. Cap at 10 minutes after ingestion to avoid getting stuck.
-    const POST_AGE_CAP_MS = 10 * 60 * 1000;
+    // Media-required gate: if a post is known to have media, X must not post
+    // text-only. Telegram can fetch remote media URLs directly, but X requires
+    // uploaded bytes, so missing/invalid media must defer or fail instead of
+    // silently burning the post as text.
     const postAgeMs = Date.now() - new Date((post as { created_at: string }).created_at).getTime();
     const hasMediaFlag = (post as { has_media?: boolean }).has_media === true;
     const anyDownloaded = (mediaRows || []).some((m) => (m as MediaRow).downloaded_at);
-    if (!onlyTweetId && hasMediaFlag && !anyDownloaded && postAgeMs < POST_AGE_CAP_MS) {
+    if (hasMediaFlag && !anyDownloaded) {
       const { data: pendingJobs } = await sb.from('jobs')
         .select('id').in('type', ['resolve_media', 'download_media'])
         .in('status', ['pending', 'running'])
@@ -423,6 +420,18 @@ Deno.serve(async (req) => {
         console.log(`[x-poster] self-healed missing download for ${tweetId}, deferring`);
         continue;
       }
+
+      await sb.from('jobs').insert({
+        type: 'resolve_media',
+        payload: { tweet_id: tweetId },
+        status: 'pending',
+        idempotency_key: `resolve_media:xposter_heal:${tweetId}:${Date.now()}`,
+        next_run_at: new Date().toISOString(),
+        priority: 12,
+      });
+      results.push({ tweet_id: tweetId, status: 'deferred', reason: 'media_missing_self_healed', age_ms: postAgeMs });
+      console.log(`[x-poster] self-healed missing media rows for ${tweetId}, deferring`);
+      continue;
     }
 
     // Quota check (per-iteration in case prior iterations posted)
@@ -433,11 +442,11 @@ Deno.serve(async (req) => {
       continue;
     }
 
-    // Media tier handling — cost-first:
-    //   text  → no media/upload calls at all
+    // Media tier handling — safety-first:
+    //   text  → only allowed when the source post does not claim media
     //   image → upload up to 4 images
     //   video → upload only the video (one media_id), ignore any images
-    // We never SKIP a post for missing/invalid media — we just omit the upload.
+    // For has_media posts, media upload is mandatory; never fall back to text-only.
     let mediaIds: string[] = [];
     let mediaCount = 0;
     let mediaBytes = 0;
@@ -445,6 +454,20 @@ Deno.serve(async (req) => {
     let mediaWarning: string | null = null;
 
     const sel = selectMediaTier((mediaRows as MediaRow[]) || []);
+
+    if (hasMediaFlag && sel.tier === 'text') {
+      const reason = sel.reason || 'no_supported_media';
+      await sb.from('x_deliveries').insert({
+        post_id: tweetId,
+        status: 'pending',
+        skip_reason: reason,
+        last_error: `media_required:${reason}`,
+        attempts: 1,
+      });
+      results.push({ tweet_id: tweetId, status: 'deferred', reason: `media_required:${reason}` });
+      console.warn(`[x-poster] refusing text-only post for ${tweetId}: ${reason}`);
+      continue;
+    }
 
     if (sel.tier !== 'text' && !dryRun) {
       try {
@@ -473,13 +496,19 @@ Deno.serve(async (req) => {
           mediaKind = 'image';
         }
       } catch (e) {
-        // Upload failed — fall back to text-only rather than dropping the post.
-        mediaIds = [];
-        mediaCount = 0;
-        mediaBytes = 0;
-        mediaKind = null;
-        mediaWarning = `media_upload_failed(${sel.tier}): ${(e as Error).message}`.slice(0, 500);
-        console.warn(`[x-poster] ${sel.tier} upload failed for ${tweetId}, posting text-only: ${(e as Error).message}`);
+        const errMsg = `media_upload_failed(${sel.tier}): ${(e as Error).message}`.slice(0, 500);
+        await sb.from('x_deliveries').insert({
+          post_id: tweetId,
+          status: 'failed',
+          media_count: 0,
+          media_bytes: 0,
+          media_kind: sel.tier,
+          last_error: errMsg,
+          attempts: 1,
+        });
+        results.push({ tweet_id: tweetId, status: 'failed', error: errMsg });
+        console.warn(`[x-poster] ${sel.tier} upload failed for ${tweetId}; not posting text-only: ${(e as Error).message}`);
+        continue;
       }
     } else if (sel.tier !== 'text' && dryRun) {
       mediaCount = sel.items.length;
