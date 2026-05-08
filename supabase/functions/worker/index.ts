@@ -1744,6 +1744,13 @@ supabase: any): Promise<boolean> {
   // Build rows FIRST (and validate). Only after a successful upsert do we
   // prune stale rows. Previous flow deleted everything up-front, so any
   // insert error (e.g. type mismatch) wiped the tweet's media permanently.
+  // IMPORTANT: explicitly clear storage_path / downloaded_at / file_size /
+  // mime_type. The pre-resolve row at ordering=0 is usually the RSS
+  // thumbnail (a .jpg already in storage). Without nulling these, the upsert
+  // would overwrite src_url/kind to "video" but leave the stale jpg bytes
+  // attached, and download_media (which filters `storage_path IS NULL`)
+  // would skip the row — causing x-poster to upload the thumbnail bytes as
+  // the "video" and Telegram to send it as a document.
   const rows = await Promise.all(resolved.map(async (m, index) => ({
     tweet_id: tweetId,
     kind: m.kind,
@@ -1753,6 +1760,10 @@ supabase: any): Promise<boolean> {
     height: m.height != null ? Math.round(m.height) : null,
     duration_ms: m.duration_ms != null ? Math.round(m.duration_ms) : null,
     ordering: index,
+    storage_path: null,
+    downloaded_at: null,
+    file_size: null,
+    mime_type: null,
   })));
 
   const { error: insErr } = await supabase.from('media').upsert(rows, { onConflict: 'tweet_id,ordering' });
