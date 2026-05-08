@@ -469,19 +469,6 @@ Deno.serve(async (req) => {
       continue;
     }
 
-    if (sel.tier === 'video' && cfg.allow_video === false) {
-      await sb.from('x_deliveries').insert({
-        post_id: tweetId,
-        status: 'pending',
-        skip_reason: 'video_disabled',
-        last_error: 'media_required:video_disabled',
-        attempts: 1,
-      });
-      results.push({ tweet_id: tweetId, status: 'deferred', reason: 'media_required:video_disabled' });
-      console.warn(`[x-poster] refusing text-only post for ${tweetId}: video media exists but allow_video=false`);
-      continue;
-    }
-
     if (sel.tier !== 'text' && !dryRun) {
       try {
         if (sel.tier === 'video') {
