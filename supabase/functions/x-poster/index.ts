@@ -442,11 +442,11 @@ Deno.serve(async (req) => {
       continue;
     }
 
-    // Media tier handling — cost-first:
-    //   text  → no media/upload calls at all
+    // Media tier handling — safety-first:
+    //   text  → only allowed when the source post does not claim media
     //   image → upload up to 4 images
     //   video → upload only the video (one media_id), ignore any images
-    // We never SKIP a post for missing/invalid media — we just omit the upload.
+    // For has_media posts, media upload is mandatory; never fall back to text-only.
     let mediaIds: string[] = [];
     let mediaCount = 0;
     let mediaBytes = 0;
@@ -454,6 +454,33 @@ Deno.serve(async (req) => {
     let mediaWarning: string | null = null;
 
     const sel = selectMediaTier((mediaRows as MediaRow[]) || []);
+
+    if (hasMediaFlag && sel.tier === 'text') {
+      const reason = sel.reason || 'no_supported_media';
+      await sb.from('x_deliveries').insert({
+        post_id: tweetId,
+        status: 'pending',
+        skip_reason: reason,
+        last_error: `media_required:${reason}`,
+        attempts: 1,
+      });
+      results.push({ tweet_id: tweetId, status: 'deferred', reason: `media_required:${reason}` });
+      console.warn(`[x-poster] refusing text-only post for ${tweetId}: ${reason}`);
+      continue;
+    }
+
+    if (sel.tier === 'video' && cfg.allow_video === false) {
+      await sb.from('x_deliveries').insert({
+        post_id: tweetId,
+        status: 'pending',
+        skip_reason: 'video_disabled',
+        last_error: 'media_required:video_disabled',
+        attempts: 1,
+      });
+      results.push({ tweet_id: tweetId, status: 'deferred', reason: 'media_required:video_disabled' });
+      console.warn(`[x-poster] refusing text-only post for ${tweetId}: video media exists but allow_video=false`);
+      continue;
+    }
 
     if (sel.tier !== 'text' && !dryRun) {
       try {
@@ -482,13 +509,19 @@ Deno.serve(async (req) => {
           mediaKind = 'image';
         }
       } catch (e) {
-        // Upload failed — fall back to text-only rather than dropping the post.
-        mediaIds = [];
-        mediaCount = 0;
-        mediaBytes = 0;
-        mediaKind = null;
-        mediaWarning = `media_upload_failed(${sel.tier}): ${(e as Error).message}`.slice(0, 500);
-        console.warn(`[x-poster] ${sel.tier} upload failed for ${tweetId}, posting text-only: ${(e as Error).message}`);
+        const errMsg = `media_upload_failed(${sel.tier}): ${(e as Error).message}`.slice(0, 500);
+        await sb.from('x_deliveries').insert({
+          post_id: tweetId,
+          status: 'failed',
+          media_count: 0,
+          media_bytes: 0,
+          media_kind: sel.tier,
+          last_error: errMsg,
+          attempts: 1,
+        });
+        results.push({ tweet_id: tweetId, status: 'failed', error: errMsg });
+        console.warn(`[x-poster] ${sel.tier} upload failed for ${tweetId}; not posting text-only: ${(e as Error).message}`);
+        continue;
       }
     } else if (sel.tier !== 'text' && dryRun) {
       mediaCount = sel.items.length;
