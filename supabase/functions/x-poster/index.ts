@@ -60,6 +60,7 @@ interface PostingConfig {
   enabled: boolean;
   min_score: number;
   require_media: boolean;
+  allow_video?: boolean;
   post_template: string;
   leading_emoji: string;
   hashtags: string;
@@ -205,16 +206,13 @@ async function uploadVideoChunked(
   let segment = 0;
   for (let offset = 0; offset < bytes.length; offset += VIDEO_CHUNK_BYTES) {
     const chunk = bytes.subarray(offset, Math.min(offset + VIDEO_CHUNK_BYTES, bytes.length));
-    const appendParams: Record<string, string> = {
-      command: 'APPEND',
-      media_id: mediaId,
-      segment_index: String(segment),
-    };
-    const qs = new URLSearchParams(appendParams).toString();
-    const appendAuth = await oauthHeader('POST', UPLOAD_URL, appendParams, ck, cs, at, ats);
+    const appendAuth = await oauthHeader('POST', UPLOAD_URL, {}, ck, cs, at, ats);
     const form = new FormData();
+    form.append('command', 'APPEND');
+    form.append('media_id', mediaId);
+    form.append('segment_index', String(segment));
     form.append('media', new Blob([chunk], { type: 'application/octet-stream' }));
-    const appendResp = await fetch(`${UPLOAD_URL}?${qs}`, {
+    const appendResp = await fetch(UPLOAD_URL, {
       method: 'POST',
       headers: { Authorization: appendAuth },
       body: form,
@@ -348,7 +346,7 @@ Deno.serve(async (req) => {
   const startFrom = cfg.start_posting_from || null;
   const effectiveCutoff = startFrom && startFrom > dedupeCutoff ? startFrom : dedupeCutoff;
 
-  const { data: existingRows } = await sb.from('x_deliveries').select('post_id').gte('created_at', dedupeCutoff);
+  const { data: existingRows } = await sb.from('x_deliveries').select('post_id').eq('status', 'posted').gte('created_at', dedupeCutoff);
   const existing = new Set((existingRows || []).map((r) => r.post_id as string));
 
   let candidatesQ = sb.from('posts')
