@@ -2,6 +2,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
+export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high';
+export type Verbosity = 'low' | 'medium' | 'high';
+export type ServiceTier = 'auto' | 'default' | 'flex' | 'priority';
+
 export interface TranslationSettings {
   system_prompt: string;
   user_prompt_template: string;
@@ -11,6 +15,16 @@ export interface TranslationSettings {
   top_p: number;
   frequency_penalty: number;
   presence_penalty: number;
+  /** GPT-5.x / o-series reasoning depth */
+  reasoning_effort?: ReasoningEffort;
+  /** GPT-5.x output verbosity */
+  verbosity?: Verbosity;
+  /** Deterministic sampling seed (null = unset) */
+  seed?: number | null;
+  /** OpenAI service tier */
+  service_tier?: ServiceTier;
+  /** Allow the model to issue multiple tool calls per turn */
+  parallel_tool_calls?: boolean;
   /** Editable scoring rubric (system prompt) used when content_filter is enabled */
   scoring_system_prompt?: string;
   /** Editable JSON schema (string) for the classify_importance tool call */
