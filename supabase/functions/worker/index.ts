@@ -542,44 +542,29 @@ ${post.text_original}`;
       }
     } else {
       // No filtering — simple translation
-      const useMaxCompletion = !/^(gpt-4o($|-)|gpt-4($|-)|gpt-3\.5)/i.test(config.openaiModel);
-      const tokenParam = useMaxCompletion ? 'max_completion_tokens' : 'max_tokens';
-      const isReasoningModel = /^(gpt-5|o[34])/i.test(config.openaiModel);
-      const callBody: Record<string, unknown> = {
+      const result = await callOpenAI({
+        apiKey: openaiApiKey,
         model: config.openaiModel,
         messages: [
           { role: 'system', content: config.translationPrompt },
-          { role: 'user', content: post.text_original }
+          { role: 'user', content: post.text_original },
         ],
-        [tokenParam]: config.openaiMaxCompletionTokens,
-      };
-      if (!isReasoningModel && typeof config.openaiTemperature === 'number') callBody.temperature = config.openaiTemperature;
-      if (typeof config.openaiTopP === 'number') callBody.top_p = config.openaiTopP;
-      if (!isReasoningModel) {
-        if (typeof config.openaiFrequencyPenalty === 'number') callBody.frequency_penalty = config.openaiFrequencyPenalty;
-        if (typeof config.openaiPresencePenalty === 'number') callBody.presence_penalty = config.openaiPresencePenalty;
-      }
-      if (isReasoningModel && config.openaiReasoningEffort) callBody.reasoning_effort = config.openaiReasoningEffort;
-      if (isReasoningModel && config.openaiVerbosity) callBody.verbosity = config.openaiVerbosity;
-      if (typeof config.openaiSeed === 'number') callBody.seed = config.openaiSeed;
-      if (config.openaiServiceTier && config.openaiServiceTier !== 'auto') callBody.service_tier = config.openaiServiceTier;
-
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${openaiApiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(callBody),
+        maxOutputTokens: config.openaiMaxCompletionTokens,
+        temperature: config.openaiTemperature,
+        topP: config.openaiTopP,
+        frequencyPenalty: config.openaiFrequencyPenalty,
+        presencePenalty: config.openaiPresencePenalty,
+        reasoningEffort: config.openaiReasoningEffort,
+        verbosity: config.openaiVerbosity,
+        seed: config.openaiSeed,
+        serviceTier: config.openaiServiceTier,
+        parallelToolCalls: config.openaiParallelToolCalls,
       });
-
-      if (!response.ok) {
-        const errorData = await response.text();
-        throw new Error(`OpenAI API error: ${response.status} ${errorData}`);
+      if (!result.ok) {
+        throw new Error(`OpenAI API error: ${result.status} ${result.rawText}`);
       }
-
-      data = await response.json();
-      translatedText = data.choices?.[0]?.message?.content ?? '';
+      data = result.raw;
+      translatedText = result.content;
     }
 
     const nowIso = new Date().toISOString();
