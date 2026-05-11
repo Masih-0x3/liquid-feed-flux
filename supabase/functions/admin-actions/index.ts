@@ -150,25 +150,6 @@ function validateSettingsValue(key: string, value: unknown): string | null {
       }
       break;
     }
-    case 'openai_config': {
-      if (v.model !== undefined && typeof v.model !== 'string') {
-        return 'openai_config.model must be a string';
-      }
-      if (v.model && !/^[a-zA-Z0-9._-]{1,100}$/.test(v.model as string)) {
-        return 'openai_config.model contains invalid characters';
-      }
-      if (v.temperature !== undefined) {
-        if (typeof v.temperature !== 'number' || v.temperature < 0 || v.temperature > 2) {
-          return 'openai_config.temperature must be a number between 0 and 2';
-        }
-      }
-      if (v.max_tokens !== undefined) {
-        if (typeof v.max_tokens !== 'number' || v.max_tokens < 1 || v.max_tokens > 16000) {
-          return 'openai_config.max_tokens must be between 1 and 16000';
-        }
-      }
-      break;
-    }
     case 'telegram_config': {
       if (v.parse_mode !== undefined && !['Markdown', 'MarkdownV2', 'HTML', ''].includes(v.parse_mode as string)) {
         return 'telegram_config.parse_mode must be Markdown, MarkdownV2, HTML, or empty';
