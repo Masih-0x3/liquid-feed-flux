@@ -10,7 +10,8 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
-import { Search, RefreshCw, Edit, Check, X, ExternalLink, RotateCcw, Star, Send, Scissors, Sparkles, Twitter } from "lucide-react";
+import { Search, RefreshCw, Edit, Check, X, ExternalLink, RotateCcw, Star, Send, Scissors, Sparkles, Twitter, Ban } from "lucide-react";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { format } from "date-fns";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerDescription, DrawerClose, DrawerFooter } from "@/components/ui/drawer";
 import { useMonitoringData, type MonitoringEntry, type PipelineEvent } from "@/hooks/useMonitoringData";
