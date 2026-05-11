@@ -2,6 +2,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
+export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high';
+export type Verbosity = 'low' | 'medium' | 'high';
+export type ServiceTier = 'auto' | 'default' | 'flex' | 'priority';
+
 export interface ScoringSettings {
   model?: string;
   temperature?: number | null;
