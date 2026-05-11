@@ -716,19 +716,21 @@ serve(async (req) => {
 
             const userMessage = `Author: @${authorHandle || 'preview'}\nPublished: ${new Date().toISOString()}\nHas media: no\nURL: N/A\n\nContent:\n${text}`;
 
+            const filterCallBody: Record<string, unknown> = {
+              model,
+              messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: userMessage },
+              ],
+              tools: [{ type: 'function', function: toolFunction }],
+              tool_choice: { type: 'function', function: { name: (toolFunction.name as string) || 'classify_importance' } },
+              [tokenParam]: maxTokens,
+              ...buildExtraParams(),
+            };
             const resp = await fetch('https://api.openai.com/v1/chat/completions', {
               method: 'POST',
               headers: { 'Authorization': `Bearer ${openaiApiKey}`, 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                model,
-                messages: [
-                  { role: 'system', content: systemPrompt },
-                  { role: 'user', content: userMessage },
-                ],
-                tools: [{ type: 'function', function: toolFunction }],
-                tool_choice: { type: 'function', function: { name: (toolFunction.name as string) || 'classify_importance' } },
-                [tokenParam]: maxTokens,
-              }),
+              body: JSON.stringify(filterCallBody),
             });
             const respText = await resp.text();
             try { raw = JSON.parse(respText); } catch { raw = { raw_text: respText }; }
@@ -758,9 +760,8 @@ serve(async (req) => {
                 { role: 'user', content: text },
               ],
               [tokenParam]: maxTokens,
+              ...buildExtraParams(),
             };
-            // Only attach temperature for legacy models that support it (worker logic mirror)
-            if (!/^gpt-(5|4\.1)|^o[34]/i.test(model)) callBody.temperature = temperature;
 
             const resp = await fetch('https://api.openai.com/v1/chat/completions', {
               method: 'POST',
