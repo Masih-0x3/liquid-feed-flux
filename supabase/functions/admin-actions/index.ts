@@ -129,11 +129,23 @@ function validateSettingsValue(key: string, value: unknown): string | null {
           return `translation_prompt.${field} must be ≤${max} characters`;
         }
       }
-      const numFields = ['temperature', 'max_completion_tokens', 'top_p', 'frequency_penalty', 'presence_penalty'];
+      const numFields = ['temperature', 'max_completion_tokens', 'top_p', 'frequency_penalty', 'presence_penalty', 'seed'];
       for (const f of numFields) {
-        if (v[f] !== undefined && typeof v[f] !== 'number') {
+        if (v[f] !== undefined && v[f] !== null && typeof v[f] !== 'number') {
           return `translation_prompt.${f} must be a number`;
         }
+      }
+      if (v.reasoning_effort !== undefined && !['minimal', 'low', 'medium', 'high'].includes(v.reasoning_effort as string)) {
+        return 'translation_prompt.reasoning_effort must be one of minimal|low|medium|high';
+      }
+      if (v.verbosity !== undefined && !['low', 'medium', 'high'].includes(v.verbosity as string)) {
+        return 'translation_prompt.verbosity must be one of low|medium|high';
+      }
+      if (v.service_tier !== undefined && !['auto', 'default', 'flex', 'priority'].includes(v.service_tier as string)) {
+        return 'translation_prompt.service_tier must be one of auto|default|flex|priority';
+      }
+      if (v.parallel_tool_calls !== undefined && typeof v.parallel_tool_calls !== 'boolean') {
+        return 'translation_prompt.parallel_tool_calls must be a boolean';
       }
       break;
     }
