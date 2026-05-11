@@ -176,6 +176,11 @@ const defaults = {
   translation_prompt: {
     system_prompt: '', user_prompt_template: '', model: 'gpt-4o-mini',
     temperature: 0.2, max_completion_tokens: 1000, top_p: 1, frequency_penalty: 0, presence_penalty: 0,
+    reasoning_effort: 'medium' as ReasoningEffort,
+    verbosity: 'medium' as Verbosity,
+    seed: null,
+    service_tier: 'auto' as ServiceTier,
+    parallel_tool_calls: true,
     scoring_system_prompt: DEFAULT_SCORING_SYSTEM_PROMPT,
     classifier_tool_schema: DEFAULT_CLASSIFIER_TOOL_SCHEMA,
   } as TranslationSettings,
