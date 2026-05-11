@@ -765,20 +765,19 @@ serve(async (req) => {
         const { data: settings } = await supabase
           .from('settings')
           .select('key, value')
-          .in('key', ['translation_prompt', 'openai_config', 'content_filter']);
+          .in('key', ['translation_prompt', 'content_filter']);
 
         const settingsMap: Record<string, Record<string, unknown>> = {};
         for (const s of settings ?? []) {
           if (s.value && typeof s.value === 'object') settingsMap[s.key] = s.value as Record<string, unknown>;
         }
         const tp = settingsMap['translation_prompt'] || {};
-        const oc = settingsMap['openai_config'] || {};
         const cf = settingsMap['content_filter'] || {};
 
-        // translation_prompt.model is authoritative (matches the Settings UI); openai_config.model is legacy fallback.
+        // translation_prompt.model is authoritative (matches the Settings UI).
         const model = typeof tp.model === 'string' && (tp.model as string).trim()
           ? tp.model as string
-          : (typeof oc.model === 'string' ? oc.model as string : 'gpt-4o-mini');
+          : 'gpt-4o-mini';
         const translationPrompt = typeof tp.system_prompt === 'string' && (tp.system_prompt as string).trim()
           ? tp.system_prompt as string
           : 'You are a professional translator. Translate the given English text to Persian. Preserve @mentions, #hashtags, URLs, and line breaks exactly. Only return the translated text, nothing else.';
