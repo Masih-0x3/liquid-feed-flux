@@ -91,21 +91,8 @@ export const DEFAULT_CLASSIFIER_TOOL_SCHEMA = JSON.stringify({
   },
 }, null, 2);
 
-export interface OpenAISettings {
-  model: string;
-  temperature: number;
-  max_completion_tokens: number;
-}
-
 export interface TelegramSettings {
   parse_mode: string;
-}
-
-export interface DigestSettings {
-  frequency_minutes: number;
-  max_bullets: number;
-  min_posts: number;
-  header_format: string;
 }
 
 export interface MessageTemplateSettings {
@@ -184,7 +171,7 @@ const defaults = {
     scoring_system_prompt: DEFAULT_SCORING_SYSTEM_PROMPT,
     classifier_tool_schema: DEFAULT_CLASSIFIER_TOOL_SCHEMA,
   } as TranslationSettings,
-  openai_config: { model: 'gpt-4o-mini', temperature: 0.2, max_completion_tokens: 1000 } as OpenAISettings,
+  
   telegram_config: { parse_mode: 'Markdown' } as TelegramSettings,
   message_template: {
     template: '{translated_text}\n\n\u{1F4F0} #\u0627\u062E\u0628\u0627\u0631',
@@ -200,12 +187,6 @@ const defaults = {
     author_rules: {} as Record<string, { rule: string; threshold?: number }>,
     score_only: false,
   },
-  digest_config: {
-    frequency_minutes: 30,
-    max_bullets: 10,
-    min_posts: 2,
-    header_format: '📰 News Digest — {time}',
-  } as DigestSettings,
   twitter_hydration: {
     enabled: true,
     max_attempts: 3,

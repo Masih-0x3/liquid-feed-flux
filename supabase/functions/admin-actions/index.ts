@@ -150,25 +150,6 @@ function validateSettingsValue(key: string, value: unknown): string | null {
       }
       break;
     }
-    case 'openai_config': {
-      if (v.model !== undefined && typeof v.model !== 'string') {
-        return 'openai_config.model must be a string';
-      }
-      if (v.model && !/^[a-zA-Z0-9._-]{1,100}$/.test(v.model as string)) {
-        return 'openai_config.model contains invalid characters';
-      }
-      if (v.temperature !== undefined) {
-        if (typeof v.temperature !== 'number' || v.temperature < 0 || v.temperature > 2) {
-          return 'openai_config.temperature must be a number between 0 and 2';
-        }
-      }
-      if (v.max_tokens !== undefined) {
-        if (typeof v.max_tokens !== 'number' || v.max_tokens < 1 || v.max_tokens > 16000) {
-          return 'openai_config.max_tokens must be between 1 and 16000';
-        }
-      }
-      break;
-    }
     case 'telegram_config': {
       if (v.parse_mode !== undefined && !['Markdown', 'MarkdownV2', 'HTML', ''].includes(v.parse_mode as string)) {
         return 'telegram_config.parse_mode must be Markdown, MarkdownV2, HTML, or empty';
@@ -191,16 +172,6 @@ function validateSettingsValue(key: string, value: unknown): string | null {
       if (v.custom_hashtags !== undefined && typeof v.custom_hashtags !== 'string') {
         return 'message_template.custom_hashtags must be a string';
       }
-      break;
-    }
-    case 'digest_config': {
-      if (v.twitter_consumer_key !== undefined && typeof v.twitter_consumer_key !== 'string') return 'digest_config.twitter_consumer_key must be a string';
-      if (v.twitter_consumer_secret !== undefined && typeof v.twitter_consumer_secret !== 'string') return 'digest_config.twitter_consumer_secret must be a string';
-      if (v.twitter_access_token !== undefined && typeof v.twitter_access_token !== 'string') return 'digest_config.twitter_access_token must be a string';
-      if (v.twitter_access_token_secret !== undefined && typeof v.twitter_access_token_secret !== 'string') return 'digest_config.twitter_access_token_secret must be a string';
-      if (v.frequency_minutes !== undefined && (typeof v.frequency_minutes !== 'number' || ![30, 60, 120, 240].includes(v.frequency_minutes))) return 'digest_config.frequency_minutes must be 30, 60, 120, or 240';
-      if (v.max_bullets !== undefined && (typeof v.max_bullets !== 'number' || v.max_bullets < 1 || v.max_bullets > 20)) return 'digest_config.max_bullets must be 1-20';
-      if (v.min_posts !== undefined && (typeof v.min_posts !== 'number' || v.min_posts < 1 || v.min_posts > 50)) return 'digest_config.min_posts must be 1-50';
       break;
     }
       case 'twitter_hydration': {
@@ -273,7 +244,7 @@ serve(async (req) => {
           return jsonResponse({ error: 'key and value are required' }, 400);
         }
         // Only allow non-secret settings keys
-        const allowedKeys = ['translation_prompt', 'openai_config', 'telegram_config', 'message_template', 'content_filter', 'digest_config', 'twitter_hydration', 'x_posting_config', 'x_rate_limits'];
+        const allowedKeys = ['translation_prompt', 'telegram_config', 'message_template', 'content_filter', 'twitter_hydration', 'x_posting_config', 'x_rate_limits'];
         if (!allowedKeys.includes(key)) {
           return jsonResponse({ error: `Setting key "${key}" is not allowed` }, 400);
         }
@@ -794,20 +765,19 @@ serve(async (req) => {
         const { data: settings } = await supabase
           .from('settings')
           .select('key, value')
-          .in('key', ['translation_prompt', 'openai_config', 'content_filter']);
+          .in('key', ['translation_prompt', 'content_filter']);
 
         const settingsMap: Record<string, Record<string, unknown>> = {};
         for (const s of settings ?? []) {
           if (s.value && typeof s.value === 'object') settingsMap[s.key] = s.value as Record<string, unknown>;
         }
         const tp = settingsMap['translation_prompt'] || {};
-        const oc = settingsMap['openai_config'] || {};
         const cf = settingsMap['content_filter'] || {};
 
-        // translation_prompt.model is authoritative (matches the Settings UI); openai_config.model is legacy fallback.
+        // translation_prompt.model is authoritative (matches the Settings UI).
         const model = typeof tp.model === 'string' && (tp.model as string).trim()
           ? tp.model as string
-          : (typeof oc.model === 'string' ? oc.model as string : 'gpt-4o-mini');
+          : 'gpt-4o-mini';
         const translationPrompt = typeof tp.system_prompt === 'string' && (tp.system_prompt as string).trim()
           ? tp.system_prompt as string
           : 'You are a professional translator. Translate the given English text to Persian. Preserve @mentions, #hashtags, URLs, and line breaks exactly. Only return the translated text, nothing else.';

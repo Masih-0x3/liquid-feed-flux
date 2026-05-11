@@ -8,14 +8,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { Checkbox } from '@/components/ui/checkbox';
+
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Brain, MessageSquare, Eye, Code, Sparkles, Send, Key, Shield, Loader2, Filter, Newspaper, AtSign, ChevronDown } from 'lucide-react';
+import { Brain, MessageSquare, Eye, Code, Sparkles, Send, Shield, Loader2, Filter, AtSign, ChevronDown } from 'lucide-react';
 import {
   useSettingsData, useSaveSettings, openaiModels, messagePlaceholders, promptPlaceholders,
-  type TranslationSettings, type OpenAISettings, type TelegramSettings, type MessageTemplateSettings, type DigestSettings,
+  type TranslationSettings, type TelegramSettings, type MessageTemplateSettings,
 } from '@/hooks/useSettingsData';
 import ContentFilterSettings, { type ContentFilterConfig } from '@/components/settings/ContentFilterSettings';
 import XAutomationSettings from '@/components/settings/XAutomationSettings';
@@ -32,23 +32,6 @@ function insertPlaceholder(placeholder: string, textareaId: string, getter: stri
   }
 }
 
-type DigestTestPost = { author_handle?: string; created_at?: string; text_translated?: string; text_original?: string };
-type DigestTestResult = {
-  post_count?: number;
-  period_start?: string;
-  period_end?: string;
-  reason?: string;
-  openai_finish_reason?: string;
-  warning?: string;
-  posts?: DigestTestPost[];
-  openai_request?: unknown;
-  openai_system_prompt?: string;
-  openai_user_prompt?: string;
-  openai_response?: string;
-  openai_usage?: unknown;
-  formatted_tweets?: string[];
-};
-
 export default function Settings() {
   const { toast } = useToast();
   const { settingsQuery, samplesQuery } = useSettingsData();
@@ -60,19 +43,13 @@ export default function Settings() {
   const sampleTweets = samplesQuery.data || [];
 
   const [translationSettings, setTranslationSettings] = useState<TranslationSettings | null>(null);
-  const [openaiSettings, setOpenaiSettings] = useState<OpenAISettings | null>(null);
   const [telegramSettings, setTelegramSettings] = useState<TelegramSettings | null>(null);
   const [messageTemplate, setMessageTemplate] = useState<MessageTemplateSettings | null>(null);
-  const [digestSettings, setDigestSettings] = useState<DigestSettings | null>(null);
-  const [digestTestLoading, setDigestTestLoading] = useState(false);
-  const [digestTestResult, setDigestTestResult] = useState<DigestTestResult | null>(null);
 
   // Sync from server on first load
   const ts = translationSettings ?? settings?.translation_prompt;
-  const os = openaiSettings ?? settings?.openai_config;
   const tgs = telegramSettings ?? settings?.telegram_config;
   const mt = messageTemplate ?? settings?.message_template;
-  const ds = digestSettings ?? settings?.digest_config;
 
   if (settingsQuery.isLoading) {
     return (
@@ -82,7 +59,7 @@ export default function Settings() {
     );
   }
 
-  if (!ts || !os || !tgs || !mt || !ds) return null;
+  if (!ts || !tgs || !mt) return null;
 
   const selectedModel = openaiModels.find(m => m.id === ts.model);
 
@@ -131,13 +108,11 @@ export default function Settings() {
       </div>
 
       <Tabs defaultValue="translation" className="w-full">
-        <TabsList className="grid w-full grid-cols-7">
+        <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="translation" className="flex items-center gap-2"><Brain className="w-4 h-4" />Translation</TabsTrigger>
           <TabsTrigger value="filter" className="flex items-center gap-2"><Filter className="w-4 h-4" />Content Filter</TabsTrigger>
           <TabsTrigger value="messages" className="flex items-center gap-2"><MessageSquare className="w-4 h-4" />Messages</TabsTrigger>
-          <TabsTrigger value="openai" className="flex items-center gap-2"><Key className="w-4 h-4" />OpenAI</TabsTrigger>
           <TabsTrigger value="telegram" className="flex items-center gap-2"><Send className="w-4 h-4" />Telegram</TabsTrigger>
-          <TabsTrigger value="digest" className="flex items-center gap-2"><Newspaper className="w-4 h-4" />Digest</TabsTrigger>
           <TabsTrigger value="x-automation" className="flex items-center gap-2"><AtSign className="w-4 h-4" />X Automation</TabsTrigger>
         </TabsList>
 
@@ -456,37 +431,6 @@ export default function Settings() {
           </Card>
         </TabsContent>
 
-        {/* OpenAI Tab */}
-        <TabsContent value="openai" className="space-y-6">
-          <Card className="glass-card">
-            <CardHeader>
-              <CardTitle className="flex items-center text-glass-foreground"><Key className="w-5 h-5 mr-2" />OpenAI Configuration</CardTitle>
-              <CardDescription>Configure the OpenAI integration parameters</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="p-4 bg-muted/50 rounded-lg border border-dashed border-muted-foreground/30 flex items-start gap-3">
-                <Shield className="w-5 h-5 text-primary mt-0.5 shrink-0" />
-                <div>
-                  <p className="text-sm font-medium text-glass-foreground">API Key managed securely</p>
-                  <p className="text-xs text-muted-foreground mt-1">Your OpenAI API key is stored as a Supabase secret and is never exposed to the browser. To update it, go to your Supabase project → Edge Function Secrets → OPENAI_API_KEY.</p>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label>Model</Label>
-                <Select value={os.model} onValueChange={(v) => setOpenaiSettings({ ...os, model: v })}>
-                  <SelectTrigger className="glass-input"><SelectValue /></SelectTrigger>
-                  <SelectContent>{openaiModels.map(m => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2"><Label>Temperature</Label><Input type="number" step="0.1" min="0" max="2" value={os.temperature} onChange={(e) => setOpenaiSettings({ ...os, temperature: parseFloat(e.target.value) || 0 })} className="glass-input" /></div>
-                <div className="space-y-2"><Label>Max Completion Tokens</Label><Input type="number" min="1" value={os.max_completion_tokens} onChange={(e) => setOpenaiSettings({ ...os, max_completion_tokens: parseInt(e.target.value) || 1000 })} className="glass-input" /></div>
-              </div>
-              <Button onClick={() => saveMutation.mutate({ key: 'openai_config', value: os })} disabled={saveMutation.isPending} className="bg-gradient-primary hover:opacity-90 text-white w-full">Save OpenAI Config</Button>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
         {/* Telegram Tab */}
         <TabsContent value="telegram" className="space-y-6">
           <Card className="glass-card">
@@ -514,170 +458,6 @@ export default function Settings() {
                 </Select>
               </div>
               <Button onClick={() => saveMutation.mutate({ key: 'telegram_config', value: tgs })} disabled={saveMutation.isPending} className="bg-gradient-primary hover:opacity-90 text-white w-full">Save Telegram Config</Button>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Digest Tab */}
-        <TabsContent value="digest" className="space-y-6">
-          <Card className="glass-card">
-            <CardHeader>
-              <CardTitle className="flex items-center text-glass-foreground"><Key className="w-5 h-5 mr-2" />Twitter/X API Credentials</CardTitle>
-              <CardDescription>Credential status, hydration, API usage, and test tools have moved to the <strong>X Automation</strong> tab.</CardDescription>
-            </CardHeader>
-          </Card>
-
-          <Card className="glass-card">
-            <CardHeader>
-              <CardTitle className="flex items-center text-glass-foreground"><Newspaper className="w-5 h-5 mr-2" />Digest Preferences</CardTitle>
-              <CardDescription>Configure how frequently digests are compiled and their format</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Frequency</Label>
-                  <Select value={ds.frequency_minutes.toString()} onValueChange={(v) => setDigestSettings({ ...ds, frequency_minutes: parseInt(v) })}>
-                    <SelectTrigger className="glass-input"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="30">Every 30 minutes</SelectItem>
-                      <SelectItem value="60">Every 1 hour</SelectItem>
-                      <SelectItem value="120">Every 2 hours</SelectItem>
-                      <SelectItem value="240">Every 4 hours</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Max Bullet Points</Label>
-                  <Input type="number" min="1" max="20" value={ds.max_bullets} onChange={(e) => setDigestSettings({ ...ds, max_bullets: parseInt(e.target.value) || 10 })} className="glass-input" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Min Posts to Trigger</Label>
-                  <Input type="number" min="1" max="50" value={ds.min_posts} onChange={(e) => setDigestSettings({ ...ds, min_posts: parseInt(e.target.value) || 2 })} className="glass-input" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Header Format</Label>
-                  <Input value={ds.header_format} onChange={(e) => setDigestSettings({ ...ds, header_format: e.target.value })} className="glass-input" placeholder="📰 News Digest — {time}" />
-                  <p className="text-xs text-muted-foreground">Use {'{time}'} for the current time</p>
-                </div>
-              </div>
-              <Button onClick={() => saveMutation.mutate({ key: 'digest_config', value: ds })} disabled={saveMutation.isPending} className="bg-gradient-primary hover:opacity-90 text-white w-full">
-                Save Digest Settings
-              </Button>
-            </CardContent>
-          </Card>
-
-          <Card className="glass-card">
-            <CardHeader>
-              <CardTitle className="flex items-center text-glass-foreground"><Eye className="w-5 h-5 mr-2" />Digest Dry Run</CardTitle>
-              <CardDescription>Test the digest pipeline without posting to Twitter. Shows posts, OpenAI prompt, summary, and formatted tweets.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <Button
-                onClick={async () => {
-                  setDigestTestLoading(true);
-                  setDigestTestResult(null);
-                  try {
-                    const { data, error } = await supabase.functions.invoke('digest-compiler', {
-                      body: {
-                        dry_run: true,
-                        config: {
-                          frequency_minutes: ds.frequency_minutes,
-                          max_bullets: ds.max_bullets,
-                          min_posts: ds.min_posts,
-                          header_format: ds.header_format,
-                        },
-                      },
-                    });
-                    if (error) throw error;
-                    setDigestTestResult(data);
-                  } catch (e: unknown) {
-                    toast({ title: 'Dry run failed', description: e instanceof Error ? e.message : String(e), variant: 'destructive' });
-                  } finally {
-                    setDigestTestLoading(false);
-                  }
-                }}
-                disabled={digestTestLoading}
-                variant="outline"
-                className="border-primary/50 hover:bg-primary/10 w-full"
-              >
-                {digestTestLoading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Running Dry Test...</> : <>🧪 Run Dry Test (No Posting)</>}
-              </Button>
-
-              {digestTestResult && (
-                <div className="space-y-4 mt-4">
-                  <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                    <Badge variant="secondary">{digestTestResult.post_count ?? 0} posts</Badge>
-                    {digestTestResult.period_start && digestTestResult.period_end && (
-                      <span>from {new Date(digestTestResult.period_start).toLocaleTimeString()} → {new Date(digestTestResult.period_end).toLocaleTimeString()}</span>
-                    )}
-                    {digestTestResult.reason && <Badge variant="outline">{digestTestResult.reason}</Badge>}
-                    {digestTestResult.openai_finish_reason && <Badge variant="outline">finish: {digestTestResult.openai_finish_reason}</Badge>}
-                  </div>
-
-                  {digestTestResult.warning && (
-                    <div className="rounded-lg border border-primary/30 bg-muted/50 p-3 text-sm text-muted-foreground">
-                      {digestTestResult.warning}
-                    </div>
-                  )}
-
-                  <div className="space-y-2">
-                    <Label className="text-sm font-medium">📥 Posts Found ({digestTestResult.post_count ?? 0})</Label>
-                    <div className="max-h-56 overflow-y-auto bg-muted/50 rounded-lg p-3 space-y-2 text-sm">
-                      {digestTestResult.posts?.length ? digestTestResult.posts.map((p, i: number) => (
-                        <div key={i} className="p-2 bg-background rounded border">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-mono text-xs text-primary">@{p.author_handle || 'unknown'}</span>
-                            {p.created_at && <span className="text-[10px] text-muted-foreground">{new Date(p.created_at).toLocaleTimeString()}</span>}
-                          </div>
-                          <p className="text-xs mt-1 whitespace-pre-wrap">{p.text_translated || p.text_original || '(empty post text)'}</p>
-                        </div>
-                      )) : <p className="text-xs text-muted-foreground italic">No posts found in this period.</p>}
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label className="text-sm font-medium">🤖 OpenAI Request</Label>
-                    <div className="bg-muted/50 rounded-lg p-3 text-xs font-mono whitespace-pre-wrap border max-h-56 overflow-y-auto">{JSON.stringify(digestTestResult.openai_request ?? {}, null, 2)}</div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label className="text-sm font-medium">🧠 OpenAI System Prompt</Label>
-                    <div className="bg-muted/50 rounded-lg p-3 text-xs font-mono whitespace-pre-wrap border">{digestTestResult.openai_system_prompt || '(empty)'}</div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label className="text-sm font-medium">📝 OpenAI User Prompt</Label>
-                    <div className="bg-muted/50 rounded-lg p-3 text-xs font-mono whitespace-pre-wrap border max-h-56 overflow-y-auto">{digestTestResult.openai_user_prompt || '(empty)'}</div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label className="text-sm font-medium">✨ OpenAI Outcome</Label>
-                    <div className="bg-muted/50 rounded-lg p-3 text-sm whitespace-pre-wrap border min-h-[80px]">{digestTestResult.openai_response || '(empty response text)'}</div>
-                    {digestTestResult.openai_usage && (
-                      <div className="text-xs text-muted-foreground font-mono">{JSON.stringify(digestTestResult.openai_usage)}</div>
-                    )}
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label className="text-sm font-medium">🐦 Formatted Tweets ({digestTestResult.formatted_tweets?.length ?? 0})</Label>
-                    {digestTestResult.formatted_tweets?.length > 0 ? (
-                      <div className="space-y-2">
-                        {digestTestResult.formatted_tweets.map((tweet: string, i: number) => (
-                          <div key={i} className="p-3 bg-background rounded-lg border">
-                            <div className="flex items-center justify-between mb-1">
-                              <Badge variant="outline" className="text-xs">Tweet {i + 1}</Badge>
-                              <span className="text-xs text-muted-foreground">{tweet.length}/280 chars</span>
-                            </div>
-                            <p className="text-sm whitespace-pre-wrap">{tweet}</p>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="bg-muted/50 rounded-lg p-3 text-sm text-muted-foreground border">No tweet chunks generated yet.</div>
-                    )}
-                  </div>
-                </div>
-              )}
             </CardContent>
           </Card>
         </TabsContent>

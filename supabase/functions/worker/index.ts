@@ -94,18 +94,10 @@ supabase: any): Promise<{
     const { data: settings } = await supabase
       .from('settings')
       .select('key, value')
-      .in('key', ['translation_prompt', 'openai_config', 'message_template', 'content_filter']);
+      .in('key', ['translation_prompt', 'message_template', 'content_filter']);
 
     if (settings) {
-      // First pass: legacy openai_config (lowest priority)
-      for (const s of settings) {
-        if (s.key === 'openai_config' && typeof s.value === 'object' && s.value !== null) {
-          const v = s.value as Record<string, unknown>;
-          if (v.model) defaults.openaiModel = String(v.model);
-          if (typeof v.temperature === 'number') defaults.openaiTemperature = v.temperature;
-        }
-      }
-      // Second pass: translation_prompt (authoritative — overrides openai_config)
+      // translation_prompt is the authoritative source for OpenAI parameters.
       for (const s of settings) {
         if (s.key === 'translation_prompt' && typeof s.value === 'object' && s.value !== null) {
           const v = s.value as Record<string, unknown>;
@@ -1314,23 +1306,13 @@ async function hydrateOauthHeader(
     .map((k) => `${hydratePercentEncode(k)}="${hydratePercentEncode(oauthParams[k])}"`).join(", ")}`;
 }
 
-// Reads Twitter creds from env first; falls back to digest_config settings row (same pattern as digest-compiler).
+// Reads Twitter creds strictly from environment secrets.
 async function getTwitterCreds(// deno-lint-ignore no-explicit-any
-supabase: any): Promise<{ ck: string; cs: string; at: string; ats: string } | null> {
-  let ck = Deno.env.get("TWITTER_CONSUMER_KEY") || "";
-  let cs = Deno.env.get("TWITTER_CONSUMER_SECRET") || "";
-  let at = Deno.env.get("TWITTER_ACCESS_TOKEN") || "";
-  let ats = Deno.env.get("TWITTER_ACCESS_TOKEN_SECRET") || "";
-  if (!ck || !cs || !at || !ats) {
-    try {
-      const { data } = await supabase.from('settings').select('value').eq('key', 'digest_config').maybeSingle();
-      const v = (data?.value || {}) as Record<string, unknown>;
-      ck = ck || String(v.twitter_consumer_key || "");
-      cs = cs || String(v.twitter_consumer_secret || "");
-      at = at || String(v.twitter_access_token || "");
-      ats = ats || String(v.twitter_access_token_secret || "");
-    } catch { /* fall through */ }
-  }
+_supabase: any): Promise<{ ck: string; cs: string; at: string; ats: string } | null> {
+  const ck = Deno.env.get("TWITTER_CONSUMER_KEY") || "";
+  const cs = Deno.env.get("TWITTER_CONSUMER_SECRET") || "";
+  const at = Deno.env.get("TWITTER_ACCESS_TOKEN") || "";
+  const ats = Deno.env.get("TWITTER_ACCESS_TOKEN_SECRET") || "";
   if (!ck || !cs || !at || !ats) return null;
   return { ck, cs, at, ats };
 }
