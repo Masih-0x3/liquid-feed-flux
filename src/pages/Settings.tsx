@@ -431,37 +431,6 @@ export default function Settings() {
           </Card>
         </TabsContent>
 
-        {/* OpenAI Tab */}
-        <TabsContent value="openai" className="space-y-6">
-          <Card className="glass-card">
-            <CardHeader>
-              <CardTitle className="flex items-center text-glass-foreground"><Key className="w-5 h-5 mr-2" />OpenAI Configuration</CardTitle>
-              <CardDescription>Configure the OpenAI integration parameters</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="p-4 bg-muted/50 rounded-lg border border-dashed border-muted-foreground/30 flex items-start gap-3">
-                <Shield className="w-5 h-5 text-primary mt-0.5 shrink-0" />
-                <div>
-                  <p className="text-sm font-medium text-glass-foreground">API Key managed securely</p>
-                  <p className="text-xs text-muted-foreground mt-1">Your OpenAI API key is stored as a Supabase secret and is never exposed to the browser. To update it, go to your Supabase project → Edge Function Secrets → OPENAI_API_KEY.</p>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label>Model</Label>
-                <Select value={os.model} onValueChange={(v) => setOpenaiSettings({ ...os, model: v })}>
-                  <SelectTrigger className="glass-input"><SelectValue /></SelectTrigger>
-                  <SelectContent>{openaiModels.map(m => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2"><Label>Temperature</Label><Input type="number" step="0.1" min="0" max="2" value={os.temperature} onChange={(e) => setOpenaiSettings({ ...os, temperature: parseFloat(e.target.value) || 0 })} className="glass-input" /></div>
-                <div className="space-y-2"><Label>Max Completion Tokens</Label><Input type="number" min="1" value={os.max_completion_tokens} onChange={(e) => setOpenaiSettings({ ...os, max_completion_tokens: parseInt(e.target.value) || 1000 })} className="glass-input" /></div>
-              </div>
-              <Button onClick={() => saveMutation.mutate({ key: 'openai_config', value: os })} disabled={saveMutation.isPending} className="bg-gradient-primary hover:opacity-90 text-white w-full">Save OpenAI Config</Button>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
         {/* Telegram Tab */}
         <TabsContent value="telegram" className="space-y-6">
           <Card className="glass-card">
