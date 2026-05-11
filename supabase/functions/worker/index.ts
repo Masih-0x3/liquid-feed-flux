@@ -61,6 +61,15 @@ supabase: any): Promise<{
     translationPrompt: "You are a professional translator. Translate the given English text to Persian. Preserve @mentions, #hashtags, URLs, and line breaks exactly. Only return the translated text, nothing else.",
     openaiModel: 'gpt-4o-mini',
     openaiTemperature: 0.2,
+    openaiMaxCompletionTokens: 2000,
+    openaiTopP: null as number | null,
+    openaiFrequencyPenalty: null as number | null,
+    openaiPresencePenalty: null as number | null,
+    openaiReasoningEffort: null as string | null,
+    openaiVerbosity: null as string | null,
+    openaiSeed: null as number | null,
+    openaiServiceTier: null as string | null,
+    openaiParallelToolCalls: null as boolean | null,
     messageTemplate: {
       template: '{translated_text}\n\n📰 #اخبار',
       include_source_link: true,
@@ -102,6 +111,15 @@ supabase: any): Promise<{
           if (v.system_prompt) defaults.translationPrompt = String(v.system_prompt);
           if (typeof v.model === 'string' && (v.model as string).trim()) defaults.openaiModel = String(v.model);
           if (typeof v.temperature === 'number') defaults.openaiTemperature = v.temperature;
+          if (typeof v.max_completion_tokens === 'number') defaults.openaiMaxCompletionTokens = Math.min(8000, Math.max(1, v.max_completion_tokens as number));
+          if (typeof v.top_p === 'number') defaults.openaiTopP = v.top_p as number;
+          if (typeof v.frequency_penalty === 'number') defaults.openaiFrequencyPenalty = v.frequency_penalty as number;
+          if (typeof v.presence_penalty === 'number') defaults.openaiPresencePenalty = v.presence_penalty as number;
+          if (typeof v.reasoning_effort === 'string') defaults.openaiReasoningEffort = v.reasoning_effort as string;
+          if (typeof v.verbosity === 'string') defaults.openaiVerbosity = v.verbosity as string;
+          if (typeof v.seed === 'number') defaults.openaiSeed = v.seed as number;
+          if (typeof v.service_tier === 'string') defaults.openaiServiceTier = v.service_tier as string;
+          if (typeof v.parallel_tool_calls === 'boolean') defaults.openaiParallelToolCalls = v.parallel_tool_calls as boolean;
           if (typeof v.scoring_system_prompt === 'string' && v.scoring_system_prompt.trim()) {
             defaults.scoringSystemPrompt = v.scoring_system_prompt as string;
           }
@@ -483,6 +501,24 @@ ${post.text_original}`;
       // Modern OpenAI models (gpt-5.x, gpt-4.1, o-series) require max_completion_tokens.
       const useMaxCompletion = !/^(gpt-4o($|-)|gpt-4($|-)|gpt-3\.5)/i.test(config.openaiModel);
       const tokenParam = useMaxCompletion ? 'max_completion_tokens' : 'max_tokens';
+      const isReasoningModel = /^(gpt-5|o[34])/i.test(config.openaiModel);
+
+      // Compose configurable sampling/runtime params honoring the selected model's capabilities.
+      const buildExtraParams = (): Record<string, unknown> => {
+        const p: Record<string, unknown> = {};
+        if (!isReasoningModel && typeof config.openaiTemperature === 'number') p.temperature = config.openaiTemperature;
+        if (typeof config.openaiTopP === 'number') p.top_p = config.openaiTopP;
+        if (!isReasoningModel) {
+          if (typeof config.openaiFrequencyPenalty === 'number') p.frequency_penalty = config.openaiFrequencyPenalty;
+          if (typeof config.openaiPresencePenalty === 'number') p.presence_penalty = config.openaiPresencePenalty;
+        }
+        if (isReasoningModel && config.openaiReasoningEffort) p.reasoning_effort = config.openaiReasoningEffort;
+        if (isReasoningModel && config.openaiVerbosity) p.verbosity = config.openaiVerbosity;
+        if (typeof config.openaiSeed === 'number') p.seed = config.openaiSeed;
+        if (config.openaiServiceTier && config.openaiServiceTier !== 'auto') p.service_tier = config.openaiServiceTier;
+        if (typeof config.openaiParallelToolCalls === 'boolean') p.parallel_tool_calls = config.openaiParallelToolCalls;
+        return p;
+      };
 
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
@@ -498,7 +534,8 @@ ${post.text_original}`;
           ],
           tools: [{ type: 'function', function: toolFunction }],
           tool_choice: { type: 'function', function: { name: (toolFunction.name as string) || 'classify_importance' } },
-          [tokenParam]: 2000,
+          [tokenParam]: config.openaiMaxCompletionTokens,
+          ...buildExtraParams(),
         }),
       });
 
@@ -529,21 +566,35 @@ ${post.text_original}`;
       }
     } else {
       // No filtering — simple translation
+      const useMaxCompletion = !/^(gpt-4o($|-)|gpt-4($|-)|gpt-3\.5)/i.test(config.openaiModel);
+      const tokenParam = useMaxCompletion ? 'max_completion_tokens' : 'max_tokens';
+      const isReasoningModel = /^(gpt-5|o[34])/i.test(config.openaiModel);
+      const callBody: Record<string, unknown> = {
+        model: config.openaiModel,
+        messages: [
+          { role: 'system', content: config.translationPrompt },
+          { role: 'user', content: post.text_original }
+        ],
+        [tokenParam]: config.openaiMaxCompletionTokens,
+      };
+      if (!isReasoningModel && typeof config.openaiTemperature === 'number') callBody.temperature = config.openaiTemperature;
+      if (typeof config.openaiTopP === 'number') callBody.top_p = config.openaiTopP;
+      if (!isReasoningModel) {
+        if (typeof config.openaiFrequencyPenalty === 'number') callBody.frequency_penalty = config.openaiFrequencyPenalty;
+        if (typeof config.openaiPresencePenalty === 'number') callBody.presence_penalty = config.openaiPresencePenalty;
+      }
+      if (isReasoningModel && config.openaiReasoningEffort) callBody.reasoning_effort = config.openaiReasoningEffort;
+      if (isReasoningModel && config.openaiVerbosity) callBody.verbosity = config.openaiVerbosity;
+      if (typeof config.openaiSeed === 'number') callBody.seed = config.openaiSeed;
+      if (config.openaiServiceTier && config.openaiServiceTier !== 'auto') callBody.service_tier = config.openaiServiceTier;
+
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${openaiApiKey}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          model: config.openaiModel,
-          messages: [
-            { role: 'system', content: config.translationPrompt },
-            { role: 'user', content: post.text_original }
-          ],
-          temperature: config.openaiTemperature,
-          max_tokens: 1000
-        }),
+        body: JSON.stringify(callBody),
       });
 
       if (!response.ok) {

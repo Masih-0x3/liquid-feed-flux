@@ -129,11 +129,23 @@ function validateSettingsValue(key: string, value: unknown): string | null {
           return `translation_prompt.${field} must be ≤${max} characters`;
         }
       }
-      const numFields = ['temperature', 'max_completion_tokens', 'top_p', 'frequency_penalty', 'presence_penalty'];
+      const numFields = ['temperature', 'max_completion_tokens', 'top_p', 'frequency_penalty', 'presence_penalty', 'seed'];
       for (const f of numFields) {
-        if (v[f] !== undefined && typeof v[f] !== 'number') {
+        if (v[f] !== undefined && v[f] !== null && typeof v[f] !== 'number') {
           return `translation_prompt.${f} must be a number`;
         }
+      }
+      if (v.reasoning_effort !== undefined && !['minimal', 'low', 'medium', 'high'].includes(v.reasoning_effort as string)) {
+        return 'translation_prompt.reasoning_effort must be one of minimal|low|medium|high';
+      }
+      if (v.verbosity !== undefined && !['low', 'medium', 'high'].includes(v.verbosity as string)) {
+        return 'translation_prompt.verbosity must be one of low|medium|high';
+      }
+      if (v.service_tier !== undefined && !['auto', 'default', 'flex', 'priority'].includes(v.service_tier as string)) {
+        return 'translation_prompt.service_tier must be one of auto|default|flex|priority';
+      }
+      if (v.parallel_tool_calls !== undefined && typeof v.parallel_tool_calls !== 'boolean') {
+        return 'translation_prompt.parallel_tool_calls must be a boolean';
       }
       break;
     }
@@ -617,12 +629,38 @@ serve(async (req) => {
           : 'You are a professional translator. Translate the given English text to Persian. Preserve @mentions, #hashtags, URLs, and line breaks exactly. Only return the translated text, nothing else.';
         const temperature = typeof ts.temperature === 'number' ? ts.temperature : 0.2;
         const maxTokens = typeof ts.max_completion_tokens === 'number' ? Math.min(8000, Math.max(1, ts.max_completion_tokens)) : 2000;
+        const topP = typeof ts.top_p === 'number' ? ts.top_p : null;
+        const freqPen = typeof ts.frequency_penalty === 'number' ? ts.frequency_penalty : null;
+        const presPen = typeof ts.presence_penalty === 'number' ? ts.presence_penalty : null;
+        const reasoningEffort = typeof ts.reasoning_effort === 'string' ? ts.reasoning_effort as string : null;
+        const verbosity = typeof ts.verbosity === 'string' ? ts.verbosity as string : null;
+        const seed = typeof ts.seed === 'number' ? ts.seed : null;
+        const serviceTier = typeof ts.service_tier === 'string' ? ts.service_tier as string : null;
+        const parallelToolCalls = typeof ts.parallel_tool_calls === 'boolean' ? ts.parallel_tool_calls as boolean : null;
         // GPT-5.x, GPT-4.1, o-series and any modern model use `max_completion_tokens`.
         // Only legacy gpt-4o / gpt-4 / gpt-3.5 still accept `max_tokens`.
         const useMaxCompletion = !/^(gpt-4o($|-)|gpt-4($|-)|gpt-3\.5)/i.test(model);
         const tokenParam = useMaxCompletion ? 'max_completion_tokens' : 'max_tokens';
+        const isReasoningModel = /^(gpt-5|o[34])/i.test(model);
         const customScoringPrompt = typeof ts.scoring_system_prompt === 'string' && ts.scoring_system_prompt.trim() ? ts.scoring_system_prompt as string : null;
         const customToolSchema = typeof ts.classifier_tool_schema === 'string' && ts.classifier_tool_schema.trim() ? ts.classifier_tool_schema as string : null;
+
+        // Build sampling/runtime params consistent with the selected model's capabilities.
+        const buildExtraParams = (): Record<string, unknown> => {
+          const p: Record<string, unknown> = {};
+          if (!isReasoningModel && typeof temperature === 'number') p.temperature = temperature;
+          if (topP !== null) p.top_p = topP;
+          if (!isReasoningModel) {
+            if (freqPen !== null) p.frequency_penalty = freqPen;
+            if (presPen !== null) p.presence_penalty = presPen;
+          }
+          if (isReasoningModel && reasoningEffort) p.reasoning_effort = reasoningEffort;
+          if (isReasoningModel && verbosity) p.verbosity = verbosity;
+          if (seed !== null) p.seed = seed;
+          if (serviceTier && serviceTier !== 'auto') p.service_tier = serviceTier;
+          if (parallelToolCalls !== null) p.parallel_tool_calls = parallelToolCalls;
+          return p;
+        };
 
         const filterEnabled = cf.enabled === true || cf.score_only === true;
 
@@ -678,19 +716,21 @@ serve(async (req) => {
 
             const userMessage = `Author: @${authorHandle || 'preview'}\nPublished: ${new Date().toISOString()}\nHas media: no\nURL: N/A\n\nContent:\n${text}`;
 
+            const filterCallBody: Record<string, unknown> = {
+              model,
+              messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: userMessage },
+              ],
+              tools: [{ type: 'function', function: toolFunction }],
+              tool_choice: { type: 'function', function: { name: (toolFunction.name as string) || 'classify_importance' } },
+              [tokenParam]: maxTokens,
+              ...buildExtraParams(),
+            };
             const resp = await fetch('https://api.openai.com/v1/chat/completions', {
               method: 'POST',
               headers: { 'Authorization': `Bearer ${openaiApiKey}`, 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                model,
-                messages: [
-                  { role: 'system', content: systemPrompt },
-                  { role: 'user', content: userMessage },
-                ],
-                tools: [{ type: 'function', function: toolFunction }],
-                tool_choice: { type: 'function', function: { name: (toolFunction.name as string) || 'classify_importance' } },
-                [tokenParam]: maxTokens,
-              }),
+              body: JSON.stringify(filterCallBody),
             });
             const respText = await resp.text();
             try { raw = JSON.parse(respText); } catch { raw = { raw_text: respText }; }
@@ -720,9 +760,8 @@ serve(async (req) => {
                 { role: 'user', content: text },
               ],
               [tokenParam]: maxTokens,
+              ...buildExtraParams(),
             };
-            // Only attach temperature for legacy models that support it (worker logic mirror)
-            if (!/^gpt-(5|4\.1)|^o[34]/i.test(model)) callBody.temperature = temperature;
 
             const resp = await fetch('https://api.openai.com/v1/chat/completions', {
               method: 'POST',

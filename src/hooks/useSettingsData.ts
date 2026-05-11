@@ -2,6 +2,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
+export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high';
+export type Verbosity = 'low' | 'medium' | 'high';
+export type ServiceTier = 'auto' | 'default' | 'flex' | 'priority';
+
 export interface TranslationSettings {
   system_prompt: string;
   user_prompt_template: string;
@@ -11,6 +15,16 @@ export interface TranslationSettings {
   top_p: number;
   frequency_penalty: number;
   presence_penalty: number;
+  /** GPT-5.x / o-series reasoning depth */
+  reasoning_effort?: ReasoningEffort;
+  /** GPT-5.x output verbosity */
+  verbosity?: Verbosity;
+  /** Deterministic sampling seed (null = unset) */
+  seed?: number | null;
+  /** OpenAI service tier */
+  service_tier?: ServiceTier;
+  /** Allow the model to issue multiple tool calls per turn */
+  parallel_tool_calls?: boolean;
   /** Editable scoring rubric (system prompt) used when content_filter is enabled */
   scoring_system_prompt?: string;
   /** Editable JSON schema (string) for the classify_importance tool call */
@@ -113,18 +127,25 @@ export interface OpenAIModel {
   maxTokens: number;
   useMaxCompletionTokens: boolean;
   supportsTemperature: boolean;
+  supportsTopP: boolean;
+  supportsPenalties: boolean;
+  supportsReasoningEffort: boolean;
+  supportsVerbosity: boolean;
+  supportsSeed: boolean;
+  supportsServiceTier: boolean;
+  supportsParallelToolCalls: boolean;
   tier: ModelTier;
 }
 
 export const openaiModels: OpenAIModel[] = [
   // Latest (GPT-5.4 family — released Mar 5, 2026, per platform.openai.com/docs/models)
-  { id: 'gpt-5.4', name: 'GPT-5.4', description: 'Flagship — frontier reasoning & coding, 1M context. $2.50/$15 per MTok', supports: ['text', 'vision'], maxTokens: 1050000, useMaxCompletionTokens: true, supportsTemperature: false, tier: 'latest' },
-  { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini', description: 'Strong mini model — coding & computer use, 400K context. $0.75/$4.50 per MTok', supports: ['text', 'vision'], maxTokens: 400000, useMaxCompletionTokens: true, supportsTemperature: false, tier: 'latest' },
-  { id: 'gpt-5.4-nano', name: 'GPT-5.4 Nano', description: 'Cheapest GPT-5.4 — high-volume tasks, 400K context. $0.20/$1.25 per MTok', supports: ['text', 'vision'], maxTokens: 400000, useMaxCompletionTokens: true, supportsTemperature: false, tier: 'latest' },
+  { id: 'gpt-5.4',      name: 'GPT-5.4',      description: 'Flagship — frontier reasoning & coding, 1M context. $2.50/$15 per MTok',  supports: ['text', 'vision'], maxTokens: 1050000, useMaxCompletionTokens: true, supportsTemperature: false, supportsTopP: true,  supportsPenalties: false, supportsReasoningEffort: true,  supportsVerbosity: true,  supportsSeed: true, supportsServiceTier: true, supportsParallelToolCalls: true, tier: 'latest' },
+  { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini', description: 'Strong mini model — coding & computer use, 400K context. $0.75/$4.50 per MTok', supports: ['text', 'vision'], maxTokens: 400000,  useMaxCompletionTokens: true, supportsTemperature: false, supportsTopP: true,  supportsPenalties: false, supportsReasoningEffort: true,  supportsVerbosity: true,  supportsSeed: true, supportsServiceTier: true, supportsParallelToolCalls: true, tier: 'latest' },
+  { id: 'gpt-5.4-nano', name: 'GPT-5.4 Nano', description: 'Cheapest GPT-5.4 — high-volume tasks, 400K context. $0.20/$1.25 per MTok',  supports: ['text', 'vision'], maxTokens: 400000,  useMaxCompletionTokens: true, supportsTemperature: false, supportsTopP: true,  supportsPenalties: false, supportsReasoningEffort: true,  supportsVerbosity: true,  supportsSeed: true, supportsServiceTier: true, supportsParallelToolCalls: true, tier: 'latest' },
   // Reasoning specialists
-  { id: 'o4-mini', name: 'o4-mini', description: 'Fast reasoning model — strong on code & logic', supports: ['text', 'code', 'vision'], maxTokens: 200000, useMaxCompletionTokens: true, supportsTemperature: false, tier: 'reasoning' },
+  { id: 'o4-mini', name: 'o4-mini', description: 'Fast reasoning model — strong on code & logic', supports: ['text', 'code', 'vision'], maxTokens: 200000, useMaxCompletionTokens: true, supportsTemperature: false, supportsTopP: false, supportsPenalties: false, supportsReasoningEffort: true, supportsVerbosity: false, supportsSeed: true, supportsServiceTier: true, supportsParallelToolCalls: true, tier: 'reasoning' },
   // Legacy fallback (only the one currently used by the worker)
-  { id: 'gpt-4o-mini', name: 'GPT-4o Mini', description: 'Legacy — current worker default, cheap & fast', supports: ['text', 'vision'], maxTokens: 16384, useMaxCompletionTokens: false, supportsTemperature: true, tier: 'legacy' },
+  { id: 'gpt-4o-mini', name: 'GPT-4o Mini', description: 'Legacy — current worker default, cheap & fast', supports: ['text', 'vision'], maxTokens: 16384, useMaxCompletionTokens: false, supportsTemperature: true, supportsTopP: true, supportsPenalties: true, supportsReasoningEffort: false, supportsVerbosity: false, supportsSeed: true, supportsServiceTier: false, supportsParallelToolCalls: true, tier: 'legacy' },
 ];
 
 
@@ -155,6 +176,11 @@ const defaults = {
   translation_prompt: {
     system_prompt: '', user_prompt_template: '', model: 'gpt-4o-mini',
     temperature: 0.2, max_completion_tokens: 1000, top_p: 1, frequency_penalty: 0, presence_penalty: 0,
+    reasoning_effort: 'medium' as ReasoningEffort,
+    verbosity: 'medium' as Verbosity,
+    seed: null,
+    service_tier: 'auto' as ServiceTier,
+    parallel_tool_calls: true,
     scoring_system_prompt: DEFAULT_SCORING_SYSTEM_PROMPT,
     classifier_tool_schema: DEFAULT_CLASSIFIER_TOOL_SCHEMA,
   } as TranslationSettings,

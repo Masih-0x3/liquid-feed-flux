@@ -184,16 +184,97 @@ export default function Settings() {
                   <div className="space-y-2">
                     <Label>Temperature</Label>
                     <Input type="number" step="0.1" min="0" max="2" value={ts.temperature} onChange={(e) => setTranslationSettings({ ...ts, temperature: parseFloat(e.target.value) || 0 })} className="glass-input" />
+                    <p className="text-xs text-muted-foreground">0 = deterministic, 2 = very random.</p>
+                  </div>
+                )}
+                {selectedModel?.supportsReasoningEffort && (
+                  <div className="space-y-2">
+                    <Label>Reasoning effort</Label>
+                    <Select value={ts.reasoning_effort ?? 'medium'} onValueChange={(v) => setTranslationSettings({ ...ts, reasoning_effort: v as 'minimal' | 'low' | 'medium' | 'high' })}>
+                      <SelectTrigger className="glass-input"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="minimal">Minimal — fastest, cheapest</SelectItem>
+                        <SelectItem value="low">Low</SelectItem>
+                        <SelectItem value="medium">Medium (recommended)</SelectItem>
+                        <SelectItem value="high">High — deepest, slowest</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">How much hidden reasoning the model performs before answering.</p>
+                  </div>
+                )}
+                {selectedModel?.supportsVerbosity && (
+                  <div className="space-y-2">
+                    <Label>Verbosity</Label>
+                    <Select value={ts.verbosity ?? 'medium'} onValueChange={(v) => setTranslationSettings({ ...ts, verbosity: v as 'low' | 'medium' | 'high' })}>
+                      <SelectTrigger className="glass-input"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="low">Low — terse output</SelectItem>
+                        <SelectItem value="medium">Medium</SelectItem>
+                        <SelectItem value="high">High — expansive</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">Controls visible answer length, independent of reasoning depth.</p>
                   </div>
                 )}
               </div>
-              {selectedModel?.supportsTemperature && (
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="space-y-2"><Label>Top P</Label><Input type="number" step="0.1" min="0" max="1" value={ts.top_p} onChange={(e) => setTranslationSettings({ ...ts, top_p: parseFloat(e.target.value) || 1 })} className="glass-input" /></div>
-                  <div className="space-y-2"><Label>Frequency Penalty</Label><Input type="number" step="0.1" min="-2" max="2" value={ts.frequency_penalty} onChange={(e) => setTranslationSettings({ ...ts, frequency_penalty: parseFloat(e.target.value) || 0 })} className="glass-input" /></div>
-                  <div className="space-y-2"><Label>Presence Penalty</Label><Input type="number" step="0.1" min="-2" max="2" value={ts.presence_penalty} onChange={(e) => setTranslationSettings({ ...ts, presence_penalty: parseFloat(e.target.value) || 0 })} className="glass-input" /></div>
-                </div>
-              )}
+              <div className="grid grid-cols-3 gap-4">
+                {selectedModel?.supportsTopP && (
+                  <div className="space-y-2">
+                    <Label>Top P</Label>
+                    <Input type="number" step="0.05" min="0" max="1" value={ts.top_p} onChange={(e) => setTranslationSettings({ ...ts, top_p: parseFloat(e.target.value) || 1 })} className="glass-input" />
+                  </div>
+                )}
+                {selectedModel?.supportsPenalties && (
+                  <>
+                    <div className="space-y-2"><Label>Frequency Penalty</Label><Input type="number" step="0.1" min="-2" max="2" value={ts.frequency_penalty} onChange={(e) => setTranslationSettings({ ...ts, frequency_penalty: parseFloat(e.target.value) || 0 })} className="glass-input" /></div>
+                    <div className="space-y-2"><Label>Presence Penalty</Label><Input type="number" step="0.1" min="-2" max="2" value={ts.presence_penalty} onChange={(e) => setTranslationSettings({ ...ts, presence_penalty: parseFloat(e.target.value) || 0 })} className="glass-input" /></div>
+                  </>
+                )}
+              </div>
+              <div className="grid grid-cols-3 gap-4">
+                {selectedModel?.supportsSeed && (
+                  <div className="space-y-2">
+                    <Label>Seed (optional)</Label>
+                    <Input
+                      type="number"
+                      placeholder="leave blank for random"
+                      value={ts.seed ?? ''}
+                      onChange={(e) => {
+                        const raw = e.target.value.trim();
+                        setTranslationSettings({ ...ts, seed: raw === '' ? null : parseInt(raw) });
+                      }}
+                      className="glass-input"
+                    />
+                    <p className="text-xs text-muted-foreground">Same seed + same prompt → reproducible output.</p>
+                  </div>
+                )}
+                {selectedModel?.supportsServiceTier && (
+                  <div className="space-y-2">
+                    <Label>Service tier</Label>
+                    <Select value={ts.service_tier ?? 'auto'} onValueChange={(v) => setTranslationSettings({ ...ts, service_tier: v as 'auto' | 'default' | 'flex' | 'priority' })}>
+                      <SelectTrigger className="glass-input"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="auto">Auto</SelectItem>
+                        <SelectItem value="default">Default</SelectItem>
+                        <SelectItem value="flex">Flex (cheaper, slower)</SelectItem>
+                        <SelectItem value="priority">Priority (faster, costlier)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                {selectedModel?.supportsParallelToolCalls && (
+                  <div className="space-y-2">
+                    <Label>Parallel tool calls</Label>
+                    <Select value={String(ts.parallel_tool_calls ?? true)} onValueChange={(v) => setTranslationSettings({ ...ts, parallel_tool_calls: v === 'true' })}>
+                      <SelectTrigger className="glass-input"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="true">Enabled</SelectItem>
+                        <SelectItem value="false">Disabled (force single call)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
 
