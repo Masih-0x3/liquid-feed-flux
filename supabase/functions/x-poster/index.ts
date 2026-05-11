@@ -64,6 +64,8 @@ interface PostingConfig {
   post_template: string;
   leading_emoji: string;
   hashtags: string;
+  hashtag_pool?: string[];
+  hashtags_per_post?: number;
   max_chars: number;
   dedupe_window_hours: number;
   post_only_decision_deliver: boolean;
@@ -80,7 +82,8 @@ interface RateLimits {
 const DEFAULT_CFG: PostingConfig = {
   enabled: false, min_score: 14, require_media: true,
   post_template: '{leading_emoji} {translated_text}', leading_emoji: '📰',
-  hashtags: '', max_chars: 280, dedupe_window_hours: 48, post_only_decision_deliver: true,
+  hashtags: '', hashtag_pool: [], hashtags_per_post: 1,
+  max_chars: 280, dedupe_window_hours: 48, post_only_decision_deliver: true,
 };
 const DEFAULT_LIMITS: RateLimits = {
   posts_per_hour: 20, posts_per_day: 100, monthly_post_budget: 2500, media_uploads_per_day: 200,
