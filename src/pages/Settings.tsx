@@ -15,7 +15,6 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Brain, MessageSquare, Eye, Code, Sparkles, Send, Key, Shield, Loader2, Filter, Newspaper, AtSign, ChevronDown } from 'lucide-react';
 import {
   useSettingsData, useSaveSettings, openaiModels, messagePlaceholders, promptPlaceholders,
-  DEFAULT_SCORING_SYSTEM_PROMPT, DEFAULT_CLASSIFIER_TOOL_SCHEMA,
   type TranslationSettings, type OpenAISettings, type TelegramSettings, type MessageTemplateSettings, type DigestSettings,
 } from '@/hooks/useSettingsData';
 import ContentFilterSettings, { type ContentFilterConfig } from '@/components/settings/ContentFilterSettings';
