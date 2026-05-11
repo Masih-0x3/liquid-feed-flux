@@ -51,9 +51,38 @@ const DEFAULTS: XPostingConfigValue = {
 const PLACEHOLDERS = [
   { key: '{leading_emoji}', desc: 'News emoji prefix' },
   { key: '{translated_text}', desc: 'Persian translation' },
-  { key: '{hashtags}', desc: 'Configured hashtags' },
+  { key: '{persian_date}', desc: 'Today in Jalali calendar (Persian)' },
+  { key: '{hashtags}', desc: 'Random pick from hashtag pool' },
   { key: '{author_handle}', desc: 'Original author' },
 ];
+
+/** Persian (Jalali) date in fa-IR for live preview, e.g. "۱۴ اردیبهشت ۱۴۰۵". */
+function persianDateNow(): string {
+  try {
+    return new Intl.DateTimeFormat('fa-IR-u-ca-persian', {
+      day: 'numeric', month: 'long', year: 'numeric',
+    }).format(new Date());
+  } catch {
+    return new Date().toISOString().slice(0, 10);
+  }
+}
+
+function normHashtag(s: string): string {
+  const t = s.trim().replace(/^#+/, '');
+  return t ? `#${t}` : '';
+}
+
+function pickHashtags(pool: string[], n: number): string {
+  const cleaned = pool.map(normHashtag).filter(Boolean);
+  if (cleaned.length === 0 || n <= 0) return '';
+  const arr = cleaned.slice();
+  const take = Math.min(n, arr.length);
+  for (let i = 0; i < take; i++) {
+    const j = i + Math.floor(Math.random() * (arr.length - i));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr.slice(0, take).join(' ');
+}
 
 interface Props {
   initial?: Partial<XPostingConfigValue>;
@@ -65,20 +94,43 @@ export default function XPostingConfig({ initial }: Props) {
   const [cfg, setCfg] = useState<XPostingConfigValue>({ ...DEFAULTS, ...(initial ?? {}) });
   const [dryRunLoading, setDryRunLoading] = useState(false);
   const [dryRunResult, setDryRunResult] = useState<{ results?: Array<Record<string, unknown>> } | null>(null);
+  const [hashtagPoolText, setHashtagPoolText] = useState<string>(((initial?.hashtag_pool ?? DEFAULTS.hashtag_pool) || []).join('\n'));
+  const [previewSeed, setPreviewSeed] = useState(0);
 
-  useEffect(() => { setCfg({ ...DEFAULTS, ...(initial ?? {}) }); }, [initial]);
+  useEffect(() => {
+    const next = { ...DEFAULTS, ...(initial ?? {}) };
+    setCfg(next);
+    setHashtagPoolText((next.hashtag_pool || []).join('\n'));
+  }, [initial]);
 
   const update = (patch: Partial<XPostingConfigValue>) => setCfg((c) => ({ ...c, ...patch }));
 
-  const handleSave = () => save.mutate({ key: 'x_posting_config', value: cfg });
+  /** Parse the textarea (newline or comma separated) into a clean string[] for save. */
+  const parsePool = (raw: string): string[] => {
+    return raw.split(/[\n,]+/).map((s) => normHashtag(s)).filter(Boolean);
+  };
+
+  const handlePoolChange = (raw: string) => {
+    setHashtagPoolText(raw);
+    update({ hashtag_pool: parsePool(raw) });
+  };
+
+  const handleSave = () => save.mutate({ key: 'x_posting_config', value: { ...cfg, hashtag_pool: parsePool(hashtagPoolText) } });
 
   const insertPlaceholder = (ph: string) => update({ post_template: cfg.post_template + ' ' + ph });
 
   const RLM = '\u200F';
+  // previewSeed forces re-pick of random hashtags
+  const sampledHashtags = (() => {
+    void previewSeed;
+    const picked = pickHashtags(cfg.hashtag_pool || [], cfg.hashtags_per_post ?? 0);
+    return picked || cfg.hashtags || '';
+  })();
   const previewText = RLM + cfg.post_template
     .split('{leading_emoji}').join(cfg.leading_emoji)
     .split('{translated_text}').join('این یک نمونه‌ی پیش‌نمایش از پست خبری ترجمه‌شده است.')
-    .split('{hashtags}').join(cfg.hashtags)
+    .split('{hashtags}').join(sampledHashtags)
+    .split('{persian_date}').join(persianDateNow())
     .split('{author_handle}').join('example_user')
     .replace(/\n{3,}/g, '\n\n').trim()
     .slice(0, Math.max(1, cfg.max_chars - 1));
