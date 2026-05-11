@@ -229,19 +229,56 @@ export default function XPostingConfig({ initial }: Props) {
           />
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <Label htmlFor="leading_emoji">Leading emoji</Label>
             <Input id="leading_emoji" value={cfg.leading_emoji} onChange={(e) => update({ leading_emoji: e.target.value })} className="glass-input" />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="hashtags">Hashtags</Label>
-            <Input id="hashtags" value={cfg.hashtags} onChange={(e) => update({ hashtags: e.target.value })} placeholder="#News #Iran" className="glass-input" />
-          </div>
-          <div className="space-y-1.5">
             <Label htmlFor="max_chars">Max characters</Label>
             <Input id="max_chars" type="number" min={50} max={4000} value={cfg.max_chars}
               onChange={(e) => update({ max_chars: Math.max(50, Math.min(4000, Number(e.target.value) || 280)) })} className="glass-input" />
+          </div>
+        </div>
+
+        <Separator />
+
+        {/* Hashtag pool + per-post count */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Hash className="w-4 h-4 text-muted-foreground" />
+            <Label className="font-medium">Hashtag pool</Label>
+            <Badge variant="secondary" className="ml-auto">{(cfg.hashtag_pool || []).length} tags</Badge>
+          </div>
+          <p className="text-xs text-muted-foreground -mt-1">
+            One hashtag per line (or comma-separated). The poster picks at random per post and substitutes <code>{'{hashtags}'}</code> in the template. Leading <code>#</code> is added automatically.
+          </p>
+          <Textarea
+            value={hashtagPoolText}
+            onChange={(e) => handlePoolChange(e.target.value)}
+            placeholder={'#اخبار\n#ایران\n#خاورمیانه\n#اقتصاد'}
+            className="glass-input font-mono text-sm min-h-[120px]"
+          />
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>Hashtags per post</Label>
+              <Select
+                value={String(cfg.hashtags_per_post ?? 1)}
+                onValueChange={(v) => update({ hashtags_per_post: Number(v) as 0 | 1 | 2 })}
+              >
+                <SelectTrigger className="glass-input"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="0">None — leave {'{hashtags}'} empty</SelectItem>
+                  <SelectItem value="1">1 random hashtag</SelectItem>
+                  <SelectItem value="2">2 random hashtags</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="hashtags_fallback">Fallback hashtags (used if pool is empty)</Label>
+              <Input id="hashtags_fallback" value={cfg.hashtags} onChange={(e) => update({ hashtags: e.target.value })} placeholder="#اخبار" className="glass-input" />
+            </div>
           </div>
         </div>
 
