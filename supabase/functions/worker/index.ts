@@ -40,26 +40,12 @@ function validateInternalToken(req: Request): Response | null {
 }
 
 // Load config from settings table with fallback defaults
-async function loadConfig(// deno-lint-ignore no-explicit-any
-supabase: any): Promise<{
-  translationPrompt: string;
-  openaiModel: string;
-  openaiTemperature: number;
-  messageTemplate: Record<string, unknown>;
-  scoringSystemPrompt: string | null;
-  classifierToolSchema: string | null;
-  contentFilter: {
-    enabled: boolean;
-    default_threshold: number;
-    editorial_guidelines: string;
-    priority_topics: string[];
-    low_priority_topics: string[];
-    author_rules: Record<string, { rule: string; threshold?: number }>;
-      score_only?: boolean;
-  };
-}> {
+// deno-lint-ignore no-explicit-any
+async function loadConfig(supabase: any): Promise<any> {
   const defaults = {
     translationPrompt: "You are a professional translator. Translate the given English text to Persian. Preserve @mentions, #hashtags, URLs, and line breaks exactly. Only return the translated text, nothing else.",
+    userPromptTemplate: null as string | null,
+    splitCalls: true,
     openaiModel: 'gpt-4o-mini',
     openaiTemperature: 0.2,
     openaiMaxCompletionTokens: 2000,
@@ -71,6 +57,16 @@ supabase: any): Promise<{
     openaiSeed: null as number | null,
     openaiServiceTier: null as string | null,
     openaiParallelToolCalls: null as boolean | null,
+    // Scoring (independent). Null = inherit from translation values at use-site.
+    scoringModel: null as string | null,
+    scoringTemperature: null as number | null,
+    scoringMaxCompletionTokens: null as number | null,
+    scoringTopP: null as number | null,
+    scoringReasoningEffort: null as string | null,
+    scoringVerbosity: null as string | null,
+    scoringSeed: null as number | null,
+    scoringServiceTier: null as string | null,
+    scoringParallelToolCalls: null as boolean | null,
     messageTemplate: {
       template: '{translated_text}\n\n📰 #اخبار',
       include_source_link: true,
