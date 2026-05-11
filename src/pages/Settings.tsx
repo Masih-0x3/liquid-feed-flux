@@ -32,23 +32,6 @@ function insertPlaceholder(placeholder: string, textareaId: string, getter: stri
   }
 }
 
-type DigestTestPost = { author_handle?: string; created_at?: string; text_translated?: string; text_original?: string };
-type DigestTestResult = {
-  post_count?: number;
-  period_start?: string;
-  period_end?: string;
-  reason?: string;
-  openai_finish_reason?: string;
-  warning?: string;
-  posts?: DigestTestPost[];
-  openai_request?: unknown;
-  openai_system_prompt?: string;
-  openai_user_prompt?: string;
-  openai_response?: string;
-  openai_usage?: unknown;
-  formatted_tweets?: string[];
-};
-
 export default function Settings() {
   const { toast } = useToast();
   const { settingsQuery, samplesQuery } = useSettingsData();
@@ -60,19 +43,13 @@ export default function Settings() {
   const sampleTweets = samplesQuery.data || [];
 
   const [translationSettings, setTranslationSettings] = useState<TranslationSettings | null>(null);
-  const [openaiSettings, setOpenaiSettings] = useState<OpenAISettings | null>(null);
   const [telegramSettings, setTelegramSettings] = useState<TelegramSettings | null>(null);
   const [messageTemplate, setMessageTemplate] = useState<MessageTemplateSettings | null>(null);
-  const [digestSettings, setDigestSettings] = useState<DigestSettings | null>(null);
-  const [digestTestLoading, setDigestTestLoading] = useState(false);
-  const [digestTestResult, setDigestTestResult] = useState<DigestTestResult | null>(null);
 
   // Sync from server on first load
   const ts = translationSettings ?? settings?.translation_prompt;
-  const os = openaiSettings ?? settings?.openai_config;
   const tgs = telegramSettings ?? settings?.telegram_config;
   const mt = messageTemplate ?? settings?.message_template;
-  const ds = digestSettings ?? settings?.digest_config;
 
   if (settingsQuery.isLoading) {
     return (
