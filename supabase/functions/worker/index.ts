@@ -98,9 +98,13 @@ async function loadConfig(supabase: any): Promise<any> {
         if (s.key === 'translation_prompt' && typeof s.value === 'object' && s.value !== null) {
           const v = s.value as Record<string, unknown>;
           if (v.system_prompt) defaults.translationPrompt = String(v.system_prompt);
+          if (typeof v.user_prompt_template === 'string' && (v.user_prompt_template as string).trim()) {
+            defaults.userPromptTemplate = v.user_prompt_template as string;
+          }
+          if (typeof v.split_calls === 'boolean') defaults.splitCalls = v.split_calls as boolean;
           if (typeof v.model === 'string' && (v.model as string).trim()) defaults.openaiModel = String(v.model);
           if (typeof v.temperature === 'number') defaults.openaiTemperature = v.temperature;
-          if (typeof v.max_completion_tokens === 'number') defaults.openaiMaxCompletionTokens = Math.min(8000, Math.max(1, v.max_completion_tokens as number));
+          if (typeof v.max_completion_tokens === 'number') defaults.openaiMaxCompletionTokens = Math.max(1, v.max_completion_tokens as number);
           if (typeof v.top_p === 'number') defaults.openaiTopP = v.top_p as number;
           if (typeof v.frequency_penalty === 'number') defaults.openaiFrequencyPenalty = v.frequency_penalty as number;
           if (typeof v.presence_penalty === 'number') defaults.openaiPresencePenalty = v.presence_penalty as number;
@@ -114,6 +118,19 @@ async function loadConfig(supabase: any): Promise<any> {
           }
           if (typeof v.classifier_tool_schema === 'string' && v.classifier_tool_schema.trim()) {
             defaults.classifierToolSchema = v.classifier_tool_schema as string;
+          }
+          // Independent scoring params (optional)
+          if (typeof v.scoring === 'object' && v.scoring !== null) {
+            const sv = v.scoring as Record<string, unknown>;
+            if (typeof sv.model === 'string' && (sv.model as string).trim()) defaults.scoringModel = sv.model as string;
+            if (typeof sv.temperature === 'number') defaults.scoringTemperature = sv.temperature as number;
+            if (typeof sv.max_completion_tokens === 'number') defaults.scoringMaxCompletionTokens = Math.max(1, sv.max_completion_tokens as number);
+            if (typeof sv.top_p === 'number') defaults.scoringTopP = sv.top_p as number;
+            if (typeof sv.reasoning_effort === 'string') defaults.scoringReasoningEffort = sv.reasoning_effort as string;
+            if (typeof sv.verbosity === 'string') defaults.scoringVerbosity = sv.verbosity as string;
+            if (typeof sv.seed === 'number') defaults.scoringSeed = sv.seed as number;
+            if (typeof sv.service_tier === 'string') defaults.scoringServiceTier = sv.service_tier as string;
+            if (typeof sv.parallel_tool_calls === 'boolean') defaults.scoringParallelToolCalls = sv.parallel_tool_calls as boolean;
           }
         }
         if (s.key === 'message_template' && typeof s.value === 'object' && s.value !== null) {
