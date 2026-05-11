@@ -552,10 +552,13 @@ Deno.serve(async (req) => {
 
     // Format text
     const accountHandle = (post.accounts as { handle?: string })?.handle || '';
+    const pickedHashtags = pickHashtags(cfg.hashtag_pool, cfg.hashtags_per_post ?? 0);
+    const hashtagsValue = pickedHashtags || cfg.hashtags || '';
     const text = formatTweet(cfg.post_template, {
       leading_emoji: cfg.leading_emoji,
       translated_text: post.text_translated || '',
-      hashtags: cfg.hashtags,
+      hashtags: hashtagsValue,
+      persian_date: persianDateNow(),
       author_handle: post.author_handle || accountHandle,
     }, cfg.max_chars);
 
