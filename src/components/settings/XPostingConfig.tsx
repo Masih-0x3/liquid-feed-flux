@@ -23,6 +23,10 @@ export interface XPostingConfigValue {
   post_template: string;
   leading_emoji: string;
   hashtags: string;
+  /** Pool of hashtags from which 0/1/2 are picked at random per post. Each entry like "#News" or "News". */
+  hashtag_pool: string[];
+  /** How many hashtags to randomly inject into {hashtags} per post: 0, 1, or 2. */
+  hashtags_per_post: 0 | 1 | 2;
   max_chars: number;
   dedupe_window_hours: number;
   post_only_decision_deliver: boolean;
@@ -34,9 +38,11 @@ const DEFAULTS: XPostingConfigValue = {
   enabled: false,
   min_score: 14,
   require_media: true,
-  post_template: '{leading_emoji} {translated_text}',
+  post_template: '{leading_emoji} {translated_text}\n\n{persian_date}\n{hashtags}',
   leading_emoji: '📰',
   hashtags: '',
+  hashtag_pool: [],
+  hashtags_per_post: 1,
   max_chars: 280,
   dedupe_window_hours: 48,
   post_only_decision_deliver: true,
