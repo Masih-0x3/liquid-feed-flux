@@ -8,11 +8,13 @@ import { Slider } from '@/components/ui/slider';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { useSaveSettings } from '@/hooks/useSettingsData';
 import { PromptEditor } from '@/components/settings/PromptEditor';
-import { Newspaper, Save, Sparkles, Loader2, ImageIcon, Eye } from 'lucide-react';
+import { Newspaper, Save, Sparkles, Loader2, ImageIcon, Eye, RefreshCw, Hash } from 'lucide-react';
 
 export interface XPostingConfigValue {
   enabled: boolean;
