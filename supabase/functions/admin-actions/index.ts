@@ -378,6 +378,33 @@ serve(async (req) => {
         return jsonResponse({ success: true, message: 'Reprocess job queued' });
       }
 
+      // ===== Cancel pending/running jobs =====
+      case 'cancel_pending_jobs': {
+        const { types, include_running } = body as { types?: string[]; include_running?: boolean };
+        const statuses = include_running === false ? ['pending'] : ['pending', 'running'];
+        let query = supabase
+          .from('jobs')
+          .update({
+            status: 'failed',
+            last_error: 'Manually canceled by admin',
+            completed_at: new Date().toISOString(),
+            locked_at: null,
+            locked_by: null,
+            lease_expires_at: null,
+          })
+          .in('status', statuses)
+          .select('id, type');
+        if (Array.isArray(types) && types.length > 0) {
+          query = query.in('type', types);
+        }
+        const { data, error } = await query;
+        if (error) throw error;
+        const canceled = data?.length ?? 0;
+        const byType: Record<string, number> = {};
+        (data || []).forEach((r: { type: string }) => { byType[r.type] = (byType[r.type] || 0) + 1; });
+        return jsonResponse({ success: true, canceled, by_type: byType, message: `Canceled ${canceled} job(s)` });
+      }
+
       // ===== Bulk reprocess =====
       case 'bulk_reprocess': {
         const { tweet_ids } = body;
