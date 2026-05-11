@@ -111,6 +111,15 @@ supabase: any): Promise<{
           if (v.system_prompt) defaults.translationPrompt = String(v.system_prompt);
           if (typeof v.model === 'string' && (v.model as string).trim()) defaults.openaiModel = String(v.model);
           if (typeof v.temperature === 'number') defaults.openaiTemperature = v.temperature;
+          if (typeof v.max_completion_tokens === 'number') defaults.openaiMaxCompletionTokens = Math.min(8000, Math.max(1, v.max_completion_tokens as number));
+          if (typeof v.top_p === 'number') defaults.openaiTopP = v.top_p as number;
+          if (typeof v.frequency_penalty === 'number') defaults.openaiFrequencyPenalty = v.frequency_penalty as number;
+          if (typeof v.presence_penalty === 'number') defaults.openaiPresencePenalty = v.presence_penalty as number;
+          if (typeof v.reasoning_effort === 'string') defaults.openaiReasoningEffort = v.reasoning_effort as string;
+          if (typeof v.verbosity === 'string') defaults.openaiVerbosity = v.verbosity as string;
+          if (typeof v.seed === 'number') defaults.openaiSeed = v.seed as number;
+          if (typeof v.service_tier === 'string') defaults.openaiServiceTier = v.service_tier as string;
+          if (typeof v.parallel_tool_calls === 'boolean') defaults.openaiParallelToolCalls = v.parallel_tool_calls as boolean;
           if (typeof v.scoring_system_prompt === 'string' && v.scoring_system_prompt.trim()) {
             defaults.scoringSystemPrompt = v.scoring_system_prompt as string;
           }
