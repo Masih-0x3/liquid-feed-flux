@@ -674,9 +674,13 @@ ${post.text_original}`;
     const nowIso = new Date().toISOString();
     const resultMeta = {
       model: config.openaiModel,
+      scoring_model: scoringModel,
       usage: data.usage ?? null,
+      scoring_usage: scoringUsage,
+      translation_usage: translationUsage,
       finished_at: nowIso,
       importance_score: importanceScore,
+      split_calls: !!(filterEnabled && config.splitCalls),
     };
     try {
       await supabase.from('jobs').update({ result_meta: resultMeta }).eq('id', job.id);
