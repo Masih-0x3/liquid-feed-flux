@@ -87,7 +87,6 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
   const [newPriorityTopic, setNewPriorityTopic] = useState('');
   const [newLowPriorityTopic, setNewLowPriorityTopic] = useState('');
   const [authorOverridesOpen, setAuthorOverridesOpen] = useState(false);
-  const [advancedScorerOpen, setAdvancedScorerOpen] = useState(false);
   const saveMutation = useSaveSettings();
   const { toast } = useToast();
 
