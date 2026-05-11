@@ -8,11 +8,13 @@ import { Slider } from '@/components/ui/slider';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { useSaveSettings } from '@/hooks/useSettingsData';
 import { PromptEditor } from '@/components/settings/PromptEditor';
-import { Newspaper, Save, Sparkles, Loader2, ImageIcon, Eye } from 'lucide-react';
+import { Newspaper, Save, Sparkles, Loader2, ImageIcon, Eye, RefreshCw, Hash } from 'lucide-react';
 
 export interface XPostingConfigValue {
   enabled: boolean;
@@ -21,6 +23,10 @@ export interface XPostingConfigValue {
   post_template: string;
   leading_emoji: string;
   hashtags: string;
+  /** Pool of hashtags from which 0/1/2 are picked at random per post. Each entry like "#News" or "News". */
+  hashtag_pool: string[];
+  /** How many hashtags to randomly inject into {hashtags} per post: 0, 1, or 2. */
+  hashtags_per_post: 0 | 1 | 2;
   max_chars: number;
   dedupe_window_hours: number;
   post_only_decision_deliver: boolean;
@@ -32,9 +38,11 @@ const DEFAULTS: XPostingConfigValue = {
   enabled: false,
   min_score: 14,
   require_media: true,
-  post_template: '{leading_emoji} {translated_text}',
+  post_template: '{leading_emoji} {translated_text}\n\n{persian_date}\n{hashtags}',
   leading_emoji: '📰',
   hashtags: '',
+  hashtag_pool: [],
+  hashtags_per_post: 1,
   max_chars: 280,
   dedupe_window_hours: 48,
   post_only_decision_deliver: true,
@@ -43,9 +51,38 @@ const DEFAULTS: XPostingConfigValue = {
 const PLACEHOLDERS = [
   { key: '{leading_emoji}', desc: 'News emoji prefix' },
   { key: '{translated_text}', desc: 'Persian translation' },
-  { key: '{hashtags}', desc: 'Configured hashtags' },
+  { key: '{persian_date}', desc: 'Today in Jalali calendar (Persian)' },
+  { key: '{hashtags}', desc: 'Random pick from hashtag pool' },
   { key: '{author_handle}', desc: 'Original author' },
 ];
+
+/** Persian (Jalali) date in fa-IR for live preview, e.g. "۱۴ اردیبهشت ۱۴۰۵". */
+function persianDateNow(): string {
+  try {
+    return new Intl.DateTimeFormat('fa-IR-u-ca-persian', {
+      day: 'numeric', month: 'long', year: 'numeric',
+    }).format(new Date());
+  } catch {
+    return new Date().toISOString().slice(0, 10);
+  }
+}
+
+function normHashtag(s: string): string {
+  const t = s.trim().replace(/^#+/, '');
+  return t ? `#${t}` : '';
+}
+
+function pickHashtags(pool: string[], n: number): string {
+  const cleaned = pool.map(normHashtag).filter(Boolean);
+  if (cleaned.length === 0 || n <= 0) return '';
+  const arr = cleaned.slice();
+  const take = Math.min(n, arr.length);
+  for (let i = 0; i < take; i++) {
+    const j = i + Math.floor(Math.random() * (arr.length - i));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr.slice(0, take).join(' ');
+}
 
 interface Props {
   initial?: Partial<XPostingConfigValue>;
@@ -57,20 +94,43 @@ export default function XPostingConfig({ initial }: Props) {
   const [cfg, setCfg] = useState<XPostingConfigValue>({ ...DEFAULTS, ...(initial ?? {}) });
   const [dryRunLoading, setDryRunLoading] = useState(false);
   const [dryRunResult, setDryRunResult] = useState<{ results?: Array<Record<string, unknown>> } | null>(null);
+  const [hashtagPoolText, setHashtagPoolText] = useState<string>(((initial?.hashtag_pool ?? DEFAULTS.hashtag_pool) || []).join('\n'));
+  const [previewSeed, setPreviewSeed] = useState(0);
 
-  useEffect(() => { setCfg({ ...DEFAULTS, ...(initial ?? {}) }); }, [initial]);
+  useEffect(() => {
+    const next = { ...DEFAULTS, ...(initial ?? {}) };
+    setCfg(next);
+    setHashtagPoolText((next.hashtag_pool || []).join('\n'));
+  }, [initial]);
 
   const update = (patch: Partial<XPostingConfigValue>) => setCfg((c) => ({ ...c, ...patch }));
 
-  const handleSave = () => save.mutate({ key: 'x_posting_config', value: cfg });
+  /** Parse the textarea (newline or comma separated) into a clean string[] for save. */
+  const parsePool = (raw: string): string[] => {
+    return raw.split(/[\n,]+/).map((s) => normHashtag(s)).filter(Boolean);
+  };
+
+  const handlePoolChange = (raw: string) => {
+    setHashtagPoolText(raw);
+    update({ hashtag_pool: parsePool(raw) });
+  };
+
+  const handleSave = () => save.mutate({ key: 'x_posting_config', value: { ...cfg, hashtag_pool: parsePool(hashtagPoolText) } });
 
   const insertPlaceholder = (ph: string) => update({ post_template: cfg.post_template + ' ' + ph });
 
   const RLM = '\u200F';
+  // previewSeed forces re-pick of random hashtags
+  const sampledHashtags = (() => {
+    void previewSeed;
+    const picked = pickHashtags(cfg.hashtag_pool || [], cfg.hashtags_per_post ?? 0);
+    return picked || cfg.hashtags || '';
+  })();
   const previewText = RLM + cfg.post_template
     .split('{leading_emoji}').join(cfg.leading_emoji)
     .split('{translated_text}').join('این یک نمونه‌ی پیش‌نمایش از پست خبری ترجمه‌شده است.')
-    .split('{hashtags}').join(cfg.hashtags)
+    .split('{hashtags}').join(sampledHashtags)
+    .split('{persian_date}').join(persianDateNow())
     .split('{author_handle}').join('example_user')
     .replace(/\n{3,}/g, '\n\n').trim()
     .slice(0, Math.max(1, cfg.max_chars - 1));
@@ -169,19 +229,56 @@ export default function XPostingConfig({ initial }: Props) {
           />
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <Label htmlFor="leading_emoji">Leading emoji</Label>
             <Input id="leading_emoji" value={cfg.leading_emoji} onChange={(e) => update({ leading_emoji: e.target.value })} className="glass-input" />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="hashtags">Hashtags</Label>
-            <Input id="hashtags" value={cfg.hashtags} onChange={(e) => update({ hashtags: e.target.value })} placeholder="#News #Iran" className="glass-input" />
-          </div>
-          <div className="space-y-1.5">
             <Label htmlFor="max_chars">Max characters</Label>
             <Input id="max_chars" type="number" min={50} max={4000} value={cfg.max_chars}
               onChange={(e) => update({ max_chars: Math.max(50, Math.min(4000, Number(e.target.value) || 280)) })} className="glass-input" />
+          </div>
+        </div>
+
+        <Separator />
+
+        {/* Hashtag pool + per-post count */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Hash className="w-4 h-4 text-muted-foreground" />
+            <Label className="font-medium">Hashtag pool</Label>
+            <Badge variant="secondary" className="ml-auto">{(cfg.hashtag_pool || []).length} tags</Badge>
+          </div>
+          <p className="text-xs text-muted-foreground -mt-1">
+            One hashtag per line (or comma-separated). The poster picks at random per post and substitutes <code>{'{hashtags}'}</code> in the template. Leading <code>#</code> is added automatically.
+          </p>
+          <Textarea
+            value={hashtagPoolText}
+            onChange={(e) => handlePoolChange(e.target.value)}
+            placeholder={'#اخبار\n#ایران\n#خاورمیانه\n#اقتصاد'}
+            className="glass-input font-mono text-sm min-h-[120px]"
+          />
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>Hashtags per post</Label>
+              <Select
+                value={String(cfg.hashtags_per_post ?? 1)}
+                onValueChange={(v) => update({ hashtags_per_post: Number(v) as 0 | 1 | 2 })}
+              >
+                <SelectTrigger className="glass-input"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="0">None — leave {'{hashtags}'} empty</SelectItem>
+                  <SelectItem value="1">1 random hashtag</SelectItem>
+                  <SelectItem value="2">2 random hashtags</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="hashtags_fallback">Fallback hashtags (used if pool is empty)</Label>
+              <Input id="hashtags_fallback" value={cfg.hashtags} onChange={(e) => update({ hashtags: e.target.value })} placeholder="#اخبار" className="glass-input" />
+            </div>
           </div>
         </div>
 
@@ -196,6 +293,13 @@ export default function XPostingConfig({ initial }: Props) {
         <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 space-y-2">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Eye className="w-3.5 h-3.5" /><span>Live preview</span>
+            <Button
+              type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs"
+              onClick={() => setPreviewSeed((s) => s + 1)}
+              title="Pick new random hashtags"
+            >
+              <RefreshCw className="w-3 h-3 mr-1" />Re-shuffle
+            </Button>
             <Badge variant="outline" className="ml-auto text-xs">{previewText.length}/{cfg.max_chars}</Badge>
           </div>
           <div dir="rtl" lang="fa" className="whitespace-pre-wrap text-sm text-glass-foreground bg-background/50 p-3 rounded text-right">{previewText || '(empty)'}</div>

@@ -64,6 +64,8 @@ interface PostingConfig {
   post_template: string;
   leading_emoji: string;
   hashtags: string;
+  hashtag_pool?: string[];
+  hashtags_per_post?: number;
   max_chars: number;
   dedupe_window_hours: number;
   post_only_decision_deliver: boolean;
@@ -80,7 +82,8 @@ interface RateLimits {
 const DEFAULT_CFG: PostingConfig = {
   enabled: false, min_score: 14, require_media: true,
   post_template: '{leading_emoji} {translated_text}', leading_emoji: '📰',
-  hashtags: '', max_chars: 280, dedupe_window_hours: 48, post_only_decision_deliver: true,
+  hashtags: '', hashtag_pool: [], hashtags_per_post: 1,
+  max_chars: 280, dedupe_window_hours: 48, post_only_decision_deliver: true,
 };
 const DEFAULT_LIMITS: RateLimits = {
   posts_per_hour: 20, posts_per_day: 100, monthly_post_budget: 2500, media_uploads_per_day: 200,
@@ -101,6 +104,38 @@ function formatTweet(tpl: string, vars: Record<string, string>, max: number): st
   const budget = Math.max(1, max - 1);
   if (out.length > budget) out = out.slice(0, budget - 1).trimEnd() + '…';
   return RLM + out;
+}
+
+/** Persian (Jalali) date string like "۱۴ اردیبهشت ۱۴۰۵" using fa-IR Intl. */
+function persianDateNow(): string {
+  try {
+    return new Intl.DateTimeFormat('fa-IR-u-ca-persian', {
+      day: 'numeric', month: 'long', year: 'numeric',
+    }).format(new Date());
+  } catch {
+    return new Date().toISOString().slice(0, 10);
+  }
+}
+
+/** Normalize a hashtag entry: strip whitespace, ensure leading '#'. */
+function normHashtag(s: string): string {
+  const t = s.trim().replace(/^#+/, '');
+  return t ? `#${t}` : '';
+}
+
+/** Pick `n` distinct random hashtags from a pool, returning a space-joined string. */
+function pickHashtags(pool: string[] | undefined, n: number): string {
+  if (!pool || pool.length === 0 || n <= 0) return '';
+  const cleaned = pool.map(normHashtag).filter(Boolean);
+  if (cleaned.length === 0) return '';
+  const take = Math.min(n, cleaned.length);
+  // Fisher-Yates partial shuffle
+  const arr = cleaned.slice();
+  for (let i = 0; i < take; i++) {
+    const j = i + Math.floor(Math.random() * (arr.length - i));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr.slice(0, take).join(' ');
 }
 
 async function trimRollingWindow(arr: string[], windowMs: number): Promise<string[]> {
@@ -517,10 +552,13 @@ Deno.serve(async (req) => {
 
     // Format text
     const accountHandle = (post.accounts as { handle?: string })?.handle || '';
+    const pickedHashtags = pickHashtags(cfg.hashtag_pool, cfg.hashtags_per_post ?? 0);
+    const hashtagsValue = pickedHashtags || cfg.hashtags || '';
     const text = formatTweet(cfg.post_template, {
       leading_emoji: cfg.leading_emoji,
       translated_text: post.text_translated || '',
-      hashtags: cfg.hashtags,
+      hashtags: hashtagsValue,
+      persian_date: persianDateNow(),
       author_handle: post.author_handle || accountHandle,
     }, cfg.max_chars);
 
