@@ -6,6 +6,18 @@ export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high';
 export type Verbosity = 'low' | 'medium' | 'high';
 export type ServiceTier = 'auto' | 'default' | 'flex' | 'priority';
 
+export interface ScoringSettings {
+  model?: string;
+  temperature?: number | null;
+  max_completion_tokens?: number;
+  top_p?: number | null;
+  reasoning_effort?: ReasoningEffort;
+  verbosity?: Verbosity;
+  seed?: number | null;
+  service_tier?: ServiceTier;
+  parallel_tool_calls?: boolean;
+}
+
 export interface TranslationSettings {
   system_prompt: string;
   user_prompt_template: string;
@@ -29,6 +41,10 @@ export interface TranslationSettings {
   scoring_system_prompt?: string;
   /** Editable JSON schema (string) for the classify_importance tool call */
   classifier_tool_schema?: string;
+  /** When true (default), the worker scores first and only translates on pass */
+  split_calls?: boolean;
+  /** Independent OpenAI parameters for the scoring call (falls back to translation values when unset) */
+  scoring?: ScoringSettings;
 }
 
 export const DEFAULT_SCORING_SYSTEM_PROMPT = `You have two tasks. Complete both carefully.
@@ -170,6 +186,16 @@ const defaults = {
     parallel_tool_calls: true,
     scoring_system_prompt: DEFAULT_SCORING_SYSTEM_PROMPT,
     classifier_tool_schema: DEFAULT_CLASSIFIER_TOOL_SCHEMA,
+    split_calls: true,
+    scoring: {
+      model: 'gpt-5.4-mini',
+      reasoning_effort: 'high' as ReasoningEffort,
+      verbosity: 'low' as Verbosity,
+      max_completion_tokens: 4000,
+      seed: null,
+      service_tier: 'auto' as ServiceTier,
+      parallel_tool_calls: true,
+    } as ScoringSettings,
   } as TranslationSettings,
   
   telegram_config: { parse_mode: 'Markdown' } as TelegramSettings,

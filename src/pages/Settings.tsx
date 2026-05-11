@@ -268,6 +268,137 @@ export default function Settings() {
             </CardContent>
           </Card>
 
+          {/* Scoring Model Settings — independent params for the importance-scoring call */}
+          {(() => {
+            const scoring = ts.scoring ?? {};
+            const scoringModelId = scoring.model ?? ts.model;
+            const scoringModel = openaiModels.find(m => m.id === scoringModelId);
+            const updateScoring = (patch: Partial<NonNullable<TranslationSettings['scoring']>>) => {
+              setTranslationSettings({ ...ts, scoring: { ...scoring, ...patch } });
+            };
+            return (
+              <Card className="glass-card">
+                <CardHeader>
+                  <CardTitle className="flex items-center text-glass-foreground"><Brain className="w-5 h-5 mr-2" />Scoring Model Settings</CardTitle>
+                  <CardDescription>
+                    Independent OpenAI parameters for the importance-scoring call. When the score passes the filter, the translation call runs with the settings above.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
+                    <div>
+                      <Label className="text-sm">Score-first pipeline (split calls)</Label>
+                      <p className="text-xs text-muted-foreground mt-1">When enabled, score first and translate only on pass.</p>
+                    </div>
+                    <Select value={String(ts.split_calls ?? true)} onValueChange={(v) => setTranslationSettings({ ...ts, split_calls: v === 'true' })}>
+                      <SelectTrigger className="glass-input w-32"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="true">Enabled</SelectItem>
+                        <SelectItem value="false">Disabled</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Scoring model</Label>
+                    <Select value={scoringModelId} onValueChange={(v) => updateScoring({ model: v })}>
+                      <SelectTrigger className="glass-input"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {openaiModels.map(model => (
+                          <SelectItem key={model.id} value={model.id}>
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium">{model.name}</span>
+                              <Badge variant={model.tier === 'latest' ? 'default' : model.tier === 'legacy' ? 'outline' : 'secondary'} className="text-[10px] uppercase">{model.tier}</Badge>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Max Completion Tokens</Label>
+                      <Input type="number" min={1} max={scoringModel?.maxTokens || 16000} value={scoring.max_completion_tokens ?? 4000} onChange={(e) => updateScoring({ max_completion_tokens: parseInt(e.target.value) || 4000 })} className="glass-input" />
+                    </div>
+                    {scoringModel?.supportsTemperature && (
+                      <div className="space-y-2">
+                        <Label>Temperature</Label>
+                        <Input type="number" step="0.1" min={0} max={2} value={scoring.temperature ?? 0.2} onChange={(e) => updateScoring({ temperature: parseFloat(e.target.value) })} className="glass-input" />
+                      </div>
+                    )}
+                    {scoringModel?.supportsReasoningEffort && (
+                      <div className="space-y-2">
+                        <Label>Reasoning effort</Label>
+                        <Select value={scoring.reasoning_effort ?? 'high'} onValueChange={(v) => updateScoring({ reasoning_effort: v as 'minimal' | 'low' | 'medium' | 'high' })}>
+                          <SelectTrigger className="glass-input"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="minimal">Minimal</SelectItem>
+                            <SelectItem value="low">Low</SelectItem>
+                            <SelectItem value="medium">Medium</SelectItem>
+                            <SelectItem value="high">High</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                    {scoringModel?.supportsVerbosity && (
+                      <div className="space-y-2">
+                        <Label>Verbosity</Label>
+                        <Select value={scoring.verbosity ?? 'low'} onValueChange={(v) => updateScoring({ verbosity: v as 'low' | 'medium' | 'high' })}>
+                          <SelectTrigger className="glass-input"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="low">Low</SelectItem>
+                            <SelectItem value="medium">Medium</SelectItem>
+                            <SelectItem value="high">High</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                    {scoringModel?.supportsTopP && (
+                      <div className="space-y-2">
+                        <Label>Top P</Label>
+                        <Input type="number" step="0.05" min={0} max={1} value={scoring.top_p ?? 1} onChange={(e) => updateScoring({ top_p: parseFloat(e.target.value) })} className="glass-input" />
+                      </div>
+                    )}
+                    {scoringModel?.supportsSeed && (
+                      <div className="space-y-2">
+                        <Label>Seed (optional)</Label>
+                        <Input type="number" placeholder="random" value={scoring.seed ?? ''} onChange={(e) => updateScoring({ seed: e.target.value === '' ? null : parseInt(e.target.value) })} className="glass-input" />
+                      </div>
+                    )}
+                    {scoringModel?.supportsServiceTier && (
+                      <div className="space-y-2">
+                        <Label>Service tier</Label>
+                        <Select value={scoring.service_tier ?? 'auto'} onValueChange={(v) => updateScoring({ service_tier: v as 'auto' | 'default' | 'flex' | 'priority' })}>
+                          <SelectTrigger className="glass-input"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="auto">Auto</SelectItem>
+                            <SelectItem value="default">Default</SelectItem>
+                            <SelectItem value="flex">Flex</SelectItem>
+                            <SelectItem value="priority">Priority</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex justify-end gap-2">
+                    <Button size="sm" variant="ghost" onClick={() => updateScoring({
+                      model: ts.model, temperature: ts.temperature, max_completion_tokens: ts.max_completion_tokens,
+                      top_p: ts.top_p, reasoning_effort: ts.reasoning_effort, verbosity: ts.verbosity,
+                      seed: ts.seed, service_tier: ts.service_tier, parallel_tool_calls: ts.parallel_tool_calls,
+                    })}>
+                      Copy from translation
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => saveMutation.mutate({ key: 'translation_prompt', value: ts })} disabled={saveMutation.isPending}>
+                      Save scoring parameters
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })()}
+
           <Card className="glass-card">
             <CardHeader>
               <CardTitle className="flex items-center text-glass-foreground"><MessageSquare className="w-5 h-5 mr-2" />Translation Prompt Configuration</CardTitle>

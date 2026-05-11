@@ -148,6 +148,34 @@ function validateSettingsValue(key: string, value: unknown): string | null {
       if (v.parallel_tool_calls !== undefined && typeof v.parallel_tool_calls !== 'boolean') {
         return 'translation_prompt.parallel_tool_calls must be a boolean';
       }
+      if (v.split_calls !== undefined && typeof v.split_calls !== 'boolean') {
+        return 'translation_prompt.split_calls must be a boolean';
+      }
+      if (v.scoring !== undefined) {
+        if (typeof v.scoring !== 'object' || v.scoring === null || Array.isArray(v.scoring)) {
+          return 'translation_prompt.scoring must be an object';
+        }
+        const sv = v.scoring as Record<string, unknown>;
+        if (sv.model !== undefined && typeof sv.model !== 'string') return 'scoring.model must be a string';
+        const snum = ['temperature', 'max_completion_tokens', 'top_p', 'seed'];
+        for (const f of snum) {
+          if (sv[f] !== undefined && sv[f] !== null && typeof sv[f] !== 'number') {
+            return `scoring.${f} must be a number`;
+          }
+        }
+        if (sv.reasoning_effort !== undefined && !['minimal', 'low', 'medium', 'high'].includes(sv.reasoning_effort as string)) {
+          return 'scoring.reasoning_effort must be one of minimal|low|medium|high';
+        }
+        if (sv.verbosity !== undefined && !['low', 'medium', 'high'].includes(sv.verbosity as string)) {
+          return 'scoring.verbosity must be one of low|medium|high';
+        }
+        if (sv.service_tier !== undefined && !['auto', 'default', 'flex', 'priority'].includes(sv.service_tier as string)) {
+          return 'scoring.service_tier must be one of auto|default|flex|priority';
+        }
+        if (sv.parallel_tool_calls !== undefined && typeof sv.parallel_tool_calls !== 'boolean') {
+          return 'scoring.parallel_tool_calls must be a boolean';
+        }
+      }
       break;
     }
     case 'telegram_config': {

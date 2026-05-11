@@ -40,26 +40,12 @@ function validateInternalToken(req: Request): Response | null {
 }
 
 // Load config from settings table with fallback defaults
-async function loadConfig(// deno-lint-ignore no-explicit-any
-supabase: any): Promise<{
-  translationPrompt: string;
-  openaiModel: string;
-  openaiTemperature: number;
-  messageTemplate: Record<string, unknown>;
-  scoringSystemPrompt: string | null;
-  classifierToolSchema: string | null;
-  contentFilter: {
-    enabled: boolean;
-    default_threshold: number;
-    editorial_guidelines: string;
-    priority_topics: string[];
-    low_priority_topics: string[];
-    author_rules: Record<string, { rule: string; threshold?: number }>;
-      score_only?: boolean;
-  };
-}> {
+// deno-lint-ignore no-explicit-any
+async function loadConfig(supabase: any): Promise<any> {
   const defaults = {
     translationPrompt: "You are a professional translator. Translate the given English text to Persian. Preserve @mentions, #hashtags, URLs, and line breaks exactly. Only return the translated text, nothing else.",
+    userPromptTemplate: null as string | null,
+    splitCalls: true,
     openaiModel: 'gpt-4o-mini',
     openaiTemperature: 0.2,
     openaiMaxCompletionTokens: 2000,
@@ -71,6 +57,16 @@ supabase: any): Promise<{
     openaiSeed: null as number | null,
     openaiServiceTier: null as string | null,
     openaiParallelToolCalls: null as boolean | null,
+    // Scoring (independent). Null = inherit from translation values at use-site.
+    scoringModel: null as string | null,
+    scoringTemperature: null as number | null,
+    scoringMaxCompletionTokens: null as number | null,
+    scoringTopP: null as number | null,
+    scoringReasoningEffort: null as string | null,
+    scoringVerbosity: null as string | null,
+    scoringSeed: null as number | null,
+    scoringServiceTier: null as string | null,
+    scoringParallelToolCalls: null as boolean | null,
     messageTemplate: {
       template: '{translated_text}\n\n📰 #اخبار',
       include_source_link: true,
@@ -102,9 +98,13 @@ supabase: any): Promise<{
         if (s.key === 'translation_prompt' && typeof s.value === 'object' && s.value !== null) {
           const v = s.value as Record<string, unknown>;
           if (v.system_prompt) defaults.translationPrompt = String(v.system_prompt);
+          if (typeof v.user_prompt_template === 'string' && (v.user_prompt_template as string).trim()) {
+            defaults.userPromptTemplate = v.user_prompt_template as string;
+          }
+          if (typeof v.split_calls === 'boolean') defaults.splitCalls = v.split_calls as boolean;
           if (typeof v.model === 'string' && (v.model as string).trim()) defaults.openaiModel = String(v.model);
           if (typeof v.temperature === 'number') defaults.openaiTemperature = v.temperature;
-          if (typeof v.max_completion_tokens === 'number') defaults.openaiMaxCompletionTokens = Math.min(8000, Math.max(1, v.max_completion_tokens as number));
+          if (typeof v.max_completion_tokens === 'number') defaults.openaiMaxCompletionTokens = Math.max(1, v.max_completion_tokens as number);
           if (typeof v.top_p === 'number') defaults.openaiTopP = v.top_p as number;
           if (typeof v.frequency_penalty === 'number') defaults.openaiFrequencyPenalty = v.frequency_penalty as number;
           if (typeof v.presence_penalty === 'number') defaults.openaiPresencePenalty = v.presence_penalty as number;
@@ -118,6 +118,19 @@ supabase: any): Promise<{
           }
           if (typeof v.classifier_tool_schema === 'string' && v.classifier_tool_schema.trim()) {
             defaults.classifierToolSchema = v.classifier_tool_schema as string;
+          }
+          // Independent scoring params (optional)
+          if (typeof v.scoring === 'object' && v.scoring !== null) {
+            const sv = v.scoring as Record<string, unknown>;
+            if (typeof sv.model === 'string' && (sv.model as string).trim()) defaults.scoringModel = sv.model as string;
+            if (typeof sv.temperature === 'number') defaults.scoringTemperature = sv.temperature as number;
+            if (typeof sv.max_completion_tokens === 'number') defaults.scoringMaxCompletionTokens = Math.max(1, sv.max_completion_tokens as number);
+            if (typeof sv.top_p === 'number') defaults.scoringTopP = sv.top_p as number;
+            if (typeof sv.reasoning_effort === 'string') defaults.scoringReasoningEffort = sv.reasoning_effort as string;
+            if (typeof sv.verbosity === 'string') defaults.scoringVerbosity = sv.verbosity as string;
+            if (typeof sv.seed === 'number') defaults.scoringSeed = sv.seed as number;
+            if (typeof sv.service_tier === 'string') defaults.scoringServiceTier = sv.service_tier as string;
+            if (typeof sv.parallel_tool_calls === 'boolean') defaults.scoringParallelToolCalls = sv.parallel_tool_calls as boolean;
           }
         }
         if (s.key === 'message_template' && typeof s.value === 'object' && s.value !== null) {
@@ -380,20 +393,30 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
     let importanceScore: number | null = null;
     let importanceTags: string[] | null = null;
     let importanceReasoning: string | null = null;
-    let data: Record<string, unknown>;
+    let data: Record<string, unknown> = {};
+    let scoringUsage: Record<string, unknown> | null = null;
+    let translationUsage: Record<string, unknown> | null = null;
 
-    if (filterEnabled) {
-      // Combined translate + score via tool calling
-      const scoringGuidelines = config.contentFilter.editorial_guidelines || '';
-      const priorityTopics = config.contentFilter.priority_topics.join(', ') || 'none specified';
-      const lowPriorityTopics = config.contentFilter.low_priority_topics.join(', ') || 'none specified';
-      const guidelinesBlock = scoringGuidelines.trim()
-        ? `### Editorial Guidelines (AUTHORITATIVE — these override the default rubric when they conflict)\n---\n${scoringGuidelines}\n---`
-        : '';
+    // Resolve scoring params (fall back to translation values if not set)
+    const scoringModel = config.scoringModel ?? config.openaiModel;
+    const scoringTemperature = config.scoringTemperature ?? config.openaiTemperature;
+    const scoringMaxTokens = config.scoringMaxCompletionTokens ?? config.openaiMaxCompletionTokens;
+    const scoringTopP = config.scoringTopP ?? config.openaiTopP;
+    const scoringReasoningEffort = config.scoringReasoningEffort ?? config.openaiReasoningEffort;
+    const scoringVerbosity = config.scoringVerbosity ?? config.openaiVerbosity;
+    const scoringSeed = config.scoringSeed ?? config.openaiSeed;
+    const scoringServiceTier = config.scoringServiceTier ?? config.openaiServiceTier;
+    const scoringParallelTools = config.scoringParallelToolCalls ?? config.openaiParallelToolCalls;
 
-      // Hardcoded fallback rubric (used only if no editable rubric is in settings).
-      // Mirrors DEFAULT_SCORING_SYSTEM_PROMPT in src/hooks/useSettingsData.ts.
-      const fallbackRubric = `You have two tasks. Complete both carefully.
+    // Build shared scoring system + user messages (used by both split and combined paths)
+    const scoringGuidelines = config.contentFilter.editorial_guidelines || '';
+    const priorityTopics = config.contentFilter.priority_topics.join(', ') || 'none specified';
+    const lowPriorityTopics = config.contentFilter.low_priority_topics.join(', ') || 'none specified';
+    const guidelinesBlock = scoringGuidelines.trim()
+      ? `### Editorial Guidelines (AUTHORITATIVE — these override the default rubric when they conflict)\n---\n${scoringGuidelines}\n---`
+      : '';
+
+    const fallbackRubric = `You have two tasks. Complete both carefully.
 
 ## Task 1: Translation
 {translation_prompt}
@@ -403,25 +426,10 @@ You are an editorial assistant scoring news items for a curated Telegram channel
 
 ### STEP A — Assign Relevance Level (state in reasoning)
 - DIRECT (Iran gov/IRGC/nuclear/Hormuz/proxies/Israel-Iran/US-Iran war/sanctions on Iran): no cap.
-- INDIRECT (Iran is the SUBJECT of foreign discussion — polls about Iran war, Western debate on Iran policy, analyst reports on Iran, leaks about Iran strategy, foreign-leader rhetoric on Iran): cap at 16.
+- INDIRECT (Iran is the SUBJECT of foreign discussion): cap at 16.
 - NO IRAN NEXUS (pure US/EU/China domestic): cap at 8.
 
 ### STEP B — Score 1-20
-19-20 CRITICAL military action / war declarations / nuclear incidents.
-17-18 VERY HIGH major sanctions / escalation / regime changes.
-15-16 HIGH diplomatic breakthroughs, major policy reversals, large protests, plus public-opinion shifts on Iran-related conflicts and major polling contradicting Iran narratives.
-13-14 IMPORTANT notable diplomatic meetings, policy changes, plus polling/sentiment data on Iran policy and analyst reports on Iran.
-11-12 ABOVE AVERAGE official statements, economic data, plus general Western public opinion with indirect Iran relevance.
-9-10 MODERATE routine activity.
-7-8 BELOW AVERAGE minor exchanges, peripheral coverage.
-5-6 LOW administrative.
-3-4 VERY LOW soft news.
-1-2 SKIP entertainment/sports/memes.
-
-### Anti-Bias Guardrails
-- Do NOT down-score because framing is American/Western — score on whether subject matter is Iran/Middle East.
-- Polls, leaks, analyst reports about active Iran conflicts can be as important as primary events.
-- When in doubt between two tiers, prefer the higher tier.
 
 ### Topics
 High-priority (boost 1-2): {priority_topics}
@@ -429,25 +437,14 @@ Low-priority (reduce 1-2): {low_priority_topics}
 
 {editorial_guidelines_block}
 
-### Reasoning (REQUIRED)
-State: (1) relevance level (DIRECT/INDIRECT/NO NEXUS) and why, (2) tier and why, (3) any cap applied.
-
 You MUST call the "classify_importance" tool.`;
 
-      const scoringTemplate = config.scoringSystemPrompt ?? fallbackRubric;
-      const systemPrompt = scoringTemplate
-        .replace('{translation_prompt}', config.translationPrompt)
-        .replace('{priority_topics}', priorityTopics)
-        .replace('{low_priority_topics}', lowPriorityTopics)
-        .replace('{editorial_guidelines_block}', guidelinesBlock);
+    const accountData = (post as Record<string, unknown>).accounts as Record<string, unknown> | null;
+    const authorDisplay = authorHandle || (accountData?.handle as string) || 'unknown';
+    const accountName = (accountData?.display_name as string) || '';
+    const publishedAt = post.tweeted_at ? new Date(post.tweeted_at as string).toISOString() : 'unknown';
 
-      // Enrich user message with metadata for context
-      const accountData = (post as Record<string, unknown>).accounts as Record<string, unknown> | null;
-      const authorDisplay = authorHandle || (accountData?.handle as string) || 'unknown';
-      const accountName = (accountData?.display_name as string) || '';
-      const publishedAt = post.tweeted_at ? new Date(post.tweeted_at as string).toISOString() : 'unknown';
-
-      const userMessage = `Author: @${authorDisplay}${accountName ? ` (${accountName})` : ''}
+    const buildUserMessage = () => `Author: @${authorDisplay}${accountName ? ` (${accountName})` : ''}
 Published: ${publishedAt}
 Has media: ${post.has_media ? 'yes' : 'no'}
 URL: ${post.url || 'N/A'}
@@ -455,28 +452,29 @@ URL: ${post.url || 'N/A'}
 Content:
 ${post.text_original}`;
 
-      // Build tool schema (editable from settings, with safe fallback)
-      let toolFunction: Record<string, unknown>;
+    // Build classifier tool schema (with optional translated_text stripped for split mode)
+    const buildToolFunction = (includeTranslatedText: boolean): Record<string, unknown> => {
+      let base: Record<string, unknown>;
       try {
-        toolFunction = config.classifierToolSchema
+        base = config.classifierToolSchema
           ? JSON.parse(config.classifierToolSchema)
           : {
               name: 'classify_importance',
-              description: 'Provide the Persian translation and importance classification of this news item',
+              description: 'Provide importance classification of this news item',
               parameters: {
                 type: 'object',
                 properties: {
                   translated_text: { type: 'string', description: 'The Persian translation of the original text' },
-                  importance_score: { type: 'integer', description: 'Importance score 1-20 based on the rubric', minimum: 1, maximum: 20 },
-                  tags: { type: 'array', items: { type: 'string' }, description: 'Topic tags (e.g., war, iran, economy, politics, diplomacy, military)' },
+                  importance_score: { type: 'integer', minimum: 1, maximum: 20 },
+                  tags: { type: 'array', items: { type: 'string' } },
                   reasoning: { type: 'string', description: 'Required: state relevance level, tier, and any cap applied' },
                 },
                 required: ['translated_text', 'importance_score', 'tags', 'reasoning'],
               },
             };
       } catch (e) {
-        console.warn('Invalid classifier_tool_schema in settings, using fallback:', (e as Error).message);
-        toolFunction = {
+        console.warn('Invalid classifier_tool_schema, using fallback:', (e as Error).message);
+        base = {
           name: 'classify_importance',
           parameters: {
             type: 'object',
@@ -490,13 +488,132 @@ ${post.text_original}`;
           },
         };
       }
+      if (!includeTranslatedText) {
+        const params = base.parameters as Record<string, unknown>;
+        const props = { ...(params.properties as Record<string, unknown>) };
+        delete props.translated_text;
+        const required = ((params.required as string[]) || []).filter((k) => k !== 'translated_text');
+        base = { ...base, parameters: { ...params, properties: props, required } };
+      }
+      return base;
+    };
 
+    const renderSystemPrompt = () => (config.scoringSystemPrompt ?? fallbackRubric)
+      .replace('{translation_prompt}', config.translationPrompt)
+      .replace('{priority_topics}', priorityTopics)
+      .replace('{low_priority_topics}', lowPriorityTopics)
+      .replace('{editorial_guidelines_block}', guidelinesBlock);
+
+    // Helper: render translation user prompt from template (or default)
+    const renderTranslationUserPrompt = () => {
+      const tpl = config.userPromptTemplate;
+      if (tpl && tpl.trim()) {
+        return tpl
+          .replace(/\{content\}/g, post.text_original as string)
+          .replace(/\{author\}/g, `@${authorDisplay}`)
+          .replace(/\{author_handle\}/g, `@${authorDisplay}`)
+          .replace(/\{author_name\}/g, accountName)
+          .replace(/\{published_at\}/g, publishedAt)
+          .replace(/\{published_date\}/g, publishedAt);
+      }
+      return post.text_original as string;
+    };
+
+    // ============ SPLIT PATH: score first, translate only on pass ============
+    if (filterEnabled && config.splitCalls) {
+      const scoreToolFunction = buildToolFunction(false);
+
+      console.log(JSON.stringify({ function: 'worker', action: 'score_start', tweet_id: tweetId, model: scoringModel, reasoning_effort: scoringReasoningEffort }));
+
+      const scoreResult = await callOpenAI({
+        apiKey: openaiApiKey,
+        model: scoringModel,
+        messages: [
+          { role: 'system', content: renderSystemPrompt() },
+          { role: 'user', content: buildUserMessage() },
+        ],
+        tool: scoreToolFunction as ToolFunctionDef,
+        maxOutputTokens: scoringMaxTokens,
+        temperature: scoringTemperature,
+        topP: scoringTopP,
+        reasoningEffort: scoringReasoningEffort,
+        verbosity: scoringVerbosity,
+        seed: scoringSeed,
+        serviceTier: scoringServiceTier,
+        parallelToolCalls: scoringParallelTools,
+      });
+
+      if (!scoreResult.ok) {
+        throw new Error(`OpenAI scoring error: ${scoreResult.status} ${scoreResult.rawText}`);
+      }
+      scoringUsage = scoreResult.raw?.usage ?? null;
+      data = scoreResult.raw;
+
+      if (scoreResult.toolCall) {
+        try {
+          const args = JSON.parse(scoreResult.toolCall.arguments);
+          importanceScore = Math.max(1, Math.min(20, args.importance_score || 10));
+          importanceTags = args.tags || [];
+          importanceReasoning = typeof args.reasoning === 'string' ? args.reasoning : null;
+          console.log(JSON.stringify({ function: 'worker', action: 'scored', tweet_id: tweetId, score: importanceScore, tags: importanceTags, reasoning: importanceReasoning, endpoint: scoreResult.endpoint, model: scoringModel }));
+        } catch (parseErr) {
+          console.warn('Failed to parse score tool call:', (parseErr as Error).message);
+        }
+      }
+
+      // Decide gate BEFORE translating
+      let preDecision = 'deliver';
+      if (importanceScore !== null && !scoreOnly) {
+        const authorRule = authorHandle ? config.contentFilter.author_rules[authorHandle] : null;
+        if (authorRule?.rule === 'always_deliver') preDecision = 'deliver';
+        else if (authorRule?.rule === 'always_skip') preDecision = 'skip';
+        else {
+          const threshold = authorRule?.rule === 'custom_threshold' && authorRule.threshold != null
+            ? authorRule.threshold
+            : config.contentFilter.default_threshold;
+          preDecision = importanceScore >= threshold ? 'deliver' : 'skip';
+        }
+      }
+
+      // Translate only if passing the gate (or in score_only mode where we still translate everything)
+      if (preDecision === 'deliver' || scoreOnly) {
+        console.log(JSON.stringify({ function: 'worker', action: 'translate_call_start', tweet_id: tweetId, model: config.openaiModel, reasoning_effort: config.openaiReasoningEffort }));
+        const trResult = await callOpenAI({
+          apiKey: openaiApiKey,
+          model: config.openaiModel,
+          messages: [
+            { role: 'system', content: config.translationPrompt },
+            { role: 'user', content: renderTranslationUserPrompt() },
+          ],
+          maxOutputTokens: config.openaiMaxCompletionTokens,
+          temperature: config.openaiTemperature,
+          topP: config.openaiTopP,
+          frequencyPenalty: config.openaiFrequencyPenalty,
+          presencePenalty: config.openaiPresencePenalty,
+          reasoningEffort: config.openaiReasoningEffort,
+          verbosity: config.openaiVerbosity,
+          seed: config.openaiSeed,
+          serviceTier: config.openaiServiceTier,
+          parallelToolCalls: config.openaiParallelToolCalls,
+        });
+        if (!trResult.ok) {
+          throw new Error(`OpenAI translation error: ${trResult.status} ${trResult.rawText}`);
+        }
+        translationUsage = trResult.raw?.usage ?? null;
+        translatedText = trResult.content;
+        console.log(JSON.stringify({ function: 'worker', action: 'translate_complete', tweet_id: tweetId, chars: translatedText.length }));
+      } else {
+        console.log(JSON.stringify({ function: 'worker', action: 'translate_skipped_by_filter', tweet_id: tweetId, score: importanceScore }));
+      }
+    } else if (filterEnabled) {
+      // ============ COMBINED PATH (legacy, when split_calls = false) ============
+      const toolFunction = buildToolFunction(true);
       const result = await callOpenAI({
         apiKey: openaiApiKey,
         model: config.openaiModel,
         messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userMessage },
+          { role: 'system', content: renderSystemPrompt() },
+          { role: 'user', content: buildUserMessage() },
         ],
         tool: toolFunction as ToolFunctionDef,
         maxOutputTokens: config.openaiMaxCompletionTokens,
@@ -510,13 +627,8 @@ ${post.text_original}`;
         serviceTier: config.openaiServiceTier,
         parallelToolCalls: config.openaiParallelToolCalls,
       });
-
-      if (!result.ok) {
-        throw new Error(`OpenAI API error: ${result.status} ${result.rawText}`);
-      }
-
+      if (!result.ok) throw new Error(`OpenAI API error: ${result.status} ${result.rawText}`);
       data = result.raw;
-
       if (result.toolCall) {
         try {
           const args = JSON.parse(result.toolCall.arguments);
@@ -539,7 +651,7 @@ ${post.text_original}`;
         model: config.openaiModel,
         messages: [
           { role: 'system', content: config.translationPrompt },
-          { role: 'user', content: post.text_original },
+          { role: 'user', content: renderTranslationUserPrompt() },
         ],
         maxOutputTokens: config.openaiMaxCompletionTokens,
         temperature: config.openaiTemperature,
@@ -562,9 +674,13 @@ ${post.text_original}`;
     const nowIso = new Date().toISOString();
     const resultMeta = {
       model: config.openaiModel,
+      scoring_model: scoringModel,
       usage: data.usage ?? null,
+      scoring_usage: scoringUsage,
+      translation_usage: translationUsage,
       finished_at: nowIso,
       importance_score: importanceScore,
+      split_calls: !!(filterEnabled && config.splitCalls),
     };
     try {
       await supabase.from('jobs').update({ result_meta: resultMeta }).eq('id', job.id);
