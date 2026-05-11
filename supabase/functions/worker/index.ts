@@ -94,17 +94,9 @@ supabase: any): Promise<{
     const { data: settings } = await supabase
       .from('settings')
       .select('key, value')
-      .in('key', ['translation_prompt', 'openai_config', 'message_template', 'content_filter']);
+      .in('key', ['translation_prompt', 'message_template', 'content_filter']);
 
     if (settings) {
-      // First pass: legacy openai_config (lowest priority)
-      for (const s of settings) {
-        if (s.key === 'openai_config' && typeof s.value === 'object' && s.value !== null) {
-          const v = s.value as Record<string, unknown>;
-          if (v.model) defaults.openaiModel = String(v.model);
-          if (typeof v.temperature === 'number') defaults.openaiTemperature = v.temperature;
-        }
-      }
       // Second pass: translation_prompt (authoritative — overrides openai_config)
       for (const s of settings) {
         if (s.key === 'translation_prompt' && typeof s.value === 'object' && s.value !== null) {
