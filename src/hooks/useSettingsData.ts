@@ -184,7 +184,7 @@ const defaults = {
     scoring_system_prompt: DEFAULT_SCORING_SYSTEM_PROMPT,
     classifier_tool_schema: DEFAULT_CLASSIFIER_TOOL_SCHEMA,
   } as TranslationSettings,
-  openai_config: { model: 'gpt-4o-mini', temperature: 0.2, max_completion_tokens: 1000 } as OpenAISettings,
+  
   telegram_config: { parse_mode: 'Markdown' } as TelegramSettings,
   message_template: {
     template: '{translated_text}\n\n\u{1F4F0} #\u0627\u062E\u0628\u0627\u0631',
