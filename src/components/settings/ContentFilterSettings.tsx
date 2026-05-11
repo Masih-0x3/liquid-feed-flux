@@ -11,7 +11,13 @@ import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Filter, Shield, Users, Sparkles, X, Plus, Loader2, ChevronDown, Wand2 } from 'lucide-react';
+import { Filter, Shield, Users, Sparkles, X, Plus, Loader2, ChevronDown, Wand2, Code } from 'lucide-react';
+import PromptEditor from '@/components/settings/PromptEditor';
+import {
+  DEFAULT_SCORING_SYSTEM_PROMPT,
+  DEFAULT_CLASSIFIER_TOOL_SCHEMA,
+  type TranslationSettings,
+} from '@/hooks/useSettingsData';
 import { useToast } from '@/hooks/use-toast';
 
 const RECOMMENDED_IRAN_RUBRIC: ContentFilterConfig = {
@@ -70,13 +76,23 @@ interface Props {
   initialConfig?: ContentFilterConfig;
 }
 
-export default function ContentFilterSettings({ initialConfig }: Props) {
+interface Props {
+  initialConfig?: ContentFilterConfig;
+  translationSettings: TranslationSettings;
+  onTranslationSettingsChange: (next: TranslationSettings) => void;
+}
+
+export default function ContentFilterSettings({ initialConfig, translationSettings, onTranslationSettingsChange }: Props) {
   const [config, setConfig] = useState<ContentFilterConfig>({ ...defaultConfig, ...initialConfig });
   const [newPriorityTopic, setNewPriorityTopic] = useState('');
   const [newLowPriorityTopic, setNewLowPriorityTopic] = useState('');
   const [authorOverridesOpen, setAuthorOverridesOpen] = useState(false);
   const saveMutation = useSaveSettings();
   const { toast } = useToast();
+
+  const ts = translationSettings;
+  const setTs = (patch: Partial<TranslationSettings>) => onTranslationSettingsChange({ ...ts, ...patch });
+  const saveTranslationPrompt = () => saveMutation.mutate({ key: 'translation_prompt', value: ts });
 
   const applyRecommendedDefaults = async () => {
     setConfig(RECOMMENDED_IRAN_RUBRIC);
@@ -421,6 +437,81 @@ export default function ContentFilterSettings({ initialConfig }: Props) {
           </CardContent>
         </Card>
       )}
+
+      {/* Scoring Rubric (System Prompt for combined translate+score call) */}
+      <Card className="glass-card">
+        <CardHeader>
+          <CardTitle className="flex items-center text-glass-foreground">
+            <Shield className="w-5 h-5 mr-2" />Scoring Rubric (System Prompt)
+          </CardTitle>
+          <CardDescription>
+            Used only when this filter is enabled. Combined with the translation prompt for the dual translate+score call.
+            Placeholders: <code className="text-xs">{'{translation_prompt}'}</code>, <code className="text-xs">{'{priority_topics}'}</code>, <code className="text-xs">{'{low_priority_topics}'}</code>, <code className="text-xs">{'{editorial_guidelines_block}'}</code>
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <PromptEditor
+            value={ts.scoring_system_prompt ?? DEFAULT_SCORING_SYSTEM_PROMPT}
+            onChange={(v) => setTs({ scoring_system_prompt: v })}
+            placeholder="Enter the scoring rubric system prompt..."
+            minHeight={420}
+            maxLength={20000}
+            title="Scoring Rubric (System Prompt)"
+            onReset={() => setTs({ scoring_system_prompt: DEFAULT_SCORING_SYSTEM_PROMPT })}
+          />
+          <div className="flex justify-end">
+            <Button
+              size="sm"
+              onClick={saveTranslationPrompt}
+              disabled={saveMutation.isPending}
+              className="bg-gradient-primary hover:opacity-90 text-white"
+            >
+              Save scoring prompt
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Classifier Tool Schema */}
+      <Card className="glass-card">
+        <CardHeader>
+          <CardTitle className="flex items-center text-glass-foreground">
+            <Code className="w-5 h-5 mr-2" />Classifier Tool Schema
+          </CardTitle>
+          <CardDescription>
+            JSON schema for the <code className="text-xs">classify_importance</code> function the model is forced to call. Edit field names, descriptions, or constraints. Must be valid JSON.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <PromptEditor
+            value={ts.classifier_tool_schema ?? DEFAULT_CLASSIFIER_TOOL_SCHEMA}
+            onChange={(v) => setTs({ classifier_tool_schema: v })}
+            placeholder="Enter the JSON schema..."
+            minHeight={360}
+            maxLength={20000}
+            title="Classifier Tool Schema"
+            onReset={() => setTs({ classifier_tool_schema: DEFAULT_CLASSIFIER_TOOL_SCHEMA })}
+          />
+          <div className="flex gap-2 items-center justify-end">
+            <span className="text-xs text-muted-foreground mr-auto">JSON validated on save</span>
+            <Button
+              size="sm"
+              onClick={() => {
+                try {
+                  JSON.parse(ts.classifier_tool_schema ?? DEFAULT_CLASSIFIER_TOOL_SCHEMA);
+                  saveTranslationPrompt();
+                } catch (e) {
+                  toast({ title: 'Invalid JSON', description: (e as Error).message, variant: 'destructive' });
+                }
+              }}
+              disabled={saveMutation.isPending}
+              className="bg-gradient-primary hover:opacity-90 text-white"
+            >
+              Save tool schema
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Action Buttons */}
       <div className="flex flex-col sm:flex-row gap-3">

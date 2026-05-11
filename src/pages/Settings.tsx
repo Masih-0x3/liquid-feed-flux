@@ -11,10 +11,10 @@ import { Separator } from '@/components/ui/separator';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
-import { Brain, MessageSquare, Eye, Code, Sparkles, Send, Key, Shield, Loader2, Filter, Newspaper, AtSign } from 'lucide-react';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Brain, MessageSquare, Eye, Code, Sparkles, Send, Key, Shield, Loader2, Filter, Newspaper, AtSign, ChevronDown } from 'lucide-react';
 import {
   useSettingsData, useSaveSettings, openaiModels, messagePlaceholders, promptPlaceholders,
-  DEFAULT_SCORING_SYSTEM_PROMPT, DEFAULT_CLASSIFIER_TOOL_SCHEMA,
   type TranslationSettings, type OpenAISettings, type TelegramSettings, type MessageTemplateSettings, type DigestSettings,
 } from '@/hooks/useSettingsData';
 import ContentFilterSettings, { type ContentFilterConfig } from '@/components/settings/ContentFilterSettings';
@@ -217,64 +217,79 @@ export default function Settings() {
                   </div>
                 )}
               </div>
-              <div className="grid grid-cols-3 gap-4">
-                {selectedModel?.supportsTopP && (
-                  <div className="space-y-2">
-                    <Label>Top P</Label>
-                    <Input type="number" step="0.05" min="0" max="1" value={ts.top_p} onChange={(e) => setTranslationSettings({ ...ts, top_p: parseFloat(e.target.value) || 1 })} className="glass-input" />
+              <Collapsible>
+                <CollapsibleTrigger asChild>
+                  <Button variant="ghost" size="sm" className="w-full justify-between text-xs text-muted-foreground hover:text-foreground border border-dashed border-border">
+                    <span className="flex items-center gap-2"><Code className="w-3.5 h-3.5" />Advanced sampling parameters</span>
+                    <ChevronDown className="w-4 h-4 transition-transform [&[data-state=open]]:rotate-180" />
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="space-y-4 pt-4">
+                  <div className="grid grid-cols-3 gap-4">
+                    {selectedModel?.supportsTopP && (
+                      <div className="space-y-2">
+                        <Label>Top P</Label>
+                        <Input type="number" step="0.05" min="0" max="1" value={ts.top_p} onChange={(e) => setTranslationSettings({ ...ts, top_p: parseFloat(e.target.value) || 1 })} className="glass-input" />
+                      </div>
+                    )}
+                    {selectedModel?.supportsPenalties && (
+                      <>
+                        <div className="space-y-2"><Label>Frequency Penalty</Label><Input type="number" step="0.1" min="-2" max="2" value={ts.frequency_penalty} onChange={(e) => setTranslationSettings({ ...ts, frequency_penalty: parseFloat(e.target.value) || 0 })} className="glass-input" /></div>
+                        <div className="space-y-2"><Label>Presence Penalty</Label><Input type="number" step="0.1" min="-2" max="2" value={ts.presence_penalty} onChange={(e) => setTranslationSettings({ ...ts, presence_penalty: parseFloat(e.target.value) || 0 })} className="glass-input" /></div>
+                      </>
+                    )}
                   </div>
-                )}
-                {selectedModel?.supportsPenalties && (
-                  <>
-                    <div className="space-y-2"><Label>Frequency Penalty</Label><Input type="number" step="0.1" min="-2" max="2" value={ts.frequency_penalty} onChange={(e) => setTranslationSettings({ ...ts, frequency_penalty: parseFloat(e.target.value) || 0 })} className="glass-input" /></div>
-                    <div className="space-y-2"><Label>Presence Penalty</Label><Input type="number" step="0.1" min="-2" max="2" value={ts.presence_penalty} onChange={(e) => setTranslationSettings({ ...ts, presence_penalty: parseFloat(e.target.value) || 0 })} className="glass-input" /></div>
-                  </>
-                )}
-              </div>
-              <div className="grid grid-cols-3 gap-4">
-                {selectedModel?.supportsSeed && (
-                  <div className="space-y-2">
-                    <Label>Seed (optional)</Label>
-                    <Input
-                      type="number"
-                      placeholder="leave blank for random"
-                      value={ts.seed ?? ''}
-                      onChange={(e) => {
-                        const raw = e.target.value.trim();
-                        setTranslationSettings({ ...ts, seed: raw === '' ? null : parseInt(raw) });
-                      }}
-                      className="glass-input"
-                    />
-                    <p className="text-xs text-muted-foreground">Same seed + same prompt → reproducible output.</p>
+                  <div className="grid grid-cols-3 gap-4">
+                    {selectedModel?.supportsSeed && (
+                      <div className="space-y-2">
+                        <Label>Seed (optional)</Label>
+                        <Input
+                          type="number"
+                          placeholder="leave blank for random"
+                          value={ts.seed ?? ''}
+                          onChange={(e) => {
+                            const raw = e.target.value.trim();
+                            setTranslationSettings({ ...ts, seed: raw === '' ? null : parseInt(raw) });
+                          }}
+                          className="glass-input"
+                        />
+                        <p className="text-xs text-muted-foreground">Same seed + same prompt → reproducible output.</p>
+                      </div>
+                    )}
+                    {selectedModel?.supportsServiceTier && (
+                      <div className="space-y-2">
+                        <Label>Service tier</Label>
+                        <Select value={ts.service_tier ?? 'auto'} onValueChange={(v) => setTranslationSettings({ ...ts, service_tier: v as 'auto' | 'default' | 'flex' | 'priority' })}>
+                          <SelectTrigger className="glass-input"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="auto">Auto</SelectItem>
+                            <SelectItem value="default">Default</SelectItem>
+                            <SelectItem value="flex">Flex (cheaper, slower)</SelectItem>
+                            <SelectItem value="priority">Priority (faster, costlier)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                    {selectedModel?.supportsParallelToolCalls && (
+                      <div className="space-y-2">
+                        <Label>Parallel tool calls</Label>
+                        <Select value={String(ts.parallel_tool_calls ?? true)} onValueChange={(v) => setTranslationSettings({ ...ts, parallel_tool_calls: v === 'true' })}>
+                          <SelectTrigger className="glass-input"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="true">Enabled</SelectItem>
+                            <SelectItem value="false">Disabled (force single call)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
                   </div>
-                )}
-                {selectedModel?.supportsServiceTier && (
-                  <div className="space-y-2">
-                    <Label>Service tier</Label>
-                    <Select value={ts.service_tier ?? 'auto'} onValueChange={(v) => setTranslationSettings({ ...ts, service_tier: v as 'auto' | 'default' | 'flex' | 'priority' })}>
-                      <SelectTrigger className="glass-input"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="auto">Auto</SelectItem>
-                        <SelectItem value="default">Default</SelectItem>
-                        <SelectItem value="flex">Flex (cheaper, slower)</SelectItem>
-                        <SelectItem value="priority">Priority (faster, costlier)</SelectItem>
-                      </SelectContent>
-                    </Select>
+                  <div className="flex justify-end">
+                    <Button size="sm" variant="outline" onClick={() => saveMutation.mutate({ key: 'translation_prompt', value: ts })} disabled={saveMutation.isPending}>
+                      Save model parameters
+                    </Button>
                   </div>
-                )}
-                {selectedModel?.supportsParallelToolCalls && (
-                  <div className="space-y-2">
-                    <Label>Parallel tool calls</Label>
-                    <Select value={String(ts.parallel_tool_calls ?? true)} onValueChange={(v) => setTranslationSettings({ ...ts, parallel_tool_calls: v === 'true' })}>
-                      <SelectTrigger className="glass-input"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="true">Enabled</SelectItem>
-                        <SelectItem value="false">Disabled (force single call)</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-              </div>
+                </CollapsibleContent>
+              </Collapsible>
             </CardContent>
           </Card>
 
@@ -354,76 +369,8 @@ export default function Settings() {
             </CardContent>
           </Card>
 
-          {/* Scoring Rubric (System Prompt for combined translate+score call) */}
-          <Card className="glass-card">
-            <CardHeader>
-              <CardTitle className="flex items-center text-glass-foreground"><Shield className="w-5 h-5 mr-2" />Scoring Rubric (System Prompt)</CardTitle>
-              <CardDescription>
-                Used only when Content Filter is enabled. Combined with the translation prompt above for the dual translate+score call.
-                Placeholders: <code className="text-xs">{'{translation_prompt}'}</code>, <code className="text-xs">{'{priority_topics}'}</code>, <code className="text-xs">{'{low_priority_topics}'}</code>, <code className="text-xs">{'{editorial_guidelines_block}'}</code>
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <PromptEditor
-                value={ts.scoring_system_prompt ?? DEFAULT_SCORING_SYSTEM_PROMPT}
-                onChange={(v) => setTranslationSettings({ ...ts, scoring_system_prompt: v })}
-                placeholder="Enter the scoring rubric system prompt..."
-                minHeight={420}
-                maxLength={20000}
-                title="Scoring Rubric (System Prompt)"
-                onReset={() => setTranslationSettings({ ...ts, scoring_system_prompt: DEFAULT_SCORING_SYSTEM_PROMPT })}
-              />
-              <div className="flex justify-end">
-                <Button
-                  size="sm"
-                  onClick={() => saveMutation.mutate({ key: 'translation_prompt', value: ts })}
-                  disabled={saveMutation.isPending}
-                  className="bg-gradient-primary hover:opacity-90 text-white"
-                >
-                  Save scoring prompt
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Classifier Tool Schema */}
-          <Card className="glass-card">
-            <CardHeader>
-              <CardTitle className="flex items-center text-glass-foreground"><Code className="w-5 h-5 mr-2" />Classifier Tool Schema</CardTitle>
-              <CardDescription>
-                JSON schema for the <code className="text-xs">classify_importance</code> function the model is forced to call. Edit field names, descriptions, or constraints. Must be valid JSON.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <PromptEditor
-                value={ts.classifier_tool_schema ?? DEFAULT_CLASSIFIER_TOOL_SCHEMA}
-                onChange={(v) => setTranslationSettings({ ...ts, classifier_tool_schema: v })}
-                placeholder="Enter the JSON schema..."
-                minHeight={360}
-                maxLength={20000}
-                title="Classifier Tool Schema"
-                onReset={() => setTranslationSettings({ ...ts, classifier_tool_schema: DEFAULT_CLASSIFIER_TOOL_SCHEMA })}
-              />
-              <div className="flex gap-2 items-center justify-end">
-                <span className="text-xs text-muted-foreground mr-auto">JSON validated on save</span>
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    try {
-                      JSON.parse(ts.classifier_tool_schema ?? DEFAULT_CLASSIFIER_TOOL_SCHEMA);
-                      saveMutation.mutate({ key: 'translation_prompt', value: ts });
-                    } catch (e) {
-                      toast({ title: 'Invalid JSON', description: (e as Error).message, variant: 'destructive' });
-                    }
-                  }}
-                  disabled={saveMutation.isPending}
-                  className="bg-gradient-primary hover:opacity-90 text-white"
-                >
-                  Save tool schema
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+          {/* Scoring rubric + classifier tool schema have moved to the Content Filter tab,
+              where they conceptually belong (they only run when filtering/scoring is active). */}
 
           {/* Live Translation Playground */}
           <TranslationPlayground
@@ -435,7 +382,11 @@ export default function Settings() {
 
         {/* Content Filter Tab */}
         <TabsContent value="filter" className="space-y-6">
-          <ContentFilterSettings initialConfig={settings?.content_filter as ContentFilterConfig | undefined} />
+          <ContentFilterSettings
+            initialConfig={settings?.content_filter as ContentFilterConfig | undefined}
+            translationSettings={ts}
+            onTranslationSettingsChange={setTranslationSettings}
+          />
         </TabsContent>
 
         <TabsContent value="messages" className="space-y-6">
