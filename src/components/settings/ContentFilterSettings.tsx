@@ -97,13 +97,8 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
   const applyRecommendedDefaults = async () => {
     setConfig(RECOMMENDED_IRAN_RUBRIC);
     try {
-      // Run sequentially via mutateAsync so the second call doesn't cancel the first
       await saveMutation.mutateAsync({ key: 'content_filter', value: RECOMMENDED_IRAN_RUBRIC });
-      await saveMutation.mutateAsync({
-        key: 'openai_config',
-        value: { model: 'gpt-5.4-mini', temperature: 0.2, max_completion_tokens: 1000, api_key: '' },
-      });
-      toast({ title: 'Recommended Iran-rubric defaults applied', description: 'Threshold 12, updated guidelines, model gpt-5.4-mini.' });
+      toast({ title: 'Recommended Iran-rubric defaults applied', description: 'Threshold 12 with updated guidelines.' });
     } catch (e) {
       // useSaveSettings already shows an error toast
     }
