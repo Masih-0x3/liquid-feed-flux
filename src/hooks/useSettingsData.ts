@@ -186,6 +186,16 @@ const defaults = {
     parallel_tool_calls: true,
     scoring_system_prompt: DEFAULT_SCORING_SYSTEM_PROMPT,
     classifier_tool_schema: DEFAULT_CLASSIFIER_TOOL_SCHEMA,
+    split_calls: true,
+    scoring: {
+      model: 'gpt-5.4-mini',
+      reasoning_effort: 'high' as ReasoningEffort,
+      verbosity: 'low' as Verbosity,
+      max_completion_tokens: 4000,
+      seed: null,
+      service_tier: 'auto' as ServiceTier,
+      parallel_tool_calls: true,
+    } as ScoringSettings,
   } as TranslationSettings,
   
   telegram_config: { parse_mode: 'Markdown' } as TelegramSettings,
