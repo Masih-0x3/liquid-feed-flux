@@ -11,7 +11,13 @@ import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Filter, Shield, Users, Sparkles, X, Plus, Loader2, ChevronDown, Wand2 } from 'lucide-react';
+import { Filter, Shield, Users, Sparkles, X, Plus, Loader2, ChevronDown, Wand2, Code } from 'lucide-react';
+import PromptEditor from '@/components/settings/PromptEditor';
+import {
+  DEFAULT_SCORING_SYSTEM_PROMPT,
+  DEFAULT_CLASSIFIER_TOOL_SCHEMA,
+  type TranslationSettings,
+} from '@/hooks/useSettingsData';
 import { useToast } from '@/hooks/use-toast';
 
 const RECOMMENDED_IRAN_RUBRIC: ContentFilterConfig = {
