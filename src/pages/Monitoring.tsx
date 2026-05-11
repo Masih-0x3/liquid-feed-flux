@@ -213,7 +213,38 @@ export default function Monitoring() {
           <h1 className="text-3xl font-bold">Content Monitoring</h1>
           <p className="text-muted-foreground">English → Persian translation pipeline • Live updates enabled</p>
         </div>
-        <Button onClick={invalidate} variant="outline"><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>
+        <div className="flex gap-2">
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="outline" className="text-destructive hover:text-destructive">
+                <Ban className="w-4 h-4 mr-2" />Cancel Pending Jobs
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Cancel all pending jobs?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This marks every <strong>pending</strong> and <strong>running</strong> job as failed so the worker stops processing them automatically. Already-failed jobs are not affected. You can still manually reprocess any post afterward.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Keep them</AlertDialogCancel>
+                <AlertDialogAction onClick={async () => {
+                  try {
+                    const { data, error } = await supabase.functions.invoke('admin-actions', { body: { action: 'cancel_pending_jobs' } });
+                    if (error) throw error;
+                    const d = data as { canceled?: number };
+                    toast({ title: 'Pending jobs canceled', description: `${d?.canceled ?? 0} job(s) marked failed.` });
+                    invalidate();
+                  } catch (e) {
+                    toast({ title: 'Error', description: (e as Error).message || 'Failed to cancel jobs', variant: 'destructive' });
+                  }
+                }}>Cancel jobs</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+          <Button onClick={invalidate} variant="outline"><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>
+        </div>
       </div>
 
       {/* Stats */}
