@@ -293,6 +293,13 @@ export default function XPostingConfig({ initial }: Props) {
         <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 space-y-2">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Eye className="w-3.5 h-3.5" /><span>Live preview</span>
+            <Button
+              type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs"
+              onClick={() => setPreviewSeed((s) => s + 1)}
+              title="Pick new random hashtags"
+            >
+              <RefreshCw className="w-3 h-3 mr-1" />Re-shuffle
+            </Button>
             <Badge variant="outline" className="ml-auto text-xs">{previewText.length}/{cfg.max_chars}</Badge>
           </div>
           <div dir="rtl" lang="fa" className="whitespace-pre-wrap text-sm text-glass-foreground bg-background/50 p-3 rounded text-right">{previewText || '(empty)'}</div>
