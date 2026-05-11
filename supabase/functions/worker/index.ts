@@ -97,7 +97,7 @@ supabase: any): Promise<{
       .in('key', ['translation_prompt', 'message_template', 'content_filter']);
 
     if (settings) {
-      // Second pass: translation_prompt (authoritative — overrides openai_config)
+      // translation_prompt is the authoritative source for OpenAI parameters.
       for (const s of settings) {
         if (s.key === 'translation_prompt' && typeof s.value === 'object' && s.value !== null) {
           const v = s.value as Record<string, unknown>;
