@@ -501,6 +501,24 @@ ${post.text_original}`;
       // Modern OpenAI models (gpt-5.x, gpt-4.1, o-series) require max_completion_tokens.
       const useMaxCompletion = !/^(gpt-4o($|-)|gpt-4($|-)|gpt-3\.5)/i.test(config.openaiModel);
       const tokenParam = useMaxCompletion ? 'max_completion_tokens' : 'max_tokens';
+      const isReasoningModel = /^(gpt-5|o[34])/i.test(config.openaiModel);
+
+      // Compose configurable sampling/runtime params honoring the selected model's capabilities.
+      const buildExtraParams = (): Record<string, unknown> => {
+        const p: Record<string, unknown> = {};
+        if (!isReasoningModel && typeof config.openaiTemperature === 'number') p.temperature = config.openaiTemperature;
+        if (typeof config.openaiTopP === 'number') p.top_p = config.openaiTopP;
+        if (!isReasoningModel) {
+          if (typeof config.openaiFrequencyPenalty === 'number') p.frequency_penalty = config.openaiFrequencyPenalty;
+          if (typeof config.openaiPresencePenalty === 'number') p.presence_penalty = config.openaiPresencePenalty;
+        }
+        if (isReasoningModel && config.openaiReasoningEffort) p.reasoning_effort = config.openaiReasoningEffort;
+        if (isReasoningModel && config.openaiVerbosity) p.verbosity = config.openaiVerbosity;
+        if (typeof config.openaiSeed === 'number') p.seed = config.openaiSeed;
+        if (config.openaiServiceTier && config.openaiServiceTier !== 'auto') p.service_tier = config.openaiServiceTier;
+        if (typeof config.openaiParallelToolCalls === 'boolean') p.parallel_tool_calls = config.openaiParallelToolCalls;
+        return p;
+      };
 
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
@@ -516,7 +534,8 @@ ${post.text_original}`;
           ],
           tools: [{ type: 'function', function: toolFunction }],
           tool_choice: { type: 'function', function: { name: (toolFunction.name as string) || 'classify_importance' } },
-          [tokenParam]: 2000,
+          [tokenParam]: config.openaiMaxCompletionTokens,
+          ...buildExtraParams(),
         }),
       });
 
@@ -547,21 +566,35 @@ ${post.text_original}`;
       }
     } else {
       // No filtering — simple translation
+      const useMaxCompletion = !/^(gpt-4o($|-)|gpt-4($|-)|gpt-3\.5)/i.test(config.openaiModel);
+      const tokenParam = useMaxCompletion ? 'max_completion_tokens' : 'max_tokens';
+      const isReasoningModel = /^(gpt-5|o[34])/i.test(config.openaiModel);
+      const callBody: Record<string, unknown> = {
+        model: config.openaiModel,
+        messages: [
+          { role: 'system', content: config.translationPrompt },
+          { role: 'user', content: post.text_original }
+        ],
+        [tokenParam]: config.openaiMaxCompletionTokens,
+      };
+      if (!isReasoningModel && typeof config.openaiTemperature === 'number') callBody.temperature = config.openaiTemperature;
+      if (typeof config.openaiTopP === 'number') callBody.top_p = config.openaiTopP;
+      if (!isReasoningModel) {
+        if (typeof config.openaiFrequencyPenalty === 'number') callBody.frequency_penalty = config.openaiFrequencyPenalty;
+        if (typeof config.openaiPresencePenalty === 'number') callBody.presence_penalty = config.openaiPresencePenalty;
+      }
+      if (isReasoningModel && config.openaiReasoningEffort) callBody.reasoning_effort = config.openaiReasoningEffort;
+      if (isReasoningModel && config.openaiVerbosity) callBody.verbosity = config.openaiVerbosity;
+      if (typeof config.openaiSeed === 'number') callBody.seed = config.openaiSeed;
+      if (config.openaiServiceTier && config.openaiServiceTier !== 'auto') callBody.service_tier = config.openaiServiceTier;
+
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${openaiApiKey}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          model: config.openaiModel,
-          messages: [
-            { role: 'system', content: config.translationPrompt },
-            { role: 'user', content: post.text_original }
-          ],
-          temperature: config.openaiTemperature,
-          max_tokens: 1000
-        }),
+        body: JSON.stringify(callBody),
       });
 
       if (!response.ok) {
