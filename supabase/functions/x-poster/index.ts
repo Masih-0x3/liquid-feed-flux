@@ -106,6 +106,38 @@ function formatTweet(tpl: string, vars: Record<string, string>, max: number): st
   return RLM + out;
 }
 
+/** Persian (Jalali) date string like "۱۴ اردیبهشت ۱۴۰۵" using fa-IR Intl. */
+function persianDateNow(): string {
+  try {
+    return new Intl.DateTimeFormat('fa-IR-u-ca-persian', {
+      day: 'numeric', month: 'long', year: 'numeric',
+    }).format(new Date());
+  } catch {
+    return new Date().toISOString().slice(0, 10);
+  }
+}
+
+/** Normalize a hashtag entry: strip whitespace, ensure leading '#'. */
+function normHashtag(s: string): string {
+  const t = s.trim().replace(/^#+/, '');
+  return t ? `#${t}` : '';
+}
+
+/** Pick `n` distinct random hashtags from a pool, returning a space-joined string. */
+function pickHashtags(pool: string[] | undefined, n: number): string {
+  if (!pool || pool.length === 0 || n <= 0) return '';
+  const cleaned = pool.map(normHashtag).filter(Boolean);
+  if (cleaned.length === 0) return '';
+  const take = Math.min(n, cleaned.length);
+  // Fisher-Yates partial shuffle
+  const arr = cleaned.slice();
+  for (let i = 0; i < take; i++) {
+    const j = i + Math.floor(Math.random() * (arr.length - i));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr.slice(0, take).join(' ');
+}
+
 async function trimRollingWindow(arr: string[], windowMs: number): Promise<string[]> {
   const cutoff = Date.now() - windowMs;
   return (arr || []).filter((ts) => { try { return new Date(ts).getTime() > cutoff; } catch { return false; } });
