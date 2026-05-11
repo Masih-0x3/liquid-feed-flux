@@ -91,21 +91,8 @@ export const DEFAULT_CLASSIFIER_TOOL_SCHEMA = JSON.stringify({
   },
 }, null, 2);
 
-export interface OpenAISettings {
-  model: string;
-  temperature: number;
-  max_completion_tokens: number;
-}
-
 export interface TelegramSettings {
   parse_mode: string;
-}
-
-export interface DigestSettings {
-  frequency_minutes: number;
-  max_bullets: number;
-  min_posts: number;
-  header_format: string;
 }
 
 export interface MessageTemplateSettings {
