@@ -399,6 +399,9 @@ export default function Settings() {
             );
           })()}
 
+          <Card className="glass-card">
+            <CardHeader>
+              <CardTitle className="flex items-center text-glass-foreground"><MessageSquare className="w-5 h-5 mr-2" />Translation Prompt Configuration</CardTitle>
               <CardDescription>Configure the AI translation prompts with dynamic placeholders</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
