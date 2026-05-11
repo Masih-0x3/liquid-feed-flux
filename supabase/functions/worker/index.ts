@@ -1306,23 +1306,13 @@ async function hydrateOauthHeader(
     .map((k) => `${hydratePercentEncode(k)}="${hydratePercentEncode(oauthParams[k])}"`).join(", ")}`;
 }
 
-// Reads Twitter creds from env first; falls back to digest_config settings row (same pattern as digest-compiler).
+// Reads Twitter creds strictly from environment secrets.
 async function getTwitterCreds(// deno-lint-ignore no-explicit-any
-supabase: any): Promise<{ ck: string; cs: string; at: string; ats: string } | null> {
-  let ck = Deno.env.get("TWITTER_CONSUMER_KEY") || "";
-  let cs = Deno.env.get("TWITTER_CONSUMER_SECRET") || "";
-  let at = Deno.env.get("TWITTER_ACCESS_TOKEN") || "";
-  let ats = Deno.env.get("TWITTER_ACCESS_TOKEN_SECRET") || "";
-  if (!ck || !cs || !at || !ats) {
-    try {
-      const { data } = await supabase.from('settings').select('value').eq('key', 'digest_config').maybeSingle();
-      const v = (data?.value || {}) as Record<string, unknown>;
-      ck = ck || String(v.twitter_consumer_key || "");
-      cs = cs || String(v.twitter_consumer_secret || "");
-      at = at || String(v.twitter_access_token || "");
-      ats = ats || String(v.twitter_access_token_secret || "");
-    } catch { /* fall through */ }
-  }
+_supabase: any): Promise<{ ck: string; cs: string; at: string; ats: string } | null> {
+  const ck = Deno.env.get("TWITTER_CONSUMER_KEY") || "";
+  const cs = Deno.env.get("TWITTER_CONSUMER_SECRET") || "";
+  const at = Deno.env.get("TWITTER_ACCESS_TOKEN") || "";
+  const ats = Deno.env.get("TWITTER_ACCESS_TOKEN_SECRET") || "";
   if (!ck || !cs || !at || !ats) return null;
   return { ck, cs, at, ats };
 }
