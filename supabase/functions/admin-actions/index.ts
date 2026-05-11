@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
+import { callOpenAI, type ToolFunctionDef } from "../_shared/openai.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -637,30 +638,23 @@ serve(async (req) => {
         const seed = typeof ts.seed === 'number' ? ts.seed : null;
         const serviceTier = typeof ts.service_tier === 'string' ? ts.service_tier as string : null;
         const parallelToolCalls = typeof ts.parallel_tool_calls === 'boolean' ? ts.parallel_tool_calls as boolean : null;
-        // GPT-5.x, GPT-4.1, o-series and any modern model use `max_completion_tokens`.
-        // Only legacy gpt-4o / gpt-4 / gpt-3.5 still accept `max_tokens`.
-        const useMaxCompletion = !/^(gpt-4o($|-)|gpt-4($|-)|gpt-3\.5)/i.test(model);
-        const tokenParam = useMaxCompletion ? 'max_completion_tokens' : 'max_tokens';
-        const isReasoningModel = /^(gpt-5|o[34])/i.test(model);
+        // Note: token-param choice and reasoning-vs-non-reasoning gating now
+        // live inside the shared callOpenAI helper, which also routes the
+        // gpt-5.4 family to the /v1/responses endpoint as required by OpenAI.
         const customScoringPrompt = typeof ts.scoring_system_prompt === 'string' && ts.scoring_system_prompt.trim() ? ts.scoring_system_prompt as string : null;
         const customToolSchema = typeof ts.classifier_tool_schema === 'string' && ts.classifier_tool_schema.trim() ? ts.classifier_tool_schema as string : null;
 
-        // Build sampling/runtime params consistent with the selected model's capabilities.
-        const buildExtraParams = (): Record<string, unknown> => {
-          const p: Record<string, unknown> = {};
-          if (!isReasoningModel && typeof temperature === 'number') p.temperature = temperature;
-          if (topP !== null) p.top_p = topP;
-          if (!isReasoningModel) {
-            if (freqPen !== null) p.frequency_penalty = freqPen;
-            if (presPen !== null) p.presence_penalty = presPen;
-          }
-          if (isReasoningModel && reasoningEffort) p.reasoning_effort = reasoningEffort;
-          if (isReasoningModel && verbosity) p.verbosity = verbosity;
-          if (seed !== null) p.seed = seed;
-          if (serviceTier && serviceTier !== 'auto') p.service_tier = serviceTier;
-          if (parallelToolCalls !== null) p.parallel_tool_calls = parallelToolCalls;
-          return p;
-        };
+        const sharedCallOpts = {
+          temperature,
+          topP,
+          frequencyPenalty: freqPen,
+          presencePenalty: presPen,
+          reasoningEffort,
+          verbosity,
+          seed,
+          serviceTier,
+          parallelToolCalls,
+        } as const;
 
         const filterEnabled = cf.enabled === true || cf.score_only === true;
 
@@ -673,6 +667,7 @@ serve(async (req) => {
         let importanceTags: string[] | null = null;
         let reasoning: string | null = null;
         let raw: Record<string, unknown> = {};
+        let usedEndpoint: 'chat.completions' | 'responses' = 'chat.completions';
 
         try {
           if (filterEnabled) {
@@ -683,7 +678,6 @@ serve(async (req) => {
               ? `### Editorial Guidelines (AUTHORITATIVE — these override the default rubric when they conflict)\n---\n${guidelines}\n---`
               : '';
 
-            // Use editable scoring system prompt with placeholder substitution
             const scoringTemplate = customScoringPrompt ?? `You have two tasks. Complete both carefully.\n\n## Task 1: Translation\n{translation_prompt}\n\n## Task 2: News Importance Scoring\nYou are an editorial assistant. Score 1-20 based on importance to an Iran/Middle East news channel. Cap non-Iran content at 8.\n\nHigh-priority: {priority_topics}\nLow-priority: {low_priority_topics}\n\n{editorial_guidelines_block}\n\nYou MUST call the "classify_importance" tool.`;
             const systemPrompt = scoringTemplate
               .replace('{translation_prompt}', translationPrompt)
@@ -691,8 +685,7 @@ serve(async (req) => {
               .replace('{low_priority_topics}', lowPriorityTopics)
               .replace('{editorial_guidelines_block}', guidelinesBlock);
 
-            // Parse tool schema (with safe fallback)
-            let toolFunction: Record<string, unknown>;
+            let toolFunction: ToolFunctionDef;
             try {
               toolFunction = customToolSchema
                 ? JSON.parse(customToolSchema)
@@ -716,62 +709,51 @@ serve(async (req) => {
 
             const userMessage = `Author: @${authorHandle || 'preview'}\nPublished: ${new Date().toISOString()}\nHas media: no\nURL: N/A\n\nContent:\n${text}`;
 
-            const filterCallBody: Record<string, unknown> = {
+            const result = await callOpenAI({
+              apiKey: openaiApiKey,
               model,
               messages: [
                 { role: 'system', content: systemPrompt },
                 { role: 'user', content: userMessage },
               ],
-              tools: [{ type: 'function', function: toolFunction }],
-              tool_choice: { type: 'function', function: { name: (toolFunction.name as string) || 'classify_importance' } },
-              [tokenParam]: maxTokens,
-              ...buildExtraParams(),
-            };
-            const resp = await fetch('https://api.openai.com/v1/chat/completions', {
-              method: 'POST',
-              headers: { 'Authorization': `Bearer ${openaiApiKey}`, 'Content-Type': 'application/json' },
-              body: JSON.stringify(filterCallBody),
+              tool: toolFunction,
+              maxOutputTokens: maxTokens,
+              ...sharedCallOpts,
             });
-            const respText = await resp.text();
-            try { raw = JSON.parse(respText); } catch { raw = { raw_text: respText }; }
-            if (!resp.ok) return jsonResponse({ ok: false, error: `OpenAI ${resp.status}: ${respText.slice(0, 500)}`, result: { raw } });
+            raw = result.raw;
+            usedEndpoint = result.endpoint;
+            if (!result.ok) return jsonResponse({ ok: false, error: `OpenAI ${result.status}: ${result.rawText.slice(0, 500)}`, result: { raw, endpoint: usedEndpoint } });
 
-            const toolCall = (raw as { choices?: Array<{ message?: { tool_calls?: Array<{ function?: { arguments?: string } }>; content?: string } }> }).choices?.[0]?.message?.tool_calls?.[0];
-            if (toolCall?.function?.arguments) {
+            if (result.toolCall) {
               try {
-                const args = JSON.parse(toolCall.function.arguments);
+                const args = JSON.parse(result.toolCall.arguments);
                 translatedText = args.translated_text || '';
                 importanceScore = Math.max(1, Math.min(20, args.importance_score || 10));
                 importanceTags = Array.isArray(args.tags) ? args.tags : [];
                 reasoning = typeof args.reasoning === 'string' ? args.reasoning : null;
               } catch (parseErr) {
-                translatedText = (raw as { choices?: Array<{ message?: { content?: string } }> }).choices?.[0]?.message?.content ?? '';
+                translatedText = result.content;
                 reasoning = `Tool-call parse error: ${(parseErr as Error).message}`;
               }
             } else {
-              translatedText = (raw as { choices?: Array<{ message?: { content?: string } }> }).choices?.[0]?.message?.content ?? '';
+              translatedText = result.content;
             }
           } else {
             // Simple translation only
-            const callBody: Record<string, unknown> = {
+            const result = await callOpenAI({
+              apiKey: openaiApiKey,
               model,
               messages: [
                 { role: 'system', content: translationPrompt },
                 { role: 'user', content: text },
               ],
-              [tokenParam]: maxTokens,
-              ...buildExtraParams(),
-            };
-
-            const resp = await fetch('https://api.openai.com/v1/chat/completions', {
-              method: 'POST',
-              headers: { 'Authorization': `Bearer ${openaiApiKey}`, 'Content-Type': 'application/json' },
-              body: JSON.stringify(callBody),
+              maxOutputTokens: maxTokens,
+              ...sharedCallOpts,
             });
-            const respText = await resp.text();
-            try { raw = JSON.parse(respText); } catch { raw = { raw_text: respText }; }
-            if (!resp.ok) return jsonResponse({ ok: false, error: `OpenAI ${resp.status}: ${respText.slice(0, 500)}`, result: { raw } });
-            translatedText = (raw as { choices?: Array<{ message?: { content?: string } }> }).choices?.[0]?.message?.content ?? '';
+            raw = result.raw;
+            usedEndpoint = result.endpoint;
+            if (!result.ok) return jsonResponse({ ok: false, error: `OpenAI ${result.status}: ${result.rawText.slice(0, 500)}`, result: { raw, endpoint: usedEndpoint } });
+            translatedText = result.content;
           }
 
           const usage = (raw as { usage?: Record<string, number> }).usage ?? null;
@@ -783,6 +765,7 @@ serve(async (req) => {
               importance_tags: importanceTags,
               reasoning,
               model,
+              endpoint: usedEndpoint,
               usage,
               duration_ms: Date.now() - startedAt,
               used_filter: filterEnabled,
@@ -830,8 +813,17 @@ serve(async (req) => {
           : 'You are a professional translator. Translate the given English text to Persian. Preserve @mentions, #hashtags, URLs, and line breaks exactly. Only return the translated text, nothing else.';
         const customScoringPrompt = typeof tp.scoring_system_prompt === 'string' && (tp.scoring_system_prompt as string).trim() ? tp.scoring_system_prompt as string : null;
         const customToolSchema = typeof tp.classifier_tool_schema === 'string' && (tp.classifier_tool_schema as string).trim() ? tp.classifier_tool_schema as string : null;
-        const useMaxCompletion = !/^(gpt-4o($|-)|gpt-4($|-)|gpt-3\.5)/i.test(model);
-        const tokenParam = useMaxCompletion ? 'max_completion_tokens' : 'max_tokens';
+        // Pull advanced sampling params from settings (mirrors the worker).
+        const tsTemperature = typeof tp.temperature === 'number' ? tp.temperature as number : null;
+        const tsMaxTokens = typeof tp.max_completion_tokens === 'number' ? Math.min(8000, Math.max(1, tp.max_completion_tokens as number)) : 2000;
+        const tsTopP = typeof tp.top_p === 'number' ? tp.top_p as number : null;
+        const tsFreqPen = typeof tp.frequency_penalty === 'number' ? tp.frequency_penalty as number : null;
+        const tsPresPen = typeof tp.presence_penalty === 'number' ? tp.presence_penalty as number : null;
+        const tsReasoningEffort = typeof tp.reasoning_effort === 'string' ? tp.reasoning_effort as string : null;
+        const tsVerbosity = typeof tp.verbosity === 'string' ? tp.verbosity as string : null;
+        const tsSeed = typeof tp.seed === 'number' ? tp.seed as number : null;
+        const tsServiceTier = typeof tp.service_tier === 'string' ? tp.service_tier as string : null;
+        const tsParallelToolCalls = typeof tp.parallel_tool_calls === 'boolean' ? tp.parallel_tool_calls as boolean : null;
 
         const openaiApiKey = Deno.env.get('OPENAI_API_KEY');
         if (!openaiApiKey) return jsonResponse({ ok: false, error: 'OPENAI_API_KEY is not configured' }, 500);
@@ -850,7 +842,7 @@ serve(async (req) => {
           .replace('{low_priority_topics}', lowPriorityTopics)
           .replace('{editorial_guidelines_block}', guidelinesBlock);
 
-        let toolFunction: Record<string, unknown>;
+        let toolFunction: ToolFunctionDef;
         try {
           toolFunction = customToolSchema ? JSON.parse(customToolSchema) : {
             name: 'classify_importance',
@@ -871,30 +863,31 @@ serve(async (req) => {
 
         const userMessage = `Author: @${post.author_handle || 'unknown'}\nPublished: ${post.tweeted_at ? new Date(post.tweeted_at as string).toISOString() : 'unknown'}\nHas media: ${post.has_media ? 'yes' : 'no'}\nURL: ${post.url || 'N/A'}\n\nContent:\n${post.text_original}`;
 
-        const resp = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${openaiApiKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model,
-            messages: [
-              { role: 'system', content: systemPrompt },
-              { role: 'user', content: userMessage },
-            ],
-            tools: [{ type: 'function', function: toolFunction }],
-            tool_choice: { type: 'function', function: { name: (toolFunction.name as string) || 'classify_importance' } },
-            [tokenParam]: 2000,
-          }),
+        const result = await callOpenAI({
+          apiKey: openaiApiKey,
+          model,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userMessage },
+          ],
+          tool: toolFunction,
+          maxOutputTokens: tsMaxTokens,
+          temperature: tsTemperature,
+          topP: tsTopP,
+          frequencyPenalty: tsFreqPen,
+          presencePenalty: tsPresPen,
+          reasoningEffort: tsReasoningEffort,
+          verbosity: tsVerbosity,
+          seed: tsSeed,
+          serviceTier: tsServiceTier,
+          parallelToolCalls: tsParallelToolCalls,
         });
-        const respText = await resp.text();
-        let raw: Record<string, unknown> = {};
-        try { raw = JSON.parse(respText); } catch { raw = { raw_text: respText }; }
-        if (!resp.ok) return jsonResponse({ ok: false, error: `OpenAI ${resp.status}: ${respText.slice(0, 500)}`, raw });
-
-        const toolCall = (raw as { choices?: Array<{ message?: { tool_calls?: Array<{ function?: { arguments?: string } }> } }> }).choices?.[0]?.message?.tool_calls?.[0];
-        if (!toolCall?.function?.arguments) return jsonResponse({ ok: false, error: 'Model did not return a tool call', raw });
+        const raw = result.raw;
+        if (!result.ok) return jsonResponse({ ok: false, error: `OpenAI ${result.status}: ${result.rawText.slice(0, 500)}`, raw });
+        if (!result.toolCall) return jsonResponse({ ok: false, error: 'Model did not return a tool call', raw });
 
         let args: { translated_text?: string; importance_score?: number; tags?: string[]; reasoning?: string };
-        try { args = JSON.parse(toolCall.function.arguments); }
+        try { args = JSON.parse(result.toolCall.arguments); }
         catch (e) { return jsonResponse({ ok: false, error: `Tool-call parse error: ${(e as Error).message}`, raw }); }
 
         const newScore = Math.max(1, Math.min(20, args.importance_score || 10));

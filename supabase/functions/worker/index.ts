@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
+import { callOpenAI, type ToolFunctionDef } from "../_shared/openai.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -498,112 +499,72 @@ ${post.text_original}`;
         };
       }
 
-      // Modern OpenAI models (gpt-5.x, gpt-4.1, o-series) require max_completion_tokens.
-      const useMaxCompletion = !/^(gpt-4o($|-)|gpt-4($|-)|gpt-3\.5)/i.test(config.openaiModel);
-      const tokenParam = useMaxCompletion ? 'max_completion_tokens' : 'max_tokens';
-      const isReasoningModel = /^(gpt-5|o[34])/i.test(config.openaiModel);
-
-      // Compose configurable sampling/runtime params honoring the selected model's capabilities.
-      const buildExtraParams = (): Record<string, unknown> => {
-        const p: Record<string, unknown> = {};
-        if (!isReasoningModel && typeof config.openaiTemperature === 'number') p.temperature = config.openaiTemperature;
-        if (typeof config.openaiTopP === 'number') p.top_p = config.openaiTopP;
-        if (!isReasoningModel) {
-          if (typeof config.openaiFrequencyPenalty === 'number') p.frequency_penalty = config.openaiFrequencyPenalty;
-          if (typeof config.openaiPresencePenalty === 'number') p.presence_penalty = config.openaiPresencePenalty;
-        }
-        if (isReasoningModel && config.openaiReasoningEffort) p.reasoning_effort = config.openaiReasoningEffort;
-        if (isReasoningModel && config.openaiVerbosity) p.verbosity = config.openaiVerbosity;
-        if (typeof config.openaiSeed === 'number') p.seed = config.openaiSeed;
-        if (config.openaiServiceTier && config.openaiServiceTier !== 'auto') p.service_tier = config.openaiServiceTier;
-        if (typeof config.openaiParallelToolCalls === 'boolean') p.parallel_tool_calls = config.openaiParallelToolCalls;
-        return p;
-      };
-
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${openaiApiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: config.openaiModel,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userMessage }
-          ],
-          tools: [{ type: 'function', function: toolFunction }],
-          tool_choice: { type: 'function', function: { name: (toolFunction.name as string) || 'classify_importance' } },
-          [tokenParam]: config.openaiMaxCompletionTokens,
-          ...buildExtraParams(),
-        }),
+      const result = await callOpenAI({
+        apiKey: openaiApiKey,
+        model: config.openaiModel,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userMessage },
+        ],
+        tool: toolFunction as ToolFunctionDef,
+        maxOutputTokens: config.openaiMaxCompletionTokens,
+        temperature: config.openaiTemperature,
+        topP: config.openaiTopP,
+        frequencyPenalty: config.openaiFrequencyPenalty,
+        presencePenalty: config.openaiPresencePenalty,
+        reasoningEffort: config.openaiReasoningEffort,
+        verbosity: config.openaiVerbosity,
+        seed: config.openaiSeed,
+        serviceTier: config.openaiServiceTier,
+        parallelToolCalls: config.openaiParallelToolCalls,
       });
 
-      if (!response.ok) {
-        const errorData = await response.text();
-        throw new Error(`OpenAI API error: ${response.status} ${errorData}`);
+      if (!result.ok) {
+        throw new Error(`OpenAI API error: ${result.status} ${result.rawText}`);
       }
 
-      data = await response.json();
+      data = result.raw;
 
-      // Extract from tool call response
-      const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
-      if (toolCall?.function?.arguments) {
+      if (result.toolCall) {
         try {
-          const args = JSON.parse(toolCall.function.arguments);
+          const args = JSON.parse(result.toolCall.arguments);
           translatedText = args.translated_text || '';
           importanceScore = Math.max(1, Math.min(20, args.importance_score || 10));
           importanceTags = args.tags || [];
           importanceReasoning = typeof args.reasoning === 'string' ? args.reasoning : null;
-          console.log(JSON.stringify({ function: 'worker', action: 'scored', tweet_id: tweetId, score: importanceScore, tags: importanceTags, reasoning: importanceReasoning }));
+          console.log(JSON.stringify({ function: 'worker', action: 'scored', tweet_id: tweetId, score: importanceScore, tags: importanceTags, reasoning: importanceReasoning, endpoint: result.endpoint }));
         } catch (parseErr) {
           console.warn('Failed to parse tool call, falling back to content:', (parseErr as Error).message);
-          translatedText = data.choices?.[0]?.message?.content ?? '';
+          translatedText = result.content;
         }
       } else {
-        // Fallback: model returned content instead of tool call
-        translatedText = data.choices?.[0]?.message?.content ?? '';
+        translatedText = result.content;
       }
     } else {
       // No filtering — simple translation
-      const useMaxCompletion = !/^(gpt-4o($|-)|gpt-4($|-)|gpt-3\.5)/i.test(config.openaiModel);
-      const tokenParam = useMaxCompletion ? 'max_completion_tokens' : 'max_tokens';
-      const isReasoningModel = /^(gpt-5|o[34])/i.test(config.openaiModel);
-      const callBody: Record<string, unknown> = {
+      const result = await callOpenAI({
+        apiKey: openaiApiKey,
         model: config.openaiModel,
         messages: [
           { role: 'system', content: config.translationPrompt },
-          { role: 'user', content: post.text_original }
+          { role: 'user', content: post.text_original },
         ],
-        [tokenParam]: config.openaiMaxCompletionTokens,
-      };
-      if (!isReasoningModel && typeof config.openaiTemperature === 'number') callBody.temperature = config.openaiTemperature;
-      if (typeof config.openaiTopP === 'number') callBody.top_p = config.openaiTopP;
-      if (!isReasoningModel) {
-        if (typeof config.openaiFrequencyPenalty === 'number') callBody.frequency_penalty = config.openaiFrequencyPenalty;
-        if (typeof config.openaiPresencePenalty === 'number') callBody.presence_penalty = config.openaiPresencePenalty;
-      }
-      if (isReasoningModel && config.openaiReasoningEffort) callBody.reasoning_effort = config.openaiReasoningEffort;
-      if (isReasoningModel && config.openaiVerbosity) callBody.verbosity = config.openaiVerbosity;
-      if (typeof config.openaiSeed === 'number') callBody.seed = config.openaiSeed;
-      if (config.openaiServiceTier && config.openaiServiceTier !== 'auto') callBody.service_tier = config.openaiServiceTier;
-
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${openaiApiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(callBody),
+        maxOutputTokens: config.openaiMaxCompletionTokens,
+        temperature: config.openaiTemperature,
+        topP: config.openaiTopP,
+        frequencyPenalty: config.openaiFrequencyPenalty,
+        presencePenalty: config.openaiPresencePenalty,
+        reasoningEffort: config.openaiReasoningEffort,
+        verbosity: config.openaiVerbosity,
+        seed: config.openaiSeed,
+        serviceTier: config.openaiServiceTier,
+        parallelToolCalls: config.openaiParallelToolCalls,
       });
-
-      if (!response.ok) {
-        const errorData = await response.text();
-        throw new Error(`OpenAI API error: ${response.status} ${errorData}`);
+      if (!result.ok) {
+        throw new Error(`OpenAI API error: ${result.status} ${result.rawText}`);
       }
-
-      data = await response.json();
-      translatedText = data.choices?.[0]?.message?.content ?? '';
+      data = result.raw;
+      translatedText = result.content;
     }
 
     const nowIso = new Date().toISOString();
