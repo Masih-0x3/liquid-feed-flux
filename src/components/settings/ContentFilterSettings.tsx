@@ -76,13 +76,24 @@ interface Props {
   initialConfig?: ContentFilterConfig;
 }
 
-export default function ContentFilterSettings({ initialConfig }: Props) {
+interface Props {
+  initialConfig?: ContentFilterConfig;
+  translationSettings: TranslationSettings;
+  onTranslationSettingsChange: (next: TranslationSettings) => void;
+}
+
+export default function ContentFilterSettings({ initialConfig, translationSettings, onTranslationSettingsChange }: Props) {
   const [config, setConfig] = useState<ContentFilterConfig>({ ...defaultConfig, ...initialConfig });
   const [newPriorityTopic, setNewPriorityTopic] = useState('');
   const [newLowPriorityTopic, setNewLowPriorityTopic] = useState('');
   const [authorOverridesOpen, setAuthorOverridesOpen] = useState(false);
+  const [advancedScorerOpen, setAdvancedScorerOpen] = useState(false);
   const saveMutation = useSaveSettings();
   const { toast } = useToast();
+
+  const ts = translationSettings;
+  const setTs = (patch: Partial<TranslationSettings>) => onTranslationSettingsChange({ ...ts, ...patch });
+  const saveTranslationPrompt = () => saveMutation.mutate({ key: 'translation_prompt', value: ts });
 
   const applyRecommendedDefaults = async () => {
     setConfig(RECOMMENDED_IRAN_RUBRIC);
