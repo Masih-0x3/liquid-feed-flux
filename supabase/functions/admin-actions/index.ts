@@ -190,6 +190,16 @@ function validateSettingsValue(key: string, value: unknown): string | null {
           if (v[f] !== undefined && typeof v[f] !== 'string') return `x_posting_config.${f} must be a string`;
           if (typeof v[f] === 'string' && (v[f] as string).length > max) return `x_posting_config.${f} must be ≤${max} characters`;
         }
+        if (v.hashtag_pool !== undefined) {
+          if (!Array.isArray(v.hashtag_pool)) return 'x_posting_config.hashtag_pool must be an array of strings';
+          if ((v.hashtag_pool as unknown[]).length > 100) return 'x_posting_config.hashtag_pool must be ≤100 entries';
+          for (const t of v.hashtag_pool as unknown[]) {
+            if (typeof t !== 'string' || t.length > 64) return 'x_posting_config.hashtag_pool entries must be strings ≤64 chars';
+          }
+        }
+        if (v.hashtags_per_post !== undefined && (typeof v.hashtags_per_post !== 'number' || ![0, 1, 2].includes(v.hashtags_per_post))) {
+          return 'x_posting_config.hashtags_per_post must be 0, 1, or 2';
+        }
         break;
       }
       case 'x_rate_limits': {
