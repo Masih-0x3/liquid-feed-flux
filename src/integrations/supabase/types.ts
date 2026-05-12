@@ -386,6 +386,8 @@ export type Database = {
           created_at: string
           decision_reason: string | null
           delivery_decision: string | null
+          dup_of_tweet_id: string | null
+          dup_similarity: number | null
           final_score: number | null
           has_media: boolean | null
           hydrated_at: string | null
@@ -396,6 +398,7 @@ export type Database = {
           is_truncated: boolean
           lang_original: string | null
           score_axes: Json | null
+          story_cluster_id: string | null
           text_original: string | null
           text_translated: string | null
           translated_at: string | null
@@ -413,6 +416,8 @@ export type Database = {
           created_at?: string
           decision_reason?: string | null
           delivery_decision?: string | null
+          dup_of_tweet_id?: string | null
+          dup_similarity?: number | null
           final_score?: number | null
           has_media?: boolean | null
           hydrated_at?: string | null
@@ -423,6 +428,7 @@ export type Database = {
           is_truncated?: boolean
           lang_original?: string | null
           score_axes?: Json | null
+          story_cluster_id?: string | null
           text_original?: string | null
           text_translated?: string | null
           translated_at?: string | null
@@ -440,6 +446,8 @@ export type Database = {
           created_at?: string
           decision_reason?: string | null
           delivery_decision?: string | null
+          dup_of_tweet_id?: string | null
+          dup_similarity?: number | null
           final_score?: number | null
           has_media?: boolean | null
           hydrated_at?: string | null
@@ -450,6 +458,7 @@ export type Database = {
           is_truncated?: boolean
           lang_original?: string | null
           score_axes?: Json | null
+          story_cluster_id?: string | null
           text_original?: string | null
           text_translated?: string | null
           translated_at?: string | null
@@ -495,6 +504,36 @@ export type Database = {
           key?: string
           updated_at?: string
           value?: Json
+        }
+        Relationships: []
+      }
+      story_signatures: {
+        Row: {
+          coverage_count: number
+          created_at: string
+          embedding: string | null
+          normalized_text: string | null
+          simhash: number | null
+          story_cluster_id: string
+          tweet_id: string
+        }
+        Insert: {
+          coverage_count?: number
+          created_at?: string
+          embedding?: string | null
+          normalized_text?: string | null
+          simhash?: number | null
+          story_cluster_id?: string
+          tweet_id: string
+        }
+        Update: {
+          coverage_count?: number
+          created_at?: string
+          embedding?: string | null
+          normalized_text?: string | null
+          simhash?: number | null
+          story_cluster_id?: string
+          tweet_id?: string
         }
         Relationships: []
       }
@@ -1063,6 +1102,21 @@ export type Database = {
       cleanup_old_data: {
         Args: { batch_limit?: number; retention_days?: number }
         Returns: Json
+      }
+      find_similar_story: {
+        Args: {
+          exclude_tweet_id: string
+          query_embedding: string
+          query_simhash: number
+          similarity_threshold?: number
+          window_hours?: number
+        }
+        Returns: {
+          simhash_distance: number
+          similarity: number
+          story_cluster_id: string
+          tweet_id: string
+        }[]
       }
       get_dashboard_summary: { Args: never; Returns: Json }
       get_ingest_heartbeat: { Args: never; Returns: Json }
