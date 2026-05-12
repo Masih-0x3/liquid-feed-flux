@@ -331,7 +331,126 @@ async function loadConfig(supabase: any): Promise<any> {
   return defaults;
 }
 
-serve(async (req) => {
+// ===== Story Memory (PR3) — semantic near-duplicate detection =====
+function normalizeForHash(s: string): string {
+  return (s || '')
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, '')
+    .replace(/[@#]\w+/g, '')
+    .replace(/[^\p{L}\p{N}\s]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// 64-bit SimHash (FNV-1a per token, then sign bit aggregate). Returns BigInt-as-string for Postgres bigint.
+function simHash64(text: string): string {
+  const tokens = text.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return '0';
+  const v = new Array<number>(64).fill(0);
+  for (const tok of tokens) {
+    // FNV-1a 64-bit (split into two 32-bit halves)
+    let h1 = 0x811c9dc5 >>> 0, h2 = 0xcbf29ce4 >>> 0;
+    for (let i = 0; i < tok.length; i++) {
+      h1 ^= tok.charCodeAt(i);
+      h1 = Math.imul(h1, 0x01000193) >>> 0;
+      h2 ^= tok.charCodeAt(i);
+      h2 = Math.imul(h2, 0x01000193) >>> 0;
+    }
+    for (let b = 0; b < 32; b++) v[b]      += (h1 >> b) & 1 ? 1 : -1;
+    for (let b = 0; b < 32; b++) v[b + 32] += (h2 >> b) & 1 ? 1 : -1;
+  }
+  let bits = 0n;
+  for (let b = 0; b < 64; b++) if (v[b] > 0) bits |= 1n << BigInt(b);
+  // Convert to signed 64-bit BigInt for Postgres bigint
+  const signed = bits >= (1n << 63n) ? bits - (1n << 64n) : bits;
+  return signed.toString();
+}
+
+async function fetchEmbedding(text: string): Promise<number[] | null> {
+  const apiKey = Deno.env.get('OPENAI_API_KEY');
+  if (!apiKey) return null;
+  try {
+    const resp = await fetch('https://api.openai.com/v1/embeddings', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'text-embedding-3-small', input: text.slice(0, 8000) }),
+    });
+    if (!resp.ok) {
+      console.warn('embedding api error', resp.status, await resp.text().catch(() => ''));
+      return null;
+    }
+    const data = await resp.json();
+    return (data?.data?.[0]?.embedding as number[]) ?? null;
+  } catch (e) {
+    console.warn('embedding fetch failed', (e as Error).message);
+    return null;
+  }
+}
+
+/**
+ * Run semantic dedup. Returns { dup_of, similarity, cluster_id } when a duplicate is found.
+ * Always upserts story_signatures for the post (so future posts can match against it).
+ */
+// deno-lint-ignore no-explicit-any
+async function runStoryDedup(supabase: any, post: { tweet_id: string; text_translated: string | null; text_original: string | null; author_handle: string | null }, cfg: { enabled: boolean; window_hours: number; similarity_threshold: number; bypass_authors: string[] }): Promise<{ dup_of: string | null; cluster_id: string | null; similarity: number | null }> {
+  if (!cfg.enabled) return { dup_of: null, cluster_id: null, similarity: null };
+  if (cfg.bypass_authors?.some(a => (post.author_handle || '').toLowerCase() === a.replace(/^@/, '').toLowerCase())) {
+    return { dup_of: null, cluster_id: null, similarity: null };
+  }
+  const raw = (post.text_translated || post.text_original || '').trim();
+  const normalized = normalizeForHash(raw);
+  if (normalized.length < 20) return { dup_of: null, cluster_id: null, similarity: null };
+
+  const simhash = simHash64(normalized);
+  const embedding = await fetchEmbedding(raw);
+  if (!embedding) {
+    // best-effort upsert without embedding
+    await supabase.from('story_signatures').upsert({
+      tweet_id: post.tweet_id, simhash, normalized_text: normalized,
+    }, { onConflict: 'tweet_id' });
+    return { dup_of: null, cluster_id: null, similarity: null };
+  }
+
+  // Find nearest neighbor
+  const embeddingLiteral = '[' + embedding.join(',') + ']';
+  const { data: matches, error: matchErr } = await supabase.rpc('find_similar_story', {
+    query_embedding: embeddingLiteral,
+    query_simhash: simhash,
+    exclude_tweet_id: post.tweet_id,
+    window_hours: cfg.window_hours,
+    similarity_threshold: cfg.similarity_threshold,
+  });
+  if (matchErr) console.warn('find_similar_story error', matchErr.message);
+
+  let dup_of: string | null = null;
+  let cluster_id: string | null = null;
+  let similarity: number | null = null;
+  if (Array.isArray(matches) && matches.length > 0) {
+    const top = matches[0] as { tweet_id: string; story_cluster_id: string; similarity: number };
+    dup_of = top.tweet_id;
+    cluster_id = top.story_cluster_id;
+    similarity = Number(top.similarity);
+    // bump coverage on original
+    await supabase.rpc('exec_sql' as never, {} as never).catch(() => null); // no-op fallback
+    await supabase.from('story_signatures')
+      .update({ coverage_count: (1 as number) })
+      .eq('tweet_id', dup_of)
+      .then(() => null, () => null);
+  }
+
+  // Upsert this post's signature (assigning cluster_id if matched)
+  await supabase.from('story_signatures').upsert({
+    tweet_id: post.tweet_id,
+    simhash,
+    embedding: embeddingLiteral,
+    normalized_text: normalized,
+    ...(cluster_id ? { story_cluster_id: cluster_id } : {}),
+  }, { onConflict: 'tweet_id' });
+
+  return { dup_of, cluster_id, similarity };
+}
+
+
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
