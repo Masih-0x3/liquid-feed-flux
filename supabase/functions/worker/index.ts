@@ -299,6 +299,7 @@ async function loadConfig(supabase: any): Promise<any> {
         }
         if (s.key === 'content_filter' && typeof s.value === 'object' && s.value !== null) {
           defaults.contentFilter = { ...defaults.contentFilter, ...s.value as Record<string, { rule: string; threshold?: number }> };
+        }
       }
 
       // Resolve active editorial profile (PR2)
