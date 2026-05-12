@@ -14,6 +14,72 @@ async function hashUrl(url: string): Promise<string> {
   return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+// ============= Multi-axis scoring (PR1) =============
+// 6 axes, each 0-10. `noise` is inverted (higher = worse).
+// Until editorial profiles land in PR2, we use uniform default weights.
+export const SCORE_AXIS_KEYS = [
+  'iran_relevance',
+  'severity',
+  'novelty',
+  'credibility',
+  'actionability',
+  'noise',
+] as const;
+export type ScoreAxisKey = typeof SCORE_AXIS_KEYS[number];
+export type ScoreAxes = Partial<Record<ScoreAxisKey, number>>;
+
+const DEFAULT_AXIS_WEIGHTS: Record<ScoreAxisKey, number> = {
+  iran_relevance: 1.0,
+  severity: 1.0,
+  novelty: 1.0,
+  credibility: 0.5,
+  actionability: 1.0,
+  noise: 1.0, // subtractive
+};
+
+/** Parse and clamp axes from arbitrary tool-call output. Returns null if no usable axes. */
+export function parseScoreAxes(raw: unknown): ScoreAxes | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const src = raw as Record<string, unknown>;
+  const out: ScoreAxes = {};
+  let hasAny = false;
+  for (const k of SCORE_AXIS_KEYS) {
+    const v = src[k];
+    if (typeof v === 'number' && Number.isFinite(v)) {
+      out[k] = Math.max(0, Math.min(10, Math.round(v)));
+      hasAny = true;
+    }
+  }
+  return hasAny ? out : null;
+}
+
+/**
+ * Compute final_score (0-20) from axes using a weights map.
+ * Formula: positive_sum = Σ(axis * weight) for non-noise axes; subtract noise * weight.
+ * Then normalize to 0-20 against the maximum possible positive sum.
+ */
+export function computeFinalScore(
+  axes: ScoreAxes,
+  weights: Record<ScoreAxisKey, number> = DEFAULT_AXIS_WEIGHTS,
+): number {
+  let posSum = 0;
+  let posMax = 0;
+  for (const k of SCORE_AXIS_KEYS) {
+    if (k === 'noise') continue;
+    const w = Math.max(0, weights[k] ?? 0);
+    posSum += (axes[k] ?? 0) * w;
+    posMax += 10 * w;
+  }
+  const noiseW = Math.max(0, weights.noise ?? 0);
+  const noisePenalty = (axes.noise ?? 0) * noiseW;
+  const noiseMax = 10 * noiseW;
+
+  // Normalize to 0..20. Subtract noise as a fraction of its max.
+  const positiveNorm = posMax > 0 ? (posSum / posMax) * 20 : 0;
+  const noiseNorm = noiseMax > 0 ? (noisePenalty / noiseMax) * 8 : 0; // noise can drag up to 8 pts
+  return Math.max(0, Math.min(20, Math.round((positiveNorm - noiseNorm) * 10) / 10));
+}
+
 // Internal token validation for cron/service-invoked functions
 function validateInternalToken(req: Request): Response | null {
   const token = req.headers.get('x-internal-token') || '';
