@@ -495,7 +495,15 @@ You are an editorial assistant scoring news items for a curated Telegram channel
 - INDIRECT (Iran is the SUBJECT of foreign discussion): cap at 16.
 - NO IRAN NEXUS (pure US/EU/China domestic): cap at 8.
 
-### STEP B — Score 1-20
+### STEP B — Score 1-20 (importance_score)
+
+### STEP C — Score the 6 axes (axes object), each 0-10
+- iran_relevance: 8-10 if DIRECT, 4-7 if INDIRECT, 0-3 if NONE.
+- severity: how big the event itself is — strike/war > policy > analysis > routine.
+- novelty: breaking new info > update > recap/rehash.
+- credibility: official statement > named reporter > anonymous/rumor.
+- actionability: does it materially shift policy/markets/the war picture?
+- noise: INVERTED — high if spam/promo/personal/sports, low for substantive news.
 
 ### Topics
 High-priority (boost 1-2): {priority_topics}
@@ -503,7 +511,7 @@ Low-priority (reduce 1-2): {low_priority_topics}
 
 {editorial_guidelines_block}
 
-You MUST call the "classify_importance" tool.`;
+You MUST call the "classify_importance" tool with BOTH importance_score (1-20) AND axes (all 6 axes).`;
 
     const accountData = (post as Record<string, unknown>).accounts as Record<string, unknown> | null;
     const authorDisplay = authorHandle || (accountData?.handle as string) || 'unknown';
