@@ -168,7 +168,7 @@ async function loadConfig(supabase: any): Promise<any> {
     const { data: settings } = await supabase
       .from('settings')
       .select('key, value')
-      .in('key', ['translation_prompt', 'message_template', 'content_filter']);
+      .in('key', ['translation_prompt', 'message_template', 'content_filter', 'editorial_profiles', 'active_profile_id']);
 
     if (settings) {
       // translation_prompt is the authoritative source for OpenAI parameters.
