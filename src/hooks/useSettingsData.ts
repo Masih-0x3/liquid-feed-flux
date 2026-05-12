@@ -259,6 +259,13 @@ const defaults = {
     profiles: [] as EditorialProfile[],
   },
   active_profile_id: { id: null as string | null },
+  story_memory: {
+    enabled: false,
+    window_hours: 12,
+    similarity_threshold: 0.86,
+    action: 'skip' as 'skip' | 'mark_and_deliver',
+    bypass_authors: [] as string[],
+  },
   twitter_hydration: {
     enabled: true,
     max_attempts: 3,

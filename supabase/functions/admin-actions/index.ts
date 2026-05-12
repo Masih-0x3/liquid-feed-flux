@@ -280,6 +280,15 @@ function validateSettingsValue(key: string, value: unknown): string | null {
         if (typeof v.id === 'string' && (v.id as string).length > 80) return 'active_profile_id.id too long';
         break;
       }
+      case 'story_memory': {
+        if (typeof v.enabled !== 'boolean') return 'story_memory.enabled must be boolean';
+        if (typeof v.window_hours !== 'number' || v.window_hours < 1 || v.window_hours > 72) return 'story_memory.window_hours must be 1-72';
+        if (typeof v.similarity_threshold !== 'number' || v.similarity_threshold < 0.5 || v.similarity_threshold > 0.99) return 'story_memory.similarity_threshold must be 0.5-0.99';
+        if (v.action !== 'skip' && v.action !== 'mark_and_deliver') return 'story_memory.action must be skip|mark_and_deliver';
+        if (!Array.isArray(v.bypass_authors)) return 'story_memory.bypass_authors must be array';
+        if ((v.bypass_authors as unknown[]).length > 100) return 'story_memory.bypass_authors must be ≤100';
+        break;
+      }
     }
     return null;
   }
@@ -318,7 +327,7 @@ serve(async (req) => {
           return jsonResponse({ error: 'key and value are required' }, 400);
         }
         // Only allow non-secret settings keys
-        const allowedKeys = ['translation_prompt', 'telegram_config', 'message_template', 'content_filter', 'twitter_hydration', 'x_posting_config', 'x_rate_limits', 'editorial_profiles', 'active_profile_id'];
+        const allowedKeys = ['translation_prompt', 'telegram_config', 'message_template', 'content_filter', 'twitter_hydration', 'x_posting_config', 'x_rate_limits', 'editorial_profiles', 'active_profile_id', 'story_memory'];
         if (!allowedKeys.includes(key)) {
           return jsonResponse({ error: `Setting key "${key}" is not allowed` }, 400);
         }
@@ -686,7 +695,34 @@ serve(async (req) => {
         });
       }
 
-      // ===== Translation Playground (no DB writes) =====
+      // ===== Story Memory backfill =====
+      case 'backfill_signatures': {
+        const hours = typeof body.hours === 'number' && body.hours > 0 && body.hours <= 168 ? body.hours : 24;
+        const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+        const { data: posts, error: fetchErr } = await supabase
+          .from('posts')
+          .select('tweet_id')
+          .not('text_translated', 'is', null)
+          .gte('created_at', since)
+          .order('created_at', { ascending: false })
+          .limit(500);
+        if (fetchErr) return jsonResponse({ ok: false, error: fetchErr.message }, 500);
+        let queued = 0;
+        for (const p of (posts ?? [])) {
+          const tid = p.tweet_id as string;
+          const { error } = await supabase.from('jobs').upsert({
+            type: 'deliver',
+            payload: { tweet_id: tid },
+            status: 'pending',
+            priority: 5,
+            idempotency_key: `deliver:story_backfill:${tid}:${Date.now()}`,
+            next_run_at: new Date().toISOString(),
+          }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+          if (!error) queued++;
+        }
+        return jsonResponse({ ok: true, scanned: posts?.length ?? 0, queued });
+      }
+
       case 'preview_translation': {
         const text = typeof body.text === 'string' ? body.text.trim() : '';
         if (!text) return jsonResponse({ ok: false, error: 'text is required' }, 400);

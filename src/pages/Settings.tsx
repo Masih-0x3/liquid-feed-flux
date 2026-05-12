@@ -19,6 +19,7 @@ import {
 } from '@/hooks/useSettingsData';
 import ContentFilterSettings, { type ContentFilterConfig } from '@/components/settings/ContentFilterSettings';
 import EditorialProfilesCard from '@/components/settings/EditorialProfilesCard';
+import StoryMemoryCard from '@/components/settings/StoryMemoryCard';
 import type { EditorialProfile } from '@/hooks/useSettingsData';
 import XAutomationSettings from '@/components/settings/XAutomationSettings';
 import TranslationPlayground from '@/components/settings/TranslationPlayground';
@@ -493,6 +494,9 @@ export default function Settings() {
           <EditorialProfilesCard
             profiles={(settings?.editorial_profiles as { profiles?: EditorialProfile[] } | undefined)?.profiles ?? []}
             activeProfileId={(settings?.active_profile_id as { id?: string | null } | undefined)?.id ?? null}
+          />
+          <StoryMemoryCard
+            initial={settings?.story_memory as Partial<import('@/components/settings/StoryMemoryCard').StoryMemoryConfig> | undefined}
           />
           <ContentFilterSettings
             initialConfig={settings?.content_filter as ContentFilterConfig | undefined}
