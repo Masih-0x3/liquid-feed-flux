@@ -22,6 +22,12 @@ export interface MonitoringEntry {
   importance_tags: string[] | null;
   importance_reasoning: string | null;
   delivery_decision: string | null;
+  /** PR1: per-axis 0–10 scores returned by the AI (iran_relevance, severity, novelty, credibility, actionability, noise). */
+  score_axes: Record<string, number> | null;
+  /** PR1: derived 0–20 score computed from axes via the active editorial profile's weights. */
+  final_score: number | null;
+  /** PR1: short reason explaining the delivery decision (e.g. "below_threshold:8<12", "author_rule:always_skip:foo"). */
+  decision_reason: string | null;
   is_truncated: boolean;
   hydrated_at: string | null;
   hydration_source: string | null;
