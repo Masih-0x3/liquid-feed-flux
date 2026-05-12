@@ -18,6 +18,8 @@ import {
   type TranslationSettings, type TelegramSettings, type MessageTemplateSettings,
 } from '@/hooks/useSettingsData';
 import ContentFilterSettings, { type ContentFilterConfig } from '@/components/settings/ContentFilterSettings';
+import EditorialProfilesCard from '@/components/settings/EditorialProfilesCard';
+import type { EditorialProfile } from '@/hooks/useSettingsData';
 import XAutomationSettings from '@/components/settings/XAutomationSettings';
 import TranslationPlayground from '@/components/settings/TranslationPlayground';
 import PromptEditor from '@/components/settings/PromptEditor';
