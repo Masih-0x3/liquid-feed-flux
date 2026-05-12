@@ -216,7 +216,18 @@ async function loadConfig(supabase: any): Promise<any> {
         }
         if (s.key === 'content_filter' && typeof s.value === 'object' && s.value !== null) {
           defaults.contentFilter = { ...defaults.contentFilter, ...s.value as Record<string, { rule: string; threshold?: number }> };
-        }
+      }
+
+      // Resolve active editorial profile (PR2)
+      const profilesEntry = settings.find((x) => x.key === 'editorial_profiles');
+      const activeEntry = settings.find((x) => x.key === 'active_profile_id');
+      const profilesArr = (profilesEntry?.value as { profiles?: unknown[] } | null)?.profiles;
+      const activeId = (activeEntry?.value as { id?: string } | null)?.id;
+      if (Array.isArray(profilesArr) && activeId) {
+        const found = profilesArr.find(
+          (p) => p && typeof p === 'object' && (p as Record<string, unknown>).id === activeId,
+        );
+        if (found) defaults.editorialProfile = found as typeof defaults.editorialProfile;
       }
     }
   } catch (e) {
