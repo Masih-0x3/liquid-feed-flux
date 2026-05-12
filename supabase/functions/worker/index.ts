@@ -773,14 +773,26 @@ ${post.text_original}`;
       // Decide gate BEFORE translating
       let preDecision = 'deliver';
       if (importanceScore !== null && !scoreOnly) {
-        const authorRule = authorHandle ? config.contentFilter.author_rules[authorHandle] : null;
-        if (authorRule?.rule === 'always_deliver') preDecision = 'deliver';
-        else if (authorRule?.rule === 'always_skip') preDecision = 'skip';
-        else {
-          const threshold = authorRule?.rule === 'custom_threshold' && authorRule.threshold != null
-            ? authorRule.threshold
-            : config.contentFilter.default_threshold;
-          preDecision = importanceScore >= threshold ? 'deliver' : 'skip';
+        if (config.editorialProfile) {
+          const r = applyProfileDecision({
+            profile: config.editorialProfile,
+            axes: scoreAxes,
+            legacyScore: importanceScore,
+            tags: importanceTags,
+            text: textToTranslate,
+            authorHandle,
+          });
+          preDecision = r.decision;
+        } else {
+          const authorRule = authorHandle ? config.contentFilter.author_rules[authorHandle] : null;
+          if (authorRule?.rule === 'always_deliver') preDecision = 'deliver';
+          else if (authorRule?.rule === 'always_skip') preDecision = 'skip';
+          else {
+            const threshold = authorRule?.rule === 'custom_threshold' && authorRule.threshold != null
+              ? authorRule.threshold
+              : config.contentFilter.default_threshold;
+            preDecision = importanceScore >= threshold ? 'deliver' : 'skip';
+          }
         }
       }
 
