@@ -307,6 +307,9 @@ async function loadConfig(supabase: any): Promise<any> {
         if (s.key === 'content_filter' && typeof s.value === 'object' && s.value !== null) {
           defaults.contentFilter = { ...defaults.contentFilter, ...s.value as Record<string, { rule: string; threshold?: number }> };
         }
+        if (s.key === 'story_memory' && typeof s.value === 'object' && s.value !== null) {
+          defaults.storyMemory = { ...defaults.storyMemory, ...s.value as Record<string, unknown> } as typeof defaults.storyMemory;
+        }
       }
 
       // Resolve active editorial profile (PR2)
