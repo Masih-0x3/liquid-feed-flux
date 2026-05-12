@@ -326,13 +326,24 @@ export default function Monitoring() {
                                 ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
                                 : 'bg-red-500/20 text-red-400 border-red-500/30'
                             }
+                            title={
+                              entry.score_axes
+                                ? `Axes — ` + Object.entries(entry.score_axes).map(([k, v]) => `${k}:${v}`).join(', ')
+                                : undefined
+                            }
                           >
                             <Star className="w-3 h-3 mr-1" />{entry.importance_score}/20
                           </Badge>
                         )}
+                        {entry.final_score != null && entry.score_axes && (
+                          <Badge variant="outline" className="text-xs font-mono" title="Derived from axes (PR1: uniform weights)">
+                            f:{entry.final_score}
+                          </Badge>
+                        )}
                         {entry.delivery_decision && entry.delivery_decision !== 'deliver' && (
-                          <Badge variant="outline" className="text-muted-foreground">
+                          <Badge variant="outline" className="text-muted-foreground" title={entry.decision_reason ?? undefined}>
                             {entry.delivery_decision === 'skip' ? 'Skipped' : entry.delivery_decision}
+                            {entry.decision_reason ? ` · ${entry.decision_reason.split(':')[0]}` : ''}
                           </Badge>
                         )}
                         {entry.hydration_source === 'x_api' && (
