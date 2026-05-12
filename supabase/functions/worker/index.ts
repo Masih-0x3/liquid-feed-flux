@@ -764,26 +764,39 @@ ${post.text_original}`;
 
     // Determine delivery decision based on content filter
     let deliveryDecision = 'deliver';
+    let decisionReason: string | null = null;
     if (filterEnabled && importanceScore !== null && !scoreOnly) {
       // Check author-specific rules first
       const authorRule = authorHandle ? config.contentFilter.author_rules[authorHandle] : null;
-      
+
       if (authorRule?.rule === 'always_deliver') {
         deliveryDecision = 'deliver';
+        decisionReason = `author_rule:always_deliver:${authorHandle}`;
       } else if (authorRule?.rule === 'always_skip') {
         deliveryDecision = 'skip';
+        decisionReason = `author_rule:always_skip:${authorHandle}`;
       } else {
         const threshold = authorRule?.rule === 'custom_threshold' && authorRule.threshold != null
           ? authorRule.threshold
           : config.contentFilter.default_threshold;
         deliveryDecision = importanceScore >= threshold ? 'deliver' : 'skip';
+        decisionReason = deliveryDecision === 'deliver'
+          ? `score_pass:${importanceScore}>=${threshold}`
+          : `below_threshold:${importanceScore}<${threshold}`;
       }
-      console.log(JSON.stringify({ function: 'worker', action: 'filter_decision', tweet_id: tweetId, decision: deliveryDecision, score: importanceScore, threshold: config.contentFilter.default_threshold, author: authorHandle }));
+      console.log(JSON.stringify({ function: 'worker', action: 'filter_decision', tweet_id: tweetId, decision: deliveryDecision, score: importanceScore, threshold: config.contentFilter.default_threshold, author: authorHandle, reason: decisionReason }));
+    } else if (scoreOnly) {
+      decisionReason = 'score_only_mode';
+    } else if (!filterEnabled) {
+      decisionReason = 'filter_disabled';
     }
+
+    // Compute final_score from axes when present (PR1: uniform weights — PR2 will use editorial profiles)
+    const finalScore = scoreAxes ? computeFinalScore(scoreAxes) : (importanceScore ?? null);
 
     const { error: updateError } = await supabase
       .from('posts')
-      .update({ 
+      .update({
         text_translated: translatedText,
         lang_original: 'en',
         translated_at: nowIso,
@@ -794,6 +807,9 @@ ${post.text_original}`;
         importance_tags: importanceTags,
         importance_reasoning: importanceReasoning,
         delivery_decision: deliveryDecision,
+        score_axes: scoreAxes ?? null,
+        final_score: finalScore,
+        decision_reason: decisionReason,
       })
       .eq('tweet_id', tweetId);
 
