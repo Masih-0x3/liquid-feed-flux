@@ -708,7 +708,11 @@ ${post.text_original}`;
           importanceScore = Math.max(1, Math.min(20, args.importance_score || 10));
           importanceTags = args.tags || [];
           importanceReasoning = typeof args.reasoning === 'string' ? args.reasoning : null;
-          console.log(JSON.stringify({ function: 'worker', action: 'scored', tweet_id: tweetId, score: importanceScore, tags: importanceTags, reasoning: importanceReasoning, endpoint: result.endpoint }));
+          scoreAxes = parseScoreAxes(args.axes);
+          if (scoreAxes && (args.importance_score == null)) {
+            importanceScore = Math.round(computeFinalScore(scoreAxes));
+          }
+          console.log(JSON.stringify({ function: 'worker', action: 'scored', tweet_id: tweetId, score: importanceScore, axes: scoreAxes, tags: importanceTags, reasoning: importanceReasoning, endpoint: result.endpoint }));
         } catch (parseErr) {
           console.warn('Failed to parse tool call, falling back to content:', (parseErr as Error).message);
           translatedText = result.content;
