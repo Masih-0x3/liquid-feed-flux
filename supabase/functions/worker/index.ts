@@ -80,7 +80,90 @@ export function computeFinalScore(
   return Math.max(0, Math.min(20, Math.round((positiveNorm - noiseNorm) * 10) / 10));
 }
 
-// Internal token validation for cron/service-invoked functions
+// ============= Editorial profile decision (PR2) =============
+export interface EditorialProfile {
+  id: string;
+  name: string;
+  weights: Record<ScoreAxisKey, number>;
+  threshold: number;
+  must_include_keywords: string[];
+  must_exclude_keywords: string[];
+  required_tags_any: string[];
+  blocked_tags: string[];
+  author_overrides: Record<string, 'always_deliver' | 'always_skip'>;
+  editorial_note?: string;
+}
+
+export interface ProfileDecisionInput {
+  profile: EditorialProfile;
+  axes: ScoreAxes | null;
+  legacyScore: number | null;
+  tags: string[];
+  text: string;
+  authorHandle: string | null;
+}
+
+export interface ProfileDecisionResult {
+  decision: 'deliver' | 'skip';
+  reason: string;
+  finalScore: number;
+}
+
+/** Apply hard rules + weighted formula. Returns final decision + reason. */
+export function applyProfileDecision(input: ProfileDecisionInput): ProfileDecisionResult {
+  const { profile, axes, legacyScore, tags, text, authorHandle } = input;
+  const norm = (text || '').toLowerCase();
+  const handle = (authorHandle || '').toLowerCase();
+  const tagSet = new Set((tags || []).map((t) => String(t).toLowerCase()));
+
+  // 1. Author overrides (highest priority)
+  if (handle && profile.author_overrides) {
+    for (const [h, rule] of Object.entries(profile.author_overrides)) {
+      if (h.toLowerCase().replace(/^@/, '') === handle.replace(/^@/, '')) {
+        const finalScore = axes ? computeFinalScore(axes, profile.weights) : (legacyScore ?? 0);
+        return { decision: rule === 'always_deliver' ? 'deliver' : 'skip', reason: `author_override:${rule}:@${handle}`, finalScore };
+      }
+    }
+  }
+
+  // 2. Blocked tags
+  for (const t of profile.blocked_tags || []) {
+    if (tagSet.has(t.toLowerCase())) {
+      return { decision: 'skip', reason: `blocked_tag:${t}`, finalScore: 0 };
+    }
+  }
+
+  // 3. Required tags (any)
+  if ((profile.required_tags_any || []).length > 0) {
+    const ok = profile.required_tags_any.some((t) => tagSet.has(t.toLowerCase()));
+    if (!ok) return { decision: 'skip', reason: `missing_required_tag`, finalScore: 0 };
+  }
+
+  // 4. Must-exclude keywords
+  for (const kw of profile.must_exclude_keywords || []) {
+    if (kw && norm.includes(kw.toLowerCase())) {
+      return { decision: 'skip', reason: `excluded_keyword:${kw}`, finalScore: 0 };
+    }
+  }
+
+  // 5. Compute final score with profile weights
+  let finalScore = axes ? computeFinalScore(axes, profile.weights) : (legacyScore ?? 0);
+
+  // 6. Must-include keywords boost (+2 each, capped at 20)
+  let boost = 0;
+  for (const kw of profile.must_include_keywords || []) {
+    if (kw && norm.includes(kw.toLowerCase())) boost += 2;
+  }
+  if (boost > 0) finalScore = Math.min(20, finalScore + boost);
+
+  // 7. Threshold
+  if (finalScore >= profile.threshold) {
+    return { decision: 'deliver', reason: `score_pass:${finalScore.toFixed(1)}>=${profile.threshold}${boost ? `(+${boost} kw)` : ''}`, finalScore };
+  }
+  return { decision: 'skip', reason: `below_threshold:${finalScore.toFixed(1)}<${profile.threshold}`, finalScore };
+}
+
+
 function validateInternalToken(req: Request): Response | null {
   const token = req.headers.get('x-internal-token') || '';
   const expected = Deno.env.get('WEBHOOK_SHARED_SECRET') || '';
