@@ -245,6 +245,13 @@ async function loadConfig(supabase: any): Promise<any> {
       author_overrides: Record<string, 'always_deliver' | 'always_skip'>;
       editorial_note?: string;
     },
+    storyMemory: {
+      enabled: false,
+      window_hours: 12,
+      similarity_threshold: 0.86,
+      action: 'skip' as 'skip' | 'mark_and_deliver',
+      bypass_authors: [] as string[],
+    },
   };
 
   try {
