@@ -1241,7 +1241,7 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
 
     const { data: post, error: postError } = await supabase
       .from('posts')
-      .select('tweet_id, text_original, text_translated, url, tweeted_at, has_media, account_id')
+      .select('tweet_id, text_original, text_translated, url, tweeted_at, has_media, account_id, author_handle')
       .eq('tweet_id', tweetId)
       .single();
 
