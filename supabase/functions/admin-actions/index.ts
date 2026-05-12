@@ -244,7 +244,6 @@ function validateSettingsValue(key: string, value: unknown): string | null {
         }
         break;
       }
-      }
       case 'editorial_profiles': {
         if (!Array.isArray(v.profiles)) return 'editorial_profiles.profiles must be an array';
         if ((v.profiles as unknown[]).length > 50) return 'editorial_profiles.profiles must be ≤50';
