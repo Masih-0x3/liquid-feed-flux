@@ -106,6 +106,136 @@ async function recordXApiCall(supabase: any, error?: string) {
   } catch (e) { console.error('recordXApiCall failed', e); }
 }
 
+// Inline rescore: re-runs the translation+scoring tool call against current settings
+// and persists the new translation/score/decision. Returns a plain result object so
+// callers (rescore_post and retry_x_post) can decide what to do with it.
+// deno-lint-ignore no-explicit-any
+async function runRescore(supabase: any, tweetId: string): Promise<{ ok: boolean; error?: string; score?: number; decision?: string; threshold?: number; tags?: string[]; reasoning?: string | null; translated?: string | null; model?: string }> {
+  const { data: post, error: postErr } = await supabase
+    .from('posts')
+    .select('tweet_id, text_original, author_handle, tweeted_at, has_media, url')
+    .eq('tweet_id', tweetId)
+    .single();
+  if (postErr || !post) return { ok: false, error: `Post not found: ${tweetId}` };
+  if (!post.text_original) return { ok: false, error: 'Post has no original text to score' };
+
+  const { data: settings } = await supabase
+    .from('settings')
+    .select('key, value')
+    .in('key', ['translation_prompt', 'content_filter']);
+  const settingsMap: Record<string, Record<string, unknown>> = {};
+  for (const s of settings ?? []) {
+    if (s.value && typeof s.value === 'object') settingsMap[s.key] = s.value as Record<string, unknown>;
+  }
+  const tp = settingsMap['translation_prompt'] || {};
+  const cf = settingsMap['content_filter'] || {};
+
+  const model = typeof tp.model === 'string' && (tp.model as string).trim() ? tp.model as string : 'gpt-4o-mini';
+  const translationPrompt = typeof tp.system_prompt === 'string' && (tp.system_prompt as string).trim()
+    ? tp.system_prompt as string
+    : 'You are a professional translator. Translate the given English text to Persian. Preserve @mentions, #hashtags, URLs, and line breaks exactly. Only return the translated text, nothing else.';
+  const customScoringPrompt = typeof tp.scoring_system_prompt === 'string' && (tp.scoring_system_prompt as string).trim() ? tp.scoring_system_prompt as string : null;
+  const customToolSchema = typeof tp.classifier_tool_schema === 'string' && (tp.classifier_tool_schema as string).trim() ? tp.classifier_tool_schema as string : null;
+  const tsTemperature = typeof tp.temperature === 'number' ? tp.temperature as number : null;
+  const tsMaxTokens = typeof tp.max_completion_tokens === 'number' ? Math.min(8000, Math.max(1, tp.max_completion_tokens as number)) : 2000;
+  const tsTopP = typeof tp.top_p === 'number' ? tp.top_p as number : null;
+  const tsFreqPen = typeof tp.frequency_penalty === 'number' ? tp.frequency_penalty as number : null;
+  const tsPresPen = typeof tp.presence_penalty === 'number' ? tp.presence_penalty as number : null;
+  const tsReasoningEffort = typeof tp.reasoning_effort === 'string' ? tp.reasoning_effort as string : null;
+  const tsVerbosity = typeof tp.verbosity === 'string' ? tp.verbosity as string : null;
+  const tsSeed = typeof tp.seed === 'number' ? tp.seed as number : null;
+  const tsServiceTier = typeof tp.service_tier === 'string' ? tp.service_tier as string : null;
+  const tsParallelToolCalls = typeof tp.parallel_tool_calls === 'boolean' ? tp.parallel_tool_calls as boolean : null;
+
+  const openaiApiKey = Deno.env.get('OPENAI_API_KEY');
+  if (!openaiApiKey) return { ok: false, error: 'OPENAI_API_KEY is not configured' };
+
+  const priorityTopics = Array.isArray(cf.priority_topics) ? (cf.priority_topics as string[]).join(', ') : 'none specified';
+  const lowPriorityTopics = Array.isArray(cf.low_priority_topics) ? (cf.low_priority_topics as string[]).join(', ') : 'none specified';
+  const guidelines = typeof cf.editorial_guidelines === 'string' ? cf.editorial_guidelines as string : '';
+  const guidelinesBlock = guidelines.trim()
+    ? `### Editorial Guidelines (AUTHORITATIVE — these override the default rubric when they conflict)\n---\n${guidelines}\n---`
+    : '';
+
+  const scoringTemplate = customScoringPrompt ?? `You have two tasks. Complete both carefully.\n\n## Task 1: Translation\n{translation_prompt}\n\n## Task 2: News Importance Scoring\nScore 1-20 with 3-level relevance: DIRECT (no cap), INDIRECT Iran-adjacent (cap 16), NO NEXUS (cap 8). Polls/leaks/analyst reports about Iran conflicts can score 13-16. Do NOT down-score because framing is Western. Prefer higher tier when in doubt.\n\nHigh-priority: {priority_topics}\nLow-priority: {low_priority_topics}\n\n{editorial_guidelines_block}\n\nReasoning MUST state: relevance level, tier, any cap. Call "classify_importance".`;
+  const systemPrompt = scoringTemplate
+    .replace('{translation_prompt}', translationPrompt)
+    .replace('{priority_topics}', priorityTopics)
+    .replace('{low_priority_topics}', lowPriorityTopics)
+    .replace('{editorial_guidelines_block}', guidelinesBlock);
+
+  let toolFunction: ToolFunctionDef;
+  try {
+    toolFunction = customToolSchema ? JSON.parse(customToolSchema) : {
+      name: 'classify_importance',
+      parameters: {
+        type: 'object',
+        properties: {
+          translated_text: { type: 'string' },
+          importance_score: { type: 'integer', minimum: 1, maximum: 20 },
+          tags: { type: 'array', items: { type: 'string' } },
+          reasoning: { type: 'string' },
+        },
+        required: ['translated_text', 'importance_score', 'tags', 'reasoning'],
+      },
+    };
+  } catch (e) {
+    return { ok: false, error: `Invalid classifier_tool_schema JSON: ${(e as Error).message}` };
+  }
+
+  const userMessage = `Author: @${post.author_handle || 'unknown'}\nPublished: ${post.tweeted_at ? new Date(post.tweeted_at as string).toISOString() : 'unknown'}\nHas media: ${post.has_media ? 'yes' : 'no'}\nURL: ${post.url || 'N/A'}\n\nContent:\n${post.text_original}`;
+
+  const result = await callOpenAI({
+    apiKey: openaiApiKey,
+    model,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userMessage },
+    ],
+    tool: toolFunction,
+    maxOutputTokens: tsMaxTokens,
+    temperature: tsTemperature,
+    topP: tsTopP,
+    frequencyPenalty: tsFreqPen,
+    presencePenalty: tsPresPen,
+    reasoningEffort: tsReasoningEffort,
+    verbosity: tsVerbosity,
+    seed: tsSeed,
+    serviceTier: tsServiceTier,
+    parallelToolCalls: tsParallelToolCalls,
+  });
+  if (!result.ok) return { ok: false, error: `OpenAI ${result.status}: ${result.rawText.slice(0, 500)}` };
+  if (!result.toolCall) return { ok: false, error: 'Model did not return a tool call' };
+
+  let args: { translated_text?: string; importance_score?: number; tags?: string[]; reasoning?: string };
+  try { args = JSON.parse(result.toolCall.arguments); }
+  catch (e) { return { ok: false, error: `Tool-call parse error: ${(e as Error).message}` }; }
+
+  const newScore = Math.max(1, Math.min(20, args.importance_score || 10));
+  const newTags = Array.isArray(args.tags) ? args.tags : [];
+  const newReasoning = typeof args.reasoning === 'string' ? args.reasoning : null;
+  const newTranslated = typeof args.translated_text === 'string' ? args.translated_text : null;
+
+  const threshold = typeof cf.default_threshold === 'number' ? cf.default_threshold as number : 12;
+  const newDecision = newScore >= threshold ? 'deliver' : 'skip';
+
+  const updatePayload: Record<string, unknown> = {
+    importance_score: newScore,
+    importance_tags: newTags,
+    importance_reasoning: newReasoning,
+    delivery_decision: newDecision,
+  };
+  if (newTranslated) {
+    updatePayload.text_translated = newTranslated;
+    updatePayload.translated_at = new Date().toISOString();
+    updatePayload.translation_model = model;
+  }
+
+  const { error: upErr } = await supabase.from('posts').update(updatePayload).eq('tweet_id', tweetId);
+  if (upErr) return { ok: false, error: upErr.message };
+
+  return { ok: true, score: newScore, tags: newTags, reasoning: newReasoning, translated: newTranslated, decision: newDecision, threshold, model };
+}
 
 function validateSettingsValue(key: string, value: unknown): string | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
