@@ -586,6 +586,7 @@ ${post.text_original}`;
     };
 
     // ============ SPLIT PATH: score first, translate only on pass ============
+    let scoreAxes: ScoreAxes | null = null;
     if (filterEnabled && config.splitCalls) {
       const scoreToolFunction = buildToolFunction(false);
 
@@ -621,7 +622,12 @@ ${post.text_original}`;
           importanceScore = Math.max(1, Math.min(20, args.importance_score || 10));
           importanceTags = args.tags || [];
           importanceReasoning = typeof args.reasoning === 'string' ? args.reasoning : null;
-          console.log(JSON.stringify({ function: 'worker', action: 'scored', tweet_id: tweetId, score: importanceScore, tags: importanceTags, reasoning: importanceReasoning, endpoint: scoreResult.endpoint, model: scoringModel }));
+          scoreAxes = parseScoreAxes(args.axes);
+          // If axes present and importance_score wasn't, derive it from axes
+          if (scoreAxes && (args.importance_score == null)) {
+            importanceScore = Math.round(computeFinalScore(scoreAxes));
+          }
+          console.log(JSON.stringify({ function: 'worker', action: 'scored', tweet_id: tweetId, score: importanceScore, axes: scoreAxes, tags: importanceTags, reasoning: importanceReasoning, endpoint: scoreResult.endpoint, model: scoringModel }));
         } catch (parseErr) {
           console.warn('Failed to parse score tool call:', (parseErr as Error).message);
         }
