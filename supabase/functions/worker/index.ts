@@ -911,37 +911,49 @@ ${post.text_original}`;
       await supabase.from('jobs').update({ result_meta: resultMeta }).eq('id', job.id);
     } catch (_e) { /* best-effort */ }
 
-    // Determine delivery decision based on content filter
+    // Determine delivery decision based on active editorial profile or legacy content filter
     let deliveryDecision = 'deliver';
     let decisionReason: string | null = null;
+    let finalScore: number | null = scoreAxes ? computeFinalScore(scoreAxes) : (importanceScore ?? null);
     if (filterEnabled && importanceScore !== null && !scoreOnly) {
-      // Check author-specific rules first
-      const authorRule = authorHandle ? config.contentFilter.author_rules[authorHandle] : null;
-
-      if (authorRule?.rule === 'always_deliver') {
-        deliveryDecision = 'deliver';
-        decisionReason = `author_rule:always_deliver:${authorHandle}`;
-      } else if (authorRule?.rule === 'always_skip') {
-        deliveryDecision = 'skip';
-        decisionReason = `author_rule:always_skip:${authorHandle}`;
+      if (config.editorialProfile) {
+        const r = applyProfileDecision({
+          profile: config.editorialProfile,
+          axes: scoreAxes,
+          legacyScore: importanceScore,
+          tags: importanceTags,
+          text: String(post.text_original || ''),
+          authorHandle,
+        });
+        deliveryDecision = r.decision;
+        decisionReason = r.reason;
+        finalScore = r.finalScore;
+        console.log(JSON.stringify({ function: 'worker', action: 'filter_decision', tweet_id: tweetId, decision: deliveryDecision, score: importanceScore, final_score: finalScore, profile: config.editorialProfile.id, author: authorHandle, reason: decisionReason }));
       } else {
-        const threshold = authorRule?.rule === 'custom_threshold' && authorRule.threshold != null
-          ? authorRule.threshold
-          : config.contentFilter.default_threshold;
-        deliveryDecision = importanceScore >= threshold ? 'deliver' : 'skip';
-        decisionReason = deliveryDecision === 'deliver'
-          ? `score_pass:${importanceScore}>=${threshold}`
-          : `below_threshold:${importanceScore}<${threshold}`;
+        // Legacy content_filter path
+        const authorRule = authorHandle ? config.contentFilter.author_rules[authorHandle] : null;
+        if (authorRule?.rule === 'always_deliver') {
+          deliveryDecision = 'deliver';
+          decisionReason = `author_rule:always_deliver:${authorHandle}`;
+        } else if (authorRule?.rule === 'always_skip') {
+          deliveryDecision = 'skip';
+          decisionReason = `author_rule:always_skip:${authorHandle}`;
+        } else {
+          const threshold = authorRule?.rule === 'custom_threshold' && authorRule.threshold != null
+            ? authorRule.threshold
+            : config.contentFilter.default_threshold;
+          deliveryDecision = importanceScore >= threshold ? 'deliver' : 'skip';
+          decisionReason = deliveryDecision === 'deliver'
+            ? `score_pass:${importanceScore}>=${threshold}`
+            : `below_threshold:${importanceScore}<${threshold}`;
+        }
+        console.log(JSON.stringify({ function: 'worker', action: 'filter_decision', tweet_id: tweetId, decision: deliveryDecision, score: importanceScore, threshold: config.contentFilter.default_threshold, author: authorHandle, reason: decisionReason }));
       }
-      console.log(JSON.stringify({ function: 'worker', action: 'filter_decision', tweet_id: tweetId, decision: deliveryDecision, score: importanceScore, threshold: config.contentFilter.default_threshold, author: authorHandle, reason: decisionReason }));
     } else if (scoreOnly) {
       decisionReason = 'score_only_mode';
     } else if (!filterEnabled) {
       decisionReason = 'filter_disabled';
     }
-
-    // Compute final_score from axes when present (PR1: uniform weights — PR2 will use editorial profiles)
-    const finalScore = scoreAxes ? computeFinalScore(scoreAxes) : (importanceScore ?? null);
 
     const { error: updateError } = await supabase
       .from('posts')
