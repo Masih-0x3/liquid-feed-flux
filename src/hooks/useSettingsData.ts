@@ -6,6 +6,48 @@ export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high';
 export type Verbosity = 'low' | 'medium' | 'high';
 export type ServiceTier = 'auto' | 'default' | 'flex' | 'priority';
 
+// ===== Editorial Profiles (PR2) =====
+export type ScoreAxisKey = 'iran_relevance' | 'severity' | 'novelty' | 'credibility' | 'actionability' | 'noise';
+export const SCORE_AXIS_KEYS: ScoreAxisKey[] = ['iran_relevance', 'severity', 'novelty', 'credibility', 'actionability', 'noise'];
+
+export interface EditorialProfile {
+  id: string;
+  name: string;
+  weights: Record<ScoreAxisKey, number>;
+  threshold: number;
+  must_include_keywords: string[];
+  must_exclude_keywords: string[];
+  required_tags_any: string[];
+  blocked_tags: string[];
+  author_overrides: Record<string, 'always_deliver' | 'always_skip'>;
+  editorial_note?: string;
+}
+
+export const DEFAULT_AXIS_WEIGHTS: Record<ScoreAxisKey, number> = {
+  iran_relevance: 1.5,
+  severity: 1.5,
+  novelty: 1.0,
+  credibility: 0.5,
+  actionability: 1.0,
+  noise: 1.0,
+};
+
+export function makeDefaultProfile(name = 'Default'): EditorialProfile {
+  return {
+    id: crypto.randomUUID(),
+    name,
+    weights: { ...DEFAULT_AXIS_WEIGHTS },
+    threshold: 12,
+    must_include_keywords: [],
+    must_exclude_keywords: [],
+    required_tags_any: [],
+    blocked_tags: [],
+    author_overrides: {},
+    editorial_note: '',
+  };
+}
+
+
 export interface ScoringSettings {
   model?: string;
   temperature?: number | null;
