@@ -488,6 +488,10 @@ export default function Settings() {
 
         {/* Content Filter Tab */}
         <TabsContent value="filter" className="space-y-6">
+          <EditorialProfilesCard
+            profiles={(settings?.editorial_profiles as { profiles?: EditorialProfile[] } | undefined)?.profiles ?? []}
+            activeProfileId={(settings?.active_profile_id as { id?: string | null } | undefined)?.id ?? null}
+          />
           <ContentFilterSettings
             initialConfig={settings?.content_filter as ContentFilterConfig | undefined}
             translationSettings={ts}
