@@ -624,6 +624,31 @@ serve(async (req) => {
         const tweetId = typeof body.tweet_id === 'string' ? body.tweet_id.trim() : null;
         const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
         const svcKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+
+        // Pre-flight: when forcing a specific tweet, ensure it has a translation
+        // and a score. Without this, x-poster filters it out (or in worst case
+        // posts media-only with empty body). Translate+score inline first.
+        let prep: { ran: boolean; ok: boolean; score?: number; decision?: string; error?: string } = { ran: false, ok: true };
+        if (tweetId) {
+          const { data: existing } = await supabase
+            .from('posts')
+            .select('text_translated, importance_score')
+            .eq('tweet_id', tweetId)
+            .maybeSingle();
+          const needsRescore = !existing
+            || !existing.text_translated
+            || typeof existing.text_translated !== 'string'
+            || (existing.text_translated as string).trim().length === 0
+            || existing.importance_score == null;
+          if (needsRescore) {
+            const r = await runRescore(supabase, tweetId);
+            prep = { ran: true, ok: r.ok, score: r.score, decision: r.decision, error: r.error };
+            if (!r.ok) {
+              return jsonResponse({ ok: false, error: `pre-post translate/score failed: ${r.error}`, prep }, 200);
+            }
+          }
+        }
+
         try {
           const resp = await fetch(`${supabaseUrl}/functions/v1/x-poster`, {
             method: 'POST',
@@ -635,10 +660,10 @@ serve(async (req) => {
           });
           const text = await resp.text();
           let parsed: unknown; try { parsed = JSON.parse(text); } catch { parsed = text; }
-          if (!resp.ok) return jsonResponse({ ok: false, error: `x-poster ${resp.status}: ${text.slice(0, 300)}`, raw: parsed }, 200);
-          return jsonResponse({ ok: true, ...(parsed as Record<string, unknown>) });
+          if (!resp.ok) return jsonResponse({ ok: false, error: `x-poster ${resp.status}: ${text.slice(0, 300)}`, raw: parsed, prep }, 200);
+          return jsonResponse({ ok: true, prep, ...(parsed as Record<string, unknown>) });
         } catch (e) {
-          return jsonResponse({ ok: false, error: (e as Error).message }, 200);
+          return jsonResponse({ ok: false, error: (e as Error).message, prep }, 200);
         }
       }
 
