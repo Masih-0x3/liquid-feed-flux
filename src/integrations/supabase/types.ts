@@ -384,7 +384,9 @@ export type Database = {
           account_id: string
           author_handle: string | null
           created_at: string
+          decision_reason: string | null
           delivery_decision: string | null
+          final_score: number | null
           has_media: boolean | null
           hydrated_at: string | null
           hydration_source: string | null
@@ -393,6 +395,7 @@ export type Database = {
           importance_tags: string[] | null
           is_truncated: boolean
           lang_original: string | null
+          score_axes: Json | null
           text_original: string | null
           text_translated: string | null
           translated_at: string | null
@@ -408,7 +411,9 @@ export type Database = {
           account_id: string
           author_handle?: string | null
           created_at?: string
+          decision_reason?: string | null
           delivery_decision?: string | null
+          final_score?: number | null
           has_media?: boolean | null
           hydrated_at?: string | null
           hydration_source?: string | null
@@ -417,6 +422,7 @@ export type Database = {
           importance_tags?: string[] | null
           is_truncated?: boolean
           lang_original?: string | null
+          score_axes?: Json | null
           text_original?: string | null
           text_translated?: string | null
           translated_at?: string | null
@@ -432,7 +438,9 @@ export type Database = {
           account_id?: string
           author_handle?: string | null
           created_at?: string
+          decision_reason?: string | null
           delivery_decision?: string | null
+          final_score?: number | null
           has_media?: boolean | null
           hydrated_at?: string | null
           hydration_source?: string | null
@@ -441,6 +449,7 @@ export type Database = {
           importance_tags?: string[] | null
           is_truncated?: boolean
           lang_original?: string | null
+          score_axes?: Json | null
           text_original?: string | null
           text_translated?: string | null
           translated_at?: string | null
