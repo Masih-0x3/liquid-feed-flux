@@ -150,6 +150,18 @@ async function loadConfig(supabase: any): Promise<any> {
       author_rules: {} as Record<string, { rule: string; threshold?: number }>,
       score_only: false,
     },
+    editorialProfile: null as null | {
+      id: string;
+      name: string;
+      weights: Record<ScoreAxisKey, number>;
+      threshold: number;
+      must_include_keywords: string[];
+      must_exclude_keywords: string[];
+      required_tags_any: string[];
+      blocked_tags: string[];
+      author_overrides: Record<string, 'always_deliver' | 'always_skip'>;
+      editorial_note?: string;
+    },
   };
 
   try {
