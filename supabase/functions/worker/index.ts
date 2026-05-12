@@ -14,6 +14,72 @@ async function hashUrl(url: string): Promise<string> {
   return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+// ============= Multi-axis scoring (PR1) =============
+// 6 axes, each 0-10. `noise` is inverted (higher = worse).
+// Until editorial profiles land in PR2, we use uniform default weights.
+export const SCORE_AXIS_KEYS = [
+  'iran_relevance',
+  'severity',
+  'novelty',
+  'credibility',
+  'actionability',
+  'noise',
+] as const;
+export type ScoreAxisKey = typeof SCORE_AXIS_KEYS[number];
+export type ScoreAxes = Partial<Record<ScoreAxisKey, number>>;
+
+const DEFAULT_AXIS_WEIGHTS: Record<ScoreAxisKey, number> = {
+  iran_relevance: 1.0,
+  severity: 1.0,
+  novelty: 1.0,
+  credibility: 0.5,
+  actionability: 1.0,
+  noise: 1.0, // subtractive
+};
+
+/** Parse and clamp axes from arbitrary tool-call output. Returns null if no usable axes. */
+export function parseScoreAxes(raw: unknown): ScoreAxes | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const src = raw as Record<string, unknown>;
+  const out: ScoreAxes = {};
+  let hasAny = false;
+  for (const k of SCORE_AXIS_KEYS) {
+    const v = src[k];
+    if (typeof v === 'number' && Number.isFinite(v)) {
+      out[k] = Math.max(0, Math.min(10, Math.round(v)));
+      hasAny = true;
+    }
+  }
+  return hasAny ? out : null;
+}
+
+/**
+ * Compute final_score (0-20) from axes using a weights map.
+ * Formula: positive_sum = Σ(axis * weight) for non-noise axes; subtract noise * weight.
+ * Then normalize to 0-20 against the maximum possible positive sum.
+ */
+export function computeFinalScore(
+  axes: ScoreAxes,
+  weights: Record<ScoreAxisKey, number> = DEFAULT_AXIS_WEIGHTS,
+): number {
+  let posSum = 0;
+  let posMax = 0;
+  for (const k of SCORE_AXIS_KEYS) {
+    if (k === 'noise') continue;
+    const w = Math.max(0, weights[k] ?? 0);
+    posSum += (axes[k] ?? 0) * w;
+    posMax += 10 * w;
+  }
+  const noiseW = Math.max(0, weights.noise ?? 0);
+  const noisePenalty = (axes.noise ?? 0) * noiseW;
+  const noiseMax = 10 * noiseW;
+
+  // Normalize to 0..20. Subtract noise as a fraction of its max.
+  const positiveNorm = posMax > 0 ? (posSum / posMax) * 20 : 0;
+  const noiseNorm = noiseMax > 0 ? (noisePenalty / noiseMax) * 8 : 0; // noise can drag up to 8 pts
+  return Math.max(0, Math.min(20, Math.round((positiveNorm - noiseNorm) * 10) / 10));
+}
+
 // Internal token validation for cron/service-invoked functions
 function validateInternalToken(req: Request): Response | null {
   const token = req.headers.get('x-internal-token') || '';
@@ -429,7 +495,15 @@ You are an editorial assistant scoring news items for a curated Telegram channel
 - INDIRECT (Iran is the SUBJECT of foreign discussion): cap at 16.
 - NO IRAN NEXUS (pure US/EU/China domestic): cap at 8.
 
-### STEP B — Score 1-20
+### STEP B — Score 1-20 (importance_score)
+
+### STEP C — Score the 6 axes (axes object), each 0-10
+- iran_relevance: 8-10 if DIRECT, 4-7 if INDIRECT, 0-3 if NONE.
+- severity: how big the event itself is — strike/war > policy > analysis > routine.
+- novelty: breaking new info > update > recap/rehash.
+- credibility: official statement > named reporter > anonymous/rumor.
+- actionability: does it materially shift policy/markets/the war picture?
+- noise: INVERTED — high if spam/promo/personal/sports, low for substantive news.
 
 ### Topics
 High-priority (boost 1-2): {priority_topics}
@@ -437,7 +511,7 @@ Low-priority (reduce 1-2): {low_priority_topics}
 
 {editorial_guidelines_block}
 
-You MUST call the "classify_importance" tool.`;
+You MUST call the "classify_importance" tool with BOTH importance_score (1-20) AND axes (all 6 axes).`;
 
     const accountData = (post as Record<string, unknown>).accounts as Record<string, unknown> | null;
     const authorDisplay = authorHandle || (accountData?.handle as string) || 'unknown';
@@ -453,6 +527,19 @@ Content:
 ${post.text_original}`;
 
     // Build classifier tool schema (with optional translated_text stripped for split mode)
+    const AXES_SCHEMA = {
+      type: 'object',
+      description: 'Six independent scoring axes (each 0-10). noise is INVERTED (high = bad).',
+      properties: {
+        iran_relevance: { type: 'integer', minimum: 0, maximum: 10 },
+        severity: { type: 'integer', minimum: 0, maximum: 10 },
+        novelty: { type: 'integer', minimum: 0, maximum: 10 },
+        credibility: { type: 'integer', minimum: 0, maximum: 10 },
+        actionability: { type: 'integer', minimum: 0, maximum: 10 },
+        noise: { type: 'integer', minimum: 0, maximum: 10 },
+      },
+      required: ['iran_relevance', 'severity', 'novelty', 'credibility', 'actionability', 'noise'],
+    };
     const buildToolFunction = (includeTranslatedText: boolean): Record<string, unknown> => {
       let base: Record<string, unknown>;
       try {
@@ -466,10 +553,11 @@ ${post.text_original}`;
                 properties: {
                   translated_text: { type: 'string', description: 'The Persian translation of the original text' },
                   importance_score: { type: 'integer', minimum: 1, maximum: 20 },
+                  axes: AXES_SCHEMA,
                   tags: { type: 'array', items: { type: 'string' } },
                   reasoning: { type: 'string', description: 'Required: state relevance level, tier, and any cap applied' },
                 },
-                required: ['translated_text', 'importance_score', 'tags', 'reasoning'],
+                required: ['translated_text', 'importance_score', 'axes', 'tags', 'reasoning'],
               },
             };
       } catch (e) {
@@ -481,19 +569,28 @@ ${post.text_original}`;
             properties: {
               translated_text: { type: 'string' },
               importance_score: { type: 'integer', minimum: 1, maximum: 20 },
+              axes: AXES_SCHEMA,
               tags: { type: 'array', items: { type: 'string' } },
               reasoning: { type: 'string' },
             },
-            required: ['translated_text', 'importance_score', 'tags', 'reasoning'],
+            required: ['translated_text', 'importance_score', 'axes', 'tags', 'reasoning'],
           },
         };
       }
-      if (!includeTranslatedText) {
-        const params = base.parameters as Record<string, unknown>;
-        const props = { ...(params.properties as Record<string, unknown>) };
-        delete props.translated_text;
-        const required = ((params.required as string[]) || []).filter((k) => k !== 'translated_text');
+      // Auto-inject axes into customized schemas if missing (PR1 backward-compat)
+      const params = base.parameters as Record<string, unknown>;
+      const props = { ...(params.properties as Record<string, unknown>) };
+      if (!props.axes) {
+        props.axes = AXES_SCHEMA;
+        const required = Array.from(new Set([...((params.required as string[]) || []), 'axes']));
         base = { ...base, parameters: { ...params, properties: props, required } };
+      }
+      if (!includeTranslatedText) {
+        const p2 = base.parameters as Record<string, unknown>;
+        const props2 = { ...(p2.properties as Record<string, unknown>) };
+        delete props2.translated_text;
+        const required = ((p2.required as string[]) || []).filter((k) => k !== 'translated_text');
+        base = { ...base, parameters: { ...p2, properties: props2, required } };
       }
       return base;
     };
@@ -520,6 +617,7 @@ ${post.text_original}`;
     };
 
     // ============ SPLIT PATH: score first, translate only on pass ============
+    let scoreAxes: ScoreAxes | null = null;
     if (filterEnabled && config.splitCalls) {
       const scoreToolFunction = buildToolFunction(false);
 
@@ -555,7 +653,12 @@ ${post.text_original}`;
           importanceScore = Math.max(1, Math.min(20, args.importance_score || 10));
           importanceTags = args.tags || [];
           importanceReasoning = typeof args.reasoning === 'string' ? args.reasoning : null;
-          console.log(JSON.stringify({ function: 'worker', action: 'scored', tweet_id: tweetId, score: importanceScore, tags: importanceTags, reasoning: importanceReasoning, endpoint: scoreResult.endpoint, model: scoringModel }));
+          scoreAxes = parseScoreAxes(args.axes);
+          // If axes present and importance_score wasn't, derive it from axes
+          if (scoreAxes && (args.importance_score == null)) {
+            importanceScore = Math.round(computeFinalScore(scoreAxes));
+          }
+          console.log(JSON.stringify({ function: 'worker', action: 'scored', tweet_id: tweetId, score: importanceScore, axes: scoreAxes, tags: importanceTags, reasoning: importanceReasoning, endpoint: scoreResult.endpoint, model: scoringModel }));
         } catch (parseErr) {
           console.warn('Failed to parse score tool call:', (parseErr as Error).message);
         }
@@ -636,7 +739,11 @@ ${post.text_original}`;
           importanceScore = Math.max(1, Math.min(20, args.importance_score || 10));
           importanceTags = args.tags || [];
           importanceReasoning = typeof args.reasoning === 'string' ? args.reasoning : null;
-          console.log(JSON.stringify({ function: 'worker', action: 'scored', tweet_id: tweetId, score: importanceScore, tags: importanceTags, reasoning: importanceReasoning, endpoint: result.endpoint }));
+          scoreAxes = parseScoreAxes(args.axes);
+          if (scoreAxes && (args.importance_score == null)) {
+            importanceScore = Math.round(computeFinalScore(scoreAxes));
+          }
+          console.log(JSON.stringify({ function: 'worker', action: 'scored', tweet_id: tweetId, score: importanceScore, axes: scoreAxes, tags: importanceTags, reasoning: importanceReasoning, endpoint: result.endpoint }));
         } catch (parseErr) {
           console.warn('Failed to parse tool call, falling back to content:', (parseErr as Error).message);
           translatedText = result.content;
@@ -688,26 +795,39 @@ ${post.text_original}`;
 
     // Determine delivery decision based on content filter
     let deliveryDecision = 'deliver';
+    let decisionReason: string | null = null;
     if (filterEnabled && importanceScore !== null && !scoreOnly) {
       // Check author-specific rules first
       const authorRule = authorHandle ? config.contentFilter.author_rules[authorHandle] : null;
-      
+
       if (authorRule?.rule === 'always_deliver') {
         deliveryDecision = 'deliver';
+        decisionReason = `author_rule:always_deliver:${authorHandle}`;
       } else if (authorRule?.rule === 'always_skip') {
         deliveryDecision = 'skip';
+        decisionReason = `author_rule:always_skip:${authorHandle}`;
       } else {
         const threshold = authorRule?.rule === 'custom_threshold' && authorRule.threshold != null
           ? authorRule.threshold
           : config.contentFilter.default_threshold;
         deliveryDecision = importanceScore >= threshold ? 'deliver' : 'skip';
+        decisionReason = deliveryDecision === 'deliver'
+          ? `score_pass:${importanceScore}>=${threshold}`
+          : `below_threshold:${importanceScore}<${threshold}`;
       }
-      console.log(JSON.stringify({ function: 'worker', action: 'filter_decision', tweet_id: tweetId, decision: deliveryDecision, score: importanceScore, threshold: config.contentFilter.default_threshold, author: authorHandle }));
+      console.log(JSON.stringify({ function: 'worker', action: 'filter_decision', tweet_id: tweetId, decision: deliveryDecision, score: importanceScore, threshold: config.contentFilter.default_threshold, author: authorHandle, reason: decisionReason }));
+    } else if (scoreOnly) {
+      decisionReason = 'score_only_mode';
+    } else if (!filterEnabled) {
+      decisionReason = 'filter_disabled';
     }
+
+    // Compute final_score from axes when present (PR1: uniform weights — PR2 will use editorial profiles)
+    const finalScore = scoreAxes ? computeFinalScore(scoreAxes) : (importanceScore ?? null);
 
     const { error: updateError } = await supabase
       .from('posts')
-      .update({ 
+      .update({
         text_translated: translatedText,
         lang_original: 'en',
         translated_at: nowIso,
@@ -718,6 +838,9 @@ ${post.text_original}`;
         importance_tags: importanceTags,
         importance_reasoning: importanceReasoning,
         delivery_decision: deliveryDecision,
+        score_axes: scoreAxes ?? null,
+        final_score: finalScore,
+        decision_reason: decisionReason,
       })
       .eq('tweet_id', tweetId);
 

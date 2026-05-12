@@ -22,6 +22,12 @@ export interface MonitoringEntry {
   importance_tags: string[] | null;
   importance_reasoning: string | null;
   delivery_decision: string | null;
+  /** PR1: per-axis 0–10 scores returned by the AI (iran_relevance, severity, novelty, credibility, actionability, noise). */
+  score_axes: Record<string, number> | null;
+  /** PR1: derived 0–20 score computed from axes via the active editorial profile's weights. */
+  final_score: number | null;
+  /** PR1: short reason explaining the delivery decision (e.g. "below_threshold:8<12", "author_rule:always_skip:foo"). */
+  decision_reason: string | null;
   is_truncated: boolean;
   hydrated_at: string | null;
   hydration_source: string | null;
@@ -51,7 +57,7 @@ async function fetchMonitoringPage({ pageParam = 0 }: { pageParam: number }): Pr
 
   const { data: postsData, error: postsError } = await supabase
     .from('posts')
-    .select('tweet_id, text_original, text_translated, url, created_at, translated_at, has_media, lang_original, author_handle, importance_score, importance_tags, importance_reasoning, delivery_decision, accounts!inner(handle, display_name)')
+    .select('tweet_id, text_original, text_translated, url, created_at, translated_at, has_media, lang_original, author_handle, importance_score, importance_tags, importance_reasoning, delivery_decision, score_axes, final_score, decision_reason, accounts!inner(handle, display_name)')
     .order('created_at', { ascending: false })
     .range(from, to);
   if (postsError) throw postsError;
@@ -98,6 +104,9 @@ async function fetchMonitoringPage({ pageParam = 0 }: { pageParam: number }): Pr
       importance_tags: post.importance_tags ?? null,
       importance_reasoning: (post as { importance_reasoning?: string | null }).importance_reasoning ?? null,
       delivery_decision: post.delivery_decision ?? null,
+      score_axes: ((post as { score_axes?: Record<string, number> | null }).score_axes ?? null),
+      final_score: ((post as { final_score?: number | null }).final_score ?? null),
+      decision_reason: ((post as { decision_reason?: string | null }).decision_reason ?? null),
       is_truncated: isTruncated,
       hydrated_at: hydratedAt,
       hydration_source: hydrationSource,
