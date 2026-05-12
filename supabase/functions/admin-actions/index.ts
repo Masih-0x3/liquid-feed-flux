@@ -244,6 +244,43 @@ function validateSettingsValue(key: string, value: unknown): string | null {
         }
         break;
       }
+      }
+      case 'editorial_profiles': {
+        if (!Array.isArray(v.profiles)) return 'editorial_profiles.profiles must be an array';
+        if ((v.profiles as unknown[]).length > 50) return 'editorial_profiles.profiles must be ≤50';
+        const AXES = ['iran_relevance','severity','novelty','credibility','actionability','noise'];
+        for (const p of v.profiles as unknown[]) {
+          if (!p || typeof p !== 'object') return 'each profile must be an object';
+          const pp = p as Record<string, unknown>;
+          if (typeof pp.id !== 'string' || !pp.id) return 'profile.id required';
+          if (typeof pp.name !== 'string' || !pp.name || (pp.name as string).length > 80) return 'profile.name required (≤80)';
+          if (typeof pp.threshold !== 'number' || (pp.threshold as number) < 0 || (pp.threshold as number) > 20) return 'profile.threshold must be 0-20';
+          if (!pp.weights || typeof pp.weights !== 'object') return 'profile.weights required';
+          for (const ax of AXES) {
+            const w = (pp.weights as Record<string, unknown>)[ax];
+            if (w !== undefined && (typeof w !== 'number' || w < 0 || w > 5)) return `profile.weights.${ax} must be 0-5`;
+          }
+          for (const arrKey of ['must_include_keywords','must_exclude_keywords','required_tags_any','blocked_tags']) {
+            const a = pp[arrKey];
+            if (a !== undefined && (!Array.isArray(a) || (a as unknown[]).some((x) => typeof x !== 'string' || (x as string).length > 80))) {
+              return `profile.${arrKey} must be array of strings ≤80`;
+            }
+          }
+          if (pp.author_overrides !== undefined) {
+            if (typeof pp.author_overrides !== 'object' || pp.author_overrides === null) return 'profile.author_overrides must be object';
+            for (const [, val] of Object.entries(pp.author_overrides as Record<string, unknown>)) {
+              if (val !== 'always_deliver' && val !== 'always_skip') return 'author_overrides values must be always_deliver|always_skip';
+            }
+          }
+          if (pp.editorial_note !== undefined && (typeof pp.editorial_note !== 'string' || (pp.editorial_note as string).length > 4000)) return 'profile.editorial_note must be string ≤4000';
+        }
+        break;
+      }
+      case 'active_profile_id': {
+        if (v.id !== null && typeof v.id !== 'string') return 'active_profile_id.id must be string or null';
+        if (typeof v.id === 'string' && (v.id as string).length > 80) return 'active_profile_id.id too long';
+        break;
+      }
     }
     return null;
   }
@@ -282,7 +319,7 @@ serve(async (req) => {
           return jsonResponse({ error: 'key and value are required' }, 400);
         }
         // Only allow non-secret settings keys
-        const allowedKeys = ['translation_prompt', 'telegram_config', 'message_template', 'content_filter', 'twitter_hydration', 'x_posting_config', 'x_rate_limits'];
+        const allowedKeys = ['translation_prompt', 'telegram_config', 'message_template', 'content_filter', 'twitter_hydration', 'x_posting_config', 'x_rate_limits', 'editorial_profiles', 'active_profile_id'];
         if (!allowedKeys.includes(key)) {
           return jsonResponse({ error: `Setting key "${key}" is not allowed` }, 400);
         }

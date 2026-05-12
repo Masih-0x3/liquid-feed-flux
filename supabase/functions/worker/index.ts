@@ -80,7 +80,90 @@ export function computeFinalScore(
   return Math.max(0, Math.min(20, Math.round((positiveNorm - noiseNorm) * 10) / 10));
 }
 
-// Internal token validation for cron/service-invoked functions
+// ============= Editorial profile decision (PR2) =============
+export interface EditorialProfile {
+  id: string;
+  name: string;
+  weights: Record<ScoreAxisKey, number>;
+  threshold: number;
+  must_include_keywords: string[];
+  must_exclude_keywords: string[];
+  required_tags_any: string[];
+  blocked_tags: string[];
+  author_overrides: Record<string, 'always_deliver' | 'always_skip'>;
+  editorial_note?: string;
+}
+
+export interface ProfileDecisionInput {
+  profile: EditorialProfile;
+  axes: ScoreAxes | null;
+  legacyScore: number | null;
+  tags: string[];
+  text: string;
+  authorHandle: string | null;
+}
+
+export interface ProfileDecisionResult {
+  decision: 'deliver' | 'skip';
+  reason: string;
+  finalScore: number;
+}
+
+/** Apply hard rules + weighted formula. Returns final decision + reason. */
+export function applyProfileDecision(input: ProfileDecisionInput): ProfileDecisionResult {
+  const { profile, axes, legacyScore, tags, text, authorHandle } = input;
+  const norm = (text || '').toLowerCase();
+  const handle = (authorHandle || '').toLowerCase();
+  const tagSet = new Set((tags || []).map((t) => String(t).toLowerCase()));
+
+  // 1. Author overrides (highest priority)
+  if (handle && profile.author_overrides) {
+    for (const [h, rule] of Object.entries(profile.author_overrides)) {
+      if (h.toLowerCase().replace(/^@/, '') === handle.replace(/^@/, '')) {
+        const finalScore = axes ? computeFinalScore(axes, profile.weights) : (legacyScore ?? 0);
+        return { decision: rule === 'always_deliver' ? 'deliver' : 'skip', reason: `author_override:${rule}:@${handle}`, finalScore };
+      }
+    }
+  }
+
+  // 2. Blocked tags
+  for (const t of profile.blocked_tags || []) {
+    if (tagSet.has(t.toLowerCase())) {
+      return { decision: 'skip', reason: `blocked_tag:${t}`, finalScore: 0 };
+    }
+  }
+
+  // 3. Required tags (any)
+  if ((profile.required_tags_any || []).length > 0) {
+    const ok = profile.required_tags_any.some((t) => tagSet.has(t.toLowerCase()));
+    if (!ok) return { decision: 'skip', reason: `missing_required_tag`, finalScore: 0 };
+  }
+
+  // 4. Must-exclude keywords
+  for (const kw of profile.must_exclude_keywords || []) {
+    if (kw && norm.includes(kw.toLowerCase())) {
+      return { decision: 'skip', reason: `excluded_keyword:${kw}`, finalScore: 0 };
+    }
+  }
+
+  // 5. Compute final score with profile weights
+  let finalScore = axes ? computeFinalScore(axes, profile.weights) : (legacyScore ?? 0);
+
+  // 6. Must-include keywords boost (+2 each, capped at 20)
+  let boost = 0;
+  for (const kw of profile.must_include_keywords || []) {
+    if (kw && norm.includes(kw.toLowerCase())) boost += 2;
+  }
+  if (boost > 0) finalScore = Math.min(20, finalScore + boost);
+
+  // 7. Threshold
+  if (finalScore >= profile.threshold) {
+    return { decision: 'deliver', reason: `score_pass:${finalScore.toFixed(1)}>=${profile.threshold}${boost ? `(+${boost} kw)` : ''}`, finalScore };
+  }
+  return { decision: 'skip', reason: `below_threshold:${finalScore.toFixed(1)}<${profile.threshold}`, finalScore };
+}
+
+
 function validateInternalToken(req: Request): Response | null {
   const token = req.headers.get('x-internal-token') || '';
   const expected = Deno.env.get('WEBHOOK_SHARED_SECRET') || '';
@@ -150,13 +233,25 @@ async function loadConfig(supabase: any): Promise<any> {
       author_rules: {} as Record<string, { rule: string; threshold?: number }>,
       score_only: false,
     },
+    editorialProfile: null as null | {
+      id: string;
+      name: string;
+      weights: Record<ScoreAxisKey, number>;
+      threshold: number;
+      must_include_keywords: string[];
+      must_exclude_keywords: string[];
+      required_tags_any: string[];
+      blocked_tags: string[];
+      author_overrides: Record<string, 'always_deliver' | 'always_skip'>;
+      editorial_note?: string;
+    },
   };
 
   try {
     const { data: settings } = await supabase
       .from('settings')
       .select('key, value')
-      .in('key', ['translation_prompt', 'message_template', 'content_filter']);
+      .in('key', ['translation_prompt', 'message_template', 'content_filter', 'editorial_profiles', 'active_profile_id']);
 
     if (settings) {
       // translation_prompt is the authoritative source for OpenAI parameters.
@@ -204,7 +299,18 @@ async function loadConfig(supabase: any): Promise<any> {
         }
         if (s.key === 'content_filter' && typeof s.value === 'object' && s.value !== null) {
           defaults.contentFilter = { ...defaults.contentFilter, ...s.value as Record<string, { rule: string; threshold?: number }> };
-        }
+      }
+
+      // Resolve active editorial profile (PR2)
+      const profilesEntry = settings.find((x) => x.key === 'editorial_profiles');
+      const activeEntry = settings.find((x) => x.key === 'active_profile_id');
+      const profilesArr = (profilesEntry?.value as { profiles?: unknown[] } | null)?.profiles;
+      const activeId = (activeEntry?.value as { id?: string } | null)?.id;
+      if (Array.isArray(profilesArr) && activeId) {
+        const found = profilesArr.find(
+          (p) => p && typeof p === 'object' && (p as Record<string, unknown>).id === activeId,
+        );
+        if (found) defaults.editorialProfile = found as typeof defaults.editorialProfile;
       }
     }
   } catch (e) {
@@ -667,14 +773,26 @@ ${post.text_original}`;
       // Decide gate BEFORE translating
       let preDecision = 'deliver';
       if (importanceScore !== null && !scoreOnly) {
-        const authorRule = authorHandle ? config.contentFilter.author_rules[authorHandle] : null;
-        if (authorRule?.rule === 'always_deliver') preDecision = 'deliver';
-        else if (authorRule?.rule === 'always_skip') preDecision = 'skip';
-        else {
-          const threshold = authorRule?.rule === 'custom_threshold' && authorRule.threshold != null
-            ? authorRule.threshold
-            : config.contentFilter.default_threshold;
-          preDecision = importanceScore >= threshold ? 'deliver' : 'skip';
+        if (config.editorialProfile) {
+          const r = applyProfileDecision({
+            profile: config.editorialProfile,
+            axes: scoreAxes,
+            legacyScore: importanceScore,
+            tags: importanceTags,
+            text: String(post.text_original || ''),
+            authorHandle,
+          });
+          preDecision = r.decision;
+        } else {
+          const authorRule = authorHandle ? config.contentFilter.author_rules[authorHandle] : null;
+          if (authorRule?.rule === 'always_deliver') preDecision = 'deliver';
+          else if (authorRule?.rule === 'always_skip') preDecision = 'skip';
+          else {
+            const threshold = authorRule?.rule === 'custom_threshold' && authorRule.threshold != null
+              ? authorRule.threshold
+              : config.contentFilter.default_threshold;
+            preDecision = importanceScore >= threshold ? 'deliver' : 'skip';
+          }
         }
       }
 
@@ -793,37 +911,49 @@ ${post.text_original}`;
       await supabase.from('jobs').update({ result_meta: resultMeta }).eq('id', job.id);
     } catch (_e) { /* best-effort */ }
 
-    // Determine delivery decision based on content filter
+    // Determine delivery decision based on active editorial profile or legacy content filter
     let deliveryDecision = 'deliver';
     let decisionReason: string | null = null;
+    let finalScore: number | null = scoreAxes ? computeFinalScore(scoreAxes) : (importanceScore ?? null);
     if (filterEnabled && importanceScore !== null && !scoreOnly) {
-      // Check author-specific rules first
-      const authorRule = authorHandle ? config.contentFilter.author_rules[authorHandle] : null;
-
-      if (authorRule?.rule === 'always_deliver') {
-        deliveryDecision = 'deliver';
-        decisionReason = `author_rule:always_deliver:${authorHandle}`;
-      } else if (authorRule?.rule === 'always_skip') {
-        deliveryDecision = 'skip';
-        decisionReason = `author_rule:always_skip:${authorHandle}`;
+      if (config.editorialProfile) {
+        const r = applyProfileDecision({
+          profile: config.editorialProfile,
+          axes: scoreAxes,
+          legacyScore: importanceScore,
+          tags: importanceTags,
+          text: String(post.text_original || ''),
+          authorHandle,
+        });
+        deliveryDecision = r.decision;
+        decisionReason = r.reason;
+        finalScore = r.finalScore;
+        console.log(JSON.stringify({ function: 'worker', action: 'filter_decision', tweet_id: tweetId, decision: deliveryDecision, score: importanceScore, final_score: finalScore, profile: config.editorialProfile.id, author: authorHandle, reason: decisionReason }));
       } else {
-        const threshold = authorRule?.rule === 'custom_threshold' && authorRule.threshold != null
-          ? authorRule.threshold
-          : config.contentFilter.default_threshold;
-        deliveryDecision = importanceScore >= threshold ? 'deliver' : 'skip';
-        decisionReason = deliveryDecision === 'deliver'
-          ? `score_pass:${importanceScore}>=${threshold}`
-          : `below_threshold:${importanceScore}<${threshold}`;
+        // Legacy content_filter path
+        const authorRule = authorHandle ? config.contentFilter.author_rules[authorHandle] : null;
+        if (authorRule?.rule === 'always_deliver') {
+          deliveryDecision = 'deliver';
+          decisionReason = `author_rule:always_deliver:${authorHandle}`;
+        } else if (authorRule?.rule === 'always_skip') {
+          deliveryDecision = 'skip';
+          decisionReason = `author_rule:always_skip:${authorHandle}`;
+        } else {
+          const threshold = authorRule?.rule === 'custom_threshold' && authorRule.threshold != null
+            ? authorRule.threshold
+            : config.contentFilter.default_threshold;
+          deliveryDecision = importanceScore >= threshold ? 'deliver' : 'skip';
+          decisionReason = deliveryDecision === 'deliver'
+            ? `score_pass:${importanceScore}>=${threshold}`
+            : `below_threshold:${importanceScore}<${threshold}`;
+        }
+        console.log(JSON.stringify({ function: 'worker', action: 'filter_decision', tweet_id: tweetId, decision: deliveryDecision, score: importanceScore, threshold: config.contentFilter.default_threshold, author: authorHandle, reason: decisionReason }));
       }
-      console.log(JSON.stringify({ function: 'worker', action: 'filter_decision', tweet_id: tweetId, decision: deliveryDecision, score: importanceScore, threshold: config.contentFilter.default_threshold, author: authorHandle, reason: decisionReason }));
     } else if (scoreOnly) {
       decisionReason = 'score_only_mode';
     } else if (!filterEnabled) {
       decisionReason = 'filter_disabled';
     }
-
-    // Compute final_score from axes when present (PR1: uniform weights — PR2 will use editorial profiles)
-    const finalScore = scoreAxes ? computeFinalScore(scoreAxes) : (importanceScore ?? null);
 
     const { error: updateError } = await supabase
       .from('posts')
