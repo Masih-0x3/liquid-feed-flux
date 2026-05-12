@@ -1295,7 +1295,34 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
       } catch (_e) { /* best-effort */ }
     }
 
-    const message = formatMessageWithTemplate(post, account, messageTemplate);
+    // Story Memory (PR3): semantic near-duplicate detection across outlets
+    try {
+      const sm = config.storyMemory;
+      if (sm?.enabled) {
+        const dup = await runStoryDedup(supabase, post, sm);
+        if (dup.dup_of) {
+          // Always record on the post for visibility
+          await supabase.from('posts').update({
+            dup_of_tweet_id: dup.dup_of,
+            story_cluster_id: dup.cluster_id,
+            dup_similarity: dup.similarity,
+          }).eq('tweet_id', tweetId);
+
+          if (sm.action === 'skip') {
+            await supabase.from('posts').update({
+              delivery_decision: 'skip',
+              decision_reason: `dup_of ${dup.dup_of} (cosine ${dup.similarity?.toFixed(3)})`,
+            }).eq('tweet_id', tweetId);
+            console.log(JSON.stringify({ function: 'worker', action: 'deliver_skip_story_dup', tweet_id: tweetId, dup_of: dup.dup_of, similarity: dup.similarity }));
+            await insertPipelineEvent(supabase, 'post', tweetId, 'deliver', 'completed', null, new Date().toISOString(), null, { skipped: 'story_dup', dup_of: dup.dup_of, similarity: dup.similarity });
+            return true;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('story_dedup failed (continuing)', (e as Error).message);
+    }
+
     let telegramMessageIds: string[] = [];
 
     if (media && media.length > 0) {
