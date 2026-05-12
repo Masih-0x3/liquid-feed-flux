@@ -494,6 +494,9 @@ export default function Settings() {
             profiles={(settings?.editorial_profiles as { profiles?: EditorialProfile[] } | undefined)?.profiles ?? []}
             activeProfileId={(settings?.active_profile_id as { id?: string | null } | undefined)?.id ?? null}
           />
+          <StoryMemoryCard
+            initial={settings?.story_memory as Partial<import('@/components/settings/StoryMemoryCard').StoryMemoryConfig> | undefined}
+          />
           <ContentFilterSettings
             initialConfig={settings?.content_filter as ContentFilterConfig | undefined}
             translationSettings={ts}
