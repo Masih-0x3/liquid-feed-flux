@@ -1323,6 +1323,7 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
       console.warn('story_dedup failed (continuing)', (e as Error).message);
     }
 
+    const message = formatMessageWithTemplate(post, account, messageTemplate);
     let telegramMessageIds: string[] = [];
 
     if (media && media.length > 0) {
