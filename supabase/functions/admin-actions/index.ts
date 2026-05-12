@@ -695,7 +695,34 @@ serve(async (req) => {
         });
       }
 
-      // ===== Translation Playground (no DB writes) =====
+      // ===== Story Memory backfill =====
+      case 'backfill_signatures': {
+        const hours = typeof body.hours === 'number' && body.hours > 0 && body.hours <= 168 ? body.hours : 24;
+        const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+        const { data: posts, error: fetchErr } = await supabase
+          .from('posts')
+          .select('tweet_id')
+          .not('text_translated', 'is', null)
+          .gte('created_at', since)
+          .order('created_at', { ascending: false })
+          .limit(500);
+        if (fetchErr) return jsonResponse({ ok: false, error: fetchErr.message }, 500);
+        let queued = 0;
+        for (const p of (posts ?? [])) {
+          const tid = p.tweet_id as string;
+          const { error } = await supabase.from('jobs').upsert({
+            type: 'deliver',
+            payload: { tweet_id: tid },
+            status: 'pending',
+            priority: 5,
+            idempotency_key: `deliver:story_backfill:${tid}:${Date.now()}`,
+            next_run_at: new Date().toISOString(),
+          }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+          if (!error) queued++;
+        }
+        return jsonResponse({ ok: true, scanned: posts?.length ?? 0, queued });
+      }
+
       case 'preview_translation': {
         const text = typeof body.text === 'string' ? body.text.trim() : '';
         if (!text) return jsonResponse({ ok: false, error: 'text is required' }, 400);
