@@ -280,6 +280,15 @@ function validateSettingsValue(key: string, value: unknown): string | null {
         if (typeof v.id === 'string' && (v.id as string).length > 80) return 'active_profile_id.id too long';
         break;
       }
+      case 'story_memory': {
+        if (typeof v.enabled !== 'boolean') return 'story_memory.enabled must be boolean';
+        if (typeof v.window_hours !== 'number' || v.window_hours < 1 || v.window_hours > 72) return 'story_memory.window_hours must be 1-72';
+        if (typeof v.similarity_threshold !== 'number' || v.similarity_threshold < 0.5 || v.similarity_threshold > 0.99) return 'story_memory.similarity_threshold must be 0.5-0.99';
+        if (v.action !== 'skip' && v.action !== 'mark_and_deliver') return 'story_memory.action must be skip|mark_and_deliver';
+        if (!Array.isArray(v.bypass_authors)) return 'story_memory.bypass_authors must be array';
+        if ((v.bypass_authors as unknown[]).length > 100) return 'story_memory.bypass_authors must be ≤100';
+        break;
+      }
     }
     return null;
   }
