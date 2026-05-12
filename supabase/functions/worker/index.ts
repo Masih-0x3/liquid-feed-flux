@@ -779,7 +779,7 @@ ${post.text_original}`;
             axes: scoreAxes,
             legacyScore: importanceScore,
             tags: importanceTags,
-            text: textToTranslate,
+            text: String(post.text_original || ''),
             authorHandle,
           });
           preDecision = r.decision;
