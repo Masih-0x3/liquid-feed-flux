@@ -1,162 +1,190 @@
+# Plan: Granular Scoring, Day-to-Day Filtering, and Story Memory (Dedup)
 
-# Score-first, then Translate — with fully adjustable scoring model settings
+Now that scoring is its own OpenAI call, we make it richer (multi-axis), more steerable (a "today's focus" dial), more transparent (per-axis thresholds + dry-run preview), and we add a real **Story Memory** so the same event from multiple outlets isn't published twice.
 
-## Goal
-Refactor the `translate` job into two sequential GPT-5.4-mini calls:
-
-1. **Score** — classify importance using the existing rubric/tool. Always runs.
-2. **Translate** — run the editorial Persian prompt **only if the score passes the filter**.
-
-Plus: make every GPT-5.4 parameter for the **scoring** call independently adjustable from the Settings UI (model, reasoning effort, verbosity, max tokens, temperature, top_p, seed, service tier, parallel tool calls) — exactly the same surface area we already expose for translation.
-
-Everything downstream (hydration, deliver, X-poster, Telegram, media, X API gating) stays byte-for-byte identical.
+## Goals
+1. **Granular scoring** — replace one 1–20 number with a small set of axes the model fills in.
+2. **Day-to-day customization** — change priorities/weights/keywords from the UI without touching prompts; preview impact instantly.
+3. **Better filtering** — combine axes via a weighted formula plus rules (must-have / must-not-have / author overrides).
+4. **Semantic dedup** — detect near-duplicate stories across outlets (Story Memory) and either skip or boost coverage.
 
 ---
 
-## Target flow
+## 1. Multi-axis scoring (replace the single score)
 
-```text
-translate job claimed
-        │
-        ▼
-  ┌──────────────────┐
-  │ Call 1: SCORE    │  classifier tool only, uses scoring_*
-  │ (always)         │  settings (model, reasoning_effort, verbosity,
-  │                  │  max_tokens, etc. — all independent of translation)
-  └────────┬─────────┘
-           │ writes importance_score, importance_tags,
-           │ importance_reasoning, delivery_decision
-           ▼
-  decision == 'deliver' ?
-   │                  │
-   │ no               │ yes
-   ▼                  ▼
-mark skipped     ┌──────────────────┐
-(no translate)   │ Call 2: TRANSLATE│  editorial prompt, no tool,
-                 │ (only on pass)   │  uses existing translation_* settings
-                 └────────┬─────────┘
-                          │ writes text_translated, translated_at, etc.
-                          ▼
-                  existing hydration / deliver
-                  enqueue logic (UNCHANGED)
-```
+Have the scoring tool return a structured object instead of one number. Default axes (each 0–10):
 
-`score_only` mode preserved: still translates everything, just doesn't gate.
+| Axis | What it measures |
+|---|---|
+| `iran_relevance` | DIRECT=8–10, INDIRECT=4–7, NONE=0–3 |
+| `severity` | strike/war > policy > analysis > routine |
+| `novelty` | breaking > update > recap |
+| `credibility` | official > reporter > anon |
+| `actionability` | does it shift policy/markets/war? |
+| `noise` | inverted — high = spammy/promo/personal |
 
----
+Plus existing fields: `tags[]`, `reasoning`, and a derived `final_score` computed **client/server-side** from a weights formula (so re-tuning doesn't require re-scoring).
 
-## Implementation plan
+`final_score = Σ(axis × weight) − noise × noise_weight`, normalized to 0–20.
 
-### 1. Settings shape — `translation_prompt` JSON in `settings`
+Why axes-then-formula: today the model conflates "Iran-relevant", "important", and "breaking". Splitting them lets you say "today I only care about novelty + severity" without rewriting the rubric.
 
-Add a new `scoring` sub-object that mirrors the translation params, all optional with safe defaults:
+## 2. Editorial Profiles (the day-to-day dial)
+
+New `editorial_profiles` setting (JSON) holds named profiles, e.g. `default`, `war_mode`, `quiet_day`, `sanctions_focus`. One is `active_profile_id`.
+
+Each profile bundles everything you'd swap in a day:
 
 ```jsonc
 {
-  // existing translation fields (unchanged)
-  "model": "gpt-5.4-mini",
-  "system_prompt": "...",
-  "user_prompt_template": "...",
-  "temperature": 0.2,
-  "reasoning_effort": "high",
-  "verbosity": "high",
-  "max_completion_tokens": 15000,
-  "top_p": null, "seed": null, "service_tier": "auto", ...
-
-  // NEW — independent scoring controls
-  "scoring": {
-    "model": "gpt-5.4-mini",          // default = same as translation model
-    "reasoning_effort": "high",        // default "medium"
-    "verbosity": "low",                // default "low" (scoring outputs are short)
-    "max_completion_tokens": 4000,     // default 2000
-    "temperature": null,
-    "top_p": null,
-    "seed": null,
-    "service_tier": "auto",
-    "parallel_tool_calls": null
-  },
-
-  // existing scoring prompt fields (unchanged)
-  "scoring_system_prompt": "...",
-  "classifier_tool_schema": "..."
+  "id": "war_mode",
+  "name": "War mode",
+  "weights": { "iran_relevance": 1.5, "severity": 2.0, "novelty": 1.0,
+               "credibility": 0.5, "actionability": 1.0, "noise": 1.5 },
+  "threshold": 13,
+  "must_include_keywords": ["strike","missile","ceasefire"],
+  "must_exclude_keywords": ["crypto","celebrity"],
+  "required_tags_any": ["iran","middle_east"],
+  "blocked_tags": ["sports","entertainment"],
+  "author_overrides": { "@SomeHandle": "always_deliver" },
+  "priority_topics": [...],
+  "low_priority_topics": [...],
+  "editorial_note": "Focus on kinetic events and ceasefire signals today",
+  "story_memory": {                       // §4 — per-profile dedup tuning
+    "enabled": true,
+    "window_hours": 12,
+    "similarity_threshold": 0.86,
+    "action": "skip",                     // skip | mark_and_deliver | collapse
+    "bypass_authors": ["@OfficialIRGCEN"]
+  }
 }
 ```
 
-Defaults baked into `useSettingsData.ts` so existing settings rows keep working with no migration.
+Profile selector lives at top of the Filter page: dropdown + Duplicate / Rename / Save-as-new. Switching is a single setting write — the worker reads the active profile per job.
 
-### 2. UI — Settings → Translation tab
+## 3. Filtering pipeline (worker side)
 
-Add a new collapsible/separate card titled **"Scoring model settings"** under the existing translation card, mirroring the same controls (model dropdown, reasoning effort, verbosity, max tokens, temperature, top_p, seed, service tier, parallel tool calls). Reuses the existing form components — no new design tokens needed.
+Order after scoring returns:
 
-A "Reset to translation defaults" button copies translation values into the scoring block.
+1. **Hard rules** (cheap, deterministic): author overrides → blocked_tags → required_tags_any → must_exclude_keywords.
+2. **Story Memory check** (§4) — if duplicate and action=skip, stop here.
+3. **Boosts** (additive): must_include_keywords (+N), priority_topics (+N), low_priority_topics (−N).
+4. **Final score** via active profile's `weights`.
+5. **Threshold** check vs `profile.threshold`.
+6. Decision + `decision_reason` persisted on `posts` (Monitoring shows *why*).
 
-### 3. Backend validation — `supabase/functions/admin-actions/index.ts`
+## 4. Story Memory (semantic dedup) — NEW
 
-Extend the `translation_prompt` Zod validator: add an optional `scoring` object with the same per-field validation rules already used for translation params (string enums for reasoning_effort/verbosity/service_tier, numeric ranges for tokens/temperature/top_p/seed, boolean for parallel_tool_calls). Reject unknown keys.
+Today we only have exact-match dedup (tweet_id, canonical URL, x_deliveries time-window). Two outlets reporting the same Israeli strike in different words both pass. Story Memory fixes this.
 
-### 4. Worker refactor — `supabase/functions/worker/index.ts`
+**Separate module, same pipeline gate, same UX surface as profiles.**
 
-`loadConfig` already builds a `defaults.openai*` object for translation. Add a parallel `defaults.scoring*` object populated from `settings.translation_prompt.scoring`, falling back to translation values when a scoring field is null/missing.
+### Storage
+- New `story_signatures` table: `tweet_id` (PK), `simhash bigint`, `embedding vector(1536)` (pgvector), `story_cluster_id uuid`, `coverage_count int default 1`, `created_at`.
+- pgvector ivfflat index on `embedding`.
+- BTREE on `(created_at desc)` for window scans.
 
-Refactor `handleTranslateJob` into two helpers:
+### Two-tier check (cheap → expensive)
+- **Tier 1 — SimHash** of normalized translated text (~1ms). Hamming distance ≤ 6 over the configured window → match.
+- **Tier 2 — Embedding cosine** via OpenAI `text-embedding-3-small` (~$0.00002/post). Cosine ≥ `similarity_threshold` → match. Catches paraphrases and translation drift.
 
-- **`scorePost(post, config)`** → uses scoring params + `scoring_system_prompt` + a **score-only tool schema** (drops `translated_text` from the existing `classify_importance` schema; keeps `importance_score`, `tags`, `reasoning`). Returns `{ score, tags, reasoning, raw, usage }`.
+### Pipeline placement
+- New job type `compute_signature` enqueued after `translate` completes (priority 11, runs in parallel with deliver gating).
+- `deliver` checks `story_signatures` before publishing:
+  - **No match** → assign new `story_cluster_id`, proceed.
+  - **Match + action=skip** → mark `decision_reason: dup_of <tweet_id>`, increment original's `coverage_count`, **skip**.
+  - **Match + action=mark_and_deliver** → still publish but tag with the cluster (useful for analytics).
+  - **Match + action=collapse** → reserved for future "thread updates" feature.
+  - **Author in `bypass_authors`** → skip dedup entirely (e.g. always mirror official accounts).
 
-- **`translatePost(post, config)`** → uses translation params + `system_prompt` + rendered `user_prompt_template` ({content}, {author}, {published_at}). No tool. Free-form output. Honors the user's saved `max_completion_tokens` (remove the current 8000 clamp on line 107).
+### Coupling back to scoring (optional, valuable)
+- Expose `coverage_count` as a 7th scoring axis (`corroboration`): a story 5 outlets picked up gets a small boost; a single anonymous repost stays low. Implemented purely in the scoring formula, no extra OpenAI cost.
 
-Top-level flow inside `handleTranslateJob`:
-1. Load post (unchanged query).
-2. Compute `filterEnabled` / `scoreOnly` (unchanged).
-3. **Backward-compat fast path**: if `importance_score IS NOT NULL` AND `delivery_decision = 'deliver'` AND `text_translated IS NULL`, skip scoring → go straight to translate.
-4. If `filterEnabled`: call `scorePost`. Apply existing author-rule + threshold logic to compute `deliveryDecision`.
-   - If `skip` AND `!scoreOnly`: persist score fields + `delivery_decision='skip'`, log `delivery_skipped`, insert pipeline event, **return** (no translate, no deliver).
-   - Else fall through.
-5. Call `translatePost`. Persist `text_translated`, `translated_at`, `translation_model`, `translation_tokens`, `translation_duration_ms`.
-6. Run the existing post-translate block (hydration gate / deliver enqueue / pipeline events) **unchanged**.
+### UI — new "Story Memory" tab in Editorial Console
+- Toggle, window slider (1–48h), similarity slider (0.80–0.95), action picker, bypass-authors chips.
+- "Recent duplicate clusters" list: each cluster shows the original + how many duplicates were suppressed + a link to view them.
 
-`result_meta` on the job: `{ scoring: {...}, translation: {...} }`.
+## 5. UI: a single "Editorial Console" page (replaces current Content Filter card)
 
-### 5. Logging
-- `score_start` / `scored` (already exist, keep)
-- `translate_skipped_by_filter` (NEW — when score gate stops translation)
-- `translate_start` / `translate_complete`
-- `filter_decision` (unchanged)
-- Each log includes which model + endpoint was used, so you can verify scoring vs translation params took effect.
+Four tabs:
 
-### 6. Rollout safety
-- Feature flag `translation_prompt.split_calls` (default `true`). If `false`, fall back to the current combined-call code path verbatim. One-line revert if anything regresses.
-- All new scoring fields are optional — if absent, scoring uses the same params as translation (today's behavior).
+- **Today** — daily dial. Big profile dropdown, threshold slider, weight sliders for the 6 axes, keyword chips (include/exclude), required/blocked tag chips. Live "Predicted impact" panel (§6).
+- **Profiles** — list/edit/duplicate/delete profiles.
+- **Story Memory** — §4.
+- **Advanced** — scoring system prompt, tool schema, per-author rules table, axis definitions.
 
-### 7. What is NOT touched
-- ✅ Hydration system, `hydrate_tweet` job, post-translate hydration gate
-- ✅ Deliver job, `deliveries` table, Telegram delivery
-- ✅ X poster, `x_deliveries`, X API calls, media tiering, chunked video upload
-- ✅ Media download / resolve_media / dedup
-- ✅ Scoring rubric content, threshold logic, author rules, Iran-gate caps
-- ✅ Reconcile, retry_step, claim_jobs, all RPCs
-- ✅ Frontend monitoring / dashboard / X account pages
-- ✅ `score_only` mode
+Day-to-day flow: open Today → pick `war_mode` → nudge severity weight → save. No prompt editing, no JSON.
 
-### 8. Files touched
-- `supabase/functions/worker/index.ts` — split `handleTranslateJob`; load scoring config; remove 8000 clamp.
-- `supabase/functions/admin-actions/index.ts` — extend validator with optional `scoring` block.
-- `src/hooks/useSettingsData.ts` — add `scoring` defaults to `TranslationSettings` interface.
-- `src/components/settings/PromptEditor.tsx` (or sibling) — new "Scoring model settings" card mirroring translation controls.
+## 6. Dry-run preview (so you trust the dial before saving)
 
-No DB migrations. No new tables. No RLS, RPC, cron, or other edge-function changes.
+"Preview impact" button:
+- Loads last N=200 scored posts (axes already cached on `posts`).
+- Re-applies the **current unsaved** profile formula in the browser (no API calls).
+- Re-applies the dedup decisions from `story_signatures`.
+- Shows: "would deliver 47 / 200 (vs 62 currently). 12 newly included, 27 newly excluded, 8 deduped." Click to see the diff.
+
+This is the killer feature: A/B a weight change in one second.
+
+## 7. Backfill & re-scoring
+
+- "Re-score recent" button enqueues `score_only` jobs for last 24h/7d (uses split scoring call, skips translation).
+- "Backfill signatures" button enqueues `compute_signature` for any post missing one.
+- Old single-score posts: missing axes default to neutral 5; `final_score` falls back to legacy `importance_score`.
+
+## 8. Observability
+
+- Monitoring row shows axis bars + which rule fired ("blocked_tag: sports", "boost: +2 'ceasefire'", "dup_of @abc/123 (cosine 0.91)").
+- Dashboard "Editorial decisions (24h)" widget: delivered vs filtered vs deduped, top skip reasons, active profile, dedup hit rate.
 
 ---
 
-## Expected impact
+## Technical sketch
 
-| Metric | Before | After |
-|---|---|---|
-| Translation quality | Flat literal | Editorial X-style |
-| Scoring quality | Constrained by translation budget | Fully independent — can run high reasoning without inflating translation cost |
-| OpenAI tokens / skipped tweet | ~5,000 | ~1,500–3,000 (scoring only) |
-| OpenAI tokens / delivered tweet | ~5,000 | ~6,000–8,000 |
-| Net OpenAI cost (≈65% skip rate) | 100% | ~55–70% |
-| X API calls | unchanged | unchanged |
-| Telegram calls | unchanged | unchanged |
-| Latency / skipped tweet | ~5s | ~2–3s |
-| Latency / delivered tweet | ~5s | ~7–10s (sequential) |
+**DB migrations**
+- `posts`: add `score_axes jsonb`, `final_score numeric`, `decision_reason text`.
+- New `story_signatures` table (see §4) — needs `create extension if not exists vector`.
+- New settings keys: `editorial_profiles` (array), `active_profile_id` (string). Keep `content_filter` as legacy fallback for one release.
+
+**Scoring tool schema (worker)**
+```json
+{
+  "name": "classify_importance",
+  "parameters": { "type":"object", "properties": {
+    "axes": { "type":"object", "properties": {
+      "iran_relevance":{"type":"integer","minimum":0,"maximum":10},
+      "severity":{"type":"integer","minimum":0,"maximum":10},
+      "novelty":{"type":"integer","minimum":0,"maximum":10},
+      "credibility":{"type":"integer","minimum":0,"maximum":10},
+      "actionability":{"type":"integer","minimum":0,"maximum":10},
+      "noise":{"type":"integer","minimum":0,"maximum":10}
+    }, "required":["iran_relevance","severity","novelty","credibility","actionability","noise"]},
+    "tags":{"type":"array","items":{"type":"string"}},
+    "reasoning":{"type":"string"}
+  }, "required":["axes","tags","reasoning"] }
+}
+```
+
+**Worker changes**
+- After scoring: persist axes, compute `final_score` via active profile, run hard rules + Story Memory check, persist `decision_reason`. Translation only fires if decision = deliver (already split, keeps cost down).
+
+**Edge functions**
+- `admin-actions`: `set_active_profile`, `save_profile`, `delete_profile`, `preview_profile_impact`, `rescore_recent`, `backfill_signatures`.
+- New job handler `compute_signature` inside `worker` (calls embeddings API, computes simhash, upserts row, links cluster).
+
+**Frontend**
+- Replace `ContentFilterSettings.tsx` with `EditorialConsole.tsx` (4 tabs).
+- New `useEditorialProfiles()`, `useStoryMemory()` hooks (React Query).
+- New `<AxisWeightSliders />`, `<KeywordChips />`, `<ProfileSwitcher />`, `<ImpactPreview />`, `<DuplicateClusters />` components.
+
+**Migration of existing config**: on first load, wrap current `content_filter` settings into a `default` profile so nothing breaks.
+
+---
+
+## Rollout (4 small PRs)
+
+1. **PR1 — schema + axes**: DB migration, worker emits axes, Monitoring shows them. UI still uses single threshold.
+2. **PR2 — Editorial Profiles + new UI**: profile CRUD, weight sliders, hard rules, active-profile selector. Worker uses formula.
+3. **PR3 — Story Memory**: pgvector table, `compute_signature` job, dedup gate in deliver, Story Memory tab, "dup_of" reasons in Monitoring. Adds `corroboration` axis.
+4. **PR4 — Impact Preview + Re-score/Backfill + per-axis Monitoring filters + Dashboard widget**.
+
+Each PR is independently shippable; you'd already get value after PR1 (visibility), PR2 (daily dial), PR3 (no more double-publishing), and PR4 (confidence to tune fast).
