@@ -450,8 +450,8 @@ async function runStoryDedup(supabase: any, post: { tweet_id: string; text_trans
   return { dup_of, cluster_id, similarity };
 }
 
+serve(async (req) => {
 
-  if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
