@@ -527,6 +527,19 @@ Content:
 ${post.text_original}`;
 
     // Build classifier tool schema (with optional translated_text stripped for split mode)
+    const AXES_SCHEMA = {
+      type: 'object',
+      description: 'Six independent scoring axes (each 0-10). noise is INVERTED (high = bad).',
+      properties: {
+        iran_relevance: { type: 'integer', minimum: 0, maximum: 10 },
+        severity: { type: 'integer', minimum: 0, maximum: 10 },
+        novelty: { type: 'integer', minimum: 0, maximum: 10 },
+        credibility: { type: 'integer', minimum: 0, maximum: 10 },
+        actionability: { type: 'integer', minimum: 0, maximum: 10 },
+        noise: { type: 'integer', minimum: 0, maximum: 10 },
+      },
+      required: ['iran_relevance', 'severity', 'novelty', 'credibility', 'actionability', 'noise'],
+    };
     const buildToolFunction = (includeTranslatedText: boolean): Record<string, unknown> => {
       let base: Record<string, unknown>;
       try {
@@ -540,10 +553,11 @@ ${post.text_original}`;
                 properties: {
                   translated_text: { type: 'string', description: 'The Persian translation of the original text' },
                   importance_score: { type: 'integer', minimum: 1, maximum: 20 },
+                  axes: AXES_SCHEMA,
                   tags: { type: 'array', items: { type: 'string' } },
                   reasoning: { type: 'string', description: 'Required: state relevance level, tier, and any cap applied' },
                 },
-                required: ['translated_text', 'importance_score', 'tags', 'reasoning'],
+                required: ['translated_text', 'importance_score', 'axes', 'tags', 'reasoning'],
               },
             };
       } catch (e) {
@@ -555,19 +569,28 @@ ${post.text_original}`;
             properties: {
               translated_text: { type: 'string' },
               importance_score: { type: 'integer', minimum: 1, maximum: 20 },
+              axes: AXES_SCHEMA,
               tags: { type: 'array', items: { type: 'string' } },
               reasoning: { type: 'string' },
             },
-            required: ['translated_text', 'importance_score', 'tags', 'reasoning'],
+            required: ['translated_text', 'importance_score', 'axes', 'tags', 'reasoning'],
           },
         };
       }
-      if (!includeTranslatedText) {
-        const params = base.parameters as Record<string, unknown>;
-        const props = { ...(params.properties as Record<string, unknown>) };
-        delete props.translated_text;
-        const required = ((params.required as string[]) || []).filter((k) => k !== 'translated_text');
+      // Auto-inject axes into customized schemas if missing (PR1 backward-compat)
+      const params = base.parameters as Record<string, unknown>;
+      const props = { ...(params.properties as Record<string, unknown>) };
+      if (!props.axes) {
+        props.axes = AXES_SCHEMA;
+        const required = Array.from(new Set([...((params.required as string[]) || []), 'axes']));
         base = { ...base, parameters: { ...params, properties: props, required } };
+      }
+      if (!includeTranslatedText) {
+        const p2 = base.parameters as Record<string, unknown>;
+        const props2 = { ...(p2.properties as Record<string, unknown>) };
+        delete props2.translated_text;
+        const required = ((p2.required as string[]) || []).filter((k) => k !== 'translated_text');
+        base = { ...base, parameters: { ...p2, properties: props2, required } };
       }
       return base;
     };
