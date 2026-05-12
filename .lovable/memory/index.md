@@ -13,6 +13,7 @@ Updated: today
 - Truncated RSS tweets are hydrated via X API v2; post-hydrate re-translate MUST use key `translate:hydrate:<id>` AND hydrate handler MUST null `translated_at` + `text_translated` to gate publishers.
 
 ## Memories
+- [Multi-Axis Scoring](mem://features/multi-axis-scoring) — PR1: 6-axis AI scoring schema, score_axes column, final_score derivation, decision_reason
 - [Translation & Scoring](mem://ai/translation-settings) — gpt-4o-mini single-call translation and AI scoring
 - [Job Processing](mem://architecture/job-processing) — Priority queue, batching, idempotency keys, and retry logic
 - [Pipeline Sequencing](mem://architecture/pipeline-sequencing) — Translate -> deliver sequencing driven by webhooks
