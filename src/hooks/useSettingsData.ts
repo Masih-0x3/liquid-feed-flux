@@ -213,6 +213,10 @@ const defaults = {
     author_rules: {} as Record<string, { rule: string; threshold?: number }>,
     score_only: false,
   },
+  editorial_profiles: {
+    profiles: [] as EditorialProfile[],
+  },
+  active_profile_id: { id: null as string | null },
   twitter_hydration: {
     enabled: true,
     max_attempts: 3,
