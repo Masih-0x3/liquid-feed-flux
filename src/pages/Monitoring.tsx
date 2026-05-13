@@ -15,7 +15,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { format } from "date-fns";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerDescription, DrawerClose, DrawerFooter } from "@/components/ui/drawer";
 import { useMonitoringData, type MonitoringEntry, type PipelineEvent } from "@/hooks/useMonitoringData";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { MediaThumbnails } from "@/components/monitoring/MediaThumbnails";
 
 // Admin action helpers
@@ -97,6 +97,23 @@ export default function Monitoring() {
   const [drawerTweetId, setDrawerTweetId] = useState<string | null>(null);
   const [timeline, setTimeline] = useState<PipelineEvent[]>([]);
   const { toast } = useToast();
+
+  // Active editorial-profile threshold drives the deliver/skip gate.
+  // We surface it in the UI so badges read in context (e.g. 13/20 vs threshold ≥14).
+  const { data: deliverThreshold = 14 } = useQuery({
+    queryKey: ['active-threshold'],
+    queryFn: async () => {
+      const [{ data: act }, { data: profs }] = await Promise.all([
+        supabase.from('settings').select('value').eq('key', 'active_profile_id').maybeSingle(),
+        supabase.from('settings').select('value').eq('key', 'editorial_profiles').maybeSingle(),
+      ]);
+      const activeId = (act?.value as { id?: string } | null)?.id;
+      const profiles = ((profs?.value as { profiles?: Array<{ id: string; threshold: number }> } | null)?.profiles) ?? [];
+      const active = profiles.find((p) => p.id === activeId);
+      return active?.threshold ?? 14;
+    },
+    staleTime: 60_000,
+  });
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['monitoring'] });
 
@@ -317,29 +334,48 @@ export default function Monitoring() {
                         <CardTitle className="text-lg">
                           {entry.author_handle ? `@${entry.author_handle}` : `@${entry.account_handle}`}
                         </CardTitle>
-                        {entry.importance_score != null && (
-                          <Badge
-                            className={
-                              entry.importance_score >= 15
-                                ? 'bg-green-500/20 text-green-400 border-green-500/30'
-                                : entry.importance_score >= 9
-                                ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
-                                : 'bg-red-500/20 text-red-400 border-red-500/30'
-                            }
-                            title={
-                              entry.score_axes
-                                ? `Axes — ` + Object.entries(entry.score_axes).map(([k, v]) => `${k}:${v}`).join(', ')
-                                : undefined
-                            }
-                          >
-                            <Star className="w-3 h-3 mr-1" />{entry.importance_score}/20
-                          </Badge>
-                        )}
-                        {entry.final_score != null && entry.score_axes && (
-                          <Badge variant="outline" className="text-xs font-mono" title="Derived from axes (PR1: uniform weights)">
-                            f:{entry.final_score}
-                          </Badge>
-                        )}
+                        {(() => {
+                          // The DECISION score is `final_score` (axes-weighted) compared against the active
+                          // editorial-profile threshold. `importance_score` is the legacy 1-20 AI score and is
+                          // shown only as a secondary "AI" hint when it differs from the decision score.
+                          const decision = entry.final_score != null ? entry.final_score : entry.importance_score;
+                          const passes = decision != null && decision >= deliverThreshold;
+                          const close = decision != null && decision >= deliverThreshold - 3;
+                          const axesStr = entry.score_axes
+                            ? Object.entries(entry.score_axes).map(([k, v]) => `${k}:${v}`).join(', ')
+                            : null;
+                          return (
+                            <>
+                              {decision != null && (
+                                <Badge
+                                  className={
+                                    passes
+                                      ? 'bg-green-500/20 text-green-400 border-green-500/30'
+                                      : close
+                                      ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
+                                      : 'bg-red-500/20 text-red-400 border-red-500/30'
+                                  }
+                                  title={
+                                    `Decision score (axes-weighted): ${decision}/20\n` +
+                                    `Threshold to deliver: ≥${deliverThreshold}\n` +
+                                    (axesStr ? `Axes — ${axesStr}` : '')
+                                  }
+                                >
+                                  <Star className="w-3 h-3 mr-1" />
+                                  {Number.isInteger(decision) ? decision : decision.toFixed(1)}/20
+                                  <span className="ml-1 opacity-60">· need ≥{deliverThreshold}</span>
+                                </Badge>
+                              )}
+                              {entry.importance_score != null
+                                && entry.final_score != null
+                                && Math.round(entry.importance_score) !== Math.round(entry.final_score) && (
+                                <Badge variant="outline" className="text-xs font-mono text-muted-foreground" title="Legacy single-shot AI score">
+                                  AI:{entry.importance_score}
+                                </Badge>
+                              )}
+                            </>
+                          );
+                        })()}
                         {entry.delivery_decision && entry.delivery_decision !== 'deliver' && (
                           <Badge variant="outline" className="text-muted-foreground" title={entry.decision_reason ?? undefined}>
                             {entry.delivery_decision === 'skip' ? 'Skipped' : entry.delivery_decision}
