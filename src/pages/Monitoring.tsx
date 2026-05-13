@@ -212,6 +212,16 @@ export default function Monitoring() {
     staleTime: 60_000,
   });
 
+  const { data: xPostingEnabled = false } = useQuery({
+    queryKey: ['x-posting-enabled'],
+    queryFn: async () => {
+      const { data } = await supabase.from('settings').select('value').eq('key', 'x_posting_config').maybeSingle();
+      const v = (data?.value as { enabled?: boolean } | null)?.enabled;
+      return v === true;
+    },
+    staleTime: 30_000,
+  });
+
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['monitoring'] });
 
   const handleForceDeliver = async (tweetId: string) => {
@@ -242,6 +252,14 @@ export default function Monitoring() {
   };
 
   const handleRetryXPost = async (tweetId: string) => {
+    if (!xPostingEnabled) {
+      toast({
+        title: 'X posting is off',
+        description: 'Enable X posting under Settings → X Automation before posting to X.',
+        variant: 'destructive',
+      });
+      return;
+    }
     try {
       const res = await adminRetryXPost(tweetId);
       if (!res.ok) throw new Error(res.error || 'X retry failed');
@@ -370,6 +388,20 @@ export default function Monitoring() {
           <Button onClick={invalidate} variant="outline"><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>
         </div>
       </div>
+
+      {!xPostingEnabled && (
+        <div className="mb-6 flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-foreground">
+          <Info className="w-4 h-4 mt-0.5 shrink-0 text-amber-500" />
+          <div>
+            <p className="font-medium">X posting is turned off</p>
+            <p className="text-muted-foreground mt-1">
+              The x-poster job will not run while this is off, and “Force on X” is disabled. Enable it under{' '}
+              <Link to="/settings#x-automation" className="text-primary underline">Settings → X Automation</Link>{' '}
+              when you are ready to publish again. Telegram and translation are unaffected.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
@@ -556,8 +588,15 @@ export default function Monitoring() {
                     <Button
                       size="sm"
                       variant="default"
+                      disabled={!xPostingEnabled}
                       onClick={() => handleRetryXPost(entry.tweet_id)}
-                      title={entry.x_status === 'posted' ? 'Re-post to X (overrides previous post)' : 'Force post to X'}
+                      title={
+                        !xPostingEnabled
+                          ? 'Turn on X posting in Settings → X Automation to post to X'
+                          : entry.x_status === 'posted'
+                            ? 'Re-post to X (overrides previous post)'
+                            : 'Force post to X'
+                      }
                     >
                       <Twitter className="w-3 h-3 mr-1" />{entry.x_status === 'posted' ? 'Re-post on X' : 'Force on X'}
                     </Button>

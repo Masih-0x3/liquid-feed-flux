@@ -744,6 +744,17 @@ serve(async (req) => {
         const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
         const svcKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 
+        const { data: xPostingRow } = await supabase.from('settings').select('value').eq('key', 'x_posting_config').maybeSingle();
+        const xPostingCfg = (xPostingRow?.value ?? {}) as Record<string, unknown>;
+        const xPostingEnabled = xPostingCfg.enabled === true;
+        if (action === 'retry_x_post' && !xPostingEnabled) {
+          return jsonResponse({
+            ok: false,
+            skipped: true,
+            error: 'X posting is turned off in Settings → X Automation. Turn on “Enable X posting” before posting to X.',
+          }, 200);
+        }
+
         // Pre-flight: when forcing a specific tweet, ensure it has a translation
         // and a score. Without this, x-poster filters it out (or in worst case
         // posts media-only with empty body). Translate+score inline first.

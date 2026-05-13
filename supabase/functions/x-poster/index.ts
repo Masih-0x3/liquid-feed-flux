@@ -337,8 +337,8 @@ Deno.serve(async (req) => {
   const limits: RateLimits = { ...DEFAULT_LIMITS, ...(isRecord(sm.x_rate_limits) ? sm.x_rate_limits : {}) } as RateLimits;
   const usage = isRecord(sm.x_api_usage) ? sm.x_api_usage as Record<string, unknown> : {};
 
-  if (!cfg.enabled && !dryRun && !onlyTweetId) {
-    return new Response(JSON.stringify({ skipped: true, reason: 'disabled' }), {
+  if (!cfg.enabled && !dryRun) {
+    return new Response(JSON.stringify({ skipped: true, reason: 'x_posting_disabled' }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }

@@ -168,7 +168,10 @@ export default function XPostingConfig({ initial }: Props) {
         <div className="flex items-center justify-between p-3 bg-muted/40 rounded-lg">
           <div>
             <Label htmlFor="x_enabled" className="font-medium">Enable X posting</Label>
-            <p className="text-xs text-muted-foreground mt-1">When off, the cron worker will skip all posts.</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              When off, nothing is posted to X: the x-poster cron skips work, Monitoring “Force on X” is disabled, and admin “retry X” is blocked.
+              Telegram delivery and the translate/score pipeline are unchanged.
+            </p>
           </div>
           <Switch id="x_enabled" checked={cfg.enabled} onCheckedChange={(v) => update({ enabled: v })} />
         </div>
