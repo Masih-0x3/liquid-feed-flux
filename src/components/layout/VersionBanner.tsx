@@ -37,6 +37,8 @@ function fullDate(iso: string): string {
   } catch { return iso; }
 }
 
+const STALE_THRESHOLD_MS = 2 * 60 * 60 * 1000; // 2 hours
+
 export function VersionBanner() {
   const [backend, setBackend] = useState<BackendVersion | null>(null);
   const [error, setError] = useState(false);
@@ -64,94 +66,80 @@ export function VersionBanner() {
     return () => clearInterval(id);
   }, []);
 
-  const matched = backend && frontendSha !== 'dev' && backend.sha !== 'unknown' && backend.sha === frontendSha;
-  const mismatched = backend && frontendSha !== 'dev' && backend.sha !== 'unknown' && backend.sha !== frontendSha;
-
   const uiAge = timeAgo(frontendTime);
   const apiAge = backend ? timeAgo(backend.deployed_at) : '';
 
+  const uiMs = frontendTime ? Date.now() - new Date(frontendTime).getTime() : 0;
+  const apiMs = backend?.deployed_at ? Date.now() - new Date(backend.deployed_at).getTime() : 0;
+  const uiStale = frontendSha !== 'dev' && uiMs > STALE_THRESHOLD_MS && uiMs > apiMs + STALE_THRESHOLD_MS;
+  const apiStale = backend && backend.sha !== 'unknown' && apiMs > STALE_THRESHOLD_MS && apiMs > uiMs + STALE_THRESHOLD_MS;
+  const bothFresh = backend && !error && !uiStale && !apiStale && frontendSha !== 'dev';
+
   return (
-    <div className="flex flex-col items-end gap-0.5 select-none">
-      {/* Top row: version pills */}
-      <div className="flex items-center gap-1.5">
+    <div className="flex items-center gap-1.5 select-none">
+      <span
+        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] cursor-default ${
+          uiStale
+            ? 'bg-amber-500/10 text-amber-400'
+            : 'bg-muted/60 text-muted-foreground'
+        }`}
+        title={
+          `Dashboard (what you see in the browser)\n` +
+          `Version: ${frontendSha}\n` +
+          (frontendTime ? `Built: ${fullDate(frontendTime)}\n` : '') +
+          (uiStale
+            ? `\n⚠ This build is behind the backend.\nSync from GitHub in Lovable to get the latest UI.`
+            : `\nThis is up to date.`)
+        }
+      >
+        <Monitor className="w-3 h-3" />
+        Dashboard{uiAge ? ` · ${uiAge}` : ''}
+      </span>
+
+      {error ? (
         <span
-          className="inline-flex items-center gap-1 rounded-full bg-muted/60 px-2 py-0.5 text-[10px] text-muted-foreground cursor-default"
+          className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] text-destructive cursor-default"
           title={
-            `Dashboard (frontend)\n` +
-            `Version: ${frontendSha}\n` +
-            (frontendTime ? `Built: ${fullDate(frontendTime)}\n` : '') +
-            `\nThis is the code running in your browser.\n` +
-            `If this says "dev", Lovable hasn't rebuilt from GitHub yet.`
+            `Backend API (Supabase Edge Functions)\n` +
+            `Status: OFFLINE\n\n` +
+            `Cannot reach the backend. Check the Supabase dashboard for errors.`
           }
         >
-          <Monitor className="w-3 h-3" />
-          Dashboard {uiAge ? `· ${uiAge}` : ''}
+          <AlertCircle className="w-3 h-3" />
+          API offline
         </span>
+      ) : !backend ? (
+        <span className="inline-flex items-center gap-1 rounded-full bg-muted/60 px-2 py-0.5 text-[10px] text-muted-foreground">
+          <RefreshCw className="w-3 h-3 animate-spin" />
+          Checking…
+        </span>
+      ) : (
+        <span
+          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] cursor-default ${
+            apiStale
+              ? 'bg-amber-500/10 text-amber-400'
+              : 'bg-muted/60 text-muted-foreground'
+          }`}
+          title={
+            `Backend API (Supabase Edge Functions)\n` +
+            `Version: ${backend.sha}\n` +
+            `Deployed: ${fullDate(backend.deployed_at)}\n` +
+            (apiStale
+              ? `\n⚠ The backend is behind the dashboard.\nRun: ./scripts/deploy-functions.sh`
+              : `\nThis is up to date.`)
+          }
+        >
+          <Cloud className="w-3 h-3" />
+          API{apiAge ? ` · ${apiAge}` : ''}
+        </span>
+      )}
 
-        {error ? (
-          <span
-            className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] text-destructive cursor-default"
-            title={
-              `Backend API (Edge Functions)\n` +
-              `Status: OFFLINE — cannot reach admin-actions\n\n` +
-              `The Supabase backend is not responding.\n` +
-              `Check the Supabase dashboard for errors.`
-            }
-          >
-            <AlertCircle className="w-3 h-3" />
-            API offline
-          </span>
-        ) : !backend ? (
-          <span className="inline-flex items-center gap-1 rounded-full bg-muted/60 px-2 py-0.5 text-[10px] text-muted-foreground">
-            <RefreshCw className="w-3 h-3 animate-spin" />
-            Checking API…
-          </span>
-        ) : (
-          <span
-            className="inline-flex items-center gap-1 rounded-full bg-muted/60 px-2 py-0.5 text-[10px] text-muted-foreground cursor-default"
-            title={
-              `Backend API (Edge Functions)\n` +
-              `Version: ${backend.sha}\n` +
-              `Deployed: ${fullDate(backend.deployed_at)}\n` +
-              `\nThis is the code running on Supabase servers.\n` +
-              `Updated by deploying Edge Functions.`
-            }
-          >
-            <Cloud className="w-3 h-3" />
-            API {apiAge ? `· ${apiAge}` : ''}
-          </span>
-        )}
-
-        {matched && (
-          <span
-            className="inline-flex items-center gap-1 rounded-full bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-400 cursor-default"
-            title={
-              `Everything is in sync!\n\n` +
-              `Dashboard and API are running the same version (${frontendSha}).\n` +
-              `All recent changes are live.`
-            }
-          >
-            <CheckCircle2 className="w-3 h-3" />
-          </span>
-        )}
-
-        {mismatched && (
-          <span
-            className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-400 cursor-default"
-            title={
-              `Dashboard and API are out of sync!\n\n` +
-              `Dashboard version: ${frontendSha}\n` +
-              `API version: ${backend!.sha}\n\n` +
-              `This means one side was updated but the other wasn't.\n` +
-              `• If Dashboard is older → sync from GitHub in Lovable\n` +
-              `• If API is older → run: ./scripts/deploy-functions.sh`
-            }
-          >
-            <AlertCircle className="w-3 h-3" />
-            Out of sync
-          </span>
-        )}
-      </div>
+      {bothFresh && (
+        <CheckCircle2
+          className="w-3 h-3 text-green-500 cursor-default"
+          title="Both dashboard and backend are recently deployed. Everything looks good."
+        />
+      )}
     </div>
   );
 }
