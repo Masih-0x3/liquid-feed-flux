@@ -98,6 +98,23 @@ export default function Monitoring() {
   const [timeline, setTimeline] = useState<PipelineEvent[]>([]);
   const { toast } = useToast();
 
+  // Active editorial-profile threshold drives the deliver/skip gate.
+  // We surface it in the UI so badges read in context (e.g. 13/20 vs threshold ≥14).
+  const { data: deliverThreshold = 14 } = useQuery({
+    queryKey: ['active-threshold'],
+    queryFn: async () => {
+      const [{ data: act }, { data: profs }] = await Promise.all([
+        supabase.from('settings').select('value').eq('key', 'active_profile_id').maybeSingle(),
+        supabase.from('settings').select('value').eq('key', 'editorial_profiles').maybeSingle(),
+      ]);
+      const activeId = (act?.value as { id?: string } | null)?.id;
+      const profiles = ((profs?.value as { profiles?: Array<{ id: string; threshold: number }> } | null)?.profiles) ?? [];
+      const active = profiles.find((p) => p.id === activeId);
+      return active?.threshold ?? 14;
+    },
+    staleTime: 60_000,
+  });
+
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['monitoring'] });
 
   const handleForceDeliver = async (tweetId: string) => {
