@@ -441,9 +441,9 @@ export default function Monitoring() {
                           );
                         })()}
                         {entry.delivery_decision && entry.delivery_decision !== 'deliver' && (
-                          <Badge variant="outline" className="text-muted-foreground" title={entry.decision_reason ?? undefined}>
+                          <Badge variant="outline" className="text-amber-400 border-amber-500/40 bg-amber-500/5" title={entry.decision_reason ?? undefined}>
                             {entry.delivery_decision === 'skip' ? 'Skipped' : entry.delivery_decision}
-                            {entry.decision_reason ? ` · ${entry.decision_reason.split(':')[0]}` : ''}
+                            {entry.decision_reason ? ` · ${entry.decision_reason}` : ''}
                           </Badge>
                         )}
                         {entry.dup_of_tweet_id && (
