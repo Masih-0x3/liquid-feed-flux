@@ -73,13 +73,76 @@ function StatusIndicator({ entry }: { entry: MonitoringEntry }) {
             </div>
           );
         })}
-      </div>
-      {(entry.translation_error || entry.delivery_error) && (
-        <div className="text-xs text-destructive bg-destructive/10 p-2 rounded">
-          {entry.translation_error && <div>Translation: {entry.translation_error}</div>}
-          {entry.delivery_error && <div>Delivery: {entry.delivery_error}</div>}
+    </div>
+  );
+}
+
+// Single source of truth for "what's going on with this post and what to do".
+// Surfaces skip reasons, threshold gap, and failure details inline so users
+// don't have to hover badges or expand collapsed reasoning.
+function DiagnosticStrip({ entry, threshold }: { entry: MonitoringEntry; threshold: number }) {
+  const decision = entry.final_score != null ? entry.final_score : entry.importance_score;
+  const isSkipped = entry.delivery_decision && entry.delivery_decision !== 'deliver';
+  const hasError = !!(entry.translation_error || entry.delivery_error || entry.x_error);
+
+  if (!isSkipped && !hasError) return null;
+
+  // Variant: failure (red) takes precedence over skip (amber).
+  const variant = hasError ? 'error' : 'skip';
+  const wrapCls = variant === 'error'
+    ? 'border-destructive/30 bg-destructive/5'
+    : 'border-amber-500/30 bg-amber-500/5';
+  const Icon = variant === 'error' ? AlertCircle : Info;
+  const iconCls = variant === 'error' ? 'text-destructive' : 'text-amber-400';
+
+  // Build a human-readable headline + supporting details.
+  let headline = '';
+  const details: { label: string; value: string }[] = [];
+
+  if (variant === 'error') {
+    headline = entry.translation_error
+      ? 'Translation failed'
+      : entry.delivery_error
+      ? 'Telegram delivery failed'
+      : 'X post failed';
+    if (entry.translation_error) details.push({ label: 'Translation', value: entry.translation_error });
+    if (entry.delivery_error) details.push({ label: 'Telegram', value: entry.delivery_error });
+    if (entry.x_error) details.push({ label: 'X', value: entry.x_error });
+  } else {
+    const reason = entry.decision_reason || entry.delivery_decision || 'skipped';
+    const isBelow = /below_threshold|threshold/i.test(reason);
+    if (isBelow && decision != null) {
+      const gap = (threshold - decision).toFixed(1).replace(/\.0$/, '');
+      headline = `Skipped — score ${decision}/20 is ${gap} below the ≥${threshold} threshold`;
+    } else {
+      headline = `Skipped — ${reason}`;
+    }
+    if (entry.decision_reason && !headline.includes(entry.decision_reason)) {
+      details.push({ label: 'Reason', value: entry.decision_reason });
+    }
+    if (entry.importance_reasoning) {
+      details.push({ label: 'Why', value: entry.importance_reasoning });
+    }
+  }
+
+  return (
+    <div className={`mb-4 rounded-lg border p-3 ${wrapCls}`}>
+      <div className="flex items-start gap-2">
+        <Icon className={`w-4 h-4 mt-0.5 shrink-0 ${iconCls}`} />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-foreground">{headline}</p>
+          {details.length > 0 && (
+            <div className="mt-1.5 space-y-1">
+              {details.map((d, i) => (
+                <p key={i} className="text-xs text-muted-foreground leading-relaxed">
+                  <span className="font-semibold text-foreground/80">{d.label}:</span>{' '}
+                  <span className="break-words">{d.value}</span>
+                </p>
+              ))}
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
