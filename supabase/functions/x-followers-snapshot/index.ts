@@ -100,8 +100,20 @@ async function fetchFollowerPage(userId: string, paginationToken: string | null,
   return { users: parsed.data ?? [], nextToken: parsed.meta?.next_token ?? null, status: resp.status };
 }
 
+function checkAuth(req: Request): Response | null {
+  const internal = req.headers.get('x-internal-token') || '';
+  const expected = Deno.env.get('WEBHOOK_SHARED_SECRET') || '';
+  const auth = req.headers.get('Authorization') || '';
+  const svc = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+  if (expected && internal === expected) return null;
+  if (svc && auth === `Bearer ${svc}`) return null;
+  return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
+  const authErr = checkAuth(req);
+  if (authErr) return authErr;
 
   const supabase = createClient<any, any>(
     Deno.env.get('SUPABASE_URL') ?? '',

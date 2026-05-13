@@ -167,19 +167,14 @@ export function applyProfileDecision(input: ProfileDecisionInput): ProfileDecisi
 function validateInternalToken(req: Request): Response | null {
   const token = req.headers.get('x-internal-token') || '';
   const expected = Deno.env.get('WEBHOOK_SHARED_SECRET') || '';
-  // Also accept service_role key as Authorization bearer (from cron)
   const authHeader = req.headers.get('Authorization') || '';
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
-  const anonKey = Deno.env.get('SUPABASE_ANON_KEY') || '';
 
   if (expected && token === expected) return null;
   if (serviceKey && authHeader === `Bearer ${serviceKey}`) return null;
-  if (anonKey && authHeader === `Bearer ${anonKey}`) return null;
 
-  // Allow if no shared secret configured (backwards compat)
   if (!expected) {
-    console.warn('No WEBHOOK_SHARED_SECRET configured; allowing request.');
-    return null;
+    console.error('WEBHOOK_SHARED_SECRET not configured; rejecting request.');
   }
 
   return new Response(JSON.stringify({ error: 'Unauthorized' }), {
