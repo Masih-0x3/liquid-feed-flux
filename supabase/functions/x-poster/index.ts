@@ -47,11 +47,8 @@ function checkAuth(req: Request): Response | null {
   const expected = Deno.env.get('WEBHOOK_SHARED_SECRET') || '';
   const auth = req.headers.get('Authorization') || '';
   const svc = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
-  const anon = Deno.env.get('SUPABASE_ANON_KEY') || '';
   if (expected && internal === expected) return null;
   if (svc && auth === `Bearer ${svc}`) return null;
-  if (anon && auth === `Bearer ${anon}`) return null;
-  if (!expected) return null;
   return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 }
 
