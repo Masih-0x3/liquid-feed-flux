@@ -88,16 +88,19 @@ serve(async (req) => {
       || Deno.env.get('RSSAPP_TOKEN')
       || '').trim();
 
-    if (expectedToken) {
-      if (!providedToken || providedToken !== expectedToken) {
-        console.warn('Webhook token missing or invalid');
-        return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-          status: 401,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
-    } else {
-      console.warn('No webhook shared secret configured; allowing request. Set WEBHOOK_SHARED_SECRET to enforce.');
+    if (!expectedToken) {
+      console.error('WEBHOOK_SHARED_SECRET not configured; rejecting request.');
+      return new Response(JSON.stringify({ error: 'Webhook secret not configured' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    if (!providedToken || providedToken !== expectedToken) {
+      console.warn('Webhook token missing or invalid');
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
     const supabase = createClient<any, any>(
