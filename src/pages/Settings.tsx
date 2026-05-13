@@ -26,6 +26,7 @@ import type { EditorialProfile } from '@/hooks/useSettingsData';
 import XAutomationSettings from '@/components/settings/XAutomationSettings';
 import TranslationPlayground from '@/components/settings/TranslationPlayground';
 import PromptEditor from '@/components/settings/PromptEditor';
+import LearnedSignalsCard from '@/components/settings/LearnedSignalsCard';
 
 const SETTINGS_TAB_IDS = ['translation', 'filter', 'messages', 'telegram', 'x-automation'] as const;
 type SettingsTabId = (typeof SETTINGS_TAB_IDS)[number];
@@ -563,6 +564,7 @@ export default function Settings() {
             translationSettings={ts}
             onTranslationSettingsChange={setTranslationSettings}
           />
+          <LearnedSignalsCard />
         </TabsContent>
 
         <TabsContent value="messages" className="space-y-6">

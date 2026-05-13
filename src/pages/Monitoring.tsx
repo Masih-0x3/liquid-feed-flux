@@ -66,6 +66,11 @@ async function adminRetryXPost(tweetId: string) {
   if (error) throw error;
   return data as { ok: boolean; error?: string; status?: string; x_tweet_id?: string };
 }
+async function adminClearDup(tweetId: string, relatedTweetId: string | null) {
+  const { data, error } = await supabase.functions.invoke('admin-actions', { body: { action: 'clear_dup', tweet_id: tweetId, related_tweet_id: relatedTweetId } });
+  if (error) throw error;
+  return data as { success: boolean };
+}
 
 function StatusIndicator({ entry }: { entry: MonitoringEntry }) {
   const steps = [
@@ -274,6 +279,14 @@ export default function Monitoring() {
     } catch (e) {
       toast({ title: 'X retry failed', description: (e as Error).message, variant: 'destructive' });
     }
+  };
+
+  const handleClearDup = async (tweetId: string, relatedTweetId: string | null) => {
+    try {
+      await adminClearDup(tweetId, relatedTweetId);
+      toast({ title: 'Duplicate cleared', description: 'Post will be re-evaluated for delivery' });
+      invalidate();
+    } catch { toast({ title: 'Error', description: 'Failed to clear duplicate', variant: 'destructive' }); }
   };
 
   const handleRescorePost = async (tweetId: string) => {
@@ -495,9 +508,17 @@ export default function Monitoring() {
                                       : 'bg-red-500/20 text-red-400 border-red-500/30'
                                   }
                                   title={
-                                    `Decision score (axes-weighted when present): ${decision}/20\n` +
+                                    `Decision score: ${decision}/20\n` +
                                     `Threshold to deliver: ≥${deliverThreshold}\n` +
-                                    (axesStr ? `Axes — ${axesStr}` : '')
+                                    (axesStr ? `Axes — ${axesStr}\n` : '') +
+                                    (entry.score_breakdown
+                                      ? `--- Breakdown ---\n` +
+                                        `AI base: ${entry.score_breakdown.ai ?? '—'}\n` +
+                                        (entry.score_breakdown.author_bias ? `Author bias: ${entry.score_breakdown.author_bias > 0 ? '+' : ''}${entry.score_breakdown.author_bias}\n` : '') +
+                                        (entry.score_breakdown.tag_bias ? `Tag bias: ${entry.score_breakdown.tag_bias > 0 ? '+' : ''}${entry.score_breakdown.tag_bias}\n` : '') +
+                                        (entry.score_breakdown.knn_prior ? `Similar posts you labeled: ${entry.score_breakdown.knn_prior > 0 ? '+' : ''}${entry.score_breakdown.knn_prior}\n` : '') +
+                                        `Final: ${entry.score_breakdown.final ?? decision}`
+                                      : '')
                                   }
                                 >
                                   <Star className="w-3 h-3 mr-1" />
@@ -513,11 +534,25 @@ export default function Monitoring() {
                                 </span>
                               )}
                               {entry.dup_of_tweet_id && (
-                                <Badge
-                                  className="bg-purple-500/20 text-purple-300 border-purple-500/30"
-                                  title={`dup_of ${entry.dup_of_tweet_id}${entry.dup_similarity != null ? ` · cosine ${entry.dup_similarity.toFixed(3)}` : ''}`}
-                                >
-                                  dup{entry.dup_similarity != null ? ` ${entry.dup_similarity.toFixed(2)}` : ''}
+                                <span className="inline-flex items-center gap-1">
+                                  <Badge
+                                    className="bg-purple-500/20 text-purple-300 border-purple-500/30"
+                                    title={`dup_of ${entry.dup_of_tweet_id}${entry.dup_similarity != null ? ` · cosine ${entry.dup_similarity.toFixed(3)}` : ''}`}
+                                  >
+                                    dup{entry.dup_similarity != null ? ` ${entry.dup_similarity.toFixed(2)}` : ''}
+                                  </Badge>
+                                  <button
+                                    className="text-[10px] text-purple-400 hover:text-purple-200 underline underline-offset-2 cursor-pointer"
+                                    onClick={(e) => { e.stopPropagation(); handleClearDup(entry.tweet_id, entry.dup_of_tweet_id); }}
+                                    title="Mark as not a duplicate — clears dup status and blocklists this pair"
+                                  >
+                                    Not a dup
+                                  </button>
+                                </span>
+                              )}
+                              {entry.feedback_locked && (
+                                <Badge className="bg-blue-500/20 text-blue-300 border-blue-500/30" title="You force-delivered or force-posted this — dedup will not auto-skip it">
+                                  Locked
                                 </Badge>
                               )}
                               {entry.hydration_source === 'x_api' && (

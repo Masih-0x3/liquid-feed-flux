@@ -42,6 +42,10 @@ export interface MonitoringEntry {
   story_cluster_id: string | null;
   /** PR3: cosine similarity (0-1) of the embedding match against the original. */
   dup_similarity: number | null;
+  /** Feedback learning: breakdown of AI base + bias + kNN for the final score. */
+  score_breakdown: { ai?: number; author_bias?: number; tag_bias?: number; knn_prior?: number; final?: number } | null;
+  /** Feedback learning: true if user force-delivered/posted, preventing auto-skip by dedup. */
+  feedback_locked: boolean;
 }
 
 export interface PipelineEvent {
@@ -63,7 +67,7 @@ async function fetchMonitoringPage({ pageParam = 0 }: { pageParam: number }): Pr
 
   const { data: postsData, error: postsError } = await supabase
     .from('posts')
-    .select('tweet_id, text_original, text_translated, url, created_at, translated_at, has_media, lang_original, author_handle, importance_score, importance_tags, importance_reasoning, delivery_decision, score_axes, final_score, decision_reason, dup_of_tweet_id, story_cluster_id, dup_similarity, accounts!inner(handle, display_name)')
+    .select('tweet_id, text_original, text_translated, url, created_at, translated_at, has_media, lang_original, author_handle, importance_score, importance_tags, importance_reasoning, delivery_decision, score_axes, final_score, decision_reason, dup_of_tweet_id, story_cluster_id, dup_similarity, score_breakdown, feedback_locked, accounts!inner(handle, display_name)')
     .order('created_at', { ascending: false })
     .range(from, to);
   if (postsError) throw postsError;
@@ -124,6 +128,8 @@ async function fetchMonitoringPage({ pageParam = 0 }: { pageParam: number }): Pr
       dup_of_tweet_id: ((post as { dup_of_tweet_id?: string | null }).dup_of_tweet_id ?? null),
       story_cluster_id: ((post as { story_cluster_id?: string | null }).story_cluster_id ?? null),
       dup_similarity: ((post as { dup_similarity?: number | null }).dup_similarity ?? null),
+      score_breakdown: ((post as { score_breakdown?: MonitoringEntry['score_breakdown'] }).score_breakdown ?? null),
+      feedback_locked: ((post as { feedback_locked?: boolean }).feedback_locked ?? false),
     };
   });
 

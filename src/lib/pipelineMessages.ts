@@ -48,6 +48,13 @@ export function formatDecisionReason(reason: string | null | undefined): Formatt
   if (legacyBelow) return withDetail(r, `Below threshold (${legacyBelow[1]} < ${legacyBelow[2]})`);
   if (/^author_rule:always_deliver:/i.test(r)) return withDetail(r, 'Author rule: always deliver');
   if (/^author_rule:always_skip:/i.test(r)) return withDetail(r, 'Author rule: always skip');
+  if (r === 'dup_cleared_by_admin') return withDetail(r, 'Duplicate cleared by admin');
+  const boost = r.match(/^feedback_boost:([\d.]+)\+([-\d.]+)>=(\d+)/);
+  if (boost) return withDetail(r, `Feedback boosted: AI ${boost[1]} + bias ${boost[2]} met threshold ${boost[3]}`);
+  const reduce = r.match(/^feedback_reduce:([\d.]+)\+([-\d.]+)<(\d+)/);
+  if (reduce) return withDetail(r, `Feedback reduced: AI ${reduce[1]} + bias ${reduce[2]} below threshold ${reduce[3]}`);
+  const dupOf = r.match(/^dup_of\s+(\S+)/);
+  if (dupOf) return withDetail(r, `Duplicate of ${dupOf[1]}`);
 
   return withDetail(r, r.length > 72 ? `${r.slice(0, 69)}…` : r);
 }

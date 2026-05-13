@@ -324,6 +324,49 @@ async function runRescore(supabase: any, tweetId: string): Promise<{
   const legacyThreshold = typeof cf.default_threshold === 'number' ? cf.default_threshold as number : 12;
   const thresholdOut = editorialProfile ? editorialProfile.threshold : legacyThreshold;
 
+  // Feedback bias + kNN prior
+  let scoreBreakdown: Record<string, unknown> | null = null;
+  if (finalScore !== null) {
+    try {
+      const { data: biasRow } = await supabase.from('settings').select('value').eq('key', 'learned_biases').maybeSingle();
+      const biases = (biasRow?.value ?? {}) as { author_bias?: Record<string, number>; tag_bias?: Record<string, number> };
+      const authorDelta = authorHandle ? (biases.author_bias?.[(authorHandle).toLowerCase()] ?? 0) : 0;
+      let tagDelta = 0;
+      for (const t of newTags) tagDelta += biases.tag_bias?.[String(t).toLowerCase()] ?? 0;
+      tagDelta = Math.max(-2, Math.min(2, tagDelta));
+
+      let knnPrior = 0;
+      const { data: sigRow } = await supabase.from('story_signatures').select('embedding').eq('tweet_id', tweetId).maybeSingle();
+      if (sigRow?.embedding) {
+        const { data: knnVal } = await supabase.rpc('knn_feedback_prior', { query_embedding: sigRow.embedding, exclude_tweet_id: tweetId });
+        knnPrior = typeof knnVal === 'number' ? knnVal : 0;
+      }
+
+      const totalBias = Math.max(-5, Math.min(5, authorDelta + tagDelta + knnPrior));
+      const aiFinal = finalScore;
+      if (totalBias !== 0) {
+        finalScore = Math.max(1, Math.min(20, Math.round((finalScore + totalBias) * 10) / 10));
+        if (filterEnabled && !scoreOnly) {
+          const thr = thresholdOut;
+          if (finalScore >= thr && deliveryDecision === 'skip' && (decisionReason ?? '').startsWith('below_threshold')) {
+            deliveryDecision = 'deliver';
+            decisionReason = `feedback_boost:${aiFinal.toFixed(1)}+${totalBias.toFixed(1)}>=${thr}`;
+          } else if (finalScore < thr && deliveryDecision === 'deliver' && (decisionReason ?? '').startsWith('score_pass')) {
+            deliveryDecision = 'skip';
+            decisionReason = `feedback_reduce:${aiFinal.toFixed(1)}+${totalBias.toFixed(1)}<${thr}`;
+          }
+        }
+      }
+      scoreBreakdown = {
+        ai: Math.round(aiFinal * 10) / 10,
+        ...(authorDelta ? { author_bias: Math.round(authorDelta * 1000) / 1000 } : {}),
+        ...(tagDelta ? { tag_bias: Math.round(tagDelta * 1000) / 1000 } : {}),
+        ...(knnPrior ? { knn_prior: Math.round(knnPrior * 1000) / 1000 } : {}),
+        final: Math.round(finalScore * 10) / 10,
+      };
+    } catch (_e) { /* non-fatal */ }
+  }
+
   const updatePayload: Record<string, unknown> = {
     importance_score: importanceScore,
     importance_tags: newTags,
@@ -332,6 +375,7 @@ async function runRescore(supabase: any, tweetId: string): Promise<{
     score_axes: scoreAxes ?? null,
     final_score: finalScore,
     decision_reason: decisionReason,
+    score_breakdown: scoreBreakdown,
   };
   if (typeof args.translated_text === 'string') {
     updatePayload.text_translated = args.translated_text;
@@ -354,6 +398,70 @@ async function runRescore(supabase: any, tweetId: string): Promise<{
     threshold: thresholdOut,
     model,
   };
+}
+
+// deno-lint-ignore no-explicit-any
+async function recordFeedback(
+  supabase: any,
+  tweetId: string,
+  feedbackAction: string,
+  polarity: number,
+  meta?: Record<string, unknown>,
+  relatedTweetId?: string | null,
+) {
+  await supabase.from('feedback_events').insert({
+    tweet_id: tweetId,
+    related_tweet_id: relatedTweetId ?? null,
+    action: feedbackAction,
+    polarity,
+    meta: meta ?? {},
+    source: 'admin_action',
+  });
+
+  if (polarity === 0 || ['not_duplicate', 'confirm_duplicate'].includes(feedbackAction)) return;
+
+  const { data: post } = await supabase
+    .from('posts')
+    .select('author_handle, importance_tags')
+    .eq('tweet_id', tweetId)
+    .maybeSingle();
+  if (!post) return;
+
+  const { data: biasRow } = await supabase
+    .from('settings')
+    .select('value')
+    .eq('key', 'learned_biases')
+    .maybeSingle();
+  const biases = (biasRow?.value ?? { author_bias: {}, tag_bias: {}, keyword_bias: {} }) as {
+    author_bias: Record<string, number>;
+    tag_bias: Record<string, number>;
+    keyword_bias: Record<string, number>;
+  };
+
+  const PER_EVENT_CLAMP = 0.5;
+  const PER_KEY_CAP = 3;
+  const clampD = (d: number) => Math.max(-PER_EVENT_CLAMP, Math.min(PER_EVENT_CLAMP, d));
+  const clampT = (t: number) => Math.max(-PER_KEY_CAP, Math.min(PER_KEY_CAP, t));
+
+  if (post.author_handle) {
+    const handle = (post.author_handle as string).toLowerCase();
+    biases.author_bias[handle] = clampT((biases.author_bias[handle] || 0) + clampD(polarity * 0.6));
+  }
+
+  const tags = Array.isArray(post.importance_tags) ? post.importance_tags as string[] : [];
+  if (tags.length > 0) {
+    const perTag = polarity * 0.2 / tags.length;
+    for (const tag of tags) {
+      const t = String(tag).toLowerCase();
+      biases.tag_bias[t] = clampT((biases.tag_bias[t] || 0) + clampD(perTag));
+    }
+  }
+
+  await supabase.from('settings').upsert({
+    key: 'learned_biases',
+    value: biases,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'key' });
 }
 
 function validateSettingsValue(key: string, value: unknown): string | null {
@@ -638,6 +746,7 @@ serve(async (req) => {
           .update({ text_translated })
           .eq('tweet_id', tweet_id);
         if (error) throw error;
+        await recordFeedback(supabase, tweet_id, 'edit_translation', 0).catch(() => {});
         return jsonResponse({ success: true, message: 'Translation updated' });
       }
 
@@ -649,6 +758,10 @@ serve(async (req) => {
         }
         const { data: result, error } = await supabase.rpc('retry_step', { tweet_id, step });
         if (error) throw error;
+        if (step === 'deliver') {
+          await recordFeedback(supabase, tweet_id, 'force_deliver', 2).catch(() => {});
+          await supabase.from('posts').update({ feedback_locked: true }).eq('tweet_id', tweet_id);
+        }
         return jsonResponse({ success: true, message: `${step} retry queued` });
       }
 
@@ -669,6 +782,7 @@ serve(async (req) => {
             next_run_at: new Date().toISOString()
           }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
         if (error) throw error;
+        await recordFeedback(supabase, tweet_id, 'reprocess', 0).catch(() => {});
         return jsonResponse({ success: true, message: 'Reprocess job queued' });
       }
 
@@ -794,6 +908,10 @@ serve(async (req) => {
           if (!resp.ok) return jsonResponse({ ok: false, error: `x-poster ${resp.status}: ${text.slice(0, 300)}`, raw: parsed, prep }, 200);
           const parsedObj = parsed as { results?: Array<Record<string, unknown>> };
           const result = tweetId ? (parsedObj?.results?.[0] ?? null) : null;
+          if (tweetId && action === 'retry_x_post') {
+            await recordFeedback(supabase, tweetId, 'force_x', 1).catch(() => {});
+            await supabase.from('posts').update({ feedback_locked: true }).eq('tweet_id', tweetId);
+          }
           return jsonResponse({
             ok: true,
             prep,
@@ -1220,8 +1338,18 @@ serve(async (req) => {
       case 'rescore_post': {
         const tweetId = typeof body.tweet_id === 'string' ? body.tweet_id.trim() : '';
         if (!tweetId) return jsonResponse({ ok: false, error: 'tweet_id is required' }, 400);
+        const { data: prePost } = await supabase.from('posts').select('final_score').eq('tweet_id', tweetId).maybeSingle();
+        const oldScore = prePost?.final_score != null ? Number(prePost.final_score) : null;
         const r = await runRescore(supabase, tweetId);
         if (!r.ok) return jsonResponse({ ok: false, error: r.error }, 200);
+        if (oldScore !== null && r.final_score != null) {
+          const diff = r.final_score - oldScore;
+          if (Math.abs(diff) >= 0.5) {
+            const act = diff < 0 ? 'dispute_high' : 'dispute_low';
+            const pol = diff < 0 ? -1 : 1;
+            await recordFeedback(supabase, tweetId, act, pol, { old_score: oldScore, new_score: r.final_score }).catch(() => {});
+          }
+        }
         return jsonResponse({
           ok: true,
           tweet_id: tweetId,
@@ -1253,6 +1381,40 @@ serve(async (req) => {
         } catch (e) {
           return jsonResponse({ ok: false, error: (e as Error).message }, 200);
         }
+      }
+
+      // ===== Clear duplicate (not-a-duplicate feedback) =====
+      case 'clear_dup': {
+        const { tweet_id, related_tweet_id } = body;
+        if (!tweet_id) return jsonResponse({ error: 'tweet_id is required' }, 400);
+        const { error: clrErr } = await supabase.from('posts').update({
+          dup_of_tweet_id: null,
+          dup_similarity: null,
+          delivery_decision: 'deliver',
+          decision_reason: 'dup_cleared_by_admin',
+          feedback_locked: true,
+        }).eq('tweet_id', tweet_id);
+        if (clrErr) throw clrErr;
+        if (related_tweet_id) {
+          const pairA = tweet_id < related_tweet_id ? tweet_id : related_tweet_id;
+          const pairB = tweet_id < related_tweet_id ? related_tweet_id : tweet_id;
+          await supabase.from('story_pair_blocklist').upsert(
+            { tweet_a: pairA, tweet_b: pairB, reason: 'not_duplicate_admin' },
+            { onConflict: 'tweet_a,tweet_b' },
+          ).then(() => null, (e: Error) => console.warn('blocklist upsert failed', e.message));
+        }
+        await recordFeedback(supabase, tweet_id, 'not_duplicate', -2, {}, related_tweet_id).catch(() => {});
+        return jsonResponse({ success: true, message: 'Duplicate cleared and pair blocklisted' });
+      }
+
+      // ===== Reset learned biases =====
+      case 'reset_learned_biases': {
+        await supabase.from('settings').upsert({
+          key: 'learned_biases',
+          value: { author_bias: {}, tag_bias: {}, keyword_bias: {} },
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'key' });
+        return jsonResponse({ success: true, message: 'Learned biases reset' });
       }
 
       default:

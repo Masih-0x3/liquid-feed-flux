@@ -265,7 +265,7 @@ async function runStoryDedup(supabase: any, post: { tweet_id: string; text_trans
 
   // Find nearest neighbor
   const embeddingLiteral = '[' + embedding.join(',') + ']';
-  const { data: matches, error: matchErr } = await supabase.rpc('find_similar_story', {
+  const { data: matches, error: matchErr } = await supabase.rpc('find_similar_story_v2', {
     query_embedding: embeddingLiteral,
     query_simhash: simhash,
     exclude_tweet_id: post.tweet_id,
@@ -311,16 +311,16 @@ async function handleComputeSignatureJob(job: Record<string, unknown>, supabase:
   const tweetId = payload.tweet_id as string;
   if (!tweetId) throw new Error('compute_signature: missing tweet_id in job payload');
   const sm = config.storyMemory;
-  if (!sm?.enabled) return true; // feature off → no-op success
+  if (!sm?.enabled) return true;
 
   const { data: post, error } = await supabase
     .from('posts')
-    .select('tweet_id, text_translated, text_original, author_handle, delivery_decision')
+    .select('tweet_id, text_translated, text_original, author_handle, delivery_decision, feedback_locked')
     .eq('tweet_id', tweetId)
     .single();
   if (error || !post) {
     console.warn(JSON.stringify({ function: 'worker', action: 'compute_signature_no_post', tweet_id: tweetId }));
-    return true; // post is gone, nothing to do
+    return true;
   }
 
   let dup: { dup_of: string | null; cluster_id: string | null; similarity: number | null };
@@ -340,15 +340,16 @@ async function handleComputeSignatureJob(job: Record<string, unknown>, supabase:
       story_cluster_id: dup.cluster_id,
       dup_similarity: dup.similarity,
     };
-    // Only mark as skip if not already decided as skip (don't overwrite stronger skips),
-    // and only if the post was originally going to deliver.
-    if (sm.action === 'skip' && (post.delivery_decision === 'deliver' || post.delivery_decision == null)) {
+    // Respect feedback_locked: record the dup match for visibility but never
+    // flip delivery_decision if the user already force-delivered this post.
+    const locked = post.feedback_locked === true;
+    if (!locked && sm.action === 'skip' && (post.delivery_decision === 'deliver' || post.delivery_decision == null)) {
       updates.delivery_decision = 'skip';
       updates.decision_reason = `dup_of ${dup.dup_of} (cosine ${dup.similarity?.toFixed(3)})`;
     }
     await supabase.from('posts').update(updates).eq('tweet_id', tweetId);
-    await insertPipelineEvent(supabase, 'post', tweetId, 'compute_signature', 'completed', null, new Date().toISOString(), null, { dup_of: dup.dup_of, similarity: dup.similarity, action: sm.action });
-    console.log(JSON.stringify({ function: 'worker', action: 'compute_signature_dup', tweet_id: tweetId, dup_of: dup.dup_of, similarity: dup.similarity }));
+    await insertPipelineEvent(supabase, 'post', tweetId, 'compute_signature', 'completed', null, new Date().toISOString(), null, { dup_of: dup.dup_of, similarity: dup.similarity, action: sm.action, feedback_locked: locked });
+    console.log(JSON.stringify({ function: 'worker', action: 'compute_signature_dup', tweet_id: tweetId, dup_of: dup.dup_of, similarity: dup.similarity, feedback_locked: locked }));
   } else {
     await insertPipelineEvent(supabase, 'post', tweetId, 'compute_signature', 'completed', null, new Date().toISOString(), null, { dup_of: null });
   }
@@ -998,6 +999,51 @@ ${post.text_original}`;
       decisionReason = 'filter_disabled';
     }
 
+    // Feedback bias + kNN prior: adjust finalScore with learned signals
+    let scoreBreakdown: Record<string, unknown> | null = null;
+    if (finalScore !== null) {
+      try {
+        const { data: biasRow } = await supabase.from('settings').select('value').eq('key', 'learned_biases').maybeSingle();
+        const biases = (biasRow?.value ?? {}) as { author_bias?: Record<string, number>; tag_bias?: Record<string, number> };
+        const authorDelta = authorHandle ? (biases.author_bias?.[(authorHandle).toLowerCase()] ?? 0) : 0;
+        let tagDelta = 0;
+        for (const t of importanceTags ?? []) tagDelta += biases.tag_bias?.[String(t).toLowerCase()] ?? 0;
+        tagDelta = Math.max(-2, Math.min(2, tagDelta));
+
+        let knnPrior = 0;
+        const { data: sigRow } = await supabase.from('story_signatures').select('embedding').eq('tweet_id', tweetId).maybeSingle();
+        if (sigRow?.embedding) {
+          const { data: knnVal } = await supabase.rpc('knn_feedback_prior', { query_embedding: sigRow.embedding, exclude_tweet_id: tweetId });
+          knnPrior = typeof knnVal === 'number' ? knnVal : 0;
+        }
+
+        const totalBias = Math.max(-5, Math.min(5, authorDelta + tagDelta + knnPrior));
+        const aiFinal = finalScore;
+        if (totalBias !== 0) {
+          finalScore = Math.max(1, Math.min(20, Math.round((finalScore + totalBias) * 10) / 10));
+          if (filterEnabled && !scoreOnly) {
+            const thr = config.editorialProfile?.threshold ?? config.contentFilter.default_threshold;
+            if (finalScore >= thr && deliveryDecision === 'skip' && (decisionReason ?? '').startsWith('below_threshold')) {
+              deliveryDecision = 'deliver';
+              decisionReason = `feedback_boost:${aiFinal.toFixed(1)}+${totalBias.toFixed(1)}>=${thr}`;
+            } else if (finalScore < thr && deliveryDecision === 'deliver' && (decisionReason ?? '').startsWith('score_pass')) {
+              deliveryDecision = 'skip';
+              decisionReason = `feedback_reduce:${aiFinal.toFixed(1)}+${totalBias.toFixed(1)}<${thr}`;
+            }
+          }
+        }
+        scoreBreakdown = {
+          ai: Math.round(aiFinal * 10) / 10,
+          ...(authorDelta ? { author_bias: Math.round(authorDelta * 1000) / 1000 } : {}),
+          ...(tagDelta ? { tag_bias: Math.round(tagDelta * 1000) / 1000 } : {}),
+          ...(knnPrior ? { knn_prior: Math.round(knnPrior * 1000) / 1000 } : {}),
+          final: Math.round(finalScore * 10) / 10,
+        };
+      } catch (biasErr) {
+        console.warn('feedback bias (non-fatal):', (biasErr as Error).message);
+      }
+    }
+
     const { error: updateError } = await supabase
       .from('posts')
       .update({
@@ -1014,6 +1060,7 @@ ${post.text_original}`;
         score_axes: scoreAxes ?? null,
         final_score: finalScore,
         decision_reason: decisionReason,
+        score_breakdown: scoreBreakdown,
       })
       .eq('tweet_id', tweetId);
 
