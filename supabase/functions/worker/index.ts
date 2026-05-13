@@ -622,6 +622,9 @@ serve(async (req) => {
             case 'resolve_media':
               success = await handleResolveMediaJob(job, supabase);
               break;
+            case 'compute_signature':
+              success = await handleComputeSignatureJob(job, supabase, config);
+              break;
             default:
               console.error(`Unknown job type: ${job.type}`);
               success = false;
