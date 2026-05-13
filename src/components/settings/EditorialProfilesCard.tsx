@@ -91,6 +91,24 @@ export default function EditorialProfilesCard({ profiles: initialProfiles, activ
 
   const handleSetActive = (id: string) => setActiveId(id);
 
+  const handleRescore = async () => {
+    setRescoring(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('admin-actions', {
+        body: { action: 'rescore_recent', hours: 48, only_missing: true },
+      });
+      if (error) throw error;
+      toast({
+        title: 'Re-score queued',
+        description: `Queued ${data?.queued ?? 0} of ${data?.matched ?? 0} posts missing axes (scanned ${data?.scanned ?? 0}).`,
+      });
+    } catch (e) {
+      toast({ title: 'Re-score failed', description: (e as Error).message, variant: 'destructive' });
+    } finally {
+      setRescoring(false);
+    }
+  };
+
   return (
     <Card className="glass-card">
       <CardHeader>
