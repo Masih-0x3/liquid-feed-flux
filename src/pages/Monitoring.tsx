@@ -73,6 +73,7 @@ function StatusIndicator({ entry }: { entry: MonitoringEntry }) {
             </div>
           );
         })}
+      </div>
     </div>
   );
 }
