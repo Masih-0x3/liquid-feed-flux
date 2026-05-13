@@ -528,6 +528,7 @@ export default function Monitoring() {
                 </div>
               </CardHeader>
               <CardContent>
+                <DiagnosticStrip entry={entry} threshold={deliverThreshold} />
                 <MediaThumbnails tweetId={entry.tweet_id} />
                 <div className="mb-4">
                   <h4 className="font-medium mb-2 text-sm text-muted-foreground">English</h4>
