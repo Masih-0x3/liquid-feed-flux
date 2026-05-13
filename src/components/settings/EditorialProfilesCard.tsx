@@ -8,9 +8,10 @@ import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
-import { Sparkles, Plus, X, Copy, Trash2, Save, Loader2 } from 'lucide-react';
+import { Sparkles, Plus, X, Copy, Trash2, Save, Loader2, RefreshCw } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useSaveSettings, makeDefaultProfile, DEFAULT_AXIS_WEIGHTS, SCORE_AXIS_KEYS, type EditorialProfile, type ScoreAxisKey } from '@/hooks/useSettingsData';
+import { supabase } from '@/integrations/supabase/client';
 
 interface Props {
   profiles: EditorialProfile[];
@@ -31,6 +32,7 @@ export default function EditorialProfilesCard({ profiles: initialProfiles, activ
   const [activeId, setActiveId] = useState<string | null>(initialActive);
   const [editingId, setEditingId] = useState<string | null>(initialActive ?? initialProfiles[0]?.id ?? null);
   const [kwInputs, setKwInputs] = useState<Record<string, string>>({});
+  const [rescoring, setRescoring] = useState(false);
   const saveMutation = useSaveSettings();
   const { toast } = useToast();
 
@@ -88,6 +90,24 @@ export default function EditorialProfilesCard({ profiles: initialProfiles, activ
   };
 
   const handleSetActive = (id: string) => setActiveId(id);
+
+  const handleRescore = async () => {
+    setRescoring(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('admin-actions', {
+        body: { action: 'rescore_recent', hours: 48, only_missing: true },
+      });
+      if (error) throw error;
+      toast({
+        title: 'Re-score queued',
+        description: `Queued ${data?.queued ?? 0} of ${data?.matched ?? 0} posts missing axes (scanned ${data?.scanned ?? 0}).`,
+      });
+    } catch (e) {
+      toast({ title: 'Re-score failed', description: (e as Error).message, variant: 'destructive' });
+    } finally {
+      setRescoring(false);
+    }
+  };
 
   return (
     <Card className="glass-card">
@@ -235,7 +255,11 @@ export default function EditorialProfilesCard({ profiles: initialProfiles, activ
         )}
 
         <Separator />
-        <div className="flex justify-end">
+        <div className="flex justify-between items-center gap-3 flex-wrap">
+          <Button variant="outline" onClick={handleRescore} disabled={rescoring} size="sm">
+            {rescoring ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <RefreshCw className="w-4 h-4 mr-2" />}
+            Re-score last 48h (missing axes only)
+          </Button>
           <Button onClick={handleSaveAll} disabled={saveMutation.isPending} className="bg-gradient-primary hover:opacity-90 text-white">
             {saveMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Save className="w-4 h-4 mr-2" />}
             Save profiles & active selection

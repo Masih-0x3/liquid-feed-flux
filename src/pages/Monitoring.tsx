@@ -346,6 +346,14 @@ export default function Monitoring() {
                             {entry.decision_reason ? ` · ${entry.decision_reason.split(':')[0]}` : ''}
                           </Badge>
                         )}
+                        {entry.dup_of_tweet_id && (
+                          <Badge
+                            className="bg-purple-500/20 text-purple-300 border-purple-500/30"
+                            title={`dup_of ${entry.dup_of_tweet_id}${entry.dup_similarity != null ? ` · cosine ${entry.dup_similarity.toFixed(3)}` : ''}`}
+                          >
+                            dup{entry.dup_similarity != null ? ` ${entry.dup_similarity.toFixed(2)}` : ''}
+                          </Badge>
+                        )}
                         {entry.hydration_source === 'x_api' && (
                           <Badge className="bg-green-500/20 text-green-400 border-green-500/30">
                             <Sparkles className="w-3 h-3 mr-1" />Hydrated

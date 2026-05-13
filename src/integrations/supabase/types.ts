@@ -1062,6 +1062,7 @@ export type Database = {
       }
     }
     Functions: {
+      bump_coverage_count: { Args: { p_tweet_id: string }; Returns: undefined }
       calculate_growth_rate: {
         Args: { p_chat_id: string; p_days?: number }
         Returns: {

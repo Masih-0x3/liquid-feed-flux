@@ -36,6 +36,12 @@ export interface MonitoringEntry {
   x_posted_at: string | null;
   x_error: string | null;
   x_skip_reason: string | null;
+  /** PR3: tweet_id of the original story this is a near-duplicate of, when story memory matched. */
+  dup_of_tweet_id: string | null;
+  /** PR3: cluster id grouping near-duplicate stories. */
+  story_cluster_id: string | null;
+  /** PR3: cosine similarity (0-1) of the embedding match against the original. */
+  dup_similarity: number | null;
 }
 
 export interface PipelineEvent {
@@ -57,7 +63,7 @@ async function fetchMonitoringPage({ pageParam = 0 }: { pageParam: number }): Pr
 
   const { data: postsData, error: postsError } = await supabase
     .from('posts')
-    .select('tweet_id, text_original, text_translated, url, created_at, translated_at, has_media, lang_original, author_handle, importance_score, importance_tags, importance_reasoning, delivery_decision, score_axes, final_score, decision_reason, accounts!inner(handle, display_name)')
+    .select('tweet_id, text_original, text_translated, url, created_at, translated_at, has_media, lang_original, author_handle, importance_score, importance_tags, importance_reasoning, delivery_decision, score_axes, final_score, decision_reason, dup_of_tweet_id, story_cluster_id, dup_similarity, accounts!inner(handle, display_name)')
     .order('created_at', { ascending: false })
     .range(from, to);
   if (postsError) throw postsError;
@@ -115,6 +121,9 @@ async function fetchMonitoringPage({ pageParam = 0 }: { pageParam: number }): Pr
       x_posted_at: (rpc?.x_posted_at as string) ?? null,
       x_error: (rpc?.x_error as string) ?? null,
       x_skip_reason: (rpc?.x_skip_reason as string) ?? null,
+      dup_of_tweet_id: ((post as { dup_of_tweet_id?: string | null }).dup_of_tweet_id ?? null),
+      story_cluster_id: ((post as { story_cluster_id?: string | null }).story_cluster_id ?? null),
+      dup_similarity: ((post as { dup_similarity?: number | null }).dup_similarity ?? null),
     };
   });
 

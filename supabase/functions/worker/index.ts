@@ -388,8 +388,9 @@ async function fetchEmbedding(text: string): Promise<number[] | null> {
 }
 
 /**
- * Run semantic dedup. Returns { dup_of, similarity, cluster_id } when a duplicate is found.
- * Always upserts story_signatures for the post (so future posts can match against it).
+ * Compute the story signature for a post and return any near-duplicate match.
+ * Always upserts story_signatures so future posts can match against it.
+ * Tie-break: in fuzzy zone [threshold, threshold+0.02], also require Hamming ≤ 12.
  */
 // deno-lint-ignore no-explicit-any
 async function runStoryDedup(supabase: any, post: { tweet_id: string; text_translated: string | null; text_original: string | null; author_handle: string | null }, cfg: { enabled: boolean; window_hours: number; similarity_threshold: number; bypass_authors: string[] }): Promise<{ dup_of: string | null; cluster_id: string | null; similarity: number | null }> {
@@ -404,11 +405,12 @@ async function runStoryDedup(supabase: any, post: { tweet_id: string; text_trans
   const simhash = simHash64(normalized);
   const embedding = await fetchEmbedding(raw);
   if (!embedding) {
-    // best-effort upsert without embedding
+    // No embedding → cannot do semantic match. Persist the simhash so future
+    // matches can still find this post via embedding-side; signal caller to retry.
     await supabase.from('story_signatures').upsert({
       tweet_id: post.tweet_id, simhash, normalized_text: normalized,
     }, { onConflict: 'tweet_id' });
-    return { dup_of: null, cluster_id: null, similarity: null };
+    throw new Error('embedding_unavailable');
   }
 
   // Find nearest neighbor
@@ -426,16 +428,19 @@ async function runStoryDedup(supabase: any, post: { tweet_id: string; text_trans
   let cluster_id: string | null = null;
   let similarity: number | null = null;
   if (Array.isArray(matches) && matches.length > 0) {
-    const top = matches[0] as { tweet_id: string; story_cluster_id: string; similarity: number };
-    dup_of = top.tweet_id;
-    cluster_id = top.story_cluster_id;
-    similarity = Number(top.similarity);
-    // bump coverage on original
-    await supabase.rpc('exec_sql' as never, {} as never).catch(() => null); // no-op fallback
-    await supabase.from('story_signatures')
-      .update({ coverage_count: (1 as number) })
-      .eq('tweet_id', dup_of)
-      .then(() => null, () => null);
+    const top = matches[0] as { tweet_id: string; story_cluster_id: string; similarity: number; simhash_distance: number };
+    const sim = Number(top.similarity);
+    const hamming = Number(top.simhash_distance ?? 64);
+    // Fuzzy-zone tie-break: only accept when SimHash also agrees
+    const inFuzzy = sim < cfg.similarity_threshold + 0.02;
+    if (!inFuzzy || hamming <= 12) {
+      dup_of = top.tweet_id;
+      cluster_id = top.story_cluster_id;
+      similarity = sim;
+      // Atomic coverage_count++ on the original signature
+      await supabase.rpc('bump_coverage_count', { p_tweet_id: dup_of })
+        .then(() => null, (e: Error) => console.warn('bump_coverage_count failed', e.message));
+    }
   }
 
   // Upsert this post's signature (assigning cluster_id if matched)
@@ -448,6 +453,56 @@ async function runStoryDedup(supabase: any, post: { tweet_id: string; text_trans
   }, { onConflict: 'tweet_id' });
 
   return { dup_of, cluster_id, similarity };
+}
+
+// deno-lint-ignore no-explicit-any
+async function handleComputeSignatureJob(job: Record<string, unknown>, supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean> {
+  const payload = job.payload as Record<string, unknown>;
+  const tweetId = payload.tweet_id as string;
+  if (!tweetId) return false;
+  const sm = config.storyMemory;
+  if (!sm?.enabled) return true; // feature off → no-op success
+
+  const { data: post, error } = await supabase
+    .from('posts')
+    .select('tweet_id, text_translated, text_original, author_handle, delivery_decision')
+    .eq('tweet_id', tweetId)
+    .single();
+  if (error || !post) {
+    console.warn(JSON.stringify({ function: 'worker', action: 'compute_signature_no_post', tweet_id: tweetId }));
+    return true; // post is gone, nothing to do
+  }
+
+  let dup: { dup_of: string | null; cluster_id: string | null; similarity: number | null };
+  try {
+    dup = await runStoryDedup(supabase, post, sm);
+  } catch (e) {
+    if ((e as Error).message === 'embedding_unavailable') {
+      console.warn(JSON.stringify({ function: 'worker', action: 'compute_signature_embedding_unavailable', tweet_id: tweetId }));
+      return false; // let job-failure handler retry with backoff
+    }
+    throw e;
+  }
+
+  if (dup.dup_of) {
+    const updates: Record<string, unknown> = {
+      dup_of_tweet_id: dup.dup_of,
+      story_cluster_id: dup.cluster_id,
+      dup_similarity: dup.similarity,
+    };
+    // Only mark as skip if not already decided as skip (don't overwrite stronger skips),
+    // and only if the post was originally going to deliver.
+    if (sm.action === 'skip' && (post.delivery_decision === 'deliver' || post.delivery_decision == null)) {
+      updates.delivery_decision = 'skip';
+      updates.decision_reason = `dup_of ${dup.dup_of} (cosine ${dup.similarity?.toFixed(3)})`;
+    }
+    await supabase.from('posts').update(updates).eq('tweet_id', tweetId);
+    await insertPipelineEvent(supabase, 'post', tweetId, 'compute_signature', 'completed', null, new Date().toISOString(), null, { dup_of: dup.dup_of, similarity: dup.similarity, action: sm.action });
+    console.log(JSON.stringify({ function: 'worker', action: 'compute_signature_dup', tweet_id: tweetId, dup_of: dup.dup_of, similarity: dup.similarity }));
+  } else {
+    await insertPipelineEvent(supabase, 'post', tweetId, 'compute_signature', 'completed', null, new Date().toISOString(), null, { dup_of: null });
+  }
+  return true;
 }
 
 serve(async (req) => {
@@ -566,6 +621,9 @@ serve(async (req) => {
               break;
             case 'resolve_media':
               success = await handleResolveMediaJob(job, supabase);
+              break;
+            case 'compute_signature':
+              success = await handleComputeSignatureJob(job, supabase, config);
               break;
             default:
               console.error(`Unknown job type: ${job.type}`);
@@ -1106,7 +1164,28 @@ ${post.text_original}`;
 
     if (updateError) throw updateError;
 
+    // PR3: enqueue compute_signature for every translated post (regardless of decision),
+    // so the dedup memory window has full coverage.
+    if (config.storyMemory?.enabled) {
+      try {
+        await supabase.from('jobs').upsert({
+          type: 'compute_signature',
+          payload: { tweet_id: tweetId },
+          status: 'pending',
+          priority: 11,
+          idempotency_key: `compute_signature:${tweetId}`,
+          next_run_at: new Date().toISOString(),
+        }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+      } catch (e) {
+        console.warn('Failed to enqueue compute_signature:', (e as Error).message);
+      }
+    }
+
     // Decide what to enqueue next based on filter decision + truncation state.
+    // NEW FLOW: If a tweet PASSED the editorial gate AND is still truncated AND
+    // not yet hydrated, enqueue hydrate_tweet instead of deliver. The hydrate
+    // job will re-enqueue translate on success, which will fall through to
+    // deliver on the second pass (is_truncated will be false by then).
     // NEW FLOW: If a tweet PASSED the editorial gate AND is still truncated AND
     // not yet hydrated, enqueue hydrate_tweet instead of deliver. The hydrate
     // job will re-enqueue translate on success, which will fall through to
@@ -1295,32 +1374,24 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
       } catch (_e) { /* best-effort */ }
     }
 
-    // Story Memory (PR3): semantic near-duplicate detection across outlets
+    // Story Memory (PR3): read-only check. Signature computation happens in
+    // the dedicated `compute_signature` job enqueued right after translate.
     try {
       const sm = config.storyMemory;
-      if (sm?.enabled) {
-        const dup = await runStoryDedup(supabase, post, sm);
-        if (dup.dup_of) {
-          // Always record on the post for visibility
-          await supabase.from('posts').update({
-            dup_of_tweet_id: dup.dup_of,
-            story_cluster_id: dup.cluster_id,
-            dup_similarity: dup.similarity,
-          }).eq('tweet_id', tweetId);
-
-          if (sm.action === 'skip') {
-            await supabase.from('posts').update({
-              delivery_decision: 'skip',
-              decision_reason: `dup_of ${dup.dup_of} (cosine ${dup.similarity?.toFixed(3)})`,
-            }).eq('tweet_id', tweetId);
-            console.log(JSON.stringify({ function: 'worker', action: 'deliver_skip_story_dup', tweet_id: tweetId, dup_of: dup.dup_of, similarity: dup.similarity }));
-            await insertPipelineEvent(supabase, 'post', tweetId, 'deliver', 'completed', null, new Date().toISOString(), null, { skipped: 'story_dup', dup_of: dup.dup_of, similarity: dup.similarity });
-            return true;
-          }
+      if (sm?.enabled && sm.action === 'skip') {
+        const { data: dupRow } = await supabase
+          .from('posts')
+          .select('dup_of_tweet_id, dup_similarity, story_cluster_id')
+          .eq('tweet_id', tweetId)
+          .single();
+        if (dupRow?.dup_of_tweet_id) {
+          console.log(JSON.stringify({ function: 'worker', action: 'deliver_skip_story_dup', tweet_id: tweetId, dup_of: dupRow.dup_of_tweet_id, similarity: dupRow.dup_similarity }));
+          await insertPipelineEvent(supabase, 'post', tweetId, 'deliver', 'completed', null, new Date().toISOString(), null, { skipped: 'story_dup', dup_of: dupRow.dup_of_tweet_id, similarity: dupRow.dup_similarity });
+          return true;
         }
       }
     } catch (e) {
-      console.warn('story_dedup failed (continuing)', (e as Error).message);
+      console.warn('story_dedup_check failed (continuing)', (e as Error).message);
     }
 
     const message = formatMessageWithTemplate(post, account, messageTemplate);

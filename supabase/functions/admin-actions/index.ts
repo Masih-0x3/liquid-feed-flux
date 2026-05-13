@@ -850,9 +850,9 @@ serve(async (req) => {
         });
       }
 
-      // ===== Story Memory backfill =====
+      // ===== Story Memory backfill (enqueues compute_signature jobs) =====
       case 'backfill_signatures': {
-        const hours = typeof body.hours === 'number' && body.hours > 0 && body.hours <= 168 ? body.hours : 24;
+        const hours = typeof body.hours === 'number' && body.hours > 0 && body.hours <= 168 ? body.hours : 48;
         const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
         const { data: posts, error: fetchErr } = await supabase
           .from('posts')
@@ -860,22 +860,54 @@ serve(async (req) => {
           .not('text_translated', 'is', null)
           .gte('created_at', since)
           .order('created_at', { ascending: false })
-          .limit(500);
+          .limit(2000);
         if (fetchErr) return jsonResponse({ ok: false, error: fetchErr.message }, 500);
         let queued = 0;
+        const stamp = Date.now();
         for (const p of (posts ?? [])) {
           const tid = p.tweet_id as string;
           const { error } = await supabase.from('jobs').upsert({
-            type: 'deliver',
+            type: 'compute_signature',
             payload: { tweet_id: tid },
             status: 'pending',
-            priority: 5,
-            idempotency_key: `deliver:story_backfill:${tid}:${Date.now()}`,
+            priority: 11,
+            idempotency_key: `compute_signature:backfill:${tid}:${stamp}`,
             next_run_at: new Date().toISOString(),
           }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
           if (!error) queued++;
         }
-        return jsonResponse({ ok: true, scanned: posts?.length ?? 0, queued });
+        return jsonResponse({ ok: true, scanned: posts?.length ?? 0, queued, hours });
+      }
+
+      // ===== Re-score recent posts that are missing score_axes =====
+      case 'rescore_recent': {
+        const hours = typeof body.hours === 'number' && body.hours > 0 && body.hours <= 168 ? body.hours : 48;
+        const onlyMissing = body.only_missing !== false; // default true
+        const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+        let q = supabase
+          .from('posts')
+          .select('tweet_id, score_axes')
+          .gte('created_at', since)
+          .order('created_at', { ascending: false })
+          .limit(2000);
+        const { data: posts, error: fetchErr } = await q;
+        if (fetchErr) return jsonResponse({ ok: false, error: fetchErr.message }, 500);
+        const targets = (posts ?? []).filter((p) => !onlyMissing || p.score_axes == null);
+        let queued = 0;
+        const stamp = Date.now();
+        for (const p of targets) {
+          const tid = p.tweet_id as string;
+          const { error } = await supabase.from('jobs').upsert({
+            type: 'translate',
+            payload: { tweet_id: tid, force_rescore: true },
+            status: 'pending',
+            priority: 9,
+            idempotency_key: `translate:rescore:${tid}:${stamp}`,
+            next_run_at: new Date().toISOString(),
+          }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+          if (!error) queued++;
+        }
+        return jsonResponse({ ok: true, scanned: posts?.length ?? 0, matched: targets.length, queued, hours });
       }
 
       case 'preview_translation': {
