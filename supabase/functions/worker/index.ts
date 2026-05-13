@@ -309,7 +309,7 @@ async function runStoryDedup(supabase: any, post: { tweet_id: string; text_trans
 async function handleComputeSignatureJob(job: Record<string, unknown>, supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean> {
   const payload = job.payload as Record<string, unknown>;
   const tweetId = payload.tweet_id as string;
-  if (!tweetId) return false;
+  if (!tweetId) throw new Error('compute_signature: missing tweet_id in job payload');
   const sm = config.storyMemory;
   if (!sm?.enabled) return true; // feature off → no-op success
 
@@ -329,7 +329,7 @@ async function handleComputeSignatureJob(job: Record<string, unknown>, supabase:
   } catch (e) {
     if ((e as Error).message === 'embedding_unavailable') {
       console.warn(JSON.stringify({ function: 'worker', action: 'compute_signature_embedding_unavailable', tweet_id: tweetId }));
-      return false; // let job-failure handler retry with backoff
+      throw new Error(`compute_signature[${tweetId}]: embedding_unavailable (retry)`);
     }
     throw e;
   }
@@ -475,8 +475,7 @@ serve(async (req) => {
               success = await handleComputeSignatureJob(job, supabase, config);
               break;
             default:
-              console.error(`Unknown job type: ${job.type}`);
-              success = false;
+              throw new Error(`Unknown job type: ${String(job.type)}`);
           }
 
           if (success) {
@@ -493,22 +492,29 @@ serve(async (req) => {
             console.log(JSON.stringify({ function: 'worker', action: 'job_complete', job_id: job.id, type: job.type }));
             return { success: true, jobId: job.id };
           } else {
-            await handleJobFailure(supabase, job);
+            const jt = String(job.type);
+            await handleJobFailure(
+              supabase,
+              job,
+              new Error(`${jt}: handler returned false (check worker logs for ${jt}_* / job_error)`),
+            );
             await recordPipelineEvent(supabase, job, 'failed');
             return { success: false, jobId: job.id };
           }
 
         } catch (error) {
-          console.error(JSON.stringify({ function: 'worker', action: 'job_error', job_id: job.id, error: (error as Error)?.message }));
-          await handleJobFailure(supabase, job, error as Error);
-          await recordPipelineEvent(supabase, job, 'failed', (error as Error)?.message ?? 'Failed');
-          return { success: false, jobId: job.id, error: (error as Error)?.message };
+          const err = jobError(error);
+          console.error(JSON.stringify({ function: 'worker', action: 'job_error', job_id: job.id, type: job.type, error: err.message }));
+          await handleJobFailure(supabase, job, err);
+          await recordPipelineEvent(supabase, job, 'failed', err.message);
+          return { success: false, jobId: job.id, error: err.message };
         }
       } catch (error) {
-        console.error(JSON.stringify({ function: 'worker', action: 'job_outer_error', job_id: job.id, error: (error as Error)?.message }));
-        await handleJobFailure(supabase, job, error as Error);
-        await recordPipelineEvent(supabase, job, 'failed', (error as Error)?.message ?? 'Failed');
-        return { success: false, jobId: job.id, error: (error as Error)?.message };
+        const err = jobError(error);
+        console.error(JSON.stringify({ function: 'worker', action: 'job_outer_error', job_id: job.id, type: job.type, error: err.message }));
+        await handleJobFailure(supabase, job, err);
+        await recordPipelineEvent(supabase, job, 'failed', err.message);
+        return { success: false, jobId: job.id, error: err.message };
       }
     });
 
@@ -560,7 +566,7 @@ serve(async (req) => {
     });
 
   } catch (error) {
-    console.error(JSON.stringify({ function: 'worker', action: 'fatal', error: (error as Error).message }));
+    console.error(JSON.stringify({ function: 'worker', action: 'fatal', error: jobError(error).message }));
     return new Response(JSON.stringify({ error: 'Internal server error' }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -1105,8 +1111,19 @@ ${post.text_original}`;
     
     return true;
   } catch (error) {
-    console.error(JSON.stringify({ function: 'worker', action: 'translate_error', error: (error as Error).message }));
-    return false;
+    const e = jobError(error);
+    const tid = (job.payload as Record<string, unknown> | undefined)?.tweet_id;
+    console.error(JSON.stringify({
+      function: 'worker',
+      action: 'translate_error',
+      tweet_id: tid ?? 'unknown',
+      error: e.message,
+      name: e.name,
+    }));
+    if (tid != null && typeof tid === 'string') {
+      throw new Error(`translate[${tid}]: ${e.message}`);
+    }
+    throw e;
   }
 }
 
@@ -1150,8 +1167,9 @@ supabase: any): Promise<boolean> {
     if (error) throw error;
     return true;
   } catch (error) {
-    console.error(JSON.stringify({ function: 'worker', action: 'moderate_error', error: (error as Error).message }));
-    return false;
+    const e = jobError(error);
+    console.error(JSON.stringify({ function: 'worker', action: 'moderate_error', error: e.message }));
+    throw e;
   }
 }
 
@@ -1311,9 +1329,9 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
     return true;
 
   } catch (error) {
-    console.error(JSON.stringify({ function: 'worker', action: 'deliver_error', tweet_id: tweetId, error: (error as Error).message }));
-    await insertPipelineEvent(supabase, 'post', tweetId, 'deliver', 'failed', null, null, (error as Error)?.message ?? 'Delivery failed');
-    return false;
+    const e = jobError(error);
+    console.error(JSON.stringify({ function: 'worker', action: 'deliver_error', tweet_id: tweetId, error: e.message }));
+    throw new Error(`deliver[${tweetId}]: ${e.message}`);
   }
 }
 
@@ -1451,12 +1469,34 @@ const MAX_ATTEMPTS: Record<string, number> = {
   resolve_media: 4,
 };
 
+/** Normalize any thrown/failure value to `Error` for `last_error` + dead-letter rows. */
+function jobError(reason: unknown): Error {
+  if (reason instanceof Error) return reason;
+  if (typeof reason === 'string' && reason.trim()) return new Error(reason.trim());
+  try {
+    const s = JSON.stringify(reason);
+    if (s && s !== '{}') return new Error(s);
+  } catch { /* fall through */ }
+  return new Error(String(reason ?? 'unknown_error'));
+}
+
 async function handleJobFailure(// deno-lint-ignore no-explicit-any
 supabase: any, job: Record<string, unknown>, errorOrMessage?: Error | string) {
   const jobType = job.type as string;
   const maxAttempts = MAX_ATTEMPTS[jobType] ?? 5;
   const attempts = (job.attempts as number) ?? 0;
-  const errorMsg = typeof errorOrMessage === 'string' ? errorOrMessage : (errorOrMessage?.message || 'Processing failed');
+  let errorMsg: string;
+  if (typeof errorOrMessage === 'string') {
+    errorMsg = errorOrMessage.trim() || 'Unknown job failure';
+  } else if (errorOrMessage instanceof Error) {
+    errorMsg = (errorOrMessage.message && errorOrMessage.message.trim())
+      ? errorOrMessage.message.trim()
+      : (errorOrMessage.name || 'Error');
+  } else if (errorOrMessage != null) {
+    errorMsg = String(errorOrMessage);
+  } else {
+    errorMsg = 'Unknown job failure (no error passed)';
+  }
   
   if (attempts >= maxAttempts) {
     // Dead-letter the job
@@ -1550,8 +1590,9 @@ supabase: any): Promise<boolean> {
     await insertPipelineEvent(supabase, 'post', tweetId, 'media', 'completed', null, new Date().toISOString());
     return true;
   } catch (error) {
-    await insertPipelineEvent(supabase, 'post', tweetId, 'media', 'failed', null, null, (error as Error)?.message ?? 'Download failed');
-    return false;
+    const e = jobError(error);
+    await insertPipelineEvent(supabase, 'post', tweetId, 'media', 'failed', null, null, e.message);
+    throw new Error(`download_media[${tweetId}]: ${e.message}`);
   }
 }
 
@@ -1592,8 +1633,9 @@ supabase: any): Promise<boolean> {
 
     return true;
   } catch (error) {
-    console.error(JSON.stringify({ function: 'worker', action: 'reprocess_error', tweet_id: tweetId, error: (error as Error).message }));
-    return false;
+    const e = jobError(error);
+    console.error(JSON.stringify({ function: 'worker', action: 'reprocess_error', tweet_id: tweetId, error: e.message }));
+    throw new Error(`reprocess[${tweetId}]: ${e.message}`);
   }
 }
 
@@ -1873,7 +1915,7 @@ supabase: any): Promise<boolean> {
   const tweetId = String(payload.tweet_id || '');
   if (!tweetId) {
     console.error('hydrate_tweet: missing tweet_id');
-    return false;
+    throw new Error('hydrate_tweet: missing tweet_id in job payload');
   }
 
   // Load post; idempotent if already hydrated
@@ -1885,7 +1927,7 @@ supabase: any): Promise<boolean> {
 
   if (postErr || !post) {
     console.error('hydrate_tweet: post not found', tweetId, postErr?.message);
-    return false;
+    throw new Error(`hydrate_tweet[${tweetId}]: post not found${postErr?.message ? `: ${postErr.message}` : ''}`);
   }
 
   if (post.hydrated_at) {
@@ -1958,7 +2000,7 @@ supabase: any): Promise<boolean> {
     auth = await hydrateOauthHeader('GET', baseUrl, queryParams, creds.ck, creds.cs, creds.at, creds.ats);
   } catch (e) {
     console.error('hydrate_tweet: oauth signing failed', (e as Error).message);
-    return false;
+    throw new Error(`hydrate_tweet[${tweetId}]: oauth_signing_failed: ${(e as Error).message}`);
   }
 
   let res: Response;
@@ -1967,7 +2009,7 @@ supabase: any): Promise<boolean> {
   } catch (e) {
     console.error('hydrate_tweet: network error', (e as Error).message);
     await recordXApiCall(supabase, `network: ${(e as Error).message}`);
-    return false; // retryable via handleJobFailure
+    throw new Error(`hydrate_tweet[${tweetId}]: network_error: ${(e as Error).message}`);
   }
 
   await recordXApiCall(supabase, res.ok ? null : `http_${res.status}`);
@@ -1991,13 +2033,13 @@ supabase: any): Promise<boolean> {
   if (res.status === 401 || res.status === 403) {
     const txt = await res.text().catch(() => '');
     console.error(`hydrate_tweet: auth failed ${res.status}`, txt.slice(0, 300));
-    return false; // will retry, then dead-letter; admin must rotate creds
+    throw new Error(`hydrate_tweet[${tweetId}]: x_api_auth_${res.status}: ${txt.slice(0, 500)}`);
   }
 
   if (!res.ok) {
     const txt = await res.text().catch(() => '');
     console.error(`hydrate_tweet: HTTP ${res.status}`, txt.slice(0, 300));
-    return false;
+    throw new Error(`hydrate_tweet[${tweetId}]: x_api_http_${res.status}: ${txt.slice(0, 500)}`);
   }
 
   let json: Record<string, unknown>;
@@ -2005,7 +2047,7 @@ supabase: any): Promise<boolean> {
     json = await res.json();
   } catch (e) {
     console.error('hydrate_tweet: invalid JSON', (e as Error).message);
-    return false;
+    throw new Error(`hydrate_tweet[${tweetId}]: invalid_x_api_json: ${(e as Error).message}`);
   }
 
   const data = (json.data || {}) as Record<string, unknown>;
@@ -2039,7 +2081,7 @@ supabase: any): Promise<boolean> {
   const { error: updErr } = await supabase.from('posts').update(updatePayload).eq('tweet_id', tweetId);
   if (updErr) {
     console.error('hydrate_tweet: post update failed', updErr.message);
-    return false;
+    throw new Error(`hydrate_tweet[${tweetId}]: post_update_failed: ${updErr.message}`);
   }
 
   console.log(`hydrate_tweet: success ${tweetId} (orig=${(post.text_original || '').length} chars → full=${fullText.length} chars)`);
@@ -2210,7 +2252,7 @@ supabase: any): Promise<boolean> {
   const tweetId = String(payload.tweet_id || '');
   if (!tweetId) {
     console.error('resolve_media: missing tweet_id');
-    return false;
+    throw new Error('resolve_media: missing tweet_id in job payload');
   }
 
   const { data: post, error: postErr } = await supabase
@@ -2221,7 +2263,7 @@ supabase: any): Promise<boolean> {
 
   if (postErr || !post) {
     console.error('resolve_media: post not found', tweetId, postErr?.message);
-    return false;
+    throw new Error(`resolve_media[${tweetId}]: post not found${postErr?.message ? `: ${postErr.message}` : ''}`);
   }
 
   const numericId = extractNumericTweetId(tweetId, post.url as string | null);
@@ -2277,7 +2319,7 @@ supabase: any): Promise<boolean> {
     console.error('resolve_media: insert failed', insErr.message);
     await insertPipelineEvent(supabase, 'post', tweetId, 'resolve_media', 'failed',
       null, new Date().toISOString(), `upsert_failed: ${insErr.message}`, { handle, numericId, count: rows.length });
-    return false;
+    throw new Error(`resolve_media[${tweetId}]: media_upsert_failed: ${insErr.message}`);
   }
 
   // Prune any leftover higher-ordering rows from a previous (longer) resolution.
