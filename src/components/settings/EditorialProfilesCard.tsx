@@ -8,7 +8,8 @@ import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
-import { Sparkles, Plus, X, Copy, Trash2, Save, Loader2, RefreshCw } from 'lucide-react';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Sparkles, Plus, X, Copy, Trash2, Save, Loader2, RefreshCw, ChevronDown } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useSaveSettings, makeDefaultProfile, DEFAULT_AXIS_WEIGHTS, SCORE_AXIS_KEYS, type EditorialProfile, type ScoreAxisKey } from '@/hooks/useSettingsData';
 import { supabase } from '@/integrations/supabase/client';
@@ -27,12 +28,23 @@ const AXIS_LABELS: Record<ScoreAxisKey, string> = {
   noise: 'Noise (penalty)',
 };
 
+/** Short blurbs for the profile editor — aligned with worker axis semantics. */
+const AXIS_BLURBS: Record<ScoreAxisKey, string> = {
+  iran_relevance: 'How tightly the item relates to Iran and your regional mandate. Raising weight pulls the final score toward that signal.',
+  severity: 'How urgent or high-impact the story is (conflict, policy, markets, security).',
+  novelty: 'How new or non-redundant the information is versus typical wire chatter.',
+  credibility: 'Source quality, specificity, and whether claims are substantiated.',
+  actionability: 'Whether the audience can do something meaningful with the information soon.',
+  noise: 'Spam-like, thin, or off-topic feel. This axis is applied as a penalty toward the weighted final score.',
+};
+
 export default function EditorialProfilesCard({ profiles: initialProfiles, activeProfileId: initialActive }: Props) {
   const [profiles, setProfiles] = useState<EditorialProfile[]>(initialProfiles);
   const [activeId, setActiveId] = useState<string | null>(initialActive);
   const [editingId, setEditingId] = useState<string | null>(initialActive ?? initialProfiles[0]?.id ?? null);
   const [kwInputs, setKwInputs] = useState<Record<string, string>>({});
   const [rescoring, setRescoring] = useState(false);
+  const [profileHelpOpen, setProfileHelpOpen] = useState(false);
   const saveMutation = useSaveSettings();
   const { toast } = useToast();
 
@@ -126,6 +138,41 @@ export default function EditorialProfilesCard({ profiles: initialProfiles, activ
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
+        <Collapsible open={profileHelpOpen} onOpenChange={setProfileHelpOpen}>
+          <CollapsibleTrigger className="flex w-full items-center justify-between rounded-lg border border-border bg-muted/30 p-3 text-left text-sm font-medium hover:bg-muted/50">
+            <span>How profile decisions are ordered (worker)</span>
+            <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${profileHelpOpen ? 'rotate-180' : ''}`} />
+          </CollapsibleTrigger>
+          <CollapsibleContent className="mt-3 space-y-4 text-sm text-muted-foreground">
+            <ol className="list-decimal space-y-1.5 pl-4">
+              <li>Per-profile author overrides (always deliver or always skip).</li>
+              <li>Blocked tags — if any blocked tag is present on the post, skip.</li>
+              <li>Required tags — when the list is non-empty, at least one required tag must match or skip.</li>
+              <li>Exclude keywords — a case-insensitive hit in the tweet text skips.</li>
+              <li>Weighted axis score (or legacy importance when axes are missing), plus optional boosts for must-include keywords (+2 each, capped at 20).</li>
+              <li>Profile threshold — deliver when final score is at or above the threshold.</li>
+            </ol>
+            <div className="rounded-md border">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b bg-muted/40">
+                    <th className="p-2 font-medium text-foreground">Axis</th>
+                    <th className="p-2 font-medium text-foreground">In plain language</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {SCORE_AXIS_KEYS.map((k) => (
+                    <tr key={k} className="border-b border-border/60 last:border-0">
+                      <td className="p-2 align-top font-medium text-foreground">{AXIS_LABELS[k]}</td>
+                      <td className="p-2 align-top">{AXIS_BLURBS[k]}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
+
         {/* Profile selector + actions */}
         <div className="flex flex-wrap items-end gap-3">
           <div className="space-y-1 flex-1 min-w-[220px]">

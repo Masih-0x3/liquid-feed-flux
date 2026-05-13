@@ -1,9 +1,10 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
+import { requireRssWebhookAuth } from "../_shared/internalAuth.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-webhook-token, x-rssapp-token',
 };
 
 async function hashUrl(url: string): Promise<string> {
@@ -77,36 +78,13 @@ serve(async (req) => {
   }
 
   try {
-    // Optional shared-secret validation to protect the webhook when verify_jwt=false
-    const urlObj = new URL(req.url);
-    const providedToken = (urlObj.searchParams.get('token')
-      || req.headers.get('x-webhook-token')
-      || req.headers.get('x-rssapp-token')
-      || '').trim();
-    const expectedToken = (Deno.env.get('WEBHOOK_SHARED_SECRET')
-      || Deno.env.get('RSSAPP_WEBHOOK_TOKEN')
-      || Deno.env.get('RSSAPP_TOKEN')
-      || '').trim();
-
-    if (!expectedToken) {
-      console.error('WEBHOOK_SHARED_SECRET not configured; rejecting request.');
-      return new Response(JSON.stringify({ error: 'Webhook secret not configured' }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-    if (!providedToken || providedToken !== expectedToken) {
-      console.warn('Webhook token missing or invalid');
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-
     const supabase = createClient<any, any>(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
+
+    const webhookAuthErr = await requireRssWebhookAuth(req, supabase, corsHeaders);
+    if (webhookAuthErr) return webhookAuthErr;
 
     console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'received' }));
     

@@ -1,9 +1,10 @@
 // X Poster — score-gated posting pipeline.
 // Cron-driven worker that posts qualifying posts to X via OAuth 1.0a v2 with
 // optional media upload. All quotas/templates read from the `settings` table.
-// Deployed with verify_jwt=false; auth handled in checkAuth().
+// Deployed with verify_jwt=false; auth handled in requireInternalAuth().
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1';
+import { requireInternalAuth } from '../_shared/internalAuth.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -39,17 +40,6 @@ async function oauthHeader(
   const signKey = `${pe(cs)}&${pe(ats)}`;
   oauth.oauth_signature = await hmacSha1(signKey, baseStr);
   return `OAuth ${Object.keys(oauth).sort().map((k) => `${pe(k)}="${pe(oauth[k])}"`).join(', ')}`;
-}
-
-// ─── Auth (cron / internal only) ─────────────────────────────────────
-function checkAuth(req: Request): Response | null {
-  const internal = req.headers.get('x-internal-token') || '';
-  const expected = Deno.env.get('WEBHOOK_SHARED_SECRET') || '';
-  const auth = req.headers.get('Authorization') || '';
-  const svc = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
-  if (expected && internal === expected) return null;
-  if (svc && auth === `Bearer ${svc}`) return null;
-  return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 }
 
 // ─── Types ───────────────────────────────────────────────────────────
@@ -314,18 +304,26 @@ async function postTweet(
     throw err;
   }
   const d = (json as { data?: { id?: string } }).data;
-  return { id: String(d?.id), raw: json };
+  const id = typeof d?.id === 'string' && /^\d+$/.test(d.id) ? d.id : '';
+  if (!id) {
+    const err = new Error(`tweet 200 but missing data.id: ${text2.slice(0, 400)}`);
+    (err as { status?: number }).status = 502;
+    (err as { raw?: unknown }).raw = json;
+    throw err;
+  }
+  return { id, raw: json };
 }
 
 // ─── Main ────────────────────────────────────────────────────────────
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
-  const authErr = checkAuth(req);
-  if (authErr) return authErr;
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
   const svcKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
   const sb = createClient<any, any>(supabaseUrl, svcKey);
+
+  const authErr = await requireInternalAuth(req, sb, corsHeaders);
+  if (authErr) return authErr;
 
   const body = await req.json().catch(() => ({} as Record<string, unknown>));
   const dryRun = body.dry_run === true;
@@ -382,13 +380,15 @@ Deno.serve(async (req) => {
   const existing = new Set((existingRows || []).map((r) => r.post_id as string));
 
   let candidatesQ = sb.from('posts')
-    .select('tweet_id, text_translated, text_original, author_handle, has_media, importance_score, delivery_decision, url, is_truncated, hydrated_at, created_at, accounts!inner(handle)')
+    .select('tweet_id, text_translated, text_original, author_handle, has_media, importance_score, final_score, delivery_decision, url, is_truncated, hydrated_at, created_at, accounts!inner(handle)')
     .gte('created_at', effectiveCutoff)
     .not('text_translated', 'is', null);
 
   if (onlyTweetId) candidatesQ = candidatesQ.eq('tweet_id', onlyTweetId);
   else {
-    candidatesQ = candidatesQ.gte('importance_score', cfg.min_score);
+    candidatesQ = candidatesQ.or(
+      `final_score.gte.${cfg.min_score},and(final_score.is.null,importance_score.gte.${cfg.min_score})`,
+    );
     if (cfg.post_only_decision_deliver) candidatesQ = candidatesQ.eq('delivery_decision', 'deliver');
     // Hydration gate: skip posts that are still truncated and awaiting hydration.
     // Without this, x-poster can publish the truncated first translation before
@@ -469,7 +469,10 @@ Deno.serve(async (req) => {
     // Quota check (per-iteration in case prior iterations posted)
     const blocked = quotaBlock();
     if (blocked) {
-      if (!dryRun) await sb.from('x_deliveries').insert({ post_id: tweetId, status: 'skipped', skip_reason: blocked });
+      if (!dryRun) {
+        const { error: skipErr } = await sb.from('x_deliveries').insert({ post_id: tweetId, status: 'skipped', skip_reason: blocked });
+        if (skipErr) console.error('[x-poster] x_deliveries insert skipped failed', { tweetId, err: skipErr.message });
+      }
       results.push({ tweet_id: tweetId, status: 'skipped', reason: blocked });
       continue;
     }
@@ -489,13 +492,14 @@ Deno.serve(async (req) => {
 
     if (hasMediaFlag && sel.tier === 'text') {
       const reason = sel.reason || 'no_supported_media';
-      await sb.from('x_deliveries').insert({
+      const { error: pendErr } = await sb.from('x_deliveries').insert({
         post_id: tweetId,
         status: 'pending',
         skip_reason: reason,
         last_error: `media_required:${reason}`,
         attempts: 1,
       });
+      if (pendErr) console.error('[x-poster] x_deliveries insert pending failed', { tweetId, err: pendErr.message });
       results.push({ tweet_id: tweetId, status: 'deferred', reason: `media_required:${reason}` });
       console.warn(`[x-poster] refusing text-only post for ${tweetId}: ${reason}`);
       continue;
@@ -529,7 +533,7 @@ Deno.serve(async (req) => {
         }
       } catch (e) {
         const errMsg = `media_upload_failed(${sel.tier}): ${(e as Error).message}`.slice(0, 500);
-        await sb.from('x_deliveries').insert({
+        const { error: failInsErr } = await sb.from('x_deliveries').insert({
           post_id: tweetId,
           status: 'failed',
           media_count: 0,
@@ -538,6 +542,7 @@ Deno.serve(async (req) => {
           last_error: errMsg,
           attempts: 1,
         });
+        if (failInsErr) console.error('[x-poster] x_deliveries insert failed (media)', { tweetId, err: failInsErr.message });
         results.push({ tweet_id: tweetId, status: 'failed', error: errMsg });
         console.warn(`[x-poster] ${sel.tier} upload failed for ${tweetId}; not posting text-only: ${(e as Error).message}`);
         continue;
@@ -569,22 +574,49 @@ Deno.serve(async (req) => {
       const { id: xId, raw } = await postTweet(text, mediaIds, ck, cs, at, ats);
       const latency = Date.now() - startedAt;
       posts24hArr.push(new Date().toISOString());
-      await sb.from('x_deliveries').insert({
-        post_id: tweetId, x_tweet_id: xId, status: 'posted',
-        media_count: mediaCount, media_bytes: mediaBytes, media_kind: mediaKind,
-        posted_at: new Date().toISOString(), latency_ms: latency, api_response: raw, attempts: 1,
-        last_error: mediaWarning,
-      });
+      const { data: existingPosted } = await sb
+        .from('x_deliveries')
+        .select('id, attempts')
+        .eq('post_id', tweetId)
+        .eq('status', 'posted')
+        .maybeSingle();
+      const postedAt = new Date().toISOString();
+      let writeErr: { message: string } | null = null;
+      if (existingPosted) {
+        const prevAttempts = (existingPosted as { attempts?: number }).attempts ?? 1;
+        const { error: updErr } = await sb.from('x_deliveries').update({
+          x_tweet_id: xId,
+          media_count: mediaCount,
+          media_bytes: mediaBytes,
+          media_kind: mediaKind,
+          posted_at: postedAt,
+          latency_ms: latency,
+          api_response: raw,
+          last_error: mediaWarning,
+          attempts: prevAttempts + 1,
+        }).eq('id', (existingPosted as { id: string }).id);
+        writeErr = updErr;
+      } else {
+        const { error: insErr } = await sb.from('x_deliveries').insert({
+          post_id: tweetId, x_tweet_id: xId, status: 'posted',
+          media_count: mediaCount, media_bytes: mediaBytes, media_kind: mediaKind,
+          posted_at: postedAt, latency_ms: latency, api_response: raw, attempts: 1,
+          last_error: mediaWarning,
+        });
+        writeErr = insErr;
+      }
+      if (writeErr) console.error('[x-poster] x_deliveries write failed', { tweetId, xId, err: writeErr.message });
       results.push({ tweet_id: tweetId, status: 'posted', x_tweet_id: xId, latency_ms: latency });
     } catch (e) {
       const status = (e as { status?: number }).status || 0;
       const errMsg = (e as Error).message;
       const isRetriable = status === 429 || status >= 500;
-      await sb.from('x_deliveries').insert({
+      const { error: postFailErr } = await sb.from('x_deliveries').insert({
         post_id: tweetId, status: isRetriable ? 'pending' : 'failed',
         last_error: errMsg, attempts: 1,
         api_response: (e as { raw?: unknown }).raw ?? null,
       });
+      if (postFailErr) console.error('[x-poster] x_deliveries insert failed (post)', { tweetId, err: postFailErr.message });
       results.push({ tweet_id: tweetId, status: isRetriable ? 'pending' : 'failed', error: errMsg });
     }
   }

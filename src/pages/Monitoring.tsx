@@ -10,13 +10,26 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
-import { Search, RefreshCw, Edit, Check, X, ExternalLink, RotateCcw, Star, Send, Scissors, Sparkles, Twitter, Ban, AlertCircle, Info, Clock } from "lucide-react";
+import { Search, RefreshCw, Edit, Check, X, ExternalLink, RotateCcw, Star, Send, Scissors, Sparkles, Twitter, Ban, AlertCircle, Info, Clock, MoreHorizontal } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { format } from "date-fns";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerDescription, DrawerClose, DrawerFooter } from "@/components/ui/drawer";
 import { useMonitoringData, type MonitoringEntry, type PipelineEvent } from "@/hooks/useMonitoringData";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { MediaThumbnails } from "@/components/monitoring/MediaThumbnails";
+import { Link } from "react-router-dom";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  decisionScore,
+  formatDecisionReason,
+  formatPipelineError,
+  formatXBadge,
+} from "@/lib/pipelineMessages";
 
 // Admin action helpers
 async function adminEditTranslation(tweetId: string, text: string) {
@@ -38,7 +51,15 @@ async function adminBulkReprocess(tweetIds: string[]) {
 async function adminRescorePost(tweetId: string) {
   const { data, error } = await supabase.functions.invoke('admin-actions', { body: { action: 'rescore_post', tweet_id: tweetId } });
   if (error) throw error;
-  return data as { ok: boolean; score?: number; decision?: string; reasoning?: string; error?: string };
+  return data as {
+    ok: boolean;
+    score?: number;
+    final_score?: number;
+    decision?: string;
+    decision_reason?: string | null;
+    reasoning?: string;
+    error?: string;
+  };
 }
 async function adminRetryXPost(tweetId: string) {
   const { data, error } = await supabase.functions.invoke('admin-actions', { body: { action: 'retry_x_post', tweet_id: tweetId } });
@@ -82,13 +103,12 @@ function StatusIndicator({ entry }: { entry: MonitoringEntry }) {
 // Surfaces skip reasons, threshold gap, and failure details inline so users
 // don't have to hover badges or expand collapsed reasoning.
 function DiagnosticStrip({ entry, threshold }: { entry: MonitoringEntry; threshold: number }) {
-  const decision = entry.final_score != null ? entry.final_score : entry.importance_score;
+  const decision = decisionScore(entry);
   const isSkipped = entry.delivery_decision && entry.delivery_decision !== 'deliver';
   const hasError = !!(entry.translation_error || entry.delivery_error || entry.x_error);
 
   if (!isSkipped && !hasError) return null;
 
-  // Variant: failure (red) takes precedence over skip (amber).
   const variant = hasError ? 'error' : 'skip';
   const wrapCls = variant === 'error'
     ? 'border-destructive/30 bg-destructive/5'
@@ -96,7 +116,6 @@ function DiagnosticStrip({ entry, threshold }: { entry: MonitoringEntry; thresho
   const Icon = variant === 'error' ? AlertCircle : Info;
   const iconCls = variant === 'error' ? 'text-destructive' : 'text-amber-400';
 
-  // Build a human-readable headline + supporting details.
   let headline = '';
   const details: { label: string; value: string }[] = [];
 
@@ -106,23 +125,37 @@ function DiagnosticStrip({ entry, threshold }: { entry: MonitoringEntry; thresho
       : entry.delivery_error
       ? 'Telegram delivery failed'
       : 'X post failed';
-    if (entry.translation_error) details.push({ label: 'Translation', value: entry.translation_error });
-    if (entry.delivery_error) details.push({ label: 'Telegram', value: entry.delivery_error });
-    if (entry.x_error) details.push({ label: 'X', value: entry.x_error });
+    if (entry.translation_error) {
+      const ft = formatPipelineError(entry.translation_error);
+      details.push({ label: 'Translation', value: ft.title });
+      if (ft.detail) details.push({ label: 'Technical', value: ft.detail });
+    }
+    if (entry.delivery_error) {
+      const fd = formatPipelineError(entry.delivery_error);
+      details.push({ label: 'Telegram', value: fd.title });
+      if (fd.detail) details.push({ label: 'Technical', value: fd.detail });
+    }
+    if (entry.x_error) {
+      const fx = formatPipelineError(entry.x_error);
+      details.push({ label: 'X', value: fx.title });
+      if (fx.detail) details.push({ label: 'Technical', value: fx.detail });
+    }
   } else {
-    const reason = entry.decision_reason || entry.delivery_decision || 'skipped';
-    const isBelow = /below_threshold|threshold/i.test(reason);
+    const reason = entry.decision_reason;
+    const fr = formatDecisionReason(reason);
+    const isBelow = /below_threshold|threshold/i.test(reason || '');
     if (isBelow && decision != null) {
       const gap = (threshold - decision).toFixed(1).replace(/\.0$/, '');
-      headline = `Skipped — score ${decision}/20 is ${gap} below the ≥${threshold} threshold`;
+      headline = `Skipped — score ${Number.isInteger(decision) ? decision : decision.toFixed(1)}/20 is ${gap} points below the ≥${threshold} threshold`;
+      if (fr.detail) details.push({ label: 'Technical code', value: fr.detail });
     } else {
-      headline = `Skipped — ${reason}`;
+      headline = `Skipped — ${fr.title}`;
     }
-    if (entry.decision_reason && !headline.includes(entry.decision_reason)) {
-      details.push({ label: 'Reason', value: entry.decision_reason });
+    if (fr.detail && fr.detail !== reason && !details.some((d) => d.value === fr.detail)) {
+      details.push({ label: 'Technical code', value: fr.detail });
     }
     if (entry.importance_reasoning) {
-      details.push({ label: 'Why', value: entry.importance_reasoning });
+      details.push({ label: 'Model rationale', value: entry.importance_reasoning });
     }
   }
 
@@ -212,7 +245,13 @@ export default function Monitoring() {
     try {
       const res = await adminRetryXPost(tweetId);
       if (!res.ok) throw new Error(res.error || 'X retry failed');
-      toast({ title: 'X post queued', description: res.x_tweet_id ? `Posted: ${res.x_tweet_id}` : `Status: ${res.status ?? 'queued'}` });
+      if (res.status === 'posted' && res.x_tweet_id) {
+        toast({ title: 'Posted to X', description: `https://x.com/i/status/${res.x_tweet_id}` });
+      } else if (res.status === 'failed') {
+        toast({ title: 'X post failed', description: res.error ?? 'See Monitoring badge', variant: 'destructive' });
+      } else {
+        toast({ title: `X: ${res.status ?? 'queued'}`, description: 'Check Monitoring for status' });
+      }
       invalidate();
     } catch (e) {
       toast({ title: 'X retry failed', description: (e as Error).message, variant: 'destructive' });
@@ -223,7 +262,11 @@ export default function Monitoring() {
     try {
       const res = await adminRescorePost(tweetId);
       if (!res.ok) throw new Error(res.error || 'Re-score failed');
-      toast({ title: `New score: ${res.score}/20`, description: `Decision: ${res.decision}${res.reasoning ? ` — ${res.reasoning.slice(0, 120)}` : ''}` });
+      const display = res.final_score ?? res.score;
+      toast({
+        title: `New score: ${display ?? '—'}/20`,
+        description: `Decision: ${res.decision}${res.reasoning ? ` — ${res.reasoning.slice(0, 120)}` : ''}`,
+      });
       invalidate();
     } catch (e) {
       toast({ title: 'Re-score failed', description: (e as Error).message, variant: 'destructive' });
@@ -389,25 +432,25 @@ export default function Monitoring() {
           const isSelected = selectedTweets.has(entry.tweet_id);
           return (
             <Card key={entry.tweet_id} className={isSelected ? 'ring-2 ring-primary' : ''}>
-              <CardHeader className="pb-3">
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3 flex-1">
-                    <Checkbox checked={isSelected} onCheckedChange={(c) => handleSelectTweet(entry.tweet_id, c as boolean)} />
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
+              <CardHeader className="pb-2 space-y-0">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="flex min-w-0 flex-1 gap-3">
+                    <Checkbox checked={isSelected} onCheckedChange={(c) => handleSelectTweet(entry.tweet_id, c as boolean)} className="mt-1" />
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                         <CardTitle className="text-lg">
                           {entry.author_handle ? `@${entry.author_handle}` : `@${entry.account_handle}`}
                         </CardTitle>
                         {(() => {
-                          // The DECISION score is `final_score` (axes-weighted) compared against the active
-                          // editorial-profile threshold. `importance_score` is the legacy 1-20 AI score and is
-                          // shown only as a secondary "AI" hint when it differs from the decision score.
-                          const decision = entry.final_score != null ? entry.final_score : entry.importance_score;
+                          const decision = decisionScore(entry);
                           const passes = decision != null && decision >= deliverThreshold;
                           const close = decision != null && decision >= deliverThreshold - 3;
                           const axesStr = entry.score_axes
                             ? Object.entries(entry.score_axes).map(([k, v]) => `${k}:${v}`).join(', ')
                             : null;
+                          const showDelta = entry.importance_score != null
+                            && entry.final_score != null
+                            && Math.round(entry.importance_score) !== Math.round(entry.final_score);
                           return (
                             <>
                               {decision != null && (
@@ -420,7 +463,7 @@ export default function Monitoring() {
                                       : 'bg-red-500/20 text-red-400 border-red-500/30'
                                   }
                                   title={
-                                    `Decision score (axes-weighted): ${decision}/20\n` +
+                                    `Decision score (axes-weighted when present): ${decision}/20\n` +
                                     `Threshold to deliver: ≥${deliverThreshold}\n` +
                                     (axesStr ? `Axes — ${axesStr}` : '')
                                   }
@@ -430,76 +473,71 @@ export default function Monitoring() {
                                   <span className="ml-1 opacity-60">· need ≥{deliverThreshold}</span>
                                 </Badge>
                               )}
-                              {entry.importance_score != null
-                                && entry.final_score != null
-                                && Math.round(entry.importance_score) !== Math.round(entry.final_score) && (
-                                <Badge variant="outline" className="text-xs font-mono text-muted-foreground" title="Legacy single-shot AI score">
-                                  AI:{entry.importance_score}
+                              {showDelta && (
+                                <span className="text-xs text-muted-foreground">
+                                  Editorial {Number.isInteger(entry.final_score!) ? entry.final_score : entry.final_score!.toFixed(1)}
+                                  {' · '}
+                                  model {entry.importance_score}
+                                </span>
+                              )}
+                              {entry.dup_of_tweet_id && (
+                                <Badge
+                                  className="bg-purple-500/20 text-purple-300 border-purple-500/30"
+                                  title={`dup_of ${entry.dup_of_tweet_id}${entry.dup_similarity != null ? ` · cosine ${entry.dup_similarity.toFixed(3)}` : ''}`}
+                                >
+                                  dup{entry.dup_similarity != null ? ` ${entry.dup_similarity.toFixed(2)}` : ''}
+                                </Badge>
+                              )}
+                              {entry.hydration_source === 'x_api' && (
+                                <Badge className="bg-green-500/20 text-green-400 border-green-500/30">
+                                  <Sparkles className="w-3 h-3 mr-1" />Hydrated
+                                </Badge>
+                              )}
+                              {entry.is_truncated && !entry.hydrated_at && (
+                                <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30" title="Full text may be fetched from X before posting; X can defer until media and text are ready.">
+                                  <Scissors className="w-3 h-3 mr-1" />Truncated
+                                </Badge>
+                              )}
+                              {entry.hydrated_at && entry.hydration_source && entry.hydration_source !== 'x_api' && (
+                                <Badge variant="outline" className="text-muted-foreground" title={entry.hydration_source}>
+                                  <Scissors className="w-3 h-3 mr-1" />Truncated (fallback)
                                 </Badge>
                               )}
                             </>
                           );
                         })()}
-                        {entry.delivery_decision && entry.delivery_decision !== 'deliver' && (
-                          <Badge variant="outline" className="text-amber-400 border-amber-500/40 bg-amber-500/5" title={entry.decision_reason ?? undefined}>
-                            {entry.delivery_decision === 'skip' ? 'Skipped' : entry.delivery_decision}
-                            {entry.decision_reason ? ` · ${entry.decision_reason}` : ''}
-                          </Badge>
-                        )}
-                        {entry.dup_of_tweet_id && (
-                          <Badge
-                            className="bg-purple-500/20 text-purple-300 border-purple-500/30"
-                            title={`dup_of ${entry.dup_of_tweet_id}${entry.dup_similarity != null ? ` · cosine ${entry.dup_similarity.toFixed(3)}` : ''}`}
-                          >
-                            dup{entry.dup_similarity != null ? ` ${entry.dup_similarity.toFixed(2)}` : ''}
-                          </Badge>
-                        )}
-                        {entry.hydration_source === 'x_api' && (
-                          <Badge className="bg-green-500/20 text-green-400 border-green-500/30">
-                            <Sparkles className="w-3 h-3 mr-1" />Hydrated
-                          </Badge>
-                        )}
-                        {entry.is_truncated && !entry.hydrated_at && (
-                          <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30">
-                            <Scissors className="w-3 h-3 mr-1" />Truncated
-                          </Badge>
-                        )}
-                        {entry.hydrated_at && entry.hydration_source && entry.hydration_source !== 'x_api' && (
-                          <Badge variant="outline" className="text-muted-foreground" title={entry.hydration_source}>
-                            <Scissors className="w-3 h-3 mr-1" />Truncated (fallback)
-                          </Badge>
-                        )}
                       </div>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <p className="text-sm text-muted-foreground">
-                          {format(new Date(entry.created_at), 'MMM dd, yyyy HH:mm')}
-                          {entry.url && (<>{' • '}<a href={entry.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 hover:underline">Source <ExternalLink className="w-3 h-3" /></a></>)}
-                        </p>
-                        {entry.importance_tags && entry.importance_tags.length > 0 && (
-                          <div className="flex gap-1">
-                            {entry.importance_tags.map(tag => (
-                              <Badge key={tag} variant="secondary" className="text-xs px-1.5 py-0">{tag}</Badge>
-                            ))}
-                          </div>
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
+                        <span>{format(new Date(entry.created_at), 'MMM dd, yyyy HH:mm')}</span>
+                        {entry.url && (
+                          <>
+                            <span aria-hidden>·</span>
+                            <a href={entry.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 hover:underline">
+                              Source <ExternalLink className="w-3 h-3" />
+                            </a>
+                          </>
                         )}
+                        <span aria-hidden>·</span>
+                        <Link to="/settings#filter" className="text-primary hover:underline text-xs">
+                          How scoring works
+                        </Link>
                       </div>
-                      <div className="mt-2"><StatusIndicator entry={entry} /></div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 flex-wrap justify-end">
+                  <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2">
                     <Badge variant={entry.is_translated ? 'default' : 'secondary'}>{entry.is_translated ? 'Translated' : 'Original'}</Badge>
                     <Badge variant={entry.is_delivered ? 'default' : 'outline'}>{entry.is_delivered ? 'Delivered' : 'Pending'}</Badge>
                     {(() => {
                       const xs = entry.x_status;
                       if (!xs) return <Badge variant="outline" className="text-muted-foreground"><Twitter className="w-3 h-3 mr-1" />X: —</Badge>;
+                      const { label, title } = formatXBadge(entry);
                       const cls =
                         xs === 'posted' ? 'bg-green-500/20 text-green-400 border-green-500/30'
                         : xs === 'failed' ? 'bg-destructive/20 text-destructive border-destructive/30'
                         : xs === 'skipped' ? 'bg-muted text-muted-foreground border-border'
                         : 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30';
-                      const label = xs === 'posted' ? 'X: Posted' : xs === 'failed' ? 'X: Failed' : xs === 'skipped' ? `X: Skipped${entry.x_skip_reason ? ` (${entry.x_skip_reason})` : ''}` : 'X: Pending';
                       const inner = (
-                        <Badge className={cls} title={entry.x_error || entry.x_skip_reason || ''}>
+                        <Badge className={cls} title={title}>
                           <Twitter className="w-3 h-3 mr-1" />{label}
                         </Badge>
                       );
@@ -507,10 +545,9 @@ export default function Monitoring() {
                         <a href={`https://x.com/i/status/${entry.x_tweet_id}`} target="_blank" rel="noopener noreferrer">{inner}</a>
                       ) : inner;
                     })()}
-                    {/* Force actions — always available so admins can override any decision/state */}
                     <Button
                       size="sm"
-                      variant="outline"
+                      variant="default"
                       onClick={() => handleForceDeliver(entry.tweet_id)}
                       title={entry.is_delivered ? 'Re-deliver to Telegram (overrides previous delivery)' : 'Force delivery to Telegram'}
                     >
@@ -518,7 +555,7 @@ export default function Monitoring() {
                     </Button>
                     <Button
                       size="sm"
-                      variant="outline"
+                      variant="default"
                       onClick={() => handleRetryXPost(entry.tweet_id)}
                       title={entry.x_status === 'posted' ? 'Re-post to X (overrides previous post)' : 'Force post to X'}
                     >
@@ -527,22 +564,60 @@ export default function Monitoring() {
                   </div>
                 </div>
               </CardHeader>
-              <CardContent>
-                <DiagnosticStrip entry={entry} threshold={deliverThreshold} />
-                <MediaThumbnails tweetId={entry.tweet_id} />
-                <div className="mb-4">
-                  <h4 className="font-medium mb-2 text-sm text-muted-foreground">English</h4>
-                  <p className="text-sm bg-muted/50 p-3 rounded border">{entry.text_original || '[No content]'}</p>
+              <CardContent className="space-y-4 pt-0">
+                <div className="border-t border-border pt-3">
+                  <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Pipeline</p>
+                  <StatusIndicator entry={entry} />
                 </div>
-                <div className="mb-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <h4 className="font-medium text-sm text-muted-foreground">Persian</h4>
-                    <div className="flex items-center gap-2">
-                      <Button size="sm" variant="outline" onClick={() => handleReprocessTweet(entry.tweet_id)}><RotateCcw className="w-3 h-3 mr-1" />Reprocess</Button>
-                      <Button size="sm" variant="outline" onClick={() => handleRescorePost(entry.tweet_id)} title="Re-run scoring with current rubric"><Star className="w-3 h-3 mr-1" />Re-score</Button>
-                      {!entry.is_translated && <Button size="sm" variant="outline" onClick={() => handleRetryTranslation(entry.tweet_id)}>Translate</Button>}
-                      {!isEditing && <Button variant="outline" size="sm" onClick={() => { setEditingEntry(entry.tweet_id); setEditedContent(entry.text_translated || entry.text_original); }}><Edit className="w-3 h-3 mr-1" />Edit</Button>}
-                      <Button size="sm" variant="outline" onClick={() => openDetails(entry.tweet_id)}>Details</Button>
+
+                <DiagnosticStrip entry={entry} threshold={deliverThreshold} />
+
+                {entry.importance_tags && entry.importance_tags.length > 0 && (
+                  <div>
+                    <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">Tags</p>
+                    <div className="flex flex-wrap gap-1">
+                      {entry.importance_tags.map((tag) => (
+                        <Badge key={tag} variant="outline" className="text-xs font-normal text-muted-foreground px-2 py-0">
+                          {tag}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <MediaThumbnails tweetId={entry.tweet_id} />
+
+                <div>
+                  <h4 className="mb-2 text-sm font-medium text-muted-foreground">English</h4>
+                  <p className="rounded-md border bg-muted/50 p-3 text-sm">{entry.text_original || '[No content]'}</p>
+                </div>
+
+                <div>
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <h4 className="text-sm font-medium text-muted-foreground">Persian</h4>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button size="sm" variant="outline"><MoreHorizontal className="w-3 h-3 mr-1" />More</Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => handleReprocessTweet(entry.tweet_id)}>
+                            <RotateCcw className="w-3 h-3 mr-2" />Reprocess
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleRescorePost(entry.tweet_id)}>
+                            <Star className="w-3 h-3 mr-2" />Re-score
+                          </DropdownMenuItem>
+                          {!entry.is_translated && (
+                            <DropdownMenuItem onClick={() => handleRetryTranslation(entry.tweet_id)}>Queue translation</DropdownMenuItem>
+                          )}
+                          {!isEditing && (
+                            <DropdownMenuItem onClick={() => { setEditingEntry(entry.tweet_id); setEditedContent(entry.text_translated || entry.text_original); }}>
+                              <Edit className="w-3 h-3 mr-2" />Edit translation
+                            </DropdownMenuItem>
+                          )}
+                          <DropdownMenuItem onClick={() => openDetails(entry.tweet_id)}>Pipeline details</DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                   </div>
                   {isEditing ? (
@@ -554,17 +629,22 @@ export default function Monitoring() {
                       </div>
                     </div>
                   ) : (
-                    <div className={`text-sm p-4 rounded border leading-relaxed break-words ${!entry.is_translated ? 'bg-warning/10 text-warning border-warning/30' : 'bg-card text-foreground border-border'}`}>
+                    <div className={`rounded-md border p-4 text-sm leading-relaxed break-words ${!entry.is_translated ? 'border-warning/30 bg-warning/10 text-warning' : 'border-border bg-card text-foreground'}`}>
                       <div className="whitespace-pre-wrap" dir="rtl">{entry.text_translated || '[Not translated yet]'}</div>
                     </div>
                   )}
                 </div>
+
                 {entry.importance_reasoning && (
-                  <details className="mt-3 text-xs">
-                    <summary className="cursor-pointer text-muted-foreground hover:text-foreground select-none">
-                      Why this score? ({entry.importance_score ?? '—'}/20)
+                  <details className="text-xs">
+                    <summary className="cursor-pointer select-none text-muted-foreground hover:text-foreground">
+                      {entry.final_score != null
+                        && entry.importance_score != null
+                        && Math.round(entry.importance_score) !== Math.round(entry.final_score)
+                        ? `Model rationale (legacy AI score: ${entry.importance_score}/20)`
+                        : `Why this score? (${decisionScore(entry) ?? entry.importance_score ?? '—'}/20)`}
                     </summary>
-                    <div className="mt-2 p-3 rounded border border-border bg-muted/30 text-foreground whitespace-pre-wrap leading-relaxed">
+                    <div className="mt-2 rounded-md border border-border bg-muted/30 p-3 whitespace-pre-wrap leading-relaxed text-foreground">
                       {entry.importance_reasoning}
                     </div>
                   </details>

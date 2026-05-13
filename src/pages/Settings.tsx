@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -12,7 +13,8 @@ import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Brain, MessageSquare, Eye, Code, Sparkles, Send, Shield, Loader2, Filter, AtSign, ChevronDown } from 'lucide-react';
+import { Brain, MessageSquare, Eye, Code, Sparkles, Send, Shield, Loader2, Filter, AtSign, ChevronDown, Info } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   useSettingsData, useSaveSettings, openaiModels, messagePlaceholders, promptPlaceholders,
   type TranslationSettings, type TelegramSettings, type MessageTemplateSettings,
@@ -24,6 +26,14 @@ import type { EditorialProfile } from '@/hooks/useSettingsData';
 import XAutomationSettings from '@/components/settings/XAutomationSettings';
 import TranslationPlayground from '@/components/settings/TranslationPlayground';
 import PromptEditor from '@/components/settings/PromptEditor';
+
+const SETTINGS_TAB_IDS = ['translation', 'filter', 'messages', 'telegram', 'x-automation'] as const;
+type SettingsTabId = (typeof SETTINGS_TAB_IDS)[number];
+
+function tabIdFromHash(hash: string): SettingsTabId | null {
+  const id = hash.replace(/^#/, '');
+  return (SETTINGS_TAB_IDS as readonly string[]).includes(id) ? (id as SettingsTabId) : null;
+}
 
 function insertPlaceholder(placeholder: string, textareaId: string, getter: string, setter: (val: string) => void) {
   const textarea = document.getElementById(textareaId) as HTMLTextAreaElement;
@@ -37,9 +47,29 @@ function insertPlaceholder(placeholder: string, textareaId: string, getter: stri
 
 export default function Settings() {
   const { toast } = useToast();
+  const location = useLocation();
   const { settingsQuery, samplesQuery } = useSettingsData();
   const saveMutation = useSaveSettings();
   const [selectedSample, setSelectedSample] = useState(0);
+  const [settingsTab, setSettingsTab] = useState<SettingsTabId>(() => {
+    if (typeof window === 'undefined') return 'translation';
+    return tabIdFromHash(window.location.hash) ?? 'translation';
+  });
+
+  const goToSettingsTab = useCallback(
+    (tab: SettingsTabId) => {
+      setSettingsTab(tab);
+      if (typeof window !== 'undefined') {
+        window.history.replaceState(null, '', `${location.pathname}${location.search}#${tab}`);
+      }
+    },
+    [location.pathname, location.search],
+  );
+
+  useEffect(() => {
+    const fromUrl = tabIdFromHash(location.hash);
+    if (fromUrl) setSettingsTab(fromUrl);
+  }, [location.hash]);
 
   // Local state for editing (initialized from query data)
   const settings = settingsQuery.data;
@@ -110,7 +140,7 @@ export default function Settings() {
         <p className="text-muted-foreground mt-1">Configure your pipeline integrations and translation prompts</p>
       </div>
 
-      <Tabs defaultValue="translation" className="w-full">
+      <Tabs value={settingsTab} onValueChange={(v) => goToSettingsTab(v as SettingsTabId)} className="w-full">
         <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="translation" className="flex items-center gap-2"><Brain className="w-4 h-4" />Translation</TabsTrigger>
           <TabsTrigger value="filter" className="flex items-center gap-2"><Filter className="w-4 h-4" />Content Filter</TabsTrigger>
@@ -491,6 +521,36 @@ export default function Settings() {
 
         {/* Content Filter Tab */}
         <TabsContent value="filter" className="space-y-6">
+          <Alert className="border-primary/25 bg-primary/5">
+            <Info className="h-4 w-4" />
+            <AlertTitle>How content filtering fits together</AlertTitle>
+            <AlertDescription>
+              <ul className="mt-2 list-disc space-y-1.5 pl-4 text-muted-foreground">
+                <li>
+                  When an <span className="font-medium text-foreground">editorial profile</span> is active, Telegram deliver/skip uses the axes-weighted{' '}
+                  <span className="font-medium text-foreground">final score</span> compared to that profile&apos;s threshold (plus hard rules like blocked tags).
+                </li>
+                <li>
+                  The <span className="font-medium text-foreground">legacy content filter</span> below still drives split scoring, priority/low topics, editorial guidelines text, and per-author rules.
+                  When no profile is active, the worker falls back to this path and gates on <span className="font-medium text-foreground">importance_score</span> and the threshold here.
+                </li>
+                <li>
+                  <span className="font-medium text-foreground">Story memory</span> only affects near-duplicate detection and related skips — it does not change numeric scores.
+                </li>
+                <li>
+                  X posting uses separate thresholds: open the{' '}
+                  <button
+                    type="button"
+                    className="font-medium text-primary underline underline-offset-2 hover:no-underline"
+                    onClick={() => goToSettingsTab('x-automation')}
+                  >
+                    X Automation
+                  </button>{' '}
+                  tab for <code className="rounded bg-muted px-1 py-0.5 text-xs">min_score</code> and related posting rules.
+                </li>
+              </ul>
+            </AlertDescription>
+          </Alert>
           <EditorialProfilesCard
             profiles={(settings?.editorial_profiles as { profiles?: EditorialProfile[] } | undefined)?.profiles ?? []}
             activeProfileId={(settings?.active_profile_id as { id?: string | null } | undefined)?.id ?? null}

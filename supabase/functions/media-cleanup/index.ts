@@ -1,38 +1,26 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
+import { requireInternalAuth, serviceRoleBearerHeader } from "../_shared/internalAuth.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-internal-token',
 };
-
-function validateInternalToken(req: Request): Response | null {
-  const token = req.headers.get('x-internal-token') || '';
-  const expected = Deno.env.get('WEBHOOK_SHARED_SECRET') || '';
-  const authHeader = req.headers.get('Authorization') || '';
-  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
-
-  if (expected && token === expected) return null;
-  if (serviceKey && authHeader === `Bearer ${serviceKey}`) return null;
-
-  return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-    status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-  });
-}
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
-  const authError = validateInternalToken(req);
+  const supabase = createClient<any, any>(
+    Deno.env.get('SUPABASE_URL') ?? '',
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+  );
+
+  const authError = await requireInternalAuth(req, supabase, corsHeaders);
   if (authError) return authError;
 
   try {
-    const supabase = createClient<any, any>(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    );
 
     console.log(JSON.stringify({ function: 'media-cleanup', action: 'start' }));
 
@@ -42,7 +30,7 @@ serve(async (req) => {
 
     const { data, error } = await supabase.functions.invoke('media-processor', {
       body: { action: 'cleanup_old_media', days_old: daysOld },
-      headers: { 'x-internal-token': Deno.env.get('WEBHOOK_SHARED_SECRET') || '' }
+      headers: serviceRoleBearerHeader()
     } as Record<string, unknown>);
 
     if (error) {

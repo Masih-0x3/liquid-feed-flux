@@ -1,6 +1,12 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
 import { callOpenAI, type ToolFunctionDef } from "../_shared/openai.ts";
+import {
+  applyProfileDecision,
+  computeFinalScore,
+  parseScoreAxes,
+  type EditorialProfile,
+} from "../_shared/scoring.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -107,10 +113,21 @@ async function recordXApiCall(supabase: any, error?: string) {
 }
 
 // Inline rescore: re-runs the translation+scoring tool call against current settings
-// and persists the new translation/score/decision. Returns a plain result object so
-// callers (rescore_post and retry_x_post) can decide what to do with it.
+// and persists the new translation/score/decision (aligned with worker: axes + final_score + editorial profile).
 // deno-lint-ignore no-explicit-any
-async function runRescore(supabase: any, tweetId: string): Promise<{ ok: boolean; error?: string; score?: number; decision?: string; threshold?: number; tags?: string[]; reasoning?: string | null; translated?: string | null; model?: string }> {
+async function runRescore(supabase: any, tweetId: string): Promise<{
+  ok: boolean;
+  error?: string;
+  score?: number;
+  final_score?: number;
+  decision?: string;
+  decision_reason?: string | null;
+  threshold?: number;
+  tags?: string[];
+  reasoning?: string | null;
+  translated?: string | null;
+  model?: string;
+}> {
   const { data: post, error: postErr } = await supabase
     .from('posts')
     .select('tweet_id, text_original, author_handle, tweeted_at, has_media, url')
@@ -122,13 +139,28 @@ async function runRescore(supabase: any, tweetId: string): Promise<{ ok: boolean
   const { data: settings } = await supabase
     .from('settings')
     .select('key, value')
-    .in('key', ['translation_prompt', 'content_filter']);
+    .in('key', ['translation_prompt', 'content_filter', 'editorial_profiles', 'active_profile_id']);
   const settingsMap: Record<string, Record<string, unknown>> = {};
   for (const s of settings ?? []) {
     if (s.value && typeof s.value === 'object') settingsMap[s.key] = s.value as Record<string, unknown>;
   }
   const tp = settingsMap['translation_prompt'] || {};
   const cf = settingsMap['content_filter'] || {};
+
+  const profilesObj = settingsMap['editorial_profiles'];
+  const activeObj = settingsMap['active_profile_id'];
+  const profilesArr = (profilesObj?.profiles as unknown[]) ?? [];
+  const activeId = typeof activeObj?.id === 'string' ? activeObj.id : '';
+  let editorialProfile: EditorialProfile | null = null;
+  if (Array.isArray(profilesArr) && activeId) {
+    const found = profilesArr.find(
+      (p) => p && typeof p === 'object' && (p as Record<string, unknown>).id === activeId,
+    );
+    if (found && typeof found === 'object') editorialProfile = found as EditorialProfile;
+  }
+
+  const filterEnabled = cf.enabled === true;
+  const scoreOnly = cf.score_only === true;
 
   const model = typeof tp.model === 'string' && (tp.model as string).trim() ? tp.model as string : 'gpt-4o-mini';
   const translationPrompt = typeof tp.system_prompt === 'string' && (tp.system_prompt as string).trim()
@@ -157,31 +189,57 @@ async function runRescore(supabase: any, tweetId: string): Promise<{ ok: boolean
     ? `### Editorial Guidelines (AUTHORITATIVE — these override the default rubric when they conflict)\n---\n${guidelines}\n---`
     : '';
 
-  const scoringTemplate = customScoringPrompt ?? `You have two tasks. Complete both carefully.\n\n## Task 1: Translation\n{translation_prompt}\n\n## Task 2: News Importance Scoring\nScore 1-20 with 3-level relevance: DIRECT (no cap), INDIRECT Iran-adjacent (cap 16), NO NEXUS (cap 8). Polls/leaks/analyst reports about Iran conflicts can score 13-16. Do NOT down-score because framing is Western. Prefer higher tier when in doubt.\n\nHigh-priority: {priority_topics}\nLow-priority: {low_priority_topics}\n\n{editorial_guidelines_block}\n\nReasoning MUST state: relevance level, tier, any cap. Call "classify_importance".`;
+  const scoringTemplate = customScoringPrompt ?? `You have two tasks. Complete both carefully.\n\n## Task 1: Translation\n{translation_prompt}\n\n## Task 2: News Importance Scoring\nScore 1-20 with 3-level relevance: DIRECT (no cap), INDIRECT Iran-adjacent (cap 16), NO NEXUS (cap 8). Polls/leaks/analyst reports about Iran conflicts can score 13-16. Do NOT down-score because framing is Western. Prefer higher tier when in doubt.\n\nHigh-priority: {priority_topics}\nLow-priority: {low_priority_topics}\n\n{editorial_guidelines_block}\n\nReasoning MUST state: relevance level, tier, any cap. Call "classify_importance" with BOTH importance_score (1-20) AND axes (all six 0-10 fields).`;
   const systemPrompt = scoringTemplate
     .replace('{translation_prompt}', translationPrompt)
     .replace('{priority_topics}', priorityTopics)
     .replace('{low_priority_topics}', lowPriorityTopics)
     .replace('{editorial_guidelines_block}', guidelinesBlock);
 
-  let toolFunction: ToolFunctionDef;
+  const AXES_SCHEMA = {
+    type: 'object',
+    description: 'Six independent scoring axes (each 0-10). noise is INVERTED (high = bad).',
+    properties: {
+      iran_relevance: { type: 'integer', minimum: 0, maximum: 10 },
+      severity: { type: 'integer', minimum: 0, maximum: 10 },
+      novelty: { type: 'integer', minimum: 0, maximum: 10 },
+      credibility: { type: 'integer', minimum: 0, maximum: 10 },
+      actionability: { type: 'integer', minimum: 0, maximum: 10 },
+      noise: { type: 'integer', minimum: 0, maximum: 10 },
+    },
+    required: ['iran_relevance', 'severity', 'novelty', 'credibility', 'actionability', 'noise'],
+  };
+
+  let baseTool: Record<string, unknown>;
   try {
-    toolFunction = customToolSchema ? JSON.parse(customToolSchema) : {
+    baseTool = customToolSchema ? JSON.parse(customToolSchema) : {
       name: 'classify_importance',
+      description: 'Provide importance classification of this news item',
       parameters: {
         type: 'object',
         properties: {
-          translated_text: { type: 'string' },
+          translated_text: { type: 'string', description: 'The Persian translation of the original text' },
           importance_score: { type: 'integer', minimum: 1, maximum: 20 },
+          axes: AXES_SCHEMA,
           tags: { type: 'array', items: { type: 'string' } },
-          reasoning: { type: 'string' },
+          reasoning: { type: 'string', description: 'Required: state relevance level, tier, and any cap applied' },
         },
-        required: ['translated_text', 'importance_score', 'tags', 'reasoning'],
+        required: ['translated_text', 'importance_score', 'axes', 'tags', 'reasoning'],
       },
     };
   } catch (e) {
     return { ok: false, error: `Invalid classifier_tool_schema JSON: ${(e as Error).message}` };
   }
+
+  const params = baseTool.parameters as Record<string, unknown>;
+  const props = { ...(params.properties as Record<string, unknown>) };
+  if (!props.axes) {
+    props.axes = AXES_SCHEMA;
+    const required = Array.from(new Set([...((params.required as string[]) || []), 'axes']));
+    baseTool = { ...baseTool, parameters: { ...params, properties: props, required } };
+  }
+
+  const toolFunction = baseTool as ToolFunctionDef;
 
   const userMessage = `Author: @${post.author_handle || 'unknown'}\nPublished: ${post.tweeted_at ? new Date(post.tweeted_at as string).toISOString() : 'unknown'}\nHas media: ${post.has_media ? 'yes' : 'no'}\nURL: ${post.url || 'N/A'}\n\nContent:\n${post.text_original}`;
 
@@ -207,26 +265,76 @@ async function runRescore(supabase: any, tweetId: string): Promise<{ ok: boolean
   if (!result.ok) return { ok: false, error: `OpenAI ${result.status}: ${result.rawText.slice(0, 500)}` };
   if (!result.toolCall) return { ok: false, error: 'Model did not return a tool call' };
 
-  let args: { translated_text?: string; importance_score?: number; tags?: string[]; reasoning?: string };
+  let args: { translated_text?: string; importance_score?: number; axes?: unknown; tags?: string[]; reasoning?: string };
   try { args = JSON.parse(result.toolCall.arguments); }
   catch (e) { return { ok: false, error: `Tool-call parse error: ${(e as Error).message}` }; }
 
-  const newScore = Math.max(1, Math.min(20, args.importance_score || 10));
+  let importanceScore = Math.max(1, Math.min(20, args.importance_score ?? 10));
+  const scoreAxes = parseScoreAxes(args.axes);
+  if (scoreAxes && args.importance_score == null) {
+    importanceScore = Math.round(computeFinalScore(scoreAxes));
+  }
   const newTags = Array.isArray(args.tags) ? args.tags : [];
   const newReasoning = typeof args.reasoning === 'string' ? args.reasoning : null;
-  const newTranslated = typeof args.translated_text === 'string' ? args.translated_text : null;
+  const authorHandle = (post.author_handle as string | null) ?? null;
+  const textOriginal = String(post.text_original || '');
 
-  const threshold = typeof cf.default_threshold === 'number' ? cf.default_threshold as number : 12;
-  const newDecision = newScore >= threshold ? 'deliver' : 'skip';
+  let deliveryDecision = 'deliver';
+  let decisionReason: string | null = null;
+  let finalScore: number | null = scoreAxes ? computeFinalScore(scoreAxes) : (importanceScore ?? null);
+
+  if (filterEnabled && importanceScore !== null && !scoreOnly) {
+    if (editorialProfile) {
+      const r = applyProfileDecision({
+        profile: editorialProfile,
+        axes: scoreAxes,
+        legacyScore: importanceScore,
+        tags: newTags,
+        text: textOriginal,
+        authorHandle,
+      });
+      deliveryDecision = r.decision;
+      decisionReason = r.reason;
+      finalScore = r.finalScore;
+    } else {
+      const author_rules = (cf.author_rules as Record<string, { rule: string; threshold?: number }>) || {};
+      const authorRule = authorHandle ? author_rules[authorHandle] : null;
+      if (authorRule?.rule === 'always_deliver') {
+        deliveryDecision = 'deliver';
+        decisionReason = `author_rule:always_deliver:${authorHandle}`;
+      } else if (authorRule?.rule === 'always_skip') {
+        deliveryDecision = 'skip';
+        decisionReason = `author_rule:always_skip:${authorHandle}`;
+      } else {
+        const threshold = authorRule?.rule === 'custom_threshold' && authorRule.threshold != null
+          ? authorRule.threshold
+          : (typeof cf.default_threshold === 'number' ? cf.default_threshold as number : 12);
+        deliveryDecision = importanceScore >= threshold ? 'deliver' : 'skip';
+        decisionReason = deliveryDecision === 'deliver'
+          ? `score_pass:${importanceScore}>=${threshold}`
+          : `below_threshold:${importanceScore}<${threshold}`;
+      }
+    }
+  } else if (scoreOnly) {
+    decisionReason = 'score_only_mode';
+  } else if (!filterEnabled) {
+    decisionReason = 'filter_disabled';
+  }
+
+  const legacyThreshold = typeof cf.default_threshold === 'number' ? cf.default_threshold as number : 12;
+  const thresholdOut = editorialProfile ? editorialProfile.threshold : legacyThreshold;
 
   const updatePayload: Record<string, unknown> = {
-    importance_score: newScore,
+    importance_score: importanceScore,
     importance_tags: newTags,
     importance_reasoning: newReasoning,
-    delivery_decision: newDecision,
+    delivery_decision: deliveryDecision,
+    score_axes: scoreAxes ?? null,
+    final_score: finalScore,
+    decision_reason: decisionReason,
   };
-  if (newTranslated) {
-    updatePayload.text_translated = newTranslated;
+  if (typeof args.translated_text === 'string') {
+    updatePayload.text_translated = args.translated_text;
     updatePayload.translated_at = new Date().toISOString();
     updatePayload.translation_model = model;
   }
@@ -234,7 +342,18 @@ async function runRescore(supabase: any, tweetId: string): Promise<{ ok: boolean
   const { error: upErr } = await supabase.from('posts').update(updatePayload).eq('tweet_id', tweetId);
   if (upErr) return { ok: false, error: upErr.message };
 
-  return { ok: true, score: newScore, tags: newTags, reasoning: newReasoning, translated: newTranslated, decision: newDecision, threshold, model };
+  return {
+    ok: true,
+    score: importanceScore,
+    final_score: finalScore ?? undefined,
+    tags: newTags,
+    reasoning: newReasoning,
+    translated: typeof args.translated_text === 'string' ? args.translated_text : null,
+    decision: deliveryDecision,
+    decision_reason: decisionReason,
+    threshold: thresholdOut,
+    model,
+  };
 }
 
 function validateSettingsValue(key: string, value: unknown): string | null {
@@ -632,14 +751,15 @@ serve(async (req) => {
         if (tweetId) {
           const { data: existing } = await supabase
             .from('posts')
-            .select('text_translated, importance_score')
+            .select('text_translated, importance_score, final_score')
             .eq('tweet_id', tweetId)
             .maybeSingle();
           const needsRescore = !existing
             || !existing.text_translated
             || typeof existing.text_translated !== 'string'
             || (existing.text_translated as string).trim().length === 0
-            || existing.importance_score == null;
+            || existing.importance_score == null
+            || existing.final_score == null;
           if (needsRescore) {
             const r = await runRescore(supabase, tweetId);
             prep = { ran: true, ok: r.ok, score: r.score, decision: r.decision, error: r.error };
@@ -661,7 +781,20 @@ serve(async (req) => {
           const text = await resp.text();
           let parsed: unknown; try { parsed = JSON.parse(text); } catch { parsed = text; }
           if (!resp.ok) return jsonResponse({ ok: false, error: `x-poster ${resp.status}: ${text.slice(0, 300)}`, raw: parsed, prep }, 200);
-          return jsonResponse({ ok: true, prep, ...(parsed as Record<string, unknown>) });
+          const parsedObj = parsed as { results?: Array<Record<string, unknown>> };
+          const result = tweetId ? (parsedObj?.results?.[0] ?? null) : null;
+          return jsonResponse({
+            ok: true,
+            prep,
+            ...(parsed as Record<string, unknown>),
+            ...(result
+              ? {
+                status: (result.status as string | undefined) ?? undefined,
+                x_tweet_id: (result.x_tweet_id as string | undefined) ?? undefined,
+                error: (result.error as string | undefined) ?? undefined,
+              }
+              : {}),
+          });
         } catch (e) {
           return jsonResponse({ ok: false, error: (e as Error).message, prep }, 200);
         }
@@ -1078,7 +1211,18 @@ serve(async (req) => {
         if (!tweetId) return jsonResponse({ ok: false, error: 'tweet_id is required' }, 400);
         const r = await runRescore(supabase, tweetId);
         if (!r.ok) return jsonResponse({ ok: false, error: r.error }, 200);
-        return jsonResponse({ ok: true, tweet_id: tweetId, score: r.score, tags: r.tags, reasoning: r.reasoning, decision: r.decision, threshold: r.threshold, model: r.model });
+        return jsonResponse({
+          ok: true,
+          tweet_id: tweetId,
+          score: r.score,
+          final_score: r.final_score,
+          tags: r.tags,
+          reasoning: r.reasoning,
+          decision: r.decision,
+          decision_reason: r.decision_reason,
+          threshold: r.threshold,
+          model: r.model,
+        });
       }
 
       // ===== Run X followers snapshot manually =====

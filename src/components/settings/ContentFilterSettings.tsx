@@ -74,10 +74,6 @@ function applyFilterStatus(config: ContentFilterConfig, status: FilterStatus): C
 
 interface Props {
   initialConfig?: ContentFilterConfig;
-}
-
-interface Props {
-  initialConfig?: ContentFilterConfig;
   translationSettings: TranslationSettings;
   onTranslationSettingsChange: (next: TranslationSettings) => void;
 }
@@ -87,6 +83,7 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
   const [newPriorityTopic, setNewPriorityTopic] = useState('');
   const [newLowPriorityTopic, setNewLowPriorityTopic] = useState('');
   const [authorOverridesOpen, setAuthorOverridesOpen] = useState(false);
+  const [advancedFilterHelpOpen, setAdvancedFilterHelpOpen] = useState(false);
   const saveMutation = useSaveSettings();
   const { toast } = useToast();
 
@@ -183,8 +180,15 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
           <CardTitle className="flex items-center text-glass-foreground">
             <Filter className="w-5 h-5 mr-2" />Content Filtering
           </CardTitle>
-          <CardDescription>
-            Control which posts get delivered to Telegram based on AI importance scoring (1-20 scale)
+          <CardDescription className="space-y-2">
+            <p>
+              Legacy path: the model returns an <span className="font-medium text-foreground">importance score</span> (1–20). When filtering is{' '}
+              <span className="font-medium text-foreground">Active</span>, posts below your threshold are skipped for Telegram. When an editorial profile is active in the worker,
+              delivery instead uses that profile&apos;s <span className="font-medium text-foreground">final score</span> and profile threshold — so Monitoring may show different headline numbers than this card.
+            </p>
+            <p className="text-muted-foreground">
+              Score Only records scores without blocking delivery. Off disables scoring for this legacy path (profiles may still apply).
+            </p>
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -205,6 +209,29 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
               </button>
             ))}
           </div>
+
+          <Collapsible open={advancedFilterHelpOpen} onOpenChange={setAdvancedFilterHelpOpen}>
+            <CollapsibleTrigger className="flex w-full items-center justify-between rounded-lg border border-border bg-muted/30 p-3 text-left text-sm font-medium hover:bg-muted/50">
+              <span>Advanced: how this interacts with editorial profiles</span>
+              <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${advancedFilterHelpOpen ? 'rotate-180' : ''}`} />
+            </CollapsibleTrigger>
+            <CollapsibleContent className="mt-2 rounded-lg border border-dashed border-border/80 bg-muted/20 p-3 text-sm text-muted-foreground">
+              <ul className="list-disc space-y-1.5 pl-4">
+                <li>
+                  Topics and editorial guidelines here are merged into the scoring prompt (together with the rubric below) whenever the dual translate+score call runs.
+                </li>
+                <li>
+                  They are <span className="font-medium text-foreground">hints and rubric text</span>, not hard allow-lists, unless an active editorial profile adds hard rules (tags, keywords, overrides).
+                </li>
+                <li>
+                  Priority topics nudge the model toward higher scores when relevant; they do not guarantee delivery. Low-priority topics nudge downward; they do not auto-skip by themselves.
+                </li>
+                <li>
+                  The <span className="font-medium text-foreground">global threshold</span> on this card gates <span className="font-medium text-foreground">importance_score</span> on the legacy filter path. An active profile uses its own threshold on <span className="font-medium text-foreground">final_score</span> after axes and profile rules.
+                </li>
+              </ul>
+            </CollapsibleContent>
+          </Collapsible>
 
           {filterStatus === 'active' && (
             <>
@@ -251,8 +278,8 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
                 </div>
                 <p className="text-sm text-muted-foreground">
                   {filterMode === 'global'
-                    ? 'Posts scoring below this are skipped. Applies to all posts.'
-                    : 'Used for authors without a specific override rule.'}
+                    ? 'On the legacy filter path, posts whose importance_score is below this are skipped for Telegram. Does not replace an active editorial profile threshold on final_score.'
+                    : 'Fallback threshold for authors without a per-author rule on the legacy path.'}
                 </p>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">Minimum score to deliver</span>
@@ -374,8 +401,13 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
             <CardTitle className="flex items-center text-glass-foreground">
               <Sparkles className="w-5 h-5 mr-2" />Editorial Guidelines
             </CardTitle>
-            <CardDescription>
-              Tell the AI what matters to your audience in plain language. This is injected directly into the scoring prompt.
+            <CardDescription className="space-y-2">
+              <p>
+                Free-text rubric merged into the scoring prompt; this is usually the strongest narrative control on what “important” means for your channel.
+              </p>
+              <p className="text-muted-foreground">
+                Shown when filtering is Score Only or Active so you can tune the model even if delivery is not gated here.
+              </p>
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -388,6 +420,9 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
 
             <div className="space-y-2">
               <Label>High Priority Topics (boost score)</Label>
+              <p className="text-xs text-muted-foreground">
+                Hints so the model leans higher when a topic is relevant — not a hard allow-list unless combined with editorial profile rules.
+              </p>
               <div className="flex gap-2">
                 <Input
                   value={newPriorityTopic}
@@ -410,6 +445,9 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
 
             <div className="space-y-2">
               <Label>Low Priority Topics (lower score)</Label>
+              <p className="text-xs text-muted-foreground">
+                Hints to de-emphasize matching content; does not automatically skip posts.
+              </p>
               <div className="flex gap-2">
                 <Input
                   value={newLowPriorityTopic}
