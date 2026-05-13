@@ -32,6 +32,7 @@ export default function EditorialProfilesCard({ profiles: initialProfiles, activ
   const [activeId, setActiveId] = useState<string | null>(initialActive);
   const [editingId, setEditingId] = useState<string | null>(initialActive ?? initialProfiles[0]?.id ?? null);
   const [kwInputs, setKwInputs] = useState<Record<string, string>>({});
+  const [rescoring, setRescoring] = useState(false);
   const saveMutation = useSaveSettings();
   const { toast } = useToast();
 
