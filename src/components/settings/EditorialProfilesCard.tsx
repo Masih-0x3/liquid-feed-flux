@@ -8,9 +8,10 @@ import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
-import { Sparkles, Plus, X, Copy, Trash2, Save, Loader2 } from 'lucide-react';
+import { Sparkles, Plus, X, Copy, Trash2, Save, Loader2, RefreshCw } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useSaveSettings, makeDefaultProfile, DEFAULT_AXIS_WEIGHTS, SCORE_AXIS_KEYS, type EditorialProfile, type ScoreAxisKey } from '@/hooks/useSettingsData';
+import { supabase } from '@/integrations/supabase/client';
 
 interface Props {
   profiles: EditorialProfile[];
