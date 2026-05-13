@@ -22,11 +22,8 @@ export interface MonitoringEntry {
   importance_tags: string[] | null;
   importance_reasoning: string | null;
   delivery_decision: string | null;
-  /** PR1: per-axis 0–10 scores returned by the AI (iran_relevance, severity, novelty, credibility, actionability, noise). */
   score_axes: Record<string, number> | null;
-  /** PR1: derived 0–20 score computed from axes via the active editorial profile's weights. */
   final_score: number | null;
-  /** PR1: short reason explaining the delivery decision (e.g. "below_threshold:8<12", "author_rule:always_skip:foo"). */
   decision_reason: string | null;
   is_truncated: boolean;
   hydrated_at: string | null;
@@ -36,15 +33,10 @@ export interface MonitoringEntry {
   x_posted_at: string | null;
   x_error: string | null;
   x_skip_reason: string | null;
-  /** PR3: tweet_id of the original story this is a near-duplicate of, when story memory matched. */
   dup_of_tweet_id: string | null;
-  /** PR3: cluster id grouping near-duplicate stories. */
   story_cluster_id: string | null;
-  /** PR3: cosine similarity (0-1) of the embedding match against the original. */
   dup_similarity: number | null;
-  /** Feedback learning: breakdown of AI base + bias + kNN for the final score. */
   score_breakdown: { ai?: number; author_bias?: number; tag_bias?: number; knn_prior?: number; final?: number } | null;
-  /** Feedback learning: true if user force-delivered/posted, preventing auto-skip by dedup. */
   feedback_locked: boolean;
 }
 
@@ -59,25 +51,84 @@ export interface PipelineEvent {
   meta?: Record<string, unknown>;
 }
 
-const PAGE_SIZE = 30;
+export type MonitoringFilter = 'all' | 'needs-translation' | 'delivery-pending' | 'failed' | 'recently-delivered';
 
-async function fetchMonitoringPage({ pageParam = 0 }: { pageParam: number }): Promise<{ entries: MonitoringEntry[]; nextCursor: number | null }> {
+const PAGE_SIZE = 30;
+const POST_COLUMNS = 'tweet_id, text_original, text_translated, url, created_at, translated_at, has_media, lang_original, author_handle, importance_score, importance_tags, importance_reasoning, delivery_decision, score_axes, final_score, decision_reason, dup_of_tweet_id, story_cluster_id, dup_similarity, score_breakdown, feedback_locked, accounts!inner(handle, display_name)';
+
+async function getFilteredTweetIds(filter: MonitoringFilter, limit: number, offset: number): Promise<string[] | null> {
+  switch (filter) {
+    case 'recently-delivered': {
+      const { data } = await supabase
+        .from('deliveries')
+        .select('subject_id')
+        .eq('subject_type', 'post')
+        .eq('status', 'posted')
+        .order('posted_at', { ascending: false })
+        .range(offset, offset + limit - 1);
+      return data?.map((d) => d.subject_id) ?? [];
+    }
+    case 'failed': {
+      const { data } = await supabase
+        .from('jobs')
+        .select('payload')
+        .eq('status', 'failed')
+        .order('created_at', { ascending: false })
+        .range(offset, offset + limit - 1);
+      const ids = new Set<string>();
+      data?.forEach((j) => {
+        const tid = (j.payload as Record<string, string>)?.tweet_id;
+        if (tid) ids.add(tid);
+      });
+      return [...ids];
+    }
+    default:
+      return null;
+  }
+}
+
+async function fetchMonitoringPage(
+  { pageParam = 0 }: { pageParam: number },
+  filter: MonitoringFilter,
+): Promise<{ entries: MonitoringEntry[]; nextCursor: number | null }> {
   const from = pageParam * PAGE_SIZE;
   const to = from + PAGE_SIZE - 1;
 
-  const { data: postsData, error: postsError } = await supabase
+  let tweetIds: string[] | null = null;
+
+  if (filter === 'recently-delivered' || filter === 'failed') {
+    tweetIds = await getFilteredTweetIds(filter, PAGE_SIZE, from);
+    if (!tweetIds || tweetIds.length === 0) return { entries: [], nextCursor: null };
+  }
+
+  let query = supabase
     .from('posts')
-    .select('tweet_id, text_original, text_translated, url, created_at, translated_at, has_media, lang_original, author_handle, importance_score, importance_tags, importance_reasoning, delivery_decision, score_axes, final_score, decision_reason, dup_of_tweet_id, story_cluster_id, dup_similarity, score_breakdown, feedback_locked, accounts!inner(handle, display_name)')
-    .order('created_at', { ascending: false })
-    .range(from, to);
+    .select(POST_COLUMNS)
+    .order('created_at', { ascending: false });
+
+  if (tweetIds) {
+    query = query.in('tweet_id', tweetIds);
+  } else {
+    switch (filter) {
+      case 'needs-translation':
+        query = query.is('translated_at', null);
+        break;
+      case 'delivery-pending':
+        query = query.eq('delivery_decision', 'deliver');
+        break;
+    }
+    query = query.range(from, to);
+  }
+
+  const { data: postsData, error: postsError } = await query;
   if (postsError) throw postsError;
   if (!postsData || postsData.length === 0) return { entries: [], nextCursor: null };
 
-  const tweetIds = postsData.map(p => p.tweet_id);
+  const allTweetIds = postsData.map(p => p.tweet_id);
   const statusByTweet: Record<string, Record<string, unknown>> = {};
   try {
     const { data: rpcData, error: rpcError } = await supabase
-      .rpc('get_post_pipeline_status', { tweet_ids: tweetIds });
+      .rpc('get_post_pipeline_status', { tweet_ids: allTweetIds });
     if (!rpcError && rpcData) {
       (rpcData as Record<string, unknown>[]).forEach((row) => {
         statusByTweet[row.tweet_id as string] = row;
@@ -85,7 +136,7 @@ async function fetchMonitoringPage({ pageParam = 0 }: { pageParam: number }): Pr
     }
   } catch { /* RPC may not exist */ }
 
-  const entries: MonitoringEntry[] = postsData.map(post => {
+  let entries: MonitoringEntry[] = postsData.map(post => {
     const rpc = statusByTweet[post.tweet_id] as Record<string, unknown> | undefined;
     const translatedAt = rpc?.translated_at || post.translated_at;
     const isTranslated = !!(translatedAt || (post.text_translated && post.text_translated !== post.text_original));
@@ -133,19 +184,27 @@ async function fetchMonitoringPage({ pageParam = 0 }: { pageParam: number }): Pr
     };
   });
 
+  if (filter === 'delivery-pending') {
+    entries = entries.filter((e) => e.delivery_status !== 'posted');
+  }
+
+  const hasMore = tweetIds
+    ? tweetIds.length === PAGE_SIZE
+    : postsData.length === PAGE_SIZE;
+
   return {
     entries,
-    nextCursor: postsData.length === PAGE_SIZE ? pageParam + 1 : null,
+    nextCursor: hasMore ? pageParam + 1 : null,
   };
 }
 
-export function useMonitoringData() {
+export function useMonitoringData(filter: MonitoringFilter = 'all') {
   const queryClient = useQueryClient();
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const query = useInfiniteQuery({
-    queryKey: ['monitoring'],
-    queryFn: fetchMonitoringPage,
+    queryKey: ['monitoring', filter],
+    queryFn: (ctx) => fetchMonitoringPage(ctx, filter),
     initialPageParam: 0,
     getNextPageParam: (lastPage) => lastPage.nextCursor,
     staleTime: 15_000,
@@ -172,7 +231,6 @@ export function useMonitoringData() {
     };
   }, [debouncedInvalidate]);
 
-  // Flatten pages into a single array for consumers
   const allEntries = query.data?.pages.flatMap(p => p.entries) ?? [];
 
   return {

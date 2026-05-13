@@ -14,7 +14,7 @@ import { Search, RefreshCw, Edit, Check, X, ExternalLink, RotateCcw, Star, Send,
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { format } from "date-fns";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerDescription, DrawerClose, DrawerFooter } from "@/components/ui/drawer";
-import { useMonitoringData, type MonitoringEntry, type PipelineEvent } from "@/hooks/useMonitoringData";
+import { useMonitoringData, type MonitoringEntry, type MonitoringFilter, type PipelineEvent } from "@/hooks/useMonitoringData";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { MediaThumbnails } from "@/components/monitoring/MediaThumbnails";
 import { Link } from "react-router-dom";
@@ -187,14 +187,14 @@ function DiagnosticStrip({ entry, threshold }: { entry: MonitoringEntry; thresho
 }
 
 export default function Monitoring() {
-  const { entries, isLoading, hasNextPage, fetchNextPage, isFetchingNextPage } = useMonitoringData();
+  const [filter, setFilter] = useState<MonitoringFilter>("all");
+  const { entries, isLoading, hasNextPage, fetchNextPage, isFetchingNextPage } = useMonitoringData(filter);
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
   const [editingEntry, setEditingEntry] = useState<string | null>(null);
   const [editedContent, setEditedContent] = useState("");
   const [selectedTweets, setSelectedTweets] = useState<Set<string>>(new Set());
   const [isReprocessing, setIsReprocessing] = useState(false);
-  const [filter, setFilter] = useState<string>("all");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerTweetId, setDrawerTweetId] = useState<string | null>(null);
   const [timeline, setTimeline] = useState<PipelineEvent[]>([]);
@@ -322,17 +322,13 @@ export default function Monitoring() {
     setSelectedTweets(updated);
   };
 
-  const filteredEntries = entries
-    .filter((e: MonitoringEntry) => e.text_original.toLowerCase().includes(searchTerm.toLowerCase()) || e.text_translated.toLowerCase().includes(searchTerm.toLowerCase()) || e.account_handle.toLowerCase().includes(searchTerm.toLowerCase()))
-    .filter((e: MonitoringEntry) => {
-      switch (filter) {
-        case 'needs-translation': return !e.is_translated;
-        case 'delivery-pending': return e.delivery_status !== 'posted';
-        case 'failed': return !!(e.translation_error || e.delivery_error);
-        case 'recently-delivered': return e.delivery_status === 'posted';
-        default: return true;
-      }
-    });
+  const filteredEntries = searchTerm
+    ? entries.filter((e: MonitoringEntry) =>
+        e.text_original.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        e.text_translated.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        e.account_handle.toLowerCase().includes(searchTerm.toLowerCase())
+      )
+    : entries;
 
   const totalPosts = entries.length;
   const translatedPosts = entries.filter(e => e.is_translated).length;
@@ -438,15 +434,15 @@ export default function Monitoring() {
             </div>
             <div className="flex items-center gap-4">
               <div className="w-48">
-                <ThemedSelect value={filter} onValueChange={setFilter}>
+                <ThemedSelect value={filter} onValueChange={(v) => setFilter(v as MonitoringFilter)}>
                   <SelectTrigger className="bg-card text-foreground border-border"><SelectValue placeholder="All" /></SelectTrigger>
                   <SelectContent className="bg-popover text-popover-foreground border-border">
                     <SelectGroup><SelectLabel>Filter</SelectLabel>
-                      <SelectItem value="all">All</SelectItem>
+                      <SelectItem value="all">All posts</SelectItem>
+                      <SelectItem value="recently-delivered">Delivered</SelectItem>
+                      <SelectItem value="delivery-pending">Pending delivery</SelectItem>
                       <SelectItem value="needs-translation">Needs translation</SelectItem>
-                      <SelectItem value="delivery-pending">Delivery pending</SelectItem>
                       <SelectItem value="failed">Failed</SelectItem>
-                      <SelectItem value="recently-delivered">Recently Delivered</SelectItem>
                     </SelectGroup>
                   </SelectContent>
                 </ThemedSelect>
