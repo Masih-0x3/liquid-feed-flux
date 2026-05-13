@@ -499,32 +499,41 @@ export default function Monitoring() {
                           return (
                             <>
                               {decision != null && (
-                                <Badge
-                                  className={
-                                    passes
-                                      ? 'bg-green-500/20 text-green-400 border-green-500/30'
-                                      : close
-                                      ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
-                                      : 'bg-red-500/20 text-red-400 border-red-500/30'
-                                  }
-                                  title={
-                                    `Decision score: ${decision}/20\n` +
-                                    `Threshold to deliver: ≥${deliverThreshold}\n` +
-                                    (axesStr ? `Axes — ${axesStr}\n` : '') +
-                                    (entry.score_breakdown
-                                      ? `--- Breakdown ---\n` +
-                                        `AI base: ${entry.score_breakdown.ai ?? '—'}\n` +
-                                        (entry.score_breakdown.author_bias ? `Author bias: ${entry.score_breakdown.author_bias > 0 ? '+' : ''}${entry.score_breakdown.author_bias}\n` : '') +
-                                        (entry.score_breakdown.tag_bias ? `Tag bias: ${entry.score_breakdown.tag_bias > 0 ? '+' : ''}${entry.score_breakdown.tag_bias}\n` : '') +
-                                        (entry.score_breakdown.knn_prior ? `Similar posts you labeled: ${entry.score_breakdown.knn_prior > 0 ? '+' : ''}${entry.score_breakdown.knn_prior}\n` : '') +
-                                        `Final: ${entry.score_breakdown.final ?? decision}`
-                                      : '')
-                                  }
-                                >
-                                  <Star className="w-3 h-3 mr-1" />
-                                  {Number.isInteger(decision) ? decision : decision.toFixed(1)}/20
-                                  <span className="ml-1 opacity-60">· need ≥{deliverThreshold}</span>
-                                </Badge>
+                                <span className="inline-flex items-center gap-1">
+                                  <Badge
+                                    className={
+                                      passes
+                                        ? 'bg-green-500/20 text-green-400 border-green-500/30'
+                                        : close
+                                        ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
+                                        : 'bg-red-500/20 text-red-400 border-red-500/30'
+                                    }
+                                    title={
+                                      `Decision score: ${decision}/20\n` +
+                                      `Threshold to deliver: ≥${deliverThreshold}\n` +
+                                      (axesStr ? `Axes — ${axesStr}\n` : '') +
+                                      (entry.score_breakdown
+                                        ? `--- Breakdown ---\n` +
+                                          `AI base: ${entry.score_breakdown.ai ?? '—'}\n` +
+                                          (entry.score_breakdown.author_bias ? `Author bias: ${entry.score_breakdown.author_bias > 0 ? '+' : ''}${entry.score_breakdown.author_bias}\n` : '') +
+                                          (entry.score_breakdown.tag_bias ? `Tag bias: ${entry.score_breakdown.tag_bias > 0 ? '+' : ''}${entry.score_breakdown.tag_bias}\n` : '') +
+                                          (entry.score_breakdown.knn_prior ? `Similar posts you labeled: ${entry.score_breakdown.knn_prior > 0 ? '+' : ''}${entry.score_breakdown.knn_prior}\n` : '') +
+                                          `Final: ${entry.score_breakdown.final ?? decision}`
+                                        : '')
+                                    }
+                                  >
+                                    <Star className="w-3 h-3 mr-1" />
+                                    {Number.isInteger(decision) ? decision : decision.toFixed(1)}/20
+                                    <span className="ml-1 opacity-60">· need ≥{deliverThreshold}</span>
+                                  </Badge>
+                                  <button
+                                    className="text-[10px] text-primary hover:text-primary/80 underline underline-offset-2 cursor-pointer whitespace-nowrap"
+                                    onClick={(e) => { e.stopPropagation(); handleRescorePost(entry.tweet_id); }}
+                                    title="Ask AI to re-evaluate this post's importance score (disputes are recorded as feedback)"
+                                  >
+                                    Dispute score
+                                  </button>
+                                </span>
                               )}
                               {showDelta && (
                                 <span className="text-xs text-muted-foreground">
@@ -592,7 +601,9 @@ export default function Monitoring() {
                     </div>
                   </div>
                   <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2">
-                    <Badge variant={entry.is_translated ? 'default' : 'secondary'}>{entry.is_translated ? 'Translated' : 'Original'}</Badge>
+                    <Badge variant={entry.is_translated && entry.text_translated ? 'default' : 'secondary'}>
+                      {entry.is_translated && entry.text_translated ? 'Translated' : !entry.is_translated ? 'Original' : 'Translation Missing'}
+                    </Badge>
                     <Badge variant={entry.is_delivered ? 'default' : 'outline'}>{entry.is_delivered ? 'Delivered' : 'Pending'}</Badge>
                     {(() => {
                       const xs = entry.x_status;
@@ -622,18 +633,20 @@ export default function Monitoring() {
                     </Button>
                     <Button
                       size="sm"
-                      variant="default"
+                      variant={xPostingEnabled ? 'default' : 'outline'}
                       disabled={!xPostingEnabled}
                       onClick={() => handleRetryXPost(entry.tweet_id)}
+                      className={!xPostingEnabled ? 'opacity-50 line-through' : ''}
                       title={
                         !xPostingEnabled
-                          ? 'Turn on X posting in Settings → X Automation to post to X'
+                          ? 'X posting is OFF — enable it in Settings → X Automation'
                           : entry.x_status === 'posted'
                             ? 'Re-post to X (overrides previous post)'
                             : 'Force post to X'
                       }
                     >
-                      <Twitter className="w-3 h-3 mr-1" />{entry.x_status === 'posted' ? 'Re-post on X' : 'Force on X'}
+                      <Twitter className="w-3 h-3 mr-1" />
+                      {!xPostingEnabled ? 'X is OFF' : entry.x_status === 'posted' ? 'Re-post on X' : 'Force on X'}
                     </Button>
                   </div>
                 </div>
@@ -703,8 +716,17 @@ export default function Monitoring() {
                       </div>
                     </div>
                   ) : (
-                    <div className={`rounded-md border p-4 text-sm leading-relaxed break-words ${!entry.is_translated ? 'border-warning/30 bg-warning/10 text-warning' : 'border-border bg-card text-foreground'}`}>
-                      <div className="whitespace-pre-wrap" dir="rtl">{entry.text_translated || '[Not translated yet]'}</div>
+                    <div className={`rounded-md border p-4 text-sm leading-relaxed break-words ${!entry.text_translated ? 'border-warning/30 bg-warning/10 text-warning' : 'border-border bg-card text-foreground'}`}>
+                      {entry.text_translated ? (
+                        <div className="whitespace-pre-wrap" dir="rtl">{entry.text_translated}</div>
+                      ) : (
+                        <div className="flex items-center justify-between gap-2">
+                          <span>{entry.is_translated ? '[Translation completed but text is empty — retry]' : '[Not translated yet]'}</span>
+                          <Button size="sm" variant="outline" onClick={() => handleRetryTranslation(entry.tweet_id)}>
+                            <RotateCcw className="w-3 h-3 mr-1" />Retry
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
