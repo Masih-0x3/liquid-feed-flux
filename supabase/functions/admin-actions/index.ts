@@ -8,6 +8,9 @@ import {
   type EditorialProfile,
 } from "../_shared/scoring.ts";
 
+const DEPLOY_SHA = Deno.env.get('DEPLOY_GIT_SHA') ?? 'unknown';
+const DEPLOY_TIME = Deno.env.get('DEPLOY_TIME') ?? new Date().toISOString();
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -656,6 +659,17 @@ serve(async (req) => {
   }
 
   try {
+    const rawText = await req.text();
+    let body: any = {};
+    try { body = rawText ? JSON.parse(rawText) : {}; } catch (e) {
+      console.error('[admin-actions] body parse failed', { rawText: rawText.slice(0, 200), err: (e as Error).message });
+    }
+    const { action } = body;
+
+    if (action === 'version') {
+      return jsonResponse({ ok: true, sha: DEPLOY_SHA, deployed_at: DEPLOY_TIME, function: 'admin-actions' });
+    }
+
     const authResult = await requireAdmin(req);
     if (authResult instanceof Response) return authResult;
 
@@ -663,13 +677,6 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
-
-    const rawText = await req.text();
-    let body: any = {};
-    try { body = rawText ? JSON.parse(rawText) : {}; } catch (e) {
-      console.error('[admin-actions] body parse failed', { rawText: rawText.slice(0, 200), err: (e as Error).message });
-    }
-    const { action } = body;
 
     if (!action) {
       console.error('[admin-actions] missing action', { rawText: rawText.slice(0, 200), contentType: req.headers.get('content-type') });

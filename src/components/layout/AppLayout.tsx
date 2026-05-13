@@ -2,6 +2,7 @@ import { ReactNode } from 'react';
 import { Navigate } from 'react-router-dom';
 import { SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
 import { AppSidebar } from './AppSidebar';
+import { VersionBanner } from './VersionBanner';
 import { useAuth } from '@/contexts/AuthContext';
 import { Loader2, ShieldAlert } from 'lucide-react';
 
@@ -49,7 +50,7 @@ export function AppLayout({ children }: AppLayoutProps) {
           {/* Header */}
           <header className="h-16 border-b border-glass-border glass-panel rounded-none flex items-center px-6 backdrop-blur-glass">
             <SidebarTrigger className="glass-button hover:bg-glass-border/20" />
-            <div className="ml-4">
+            <div className="ml-4 flex-1">
               <h1 className="text-xl font-display font-semibold text-glass-foreground">
                 XOT Panel
               </h1>
@@ -57,6 +58,7 @@ export function AppLayout({ children }: AppLayoutProps) {
                 Monitor and manage your RSS → OpenAI → Telegram pipeline
               </p>
             </div>
+            <VersionBanner />
           </header>
 
           {/* Main Content */}
