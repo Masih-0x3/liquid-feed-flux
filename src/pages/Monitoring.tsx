@@ -15,7 +15,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { format } from "date-fns";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerDescription, DrawerClose, DrawerFooter } from "@/components/ui/drawer";
 import { useMonitoringData, type MonitoringEntry, type PipelineEvent } from "@/hooks/useMonitoringData";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { MediaThumbnails } from "@/components/monitoring/MediaThumbnails";
 
 // Admin action helpers
