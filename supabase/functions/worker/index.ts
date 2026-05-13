@@ -1164,7 +1164,28 @@ ${post.text_original}`;
 
     if (updateError) throw updateError;
 
+    // PR3: enqueue compute_signature for every translated post (regardless of decision),
+    // so the dedup memory window has full coverage.
+    if (config.storyMemory?.enabled) {
+      try {
+        await supabase.from('jobs').upsert({
+          type: 'compute_signature',
+          payload: { tweet_id: tweetId },
+          status: 'pending',
+          priority: 11,
+          idempotency_key: `compute_signature:${tweetId}`,
+          next_run_at: new Date().toISOString(),
+        }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+      } catch (e) {
+        console.warn('Failed to enqueue compute_signature:', (e as Error).message);
+      }
+    }
+
     // Decide what to enqueue next based on filter decision + truncation state.
+    // NEW FLOW: If a tweet PASSED the editorial gate AND is still truncated AND
+    // not yet hydrated, enqueue hydrate_tweet instead of deliver. The hydrate
+    // job will re-enqueue translate on success, which will fall through to
+    // deliver on the second pass (is_truncated will be false by then).
     // NEW FLOW: If a tweet PASSED the editorial gate AND is still truncated AND
     // not yet hydrated, enqueue hydrate_tweet instead of deliver. The hydrate
     // job will re-enqueue translate on success, which will fall through to
