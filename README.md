@@ -89,7 +89,7 @@ Copy `.env.example` to `.env` and populate:
 | `OPENAI_API_KEY` | Scoring & translation via OpenAI API |
 | `TELEGRAM_BOT_TOKEN` | Telegram Bot API authentication |
 | `TELEGRAM_CHAT_ID` | Target Telegram channel |
-| `WEBHOOK_SHARED_SECRET` | Internal function-to-function auth |
+| `WEBHOOK_SHARED_SECRET` | Internal function-to-function auth (must match Vault/cron token; see [runbooks](docs/operations/runbooks.md#internal-cron-and-edge-auth)) |
 
 ## Scripts
 
