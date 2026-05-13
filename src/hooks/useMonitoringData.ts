@@ -121,6 +121,9 @@ async function fetchMonitoringPage({ pageParam = 0 }: { pageParam: number }): Pr
       x_posted_at: (rpc?.x_posted_at as string) ?? null,
       x_error: (rpc?.x_error as string) ?? null,
       x_skip_reason: (rpc?.x_skip_reason as string) ?? null,
+      dup_of_tweet_id: ((post as { dup_of_tweet_id?: string | null }).dup_of_tweet_id ?? null),
+      story_cluster_id: ((post as { story_cluster_id?: string | null }).story_cluster_id ?? null),
+      dup_similarity: ((post as { dup_similarity?: number | null }).dup_similarity ?? null),
     };
   });
 
