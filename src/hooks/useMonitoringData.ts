@@ -36,6 +36,12 @@ export interface MonitoringEntry {
   x_posted_at: string | null;
   x_error: string | null;
   x_skip_reason: string | null;
+  /** PR3: tweet_id of the original story this is a near-duplicate of, when story memory matched. */
+  dup_of_tweet_id: string | null;
+  /** PR3: cluster id grouping near-duplicate stories. */
+  story_cluster_id: string | null;
+  /** PR3: cosine similarity (0-1) of the embedding match against the original. */
+  dup_similarity: number | null;
 }
 
 export interface PipelineEvent {
