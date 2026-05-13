@@ -255,7 +255,11 @@ export default function EditorialProfilesCard({ profiles: initialProfiles, activ
         )}
 
         <Separator />
-        <div className="flex justify-end">
+        <div className="flex justify-between items-center gap-3 flex-wrap">
+          <Button variant="outline" onClick={handleRescore} disabled={rescoring} size="sm">
+            {rescoring ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <RefreshCw className="w-4 h-4 mr-2" />}
+            Re-score last 48h (missing axes only)
+          </Button>
           <Button onClick={handleSaveAll} disabled={saveMutation.isPending} className="bg-gradient-primary hover:opacity-90 text-white">
             {saveMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Save className="w-4 h-4 mr-2" />}
             Save profiles & active selection
