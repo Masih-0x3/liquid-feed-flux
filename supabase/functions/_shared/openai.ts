@@ -21,6 +21,7 @@ export interface OpenAICallParams {
   model: string;
   messages: ChatMessage[];
   tool?: ToolFunctionDef; // optional single function tool (we only ever force one)
+  builtInTools?: Array<{ type: string; [key: string]: unknown }>; // e.g. { type: 'web_search' }
   maxOutputTokens?: number;
   temperature?: number | null;
   topP?: number | null;
@@ -38,6 +39,12 @@ export interface NormalizedToolCall {
   arguments: string; // JSON string
 }
 
+export interface WebSearchResult {
+  url: string;
+  title: string;
+  snippet: string;
+}
+
 export interface NormalizedOpenAIResponse {
   ok: boolean;
   status: number;
@@ -45,6 +52,8 @@ export interface NormalizedOpenAIResponse {
   raw: Record<string, unknown>;
   content: string;             // assistant text (or '')
   toolCall: NormalizedToolCall | null;
+  webSearchResults: WebSearchResult[];
+  outputItems: Array<Record<string, unknown>>; // raw Responses API output items
   usage: Record<string, number> | null;
   endpoint: 'chat.completions' | 'responses';
 }
@@ -119,6 +128,8 @@ async function callChatCompletions(p: OpenAICallParams): Promise<NormalizedOpenA
     raw,
     content: choice?.content ?? '',
     toolCall,
+    webSearchResults: [],
+    outputItems: [],
     usage: (raw as { usage?: Record<string, number> }).usage ?? null,
     endpoint: 'chat.completions',
   };
@@ -151,16 +162,20 @@ async function callResponsesApi(p: OpenAICallParams): Promise<NormalizedOpenAIRe
   // by the Responses API for reasoning models (which is the only family we
   // route here). Intentionally omitted.
 
+  const tools: Array<Record<string, unknown>> = [];
+  if (p.builtInTools?.length) {
+    for (const t of p.builtInTools) tools.push(t);
+  }
   if (p.tool) {
-    // Responses API tool format is flat (no nested `function`).
-    body.tools = [{
+    tools.push({
       type: 'function',
       name: p.tool.name,
       description: p.tool.description,
       parameters: p.tool.parameters,
-    }];
+    });
     body.tool_choice = { type: 'function', name: p.tool.name };
   }
+  if (tools.length) body.tools = tools;
 
   const resp = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST',
@@ -171,18 +186,25 @@ async function callResponsesApi(p: OpenAICallParams): Promise<NormalizedOpenAIRe
   let raw: Record<string, unknown> = {};
   try { raw = JSON.parse(rawText); } catch { raw = { raw_text: rawText }; }
 
-  // Normalize: pull tool call (function_call output item) and assistant text.
+  // Normalize: pull tool call (function_call output item), web search results, and assistant text.
   type OutputItem =
     | { type: 'message'; content?: Array<{ type: string; text?: string }> }
     | { type: 'function_call'; name?: string; arguments?: string; call_id?: string }
+    | { type: 'web_search_call'; status?: string; results?: Array<{ url?: string; title?: string; snippet?: string }> }
     | { type: string; [k: string]: unknown };
   const output = ((raw as { output?: OutputItem[] }).output ?? []) as OutputItem[];
   let toolCall: NormalizedToolCall | null = null;
   let content = '';
+  const webSearchResults: WebSearchResult[] = [];
   for (const item of output) {
     if (item.type === 'function_call') {
       const fc = item as { name?: string; arguments?: string };
       if (fc.arguments) toolCall = { name: fc.name || (p.tool?.name ?? ''), arguments: fc.arguments };
+    } else if (item.type === 'web_search_call') {
+      const ws = item as { results?: Array<{ url?: string; title?: string; snippet?: string }> };
+      for (const r of ws.results ?? []) {
+        if (r.url) webSearchResults.push({ url: r.url, title: r.title ?? '', snippet: r.snippet ?? '' });
+      }
     } else if (item.type === 'message') {
       const msg = item as { content?: Array<{ type: string; text?: string }> };
       for (const c of msg.content ?? []) {
@@ -215,6 +237,8 @@ async function callResponsesApi(p: OpenAICallParams): Promise<NormalizedOpenAIRe
     raw,
     content,
     toolCall,
+    webSearchResults,
+    outputItems: output as Array<Record<string, unknown>>,
     usage,
     endpoint: 'responses',
   };

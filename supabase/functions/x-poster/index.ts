@@ -58,6 +58,10 @@ interface PostingConfig {
   post_only_decision_deliver: boolean;
   /** ISO timestamp — only posts created at/after this are eligible. Set when posting is (re)enabled. */
   start_posting_from?: string | null;
+  /** Max posts per day (0 = unlimited). Reduces aggregator signals. */
+  daily_budget?: number;
+  /** Minimum minutes between posts (0 = no spacing). Reduces burst patterns. */
+  min_spacing_minutes?: number;
 }
 interface RateLimits {
   posts_per_hour: number;
@@ -367,6 +371,14 @@ Deno.serve(async (req) => {
     if (posts24hArr.length >= limits.posts_per_day) return 'rate_limit_day';
     if ((monthlyPosts ?? 0) >= limits.monthly_post_budget) return 'rate_limit_month';
     if (mediaUp24hArr.length >= limits.media_uploads_per_day) return 'rate_limit_media';
+    // Daily budget cap (anti-aggregator)
+    if (cfg.daily_budget && cfg.daily_budget > 0 && posts24hArr.length >= cfg.daily_budget) return 'daily_budget_reached';
+    // Minimum spacing between posts
+    if (cfg.min_spacing_minutes && cfg.min_spacing_minutes > 0 && posts24hArr.length > 0) {
+      const lastPostTime = new Date(posts24hArr[posts24hArr.length - 1]).getTime();
+      const minGapMs = cfg.min_spacing_minutes * 60 * 1000;
+      if (Date.now() - lastPostTime < minGapMs) return 'min_spacing';
+    }
     return null;
   }
 
@@ -380,7 +392,7 @@ Deno.serve(async (req) => {
   const existing = new Set((existingRows || []).map((r) => r.post_id as string));
 
   let candidatesQ = sb.from('posts')
-    .select('tweet_id, text_translated, text_original, author_handle, has_media, importance_score, final_score, delivery_decision, url, is_truncated, hydrated_at, created_at, accounts!inner(handle)')
+    .select('tweet_id, text_translated, text_original, author_handle, has_media, importance_score, final_score, delivery_decision, url, is_truncated, hydrated_at, created_at, composed_post_text, post_format_hint, humanized_commentary, commentary_hook, commentary_question, narrative_callback, thread_continuation, enrich_status, accounts!inner(handle)')
     .gte('created_at', effectiveCutoff)
     .not('text_translated', 'is', null);
 
@@ -406,7 +418,12 @@ Deno.serve(async (req) => {
   }
 
   const results: Array<Record<string, unknown>> = [];
-  const candidates = (posts || []).filter((p) => onlyTweetId || !existing.has(p.tweet_id));
+  const candidates = (posts || []).filter((p) => {
+    if (!onlyTweetId && existing.has(p.tweet_id)) return false;
+    // Skip posts awaiting enrichment approval
+    if (p.enrich_status === 'awaiting_approval' || p.enrich_status === 'pending') return false;
+    return true;
+  });
 
   for (const post of candidates) {
     const tweetId = post.tweet_id;
@@ -552,17 +569,26 @@ Deno.serve(async (req) => {
       mediaKind = sel.tier;
     }
 
-    // Format text
-    const accountHandle = (post.accounts as { handle?: string })?.handle || '';
-    const pickedHashtags = pickHashtags(cfg.hashtag_pool, cfg.hashtags_per_post ?? 0);
-    const hashtagsValue = pickedHashtags || cfg.hashtags || '';
-    const text = formatTweet(cfg.post_template, {
-      leading_emoji: cfg.leading_emoji,
-      translated_text: post.text_translated || '',
-      hashtags: hashtagsValue,
-      persian_date: persianDateNow(),
-      author_handle: post.author_handle || accountHandle,
-    }, cfg.max_chars);
+    // Format text: use composed_post_text from enrichment pipeline if available
+    let text: string;
+    if (post.composed_post_text && (post.enrich_status === 'completed' || post.enrich_status === 'approved')) {
+      text = RLM + (post.composed_post_text as string).slice(0, cfg.max_chars - 1);
+    } else {
+      const accountHandle = (post.accounts as { handle?: string })?.handle || '';
+      const pickedHashtags = pickHashtags(cfg.hashtag_pool, cfg.hashtags_per_post ?? 0);
+      const hashtagsValue = pickedHashtags || cfg.hashtags || '';
+      text = formatTweet(cfg.post_template, {
+        leading_emoji: cfg.leading_emoji,
+        translated_text: post.text_translated || '',
+        hashtags: hashtagsValue,
+        persian_date: persianDateNow(),
+        author_handle: post.author_handle || accountHandle,
+        commentary: (post.humanized_commentary as string) || '',
+        hook: (post.commentary_hook as string) || '',
+        question: (post.commentary_question as string) || '',
+        callback: (post.narrative_callback as string) || '',
+      }, cfg.max_chars);
+    }
 
     if (dryRun) {
       results.push({ tweet_id: tweetId, status: 'dry_run', preview_text: text, media_count: mediaCount, media_kind: mediaKind });

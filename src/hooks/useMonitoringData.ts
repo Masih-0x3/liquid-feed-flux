@@ -38,6 +38,18 @@ export interface MonitoringEntry {
   dup_similarity: number | null;
   score_breakdown: { ai?: number; author_bias?: number; tag_bias?: number; knn_prior?: number; final?: number } | null;
   feedback_locked: boolean;
+  // Enrichment fields
+  enrich_status: string | null;
+  editorial_commentary: string | null;
+  humanized_commentary: string | null;
+  commentary_hook: string | null;
+  commentary_question: string | null;
+  narrative_callback: string | null;
+  composed_post_text: string | null;
+  post_format_hint: string | null;
+  background_context: { background_summary?: string; key_facts?: string[]; related_events?: string; sources?: string[] } | null;
+  enrich_tokens: number | null;
+  enrich_duration_ms: number | null;
 }
 
 export interface PipelineEvent {
@@ -51,10 +63,10 @@ export interface PipelineEvent {
   meta?: Record<string, unknown>;
 }
 
-export type MonitoringFilter = 'all' | 'needs-translation' | 'delivery-pending' | 'failed' | 'recently-delivered';
+export type MonitoringFilter = 'all' | 'needs-translation' | 'delivery-pending' | 'failed' | 'recently-delivered' | 'awaiting-review';
 
 const PAGE_SIZE = 30;
-const POST_COLUMNS = 'tweet_id, text_original, text_translated, url, created_at, translated_at, has_media, lang_original, author_handle, importance_score, importance_tags, importance_reasoning, delivery_decision, score_axes, final_score, decision_reason, dup_of_tweet_id, story_cluster_id, dup_similarity, score_breakdown, feedback_locked, accounts!inner(handle, display_name)';
+const POST_COLUMNS = 'tweet_id, text_original, text_translated, url, created_at, translated_at, has_media, lang_original, author_handle, importance_score, importance_tags, importance_reasoning, delivery_decision, score_axes, final_score, decision_reason, dup_of_tweet_id, story_cluster_id, dup_similarity, score_breakdown, feedback_locked, enrich_status, editorial_commentary, humanized_commentary, commentary_hook, commentary_question, narrative_callback, composed_post_text, post_format_hint, background_context, enrich_tokens, enrich_duration_ms, accounts!inner(handle, display_name)';
 
 async function getFilteredTweetIds(filter: MonitoringFilter, limit: number, offset: number): Promise<string[] | null> {
   switch (filter) {
@@ -81,6 +93,15 @@ async function getFilteredTweetIds(filter: MonitoringFilter, limit: number, offs
         if (tid) ids.add(tid);
       });
       return [...ids];
+    }
+    case 'awaiting-review': {
+      const { data } = await supabase
+        .from('posts')
+        .select('tweet_id')
+        .eq('enrich_status', 'awaiting_approval')
+        .order('created_at', { ascending: false })
+        .range(offset, offset + limit - 1);
+      return data?.map((d) => d.tweet_id) ?? [];
     }
     default:
       return null;
@@ -181,6 +202,17 @@ async function fetchMonitoringPage(
       dup_similarity: ((post as { dup_similarity?: number | null }).dup_similarity ?? null),
       score_breakdown: ((post as { score_breakdown?: MonitoringEntry['score_breakdown'] }).score_breakdown ?? null),
       feedback_locked: ((post as { feedback_locked?: boolean }).feedback_locked ?? false),
+      enrich_status: ((post as { enrich_status?: string | null }).enrich_status ?? null),
+      editorial_commentary: ((post as { editorial_commentary?: string | null }).editorial_commentary ?? null),
+      humanized_commentary: ((post as { humanized_commentary?: string | null }).humanized_commentary ?? null),
+      commentary_hook: ((post as { commentary_hook?: string | null }).commentary_hook ?? null),
+      commentary_question: ((post as { commentary_question?: string | null }).commentary_question ?? null),
+      narrative_callback: ((post as { narrative_callback?: string | null }).narrative_callback ?? null),
+      composed_post_text: ((post as { composed_post_text?: string | null }).composed_post_text ?? null),
+      post_format_hint: ((post as { post_format_hint?: string | null }).post_format_hint ?? null),
+      background_context: ((post as { background_context?: MonitoringEntry['background_context'] }).background_context ?? null),
+      enrich_tokens: ((post as { enrich_tokens?: number | null }).enrich_tokens ?? null),
+      enrich_duration_ms: ((post as { enrich_duration_ms?: number | null }).enrich_duration_ms ?? null),
     };
   });
 

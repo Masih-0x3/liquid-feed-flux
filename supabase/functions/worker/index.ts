@@ -2,6 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
 import { callOpenAI, type ToolFunctionDef } from "../_shared/openai.ts";
+import { runEnrichPipeline, type EnrichmentConfig, type VoiceSamples } from "../_shared/enrich.ts";
 import {
   SCORE_AXIS_KEYS,
   type ScoreAxisKey,
@@ -474,6 +475,9 @@ serve(async (req) => {
               break;
             case 'compute_signature':
               success = await handleComputeSignatureJob(job, supabase, config);
+              break;
+            case 'enrich':
+              success = await handleEnrichJob(job, supabase);
               break;
             default:
               throw new Error(`Unknown job type: ${String(job.type)}`);
@@ -1119,37 +1123,67 @@ ${post.text_original}`;
         await insertPipelineEvent(supabase, 'post', tweetId, 'hydrate', 'queued', null, null, null, { source: 'post-score-gate', score: importanceScore });
       }
     } else if (deliveryDecision === 'deliver') {
-      const idempotencyKey = `deliver:${tweetId}`;
-      const { error: deliveryJobError } = await supabase
-        .from('jobs')
-        .upsert({
-          type: 'deliver',
-          payload: { tweet_id: tweetId },
-          status: 'pending',
-          priority: 20,
-          idempotency_key: idempotencyKey,
-          next_run_at: new Date().toISOString()
-        }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+      // Check if enrichment pipeline is enabled; if so, route through enrich first
+      let enrichEnabled = false;
+      try {
+        const { data: enrichCfgRow } = await supabase
+          .from('settings')
+          .select('value')
+          .eq('key', 'enrichment_config')
+          .single();
+        enrichEnabled = enrichCfgRow?.value?.enabled === true;
+      } catch (_e) { /* default to disabled */ }
 
-      if (deliveryJobError) {
-        console.warn('Failed to create delivery job:', deliveryJobError);
+      if (enrichEnabled) {
+        const enrichKey = `enrich:${tweetId}`;
+        const { error: enrichJobError } = await supabase
+          .from('jobs')
+          .upsert({
+            type: 'enrich',
+            payload: { tweet_id: tweetId },
+            status: 'pending',
+            priority: 18,
+            idempotency_key: enrichKey,
+            next_run_at: new Date().toISOString(),
+          }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+        if (enrichJobError) {
+          console.warn('Failed to enqueue enrich job:', enrichJobError);
+        } else {
+          await insertPipelineEvent(supabase, 'post', tweetId, 'enrich', 'queued', null, null, null, { source: 'translate' });
+          console.log(JSON.stringify({ function: 'worker', action: 'enrich_enqueued', tweet_id: tweetId }));
+        }
       } else {
-        await insertPipelineEvent(supabase, 'post', tweetId, 'deliver', 'queued', null, null, null, { source: 'worker' });
-        // Ensure a pending delivery row exists
-        try {
-          const { data: existingDel } = await supabase
-            .from('deliveries')
-            .select('id')
-            .eq('subject_type', 'post')
-            .eq('subject_id', tweetId)
-            .eq('status', 'pending')
-            .limit(1);
-          if (!existingDel || existingDel.length === 0) {
-            await supabase.from('deliveries').insert({
-              subject_type: 'post', subject_id: tweetId, status: 'pending', attempts: 0
-            });
-          }
-        } catch (_e) { /* best-effort */ }
+        const idempotencyKey = `deliver:${tweetId}`;
+        const { error: deliveryJobError } = await supabase
+          .from('jobs')
+          .upsert({
+            type: 'deliver',
+            payload: { tweet_id: tweetId },
+            status: 'pending',
+            priority: 20,
+            idempotency_key: idempotencyKey,
+            next_run_at: new Date().toISOString()
+          }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+
+        if (deliveryJobError) {
+          console.warn('Failed to create delivery job:', deliveryJobError);
+        } else {
+          await insertPipelineEvent(supabase, 'post', tweetId, 'deliver', 'queued', null, null, null, { source: 'worker' });
+          try {
+            const { data: existingDel } = await supabase
+              .from('deliveries')
+              .select('id')
+              .eq('subject_type', 'post')
+              .eq('subject_id', tweetId)
+              .eq('status', 'pending')
+              .limit(1);
+            if (!existingDel || existingDel.length === 0) {
+              await supabase.from('deliveries').insert({
+                subject_type: 'post', subject_id: tweetId, status: 'pending', attempts: 0
+              });
+            }
+          } catch (_e) { /* best-effort */ }
+        }
       }
     } else {
       console.log(JSON.stringify({ function: 'worker', action: 'delivery_skipped', tweet_id: tweetId, score: importanceScore, decision: deliveryDecision }));
@@ -1505,6 +1539,161 @@ function throwTelegramError(method: string, result: Record<string, unknown>, sta
   throw new Error(`Telegram ${method} failed: ${description}`);
 }
 
+// ─── handleEnrichJob: 5-agent editorial pipeline ────────────────────────────
+// deno-lint-ignore no-explicit-any
+async function handleEnrichJob(job: Record<string, unknown>, supabase: any): Promise<boolean> {
+  const payload = job.payload as Record<string, unknown>;
+  const tweetId = payload.tweet_id as string;
+  if (!tweetId) throw new Error('enrich: missing tweet_id in job payload');
+
+  const openaiApiKey = Deno.env.get('OPENAI_API_KEY');
+  if (!openaiApiKey) throw new Error('enrich: OPENAI_API_KEY not set');
+
+  console.log(JSON.stringify({ function: 'worker', action: 'enrich_start', tweet_id: tweetId }));
+
+  // Load post
+  const { data: post, error: postErr } = await supabase
+    .from('posts')
+    .select('tweet_id, text_original, text_translated, importance_score, delivery_decision')
+    .eq('tweet_id', tweetId)
+    .single();
+  if (postErr || !post) throw new Error(`enrich: post not found: ${tweetId}`);
+  if (!post.text_translated) throw new Error(`enrich: no translation for ${tweetId}`);
+
+  // Load enrichment_config
+  const { data: configRow } = await supabase
+    .from('settings')
+    .select('value')
+    .eq('key', 'enrichment_config')
+    .single();
+  const enrichConfig = (configRow?.value ?? { enabled: false }) as EnrichmentConfig;
+  if (!enrichConfig.enabled) {
+    // Enrichment disabled -- mark skipped and pass through to deliver
+    await supabase.from('posts').update({ enrich_status: 'skipped' }).eq('tweet_id', tweetId);
+    await enqueueDeliverAfterEnrich(supabase, tweetId);
+    console.log(JSON.stringify({ function: 'worker', action: 'enrich_skipped_disabled', tweet_id: tweetId }));
+    return true;
+  }
+
+  // Load voice samples
+  const { data: voiceRow } = await supabase
+    .from('settings')
+    .select('value')
+    .eq('key', 'voice_samples')
+    .single();
+  const voiceSamples = (voiceRow?.value ?? { samples: [], updated_at: null }) as VoiceSamples;
+
+  // Get previous post's format for variety
+  const { data: prevPost } = await supabase
+    .from('posts')
+    .select('post_format_hint')
+    .eq('delivery_decision', 'deliver')
+    .not('post_format_hint', 'is', null)
+    .neq('tweet_id', tweetId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single();
+  const previousFormatUsed = prevPost?.post_format_hint as string | null;
+
+  // Mark enrichment in progress
+  await supabase.from('posts').update({ enrich_status: 'pending' }).eq('tweet_id', tweetId);
+  const startedAt = new Date().toISOString();
+  await insertPipelineEvent(supabase, 'post', tweetId, 'enrich', 'running', startedAt);
+
+  try {
+    const result = await runEnrichPipeline({
+      supabase,
+      apiKey: openaiApiKey,
+      config: enrichConfig,
+      voiceSamples,
+      tweetId,
+      textOriginal: post.text_original,
+      textTranslated: post.text_translated,
+      importanceScore: post.importance_score,
+      previousFormatUsed,
+    });
+
+    // Store results
+    const enrichStatus = enrichConfig.require_approval ? 'awaiting_approval' : 'completed';
+    await supabase.from('posts').update({
+      background_context: result.researcher ? result.researcher : null,
+      editorial_commentary: result.analyst.commentary,
+      humanized_commentary: result.humanizer.humanized_commentary,
+      commentary_hook: result.humanizer.humanized_hook,
+      commentary_question: result.humanizer.humanized_question,
+      narrative_callback: result.archivist?.callback_suggestion ?? null,
+      narrative_ref_post_id: result.archivist?.referenced_post_id ?? null,
+      composed_post_text: result.composer.final_text,
+      post_format_hint: result.composer.format_used,
+      thread_continuation: result.composer.thread_continuation,
+      enrich_status: enrichStatus,
+      enrich_model: enrichConfig.model,
+      enrich_tokens: result.totalTokens,
+      enrich_duration_ms: result.durationMs,
+    }).eq('tweet_id', tweetId);
+
+    const endedAt = new Date().toISOString();
+    await insertPipelineEvent(supabase, 'post', tweetId, 'enrich', 'completed', startedAt, endedAt, null, {
+      tokens: result.totalTokens,
+      duration_ms: result.durationMs,
+      format: result.composer.format_used,
+      has_callback: result.archivist?.has_callback ?? false,
+      status: enrichStatus,
+    });
+
+    // If not requiring approval, enqueue deliver immediately
+    if (!enrichConfig.require_approval) {
+      await enqueueDeliverAfterEnrich(supabase, tweetId);
+    }
+
+    console.log(JSON.stringify({
+      function: 'worker', action: 'enrich_complete', tweet_id: tweetId,
+      tokens: result.totalTokens, duration_ms: result.durationMs,
+      format: result.composer.format_used, awaiting_approval: enrichConfig.require_approval,
+    }));
+    return true;
+  } catch (e) {
+    const err = e instanceof Error ? e : new Error(String(e));
+    await supabase.from('posts').update({ enrich_status: 'failed' }).eq('tweet_id', tweetId);
+    await insertPipelineEvent(supabase, 'post', tweetId, 'enrich', 'failed', startedAt, new Date().toISOString(), err.message);
+    throw err;
+  }
+}
+
+// deno-lint-ignore no-explicit-any
+async function enqueueDeliverAfterEnrich(supabase: any, tweetId: string) {
+  const idempotencyKey = `deliver:${tweetId}`;
+  const { error: deliveryJobError } = await supabase
+    .from('jobs')
+    .upsert({
+      type: 'deliver',
+      payload: { tweet_id: tweetId },
+      status: 'pending',
+      priority: 20,
+      idempotency_key: idempotencyKey,
+      next_run_at: new Date().toISOString(),
+    }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+  if (deliveryJobError) {
+    console.warn('enrich: failed to enqueue deliver:', deliveryJobError.message);
+  } else {
+    await insertPipelineEvent(supabase, 'post', tweetId, 'deliver', 'queued', null, null, null, { source: 'enrich' });
+    try {
+      const { data: existingDel } = await supabase
+        .from('deliveries')
+        .select('id')
+        .eq('subject_type', 'post')
+        .eq('subject_id', tweetId)
+        .eq('status', 'pending')
+        .limit(1);
+      if (!existingDel || existingDel.length === 0) {
+        await supabase.from('deliveries').insert({
+          subject_type: 'post', subject_id: tweetId, status: 'pending', attempts: 0
+        });
+      }
+    } catch (_e) { /* best-effort */ }
+  }
+}
+
 // Retry policy with dead-lettering
 const MAX_ATTEMPTS: Record<string, number> = {
   translate: 5,
@@ -1514,6 +1703,7 @@ const MAX_ATTEMPTS: Record<string, number> = {
   reprocess: 3,
   hydrate_tweet: 3,
   resolve_media: 4,
+  enrich: 3,
 };
 
 /** Normalize any thrown/failure value to `Error` for `last_error` + dead-letter rows. */

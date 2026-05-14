@@ -27,8 +27,9 @@ import XAutomationSettings from '@/components/settings/XAutomationSettings';
 import TranslationPlayground from '@/components/settings/TranslationPlayground';
 import PromptEditor from '@/components/settings/PromptEditor';
 import LearnedSignalsCard from '@/components/settings/LearnedSignalsCard';
+import EnrichmentSettings from '@/components/settings/EnrichmentSettings';
 
-const SETTINGS_TAB_IDS = ['translation', 'filter', 'messages', 'telegram', 'x-automation'] as const;
+const SETTINGS_TAB_IDS = ['translation', 'filter', 'messages', 'telegram', 'x-automation', 'enrichment'] as const;
 type SettingsTabId = (typeof SETTINGS_TAB_IDS)[number];
 
 function tabIdFromHash(hash: string): SettingsTabId | null {
@@ -142,12 +143,13 @@ export default function Settings() {
       </div>
 
       <Tabs value={settingsTab} onValueChange={(v) => goToSettingsTab(v as SettingsTabId)} className="w-full">
-        <TabsList className="grid w-full grid-cols-5">
+        <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger value="translation" className="flex items-center gap-2"><Brain className="w-4 h-4" />Translation</TabsTrigger>
           <TabsTrigger value="filter" className="flex items-center gap-2"><Filter className="w-4 h-4" />Content Filter</TabsTrigger>
           <TabsTrigger value="messages" className="flex items-center gap-2"><MessageSquare className="w-4 h-4" />Messages</TabsTrigger>
           <TabsTrigger value="telegram" className="flex items-center gap-2"><Send className="w-4 h-4" />Telegram</TabsTrigger>
           <TabsTrigger value="x-automation" className="flex items-center gap-2"><AtSign className="w-4 h-4" />X Automation</TabsTrigger>
+          <TabsTrigger value="enrichment" className="flex items-center gap-2"><Sparkles className="w-4 h-4" />Enrichment</TabsTrigger>
         </TabsList>
 
         {/* Translation Tab */}
@@ -673,6 +675,11 @@ export default function Settings() {
             xPostingConfig={settings?.x_posting_config as Record<string, unknown> | undefined}
             xRateLimits={settings?.x_rate_limits as Record<string, unknown> | undefined}
           />
+        </TabsContent>
+
+        {/* Enrichment Tab */}
+        <TabsContent value="enrichment" className="space-y-6">
+          <EnrichmentSettings />
         </TabsContent>
       </Tabs>
     </div>

@@ -281,6 +281,28 @@ export default function Monitoring() {
     }
   };
 
+  const handleApproveEnrichment = async (tweetId: string) => {
+    try {
+      await supabase.from('posts').update({ enrich_status: 'approved' }).eq('tweet_id', tweetId);
+      // Enqueue deliver job
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (supabase.from('jobs') as any).upsert({
+        type: 'deliver', payload: { tweet_id: tweetId }, status: 'pending',
+        priority: 20, idempotency_key: `deliver:${tweetId}`, next_run_at: new Date().toISOString(),
+      }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+      toast({ title: 'Approved', description: 'Post approved and queued for delivery' });
+      invalidate();
+    } catch { toast({ title: 'Error', description: 'Failed to approve', variant: 'destructive' }); }
+  };
+
+  const handleRejectEnrichment = async (tweetId: string) => {
+    try {
+      await supabase.from('posts').update({ enrich_status: 'rejected' }).eq('tweet_id', tweetId);
+      toast({ title: 'Rejected', description: 'Post will not be posted to X' });
+      invalidate();
+    } catch { toast({ title: 'Error', description: 'Failed to reject', variant: 'destructive' }); }
+  };
+
   const handleClearDup = async (tweetId: string, relatedTweetId: string | null) => {
     try {
       await adminClearDup(tweetId, relatedTweetId);
@@ -443,6 +465,7 @@ export default function Monitoring() {
                       <SelectItem value="delivery-pending">Pending delivery</SelectItem>
                       <SelectItem value="needs-translation">Needs translation</SelectItem>
                       <SelectItem value="failed">Failed</SelectItem>
+                      <SelectItem value="awaiting-review">Awaiting Review</SelectItem>
                     </SelectGroup>
                   </SelectContent>
                 </ThemedSelect>
@@ -726,6 +749,66 @@ export default function Monitoring() {
                     </div>
                   )}
                 </div>
+
+                {/* Enrichment Section */}
+                {entry.enrich_status && entry.enrich_status !== 'skipped' && entry.enrich_status !== 'pending' && (
+                  <details className="text-xs border-t border-border pt-2 mt-2">
+                    <summary className="cursor-pointer select-none text-muted-foreground hover:text-foreground flex items-center gap-2">
+                      <Sparkles className="w-3 h-3" />
+                      Enrichment
+                      <Badge variant={entry.enrich_status === 'completed' || entry.enrich_status === 'approved' ? 'default' : entry.enrich_status === 'awaiting_approval' ? 'secondary' : 'destructive'} className="text-[10px] px-1.5 py-0">
+                        {entry.enrich_status}
+                      </Badge>
+                      {entry.enrich_tokens && <span className="text-muted-foreground">({entry.enrich_tokens} tokens, {((entry.enrich_duration_ms ?? 0) / 1000).toFixed(1)}s)</span>}
+                    </summary>
+                    <div className="mt-2 space-y-2">
+                      {entry.narrative_callback && (
+                        <div className="rounded-md border border-blue-500/20 bg-blue-500/5 p-2">
+                          <p className="text-[10px] font-medium text-blue-400 mb-1">Narrative Callback</p>
+                          <p className="text-sm" dir="rtl">{entry.narrative_callback}</p>
+                        </div>
+                      )}
+                      {entry.background_context?.background_summary && (
+                        <div className="rounded-md border border-border bg-muted/30 p-2">
+                          <p className="text-[10px] font-medium text-muted-foreground mb-1">Research</p>
+                          <p className="text-sm">{entry.background_context.background_summary}</p>
+                          {entry.background_context.key_facts && entry.background_context.key_facts.length > 0 && (
+                            <ul className="list-disc list-inside text-xs text-muted-foreground mt-1">
+                              {entry.background_context.key_facts.map((f, i) => <li key={i}>{f}</li>)}
+                            </ul>
+                          )}
+                        </div>
+                      )}
+                      {entry.editorial_commentary && (
+                        <div className="rounded-md border border-border bg-muted/30 p-2">
+                          <p className="text-[10px] font-medium text-muted-foreground mb-1">Raw Commentary vs Humanized</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="text-sm opacity-60 line-through" dir="rtl">{entry.editorial_commentary}</div>
+                            <div className="text-sm font-medium" dir="rtl">{entry.humanized_commentary || entry.editorial_commentary}</div>
+                          </div>
+                        </div>
+                      )}
+                      {entry.composed_post_text && (
+                        <div className="rounded-md border border-green-500/20 bg-green-500/5 p-2">
+                          <p className="text-[10px] font-medium text-green-400 mb-1">
+                            Final Post {entry.post_format_hint && <span className="opacity-60">({entry.post_format_hint})</span>}
+                          </p>
+                          <p className="text-sm font-medium" dir="rtl">{entry.composed_post_text}</p>
+                        </div>
+                      )}
+                      {entry.enrich_status === 'awaiting_approval' && (
+                        <div className="flex gap-2 pt-1">
+                          <Button size="sm" variant="default" className="bg-green-600 hover:bg-green-700" onClick={() => handleApproveEnrichment(entry.tweet_id)}>
+                            Approve
+                          </Button>
+                          <Button size="sm" variant="destructive" onClick={() => handleRejectEnrichment(entry.tweet_id)}>
+                            Skip
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  </details>
+                )}
 
                 {entry.importance_reasoning && (
                   <details className="text-xs">
