@@ -21,6 +21,12 @@ import {
   type FollowerChange, type MutualFollowUser,
 } from "@/hooks/useFollowerData";
 
+function openInBackground(url: string) {
+  const w = window.open(url, '_blank', 'noopener');
+  if (w) w.blur();
+  window.focus();
+}
+
 export default function XAccount() {
   const { toast } = useToast();
   const [running, setRunning] = useState(false);
@@ -67,7 +73,7 @@ export default function XAccount() {
     }
     const toOpen = pending.slice(0, 15);
     for (const c of toOpen) {
-      window.open(`https://x.com/${c.username}`, "_blank", "noopener");
+      openInBackground(`https://x.com/${c.username}`);
     }
   };
 
@@ -79,7 +85,7 @@ export default function XAccount() {
   };
 
   const handleOpenAndMark = (change: FollowerChange) => {
-    if (change.username) window.open(`https://x.com/${change.username}`, "_blank", "noopener");
+    if (change.username) openInBackground(`https://x.com/${change.username}`);
     if (!change.reviewed) {
       markReviewed.mutate([change.id]);
     }
@@ -487,9 +493,9 @@ function ProfileRow({ userId, username, name, profileImageUrl, subtitle }: { use
         </div>
       </div>
       {username && (
-        <a href={`https://x.com/${username}`} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-primary shrink-0 p-2">
+        <button onClick={() => openInBackground(`https://x.com/${username}`)} className="text-muted-foreground hover:text-primary shrink-0 p-2">
           <ExternalLink className="w-4 h-4" />
-        </a>
+        </button>
       )}
     </div>
   );
