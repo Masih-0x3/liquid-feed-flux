@@ -10,7 +10,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
-import { Search, RefreshCw, Edit, Check, X, ExternalLink, RotateCcw, Star, Send, Scissors, Sparkles, Twitter, Ban, AlertCircle, Info, Clock, MoreHorizontal } from "lucide-react";
+import { Search, RefreshCw, Edit, Check, X, ExternalLink, RotateCcw, Star, Send, Scissors, Sparkles, Twitter, Ban, AlertCircle, Info, Clock, MoreHorizontal, Loader2, FlaskConical } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { format } from "date-fns";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerDescription, DrawerClose, DrawerFooter } from "@/components/ui/drawer";
@@ -301,6 +301,42 @@ export default function Monitoring() {
       toast({ title: 'Rejected', description: 'Post will not be posted to X' });
       invalidate();
     } catch { toast({ title: 'Error', description: 'Failed to reject', variant: 'destructive' }); }
+  };
+
+  const [enrichingIds, setEnrichingIds] = useState<Set<string>>(new Set());
+
+  const handleTestEnrich = async (tweetId: string) => {
+    try {
+      setEnrichingIds(prev => new Set(prev).add(tweetId));
+      const { data, error } = await supabase.functions.invoke('admin-actions', {
+        body: { action: 'enrich_post', tweet_id: tweetId },
+      });
+      if (error) throw error;
+      if (!data?.ok) throw new Error(data?.error ?? 'Failed to queue enrichment');
+      toast({ title: 'Enrichment queued', description: 'Pipeline running -- results will appear shortly.' });
+      // Poll until enrich_status changes from pending
+      const poll = setInterval(async () => {
+        const { data: post } = await supabase
+          .from('posts')
+          .select('enrich_status')
+          .eq('tweet_id', tweetId)
+          .single();
+        if (post && post.enrich_status !== 'pending') {
+          clearInterval(poll);
+          setEnrichingIds(prev => { const n = new Set(prev); n.delete(tweetId); return n; });
+          invalidate();
+          toast({ title: 'Enrichment complete', description: `Status: ${post.enrich_status}` });
+        }
+      }, 3000);
+      // Safety timeout: stop polling after 2 minutes
+      setTimeout(() => {
+        clearInterval(poll);
+        setEnrichingIds(prev => { const n = new Set(prev); n.delete(tweetId); return n; });
+      }, 120_000);
+    } catch (e) {
+      setEnrichingIds(prev => { const n = new Set(prev); n.delete(tweetId); return n; });
+      toast({ title: 'Enrich failed', description: (e as Error).message, variant: 'destructive' });
+    }
   };
 
   const handleClearDup = async (tweetId: string, relatedTweetId: string | null) => {
@@ -749,6 +785,30 @@ export default function Monitoring() {
                     </div>
                   )}
                 </div>
+
+                {/* Test Enrich Button */}
+                {entry.text_translated && (
+                  <div className="flex items-center gap-2 border-t border-border pt-2 mt-2">
+                    {enrichingIds.has(entry.tweet_id) ? (
+                      <Button size="sm" variant="outline" disabled className="text-xs">
+                        <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />Enriching...
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-xs"
+                        onClick={() => handleTestEnrich(entry.tweet_id)}
+                      >
+                        <FlaskConical className="w-3 h-3 mr-1.5" />
+                        {entry.enrich_status && entry.enrich_status !== 'pending' && entry.enrich_status !== 'skipped' ? 'Re-Enrich' : 'Test Enrich'}
+                      </Button>
+                    )}
+                    {entry.enrich_status && entry.enrich_status !== 'pending' && entry.enrich_status !== 'skipped' && (
+                      <span className="text-[10px] text-muted-foreground">Last run: {entry.enrich_status}</span>
+                    )}
+                  </div>
+                )}
 
                 {/* Enrichment Section */}
                 {entry.enrich_status && entry.enrich_status !== 'skipped' && entry.enrich_status !== 'pending' && (

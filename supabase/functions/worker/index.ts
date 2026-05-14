@@ -1544,6 +1544,7 @@ function throwTelegramError(method: string, result: Record<string, unknown>, sta
 async function handleEnrichJob(job: Record<string, unknown>, supabase: any): Promise<boolean> {
   const payload = job.payload as Record<string, unknown>;
   const tweetId = payload.tweet_id as string;
+  const forceReview = payload.force_review === true;
   if (!tweetId) throw new Error('enrich: missing tweet_id in job payload');
 
   const openaiApiKey = Deno.env.get('OPENAI_API_KEY');
@@ -1567,8 +1568,8 @@ async function handleEnrichJob(job: Record<string, unknown>, supabase: any): Pro
     .eq('key', 'enrichment_config')
     .single();
   const enrichConfig = (configRow?.value ?? { enabled: false }) as EnrichmentConfig;
-  if (!enrichConfig.enabled) {
-    // Enrichment disabled -- mark skipped and pass through to deliver
+  if (!enrichConfig.enabled && !forceReview) {
+    // Enrichment disabled -- mark skipped and pass through to deliver (unless manual test)
     await supabase.from('posts').update({ enrich_status: 'skipped' }).eq('tweet_id', tweetId);
     await enqueueDeliverAfterEnrich(supabase, tweetId);
     console.log(JSON.stringify({ function: 'worker', action: 'enrich_skipped_disabled', tweet_id: tweetId }));
@@ -1613,8 +1614,8 @@ async function handleEnrichJob(job: Record<string, unknown>, supabase: any): Pro
       previousFormatUsed,
     });
 
-    // Store results
-    const enrichStatus = enrichConfig.require_approval ? 'awaiting_approval' : 'completed';
+    // Store results -- force_review always lands in awaiting_approval (manual test mode)
+    const enrichStatus = (forceReview || enrichConfig.require_approval) ? 'awaiting_approval' : 'completed';
     await supabase.from('posts').update({
       background_context: result.researcher ? result.researcher : null,
       editorial_commentary: result.analyst.commentary,
@@ -1641,15 +1642,15 @@ async function handleEnrichJob(job: Record<string, unknown>, supabase: any): Pro
       status: enrichStatus,
     });
 
-    // If not requiring approval, enqueue deliver immediately
-    if (!enrichConfig.require_approval) {
+    // If not requiring approval AND not a manual test, enqueue deliver immediately
+    if (!forceReview && !enrichConfig.require_approval) {
       await enqueueDeliverAfterEnrich(supabase, tweetId);
     }
 
     console.log(JSON.stringify({
       function: 'worker', action: 'enrich_complete', tweet_id: tweetId,
       tokens: result.totalTokens, duration_ms: result.durationMs,
-      format: result.composer.format_used, awaiting_approval: enrichConfig.require_approval,
+      format: result.composer.format_used, awaiting_approval: forceReview || enrichConfig.require_approval,
     }));
     return true;
   } catch (e) {

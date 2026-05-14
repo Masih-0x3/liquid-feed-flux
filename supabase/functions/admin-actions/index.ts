@@ -1424,6 +1424,42 @@ serve(async (req) => {
         return jsonResponse({ success: true, message: 'Learned biases reset' });
       }
 
+      // ===== Manually trigger enrichment on a post (never auto-posts) =====
+      case 'enrich_post': {
+        const { tweet_id } = body;
+        if (!tweet_id) return jsonResponse({ error: 'tweet_id is required' }, 400);
+
+        // Reset enrichment fields so the pipeline runs fresh
+        await supabase.from('posts').update({
+          enrich_status: 'pending',
+          background_context: null,
+          editorial_commentary: null,
+          humanized_commentary: null,
+          commentary_hook: null,
+          commentary_question: null,
+          narrative_callback: null,
+          narrative_ref_post_id: null,
+          composed_post_text: null,
+          post_format_hint: null,
+          thread_continuation: null,
+          enrich_model: null,
+          enrich_tokens: null,
+          enrich_duration_ms: null,
+        }).eq('tweet_id', tweet_id);
+
+        // Upsert an enrich job with force_review flag
+        const { error: jobErr } = await supabase.from('jobs').upsert({
+          type: 'enrich',
+          payload: { tweet_id, force_review: true },
+          idempotency_key: `enrich:${tweet_id}`,
+          status: 'pending',
+          attempts: 0,
+          created_at: new Date().toISOString(),
+        }, { onConflict: 'idempotency_key', ignoreDuplicates: false });
+        if (jobErr) throw jobErr;
+        return jsonResponse({ ok: true, message: `Enrichment queued for ${tweet_id}` });
+      }
+
       default:
         return jsonResponse({ error: `Unknown action: ${action}` }, 400);
     }
