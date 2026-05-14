@@ -427,14 +427,22 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ error: postsErr.message }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 
+  const ENRICH_GRACE_MS = 5 * 60 * 1000;
+
   const results: Array<Record<string, unknown>> = [];
   const candidates = (posts || []).filter((p) => {
     if (!onlyTweetId && existing.has(p.tweet_id)) return false;
-    // Always block posts where enrichment is actively running
-    if (p.enrich_status === 'pending') return false;
-    // In normal cron runs: block awaiting_approval and rejected
-    // In force mode (onlyTweetId): allow through -- uses plain template for non-approved
-    if (!onlyTweetId && (p.enrich_status === 'awaiting_approval' || p.enrich_status === 'rejected')) return false;
+    // Grace period: if enrichment is actively running and the post is fresh,
+    // defer briefly so the pipeline can finish. After the grace window, fall
+    // through and post with the plain translation template.
+    if (p.enrich_status === 'pending') {
+      const age = Date.now() - new Date((p as { created_at: string }).created_at).getTime();
+      if (age < ENRICH_GRACE_MS) {
+        console.log(`[x-poster] deferring ${p.tweet_id}: enrichment pending, age=${Math.round(age / 1000)}s < grace ${ENRICH_GRACE_MS / 1000}s`);
+        return false;
+      }
+      console.log(`[x-poster] enrichment grace expired for ${p.tweet_id} (age=${Math.round(age / 1000)}s), falling back to plain template`);
+    }
     return true;
   });
 
@@ -582,9 +590,10 @@ Deno.serve(async (req) => {
       mediaKind = sel.tier;
     }
 
-    // Format text: use composed_post_text from enrichment pipeline if available
+    // Format text: use composed_post_text only when enrichment was approved/auto-approved
     let text: string;
-    if (post.composed_post_text && (post.enrich_status === 'completed' || post.enrich_status === 'approved')) {
+    const enrichApproved = post.enrich_status === 'enriched' || post.enrich_status === 'approved';
+    if (post.composed_post_text && enrichApproved) {
       text = RLM + safeTruncate((post.composed_post_text as string), cfg.max_chars - 1);
     } else {
       const accountHandle = (post.accounts as { handle?: string })?.handle || '';
