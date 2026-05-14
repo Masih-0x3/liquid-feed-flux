@@ -83,18 +83,21 @@ interface RecentPost {
 
 // Style modifiers randomly injected per run for variety
 const STYLE_MODIFIERS = [
-  'Use a provocative rhetorical question to open.',
-  'Be unusually blunt and short -- 2 punchy sentences max for commentary.',
-  'Reference an ironic contrast or paradox in the situation.',
-  'Use dry humor or subtle sarcasm.',
-  'Connect this to a broader historical pattern.',
-  'Focus on what this means for ordinary people.',
-  'Take a skeptical tone -- question the official narrative.',
-  'Use a vivid metaphor or analogy.',
-  'Be analytical and measured -- focus on data or specifics.',
-  'Write as if explaining to a friend in a voice message -- casual and direct.',
-  'Start with the most surprising or counterintuitive angle.',
-  'Use informal/colloquial Persian that young Iranians on social media would use.',
+  'Use a provocative rhetorical question that challenges the regime narrative.',
+  'Be unusually blunt and short -- 2 punchy sentences max. Hit hard, move on.',
+  'Point out the hypocrisy or ironic contrast in the situation.',
+  'Use dry sarcasm -- mock the regime or its apologists.',
+  'Connect this to a broader pattern of regime behavior over the past decades.',
+  'Focus on what this means for ordinary Iranians -- the people on the street.',
+  'Channel righteous anger -- this is about real people suffering under a theocracy.',
+  'Use a vivid metaphor that makes the political situation visceral.',
+  'Be analytical and strategic -- focus on what this means for the power balance.',
+  'Write as if explaining to a friend in a voice message -- raw and unfiltered.',
+  'Start with the most damning or counterintuitive angle the mainstream misses.',
+  'Use the language young Iranians on social media would use -- informal, fiery, zero respect for the regime.',
+  'Frame this in terms of the larger freedom movement -- where does this fit in the arc toward regime change?',
+  'Mock the Western appeasement angle if relevant -- "بازم مذاکره؟"',
+  'Name the human cost explicitly -- prisoners, families, lives destroyed.',
 ];
 
 function pickRandom<T>(arr: T[], n: number): T[] {
