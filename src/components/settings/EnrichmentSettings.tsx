@@ -40,11 +40,11 @@ interface VoiceSamples {
 const DEFAULT_CONFIG: EnrichmentConfig = {
   enabled: false,
   model: 'gpt-5.4-mini',
-  analyst_prompt: 'You are a sharp, direct Iranian political commentator. You are skeptical of the Islamic Republic regime, care about facts over emotions, and connect news to the bigger picture. You never use flowery diplomatic language. Write analysis in Persian.',
-  researcher_prompt: 'You are a senior news researcher specializing in Iran, the Middle East, and US foreign policy. Given a news item, search the web to find background context, related recent events, and key figures. Return structured facts only -- no opinions.',
-  humanizer_prompt: 'Rewrite the following Persian commentary to sound natural and human. Mix sentence lengths aggressively. Use colloquial Persian. Add one natural imperfection per commentary. Never use AI-tell patterns.',
-  archivist_prompt: 'You are an editorial archivist. Given a new story and recent posts, identify narrative connections. Only suggest a callback if it genuinely adds value. If nothing is related, return null.',
-  composer_prompt: 'You are a social media editor for a Persian news account on X. Assemble the final post from components. Vary format across posts. The translation is core -- commentary enhances it. Never exceed 280 characters.',
+  analyst_prompt: 'You are a sharp, direct Iranian political commentator. You are skeptical of the Islamic Republic regime, care deeply about human rights and freedom, and connect news to the bigger picture. You never use flowery diplomatic language. You sound like a real person with real opinions -- not a news anchor.',
+  researcher_prompt: 'You are a senior news researcher specializing in Iran, the Middle East, and US foreign policy. Given a news item in English, search the web for background context, related recent events, and key figures. Return structured facts in English -- no opinions, no analysis.',
+  humanizer_prompt: 'You are a rewriter that makes AI-generated Persian text sound like a real human wrote it on their phone. You match the author\'s voice samples. You aggressively vary sentence structure, use colloquial contractions, and add natural imperfections. You NEVER use formal AI-tell patterns.',
+  archivist_prompt: 'You are an editorial archivist for a Persian news account. Given a new story (in English) and recent posts, identify meaningful narrative connections. Only suggest a callback if it genuinely enriches the new post. Your callback_suggestion must be in natural Persian.',
+  composer_prompt: 'You are a social media editor for a Persian news account on X (Twitter). You assemble final posts from translated news + commentary components. Every post must feel structurally different. The translation is the core content. Commentary and hooks enhance it. Final output must be in Persian.',
   max_research_tokens: 4000,
   max_analysis_tokens: 2000,
   max_humanizer_tokens: 2000,
@@ -165,16 +165,23 @@ export default function EnrichmentSettings() {
               <Input value={config.model} onChange={(e) => setConfig({ ...config, model: e.target.value })} />
             </div>
             <div className="space-y-2">
-              <Label className="flex items-center gap-2">
-                Require Approval
-                <Badge variant={config.require_approval ? 'default' : 'secondary'}>
-                  {config.require_approval ? 'On' : 'Off'}
-                </Badge>
-              </Label>
-              <Switch
-                checked={config.require_approval}
-                onCheckedChange={(require_approval) => setConfig({ ...config, require_approval })}
-              />
+              <Label>Require Approval Before Posting</Label>
+              <div
+                className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${config.require_approval ? 'border-green-500/40 bg-green-500/5' : 'border-red-500/40 bg-red-500/5'}`}
+                onClick={() => setConfig({ ...config, require_approval: !config.require_approval })}
+              >
+                <Switch
+                  checked={config.require_approval}
+                  onCheckedChange={(require_approval) => setConfig({ ...config, require_approval })}
+                />
+                <div className="text-sm">
+                  {config.require_approval ? (
+                    <span className="text-green-400 font-medium">Enabled -- enriched posts wait for your approval before posting to X</span>
+                  ) : (
+                    <span className="text-red-400 font-medium">Disabled -- enriched posts are posted to X automatically</span>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </CardContent>

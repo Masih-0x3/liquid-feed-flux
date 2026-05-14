@@ -81,6 +81,31 @@ interface RecentPost {
   tweeted_at: string | null;
 }
 
+// Style modifiers randomly injected per run for variety
+const STYLE_MODIFIERS = [
+  'Use a provocative rhetorical question to open.',
+  'Be unusually blunt and short -- 2 punchy sentences max for commentary.',
+  'Reference an ironic contrast or paradox in the situation.',
+  'Use dry humor or subtle sarcasm.',
+  'Connect this to a broader historical pattern.',
+  'Focus on what this means for ordinary people.',
+  'Take a skeptical tone -- question the official narrative.',
+  'Use a vivid metaphor or analogy.',
+  'Be analytical and measured -- focus on data or specifics.',
+  'Write as if explaining to a friend in a voice message -- casual and direct.',
+  'Start with the most surprising or counterintuitive angle.',
+  'Use informal/colloquial Persian that young Iranians on social media would use.',
+];
+
+function pickRandom<T>(arr: T[], n: number): T[] {
+  const shuffled = [...arr].sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, n);
+}
+
+function randomTopP(): number {
+  return 0.85 + Math.random() * 0.15; // 0.85 - 1.0
+}
+
 // deno-lint-ignore no-explicit-any
 export async function runEnrichPipeline(params: {
   supabase: any;
@@ -97,7 +122,10 @@ export async function runEnrichPipeline(params: {
   const startTime = Date.now();
   let totalTokens = 0;
 
-  const skipResearch = importanceScore !== null && importanceScore < config.skip_research_below_score;
+  const skipResearch = importanceScore !== null && config.skip_research_below_score > 0 && importanceScore < config.skip_research_below_score;
+
+  // Pick a style modifier for this run
+  const [styleModifier] = pickRandom(STYLE_MODIFIERS, 1);
 
   // Phase 1: Archivist + Researcher in parallel
   const [archivistResult, researcherResult] = await Promise.all([
@@ -109,15 +137,15 @@ export async function runEnrichPipeline(params: {
   if (researcherResult?.usage) totalTokens += researcherResult.usage;
 
   // Phase 2: Analyst
-  const analystResult = await runAnalyst(apiKey, config, textOriginal, textTranslated, archivistResult?.output ?? null, researcherResult?.output ?? null);
+  const analystResult = await runAnalyst(apiKey, config, textOriginal, textTranslated, archivistResult?.output ?? null, researcherResult?.output ?? null, styleModifier);
   totalTokens += analystResult.usage;
 
   // Phase 3: Humanizer
-  const humanizerResult = await runHumanizer(apiKey, config, voiceSamples, analystResult.output);
+  const humanizerResult = await runHumanizer(apiKey, config, voiceSamples, analystResult.output, styleModifier);
   totalTokens += humanizerResult.usage;
 
   // Phase 4: Composer
-  const composerResult = await runComposer(apiKey, config, textTranslated, humanizerResult.output, archivistResult?.output ?? null, researcherResult?.output ?? null, previousFormatUsed);
+  const composerResult = await runComposer(apiKey, config, textTranslated, humanizerResult.output, archivistResult?.output ?? null, researcherResult?.output ?? null, previousFormatUsed, styleModifier);
   totalTokens += composerResult.usage;
 
   return {
@@ -157,6 +185,14 @@ async function runArchivist(supabase: any, apiKey: string, config: EnrichmentCon
       return `[${i + 1}] ID: ${p.tweet_id}\nScore: ${p.importance_score ?? '?'}\nDate: ${p.tweeted_at ?? 'unknown'}\nContent: ${text}${commentary}`;
     }).join('\n\n');
 
+    const systemPrompt = `${config.archivist_prompt}
+
+IMPORTANT RULES:
+- You receive the news item in English (original source language).
+- Your callback_suggestion MUST be written in Persian/Farsi.
+- Only suggest a callback if it genuinely enriches the new post. Do not force connections.
+- A callback should feel like a natural "as we reported earlier" or "this follows the pattern we noted" -- never mechanical.`;
+
     const tool = {
       name: 'find_narrative_thread',
       description: 'Report whether this story connects to recent coverage',
@@ -165,9 +201,9 @@ async function runArchivist(supabase: any, apiKey: string, config: EnrichmentCon
         properties: {
           has_callback: { type: 'boolean', description: 'Whether a reference to past coverage is warranted' },
           callback_type: { type: 'string', enum: ['continuation', 'validation', 'contradiction', 'thematic', 'null'], description: 'Type of narrative connection, or "null" if none' },
-          callback_suggestion: { type: 'string', description: 'Specific phrase in Persian for how to reference the prior post, or empty if none' },
+          callback_suggestion: { type: 'string', description: 'A natural Persian phrase for referencing the prior post (e.g. "همونطور که قبلا گفتیم..."). Empty if none.' },
           referenced_post_id: { type: 'string', description: 'The tweet_id of the referenced post, or empty if none' },
-          narrative_summary: { type: 'string', description: 'One sentence on the ongoing narrative thread' },
+          narrative_summary: { type: 'string', description: 'One sentence in English summarizing the ongoing narrative thread (internal use)' },
         },
         required: ['has_callback', 'callback_type'],
       },
@@ -177,11 +213,12 @@ async function runArchivist(supabase: any, apiKey: string, config: EnrichmentCon
       apiKey,
       model: config.model,
       messages: [
-        { role: 'system', content: config.archivist_prompt },
-        { role: 'user', content: `NEW STORY:\nOriginal: ${textOriginal}\nPersian: ${textTranslated}\n\nRECENT POSTS (last ${config.archivist_lookback_days} days):\n${postsContext}` },
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: `NEW STORY (English original):\n${textOriginal}\n\nRECENT POSTS we published (last ${config.archivist_lookback_days} days):\n${postsContext}` },
       ],
       tool,
       maxOutputTokens: config.max_archivist_tokens,
+      topP: randomTopP(),
     });
 
     if (!resp.ok || !resp.toolCall) {
@@ -210,15 +247,25 @@ async function runArchivist(supabase: any, apiKey: string, config: EnrichmentCon
 // ─── Agent 1: Researcher ──────────────────────────────────────────────
 async function runResearcher(apiKey: string, config: EnrichmentConfig, textOriginal: string): Promise<{ output: ResearcherOutput; usage: number } | null> {
   try {
+    const systemPrompt = `${config.researcher_prompt}
+
+IMPORTANT RULES:
+- The news item is provided in English. Research in English for best results.
+- Return all text fields (background_summary, key_facts, related_events) in ENGLISH.
+  The downstream agents will handle the Persian translation.
+- Focus on factual context: who, what, when, where, why.
+- Prioritize recent events (last 7 days) and their direct predecessors.
+- Include specific numbers, dates, and names when available.`;
+
     const tool = {
       name: 'provide_background',
       description: 'Return structured background research for this news item',
       parameters: {
         type: 'object',
         properties: {
-          background_summary: { type: 'string', description: '2-3 sentences of essential context' },
-          key_facts: { type: 'array', items: { type: 'string' }, description: 'Array of specific factual bullet points with dates/numbers' },
-          related_events: { type: 'string', description: 'What led to this, what happened before' },
+          background_summary: { type: 'string', description: '2-3 sentences of essential context (in English)' },
+          key_facts: { type: 'array', items: { type: 'string' }, description: 'Array of specific factual bullet points with dates/numbers (in English)' },
+          related_events: { type: 'string', description: 'What led to this, what happened before (in English)' },
           sources: { type: 'array', items: { type: 'string' }, description: 'URLs consulted during research' },
         },
         required: ['background_summary', 'key_facts', 'related_events', 'sources'],
@@ -229,7 +276,7 @@ async function runResearcher(apiKey: string, config: EnrichmentConfig, textOrigi
       apiKey,
       model: config.model,
       messages: [
-        { role: 'system', content: config.researcher_prompt },
+        { role: 'system', content: systemPrompt },
         { role: 'user', content: `Research background context for this news item:\n\n${textOriginal}` },
       ],
       tool,
@@ -259,17 +306,28 @@ async function runResearcher(apiKey: string, config: EnrichmentConfig, textOrigi
 }
 
 // ─── Agent 2: Analyst ─────────────────────────────────────────────────
-async function runAnalyst(apiKey: string, config: EnrichmentConfig, textOriginal: string, textTranslated: string, archivist: ArchivistOutput | null, researcher: ResearcherOutput | null): Promise<{ output: AnalystOutput; usage: number }> {
+async function runAnalyst(apiKey: string, config: EnrichmentConfig, textOriginal: string, textTranslated: string, archivist: ArchivistOutput | null, researcher: ResearcherOutput | null, styleModifier: string): Promise<{ output: AnalystOutput; usage: number }> {
   const contextParts: string[] = [];
-  contextParts.push(`Original English:\n${textOriginal}`);
-  contextParts.push(`Persian Translation:\n${textTranslated}`);
+  contextParts.push(`NEWS ITEM (English original):\n${textOriginal}`);
 
   if (researcher) {
-    contextParts.push(`Background Research:\n${researcher.background_summary}\nKey facts: ${researcher.key_facts.join('; ')}`);
+    contextParts.push(`BACKGROUND RESEARCH (English):\n${researcher.background_summary}\nKey facts:\n${researcher.key_facts.map(f => `• ${f}`).join('\n')}`);
   }
   if (archivist?.has_callback && archivist.callback_suggestion) {
-    contextParts.push(`Narrative Callback Available:\nType: ${archivist.callback_type}\nSuggested phrasing: ${archivist.callback_suggestion}\nContext: ${archivist.narrative_summary}\n\nInstruction: If this callback adds value, weave it naturally into your commentary. Do not force it.`);
+    contextParts.push(`NARRATIVE CALLBACK AVAILABLE:\nType: ${archivist.callback_type}\nSuggested Persian phrasing: ${archivist.callback_suggestion}\nContext: ${archivist.narrative_summary}\n\nIncorporate this callback ONLY if it genuinely adds value. Do not force it.`);
   }
+
+  const systemPrompt = `${config.analyst_prompt}
+
+CRITICAL INSTRUCTIONS:
+- You receive the news in ENGLISH for precision. Read it carefully.
+- ALL your output (commentary, hook, question) MUST be written in PERSIAN/FARSI.
+- Your commentary should feel like a real person's sharp take -- not a news summary.
+- The hook is the first thing readers see. Make it grab attention.
+- Style direction for THIS post: ${styleModifier}
+- Never start with "در خبری..." or "طبق گزارش..." -- these are AI-tells.
+- Never use "قابل توجه است که" or "جالب است که" -- banned phrases.
+- Vary your sentence structure. Mix short punchy sentences with longer analytical ones.`;
 
   const tool = {
     name: 'compose_analysis',
@@ -277,11 +335,11 @@ async function runAnalyst(apiKey: string, config: EnrichmentConfig, textOriginal
     parameters: {
       type: 'object',
       properties: {
-        commentary: { type: 'string', description: '2-4 sentences of editorial analysis in Persian' },
-        hook: { type: 'string', description: 'A compelling opening line in Persian' },
-        suggested_question: { type: 'string', description: 'Optional question in Persian to drive replies, or empty' },
+        commentary: { type: 'string', description: '2-4 sentences of sharp editorial analysis in PERSIAN' },
+        hook: { type: 'string', description: 'A compelling attention-grabbing opening line in PERSIAN (not a summary)' },
+        suggested_question: { type: 'string', description: 'Optional provocative question in PERSIAN to drive engagement, or empty' },
         uses_callback: { type: 'boolean', description: 'Whether the narrative callback was incorporated' },
-        significance: { type: 'string', description: 'One sentence on why this matters (internal use)' },
+        significance: { type: 'string', description: 'One sentence on why this matters (English, internal use only)' },
       },
       required: ['commentary', 'hook', 'uses_callback', 'significance'],
     },
@@ -291,11 +349,12 @@ async function runAnalyst(apiKey: string, config: EnrichmentConfig, textOriginal
     apiKey,
     model: config.model,
     messages: [
-      { role: 'system', content: config.analyst_prompt },
+      { role: 'system', content: systemPrompt },
       { role: 'user', content: contextParts.join('\n\n---\n\n') },
     ],
     tool,
     maxOutputTokens: config.max_analysis_tokens,
+    topP: randomTopP(),
   });
 
   if (!resp.ok || !resp.toolCall) {
@@ -316,12 +375,27 @@ async function runAnalyst(apiKey: string, config: EnrichmentConfig, textOriginal
 }
 
 // ─── Agent 3: Humanizer ───────────────────────────────────────────────
-async function runHumanizer(apiKey: string, config: EnrichmentConfig, voiceSamples: VoiceSamples, analyst: AnalystOutput): Promise<{ output: HumanizerOutput; usage: number }> {
+async function runHumanizer(apiKey: string, config: EnrichmentConfig, voiceSamples: VoiceSamples, analyst: AnalystOutput, styleModifier: string): Promise<{ output: HumanizerOutput; usage: number }> {
   const samplesBlock = voiceSamples.samples.length > 0
-    ? `\n\nVoice samples from the author:\n${voiceSamples.samples.map((s, i) => `[${i + 1}] ${s}`).join('\n')}`
-    : '\n\n(No voice samples provided yet -- use your best judgment for natural Persian writing style)';
+    ? `\n\nVOICE SAMPLES (real tweets from this author -- match this style):\n${voiceSamples.samples.map((s, i) => `[${i + 1}] ${s}`).join('\n')}`
+    : '';
 
-  const systemPrompt = config.humanizer_prompt + samplesBlock;
+  const systemPrompt = `${config.humanizer_prompt}
+${samplesBlock}
+
+CRITICAL INSTRUCTIONS:
+- Input is in PERSIAN. Output MUST remain in PERSIAN.
+- Your job: make AI-generated text sound like a human wrote it on their phone.
+- Style direction for THIS post: ${styleModifier}
+
+ANTI-AI-DETECTION TECHNIQUES (apply at least 3):
+1. Vary sentence lengths aggressively (mix 3-word fragments with longer ones)
+2. Use colloquial contractions: اینکه, همونطور, ینی, اصن
+3. Occasionally skip formal connecting words -- use dashes or ellipses instead
+4. Add ONE natural imperfection: a casual aside, a parenthetical thought, or an interrupted structure
+5. Never use: "قابل توجه", "جالب است", "در همین راستا", "لازم به ذکر است"
+6. Occasionally use informal punctuation: ... or !? or --
+7. If the text sounds like a news anchor, rewrite it to sound like a sharp friend texting`;
 
   const tool = {
     name: 'humanize_text',
@@ -329,16 +403,16 @@ async function runHumanizer(apiKey: string, config: EnrichmentConfig, voiceSampl
     parameters: {
       type: 'object',
       properties: {
-        humanized_commentary: { type: 'string', description: 'The rewritten commentary matching the author voice' },
-        humanized_hook: { type: 'string', description: 'The rewritten hook' },
-        humanized_question: { type: 'string', description: 'The rewritten question, or empty if none' },
-        changes_made: { type: 'string', description: 'Brief note on what was changed for transparency' },
+        humanized_commentary: { type: 'string', description: 'The rewritten commentary matching the author voice (PERSIAN)' },
+        humanized_hook: { type: 'string', description: 'The rewritten hook (PERSIAN)' },
+        humanized_question: { type: 'string', description: 'The rewritten question (PERSIAN), or empty if none' },
+        changes_made: { type: 'string', description: 'Brief English note on what was changed (internal)' },
       },
       required: ['humanized_commentary', 'humanized_hook', 'changes_made'],
     },
   };
 
-  const userContent = `Humanize this commentary to sound like the author wrote it personally:\n\nCommentary: ${analyst.commentary}\nHook: ${analyst.hook}${analyst.suggested_question ? `\nQuestion: ${analyst.suggested_question}` : ''}`;
+  const userContent = `Rewrite this to sound authentically human. Keep the meaning but change the texture:\n\nCommentary: ${analyst.commentary}\nHook: ${analyst.hook}${analyst.suggested_question ? `\nQuestion: ${analyst.suggested_question}` : ''}`;
 
   const resp = await callOpenAI({
     apiKey,
@@ -349,6 +423,7 @@ async function runHumanizer(apiKey: string, config: EnrichmentConfig, voiceSampl
     ],
     tool,
     maxOutputTokens: config.max_humanizer_tokens,
+    topP: randomTopP(),
   });
 
   if (!resp.ok || !resp.toolCall) {
@@ -368,21 +443,41 @@ async function runHumanizer(apiKey: string, config: EnrichmentConfig, voiceSampl
 }
 
 // ─── Agent 4: Composer ────────────────────────────────────────────────
-async function runComposer(apiKey: string, config: EnrichmentConfig, textTranslated: string, humanizer: HumanizerOutput, archivist: ArchivistOutput | null, researcher: ResearcherOutput | null, previousFormatUsed: string | null): Promise<{ output: ComposerOutput; usage: number }> {
+async function runComposer(apiKey: string, config: EnrichmentConfig, textTranslated: string, humanizer: HumanizerOutput, archivist: ArchivistOutput | null, researcher: ResearcherOutput | null, previousFormatUsed: string | null, styleModifier: string): Promise<{ output: ComposerOutput; usage: number }> {
   const components: string[] = [];
-  components.push(`Translation (core content):\n${textTranslated}`);
-  components.push(`Commentary: ${humanizer.humanized_commentary}`);
-  components.push(`Hook: ${humanizer.humanized_hook}`);
-  if (humanizer.humanized_question) components.push(`Question: ${humanizer.humanized_question}`);
+  components.push(`TRANSLATED NEWS (Persian -- this is the core content to include):\n${textTranslated}`);
+  components.push(`COMMENTARY (Persian): ${humanizer.humanized_commentary}`);
+  components.push(`HOOK (Persian): ${humanizer.humanized_hook}`);
+  if (humanizer.humanized_question) components.push(`QUESTION (Persian): ${humanizer.humanized_question}`);
   if (archivist?.has_callback && archivist.callback_suggestion) {
-    components.push(`Narrative callback: ${archivist.callback_suggestion}`);
+    components.push(`NARRATIVE CALLBACK (Persian): ${archivist.callback_suggestion}`);
   }
   if (researcher?.background_summary) {
-    components.push(`Background (use sparingly): ${researcher.background_summary}`);
+    components.push(`BACKGROUND (English, for context only -- do not include verbatim): ${researcher.background_summary}`);
   }
-  if (previousFormatUsed) {
-    components.push(`IMPORTANT: The previous post used format "${previousFormatUsed}". Choose a DIFFERENT format this time.`);
-  }
+
+  const avoidFormats: string[] = [];
+  if (previousFormatUsed) avoidFormats.push(previousFormatUsed);
+
+  const systemPrompt = `${config.composer_prompt}
+
+CRITICAL INSTRUCTIONS:
+- The final post MUST be in PERSIAN/FARSI.
+- You are assembling components into ONE cohesive X post (max 280 chars for main tweet).
+- The translation is the core news content. Commentary/hook enhance it -- they don't replace it.
+- Style direction: ${styleModifier}
+${avoidFormats.length > 0 ? `- DO NOT use format "${avoidFormats.join('" or "')}" -- pick something different.` : ''}
+
+FORMAT OPTIONS (choose the one that fits this content best):
+- analysis_lead: Start with your analytical take, then the news
+- question_hook: Open with a provocative question, then the news + take
+- context_first: Brief context, then news, then your reaction
+- callback_lead: Reference a prior story, then show how this connects
+- quote_style: Pull a key quote/number, then react
+- plain: News + short reaction (no tricks, just clean delivery)
+- thread_hook: Compelling first tweet + thread continuation for complex stories
+
+VARIETY IS CRITICAL. Each post should feel structurally different from the last.`;
 
   const tool = {
     name: 'compose_post',
@@ -390,9 +485,9 @@ async function runComposer(apiKey: string, config: EnrichmentConfig, textTransla
     parameters: {
       type: 'object',
       properties: {
-        final_text: { type: 'string', description: 'The assembled post ready for X (max 280 chars)' },
+        final_text: { type: 'string', description: 'The assembled post in PERSIAN ready for X (max 280 chars for main tweet)' },
         format_used: { type: 'string', enum: ['analysis_lead', 'question_hook', 'context_first', 'callback_lead', 'quote_style', 'plain', 'thread_hook'], description: 'Which format was chosen' },
-        thread_continuation: { type: 'string', description: 'Second tweet text if thread format, or empty' },
+        thread_continuation: { type: 'string', description: 'Second tweet text in PERSIAN if thread format, or empty' },
       },
       required: ['final_text', 'format_used'],
     },
@@ -402,11 +497,12 @@ async function runComposer(apiKey: string, config: EnrichmentConfig, textTransla
     apiKey,
     model: config.model,
     messages: [
-      { role: 'system', content: config.composer_prompt },
+      { role: 'system', content: systemPrompt },
       { role: 'user', content: components.join('\n\n') },
     ],
     tool,
     maxOutputTokens: config.max_composer_tokens,
+    topP: randomTopP(),
   });
 
   if (!resp.ok || !resp.toolCall) {
