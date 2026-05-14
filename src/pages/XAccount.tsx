@@ -327,10 +327,10 @@ export default function XAccount() {
             <CardContent>
               {mutualLoading ? (
                 <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin" /></div>
-              ) : !mutualData || (mutualData.dontFollowBack.length === 0 && mutualData.notFollowingBack.length === 0) ? (
+              ) : !mutualData || !mutualData.hasFollowingData ? (
                 <div className="text-center py-8 space-y-2">
                   <p className="text-muted-foreground text-sm">No mutual follow data available yet.</p>
-                  <p className="text-xs text-muted-foreground">Run a snapshot to capture your following list (who you follow). The data will appear here after the next snapshot completes.</p>
+                  <p className="text-xs text-muted-foreground">Run a snapshot (button above) to capture your "following" list. The next snapshot will fetch both who follows you AND who you follow, then this tab will compute the differences.</p>
                 </div>
               ) : (
                 <Tabs defaultValue="dont-follow-back" className="space-y-3">

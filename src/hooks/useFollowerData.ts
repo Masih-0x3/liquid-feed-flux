@@ -211,13 +211,14 @@ export function useMutualFollowData() {
         .maybeSingle();
 
       if (error) throw error;
-      if (!snap) return { dontFollowBack: [], notFollowingBack: [] };
+      if (!snap) return { dontFollowBack: [], notFollowingBack: [], hasFollowingData: false };
 
       const followerIds: string[] = (snap.follower_ids ?? []) as string[];
       const followingIds: string[] = (snap.following_ids ?? []) as string[];
 
-      if (followerIds.length === 0 && followingIds.length === 0) {
-        return { dontFollowBack: [], notFollowingBack: [] };
+      // following_ids is only populated after a snapshot runs with the updated function
+      if (followingIds.length === 0) {
+        return { dontFollowBack: [], notFollowingBack: [], hasFollowingData: false };
       }
 
       const followerSet = new Set(followerIds);
@@ -255,7 +256,7 @@ export function useMutualFollowData() {
         profileMap.get(id) ?? { user_id: id, username: null, name: null, profile_image_url: null }
       );
 
-      return { dontFollowBack, notFollowingBack };
+      return { dontFollowBack, notFollowingBack, hasFollowingData: true };
     },
     staleTime: 120_000,
   });
