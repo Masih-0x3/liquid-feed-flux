@@ -231,12 +231,22 @@ IMPORTANT RULES:
 
     const parsed = JSON.parse(resp.toolCall.arguments);
     const callbackType = parsed.callback_type === 'null' ? null : parsed.callback_type;
+
+    // Validate referenced_post_id against known IDs to prevent FK violations
+    // that would crash the entire enrich UPDATE and lose all 5 agents' work
+    const knownIds = new Set((recentPosts as RecentPost[]).map(p => p.tweet_id));
+    const rawRefId = parsed.referenced_post_id || null;
+    const validatedRefId = (rawRefId && knownIds.has(rawRefId)) ? rawRefId : null;
+    if (rawRefId && !validatedRefId) {
+      console.warn(`Archivist returned unknown referenced_post_id "${rawRefId}" -- discarding to prevent FK violation`);
+    }
+
     return {
       output: {
         has_callback: parsed.has_callback ?? false,
         callback_type: callbackType,
         callback_suggestion: parsed.callback_suggestion || null,
-        referenced_post_id: parsed.referenced_post_id || null,
+        referenced_post_id: validatedRefId,
         narrative_summary: parsed.narrative_summary || null,
       },
       usage: resp.usage?.total_tokens ?? 0,
@@ -459,8 +469,10 @@ async function runComposer(apiKey: string, config: EnrichmentConfig, textTransla
     components.push(`BACKGROUND (English, for context only -- do not include verbatim): ${researcher.background_summary}`);
   }
 
-  const avoidFormats: string[] = [];
-  if (previousFormatUsed) avoidFormats.push(previousFormatUsed);
+  // previousFormatUsed can be a comma-separated list of recent formats (last 3)
+  const avoidFormats: string[] = previousFormatUsed
+    ? previousFormatUsed.split(',').map(f => f.trim()).filter(Boolean)
+    : [];
 
   const systemPrompt = `${config.composer_prompt}
 

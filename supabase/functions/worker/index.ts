@@ -1584,17 +1584,17 @@ async function handleEnrichJob(job: Record<string, unknown>, supabase: any): Pro
     .single();
   const voiceSamples = (voiceRow?.value ?? { samples: [], updated_at: null }) as VoiceSamples;
 
-  // Get previous post's format for variety
-  const { data: prevPost } = await supabase
+  // Get recent formats for variety (avoid last 3, not just 1)
+  const { data: recentFormatPosts } = await supabase
     .from('posts')
     .select('post_format_hint')
     .eq('delivery_decision', 'deliver')
     .not('post_format_hint', 'is', null)
     .neq('tweet_id', tweetId)
     .order('created_at', { ascending: false })
-    .limit(1)
-    .single();
-  const previousFormatUsed = prevPost?.post_format_hint as string | null;
+    .limit(3);
+  const recentFormats = (recentFormatPosts || []).map((p: { post_format_hint: string }) => p.post_format_hint).filter(Boolean) as string[];
+  const previousFormatUsed = recentFormats.length > 0 ? recentFormats.join(',') : null;
 
   // Mark enrichment in progress
   await supabase.from('posts').update({ enrich_status: 'pending' }).eq('tweet_id', tweetId);
@@ -1673,7 +1673,11 @@ async function enqueueDeliverAfterEnrich(supabase: any, tweetId: string) {
       priority: 20,
       idempotency_key: idempotencyKey,
       next_run_at: new Date().toISOString(),
-    }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+      locked_at: null,
+      lease_expires_at: null,
+      last_error: null,
+      attempts: 0,
+    }, { onConflict: 'idempotency_key', ignoreDuplicates: false });
   if (deliveryJobError) {
     console.warn('enrich: failed to enqueue deliver:', deliveryJobError.message);
   } else {

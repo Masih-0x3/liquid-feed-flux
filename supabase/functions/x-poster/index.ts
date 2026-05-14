@@ -83,6 +83,16 @@ const DEFAULT_LIMITS: RateLimits = {
 // ─── Helpers ─────────────────────────────────────────────────────────
 function isRecord(v: unknown): v is Record<string, unknown> { return typeof v === 'object' && v !== null && !Array.isArray(v); }
 
+function safeTruncate(str: string, maxLen: number): string {
+  if (str.length <= maxLen) return str;
+  let end = maxLen;
+  // Don't split a UTF-16 surrogate pair (emoji, some Arabic/Persian chars)
+  if (end > 0 && str.charCodeAt(end - 1) >= 0xD800 && str.charCodeAt(end - 1) <= 0xDBFF) {
+    end--;
+  }
+  return str.slice(0, end);
+}
+
 // U+200F = Right-to-Left Mark. Forces X/Twitter to render the entire tweet RTL,
 // even when it begins with emoji, hashtags, digits, or Latin punctuation.
 const RLM = '\u200F';
@@ -420,8 +430,8 @@ Deno.serve(async (req) => {
   const results: Array<Record<string, unknown>> = [];
   const candidates = (posts || []).filter((p) => {
     if (!onlyTweetId && existing.has(p.tweet_id)) return false;
-    // Skip posts awaiting enrichment approval
-    if (p.enrich_status === 'awaiting_approval' || p.enrich_status === 'pending') return false;
+    // Skip posts that shouldn't be posted: awaiting approval, pending enrichment, or rejected
+    if (['awaiting_approval', 'pending', 'rejected'].includes(p.enrich_status)) return false;
     return true;
   });
 
@@ -572,7 +582,7 @@ Deno.serve(async (req) => {
     // Format text: use composed_post_text from enrichment pipeline if available
     let text: string;
     if (post.composed_post_text && (post.enrich_status === 'completed' || post.enrich_status === 'approved')) {
-      text = RLM + (post.composed_post_text as string).slice(0, cfg.max_chars - 1);
+      text = RLM + safeTruncate((post.composed_post_text as string), cfg.max_chars - 1);
     } else {
       const accountHandle = (post.accounts as { handle?: string })?.handle || '';
       const pickedHashtags = pickHashtags(cfg.hashtag_pool, cfg.hashtags_per_post ?? 0);

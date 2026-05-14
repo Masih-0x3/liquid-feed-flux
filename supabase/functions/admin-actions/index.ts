@@ -1424,6 +1424,41 @@ serve(async (req) => {
         return jsonResponse({ success: true, message: 'Learned biases reset' });
       }
 
+      // ===== Approve enrichment and queue delivery =====
+      case 'approve_enrichment': {
+        const { tweet_id } = body;
+        if (!tweet_id) return jsonResponse({ error: 'tweet_id is required' }, 400);
+
+        await supabase.from('posts').update({ enrich_status: 'approved' }).eq('tweet_id', tweet_id);
+
+        // Enqueue deliver job with proper lock clearing
+        const { error: delErr } = await supabase.from('jobs').upsert({
+          type: 'deliver',
+          payload: { tweet_id },
+          status: 'pending',
+          priority: 20,
+          idempotency_key: `deliver:${tweet_id}`,
+          next_run_at: new Date().toISOString(),
+          locked_at: null,
+          lease_expires_at: null,
+          last_error: null,
+          attempts: 0,
+        }, { onConflict: 'idempotency_key', ignoreDuplicates: false });
+        if (delErr) console.warn('approve_enrichment: deliver enqueue failed:', delErr.message);
+
+        return jsonResponse({ ok: true, message: `Enrichment approved for ${tweet_id}` });
+      }
+
+      // ===== Reject enrichment (post will NOT go to X) =====
+      case 'reject_enrichment': {
+        const { tweet_id } = body;
+        if (!tweet_id) return jsonResponse({ error: 'tweet_id is required' }, 400);
+
+        await supabase.from('posts').update({ enrich_status: 'rejected' }).eq('tweet_id', tweet_id);
+
+        return jsonResponse({ ok: true, message: `Enrichment rejected for ${tweet_id}` });
+      }
+
       // ===== Manually trigger enrichment on a post (never auto-posts) =====
       case 'enrich_post': {
         const { tweet_id } = body;
@@ -1447,7 +1482,7 @@ serve(async (req) => {
           enrich_duration_ms: null,
         }).eq('tweet_id', tweet_id);
 
-        // Upsert an enrich job with force_review flag
+        // Upsert an enrich job with force_review flag, clearing all lock fields
         const { error: jobErr } = await supabase.from('jobs').upsert({
           type: 'enrich',
           payload: { tweet_id, force_review: true },
@@ -1455,6 +1490,10 @@ serve(async (req) => {
           status: 'pending',
           attempts: 0,
           created_at: new Date().toISOString(),
+          locked_at: null,
+          lease_expires_at: null,
+          next_run_at: new Date().toISOString(),
+          last_error: null,
         }, { onConflict: 'idempotency_key', ignoreDuplicates: false });
         if (jobErr) throw jobErr;
         return jsonResponse({ ok: true, message: `Enrichment queued for ${tweet_id}` });

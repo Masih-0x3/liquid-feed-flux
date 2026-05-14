@@ -101,6 +101,10 @@ async function callChatCompletions(p: OpenAICallParams): Promise<NormalizedOpenA
   if (p.serviceTier && p.serviceTier !== 'auto') body.service_tier = p.serviceTier;
   if (typeof p.parallelToolCalls === 'boolean') body.parallel_tool_calls = p.parallelToolCalls;
 
+  if (p.builtInTools?.length) {
+    console.warn(`[openai] builtInTools (${p.builtInTools.map(t => t.type).join(', ')}) requested but model "${p.model}" uses Chat Completions API which does not support built-in tools like web_search. These tools will be IGNORED. Switch to a gpt-5.x model to use built-in tools.`);
+  }
+
   if (p.tool) {
     body.tools = [{ type: 'function', function: p.tool }];
     body.tool_choice = { type: 'function', function: { name: p.tool.name } };

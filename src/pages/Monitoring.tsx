@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -283,27 +283,51 @@ export default function Monitoring() {
 
   const handleApproveEnrichment = async (tweetId: string) => {
     try {
-      await supabase.from('posts').update({ enrich_status: 'approved' }).eq('tweet_id', tweetId);
-      // Enqueue deliver job
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (supabase.from('jobs') as any).upsert({
-        type: 'deliver', payload: { tweet_id: tweetId }, status: 'pending',
-        priority: 20, idempotency_key: `deliver:${tweetId}`, next_run_at: new Date().toISOString(),
-      }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+      const { data, error } = await supabase.functions.invoke('admin-actions', {
+        body: { action: 'approve_enrichment', tweet_id: tweetId },
+      });
+      if (error) throw error;
+      if (!data?.ok) throw new Error(data?.error ?? 'Failed to approve');
       toast({ title: 'Approved', description: 'Post approved and queued for delivery' });
       invalidate();
-    } catch { toast({ title: 'Error', description: 'Failed to approve', variant: 'destructive' }); }
+    } catch (e) { toast({ title: 'Error', description: (e as Error).message, variant: 'destructive' }); }
   };
 
   const handleRejectEnrichment = async (tweetId: string) => {
     try {
-      await supabase.from('posts').update({ enrich_status: 'rejected' }).eq('tweet_id', tweetId);
+      const { data, error } = await supabase.functions.invoke('admin-actions', {
+        body: { action: 'reject_enrichment', tweet_id: tweetId },
+      });
+      if (error) throw error;
+      if (!data?.ok) throw new Error(data?.error ?? 'Failed to reject');
       toast({ title: 'Rejected', description: 'Post will not be posted to X' });
       invalidate();
-    } catch { toast({ title: 'Error', description: 'Failed to reject', variant: 'destructive' }); }
+    } catch (e) { toast({ title: 'Error', description: (e as Error).message, variant: 'destructive' }); }
   };
 
   const [enrichingIds, setEnrichingIds] = useState<Set<string>>(new Set());
+  const pollRefs = useRef<Map<string, { interval: ReturnType<typeof setInterval>; timeout: ReturnType<typeof setTimeout> }>>(new Map());
+
+  useEffect(() => {
+    const refs = pollRefs.current;
+    return () => {
+      refs.forEach(({ interval, timeout }) => {
+        clearInterval(interval);
+        clearTimeout(timeout);
+      });
+      refs.clear();
+    };
+  }, []);
+
+  const cleanupPoll = (tweetId: string) => {
+    const entry = pollRefs.current.get(tweetId);
+    if (entry) {
+      clearInterval(entry.interval);
+      clearTimeout(entry.timeout);
+      pollRefs.current.delete(tweetId);
+    }
+    setEnrichingIds(prev => { const n = new Set(prev); n.delete(tweetId); return n; });
+  };
 
   const handleTestEnrich = async (tweetId: string) => {
     try {
@@ -314,27 +338,25 @@ export default function Monitoring() {
       if (error) throw error;
       if (!data?.ok) throw new Error(data?.error ?? 'Failed to queue enrichment');
       toast({ title: 'Enrichment queued', description: 'Pipeline running -- results will appear shortly.' });
-      // Poll until enrich_status changes from pending
-      const poll = setInterval(async () => {
+
+      const interval = setInterval(async () => {
         const { data: post } = await supabase
           .from('posts')
           .select('enrich_status')
           .eq('tweet_id', tweetId)
           .single();
         if (post && post.enrich_status !== 'pending') {
-          clearInterval(poll);
-          setEnrichingIds(prev => { const n = new Set(prev); n.delete(tweetId); return n; });
+          cleanupPoll(tweetId);
           invalidate();
           toast({ title: 'Enrichment complete', description: `Status: ${post.enrich_status}` });
         }
       }, 3000);
-      // Safety timeout: stop polling after 2 minutes
-      setTimeout(() => {
-        clearInterval(poll);
-        setEnrichingIds(prev => { const n = new Set(prev); n.delete(tweetId); return n; });
-      }, 120_000);
+
+      const timeout = setTimeout(() => { cleanupPoll(tweetId); }, 120_000);
+
+      pollRefs.current.set(tweetId, { interval, timeout });
     } catch (e) {
-      setEnrichingIds(prev => { const n = new Set(prev); n.delete(tweetId); return n; });
+      cleanupPoll(tweetId);
       toast({ title: 'Enrich failed', description: (e as Error).message, variant: 'destructive' });
     }
   };
