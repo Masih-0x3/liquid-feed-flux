@@ -590,15 +590,26 @@ Deno.serve(async (req) => {
       mediaKind = sel.tier;
     }
 
-    // Format text: use composed_post_text only when enrichment was approved/auto-approved
+    // Format text: structured post with news + opinion when enrichment is approved,
+    // otherwise fall back to the plain template.
     let text: string;
     const enrichApproved = post.enrich_status === 'enriched' || post.enrich_status === 'approved';
-    if (post.composed_post_text && enrichApproved) {
-      text = RLM + safeTruncate((post.composed_post_text as string), cfg.max_chars - 1);
+    const opinionText = (post.composed_post_text as string) || '';
+    const accountHandle = (post.accounts as { handle?: string })?.handle || '';
+    const pickedHashtags = pickHashtags(cfg.hashtag_pool, cfg.hashtags_per_post ?? 0);
+    const hashtagsValue = pickedHashtags || cfg.hashtags || '';
+
+    if (opinionText && enrichApproved) {
+      const parts = [
+        persianDateNow(),
+        `${cfg.leading_emoji} ${post.text_translated || ''}`,
+        `── نظر ما ──`,
+        opinionText,
+      ];
+      if (hashtagsValue) parts.push(hashtagsValue);
+      const assembled = parts.join('\n\n');
+      text = RLM + safeTruncate(assembled, cfg.max_chars - 1);
     } else {
-      const accountHandle = (post.accounts as { handle?: string })?.handle || '';
-      const pickedHashtags = pickHashtags(cfg.hashtag_pool, cfg.hashtags_per_post ?? 0);
-      const hashtagsValue = pickedHashtags || cfg.hashtags || '';
       text = formatTweet(cfg.post_template, {
         leading_emoji: cfg.leading_emoji,
         translated_text: post.text_translated || '',

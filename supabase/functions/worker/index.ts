@@ -1624,7 +1624,7 @@ async function handleEnrichJob(job: Record<string, unknown>, supabase: any): Pro
       commentary_question: result.humanizer.humanized_question,
       narrative_callback: result.archivist?.callback_suggestion ?? null,
       narrative_ref_post_id: result.archivist?.referenced_post_id ?? null,
-      composed_post_text: result.composer.final_text,
+      composed_post_text: result.composer.opinion_section,
       post_format_hint: result.composer.format_used,
       thread_continuation: result.composer.thread_continuation,
       enrich_status: enrichStatus,

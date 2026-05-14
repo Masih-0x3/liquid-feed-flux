@@ -870,12 +870,23 @@ export default function Monitoring() {
                           </div>
                         </div>
                       )}
-                      {entry.composed_post_text && (
-                        <div className="rounded-md border border-green-500/20 bg-green-500/5 p-2">
+                      {(entry.composed_post_text || entry.text_translated) && (
+                        <div className="rounded-md border border-green-500/20 bg-green-500/5 p-2 space-y-2">
                           <p className="text-[10px] font-medium text-green-400 mb-1">
-                            Final Post {entry.post_format_hint && <span className="opacity-60">({entry.post_format_hint})</span>}
+                            Structured Post Preview {entry.post_format_hint && <span className="opacity-60">({entry.post_format_hint})</span>}
                           </p>
-                          <p className="text-sm font-medium" dir="rtl">{entry.composed_post_text}</p>
+                          {entry.text_translated && (
+                            <div className="border-b border-green-500/10 pb-2">
+                              <p className="text-[10px] font-medium text-blue-400 mb-0.5">📰 News (verbatim translation)</p>
+                              <p className="text-sm" dir="rtl">{entry.text_translated}</p>
+                            </div>
+                          )}
+                          {entry.composed_post_text && (
+                            <div>
+                              <p className="text-[10px] font-medium text-amber-400 mb-0.5">💬 Opinion / Context</p>
+                              <p className="text-sm font-medium" dir="rtl">{entry.composed_post_text}</p>
+                            </div>
+                          )}
                         </div>
                       )}
                       {entry.enrich_status === 'awaiting_approval' && (

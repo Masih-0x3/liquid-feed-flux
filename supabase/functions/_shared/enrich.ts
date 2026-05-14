@@ -57,7 +57,7 @@ export interface HumanizerOutput {
 }
 
 export interface ComposerOutput {
-  final_text: string;
+  opinion_section: string;
   format_used: string;
   thread_continuation: string | null;
 }
@@ -456,9 +456,11 @@ ANTI-AI-DETECTION TECHNIQUES (apply at least 3):
 }
 
 // ─── Agent 4: Composer ────────────────────────────────────────────────
+// The Composer writes ONLY the opinion/context section. The verbatim
+// translation (news) is kept separate and assembled by the x-poster.
 async function runComposer(apiKey: string, config: EnrichmentConfig, textTranslated: string, humanizer: HumanizerOutput, archivist: ArchivistOutput | null, researcher: ResearcherOutput | null, previousFormatUsed: string | null, styleModifier: string): Promise<{ output: ComposerOutput; usage: number }> {
   const components: string[] = [];
-  components.push(`TRANSLATED NEWS (Persian -- this is the core content to include):\n${textTranslated}`);
+  components.push(`TRANSLATED NEWS (Persian -- provided for reference only, DO NOT include this text in your output):\n${textTranslated}`);
   components.push(`COMMENTARY (Persian): ${humanizer.humanized_commentary}`);
   components.push(`HOOK (Persian): ${humanizer.humanized_hook}`);
   if (humanizer.humanized_question) components.push(`QUESTION (Persian): ${humanizer.humanized_question}`);
@@ -466,10 +468,9 @@ async function runComposer(apiKey: string, config: EnrichmentConfig, textTransla
     components.push(`NARRATIVE CALLBACK (Persian): ${archivist.callback_suggestion}`);
   }
   if (researcher?.background_summary) {
-    components.push(`BACKGROUND (English, for context only -- do not include verbatim): ${researcher.background_summary}`);
+    components.push(`BACKGROUND (English, for context only): ${researcher.background_summary}`);
   }
 
-  // previousFormatUsed can be a comma-separated list of recent formats (last 3)
   const avoidFormats: string[] = previousFormatUsed
     ? previousFormatUsed.split(',').map(f => f.trim()).filter(Boolean)
     : [];
@@ -477,34 +478,36 @@ async function runComposer(apiKey: string, config: EnrichmentConfig, textTransla
   const systemPrompt = `${config.composer_prompt}
 
 CRITICAL INSTRUCTIONS:
-- The final post MUST be in PERSIAN/FARSI.
-- You are assembling components into ONE cohesive X post (max 280 chars for main tweet).
-- The translation is the core news content. Commentary/hook enhance it -- they don't replace it.
+- Your output MUST be in PERSIAN/FARSI.
+- You are writing ONLY the opinion/context section of the post.
+- The verbatim news translation will be placed ABOVE your text automatically -- DO NOT repeat, paraphrase, or summarize the news. Readers will already see it.
+- Your job: add VALUE beyond the news -- context, sharp opinion, analysis, a provocative angle, or a callback to prior coverage.
+- If the news is self-explanatory, keep it short and punchy. If it needs context (e.g., who the people are, what came before), provide it.
+- Target ~400-600 characters. Shorter is better if the take is strong enough.
 - Style direction: ${styleModifier}
 ${avoidFormats.length > 0 ? `- DO NOT use format "${avoidFormats.join('" or "')}" -- pick something different.` : ''}
 
 FORMAT OPTIONS (choose the one that fits this content best):
-- analysis_lead: Start with your analytical take, then the news
-- question_hook: Open with a provocative question, then the news + take
-- context_first: Brief context, then news, then your reaction
-- callback_lead: Reference a prior story, then show how this connects
-- quote_style: Pull a key quote/number, then react
-- plain: News + short reaction (no tricks, just clean delivery)
-- thread_hook: Compelling first tweet + thread continuation for complex stories
+- context_and_take: Brief context/background if needed, then your sharp opinion
+- question_and_take: Open with a provocative question, then your opinion
+- callback_take: Reference a prior story, show how this connects, give your take
+- sharp_reaction: Direct punchy reaction, no preamble -- hit hard and move on
+- analytical: More measured analysis with reasoning -- connect the dots
+- plain_opinion: Clean short opinion, no formatting tricks
 
 VARIETY IS CRITICAL. Each post should feel structurally different from the last.`;
 
   const tool = {
     name: 'compose_post',
-    description: 'Assemble the final X post from the provided components',
+    description: 'Write the opinion/context section that will appear below the news',
     parameters: {
       type: 'object',
       properties: {
-        final_text: { type: 'string', description: 'The assembled post in PERSIAN ready for X (max 280 chars for main tweet)' },
-        format_used: { type: 'string', enum: ['analysis_lead', 'question_hook', 'context_first', 'callback_lead', 'quote_style', 'plain', 'thread_hook'], description: 'Which format was chosen' },
-        thread_continuation: { type: 'string', description: 'Second tweet text in PERSIAN if thread format, or empty' },
+        opinion_section: { type: 'string', description: 'The opinion/context section in PERSIAN (~400-600 chars). DO NOT include the news text.' },
+        format_used: { type: 'string', enum: ['context_and_take', 'question_and_take', 'callback_take', 'sharp_reaction', 'analytical', 'plain_opinion'], description: 'Which format was chosen' },
+        thread_continuation: { type: 'string', description: 'Extended analysis in PERSIAN for a reply thread if the topic warrants depth, or empty' },
       },
-      required: ['final_text', 'format_used'],
+      required: ['opinion_section', 'format_used'],
     },
   };
 
@@ -527,8 +530,8 @@ VARIETY IS CRITICAL. Each post should feel structurally different from the last.
   const parsed = JSON.parse(resp.toolCall.arguments);
   return {
     output: {
-      final_text: parsed.final_text || '',
-      format_used: parsed.format_used || 'plain',
+      opinion_section: parsed.opinion_section || '',
+      format_used: parsed.format_used || 'plain_opinion',
       thread_continuation: parsed.thread_continuation || null,
     },
     usage: resp.usage?.total_tokens ?? 0,
