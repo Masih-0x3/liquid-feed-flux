@@ -83,8 +83,8 @@ async function getSelfId(supabase: any, creds: { ck: string; cs: string; at: str
 
 interface FollowerUser { id: string; username?: string; name?: string; profile_image_url?: string }
 
-async function fetchFollowerPage(userId: string, paginationToken: string | null, creds: { ck: string; cs: string; at: string; ats: string }): Promise<{ users: FollowerUser[]; nextToken: string | null; status: number; errorText?: string }> {
-  const baseUrl = `https://api.x.com/2/users/${userId}/followers`;
+async function fetchUserPage(userId: string, endpoint: 'followers' | 'following', paginationToken: string | null, creds: { ck: string; cs: string; at: string; ats: string }): Promise<{ users: FollowerUser[]; nextToken: string | null; status: number; errorText?: string }> {
+  const baseUrl = `https://api.x.com/2/users/${userId}/${endpoint}`;
   const qp: Record<string, string> = {
     'max_results': '1000',
     'user.fields': 'username,name,profile_image_url',
@@ -144,7 +144,7 @@ serve(async (req) => {
     // Create snapshot row
     const { data: snapRow, error: snapErr } = await supabase
       .from('x_follower_snapshots')
-      .insert({ trigger, status: 'partial', follower_count: 0, follower_ids: [], pages_fetched: 0, api_calls_used: 0 })
+      .insert({ trigger, status: 'partial', follower_count: 0, follower_ids: [], following_ids: [], following_count: 0, pages_fetched: 0, api_calls_used: 0 })
       .select()
       .single();
     if (snapErr || !snapRow) throw new Error(`snapshot insert failed: ${snapErr?.message}`);
@@ -159,7 +159,7 @@ serve(async (req) => {
 
     // Page through followers. Cap at 100 pages (100k followers) as safety.
     while (pages < 100) {
-      const { users, nextToken, status, errorText } = await fetchFollowerPage(selfId, pageToken, creds);
+      const { users, nextToken, status, errorText } = await fetchUserPage(selfId, 'followers', pageToken, creds);
       apiCalls += 1;
       await recordApiCall(supabase, status === 200 ? undefined : `followers HTTP ${status}`);
 
@@ -176,17 +176,44 @@ serve(async (req) => {
       pageToken = nextToken;
     }
 
-    // Upsert profile cache
-    if (allUsers.length > 0) {
+    // Fetch following list (people I follow)
+    const followingIds: string[] = [];
+    const followingUsers: FollowerUser[] = [];
+    let followingToken: string | null = null;
+    let followingPages = 0;
+
+    if (!halted) {
+      while (followingPages < 100) {
+        const { users, nextToken, status, errorText } = await fetchUserPage(selfId, 'following', followingToken, creds);
+        apiCalls += 1;
+        await recordApiCall(supabase, status === 200 ? undefined : `following HTTP ${status}`);
+
+        if (status === 429) { halted = { reason: 'rate_limited_following', status, error: errorText }; break; }
+        if (status !== 200) { halted = { reason: 'following_api_error', status, error: errorText }; break; }
+
+        followingPages += 1;
+        for (const u of users) {
+          followingIds.push(u.id);
+          followingUsers.push(u);
+        }
+
+        if (!nextToken) break;
+        followingToken = nextToken;
+      }
+    }
+
+    // Upsert profile cache (both followers and following)
+    const combinedUsers = [...allUsers, ...followingUsers];
+    if (combinedUsers.length > 0) {
       const nowIso = new Date().toISOString();
-      const rows = allUsers.map((u) => ({
+      const seen = new Set<string>();
+      const rows = combinedUsers.filter(u => { if (seen.has(u.id)) return false; seen.add(u.id); return true; }).map((u) => ({
         user_id: u.id,
         username: u.username ?? null,
         name: u.name ?? null,
         profile_image_url: u.profile_image_url ?? null,
         last_seen_at: nowIso,
       }));
-      // Chunk to avoid payload limits
       for (let i = 0; i < rows.length; i += 500) {
         const chunk = rows.slice(i, i + 500);
         await supabase.from('x_followers_cache').upsert(chunk, { onConflict: 'user_id' });
@@ -198,15 +225,17 @@ serve(async (req) => {
         status: 'partial',
         follower_count: allIds.length,
         follower_ids: allIds,
-        pages_fetched: pages,
+        following_ids: followingIds,
+        following_count: followingIds.length,
+        pages_fetched: pages + followingPages,
         api_calls_used: apiCalls,
-        next_token: pageToken,
+        next_token: pageToken ?? followingToken,
         error: `${halted.reason}${halted.status ? ` HTTP ${halted.status}` : ''}: ${(halted.error ?? '').slice(0, 300)}`,
       }).eq('id', snapshotId);
 
       return new Response(JSON.stringify({
         snapshot_id: snapshotId, status: 'partial', halted: halted.reason, follower_count: allIds.length,
-        pages_fetched: pages, api_calls_used: apiCalls,
+        following_count: followingIds.length, pages_fetched: pages + followingPages, api_calls_used: apiCalls,
       }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
@@ -215,7 +244,9 @@ serve(async (req) => {
       status: 'complete',
       follower_count: allIds.length,
       follower_ids: allIds,
-      pages_fetched: pages,
+      following_ids: followingIds,
+      following_count: followingIds.length,
+      pages_fetched: pages + followingPages,
       api_calls_used: apiCalls,
       next_token: null,
     }).eq('id', snapshotId);
@@ -290,7 +321,8 @@ serve(async (req) => {
       status: 'complete',
       trigger,
       follower_count: allIds.length,
-      pages_fetched: pages,
+      following_count: followingIds.length,
+      pages_fetched: pages + followingPages,
       api_calls_used: apiCalls,
       unfollowed: unfollowedCount,
       followed: followedCount,

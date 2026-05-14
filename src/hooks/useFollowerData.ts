@@ -6,8 +6,16 @@ export interface FollowerSnapshot {
   taken_at: string;
   trigger: string;
   follower_count: number;
+  following_count: number;
   status: string;
   api_calls_used: number;
+}
+
+export interface MutualFollowUser {
+  user_id: string;
+  username: string | null;
+  name: string | null;
+  profile_image_url: string | null;
 }
 
 export interface FollowerChange {
@@ -38,7 +46,7 @@ export function useFollowerSnapshots() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('x_follower_snapshots')
-        .select('id, taken_at, trigger, follower_count, status, api_calls_used')
+        .select('id, taken_at, trigger, follower_count, following_count, status, api_calls_used')
         .order('taken_at', { ascending: true });
       if (error) throw error;
       return (data ?? []) as FollowerSnapshot[];
@@ -186,5 +194,69 @@ export function useMarkAllReviewed() {
       queryClient.invalidateQueries({ queryKey: ['unfollowers'] });
       queryClient.invalidateQueries({ queryKey: ['follower-stats'] });
     },
+  });
+}
+
+export function useMutualFollowData() {
+  return useQuery({
+    queryKey: ['mutual-follow-data'],
+    queryFn: async () => {
+      // Get the latest complete snapshot with follower_ids and following_ids
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: snap, error } = await (supabase.from('x_follower_snapshots') as any)
+        .select('follower_ids, following_ids')
+        .eq('status', 'complete')
+        .order('taken_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!snap) return { dontFollowBack: [], notFollowingBack: [] };
+
+      const followerIds: string[] = (snap.follower_ids ?? []) as string[];
+      const followingIds: string[] = (snap.following_ids ?? []) as string[];
+
+      if (followerIds.length === 0 && followingIds.length === 0) {
+        return { dontFollowBack: [], notFollowingBack: [] };
+      }
+
+      const followerSet = new Set(followerIds);
+      const followingSet = new Set(followingIds);
+
+      // People who follow me but I don't follow back
+      const dontFollowBackIds = followerIds.filter(id => !followingSet.has(id));
+      // People I follow but they don't follow me back
+      const notFollowingBackIds = followingIds.filter(id => !followerSet.has(id));
+
+      // Fetch profile data for both lists from cache
+      const allLookupIds = [...new Set([...dontFollowBackIds, ...notFollowingBackIds])];
+      const profileMap = new Map<string, MutualFollowUser>();
+
+      for (let i = 0; i < allLookupIds.length; i += 500) {
+        const chunk = allLookupIds.slice(i, i + 500);
+        const { data: profiles } = await supabase
+          .from('x_followers_cache')
+          .select('user_id, username, name, profile_image_url')
+          .in('user_id', chunk);
+        for (const p of (profiles ?? [])) {
+          profileMap.set(p.user_id as string, {
+            user_id: p.user_id as string,
+            username: (p.username as string) ?? null,
+            name: (p.name as string) ?? null,
+            profile_image_url: (p.profile_image_url as string) ?? null,
+          });
+        }
+      }
+
+      const dontFollowBack: MutualFollowUser[] = dontFollowBackIds.map(id =>
+        profileMap.get(id) ?? { user_id: id, username: null, name: null, profile_image_url: null }
+      );
+      const notFollowingBack: MutualFollowUser[] = notFollowingBackIds.map(id =>
+        profileMap.get(id) ?? { user_id: id, username: null, name: null, profile_image_url: null }
+      );
+
+      return { dontFollowBack, notFollowingBack };
+    },
+    staleTime: 120_000,
   });
 }
