@@ -161,6 +161,39 @@ export type Database = {
         }
         Relationships: []
       }
+      feedback_events: {
+        Row: {
+          action: string
+          created_at: string
+          id: string
+          meta: Json | null
+          polarity: number
+          related_tweet_id: string | null
+          source: string | null
+          tweet_id: string
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          id?: string
+          meta?: Json | null
+          polarity?: number
+          related_tweet_id?: string | null
+          source?: string | null
+          tweet_id: string
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          id?: string
+          meta?: Json | null
+          polarity?: number
+          related_tweet_id?: string | null
+          source?: string | null
+          tweet_id?: string
+        }
+        Relationships: []
+      }
       feeds: {
         Row: {
           created_at: string
@@ -379,72 +412,28 @@ export type Database = {
         }
         Relationships: []
       }
-      feedback_events: {
-        Row: {
-          id: string
-          tweet_id: string
-          related_tweet_id: string | null
-          action: string
-          polarity: number
-          meta: Json
-          source: string | null
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          tweet_id: string
-          related_tweet_id?: string | null
-          action: string
-          polarity?: number
-          meta?: Json
-          source?: string | null
-          created_at?: string
-        }
-        Update: {
-          id?: string
-          tweet_id?: string
-          related_tweet_id?: string | null
-          action?: string
-          polarity?: number
-          meta?: Json
-          source?: string | null
-          created_at?: string
-        }
-        Relationships: []
-      }
-      story_pair_blocklist: {
-        Row: {
-          tweet_a: string
-          tweet_b: string
-          reason: string | null
-          created_at: string
-        }
-        Insert: {
-          tweet_a: string
-          tweet_b: string
-          reason?: string | null
-          created_at?: string
-        }
-        Update: {
-          tweet_a?: string
-          tweet_b?: string
-          reason?: string | null
-          created_at?: string
-        }
-        Relationships: []
-      }
       posts: {
         Row: {
           account_id: string
           author_handle: string | null
+          background_context: Json | null
+          commentary_hook: string | null
+          commentary_question: string | null
+          composed_post_text: string | null
           created_at: string
           decision_reason: string | null
           delivery_decision: string | null
           dup_of_tweet_id: string | null
           dup_similarity: number | null
+          editorial_commentary: string | null
+          enrich_duration_ms: number | null
+          enrich_model: string | null
+          enrich_status: string | null
+          enrich_tokens: number | null
           feedback_locked: boolean
           final_score: number | null
           has_media: boolean | null
+          humanized_commentary: string | null
           hydrated_at: string | null
           hydration_source: string | null
           importance_reasoning: string | null
@@ -452,11 +441,15 @@ export type Database = {
           importance_tags: string[] | null
           is_truncated: boolean
           lang_original: string | null
+          narrative_callback: string | null
+          narrative_ref_post_id: string | null
+          post_format_hint: string | null
           score_axes: Json | null
           score_breakdown: Json | null
           story_cluster_id: string | null
           text_original: string | null
           text_translated: string | null
+          thread_continuation: string | null
           translated_at: string | null
           translation_duration_ms: number | null
           translation_job_id: string | null
@@ -469,14 +462,24 @@ export type Database = {
         Insert: {
           account_id: string
           author_handle?: string | null
+          background_context?: Json | null
+          commentary_hook?: string | null
+          commentary_question?: string | null
+          composed_post_text?: string | null
           created_at?: string
           decision_reason?: string | null
           delivery_decision?: string | null
           dup_of_tweet_id?: string | null
           dup_similarity?: number | null
+          editorial_commentary?: string | null
+          enrich_duration_ms?: number | null
+          enrich_model?: string | null
+          enrich_status?: string | null
+          enrich_tokens?: number | null
           feedback_locked?: boolean
           final_score?: number | null
           has_media?: boolean | null
+          humanized_commentary?: string | null
           hydrated_at?: string | null
           hydration_source?: string | null
           importance_reasoning?: string | null
@@ -484,11 +487,15 @@ export type Database = {
           importance_tags?: string[] | null
           is_truncated?: boolean
           lang_original?: string | null
+          narrative_callback?: string | null
+          narrative_ref_post_id?: string | null
+          post_format_hint?: string | null
           score_axes?: Json | null
           score_breakdown?: Json | null
           story_cluster_id?: string | null
           text_original?: string | null
           text_translated?: string | null
+          thread_continuation?: string | null
           translated_at?: string | null
           translation_duration_ms?: number | null
           translation_job_id?: string | null
@@ -501,14 +508,24 @@ export type Database = {
         Update: {
           account_id?: string
           author_handle?: string | null
+          background_context?: Json | null
+          commentary_hook?: string | null
+          commentary_question?: string | null
+          composed_post_text?: string | null
           created_at?: string
           decision_reason?: string | null
           delivery_decision?: string | null
           dup_of_tweet_id?: string | null
           dup_similarity?: number | null
+          editorial_commentary?: string | null
+          enrich_duration_ms?: number | null
+          enrich_model?: string | null
+          enrich_status?: string | null
+          enrich_tokens?: number | null
           feedback_locked?: boolean
           final_score?: number | null
           has_media?: boolean | null
+          humanized_commentary?: string | null
           hydrated_at?: string | null
           hydration_source?: string | null
           importance_reasoning?: string | null
@@ -516,11 +533,15 @@ export type Database = {
           importance_tags?: string[] | null
           is_truncated?: boolean
           lang_original?: string | null
+          narrative_callback?: string | null
+          narrative_ref_post_id?: string | null
+          post_format_hint?: string | null
           score_axes?: Json | null
           score_breakdown?: Json | null
           story_cluster_id?: string | null
           text_original?: string | null
           text_translated?: string | null
+          thread_continuation?: string | null
           translated_at?: string | null
           translation_duration_ms?: number | null
           translation_job_id?: string | null
@@ -537,6 +558,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "accounts"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "posts_narrative_ref_post_id_fkey"
+            columns: ["narrative_ref_post_id"]
+            isOneToOne: false
+            referencedRelation: "posts"
+            referencedColumns: ["tweet_id"]
           },
         ]
       }
@@ -564,6 +592,27 @@ export type Database = {
           key?: string
           updated_at?: string
           value?: Json
+        }
+        Relationships: []
+      }
+      story_pair_blocklist: {
+        Row: {
+          created_at: string
+          reason: string | null
+          tweet_a: string
+          tweet_b: string
+        }
+        Insert: {
+          created_at?: string
+          reason?: string | null
+          tweet_a: string
+          tweet_b: string
+        }
+        Update: {
+          created_at?: string
+          reason?: string | null
+          tweet_a?: string
+          tweet_b?: string
         }
         Relationships: []
       }
@@ -905,6 +954,7 @@ export type Database = {
           name: string | null
           prev_snapshot_id: string | null
           profile_image_url: string | null
+          reviewed: boolean
           user_id: string
           username: string | null
         }
@@ -917,6 +967,7 @@ export type Database = {
           name?: string | null
           prev_snapshot_id?: string | null
           profile_image_url?: string | null
+          reviewed?: boolean
           user_id: string
           username?: string | null
         }
@@ -929,6 +980,7 @@ export type Database = {
           name?: string | null
           prev_snapshot_id?: string | null
           profile_image_url?: string | null
+          reviewed?: boolean
           user_id?: string
           username?: string | null
         }
@@ -956,6 +1008,8 @@ export type Database = {
           error: string | null
           follower_count: number
           follower_ids: string[]
+          following_count: number
+          following_ids: string[]
           id: string
           next_token: string | null
           pages_fetched: number
@@ -969,6 +1023,8 @@ export type Database = {
           error?: string | null
           follower_count?: number
           follower_ids?: string[]
+          following_count?: number
+          following_ids?: string[]
           id?: string
           next_token?: string | null
           pages_fetched?: number
@@ -982,6 +1038,8 @@ export type Database = {
           error?: string | null
           follower_count?: number
           follower_ids?: string[]
+          following_count?: number
+          following_ids?: string[]
           id?: string
           next_token?: string | null
           pages_fetched?: number
@@ -1180,6 +1238,21 @@ export type Database = {
           tweet_id: string
         }[]
       }
+      find_similar_story_v2: {
+        Args: {
+          exclude_tweet_id: string
+          query_embedding: string
+          query_simhash: number
+          similarity_threshold?: number
+          window_hours?: number
+        }
+        Returns: {
+          simhash_distance: number
+          similarity: number
+          story_cluster_id: string
+          tweet_id: string
+        }[]
+      }
       get_dashboard_summary: { Args: never; Returns: Json }
       get_ingest_heartbeat: { Args: never; Returns: Json }
       get_old_media: {
@@ -1233,8 +1306,26 @@ export type Database = {
         }
         Returns: boolean
       }
+      invoke_x_poster_if_enabled: { Args: never; Returns: undefined }
+      knn_feedback_prior: {
+        Args: {
+          exclude_tweet_id: string
+          half_life_days?: number
+          k?: number
+          query_embedding: string
+        }
+        Returns: number
+      }
+      rebuild_learned_biases: {
+        Args: { half_life_days?: number; per_key_cap?: number }
+        Returns: Json
+      }
       reconcile_stuck_jobs: { Args: never; Returns: Json }
       retry_step: { Args: { step: string; tweet_id: string }; Returns: boolean }
+      verify_webhook_internal_token: {
+        Args: { p_token: string }
+        Returns: boolean
+      }
     }
     Enums: {
       app_role: "admin" | "viewer"
