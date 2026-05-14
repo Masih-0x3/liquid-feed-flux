@@ -430,8 +430,10 @@ Deno.serve(async (req) => {
   const results: Array<Record<string, unknown>> = [];
   const candidates = (posts || []).filter((p) => {
     if (!onlyTweetId && existing.has(p.tweet_id)) return false;
-    // Skip posts that shouldn't be posted: awaiting approval, pending enrichment, or rejected
-    if (['awaiting_approval', 'pending', 'rejected'].includes(p.enrich_status)) return false;
+    // Always block posts mid-enrichment
+    if (p.enrich_status === 'awaiting_approval' || p.enrich_status === 'pending') return false;
+    // Block rejected posts in normal runs, but allow force-posting (uses plain template)
+    if (!onlyTweetId && p.enrich_status === 'rejected') return false;
     return true;
   });
 
