@@ -109,7 +109,7 @@ export default function EnrichmentSettings() {
     try {
       const { error } = await supabase
         .from('settings')
-        .upsert([{ key: 'enrichment_config', value: config as unknown as Record<string, unknown>, updated_at: new Date().toISOString() }], { onConflict: 'key' });
+        .upsert([{ key: 'enrichment_config', value: config as never, updated_at: new Date().toISOString() }], { onConflict: 'key' });
       if (error) throw error;
       toast({ title: 'Saved', description: 'Enrichment configuration updated.' });
     } catch (e) {
@@ -124,7 +124,7 @@ export default function EnrichmentSettings() {
     try {
       const { error } = await supabase
         .from('settings')
-        .upsert([{ key: 'voice_samples', value: updated as unknown as Record<string, unknown>, updated_at: new Date().toISOString() }], { onConflict: 'key' });
+        .upsert([{ key: 'voice_samples', value: updated as never, updated_at: new Date().toISOString() }], { onConflict: 'key' });
       if (error) throw error;
       toast({ title: 'Saved', description: 'Voice samples updated.' });
     } catch (e) {
