@@ -944,6 +944,25 @@ ${post.text_original}`;
       translatedText = result.content;
     }
 
+    // GUARD: Empty translation = silent failure mode.
+    // Reasoning models (gpt-5.x-mini etc.) can burn the entire max_completion_tokens
+    // budget on hidden reasoning, returning a tool call with empty `translated_text`
+    // or empty content. If we persist that, `text_translated is not null` passes the
+    // delivery gate and Telegram's template falls back to the English original — so
+    // the user sees an English tweet delivered "without translation". Treat empty
+    // output as a transient failure and let the job retry.
+    if (!translatedText || !String(translatedText).trim()) {
+      const finishReason = (data?.choices?.[0]?.finish_reason as string | undefined)
+        ?? (data?.status as string | undefined)
+        ?? 'unknown';
+      const usage = data?.usage ?? null;
+      console.warn(JSON.stringify({
+        function: 'worker', action: 'empty_translation', tweet_id: tweetId,
+        model: config.openaiModel, finish_reason: finishReason, usage,
+      }));
+      throw new Error(`empty_translation: model=${config.openaiModel} finish_reason=${finishReason} (likely reasoning-token budget exhausted; raise openai_max_completion_tokens or lower reasoning_effort)`);
+    }
+
     const nowIso = new Date().toISOString();
     const resultMeta = {
       model: config.openaiModel,
