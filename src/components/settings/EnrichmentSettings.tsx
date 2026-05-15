@@ -95,7 +95,7 @@ export default function EnrichmentSettings() {
       if (data) {
         for (const row of data) {
           if (row.key === 'enrichment_config' && row.value) setConfig({ ...DEFAULT_CONFIG, ...(row.value as object) });
-          if (row.key === 'voice_samples' && row.value) setVoiceSamples(row.value as VoiceSamples);
+          if (row.key === 'voice_samples' && row.value) setVoiceSamples(row.value as unknown as VoiceSamples);
         }
       }
     } catch (e) {
@@ -109,7 +109,7 @@ export default function EnrichmentSettings() {
     try {
       const { error } = await supabase
         .from('settings')
-        .upsert({ key: 'enrichment_config', value: config as unknown as Record<string, unknown>, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+        .upsert([{ key: 'enrichment_config', value: config as unknown as Record<string, unknown>, updated_at: new Date().toISOString() }], { onConflict: 'key' });
       if (error) throw error;
       toast({ title: 'Saved', description: 'Enrichment configuration updated.' });
     } catch (e) {
@@ -124,7 +124,7 @@ export default function EnrichmentSettings() {
     try {
       const { error } = await supabase
         .from('settings')
-        .upsert({ key: 'voice_samples', value: updated as unknown as Record<string, unknown>, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+        .upsert([{ key: 'voice_samples', value: updated as unknown as Record<string, unknown>, updated_at: new Date().toISOString() }], { onConflict: 'key' });
       if (error) throw error;
       toast({ title: 'Saved', description: 'Voice samples updated.' });
     } catch (e) {

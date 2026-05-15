@@ -135,10 +135,9 @@ export function VersionBanner() {
       )}
 
       {bothFresh && (
-        <CheckCircle2
-          className="w-3 h-3 text-green-500 cursor-default"
-          title="Both dashboard and backend are recently deployed. Everything looks good."
-        />
+        <span title="Both dashboard and backend are recently deployed. Everything looks good.">
+          <CheckCircle2 className="w-3 h-3 text-green-500 cursor-default" />
+        </span>
       )}
     </div>
   );
