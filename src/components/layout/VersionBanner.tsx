@@ -87,7 +87,7 @@ export function VersionBanner() {
           `Version: ${frontendSha}\n` +
           (frontendTime ? `Built: ${fullDate(frontendTime)}\n` : '') +
           (uiStale
-            ? `\n⚠ This build is behind the backend.\nSync from GitHub in Lovable to get the latest UI.`
+            ? `\n⚠ This build is behind the backend.\nDeploy the latest GitHub commit to Vercel.`
             : `\nThis is up to date.`)
         }
       >

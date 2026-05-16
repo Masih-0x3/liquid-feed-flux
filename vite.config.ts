@@ -2,10 +2,12 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
 import { execSync } from "child_process";
-import { componentTagger } from "lovable-tagger";
 
 function gitSha(): string {
-  try { return execSync('git rev-parse --short HEAD').toString().trim(); }
+  if (process.env.VERCEL_GIT_COMMIT_SHA) {
+    return process.env.VERCEL_GIT_COMMIT_SHA.slice(0, 7);
+  }
+  try { return execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); }
   catch { return 'unknown'; }
 }
 
@@ -35,7 +37,7 @@ function manualChunks(id: string): string | undefined {
 }
 
 // https://vitejs.dev/config/
-export default defineConfig(({ mode }) => ({
+export default defineConfig(() => ({
   define: {
     __APP_VERSION_SHA__: JSON.stringify(gitSha()),
     __APP_VERSION_TIME__: JSON.stringify(new Date().toISOString()),
@@ -46,8 +48,6 @@ export default defineConfig(({ mode }) => ({
   },
   plugins: [
     react(),
-    mode === 'development' &&
-    componentTagger(),
   ].filter(Boolean),
   resolve: {
     alias: {

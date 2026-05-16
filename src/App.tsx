@@ -6,7 +6,8 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { lazy, Suspense } from "react";
-import { Loader2 } from "lucide-react";
+import { AlertTriangle, Loader2 } from "lucide-react";
+import { supabaseConfigError, missingSupabaseEnv } from "@/integrations/supabase/client";
 import AuthPage from "./pages/AuthPage";
 import NotFound from "./pages/NotFound";
 
@@ -19,7 +20,7 @@ function lazyWithRetry<T extends React.ComponentType<unknown>>(
     try {
       return await factory();
     } catch (err) {
-      const reloadKey = "lovable_chunk_reloaded";
+      const reloadKey = "xot_chunk_reloaded";
       if (!sessionStorage.getItem(reloadKey)) {
         sessionStorage.setItem(reloadKey, "1");
         window.location.reload();
@@ -48,7 +49,37 @@ function PageLoader() {
   );
 }
 
+function ConfigErrorScreen() {
+  return (
+    <div className="min-h-screen bg-background text-foreground flex items-center justify-center p-6">
+      <div className="glass-panel max-w-lg rounded-lg border border-destructive/40 p-6 shadow-lg">
+        <div className="flex items-start gap-3">
+          <AlertTriangle className="mt-1 h-5 w-5 text-destructive" />
+          <div className="space-y-3">
+            <div>
+              <h1 className="text-lg font-semibold">Deployment configuration is missing</h1>
+              <p className="mt-1 text-sm text-muted-foreground">
+                XOT cannot connect to Supabase because the hosting environment is missing required Vite variables.
+              </p>
+            </div>
+            <div className="rounded-md bg-muted p-3 text-sm">
+              <div className="font-medium">Missing variables</div>
+              <ul className="mt-2 list-disc pl-5 text-muted-foreground">
+                {missingSupabaseEnv.map((name) => <li key={name}>{name}</li>)}
+              </ul>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Set these in Vercel Project Settings, then redeploy. Do not commit local .env files.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const App = () => (
+  supabaseConfigError ? <ConfigErrorScreen /> :
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
       <TooltipProvider>

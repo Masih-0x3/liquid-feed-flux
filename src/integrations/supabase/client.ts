@@ -5,9 +5,17 @@ import type { Database } from './types';
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
-if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
-  throw new Error('Missing VITE_SUPABASE_URL or VITE_SUPABASE_PUBLISHABLE_KEY');
-}
+export const missingSupabaseEnv = [
+  !SUPABASE_URL ? 'VITE_SUPABASE_URL' : null,
+  !SUPABASE_PUBLISHABLE_KEY ? 'VITE_SUPABASE_PUBLISHABLE_KEY' : null,
+].filter(Boolean) as string[];
+
+export const supabaseConfigError = missingSupabaseEnv.length > 0
+  ? `Missing ${missingSupabaseEnv.join(' and ')}`
+  : null;
+
+const resolvedSupabaseUrl = SUPABASE_URL || 'https://missing-supabase-url.invalid';
+const resolvedSupabaseKey = SUPABASE_PUBLISHABLE_KEY || 'missing-supabase-publishable-key';
 
 const getAuthStorage = () => {
   if (typeof window === 'undefined' || !window.localStorage) return undefined;
@@ -24,7 +32,7 @@ const authStorage = getAuthStorage();
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
 
-export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+export const supabase = createClient<Database>(resolvedSupabaseUrl, resolvedSupabaseKey, {
   auth: {
     ...(authStorage ? { storage: authStorage } : {}),
     persistSession: true,

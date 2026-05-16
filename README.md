@@ -82,6 +82,9 @@ Copy `.env.example` to `.env` and populate:
 | `VITE_SUPABASE_PUBLISHABLE_KEY` | Supabase anon/public key |
 | `VITE_SUPABASE_PROJECT_ID` | Supabase project ref |
 
+Production builds validate these values before bundling. Missing or placeholder
+values fail the build instead of producing a blank browser screen.
+
 ### Edge Function Secrets (Supabase Dashboard → Settings → Edge Functions)
 
 | Secret | Purpose |
@@ -97,6 +100,7 @@ Copy `.env.example` to `.env` and populate:
 |---------|---------|
 | `npm run dev` | Start dev server |
 | `npm run build` | Production build |
+| `npm run check:vite-env` | Validate required frontend environment variables |
 | `npm run lint` | ESLint check |
 | `npm test` | Run Vitest tests |
 | `npm run test:watch` | Watch mode tests |
@@ -104,12 +108,27 @@ Copy `.env.example` to `.env` and populate:
 
 ## CI/CD
 
-GitHub Actions (`.github/workflows/ci.yml`) runs lint → test → build on push/PR to `main`.  
+GitHub Actions (`.github/workflows/ci.yml`) runs lint → test → env validation → build on push/PR to `main`.
+Set `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, and `VITE_SUPABASE_PROJECT_ID`
+as GitHub repository secrets before relying on CI builds.
 Pre-commit hooks (husky + lint-staged) run ESLint and TypeScript checks on staged files.
 
 ## Deployment
 
-Push to `main` triggers auto-deploy via Lovable. Edge functions deploy automatically.
+The frontend is hosted on Vercel. Vercel should be connected to this GitHub repo
+with the Vite framework preset, `npm run build` as the build command, and `dist`
+as the output directory. The committed `vercel.json` includes SPA rewrites so
+direct route refreshes like `/monitoring` and `/x-account` resolve to `index.html`.
+
+Supabase remains the backend for Auth, Postgres, Storage, Edge Functions, and cron.
+Deploy Edge Functions separately with:
+
+```bash
+./scripts/deploy-functions.sh
+```
+
+After changing the production Vercel URL or custom domain, update Supabase Auth
+URL configuration and the Edge Function `ALLOWED_CORS_ORIGIN` secret.
 
 ## Documentation
 
@@ -117,6 +136,7 @@ Push to `main` triggers auto-deploy via Lovable. Edge functions deploy automatic
 |----------|---------|
 | [`docs/todo_monitoring.md`](docs/todo_monitoring.md) | Pipeline architecture and monitoring |
 | [`docs/operations/runbooks.md`](docs/operations/runbooks.md) | Queue management, prompt/template management, secret rotation, incident response |
+| [`docs/operations/vercel-cutover.md`](docs/operations/vercel-cutover.md) | Vercel frontend hosting setup and Lovable exit checklist |
 | [`docs/operations/backup-restore.md`](docs/operations/backup-restore.md) | Backup and restore procedures |
 | [`docs/roadmap/todo_analytics.md`](docs/roadmap/todo_analytics.md) | Telegram analytics implementation guide |
 
