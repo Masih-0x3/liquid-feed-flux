@@ -27,6 +27,7 @@ import {
   runScoringPolicy,
   type ScoringPolicyResult,
 } from "../_shared/scoringPolicy.ts";
+import { applyLearnedFeedbackBias, type FeedbackBiasResult } from "../_shared/feedbackBias.ts";
 
 export {
   SCORE_AXIS_KEYS,
@@ -674,6 +675,126 @@ ${post.text_original}`;
     let scoringPolicyResult: ScoringPolicyResult | null = null;
     const scoringPolicyEnabled = scoringPolicyConfigured;
     const scoringPolicyActive = scoringPolicyEnabled && (config.scoringPolicy?.mode === 'active' || forceScoringV2);
+    let splitDecisionState: FeedbackBiasResult | null = null;
+
+    const activeFeedbackThreshold = () => {
+      if (typeof config.editorialProfile?.threshold === 'number') return config.editorialProfile.threshold;
+      const authorRule = authorHandle ? config.contentFilter.author_rules[authorHandle] : null;
+      if (authorRule?.rule === 'custom_threshold' && authorRule.threshold != null) {
+        return authorRule.threshold;
+      }
+      return config.contentFilter.default_threshold;
+    };
+
+    const buildBaseDecisionState = (): Omit<FeedbackBiasResult, 'scoreBreakdown'> => {
+      let deliveryDecision = 'deliver';
+      let decisionReason: string | null = null;
+      let finalScore: number | null = scoringPolicyActive && scoringPolicyResult
+        ? scoringPolicyResult.final_score
+        : scoreAxes ? computeFinalScore(scoreAxes) : (importanceScore ?? null);
+
+      if (filterEnabled && scoringPolicyActive && scoringPolicyResult && !scoreOnly) {
+        deliveryDecision = scoringPolicyResult.delivery_decision;
+        decisionReason = scoringPolicyResult.decision_reason;
+        finalScore = scoringPolicyResult.final_score;
+        importanceScore = Math.round(scoringPolicyResult.final_score);
+        importanceTags = scoringPolicyResult.tags;
+        importanceReasoning = scoringPolicyResult.audience_reason;
+        scoreAxes = scoringPolicyResult.axes as ScoreAxes;
+        console.log(JSON.stringify({
+          function: 'worker',
+          action: 'filter_decision_v2',
+          tweet_id: tweetId,
+          decision: deliveryDecision,
+          final_score: finalScore,
+          audience_class: scoringPolicyResult.audience_class,
+          profile: scoringPolicyResult.profile_id,
+          reason: decisionReason,
+        }));
+      } else if (legacyFilterEnabled && importanceScore !== null && !scoreOnly) {
+        if (config.editorialProfile) {
+          const r = applyProfileDecision({
+            profile: config.editorialProfile,
+            axes: scoreAxes,
+            legacyScore: importanceScore,
+            tags: importanceTags,
+            text: String(post.text_original || ''),
+            authorHandle,
+          });
+          deliveryDecision = r.decision;
+          decisionReason = r.reason;
+          finalScore = r.finalScore;
+          console.log(JSON.stringify({ function: 'worker', action: 'filter_decision', tweet_id: tweetId, decision: deliveryDecision, score: importanceScore, final_score: finalScore, profile: config.editorialProfile.id, author: authorHandle, reason: decisionReason }));
+        } else {
+          const authorRule = authorHandle ? config.contentFilter.author_rules[authorHandle] : null;
+          if (authorRule?.rule === 'always_deliver') {
+            deliveryDecision = 'deliver';
+            decisionReason = `author_rule:always_deliver:${authorHandle}`;
+          } else if (authorRule?.rule === 'always_skip') {
+            deliveryDecision = 'skip';
+            decisionReason = `author_rule:always_skip:${authorHandle}`;
+          } else {
+            const threshold = authorRule?.rule === 'custom_threshold' && authorRule.threshold != null
+              ? authorRule.threshold
+              : config.contentFilter.default_threshold;
+            deliveryDecision = importanceScore >= threshold ? 'deliver' : 'skip';
+            decisionReason = deliveryDecision === 'deliver'
+              ? `score_pass:${importanceScore}>=${threshold}`
+              : `below_threshold:${importanceScore}<${threshold}`;
+          }
+          console.log(JSON.stringify({ function: 'worker', action: 'filter_decision', tweet_id: tweetId, decision: deliveryDecision, score: importanceScore, threshold: config.contentFilter.default_threshold, author: authorHandle, reason: decisionReason }));
+        }
+      } else if (scoreOnly) {
+        decisionReason = 'score_only_mode';
+      } else if (!legacyFilterEnabled && !scoringPolicyActive) {
+        decisionReason = 'filter_disabled';
+      }
+
+      return { deliveryDecision, decisionReason, finalScore };
+    };
+
+    const applyFeedbackBiasToDecision = async (
+      state: Omit<FeedbackBiasResult, 'scoreBreakdown'>,
+    ): Promise<FeedbackBiasResult> => {
+      if (state.finalScore === null) {
+        return { ...state, scoreBreakdown: null };
+      }
+      try {
+        const { data: biasRow } = await supabase.from('settings').select('value').eq('key', 'learned_biases').maybeSingle();
+        let knnPrior = 0;
+        const { data: sigRow } = await supabase.from('story_signatures').select('embedding').eq('tweet_id', tweetId).maybeSingle();
+        if (sigRow?.embedding) {
+          const { data: knnVal } = await supabase.rpc('knn_feedback_prior', { query_embedding: sigRow.embedding, exclude_tweet_id: tweetId });
+          knnPrior = typeof knnVal === 'number' ? knnVal : 0;
+        }
+
+        return applyLearnedFeedbackBias({
+          deliveryDecision: state.deliveryDecision,
+          decisionReason: state.decisionReason,
+          finalScore: state.finalScore,
+          filterEnabled,
+          scoreOnly,
+          threshold: activeFeedbackThreshold(),
+          authorHandle,
+          tags: importanceTags,
+          learnedBiases: biasRow?.value ?? {},
+          knnPrior,
+          scoringV2: scoringPolicyResult ? {
+            mode: scoringPolicyActive ? 'active' : 'shadow',
+            profile_id: scoringPolicyResult.profile_id,
+            audience_class: scoringPolicyResult.audience_class,
+            audience_confidence: scoringPolicyResult.audience_confidence,
+            cap: scoringPolicyResult.cap,
+            threshold: scoringPolicyResult.threshold,
+            adjudicated: scoringPolicyResult.adjudicated,
+          } : null,
+        });
+      } catch (biasErr) {
+        console.warn('feedback bias (non-fatal):', (biasErr as Error).message);
+        return { ...state, scoreBreakdown: null };
+      }
+    };
+
     if (filterEnabled && config.splitCalls) {
       if (scoringPolicyEnabled) {
         console.log(JSON.stringify({
@@ -768,37 +889,19 @@ ${post.text_original}`;
       }
       }
 
-      // Decide gate BEFORE translating
-      let preDecision = 'deliver';
-      if (scoringPolicyActive && scoringPolicyResult) {
-        importanceScore = Math.round(scoringPolicyResult.final_score);
-        importanceTags = scoringPolicyResult.tags;
-        importanceReasoning = scoringPolicyResult.audience_reason;
-        scoreAxes = scoringPolicyResult.axes as ScoreAxes;
-        preDecision = scoringPolicyResult.delivery_decision;
-      } else if (legacyFilterEnabled && importanceScore !== null && !scoreOnly) {
-        if (config.editorialProfile) {
-          const r = applyProfileDecision({
-            profile: config.editorialProfile,
-            axes: scoreAxes,
-            legacyScore: importanceScore,
-            tags: importanceTags,
-            text: String(post.text_original || ''),
-            authorHandle,
-          });
-          preDecision = r.decision;
-        } else {
-          const authorRule = authorHandle ? config.contentFilter.author_rules[authorHandle] : null;
-          if (authorRule?.rule === 'always_deliver') preDecision = 'deliver';
-          else if (authorRule?.rule === 'always_skip') preDecision = 'skip';
-          else {
-            const threshold = authorRule?.rule === 'custom_threshold' && authorRule.threshold != null
-              ? authorRule.threshold
-              : config.contentFilter.default_threshold;
-            preDecision = importanceScore >= threshold ? 'deliver' : 'skip';
-          }
-        }
-      }
+      // Decide gate BEFORE translating. Learned feedback must be applied here,
+      // otherwise a below-threshold item can skip translation and later become
+      // deliverable via feedback_boost with no Persian text persisted.
+      splitDecisionState = await applyFeedbackBiasToDecision(buildBaseDecisionState());
+      const preDecision = splitDecisionState.deliveryDecision;
+      console.log(JSON.stringify({
+        function: 'worker',
+        action: 'pre_translation_gate',
+        tweet_id: tweetId,
+        decision: preDecision,
+        final_score: splitDecisionState.finalScore,
+        reason: splitDecisionState.decisionReason,
+      }));
 
       // Translate only if passing the gate (or in score_only mode where we still translate everything)
       if (preDecision === 'deliver' || scoreOnly) {
@@ -941,124 +1044,14 @@ ${post.text_original}`;
       await supabase.from('jobs').update({ result_meta: resultMeta }).eq('id', job.id);
     } catch (_e) { /* best-effort */ }
 
-    // Determine delivery decision based on active editorial profile or legacy content filter
-    let deliveryDecision = 'deliver';
-    let decisionReason: string | null = null;
-    let finalScore: number | null = scoringPolicyActive && scoringPolicyResult
-      ? scoringPolicyResult.final_score
-      : scoreAxes ? computeFinalScore(scoreAxes) : (importanceScore ?? null);
-    if (filterEnabled && scoringPolicyActive && scoringPolicyResult && !scoreOnly) {
-      deliveryDecision = scoringPolicyResult.delivery_decision;
-      decisionReason = scoringPolicyResult.decision_reason;
-      finalScore = scoringPolicyResult.final_score;
-      importanceScore = Math.round(scoringPolicyResult.final_score);
-      importanceTags = scoringPolicyResult.tags;
-      importanceReasoning = scoringPolicyResult.audience_reason;
-      console.log(JSON.stringify({
-        function: 'worker',
-        action: 'filter_decision_v2',
-        tweet_id: tweetId,
-        decision: deliveryDecision,
-        final_score: finalScore,
-        audience_class: scoringPolicyResult.audience_class,
-        profile: scoringPolicyResult.profile_id,
-        reason: decisionReason,
-      }));
-    } else if (legacyFilterEnabled && importanceScore !== null && !scoreOnly) {
-      if (config.editorialProfile) {
-        const r = applyProfileDecision({
-          profile: config.editorialProfile,
-          axes: scoreAxes,
-          legacyScore: importanceScore,
-          tags: importanceTags,
-          text: String(post.text_original || ''),
-          authorHandle,
-        });
-        deliveryDecision = r.decision;
-        decisionReason = r.reason;
-        finalScore = r.finalScore;
-        console.log(JSON.stringify({ function: 'worker', action: 'filter_decision', tweet_id: tweetId, decision: deliveryDecision, score: importanceScore, final_score: finalScore, profile: config.editorialProfile.id, author: authorHandle, reason: decisionReason }));
-      } else {
-        // Legacy content_filter path
-        const authorRule = authorHandle ? config.contentFilter.author_rules[authorHandle] : null;
-        if (authorRule?.rule === 'always_deliver') {
-          deliveryDecision = 'deliver';
-          decisionReason = `author_rule:always_deliver:${authorHandle}`;
-        } else if (authorRule?.rule === 'always_skip') {
-          deliveryDecision = 'skip';
-          decisionReason = `author_rule:always_skip:${authorHandle}`;
-        } else {
-          const threshold = authorRule?.rule === 'custom_threshold' && authorRule.threshold != null
-            ? authorRule.threshold
-            : config.contentFilter.default_threshold;
-          deliveryDecision = importanceScore >= threshold ? 'deliver' : 'skip';
-          decisionReason = deliveryDecision === 'deliver'
-            ? `score_pass:${importanceScore}>=${threshold}`
-            : `below_threshold:${importanceScore}<${threshold}`;
-        }
-        console.log(JSON.stringify({ function: 'worker', action: 'filter_decision', tweet_id: tweetId, decision: deliveryDecision, score: importanceScore, threshold: config.contentFilter.default_threshold, author: authorHandle, reason: decisionReason }));
-      }
-    } else if (scoreOnly) {
-      decisionReason = 'score_only_mode';
-    } else if (!legacyFilterEnabled && !scoringPolicyActive) {
-      decisionReason = 'filter_disabled';
-    }
-
-    // Feedback bias + kNN prior: adjust finalScore with learned signals
-    let scoreBreakdown: Record<string, unknown> | null = null;
-    if (finalScore !== null) {
-      try {
-        const { data: biasRow } = await supabase.from('settings').select('value').eq('key', 'learned_biases').maybeSingle();
-        const biases = (biasRow?.value ?? {}) as { author_bias?: Record<string, number>; tag_bias?: Record<string, number> };
-        const authorDelta = authorHandle ? (biases.author_bias?.[(authorHandle).toLowerCase()] ?? 0) : 0;
-        let tagDelta = 0;
-        for (const t of importanceTags ?? []) tagDelta += biases.tag_bias?.[String(t).toLowerCase()] ?? 0;
-        tagDelta = Math.max(-2, Math.min(2, tagDelta));
-
-        let knnPrior = 0;
-        const { data: sigRow } = await supabase.from('story_signatures').select('embedding').eq('tweet_id', tweetId).maybeSingle();
-        if (sigRow?.embedding) {
-          const { data: knnVal } = await supabase.rpc('knn_feedback_prior', { query_embedding: sigRow.embedding, exclude_tweet_id: tweetId });
-          knnPrior = typeof knnVal === 'number' ? knnVal : 0;
-        }
-
-        const totalBias = Math.max(-5, Math.min(5, authorDelta + tagDelta + knnPrior));
-        const aiFinal = finalScore;
-        if (totalBias !== 0) {
-          finalScore = Math.max(1, Math.min(20, Math.round((finalScore + totalBias) * 10) / 10));
-          if (filterEnabled && !scoreOnly) {
-            const thr = config.editorialProfile?.threshold ?? config.contentFilter.default_threshold;
-            if (finalScore >= thr && deliveryDecision === 'skip' && (decisionReason ?? '').startsWith('below_threshold')) {
-              deliveryDecision = 'deliver';
-              decisionReason = `feedback_boost:${aiFinal.toFixed(1)}+${totalBias.toFixed(1)}>=${thr}`;
-            } else if (finalScore < thr && deliveryDecision === 'deliver' && (decisionReason ?? '').startsWith('score_pass')) {
-              deliveryDecision = 'skip';
-              decisionReason = `feedback_reduce:${aiFinal.toFixed(1)}+${totalBias.toFixed(1)}<${thr}`;
-            }
-          }
-        }
-        scoreBreakdown = {
-          ai: Math.round(aiFinal * 10) / 10,
-          ...(authorDelta ? { author_bias: Math.round(authorDelta * 1000) / 1000 } : {}),
-          ...(tagDelta ? { tag_bias: Math.round(tagDelta * 1000) / 1000 } : {}),
-          ...(knnPrior ? { knn_prior: Math.round(knnPrior * 1000) / 1000 } : {}),
-          final: Math.round(finalScore * 10) / 10,
-          ...(scoringPolicyResult ? {
-            scoring_v2: {
-              mode: scoringPolicyActive ? 'active' : 'shadow',
-              profile_id: scoringPolicyResult.profile_id,
-              audience_class: scoringPolicyResult.audience_class,
-              audience_confidence: scoringPolicyResult.audience_confidence,
-              cap: scoringPolicyResult.cap,
-              threshold: scoringPolicyResult.threshold,
-              adjudicated: scoringPolicyResult.adjudicated,
-            },
-          } : {}),
-        };
-      } catch (biasErr) {
-        console.warn('feedback bias (non-fatal):', (biasErr as Error).message);
-      }
-    }
+    // Determine delivery decision based on active editorial profile or legacy
+    // content filter. In split mode this was already computed before translation
+    // so feedback-boosted posts could receive a translation before delivery.
+    const finalDecisionState = splitDecisionState ?? await applyFeedbackBiasToDecision(buildBaseDecisionState());
+    const deliveryDecision = finalDecisionState.deliveryDecision;
+    const decisionReason = finalDecisionState.decisionReason;
+    const finalScore = finalDecisionState.finalScore;
+    const scoreBreakdown = finalDecisionState.scoreBreakdown;
 
     const { error: updateError } = await supabase
       .from('posts')
