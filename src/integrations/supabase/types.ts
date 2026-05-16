@@ -412,6 +412,133 @@ export type Database = {
         }
         Relationships: []
       }
+      enrichment_research_cache: {
+        Row: {
+          cache_key: string
+          created_at: string
+          expires_at: string
+          model: string | null
+          post_id: string | null
+          research: Json
+          source_hash: string | null
+          source_url: string | null
+        }
+        Insert: {
+          cache_key: string
+          created_at?: string
+          expires_at: string
+          model?: string | null
+          post_id?: string | null
+          research: Json
+          source_hash?: string | null
+          source_url?: string | null
+        }
+        Update: {
+          cache_key?: string
+          created_at?: string
+          expires_at?: string
+          model?: string | null
+          post_id?: string | null
+          research?: Json
+          source_hash?: string | null
+          source_url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "enrichment_research_cache_post_id_fkey"
+            columns: ["post_id"]
+            isOneToOne: false
+            referencedRelation: "posts"
+            referencedColumns: ["tweet_id"]
+          },
+        ]
+      }
+      post_enrichments: {
+        Row: {
+          aggregator_risk_score: number | null
+          ai_voice_risk_score: number | null
+          algorithm_signal_scores: Json
+          approved_at: string | null
+          created_at: string
+          creator_angle: string | null
+          critic_output: Json
+          enrichment_review_reason: string | null
+          feedback_at: string | null
+          feedback_label: string | null
+          feedback_note: string | null
+          final_x_text: string | null
+          format_used: string | null
+          id: string
+          model: string
+          monetization_risk_flags: string[]
+          post_id: string
+          rejected_at: string | null
+          source_context: Json | null
+          status: string
+          thread_continuation: string | null
+          version: string
+          why_it_matters: string | null
+        }
+        Insert: {
+          aggregator_risk_score?: number | null
+          ai_voice_risk_score?: number | null
+          algorithm_signal_scores?: Json
+          approved_at?: string | null
+          created_at?: string
+          creator_angle?: string | null
+          critic_output?: Json
+          enrichment_review_reason?: string | null
+          feedback_at?: string | null
+          feedback_label?: string | null
+          feedback_note?: string | null
+          final_x_text?: string | null
+          format_used?: string | null
+          id?: string
+          model: string
+          monetization_risk_flags?: string[]
+          post_id: string
+          rejected_at?: string | null
+          source_context?: Json | null
+          status?: string
+          thread_continuation?: string | null
+          version?: string
+          why_it_matters?: string | null
+        }
+        Update: {
+          aggregator_risk_score?: number | null
+          ai_voice_risk_score?: number | null
+          algorithm_signal_scores?: Json
+          approved_at?: string | null
+          created_at?: string
+          creator_angle?: string | null
+          critic_output?: Json
+          enrichment_review_reason?: string | null
+          feedback_at?: string | null
+          feedback_label?: string | null
+          feedback_note?: string | null
+          final_x_text?: string | null
+          format_used?: string | null
+          id?: string
+          model?: string
+          monetization_risk_flags?: string[]
+          post_id?: string
+          rejected_at?: string | null
+          source_context?: Json | null
+          status?: string
+          thread_continuation?: string | null
+          version?: string
+          why_it_matters?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "post_enrichments_post_id_fkey"
+            columns: ["post_id"]
+            isOneToOne: false
+            referencedRelation: "posts"
+            referencedColumns: ["tweet_id"]
+          },
+        ]
+      }
       posts: {
         Row: {
           account_id: string
@@ -432,11 +559,18 @@ export type Database = {
           dup_of_tweet_id: string | null
           dup_similarity: number | null
           editorial_commentary: string | null
+          enrichment_review_reason: string | null
+          enrichment_version: string | null
           enrich_duration_ms: number | null
           enrich_model: string | null
           enrich_status: string | null
           enrich_tokens: number | null
+          aggregator_risk_score: number | null
+          ai_voice_risk_score: number | null
+          algorithm_signal_scores: Json | null
+          creator_angle: string | null
           feedback_locked: boolean
+          final_x_text: string | null
           final_score: number | null
           has_media: boolean | null
           humanized_commentary: string | null
@@ -447,11 +581,13 @@ export type Database = {
           importance_tags: string[] | null
           is_truncated: boolean
           lang_original: string | null
+          monetization_risk_flags: string[] | null
           narrative_callback: string | null
           narrative_ref_post_id: string | null
           post_format_hint: string | null
           score_axes: Json | null
           score_breakdown: Json | null
+          source_context: Json | null
           story_cluster_id: string | null
           text_original: string | null
           text_translated: string | null
@@ -464,6 +600,7 @@ export type Database = {
           tweet_id: string
           tweeted_at: string | null
           url: string | null
+          why_it_matters: string | null
         }
         Insert: {
           account_id: string
@@ -484,11 +621,18 @@ export type Database = {
           dup_of_tweet_id?: string | null
           dup_similarity?: number | null
           editorial_commentary?: string | null
+          enrichment_review_reason?: string | null
+          enrichment_version?: string | null
           enrich_duration_ms?: number | null
           enrich_model?: string | null
           enrich_status?: string | null
           enrich_tokens?: number | null
+          aggregator_risk_score?: number | null
+          ai_voice_risk_score?: number | null
+          algorithm_signal_scores?: Json | null
+          creator_angle?: string | null
           feedback_locked?: boolean
+          final_x_text?: string | null
           final_score?: number | null
           has_media?: boolean | null
           humanized_commentary?: string | null
@@ -499,11 +643,13 @@ export type Database = {
           importance_tags?: string[] | null
           is_truncated?: boolean
           lang_original?: string | null
+          monetization_risk_flags?: string[] | null
           narrative_callback?: string | null
           narrative_ref_post_id?: string | null
           post_format_hint?: string | null
           score_axes?: Json | null
           score_breakdown?: Json | null
+          source_context?: Json | null
           story_cluster_id?: string | null
           text_original?: string | null
           text_translated?: string | null
@@ -516,6 +662,7 @@ export type Database = {
           tweet_id: string
           tweeted_at?: string | null
           url?: string | null
+          why_it_matters?: string | null
         }
         Update: {
           account_id?: string
@@ -536,11 +683,18 @@ export type Database = {
           dup_of_tweet_id?: string | null
           dup_similarity?: number | null
           editorial_commentary?: string | null
+          enrichment_review_reason?: string | null
+          enrichment_version?: string | null
           enrich_duration_ms?: number | null
           enrich_model?: string | null
           enrich_status?: string | null
           enrich_tokens?: number | null
+          aggregator_risk_score?: number | null
+          ai_voice_risk_score?: number | null
+          algorithm_signal_scores?: Json | null
+          creator_angle?: string | null
           feedback_locked?: boolean
+          final_x_text?: string | null
           final_score?: number | null
           has_media?: boolean | null
           humanized_commentary?: string | null
@@ -551,11 +705,13 @@ export type Database = {
           importance_tags?: string[] | null
           is_truncated?: boolean
           lang_original?: string | null
+          monetization_risk_flags?: string[] | null
           narrative_callback?: string | null
           narrative_ref_post_id?: string | null
           post_format_hint?: string | null
           score_axes?: Json | null
           score_breakdown?: Json | null
+          source_context?: Json | null
           story_cluster_id?: string | null
           text_original?: string | null
           text_translated?: string | null
@@ -568,6 +724,7 @@ export type Database = {
           tweet_id?: string
           tweeted_at?: string | null
           url?: string | null
+          why_it_matters?: string | null
         }
         Relationships: [
           {

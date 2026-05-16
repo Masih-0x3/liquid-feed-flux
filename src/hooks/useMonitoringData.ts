@@ -54,12 +54,22 @@ export interface MonitoringEntry {
   score_breakdown: { ai?: number; author_bias?: number; tag_bias?: number; knn_prior?: number; final?: number; scoring_v2?: Record<string, unknown> } | null;
   feedback_locked: boolean;
   enrich_status: string | null;
+  enrichment_version: string | null;
   editorial_commentary: string | null;
   humanized_commentary: string | null;
   commentary_hook: string | null;
   commentary_question: string | null;
   narrative_callback: string | null;
   composed_post_text: string | null;
+  creator_angle: string | null;
+  why_it_matters: string | null;
+  source_context: { attribution_policy?: string; source_label?: string | null; source_url?: string | null; sources?: string[] } | null;
+  algorithm_signal_scores: Record<string, number> | null;
+  aggregator_risk_score: number | null;
+  ai_voice_risk_score: number | null;
+  monetization_risk_flags: string[] | null;
+  enrichment_review_reason: string | null;
+  final_x_text: string | null;
   post_format_hint: string | null;
   background_context: { background_summary?: string; key_facts?: string[]; related_events?: string; sources?: string[] } | null;
   enrich_tokens: number | null;
@@ -163,9 +173,11 @@ export interface XApiSummary {
 
 const PAGE_SIZE = 50;
 const BASE_POST_COLUMNS = 'tweet_id, text_original, text_translated, url, created_at, translated_at, has_media, lang_original, author_handle, importance_score, importance_tags, importance_reasoning, delivery_decision, score_axes, final_score, decision_reason, dup_of_tweet_id, story_cluster_id, dup_similarity, score_breakdown, feedback_locked, enrich_status, editorial_commentary, humanized_commentary, commentary_hook, commentary_question, narrative_callback, composed_post_text, post_format_hint, background_context, enrich_tokens, enrich_duration_ms, accounts!inner(handle, display_name)';
+const ENRICHMENT_V2_POST_COLUMNS = 'enrichment_version, creator_angle, why_it_matters, source_context, algorithm_signal_scores, aggregator_risk_score, ai_voice_risk_score, monetization_risk_flags, enrichment_review_reason, final_x_text';
 const DEDUPE_POST_COLUMNS = 'dedupe_status, dedupe_checked_at, dedupe_method, dedupe_confidence, dedupe_reason, dedupe_new_facts';
 const SCORING_V2_POST_COLUMNS = 'scoring_version, scoring_profile_id, audience_class, audience_confidence, audience_reason, global_exception_class, score_review_status';
-const POST_COLUMNS = `${BASE_POST_COLUMNS}, ${DEDUPE_POST_COLUMNS}, ${SCORING_V2_POST_COLUMNS}`;
+const POST_COLUMNS = `${BASE_POST_COLUMNS}, ${ENRICHMENT_V2_POST_COLUMNS}, ${DEDUPE_POST_COLUMNS}, ${SCORING_V2_POST_COLUMNS}`;
+const POST_COLUMNS_NO_ENRICHMENT_V2 = `${BASE_POST_COLUMNS}, ${DEDUPE_POST_COLUMNS}, ${SCORING_V2_POST_COLUMNS}`;
 
 type LegacyFilter = 'all' | 'failed' | 'awaiting-review';
 type LegacyPostRow = {
@@ -226,7 +238,7 @@ function sanitizeSearch(search: string): string {
 
 function isMissingDedupeColumnError(error: unknown): boolean {
   const message = String((error as { message?: unknown })?.message ?? error ?? '');
-  return /posts\.(dedupe_|scoring_|audience_|global_exception_class|score_review_status)|dedupe_(status|checked_at|method|confidence|reason|new_facts)|scoring_(version|profile_id)|audience_(class|confidence|reason)|score_review_status|global_exception_class/i.test(message)
+  return /posts\.(dedupe_|scoring_|audience_|global_exception_class|score_review_status|enrichment_|creator_angle|why_it_matters|source_context|algorithm_signal_scores|aggregator_risk_score|ai_voice_risk_score|monetization_risk_flags|final_x_text)|dedupe_(status|checked_at|method|confidence|reason|new_facts)|scoring_(version|profile_id)|audience_(class|confidence|reason)|score_review_status|global_exception_class|enrichment_version|creator_angle|why_it_matters|source_context|algorithm_signal_scores|aggregator_risk_score|ai_voice_risk_score|monetization_risk_flags|enrichment_review_reason|final_x_text/i.test(message)
     && /does not exist|column|schema cache/i.test(message);
 }
 
@@ -278,6 +290,12 @@ async function fetchLegacyMonitoringPage(
   const primaryResult = await fetchPostsPage(POST_COLUMNS, from, to, tweetIds, term);
   postsData = (primaryResult.data ?? null) as unknown as LegacyPostRow[] | null;
   postsError = primaryResult.error;
+
+  if (postsError && isMissingDedupeColumnError(postsError)) {
+    const enrichmentFallback = await fetchPostsPage(POST_COLUMNS_NO_ENRICHMENT_V2, from, to, tweetIds, term);
+    postsData = (enrichmentFallback.data ?? null) as unknown as LegacyPostRow[] | null;
+    postsError = enrichmentFallback.error;
+  }
 
   if (postsError && isMissingDedupeColumnError(postsError)) {
     const fallbackResult = await fetchPostsPage(BASE_POST_COLUMNS, from, to, tweetIds, term);
@@ -363,12 +381,22 @@ async function fetchLegacyMonitoringPage(
       score_breakdown: ((post as { score_breakdown?: MonitoringEntry['score_breakdown'] }).score_breakdown ?? null),
       feedback_locked: ((post as { feedback_locked?: boolean }).feedback_locked ?? false),
       enrich_status: ((post as { enrich_status?: string | null }).enrich_status ?? null),
+      enrichment_version: ((post as { enrichment_version?: string | null }).enrichment_version ?? null),
       editorial_commentary: ((post as { editorial_commentary?: string | null }).editorial_commentary ?? null),
       humanized_commentary: ((post as { humanized_commentary?: string | null }).humanized_commentary ?? null),
       commentary_hook: ((post as { commentary_hook?: string | null }).commentary_hook ?? null),
       commentary_question: ((post as { commentary_question?: string | null }).commentary_question ?? null),
       narrative_callback: ((post as { narrative_callback?: string | null }).narrative_callback ?? null),
       composed_post_text: ((post as { composed_post_text?: string | null }).composed_post_text ?? null),
+      creator_angle: ((post as { creator_angle?: string | null }).creator_angle ?? null),
+      why_it_matters: ((post as { why_it_matters?: string | null }).why_it_matters ?? null),
+      source_context: ((post as { source_context?: MonitoringEntry['source_context'] }).source_context ?? null),
+      algorithm_signal_scores: ((post as { algorithm_signal_scores?: Record<string, number> | null }).algorithm_signal_scores ?? null),
+      aggregator_risk_score: ((post as { aggregator_risk_score?: number | null }).aggregator_risk_score ?? null),
+      ai_voice_risk_score: ((post as { ai_voice_risk_score?: number | null }).ai_voice_risk_score ?? null),
+      monetization_risk_flags: ((post as { monetization_risk_flags?: string[] | null }).monetization_risk_flags ?? null),
+      enrichment_review_reason: ((post as { enrichment_review_reason?: string | null }).enrichment_review_reason ?? null),
+      final_x_text: ((post as { final_x_text?: string | null }).final_x_text ?? null),
       post_format_hint: ((post as { post_format_hint?: string | null }).post_format_hint ?? null),
       background_context: ((post as { background_context?: MonitoringEntry['background_context'] }).background_context ?? null),
       enrich_tokens: ((post as { enrich_tokens?: number | null }).enrich_tokens ?? null),

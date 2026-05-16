@@ -11,6 +11,7 @@ export function monitoringStage(entry: MonitoringEntry): { label: string; tone: 
   if (entry.dedupe_status === 'pending') return { label: 'Duplicate gate pending', tone: 'info' };
   if (entry.score_review_status === 'needs_review') return { label: 'Manual review', tone: 'warn' };
   if (entry.dup_of_tweet_id || (entry.delivery_decision && entry.delivery_decision !== 'deliver')) return { label: 'Skipped', tone: 'muted' };
+  if (entry.enrich_status === 'rejected') return { label: 'Enrichment rejected', tone: 'bad' };
   if (entry.enrich_status === 'awaiting_approval') return { label: 'Manual review', tone: 'warn' };
   if (entry.is_truncated && !entry.hydrated_at && entry.delivery_decision === 'deliver') return { label: 'Hydration', tone: 'warn' };
   if (entry.final_score == null && entry.importance_score == null) return { label: 'Needs score', tone: 'warn' };
@@ -24,6 +25,8 @@ export function monitoringDecisionLabel(entry: MonitoringEntry, fallbackDecision
   if (entry.dedupe_status === 'uncertain') return 'Review possible duplicate';
   if (entry.dedupe_status === 'related_new_info') return 'Related: new info';
   if (entry.dedupe_status === 'pending') return 'Checking duplicate';
+  if (entry.enrich_status === 'awaiting_approval') return 'Review enrichment';
+  if (entry.enrich_status === 'rejected') return 'Enrichment rejected';
   if (entry.dup_of_tweet_id) return 'Blocked: duplicate';
   if (entry.delivery_decision === 'skip') return 'Skipped';
   if (entry.delivery_decision === 'deliver') return 'Deliver';

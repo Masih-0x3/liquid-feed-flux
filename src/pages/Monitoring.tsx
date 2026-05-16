@@ -154,6 +154,7 @@ async function adminRunDedupe(tweetId: string) {
 
 type AudienceFeedback = 'too_low' | 'too_high' | 'correct_deliver' | 'correct_skip' | 'should_pass_audience' | 'should_skip' | 'wrong_relevance_class' | 'global_exception_worth_covering' | 'not_global_exception';
 type AudienceClassValue = 'direct_focus' | 'adjacent' | 'global_exception' | 'off_topic';
+type EnrichmentFeedback = 'too_ai' | 'too_cheesy' | 'too_aggregator' | 'strong_angle' | 'needs_more_context' | 'unsafe_for_monetization';
 
 async function adminSetManualScore(tweetId: string, score: number, reason: string, overrideDuplicate: boolean, expectedAudienceClass?: AudienceClassValue | '') {
   const { data, error } = await supabase.functions.invoke('admin-actions', {
@@ -181,7 +182,23 @@ async function adminRecordScoreFeedback(tweetId: string, feedback: AudienceFeedb
   return data as { ok: boolean; polarity: number };
 }
 
-type ConfirmAction = 'force_telegram' | 'force_x' | 'rescore' | 'reprocess' | 'hydrate' | 'clear_dup' | 'close_stale_x' | 'translate' | 'run_dedupe' | 'cancel_jobs';
+async function adminEnrichmentDecision(tweetId: string, action: 'approve_enrichment' | 'reject_enrichment') {
+  const { data, error } = await supabase.functions.invoke('admin-actions', { body: { action, tweet_id: tweetId } });
+  if (error) throw error;
+  if (data?.ok === false) throw new Error(data.error ?? 'Enrichment action failed');
+  return data as { ok: boolean; message?: string };
+}
+
+async function adminRecordEnrichmentFeedback(tweetId: string, feedback: EnrichmentFeedback) {
+  const { data, error } = await supabase.functions.invoke('admin-actions', {
+    body: { action: 'record_enrichment_feedback', tweet_id: tweetId, feedback },
+  });
+  if (error) throw error;
+  if (data?.ok === false) throw new Error(data.error ?? 'Enrichment feedback failed');
+  return data as { ok: boolean };
+}
+
+type ConfirmAction = 'force_telegram' | 'force_x' | 'rescore' | 'reprocess' | 'hydrate' | 'clear_dup' | 'close_stale_x' | 'translate' | 'run_dedupe' | 'cancel_jobs' | 'approve_enrichment' | 'reject_enrichment';
 
 interface PendingAction {
   type: ConfirmAction;
@@ -254,6 +271,8 @@ function actionTitle(action: PendingAction | null) {
     case 'translate': return 'Get translation only?';
     case 'run_dedupe': return 'Run duplicate check?';
     case 'cancel_jobs': return 'Cancel all pending jobs?';
+    case 'approve_enrichment': return 'Approve enriched X draft?';
+    case 'reject_enrichment': return 'Reject enriched X draft?';
   }
 }
 
@@ -283,6 +302,10 @@ function actionDescription(action: PendingAction | null) {
       return 'Runs the duplicate gate now. Unique or meaningfully updated posts can continue to translation; duplicates remain blocked.';
     case 'cancel_jobs':
       return 'Marks pending and running jobs as failed. This does not call Telegram or X.';
+    case 'approve_enrichment':
+      return 'Marks this enrichment approved and queues normal delivery. X posting still respects configured X budgets, media gates, and posting settings.';
+    case 'reject_enrichment':
+      return 'Blocks this enriched draft from delivery. This does not call Telegram or X.';
   }
 }
 
@@ -476,6 +499,20 @@ export default function Monitoring() {
     }
   };
 
+  const handleEnrichmentFeedback = async (entry: MonitoringEntry, feedback: EnrichmentFeedback) => {
+    const key = `${entry.tweet_id}:enrich:${feedback}`;
+    setFeedbackLoading(key);
+    try {
+      await adminRecordEnrichmentFeedback(entry.tweet_id, feedback);
+      toast({ title: 'Enrichment feedback recorded' });
+      invalidate();
+    } catch (e) {
+      toast({ title: 'Feedback failed', description: (e as Error).message, variant: 'destructive' });
+    } finally {
+      setFeedbackLoading(null);
+    }
+  };
+
   const confirmAction = async () => {
     if (!pendingAction) return;
     const entry = pendingAction.entry;
@@ -547,6 +584,16 @@ export default function Monitoring() {
           toast({ title: 'Pending jobs canceled', description: `${data?.canceled ?? 0} job(s) marked failed.` });
           break;
         }
+        case 'approve_enrichment':
+          if (!entry) throw new Error('Missing post');
+          await adminEnrichmentDecision(entry.tweet_id, 'approve_enrichment');
+          toast({ title: 'Enrichment approved', description: 'Normal delivery has been queued.' });
+          break;
+        case 'reject_enrichment':
+          if (!entry) throw new Error('Missing post');
+          await adminEnrichmentDecision(entry.tweet_id, 'reject_enrichment');
+          toast({ title: 'Enrichment rejected' });
+          break;
       }
       invalidate();
     } catch (e) {
@@ -1148,16 +1195,79 @@ export default function Monitoring() {
                     <Card>
                       <CardHeader className="pb-2">
                         <div className="flex items-center justify-between">
-                          <CardTitle className="text-sm">Enrichment</CardTitle>
+                          <CardTitle className="text-sm">Enrichment Studio</CardTitle>
                           <Button size="sm" variant="outline" onClick={() => handleTestEnrich(selectedEntry.tweet_id)}>
-                            <Sparkles className="w-3 h-3 mr-1.5" />Run
+                            <Sparkles className="w-3 h-3 mr-1.5" />Regenerate
                           </Button>
                         </div>
                       </CardHeader>
                       <CardContent className="space-y-2 text-sm">
-                        <Badge variant={selectedEntry.enrich_status === 'awaiting_approval' ? 'secondary' : 'outline'}>{selectedEntry.enrich_status}</Badge>
-                        {selectedEntry.narrative_callback && <p dir="rtl" className="rounded-md border bg-muted/30 p-2">{selectedEntry.narrative_callback}</p>}
-                        {selectedEntry.composed_post_text && <p dir="rtl" className="rounded-md border bg-muted/30 p-2">{selectedEntry.composed_post_text}</p>}
+                        <div className="flex flex-wrap gap-2">
+                          <Badge variant={selectedEntry.enrich_status === 'awaiting_approval' ? 'secondary' : selectedEntry.enrich_status === 'rejected' ? 'destructive' : 'outline'}>{selectedEntry.enrich_status}</Badge>
+                          {selectedEntry.enrichment_version && <Badge variant="outline">{selectedEntry.enrichment_version}</Badge>}
+                          {typeof selectedEntry.aggregator_risk_score === 'number' && <Badge className={selectedEntry.aggregator_risk_score >= 70 ? toneClass('bad') : selectedEntry.aggregator_risk_score >= 35 ? toneClass('warn') : toneClass('good')}>Aggregator {selectedEntry.aggregator_risk_score}</Badge>}
+                          {typeof selectedEntry.ai_voice_risk_score === 'number' && <Badge className={selectedEntry.ai_voice_risk_score >= 70 ? toneClass('bad') : selectedEntry.ai_voice_risk_score >= 35 ? toneClass('warn') : toneClass('good')}>AI voice {selectedEntry.ai_voice_risk_score}</Badge>}
+                        </div>
+                        {selectedEntry.enrichment_review_reason && <p className="rounded-md border bg-muted/30 p-2">{selectedEntry.enrichment_review_reason}</p>}
+                        {selectedEntry.monetization_risk_flags && selectedEntry.monetization_risk_flags.length > 0 && (
+                          <div className="flex flex-wrap gap-1">
+                            {selectedEntry.monetization_risk_flags.map((flag) => <Badge key={flag} variant="outline" className="text-xs">{flag}</Badge>)}
+                          </div>
+                        )}
+                        {selectedEntry.creator_angle && (
+                          <div>
+                            <p className="mb-1 text-xs font-medium text-muted-foreground">Creator angle</p>
+                            <p dir="rtl" className="rounded-md border bg-muted/30 p-2">{selectedEntry.creator_angle}</p>
+                          </div>
+                        )}
+                        {selectedEntry.why_it_matters && (
+                          <div>
+                            <p className="mb-1 text-xs font-medium text-muted-foreground">Why it matters</p>
+                            <p dir="rtl" className="rounded-md border bg-muted/30 p-2">{selectedEntry.why_it_matters}</p>
+                          </div>
+                        )}
+                        {selectedEntry.final_x_text && (
+                          <div>
+                            <p className="mb-1 text-xs font-medium text-muted-foreground">Final X preview</p>
+                            <p dir="rtl" className="whitespace-pre-wrap rounded-md border bg-muted/30 p-2">{selectedEntry.final_x_text}</p>
+                          </div>
+                        )}
+                        {!selectedEntry.final_x_text && selectedEntry.composed_post_text && <p dir="rtl" className="rounded-md border bg-muted/30 p-2">{selectedEntry.composed_post_text}</p>}
+                        {selectedEntry.algorithm_signal_scores && (
+                          <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
+                            {Object.entries(selectedEntry.algorithm_signal_scores).map(([key, value]) => (
+                              <div key={key} className="rounded-md border bg-muted/20 p-2">
+                                <p className="text-muted-foreground">{key.replaceAll('_', ' ')}</p>
+                                <p className="font-semibold">{value}/5</p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {selectedEntry.source_context?.sources && selectedEntry.source_context.sources.length > 0 && (
+                          <p className="text-xs text-muted-foreground">Sources checked: {selectedEntry.source_context.sources.slice(0, 3).join(' | ')}</p>
+                        )}
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <Button size="sm" onClick={() => setPendingAction({ type: 'approve_enrichment', entry: selectedEntry })} disabled={selectedEntry.enrich_status === 'approved'}>
+                            <Check className="w-3 h-3 mr-1.5" />Approve
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => setPendingAction({ type: 'reject_enrichment', entry: selectedEntry })} disabled={selectedEntry.enrich_status === 'rejected'}>
+                            <Ban className="w-3 h-3 mr-1.5" />Reject
+                          </Button>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {([
+                            ['too_ai', 'Too AI'],
+                            ['too_cheesy', 'Too cheesy'],
+                            ['too_aggregator', 'Too aggregator'],
+                            ['strong_angle', 'Strong angle'],
+                            ['needs_more_context', 'Needs context'],
+                            ['unsafe_for_monetization', 'Unsafe'],
+                          ] as const).map(([value, label]) => (
+                            <Button key={value} size="sm" variant="outline" onClick={() => handleEnrichmentFeedback(selectedEntry, value)} disabled={feedbackLoading === `${selectedEntry.tweet_id}:enrich:${value}`}>
+                              {label}
+                            </Button>
+                          ))}
+                        </div>
                       </CardContent>
                     </Card>
                   )}

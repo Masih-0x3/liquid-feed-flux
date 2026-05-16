@@ -6,6 +6,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1';
 import { requireInternalAuth } from '../_shared/internalAuth.ts';
 import { recordLegacyXApiUsage, recordXApiEvent } from '../_shared/xApiLedger.ts';
+import { buildXPostText, isEnrichmentBlockingXPost, pickHashtags } from '../_shared/xPostText.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': Deno.env.get('ALLOWED_CORS_ORIGIN') ?? 'https://liquid-feed-flux.lovable.app',
@@ -84,30 +85,6 @@ const DEFAULT_LIMITS: RateLimits = {
 // ─── Helpers ─────────────────────────────────────────────────────────
 function isRecord(v: unknown): v is Record<string, unknown> { return typeof v === 'object' && v !== null && !Array.isArray(v); }
 
-function safeTruncate(str: string, maxLen: number): string {
-  if (str.length <= maxLen) return str;
-  let end = maxLen;
-  // Don't split a UTF-16 surrogate pair (emoji, some Arabic/Persian chars)
-  if (end > 0 && str.charCodeAt(end - 1) >= 0xD800 && str.charCodeAt(end - 1) <= 0xDBFF) {
-    end--;
-  }
-  return str.slice(0, end);
-}
-
-// U+200F = Right-to-Left Mark. Forces X/Twitter to render the entire tweet RTL,
-// even when it begins with emoji, hashtags, digits, or Latin punctuation.
-const RLM = '\u200F';
-
-function formatTweet(tpl: string, vars: Record<string, string>, max: number): string {
-  let out = tpl;
-  for (const [k, v] of Object.entries(vars)) out = out.split(`{${k}}`).join(v);
-  out = out.replace(/\n{3,}/g, '\n\n').trim();
-  // Reserve 1 char for the leading RLM so we never exceed max after prepending.
-  const budget = Math.max(1, max - 1);
-  if (out.length > budget) out = out.slice(0, budget - 1).trimEnd() + '…';
-  return RLM + out;
-}
-
 /** Persian (Jalali) date string like "۱۴ اردیبهشت ۱۴۰۵" using fa-IR Intl. */
 function persianDateNow(): string {
   try {
@@ -117,27 +94,6 @@ function persianDateNow(): string {
   } catch {
     return new Date().toISOString().slice(0, 10);
   }
-}
-
-/** Normalize a hashtag entry: strip whitespace, ensure leading '#'. */
-function normHashtag(s: string): string {
-  const t = s.trim().replace(/^#+/, '');
-  return t ? `#${t}` : '';
-}
-
-/** Pick `n` distinct random hashtags from a pool, returning a space-joined string. */
-function pickHashtags(pool: string[] | undefined, n: number): string {
-  if (!pool || pool.length === 0 || n <= 0) return '';
-  const cleaned = pool.map(normHashtag).filter(Boolean);
-  if (cleaned.length === 0) return '';
-  const take = Math.min(n, cleaned.length);
-  // Fisher-Yates partial shuffle
-  const arr = cleaned.slice();
-  for (let i = 0; i < take; i++) {
-    const j = i + Math.floor(Math.random() * (arr.length - i));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-  return arr.slice(0, take).join(' ');
 }
 
 async function trimRollingWindow(arr: string[], windowMs: number): Promise<string[]> {
@@ -416,10 +372,12 @@ Deno.serve(async (req) => {
 
   // Load settings
   const { data: settingsRows } = await sb.from('settings').select('key, value')
-    .in('key', ['x_posting_config', 'x_rate_limits']);
+    .in('key', ['x_posting_config', 'x_rate_limits', 'enrichment_config']);
   const sm: Record<string, unknown> = Object.fromEntries((settingsRows || []).map((r) => [r.key, r.value]));
   const cfg: PostingConfig = { ...DEFAULT_CFG, ...(isRecord(sm.x_posting_config) ? sm.x_posting_config : {}) } as PostingConfig;
   const limits: RateLimits = { ...DEFAULT_LIMITS, ...(isRecord(sm.x_rate_limits) ? sm.x_rate_limits : {}) } as RateLimits;
+  const enrichmentCfg = isRecord(sm.enrichment_config) ? sm.enrichment_config : {};
+  const allowCompletedEnrichment = enrichmentCfg.require_approval === false && enrichmentCfg.review_mode === 'auto_high_confidence';
 
   if (!cfg.enabled && !dryRun) {
     return new Response(JSON.stringify({ skipped: true, reason: 'x_posting_disabled' }), {
@@ -481,7 +439,7 @@ Deno.serve(async (req) => {
   const existing = new Set((existingRows || []).map((r) => r.post_id as string));
 
   let candidatesQ = sb.from('posts')
-    .select('tweet_id, text_translated, text_original, author_handle, has_media, importance_score, final_score, delivery_decision, url, is_truncated, hydrated_at, created_at, composed_post_text, post_format_hint, humanized_commentary, commentary_hook, commentary_question, narrative_callback, thread_continuation, enrich_status, accounts!inner(handle)')
+    .select('tweet_id, text_translated, text_original, author_handle, has_media, importance_score, final_score, delivery_decision, url, is_truncated, hydrated_at, created_at, final_x_text, composed_post_text, post_format_hint, humanized_commentary, commentary_hook, commentary_question, narrative_callback, thread_continuation, enrich_status, accounts!inner(handle)')
     .gte('created_at', effectiveCutoff)
     .not('text_translated', 'is', null);
 
@@ -495,6 +453,10 @@ Deno.serve(async (req) => {
     // Without this, x-poster can publish the truncated first translation before
     // the hydrate_tweet job completes (~1-2 min later).
     candidatesQ = candidatesQ.or('is_truncated.eq.false,hydrated_at.not.is.null');
+    const allowedEnrichStatuses = allowCompletedEnrichment
+      ? 'approved,enriched,completed,skipped'
+      : 'approved,enriched,skipped';
+    candidatesQ = candidatesQ.or(`enrich_status.is.null,enrich_status.in.(${allowedEnrichStatuses})`);
     // NOTE: require_media is intentionally NOT applied as a DB filter.
     // We post all eligible items; media is attached only when present & valid.
     // The legacy `require_media` flag is kept in the type for back-compat but no longer gates posting.
@@ -528,6 +490,14 @@ Deno.serve(async (req) => {
   for (const post of candidates) {
     const tweetId = post.tweet_id;
     const startedAt = Date.now();
+    const enrichStatus = (post as { enrich_status?: string | null }).enrich_status;
+
+    if (isEnrichmentBlockingXPost(enrichStatus, allowCompletedEnrichment)) {
+      const reason = `enrichment_${enrichStatus ?? 'not_approved'}`;
+      results.push({ tweet_id: tweetId, status: 'deferred', reason });
+      console.log(`[x-poster] deferring ${tweetId}: ${reason}`);
+      continue;
+    }
 
     // Fetch media rows
     const { data: mediaRows } = await sb.from('media')
@@ -669,38 +639,18 @@ Deno.serve(async (req) => {
       mediaKind = sel.tier;
     }
 
-    // Format text: structured post with news + opinion when enrichment is approved,
-    // otherwise fall back to the plain template.
-    let text: string;
-    const enrichApproved = post.enrich_status === 'enriched' || post.enrich_status === 'approved';
-    const opinionText = (post.composed_post_text as string) || '';
-    const accountHandle = (post.accounts as { handle?: string })?.handle || '';
+    // Format text: creator-analysis draft only when approved, or when the
+    // enrichment config explicitly allows auto-completed drafts. Otherwise use
+    // the plain translation template so review-pending drafts never leak to X.
     const pickedHashtags = pickHashtags(cfg.hashtag_pool, cfg.hashtags_per_post ?? 0);
     const hashtagsValue = pickedHashtags || cfg.hashtags || '';
-
-    if (opinionText && enrichApproved) {
-      const parts = [
-        persianDateNow(),
-        `${cfg.leading_emoji} ${post.text_translated || ''}`,
-        `── نظر ما ──`,
-        opinionText,
-      ];
-      if (hashtagsValue) parts.push(hashtagsValue);
-      const assembled = parts.join('\n\n');
-      text = RLM + safeTruncate(assembled, cfg.max_chars - 1);
-    } else {
-      text = formatTweet(cfg.post_template, {
-        leading_emoji: cfg.leading_emoji,
-        translated_text: post.text_translated || '',
-        hashtags: hashtagsValue,
-        persian_date: persianDateNow(),
-        author_handle: post.author_handle || accountHandle,
-        commentary: (post.humanized_commentary as string) || '',
-        hook: (post.commentary_hook as string) || '',
-        question: (post.commentary_question as string) || '',
-        callback: (post.narrative_callback as string) || '',
-      }, cfg.max_chars);
-    }
+    const text = buildXPostText({
+      post: post as Parameters<typeof buildXPostText>[0]['post'],
+      cfg,
+      hashtagsValue,
+      persianDate: persianDateNow(),
+      allowCompletedEnrichment,
+    });
 
     if (dryRun) {
       results.push({ tweet_id: tweetId, status: 'dry_run', preview_text: text, media_count: mediaCount, media_kind: mediaKind });

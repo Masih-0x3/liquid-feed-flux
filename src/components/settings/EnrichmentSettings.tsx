@@ -8,6 +8,7 @@ import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ChevronDown, Plus, X, Sparkles, Search, PenTool, Wand2, Layout, BookOpen, Loader2, Save } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
@@ -15,21 +16,36 @@ import { supabase } from '@/integrations/supabase/client';
 interface EnrichmentConfig {
   enabled: boolean;
   model: string;
+  version: string;
+  mode: 'creator_analysis' | 'legacy';
+  review_mode: 'shadow_review' | 'auto_high_confidence' | 'manual_only';
+  source_attribution_policy: 'compact' | 'always' | 'none';
   analyst_prompt: string;
   researcher_prompt: string;
   humanizer_prompt: string;
   archivist_prompt: string;
   composer_prompt: string;
+  critic_prompt: string;
   max_research_tokens: number;
   max_analysis_tokens: number;
   max_humanizer_tokens: number;
   max_archivist_tokens: number;
   max_composer_tokens: number;
+  max_critic_tokens: number;
   skip_research_below_score: number;
   archivist_lookback_days: number;
   archivist_max_posts: number;
   require_approval: boolean;
   thread_above_score: number;
+  banned_phrases: string[];
+  aggregator_review_threshold: number;
+  aggregator_reject_threshold: number;
+  ai_voice_review_threshold: number;
+  ai_voice_reject_threshold: number;
+  same_source_window_hours: number;
+  same_source_review_threshold: number;
+  research_cache_hours: number;
+  min_creator_angle_chars: number;
 }
 
 interface VoiceSamples {
@@ -40,6 +56,10 @@ interface VoiceSamples {
 const DEFAULT_CONFIG: EnrichmentConfig = {
   enabled: false,
   model: 'gpt-5.4-mini',
+  version: 'creator-analysis-v2',
+  mode: 'creator_analysis',
+  review_mode: 'shadow_review',
+  source_attribution_policy: 'compact',
   analyst_prompt: `You are the editorial voice of a Persian-language X account that amplifies Iranians the Islamic Republic tries to silence. Your core worldview:
 - The IRI (Islamic Republic of Iran) is an illegitimate terrorist theocracy. Not reformable -- must collapse entirely. You support full regime change, not reform.
 - You champion Reza Pahlavi and a Pahlavi-led secular, democratic transition for Iran. جاویدشاه is not nostalgia -- it is active political advocacy.
@@ -60,16 +80,27 @@ CRITICAL EDITORIAL GUIDELINES:
   humanizer_prompt: `You are a rewriter that transforms AI-generated Persian text into something that sounds like a real Iranian activist/commentator typed it on their phone. The author is passionate, blunt, sometimes sarcastic. They use colloquial Persian (اینکه, همونطور, ینی). They mix formal political vocabulary with street-level directness. They do NOT sound like a news anchor or a diplomatic statement. Match the provided voice samples closely.`,
   archivist_prompt: 'You are an editorial archivist for a Persian opposition news account. Given a new story (in English) and recent posts, find narrative connections that reinforce the account\'s ongoing themes: regime oppression patterns, prisoner updates, proxy war developments, Western policy shifts on Iran, and the Iranian freedom movement. Only suggest a callback if it genuinely enriches the new post. callback_suggestion must be in natural colloquial Persian.',
   composer_prompt: 'You are a social media editor for a Persian opposition news account on X. You write ONLY the opinion/context section of posts. The verbatim news translation is placed ABOVE your section automatically -- never repeat or paraphrase the news. Your job: add value beyond the news -- sharp opinion, context, analysis, or a provocative angle. Formats: context_and_take, question_and_take, callback_take, sharp_reaction, analytical, plain_opinion. This account amplifies voices the IRI silences. Final output must be in colloquial Persian.',
+  critic_prompt: 'You are a strict X creator-quality critic. Judge whether this Persian post adds original creator value, avoids aggregator/clickbait patterns, and is likely to earn healthy replies, reposts, dwell, profile clicks, and follows without causing mute/block/report/not-interested reactions. Be conservative.',
   max_research_tokens: 4000,
   max_analysis_tokens: 2000,
   max_humanizer_tokens: 2000,
   max_archivist_tokens: 2000,
   max_composer_tokens: 2000,
+  max_critic_tokens: 2000,
   skip_research_below_score: 16,
   archivist_lookback_days: 3,
   archivist_max_posts: 10,
   require_approval: true,
   thread_above_score: 18,
+  banned_phrases: ['BREAKING', 'Breaking', 'فوری', 'قابل توجه است', 'جالب است که', 'لازم به ذکر است', 'در همین راستا'],
+  aggregator_review_threshold: 35,
+  aggregator_reject_threshold: 70,
+  ai_voice_review_threshold: 35,
+  ai_voice_reject_threshold: 70,
+  same_source_window_hours: 6,
+  same_source_review_threshold: 3,
+  research_cache_hours: 24,
+  min_creator_angle_chars: 80,
 };
 
 export default function EnrichmentSettings() {
@@ -79,6 +110,7 @@ export default function EnrichmentSettings() {
   const [config, setConfig] = useState<EnrichmentConfig>(DEFAULT_CONFIG);
   const [voiceSamples, setVoiceSamples] = useState<VoiceSamples>({ samples: [], updated_at: null });
   const [newSample, setNewSample] = useState('');
+  const [newBannedPhrase, setNewBannedPhrase] = useState('');
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
   useEffect(() => {
@@ -144,6 +176,17 @@ export default function EnrichmentSettings() {
     saveVoiceSamples(updated);
   }
 
+  function addBannedPhrase() {
+    const phrase = newBannedPhrase.trim();
+    if (!phrase || config.banned_phrases.includes(phrase)) return;
+    setConfig({ ...config, banned_phrases: [...config.banned_phrases, phrase] });
+    setNewBannedPhrase('');
+  }
+
+  function removeBannedPhrase(phrase: string) {
+    setConfig({ ...config, banned_phrases: config.banned_phrases.filter((item) => item !== phrase) });
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -164,7 +207,7 @@ export default function EnrichmentSettings() {
                 AI Commentary Pipeline
               </CardTitle>
               <CardDescription>
-                5-agent system: Archivist + Researcher (parallel) then Analyst, Humanizer, Composer
+                Creator-analysis system: Archivist + Researcher, Humanizer, Composer, and algorithm-aware Critic.
               </CardDescription>
             </div>
             <Switch
@@ -191,12 +234,117 @@ export default function EnrichmentSettings() {
                 />
                 <div className="text-sm">
                   {config.require_approval ? (
-                    <span className="text-green-400 font-medium">Enabled -- enriched posts wait for your approval before posting to X</span>
+                    <span className="text-green-400 font-medium">Enabled -- enriched drafts wait for approval before normal delivery</span>
                   ) : (
-                    <span className="text-red-400 font-medium">Disabled -- enriched posts are posted to X automatically</span>
+                    <span className="text-red-400 font-medium">Disabled -- only auto mode can use approved critic output without review</span>
                   )}
                 </div>
               </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Creator Analysis Mode */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Sparkles className="w-5 h-5" />
+            Creator Analysis Mode
+          </CardTitle>
+          <CardDescription>
+            Controls the X-facing enrichment posture. Telegram remains translation-first.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4 sm:grid-cols-3">
+          <div className="space-y-2">
+            <Label>Mode</Label>
+            <Select value={config.mode} onValueChange={(mode) => setConfig({ ...config, mode: mode as EnrichmentConfig['mode'] })}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="creator_analysis">Creator analysis</SelectItem>
+                <SelectItem value="legacy">Legacy commentary</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Rollout</Label>
+            <Select value={config.review_mode} onValueChange={(review_mode) => setConfig({ ...config, review_mode: review_mode as EnrichmentConfig['review_mode'] })}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="shadow_review">Shadow + review</SelectItem>
+                <SelectItem value="auto_high_confidence">Auto high-confidence</SelectItem>
+                <SelectItem value="manual_only">Manual only</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Source Attribution</Label>
+            <Select value={config.source_attribution_policy} onValueChange={(source_attribution_policy) => setConfig({ ...config, source_attribution_policy: source_attribution_policy as EnrichmentConfig['source_attribution_policy'] })}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="compact">Compact attribution</SelectItem>
+                <SelectItem value="always">Always cite source</SelectItem>
+                <SelectItem value="none">Internal only</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Anti-Aggregator Guard */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Anti-Aggregator Guard</CardTitle>
+          <CardDescription>
+            Flags drafts that look like rapid-fire aggregation, copied translation, or formulaic clickbait.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Aggregator Review / Reject</Label>
+              <div className="grid grid-cols-2 gap-2">
+                <Input type="number" value={config.aggregator_review_threshold} onChange={(e) => setConfig({ ...config, aggregator_review_threshold: +e.target.value })} />
+                <Input type="number" value={config.aggregator_reject_threshold} onChange={(e) => setConfig({ ...config, aggregator_reject_threshold: +e.target.value })} />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>AI Voice Review / Reject</Label>
+              <div className="grid grid-cols-2 gap-2">
+                <Input type="number" value={config.ai_voice_review_threshold} onChange={(e) => setConfig({ ...config, ai_voice_review_threshold: +e.target.value })} />
+                <Input type="number" value={config.ai_voice_reject_threshold} onChange={(e) => setConfig({ ...config, ai_voice_reject_threshold: +e.target.value })} />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Same Source Window / Count</Label>
+              <div className="grid grid-cols-2 gap-2">
+                <Input type="number" value={config.same_source_window_hours} onChange={(e) => setConfig({ ...config, same_source_window_hours: +e.target.value })} />
+                <Input type="number" value={config.same_source_review_threshold} onChange={(e) => setConfig({ ...config, same_source_review_threshold: +e.target.value })} />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Minimum Creator Angle Characters</Label>
+              <Input type="number" value={config.min_creator_angle_chars} onChange={(e) => setConfig({ ...config, min_creator_angle_chars: +e.target.value })} />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>Banned Phrases</Label>
+            <div className="flex flex-wrap gap-2">
+              {config.banned_phrases.map((phrase) => (
+                <Badge key={phrase} variant="outline" className="gap-1">
+                  {phrase}
+                  <button type="button" onClick={() => removeBannedPhrase(phrase)} aria-label={`Remove ${phrase}`}>
+                    <X className="w-3 h-3" />
+                  </button>
+                </Badge>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <Input value={newBannedPhrase} onChange={(e) => setNewBannedPhrase(e.target.value)} placeholder="Add phrase to avoid..." />
+              <Button type="button" variant="outline" onClick={addBannedPhrase} disabled={!newBannedPhrase.trim()}>
+                <Plus className="w-4 h-4 mr-1" />Add
+              </Button>
             </div>
           </div>
         </CardContent>
@@ -336,6 +484,11 @@ export default function EnrichmentSettings() {
               </div>
               <p className="text-xs text-muted-foreground">High-scoring posts may be composed as threads (2 tweets)</p>
             </div>
+            <div className="space-y-2">
+              <Label>Research Cache Hours</Label>
+              <Input type="number" value={config.research_cache_hours} onChange={(e) => setConfig({ ...config, research_cache_hours: +e.target.value })} />
+              <p className="text-xs text-muted-foreground">Reuses web research per source/story to avoid repeated web calls.</p>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -386,7 +539,15 @@ export default function EnrichmentSettings() {
                   rows={3}
                 />
               </div>
-              <div className="grid grid-cols-5 gap-3">
+              <div className="space-y-2">
+                <Label>Critic Prompt</Label>
+                <Textarea
+                  value={config.critic_prompt}
+                  onChange={(e) => setConfig({ ...config, critic_prompt: e.target.value })}
+                  rows={3}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
                 <div className="space-y-1">
                   <Label className="text-xs">Research Tokens</Label>
                   <Input type="number" value={config.max_research_tokens} onChange={(e) => setConfig({ ...config, max_research_tokens: +e.target.value })} />
@@ -406,6 +567,10 @@ export default function EnrichmentSettings() {
                 <div className="space-y-1">
                   <Label className="text-xs">Composer Tokens</Label>
                   <Input type="number" value={config.max_composer_tokens} onChange={(e) => setConfig({ ...config, max_composer_tokens: +e.target.value })} />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Critic Tokens</Label>
+                  <Input type="number" value={config.max_critic_tokens} onChange={(e) => setConfig({ ...config, max_critic_tokens: +e.target.value })} />
                 </div>
               </div>
             </CardContent>

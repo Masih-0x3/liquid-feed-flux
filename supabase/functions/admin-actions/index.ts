@@ -653,6 +653,25 @@ async function insertAdminPipelineEvent(
 }
 
 // deno-lint-ignore no-explicit-any
+async function updateLatestPostEnrichment(supabase: any, tweetId: string, patch: Record<string, unknown>) {
+  const { data } = await supabase
+    .from('post_enrichments')
+    .select('id')
+    .eq('post_id', tweetId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!data?.id) return;
+
+  await supabase
+    .from('post_enrichments')
+    .update(patch)
+    .eq('id', data.id)
+    .then(() => null, () => null);
+}
+
+// deno-lint-ignore no-explicit-any
 async function runTranslationOnly(supabase: any, tweetId: string): Promise<{ ok: boolean; translated?: string; model?: string; error?: string }> {
   const { data: post, error: postErr } = await supabase
     .from('posts')
@@ -1005,6 +1024,19 @@ const MONITORING_BASE_POST_COLUMNS = [
   'accounts!inner(handle, display_name)',
 ];
 
+const MONITORING_ENRICHMENT_V2_COLUMNS = [
+  'enrichment_version',
+  'creator_angle',
+  'why_it_matters',
+  'source_context',
+  'algorithm_signal_scores',
+  'aggregator_risk_score',
+  'ai_voice_risk_score',
+  'monetization_risk_flags',
+  'enrichment_review_reason',
+  'final_x_text',
+];
+
 const MONITORING_SCORING_V2_COLUMNS = [
   'scoring_version',
   'scoring_profile_id',
@@ -1015,7 +1047,8 @@ const MONITORING_SCORING_V2_COLUMNS = [
   'score_review_status',
 ];
 
-const MONITORING_POST_SELECT = [...MONITORING_BASE_POST_COLUMNS, ...MONITORING_SCORING_V2_COLUMNS].join(', ');
+const MONITORING_POST_SELECT = [...MONITORING_BASE_POST_COLUMNS, ...MONITORING_ENRICHMENT_V2_COLUMNS, ...MONITORING_SCORING_V2_COLUMNS].join(', ');
+const MONITORING_POST_SELECT_NO_ENRICHMENT_V2 = [...MONITORING_BASE_POST_COLUMNS, ...MONITORING_SCORING_V2_COLUMNS].join(', ');
 const MONITORING_POST_SELECT_NO_SCORING_V2 = MONITORING_BASE_POST_COLUMNS.join(', ');
 
 function normalizeMonitoringFilter(v: unknown): MonitoringFilter {
@@ -1493,12 +1526,22 @@ function toMonitoringEntry(post: Record<string, unknown>, rpcRaw: Record<string,
     score_breakdown: post.score_breakdown ?? null,
     feedback_locked: post.feedback_locked ?? false,
     enrich_status: post.enrich_status ?? null,
+    enrichment_version: post.enrichment_version ?? null,
     editorial_commentary: post.editorial_commentary ?? null,
     humanized_commentary: post.humanized_commentary ?? null,
     commentary_hook: post.commentary_hook ?? null,
     commentary_question: post.commentary_question ?? null,
     narrative_callback: post.narrative_callback ?? null,
     composed_post_text: post.composed_post_text ?? null,
+    creator_angle: post.creator_angle ?? null,
+    why_it_matters: post.why_it_matters ?? null,
+    source_context: post.source_context ?? null,
+    algorithm_signal_scores: post.algorithm_signal_scores ?? null,
+    aggregator_risk_score: post.aggregator_risk_score ?? null,
+    ai_voice_risk_score: post.ai_voice_risk_score ?? null,
+    monetization_risk_flags: post.monetization_risk_flags ?? null,
+    enrichment_review_reason: post.enrichment_review_reason ?? null,
+    final_x_text: post.final_x_text ?? null,
     post_format_hint: post.post_format_hint ?? null,
     background_context: post.background_context ?? null,
     enrich_tokens: post.enrich_tokens ?? null,
@@ -1603,6 +1646,9 @@ async function getMonitoringEntries(supabase: any, body: Record<string, unknown>
   };
 
   let result = await buildQuery(MONITORING_POST_SELECT);
+  if (result.error && isMissingSchemaError(result.error)) {
+    result = await buildQuery(MONITORING_POST_SELECT_NO_ENRICHMENT_V2);
+  }
   if (result.error && isMissingSchemaError(result.error)) {
     result = await buildQuery(MONITORING_POST_SELECT_NO_SCORING_V2);
   }
@@ -3870,6 +3916,7 @@ serve(async (req) => {
         if (!tweet_id) return jsonResponse({ error: 'tweet_id is required' }, 400);
 
         await supabase.from('posts').update({ enrich_status: 'approved' }).eq('tweet_id', tweet_id);
+        await updateLatestPostEnrichment(supabase, tweet_id, { status: 'approved', approved_at: new Date().toISOString() });
 
         // Enqueue deliver job with proper lock clearing
         const { error: delErr } = await supabase.from('jobs').upsert({
@@ -3895,8 +3942,25 @@ serve(async (req) => {
         if (!tweet_id) return jsonResponse({ error: 'tweet_id is required' }, 400);
 
         await supabase.from('posts').update({ enrich_status: 'rejected' }).eq('tweet_id', tweet_id);
+        await updateLatestPostEnrichment(supabase, tweet_id, { status: 'rejected', rejected_at: new Date().toISOString() });
 
         return jsonResponse({ ok: true, message: `Enrichment rejected for ${tweet_id}` });
+      }
+
+      // ===== Record enrichment feedback without posting =====
+      case 'record_enrichment_feedback': {
+        const { tweet_id, feedback, note } = body;
+        if (!tweet_id) return jsonResponse({ error: 'tweet_id is required' }, 400);
+        if (!feedback || typeof feedback !== 'string') return jsonResponse({ error: 'feedback is required' }, 400);
+        const allowed = new Set(['too_ai', 'too_cheesy', 'too_aggregator', 'strong_angle', 'needs_more_context', 'unsafe_for_monetization']);
+        if (!allowed.has(feedback)) return jsonResponse({ error: `unsupported feedback: ${feedback}` }, 400);
+        await updateLatestPostEnrichment(supabase, tweet_id, {
+          feedback_label: feedback,
+          feedback_note: typeof note === 'string' ? note.slice(0, 500) : null,
+          feedback_at: new Date().toISOString(),
+        });
+        await insertAdminPipelineEvent(supabase, tweet_id, 'enrich_feedback', 'completed', { feedback });
+        return jsonResponse({ ok: true });
       }
 
       // ===== Manually trigger enrichment on a post (never auto-posts) =====
@@ -3915,6 +3979,16 @@ serve(async (req) => {
           narrative_callback: null,
           narrative_ref_post_id: null,
           composed_post_text: null,
+          enrichment_version: null,
+          creator_angle: null,
+          why_it_matters: null,
+          source_context: null,
+          algorithm_signal_scores: null,
+          aggregator_risk_score: null,
+          ai_voice_risk_score: null,
+          monetization_risk_flags: [],
+          enrichment_review_reason: null,
+          final_x_text: null,
           post_format_hint: null,
           thread_continuation: null,
           enrich_model: null,

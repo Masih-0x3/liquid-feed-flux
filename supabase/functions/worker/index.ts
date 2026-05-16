@@ -2,7 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
 import { callOpenAI, type ToolFunctionDef } from "../_shared/openai.ts";
-import { runEnrichPipeline, type EnrichmentConfig, type VoiceSamples } from "../_shared/enrich.ts";
+import { normalizeEnrichmentConfig, runEnrichPipeline, type EnrichmentConfig, type VoiceSamples } from "../_shared/enrich.ts";
 import {
   SCORE_AXIS_KEYS,
   type ScoreAxisKey,
@@ -1151,6 +1151,9 @@ ${post.text_original}`;
           await insertPipelineEvent(supabase, 'post', tweetId, 'enrich', 'queued', null, null, null, { source: 'translate' });
           console.log(JSON.stringify({ function: 'worker', action: 'enrich_enqueued', tweet_id: tweetId }));
         }
+        // Enrichment v2 is shadow/review-first for X, but Telegram delivery
+        // remains translation-first and should not wait on enrichment approval.
+        await enqueueDeliverAfterEnrich(supabase, tweetId, 'translate', false);
       } else {
         const idempotencyKey = `deliver:${tweetId}`;
         const { error: deliveryJobError } = await supabase
@@ -1554,7 +1557,7 @@ async function handleEnrichJob(job: Record<string, unknown>, supabase: any): Pro
   // Load post
   const { data: post, error: postErr } = await supabase
     .from('posts')
-    .select('tweet_id, text_original, text_translated, importance_score, delivery_decision')
+    .select('tweet_id, text_original, text_translated, importance_score, delivery_decision, author_handle, url, created_at')
     .eq('tweet_id', tweetId)
     .single();
   if (postErr || !post) throw new Error(`enrich: post not found: ${tweetId}`);
@@ -1566,7 +1569,7 @@ async function handleEnrichJob(job: Record<string, unknown>, supabase: any): Pro
     .select('value')
     .eq('key', 'enrichment_config')
     .single();
-  const enrichConfig = (configRow?.value ?? { enabled: false }) as EnrichmentConfig;
+  const enrichConfig = normalizeEnrichmentConfig((configRow?.value ?? { enabled: false }) as Partial<EnrichmentConfig>);
   if (!enrichConfig.enabled && !forceReview) {
     // Enrichment disabled -- mark skipped and pass through to deliver (unless manual test)
     await supabase.from('posts').update({ enrich_status: 'skipped' }).eq('tweet_id', tweetId);
@@ -1595,6 +1598,18 @@ async function handleEnrichJob(job: Record<string, unknown>, supabase: any): Pro
   const recentFormats = (recentFormatPosts || []).map((p: { post_format_hint: string }) => p.post_format_hint).filter(Boolean) as string[];
   const previousFormatUsed = recentFormats.length > 0 ? recentFormats.join(',') : null;
 
+  let sameSourceRecentCount = 0;
+  if (post.author_handle) {
+    const since = new Date(Date.now() - enrichConfig.same_source_window_hours * 3600 * 1000).toISOString();
+    const { count } = await supabase
+      .from('posts')
+      .select('*', { count: 'exact', head: true })
+      .eq('author_handle', post.author_handle)
+      .gte('created_at', since)
+      .neq('tweet_id', tweetId);
+    sameSourceRecentCount = count ?? 0;
+  }
+
   // Mark enrichment in progress
   await supabase.from('posts').update({ enrich_status: 'pending' }).eq('tweet_id', tweetId);
   const startedAt = new Date().toISOString();
@@ -1611,11 +1626,21 @@ async function handleEnrichJob(job: Record<string, unknown>, supabase: any): Pro
       textTranslated: post.text_translated,
       importanceScore: post.importance_score,
       previousFormatUsed,
+      sourceUrl: post.url,
+      sourceLabel: post.author_handle,
+      sameSourceRecentCount,
     });
 
-    // Store results -- force_review always lands in awaiting_approval (manual test mode)
-    const enrichStatus = (forceReview || enrichConfig.require_approval) ? 'awaiting_approval' : 'completed';
+    // Store results. Shadow/review mode is conservative: no auto-delivery until
+    // the critic/gate proves trustworthy and the setting is deliberately relaxed.
+    const autoCanComplete = !forceReview && !enrichConfig.require_approval && enrichConfig.review_mode === 'auto_high_confidence';
+    const enrichStatus = result.publishRecommendation === 'reject'
+      ? 'rejected'
+      : autoCanComplete && result.publishRecommendation === 'approve'
+        ? 'completed'
+        : 'awaiting_approval';
     await supabase.from('posts').update({
+      enrichment_version: enrichConfig.version,
       background_context: result.researcher ? result.researcher : null,
       editorial_commentary: result.analyst.commentary,
       humanized_commentary: result.humanizer.humanized_commentary,
@@ -1624,6 +1649,15 @@ async function handleEnrichJob(job: Record<string, unknown>, supabase: any): Pro
       narrative_callback: result.archivist?.callback_suggestion ?? null,
       narrative_ref_post_id: result.archivist?.referenced_post_id ?? null,
       composed_post_text: result.composer.opinion_section,
+      creator_angle: result.composer.creator_angle,
+      why_it_matters: result.composer.why_it_matters,
+      source_context: result.composer.source_context,
+      algorithm_signal_scores: result.critic.algorithm_signal_scores,
+      aggregator_risk_score: result.critic.aggregator_risk_score,
+      ai_voice_risk_score: result.critic.ai_voice_risk_score,
+      monetization_risk_flags: result.critic.monetization_risk_flags,
+      enrichment_review_reason: result.enrichmentReviewReason,
+      final_x_text: result.composer.final_x_text,
       post_format_hint: result.composer.format_used,
       thread_continuation: result.composer.thread_continuation,
       enrich_status: enrichStatus,
@@ -1632,6 +1666,29 @@ async function handleEnrichJob(job: Record<string, unknown>, supabase: any): Pro
       enrich_duration_ms: result.durationMs,
     }).eq('tweet_id', tweetId);
 
+    await supabase.from('post_enrichments').insert({
+      post_id: tweetId,
+      version: enrichConfig.version,
+      status: enrichStatus,
+      model: enrichConfig.model,
+      creator_angle: result.composer.creator_angle,
+      why_it_matters: result.composer.why_it_matters,
+      source_context: result.composer.source_context,
+      algorithm_signal_scores: result.critic.algorithm_signal_scores,
+      aggregator_risk_score: result.critic.aggregator_risk_score,
+      ai_voice_risk_score: result.critic.ai_voice_risk_score,
+      monetization_risk_flags: result.critic.monetization_risk_flags,
+      enrichment_review_reason: result.enrichmentReviewReason,
+      final_x_text: result.composer.final_x_text,
+      thread_continuation: result.composer.thread_continuation,
+      format_used: result.composer.format_used,
+      critic_output: {
+        critic: result.critic,
+        anti_aggregator: result.antiAggregator,
+        publish_recommendation: result.publishRecommendation,
+      },
+    });
+
     const endedAt = new Date().toISOString();
     await insertPipelineEvent(supabase, 'post', tweetId, 'enrich', 'completed', startedAt, endedAt, null, {
       tokens: result.totalTokens,
@@ -1639,10 +1696,14 @@ async function handleEnrichJob(job: Record<string, unknown>, supabase: any): Pro
       format: result.composer.format_used,
       has_callback: result.archivist?.has_callback ?? false,
       status: enrichStatus,
+      publish_recommendation: result.publishRecommendation,
+      aggregator_risk_score: result.critic.aggregator_risk_score,
+      ai_voice_risk_score: result.critic.ai_voice_risk_score,
+      risk_flags: result.critic.monetization_risk_flags,
     });
 
     // If not requiring approval AND not a manual test, enqueue deliver immediately
-    if (!forceReview && !enrichConfig.require_approval) {
+    if (enrichStatus === 'completed') {
       await enqueueDeliverAfterEnrich(supabase, tweetId);
     }
 
@@ -1661,7 +1722,7 @@ async function handleEnrichJob(job: Record<string, unknown>, supabase: any): Pro
 }
 
 // deno-lint-ignore no-explicit-any
-async function enqueueDeliverAfterEnrich(supabase: any, tweetId: string) {
+async function enqueueDeliverAfterEnrich(supabase: any, tweetId: string, source = 'enrich', resetExisting = true) {
   const idempotencyKey = `deliver:${tweetId}`;
   const { error: deliveryJobError } = await supabase
     .from('jobs')
@@ -1676,11 +1737,11 @@ async function enqueueDeliverAfterEnrich(supabase: any, tweetId: string) {
       lease_expires_at: null,
       last_error: null,
       attempts: 0,
-    }, { onConflict: 'idempotency_key', ignoreDuplicates: false });
+    }, { onConflict: 'idempotency_key', ignoreDuplicates: !resetExisting });
   if (deliveryJobError) {
     console.warn('enrich: failed to enqueue deliver:', deliveryJobError.message);
   } else {
-    await insertPipelineEvent(supabase, 'post', tweetId, 'deliver', 'queued', null, null, null, { source: 'enrich' });
+    await insertPipelineEvent(supabase, 'post', tweetId, 'deliver', 'queued', null, null, null, { source });
     try {
       const { data: existingDel } = await supabase
         .from('deliveries')
