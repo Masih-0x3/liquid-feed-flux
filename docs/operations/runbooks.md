@@ -51,7 +51,20 @@ Changes take effect on next translation/delivery (existing posts unaffected).
 
 ### RSS.app webhook URL in logs
 
-Supabase Edge logs may echo the full `webhooks-rssapp` URL including the `?token=` query. Treat that as credential exposure: **rotate the webhook URL in RSS.app** and update the destination there if logs were shared or exported.
+Supabase Edge logs may echo the full `webhooks-rssapp` URL including a `?token=` query. Treat that as credential exposure: rotate the webhook secret after any shared/exported logs, and prefer header-based auth if the RSS.app dashboard exposes custom request headers.
+
+Current RSS.app public docs describe webhooks as a configured destination URL plus options such as filters and update inclusion. They do not document custom outgoing headers as of 2026-05-16; their `Authorization` examples apply to calls made to the RSS.app API, not RSS.app calls made to our webhook.
+
+Safe migration path:
+
+1. In RSS.app, check whether the webhook editor supports custom request headers or an auth-token/header field.
+2. If supported, set `x-rssapp-token: <new secret>` or `x-webhook-token: <new secret>` and remove the query token from the webhook URL.
+3. In Supabase Edge Function Secrets, set the same value in `RSSAPP_WEBHOOK_TOKEN` or `WEBHOOK_SHARED_SECRET`.
+4. Send an RSS.app webhook test and confirm `webhooks-rssapp` returns `200`.
+5. Set `RSSAPP_ALLOW_QUERY_TOKEN=false` in Supabase Edge Function Secrets to reject future query-token requests.
+6. Rotate away from the old query token. Query-string compatibility should remain enabled only until the RSS.app configuration has been moved.
+
+If RSS.app does not expose header auth, keep `RSSAPP_ALLOW_QUERY_TOKEN=true`, use a long random token in the URL, and rotate the token after any incident or log export. The webhook remains idempotent by `tweet_id`, so retries should not redeliver existing posts.
 
 ---
 

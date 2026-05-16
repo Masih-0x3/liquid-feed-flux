@@ -42,6 +42,40 @@ export function serviceRoleBearerHeader(): Record<string, string> {
   return { Authorization: `Bearer ${serviceKey}` };
 }
 
+export function readRssWebhookToken(req: Request): { provided: string; fromQuery: boolean } {
+  const urlObj = new URL(req.url);
+  const headerToken = (
+    req.headers.get('x-webhook-token')?.trim()
+      || req.headers.get('x-rssapp-token')?.trim()
+      || ''
+  );
+  const queryToken = (
+    urlObj.searchParams.get('token')?.trim()
+      || urlObj.searchParams.get('webhook_token')?.trim()
+      || urlObj.searchParams.get('rssapp_token')?.trim()
+      || ''
+  );
+  return {
+    provided: headerToken || queryToken,
+    fromQuery: !headerToken && Boolean(queryToken),
+  };
+}
+
+export function parseRssQueryTokenAllowance(raw: string | null | undefined): boolean {
+  const normalized = (raw || 'true').trim().toLowerCase();
+  return !['0', 'false', 'no', 'off'].includes(normalized);
+}
+
+export function allowRssQueryToken(): boolean {
+  let raw: string | null | undefined;
+  try {
+    raw = Deno.env.get('RSSAPP_ALLOW_QUERY_TOKEN') || Deno.env.get('ALLOW_RSS_QUERY_TOKEN');
+  } catch (_e) {
+    raw = undefined;
+  }
+  return parseRssQueryTokenAllowance(raw);
+}
+
 /**
  * RSS / webhook entry: token in x-webhook-token or x-rssapp-token.
  * When no env token is configured, falls back to Vault WEBHOOK_SHARED_SECRET (same as cron).
@@ -52,21 +86,7 @@ export async function requireRssWebhookAuth(
   supabase: any,
   corsHeaders: Record<string, string>,
 ): Promise<Response | null> {
-  const urlObj = new URL(req.url);
-  const queryToken = urlObj.searchParams.get('token')?.trim();
-  if (queryToken) {
-    console.warn('Webhook query token rejected; use x-webhook-token or x-rssapp-token header');
-    return new Response(JSON.stringify({ error: 'Webhook token must be sent in a header' }), {
-      status: 401,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
-  }
-
-  const provided = (
-    req.headers.get('x-webhook-token')?.trim()
-      || req.headers.get('x-rssapp-token')?.trim()
-      || ''
-  );
+  const { provided, fromQuery } = readRssWebhookToken(req);
 
   if (!provided) {
     console.warn('Webhook token missing');
@@ -74,6 +94,17 @@ export async function requireRssWebhookAuth(
       status: 401,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
+  }
+
+  if (fromQuery) {
+    if (!allowRssQueryToken()) {
+      console.warn('Webhook query token rejected; use x-webhook-token or x-rssapp-token header');
+      return new Response(JSON.stringify({ error: 'Webhook token must be sent in a header' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    console.warn('Webhook query token accepted for RSS.app compatibility; prefer x-webhook-token or x-rssapp-token header when supported');
   }
 
   const expectedEnv = (
