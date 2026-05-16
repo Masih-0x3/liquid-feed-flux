@@ -109,6 +109,7 @@ async function trimRollingWindow(arr: string[], windowMs: number): Promise<strin
 const ALLOWED_IMAGE = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;        // 5MB per X spec
 const MAX_VIDEO_BYTES = 50 * 1024 * 1024;       // 50MB safety cap (X allows up to 512MB)
+const MAX_STANDARD_VIDEO_DURATION_MS = 120_000; // current account/API limit observed from X write failures
 const VIDEO_CHUNK_BYTES = 4 * 1024 * 1024;      // 4MB chunks for APPEND
 const VIDEO_PROCESS_TIMEOUT_MS = 55 * 1000;     // total polling budget
 
@@ -119,6 +120,7 @@ interface MediaRow {
   mime_type: string | null;
   file_size: number | null;
   kind: string | null;
+  duration_ms?: number | null;
 }
 
 type Tier = 'text' | 'image' | 'video';
@@ -492,16 +494,39 @@ Deno.serve(async (req) => {
     const startedAt = Date.now();
     const enrichStatus = (post as { enrich_status?: string | null }).enrich_status;
 
-    if (isEnrichmentBlockingXPost(enrichStatus, allowCompletedEnrichment)) {
+    if (!onlyTweetId && isEnrichmentBlockingXPost(enrichStatus, allowCompletedEnrichment)) {
       const reason = `enrichment_${enrichStatus ?? 'not_approved'}`;
       results.push({ tweet_id: tweetId, status: 'deferred', reason });
       console.log(`[x-poster] deferring ${tweetId}: ${reason}`);
       continue;
     }
+    if (onlyTweetId && isEnrichmentBlockingXPost(enrichStatus, allowCompletedEnrichment)) {
+      console.log(`[x-poster] force-post requested for ${tweetId}; bypassing enrichment status ${enrichStatus ?? 'none'} and using the plain X template`);
+    }
+
+    if (!onlyTweetId) {
+      const { data: latestX } = await sb
+        .from('x_deliveries')
+        .select('status, last_error, skip_reason')
+        .eq('post_id', tweetId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const latestStatus = (latestX as { status?: string } | null)?.status;
+      if (latestStatus === 'failed' || latestStatus === 'skipped') {
+        results.push({
+          tweet_id: tweetId,
+          status: 'deferred',
+          reason: `previous_x_${latestStatus}`,
+        });
+        console.log(`[x-poster] deferring ${tweetId}: previous X status is ${latestStatus}`);
+        continue;
+      }
+    }
 
     // Fetch media rows
     const { data: mediaRows } = await sb.from('media')
-      .select('id, storage_path, downloaded_at, mime_type, file_size, kind')
+      .select('id, storage_path, downloaded_at, mime_type, file_size, kind, duration_ms')
       .eq('tweet_id', tweetId)
       .order('ordering', { ascending: true });
 
@@ -593,6 +618,27 @@ Deno.serve(async (req) => {
     }
 
     if (sel.tier !== 'text' && !dryRun) {
+      if (sel.tier === 'video') {
+        const durationMs = sel.items[0]?.duration_ms ?? null;
+        if (typeof durationMs === 'number' && durationMs > MAX_STANDARD_VIDEO_DURATION_MS) {
+          const seconds = Math.round(durationMs / 1000);
+          const reason = `video_too_long_for_x:${seconds}s`;
+          const { error: skipErr } = await sb.from('x_deliveries').insert({
+            post_id: tweetId,
+            status: 'skipped',
+            media_count: 0,
+            media_bytes: 0,
+            media_kind: 'video',
+            skip_reason: reason,
+            last_error: `X account/API limit blocks videos over ${MAX_STANDARD_VIDEO_DURATION_MS / 1000}s`,
+            attempts: 0,
+          });
+          if (skipErr) console.error('[x-poster] x_deliveries insert skipped failed (video duration)', { tweetId, err: skipErr.message });
+          results.push({ tweet_id: tweetId, status: 'skipped', reason });
+          console.warn(`[x-poster] skipping ${tweetId}: ${reason}`);
+          continue;
+        }
+      }
       try {
         if (sel.tier === 'video') {
           const m = sel.items[0];

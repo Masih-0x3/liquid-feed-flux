@@ -198,7 +198,16 @@ async function adminRecordEnrichmentFeedback(tweetId: string, feedback: Enrichme
   return data as { ok: boolean };
 }
 
-type ConfirmAction = 'force_telegram' | 'force_x' | 'rescore' | 'reprocess' | 'hydrate' | 'clear_dup' | 'close_stale_x' | 'translate' | 'run_dedupe' | 'cancel_jobs' | 'approve_enrichment' | 'reject_enrichment';
+async function adminIgnoreMonitoringItem(tweetId: string, reason = 'reviewed_and_ignored') {
+  const { data, error } = await supabase.functions.invoke('admin-actions', {
+    body: { action: 'ignore_monitoring_item', tweet_id: tweetId, reason },
+  });
+  if (error) throw error;
+  if (data?.ok === false) throw new Error(data.error ?? 'Ignore failed');
+  return data as { ok: boolean; closed?: { x_deliveries?: number; deliveries?: number; jobs?: number } };
+}
+
+type ConfirmAction = 'force_telegram' | 'force_x' | 'rescore' | 'reprocess' | 'hydrate' | 'clear_dup' | 'ignore' | 'close_stale_x' | 'translate' | 'run_dedupe' | 'cancel_jobs' | 'approve_enrichment' | 'reject_enrichment';
 
 interface PendingAction {
   type: ConfirmAction;
@@ -267,6 +276,7 @@ function actionTitle(action: PendingAction | null) {
     case 'reprocess': return 'Reprocess this post?';
     case 'hydrate': return 'Hydrate this tweet?';
     case 'clear_dup': return 'Clear duplicate status?';
+    case 'ignore': return 'Ignore and remove from queues?';
     case 'close_stale_x': return 'Close stale X pending rows?';
     case 'translate': return 'Get translation only?';
     case 'run_dedupe': return 'Run duplicate check?';
@@ -294,6 +304,8 @@ function actionDescription(action: PendingAction | null) {
       return 'Queues one X read for full tweet text unless an equivalent hydrate job is already pending.';
     case 'clear_dup':
       return 'Marks this pair as not duplicate and reopens the post for delivery evaluation.';
+    case 'ignore':
+      return 'Marks this post as reviewed/ignored, closes failed or pending X rows, closes pending Telegram rows, and cancels pending work without calling Telegram or X.';
     case 'close_stale_x':
       return 'Marks pending X delivery rows older than 24 hours as skipped. This does not retry, post, or call X.';
     case 'translate':
@@ -570,6 +582,20 @@ export default function Monitoring() {
           await adminClearDup(entry.tweet_id, entry.dup_of_tweet_id);
           toast({ title: 'Duplicate cleared' });
           break;
+        case 'ignore': {
+          if (!entry) throw new Error('Missing post');
+          const res = await adminIgnoreMonitoringItem(entry.tweet_id);
+          const closed = res.closed;
+          toast({
+            title: 'Post ignored',
+            description: closed ? `Closed ${closed.x_deliveries ?? 0} X row(s), ${closed.deliveries ?? 0} delivery row(s), ${closed.jobs ?? 0} job(s).` : undefined,
+          });
+          if (drawerTweetId === entry.tweet_id) {
+            setDrawerOpen(false);
+            setDrawerTweetId(null);
+          }
+          break;
+        }
         case 'close_stale_x': {
           const { data, error: closeError } = await supabase.functions.invoke('admin-actions', {
             body: { action: 'summarize_stale_x_pending', older_than_hours: 24, close: true },
@@ -799,6 +825,9 @@ export default function Monitoring() {
             <Check className="w-3 h-3 mr-2" />Clear duplicate
           </DropdownMenuItem>
         )}
+        <DropdownMenuItem onClick={() => setPendingAction({ type: 'ignore', entry })}>
+          <Ban className="w-3 h-3 mr-2" />Ignore / remove
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );

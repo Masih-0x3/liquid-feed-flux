@@ -751,7 +751,12 @@ async function queueManualAdvance(supabase: any, tweetId: string): Promise<{ que
       priority: 15,
       idempotency_key: `hydrate:manual_score:${tweetId}`,
       next_run_at: new Date().toISOString(),
-    }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+      locked_at: null,
+      locked_by: null,
+      lease_expires_at: null,
+      last_error: null,
+      attempts: 0,
+    }, { onConflict: 'idempotency_key', ignoreDuplicates: false });
     await insertAdminPipelineEvent(supabase, tweetId, 'hydrate', 'queued', { source: 'manual_score' });
     return { queued: 'hydrate' };
   }
@@ -766,7 +771,12 @@ async function queueManualAdvance(supabase: any, tweetId: string): Promise<{ que
       priority: 18,
       idempotency_key: `enrich:${tweetId}`,
       next_run_at: new Date().toISOString(),
-    }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+      locked_at: null,
+      locked_by: null,
+      lease_expires_at: null,
+      last_error: null,
+      attempts: 0,
+    }, { onConflict: 'idempotency_key', ignoreDuplicates: false });
     await insertAdminPipelineEvent(supabase, tweetId, 'enrich', 'queued', { source: 'manual_score' });
     return { queued: 'enrich' };
   }
@@ -778,7 +788,12 @@ async function queueManualAdvance(supabase: any, tweetId: string): Promise<{ que
     priority: 20,
     idempotency_key: `deliver:${tweetId}`,
     next_run_at: new Date().toISOString(),
-  }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+    locked_at: null,
+    locked_by: null,
+    lease_expires_at: null,
+    last_error: null,
+    attempts: 0,
+  }, { onConflict: 'idempotency_key', ignoreDuplicates: false });
   const { data: pendingDel } = await supabase
     .from('deliveries')
     .select('id')
@@ -931,7 +946,15 @@ async function recordScoreFeedback(supabase: any, body: Record<string, unknown>)
   const item = map[feedback];
   if (!item) return { ok: false, error: 'feedback must be a supported score feedback action' };
   await recordFeedback(supabase, tweetId, item.action, item.polarity, { feedback });
-  await supabase.from('posts').update({ feedback_locked: true }).eq('tweet_id', tweetId);
+  const reviewPatch: Record<string, unknown> = { feedback_locked: true };
+  if (['correct_skip', 'should_skip', 'not_global_exception'].includes(feedback)) {
+    reviewPatch.score_review_status = 'rejected';
+    reviewPatch.delivery_decision = 'skip';
+    reviewPatch.decision_reason = `score_feedback_skip:${feedback}`;
+  } else {
+    reviewPatch.score_review_status = 'approved';
+  }
+  await supabase.from('posts').update(reviewPatch).eq('tweet_id', tweetId);
   const expectedClass = isAudienceClass(body.expected_audience_class) ? body.expected_audience_class : null;
   if (expectedClass || feedback === 'should_pass_audience' || feedback === 'should_skip' || feedback === 'global_exception_worth_covering' || feedback === 'not_global_exception') {
     const inferredClass: AudienceClass =
@@ -947,6 +970,106 @@ async function recordScoreFeedback(supabase: any, body: Record<string, unknown>)
   }
   await insertAdminPipelineEvent(supabase, tweetId, 'score_feedback', 'completed', { feedback, polarity: item.polarity });
   return { ok: true, tweet_id: tweetId, feedback, polarity: item.polarity };
+}
+
+// deno-lint-ignore no-explicit-any
+async function ignoreMonitoringItem(supabase: any, body: Record<string, unknown>) {
+  const tweetId = typeof body.tweet_id === 'string' ? body.tweet_id.trim() : '';
+  const reason = typeof body.reason === 'string' && body.reason.trim()
+    ? body.reason.trim().slice(0, 240)
+    : 'manual_ignore';
+  if (!tweetId) return { ok: false, error: 'tweet_id is required' };
+
+  const { data: post } = await supabase
+    .from('posts')
+    .select('tweet_id, dedupe_status')
+    .eq('tweet_id', tweetId)
+    .maybeSingle();
+  if (!post) return { ok: false, error: `Post not found: ${tweetId}` };
+
+  const now = new Date().toISOString();
+  const postPatch: Record<string, unknown> = {
+    delivery_decision: 'skip',
+    decision_reason: `admin_ignored:${reason}`,
+    feedback_locked: true,
+    score_review_status: 'rejected',
+    enrich_status: 'skipped',
+  };
+  if (post.dedupe_status === 'pending') {
+    postPatch.dedupe_status = 'unique';
+    postPatch.dedupe_checked_at = now;
+    postPatch.dedupe_reason = `admin_ignored:${reason}`;
+  }
+
+  const { error: postErr } = await supabase.from('posts').update(postPatch).eq('tweet_id', tweetId);
+  if (postErr) return { ok: false, error: postErr.message };
+
+  const { data: xRows, error: xErr } = await supabase
+    .from('x_deliveries')
+    .update({
+      status: 'skipped',
+      skip_reason: `admin_ignored:${reason}`,
+      last_error: null,
+      updated_at: now,
+    })
+    .eq('post_id', tweetId)
+    .in('status', ['pending', 'failed'])
+    .select('id');
+  if (xErr) return { ok: false, error: xErr.message };
+
+  const { data: deliveryRows, error: deliveryErr } = await supabase
+    .from('deliveries')
+    .update({
+      status: 'skipped',
+      last_error: `admin_ignored:${reason}`,
+      last_attempt_at: now,
+    })
+    .eq('subject_type', 'post')
+    .eq('subject_id', tweetId)
+    .neq('status', 'posted')
+    .select('id');
+  if (deliveryErr) return { ok: false, error: deliveryErr.message };
+
+  const { data: jobRows, error: jobErr } = await supabase
+    .from('jobs')
+    .update({
+      status: 'completed',
+      completed_at: now,
+      locked_at: null,
+      locked_by: null,
+      lease_expires_at: null,
+      last_error: null,
+      result_meta: { admin_ignored: true, reason },
+    })
+    .filter('payload->>tweet_id', 'eq', tweetId)
+    .in('status', ['pending', 'running'])
+    .select('id, type');
+  if (jobErr) return { ok: false, error: jobErr.message };
+
+  await updateLatestPostEnrichment(supabase, tweetId, {
+    status: 'skipped',
+    feedback_label: 'admin_ignored',
+    feedback_note: reason,
+    feedback_at: now,
+  });
+  await recordFeedback(supabase, tweetId, 'admin_ignore', 0, { reason }).catch(() => {});
+  await insertAdminPipelineEvent(supabase, tweetId, 'admin_ignore', 'completed', {
+    reason,
+    x_rows_closed: xRows?.length ?? 0,
+    delivery_rows_closed: deliveryRows?.length ?? 0,
+    jobs_closed: jobRows?.length ?? 0,
+  });
+
+  return {
+    ok: true,
+    tweet_id: tweetId,
+    ignored: true,
+    closed: {
+      x_deliveries: xRows?.length ?? 0,
+      deliveries: deliveryRows?.length ?? 0,
+      jobs: jobRows?.length ?? 0,
+    },
+  };
 }
 
 type MonitoringFilter =
@@ -3983,6 +4106,10 @@ serve(async (req) => {
 
       case 'record_score_feedback': {
         return jsonResponse(await recordScoreFeedback(supabase, body));
+      }
+
+      case 'ignore_monitoring_item': {
+        return jsonResponse(await ignoreMonitoringItem(supabase, body));
       }
 
       // ===== Run X followers snapshot manually =====
