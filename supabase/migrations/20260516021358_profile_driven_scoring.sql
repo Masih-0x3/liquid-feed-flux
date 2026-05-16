@@ -88,7 +88,6 @@ CREATE POLICY "Admins can manage scoring_examples"
   WITH CHECK (private.has_role((SELECT auth.uid()), 'admin'::public.app_role));
 
 REVOKE ALL ON public.scoring_examples FROM anon, authenticated;
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.scoring_examples TO authenticated;
 GRANT ALL ON public.scoring_examples TO service_role;
 
 CREATE TABLE IF NOT EXISTS public.scoring_evaluations (
@@ -119,7 +118,6 @@ CREATE POLICY "Admins can manage scoring_evaluations"
   WITH CHECK (private.has_role((SELECT auth.uid()), 'admin'::public.app_role));
 
 REVOKE ALL ON public.scoring_evaluations FROM anon, authenticated;
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.scoring_evaluations TO authenticated;
 GRANT ALL ON public.scoring_evaluations TO service_role;
 
 INSERT INTO public.settings (key, value, updated_at)

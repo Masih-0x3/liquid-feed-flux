@@ -42,7 +42,6 @@ CREATE POLICY "Admins can manage x_api_events" ON public.x_api_events
   WITH CHECK (private.has_role((SELECT auth.uid()), 'admin'::public.app_role));
 
 REVOKE ALL ON public.x_api_events FROM anon, authenticated;
-GRANT SELECT ON public.x_api_events TO authenticated;
 GRANT ALL ON public.x_api_events TO service_role;
 
 INSERT INTO public.settings (key, value, description, updated_at)

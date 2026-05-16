@@ -23,7 +23,6 @@ CREATE POLICY "Admins can manage queue_reconcile_runs" ON public.queue_reconcile
   WITH CHECK (private.has_role((SELECT auth.uid()), 'admin'::public.app_role));
 
 REVOKE ALL ON public.queue_reconcile_runs FROM anon, authenticated;
-GRANT SELECT ON public.queue_reconcile_runs TO authenticated;
 GRANT ALL ON public.queue_reconcile_runs TO service_role;
 
 -- Performance advisor: foreign-key lookups on snapshot delete/update need indexes.

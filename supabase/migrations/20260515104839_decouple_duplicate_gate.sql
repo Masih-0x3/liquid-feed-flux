@@ -121,4 +121,4 @@ AS $$
 $$;
 
 REVOKE ALL ON FUNCTION public.find_story_candidates_v3(vector(1536), text, int, numeric, int) FROM public, anon;
-GRANT EXECUTE ON FUNCTION public.find_story_candidates_v3(vector(1536), text, int, numeric, int) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.find_story_candidates_v3(vector(1536), text, int, numeric, int) TO service_role;
