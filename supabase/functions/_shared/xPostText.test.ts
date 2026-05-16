@@ -18,6 +18,8 @@ Deno.test("isEnrichmentBlockingXPost blocks review and rejected drafts", () => {
   assertEquals(isEnrichmentBlockingXPost("rejected", true), true);
   assertEquals(isEnrichmentBlockingXPost("completed", false), true);
   assertEquals(isEnrichmentBlockingXPost("completed", true), false);
+  assertEquals(isEnrichmentBlockingXPost("pending", false, false), false);
+  assertEquals(isEnrichmentBlockingXPost("awaiting_approval", false, false), false);
 });
 
 Deno.test("buildXPostText uses final_x_text only after approval", () => {

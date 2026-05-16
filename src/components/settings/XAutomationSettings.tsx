@@ -58,7 +58,7 @@ export default function XAutomationSettings({ twitterHydration, xApiUsage, xPost
   const [hydrateResult, setHydrateResult] = useState<{ ok: boolean; text?: string; note_tweet?: string; lang?: string; raw?: unknown; error?: string } | null>(null);
 
   const [backfillLoading, setBackfillLoading] = useState(false);
-  const [backfillResult, setBackfillResult] = useState<{ ok: boolean; dry_run?: boolean; scanned?: number; matched?: number; queued?: number; skipped_existing?: number; max?: number; hours?: number; error?: string } | null>(null);
+  const [backfillResult, setBackfillResult] = useState<{ ok: boolean; dry_run?: boolean; scanned?: number; matched?: number; queued?: number; skipped_existing?: number; excluded_by_gate?: number; max?: number; hours?: number; error?: string } | null>(null);
 
   const legacyCalls24h = Array.isArray(xApiUsage?.calls_24h)
     ? xApiUsage!.calls_24h!.filter((ts) => {
@@ -160,7 +160,7 @@ export default function XAutomationSettings({ twitterHydration, xApiUsage, xPost
     setBackfillResult(null);
     try {
       const { data, error } = await supabase.functions.invoke('admin-actions', {
-        body: { action: 'rehydrate_recent_truncated', hours: 24, dry_run: dryRun },
+        body: { action: 'rehydrate_recent_truncated', hours: 24, dry_run: dryRun, force: false },
       });
       if (error) throw error;
       setBackfillResult(data);
@@ -292,7 +292,7 @@ export default function XAutomationSettings({ twitterHydration, xApiUsage, xPost
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <div>
                 <p className="text-sm font-medium text-glass-foreground">Re-hydrate recent truncated tweets</p>
-                <p className="text-xs text-muted-foreground">Scans posts from the last 24h, finds ones that look truncated (e.g. ending in <code>pic.</code>, mid-sentence ellipsis, dangling articles), and queues them for X API hydration.</p>
+                <p className="text-xs text-muted-foreground">Scans posts from the last 24h and only queues hydration for score-passing posts marked for delivery. Skipped, duplicate, and below-threshold posts stay untouched.</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button onClick={() => runBackfill(true)} disabled={backfillLoading} variant="outline" className="border-primary/50 hover:bg-primary/10">
@@ -309,6 +309,7 @@ export default function XAutomationSettings({ twitterHydration, xApiUsage, xPost
                 {backfillResult.ok ? (
                   <span>
                     Scanned <strong>{backfillResult.scanned}</strong> · matched <strong>{backfillResult.matched}</strong> · {backfillResult.dry_run ? 'would queue' : 'queued'} <strong>{backfillResult.queued}</strong> hydrate jobs.
+                    {typeof backfillResult.excluded_by_gate === 'number' ? <> Excluded by score/decision gate: <strong>{backfillResult.excluded_by_gate}</strong>.</> : null}
                     {backfillResult.skipped_existing ? <> Existing pending: <strong>{backfillResult.skipped_existing}</strong>.</> : null}
                   </span>
                 ) : (

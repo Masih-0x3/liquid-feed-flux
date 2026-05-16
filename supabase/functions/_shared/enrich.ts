@@ -7,6 +7,7 @@ export interface EnrichmentConfig {
   model: string;
   version: string;
   mode: "creator_analysis" | "legacy";
+  pipeline_mode: "manual_only" | "shadow_review" | "required_for_x";
   review_mode: "shadow_review" | "auto_high_confidence" | "manual_only";
   source_attribution_policy: "compact" | "always" | "none";
   analyst_prompt: string;
@@ -172,6 +173,7 @@ const DEFAULT_ENRICHMENT_CONFIG: EnrichmentConfig = {
   model: "gpt-5.4-mini",
   version: "creator-analysis-v2",
   mode: "creator_analysis",
+  pipeline_mode: "manual_only",
   review_mode: "shadow_review",
   source_attribution_policy: "compact",
   analyst_prompt: "You are the editorial voice of a Persian-language X account writing original creator analysis for Iranian audiences. Add context, implication, contradiction, pattern, human consequence, or strategic reading. Do not simply summarize the source.",
@@ -203,9 +205,16 @@ const DEFAULT_ENRICHMENT_CONFIG: EnrichmentConfig = {
 };
 
 export function normalizeEnrichmentConfig(raw: Partial<EnrichmentConfig> | null | undefined): EnrichmentConfig {
-  const cfg = { ...DEFAULT_ENRICHMENT_CONFIG, ...(raw ?? {}) } as EnrichmentConfig;
+  const input = raw ?? {};
+  const cfg = { ...DEFAULT_ENRICHMENT_CONFIG, ...input } as EnrichmentConfig;
   cfg.version = cfg.version || "creator-analysis-v2";
   cfg.mode = cfg.mode || "creator_analysis";
+  const requestedPipelineMode = typeof input.pipeline_mode === "string" ? input.pipeline_mode : null;
+  if (!requestedPipelineMode || !["manual_only", "shadow_review", "required_for_x"].includes(requestedPipelineMode)) {
+    cfg.pipeline_mode = cfg.enabled
+      ? cfg.review_mode === "manual_only" ? "manual_only" : "shadow_review"
+      : "manual_only";
+  }
   cfg.review_mode = cfg.review_mode || "shadow_review";
   cfg.source_attribution_policy = cfg.source_attribution_policy || "compact";
   cfg.model = cfg.model || "gpt-5.4-mini";
@@ -220,6 +229,18 @@ export function normalizeEnrichmentConfig(raw: Partial<EnrichmentConfig> | null 
   cfg.min_creator_angle_chars = clampNumber(cfg.min_creator_angle_chars, 20, 400, 80);
   cfg.max_critic_tokens = clampNumber(cfg.max_critic_tokens, 500, 8000, 2000);
   return cfg;
+}
+
+export function isAutoEnrichmentEnabled(config: EnrichmentConfig): boolean {
+  return config.enabled === true && config.pipeline_mode !== "manual_only";
+}
+
+export function doesEnrichmentBlockX(config: EnrichmentConfig): boolean {
+  return config.enabled === true && config.pipeline_mode === "required_for_x";
+}
+
+export function allowCompletedEnrichmentForPosting(config: EnrichmentConfig): boolean {
+  return config.require_approval === false && config.review_mode === "auto_high_confidence";
 }
 
 function clampNumber(value: unknown, min: number, max: number, fallback: number): number {

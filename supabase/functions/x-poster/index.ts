@@ -7,6 +7,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1';
 import { requireInternalAuth } from '../_shared/internalAuth.ts';
 import { recordLegacyXApiUsage, recordXApiEvent } from '../_shared/xApiLedger.ts';
 import { buildXPostText, isEnrichmentBlockingXPost, pickHashtags } from '../_shared/xPostText.ts';
+import { allowCompletedEnrichmentForPosting, doesEnrichmentBlockX, normalizeEnrichmentConfig } from '../_shared/enrich.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': Deno.env.get('ALLOWED_CORS_ORIGIN') ?? 'https://liquid-feed-flux.lovable.app',
@@ -378,8 +379,9 @@ Deno.serve(async (req) => {
   const sm: Record<string, unknown> = Object.fromEntries((settingsRows || []).map((r) => [r.key, r.value]));
   const cfg: PostingConfig = { ...DEFAULT_CFG, ...(isRecord(sm.x_posting_config) ? sm.x_posting_config : {}) } as PostingConfig;
   const limits: RateLimits = { ...DEFAULT_LIMITS, ...(isRecord(sm.x_rate_limits) ? sm.x_rate_limits : {}) } as RateLimits;
-  const enrichmentCfg = isRecord(sm.enrichment_config) ? sm.enrichment_config : {};
-  const allowCompletedEnrichment = enrichmentCfg.require_approval === false && enrichmentCfg.review_mode === 'auto_high_confidence';
+  const enrichmentCfg = normalizeEnrichmentConfig(isRecord(sm.enrichment_config) ? sm.enrichment_config : { enabled: false });
+  const allowCompletedEnrichment = allowCompletedEnrichmentForPosting(enrichmentCfg);
+  const enrichmentRequiredForX = doesEnrichmentBlockX(enrichmentCfg);
 
   if (!cfg.enabled && !dryRun) {
     return new Response(JSON.stringify({ skipped: true, reason: 'x_posting_disabled' }), {
@@ -455,10 +457,12 @@ Deno.serve(async (req) => {
     // Without this, x-poster can publish the truncated first translation before
     // the hydrate_tweet job completes (~1-2 min later).
     candidatesQ = candidatesQ.or('is_truncated.eq.false,hydrated_at.not.is.null');
-    const allowedEnrichStatuses = allowCompletedEnrichment
-      ? 'approved,enriched,completed,skipped'
-      : 'approved,enriched,skipped';
-    candidatesQ = candidatesQ.or(`enrich_status.is.null,enrich_status.in.(${allowedEnrichStatuses})`);
+    if (enrichmentRequiredForX) {
+      const allowedEnrichStatuses = allowCompletedEnrichment
+        ? 'approved,enriched,completed,skipped'
+        : 'approved,enriched,skipped';
+      candidatesQ = candidatesQ.or(`enrich_status.is.null,enrich_status.in.(${allowedEnrichStatuses})`);
+    }
     // NOTE: require_media is intentionally NOT applied as a DB filter.
     // We post all eligible items; media is attached only when present & valid.
     // The legacy `require_media` flag is kept in the type for back-compat but no longer gates posting.
@@ -494,14 +498,20 @@ Deno.serve(async (req) => {
     const startedAt = Date.now();
     const enrichStatus = (post as { enrich_status?: string | null }).enrich_status;
 
-    if (!onlyTweetId && isEnrichmentBlockingXPost(enrichStatus, allowCompletedEnrichment)) {
+    if (!onlyTweetId && isEnrichmentBlockingXPost(enrichStatus, allowCompletedEnrichment, enrichmentRequiredForX)) {
       const reason = `enrichment_${enrichStatus ?? 'not_approved'}`;
       results.push({ tweet_id: tweetId, status: 'deferred', reason });
       console.log(`[x-poster] deferring ${tweetId}: ${reason}`);
       continue;
     }
-    if (onlyTweetId && isEnrichmentBlockingXPost(enrichStatus, allowCompletedEnrichment)) {
+    if (onlyTweetId && isEnrichmentBlockingXPost(enrichStatus, allowCompletedEnrichment, enrichmentRequiredForX)) {
       console.log(`[x-poster] force-post requested for ${tweetId}; bypassing enrichment status ${enrichStatus ?? 'none'} and using the plain X template`);
+    }
+
+    if ((post as { is_truncated?: boolean }).is_truncated === true && !(post as { hydrated_at?: string | null }).hydrated_at) {
+      results.push({ tweet_id: tweetId, status: 'deferred', reason: 'waiting_hydration' });
+      console.log(`[x-poster] deferring ${tweetId}: waiting_hydration`);
+      continue;
     }
 
     if (!onlyTweetId) {
@@ -552,6 +562,10 @@ Deno.serve(async (req) => {
       // defer this iteration so we never post text-only when media exists.
       const hasMediaRowWithSrc = (mediaRows || []).some((m) => (m as MediaRow & { id: string }).id);
       if (hasMediaRowWithSrc) {
+        if (dryRun) {
+          results.push({ tweet_id: tweetId, status: 'dry_run_deferred', reason: 'media_pending_self_heal_needed', age_ms: postAgeMs });
+          continue;
+        }
         await sb.from('jobs').insert({
           type: 'download_media',
           payload: { tweet_id: tweetId },
@@ -565,6 +579,10 @@ Deno.serve(async (req) => {
         continue;
       }
 
+      if (dryRun) {
+        results.push({ tweet_id: tweetId, status: 'dry_run_deferred', reason: 'media_missing_self_heal_needed', age_ms: postAgeMs });
+        continue;
+      }
       await sb.from('jobs').insert({
         type: 'resolve_media',
         payload: { tweet_id: tweetId },
@@ -604,6 +622,10 @@ Deno.serve(async (req) => {
 
     if (hasMediaFlag && sel.tier === 'text') {
       const reason = sel.reason || 'no_supported_media';
+      if (dryRun) {
+        results.push({ tweet_id: tweetId, status: 'dry_run_deferred', reason: `media_required:${reason}` });
+        continue;
+      }
       const { error: pendErr } = await sb.from('x_deliveries').insert({
         post_id: tweetId,
         status: 'pending',

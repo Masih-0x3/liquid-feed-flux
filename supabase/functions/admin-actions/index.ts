@@ -21,6 +21,12 @@ import {
   type ScoringPolicy,
   type ScoringPolicyResult,
 } from "../_shared/scoringPolicy.ts";
+import {
+  allowCompletedEnrichmentForPosting,
+  doesEnrichmentBlockX,
+  normalizeEnrichmentConfig,
+  type EnrichmentConfig,
+} from "../_shared/enrich.ts";
 
 const DEPLOY_SHA = Deno.env.get('DEPLOY_GIT_SHA') ?? 'unknown';
 const DEPLOY_TIME = Deno.env.get('DEPLOY_TIME') ?? new Date().toISOString();
@@ -735,6 +741,36 @@ async function runTranslationOnly(supabase: any, tweetId: string): Promise<{ ok:
 }
 
 // deno-lint-ignore no-explicit-any
+async function queueHydrationJob(supabase: any, tweetId: string, source: string): Promise<{ queued: boolean; reason?: string }> {
+  const { data: pending } = await supabase
+    .from('jobs')
+    .select('id')
+    .eq('type', 'hydrate_tweet')
+    .in('status', ['pending', 'running'])
+    .filter('payload->>tweet_id', 'eq', tweetId)
+    .limit(1);
+  if (pending && pending.length > 0) {
+    return { queued: false, reason: 'hydrate_job_already_pending' };
+  }
+  const { error } = await supabase.from('jobs').upsert({
+    type: 'hydrate_tweet',
+    payload: { tweet_id: tweetId, source },
+    status: 'pending',
+    priority: 15,
+    idempotency_key: `hydrate:${source}:${tweetId}`,
+    next_run_at: new Date().toISOString(),
+    locked_at: null,
+    locked_by: null,
+    lease_expires_at: null,
+    last_error: null,
+    attempts: 0,
+  }, { onConflict: 'idempotency_key', ignoreDuplicates: false });
+  if (error) throw error;
+  await insertAdminPipelineEvent(supabase, tweetId, 'hydrate', 'queued', { source });
+  return { queued: true };
+}
+
+// deno-lint-ignore no-explicit-any
 async function queueManualAdvance(supabase: any, tweetId: string): Promise<{ queued: string; reason?: string }> {
   const { data: post } = await supabase
     .from('posts')
@@ -744,26 +780,13 @@ async function queueManualAdvance(supabase: any, tweetId: string): Promise<{ que
   if (!post) return { queued: 'none', reason: 'post_not_found' };
   if (!post.text_translated && !post.translated_at) return { queued: 'none', reason: 'translation_missing' };
   if (post.is_truncated === true && !post.hydrated_at) {
-    await supabase.from('jobs').upsert({
-      type: 'hydrate_tweet',
-      payload: { tweet_id: tweetId, source: 'manual_score' },
-      status: 'pending',
-      priority: 15,
-      idempotency_key: `hydrate:manual_score:${tweetId}`,
-      next_run_at: new Date().toISOString(),
-      locked_at: null,
-      locked_by: null,
-      lease_expires_at: null,
-      last_error: null,
-      attempts: 0,
-    }, { onConflict: 'idempotency_key', ignoreDuplicates: false });
-    await insertAdminPipelineEvent(supabase, tweetId, 'hydrate', 'queued', { source: 'manual_score' });
-    return { queued: 'hydrate' };
+    const result = await queueHydrationJob(supabase, tweetId, 'manual_score');
+    return { queued: 'hydrate', reason: result.reason };
   }
 
   const { data: enrichCfgRow } = await supabase.from('settings').select('value').eq('key', 'enrichment_config').maybeSingle();
-  const enrichEnabled = (enrichCfgRow?.value as Record<string, unknown> | null)?.enabled === true;
-  if (enrichEnabled && post.enrich_status !== 'approved' && post.enrich_status !== 'skipped') {
+  const enrichCfg = normalizeEnrichmentConfig((enrichCfgRow?.value ?? { enabled: false }) as Partial<EnrichmentConfig>);
+  if (doesEnrichmentBlockX(enrichCfg) && post.enrich_status !== 'approved' && post.enrich_status !== 'skipped') {
     await supabase.from('jobs').upsert({
       type: 'enrich',
       payload: { tweet_id: tweetId, source: 'manual_score' },
@@ -2544,6 +2567,218 @@ async function getXApiSummary(supabase: any, body: Record<string, unknown>) {
   };
 }
 
+type XDiagnosticBlocker = {
+  code: string;
+  label: string;
+  severity: 'blocker' | 'deferred' | 'note';
+};
+
+const DEFAULT_X_POSTING_DIAG_CONFIG = {
+  enabled: false,
+  min_score: 14,
+  dedupe_window_hours: 48,
+  post_only_decision_deliver: true,
+  start_posting_from: null as string | null,
+};
+
+const DEFAULT_X_RATE_LIMIT_DIAG_CONFIG = {
+  posts_per_hour: 20,
+  posts_per_day: 100,
+  monthly_post_budget: 2500,
+  media_uploads_per_day: 200,
+};
+
+function mergeRecord<T extends Record<string, unknown>>(defaults: T, raw: unknown): T {
+  return { ...defaults, ...(raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {}) } as T;
+}
+
+function xQuotaBlock(snapshot: {
+  posts_1h: number;
+  posts_24h: number;
+  posts_30d: number;
+  media_24h: number;
+}, limits: typeof DEFAULT_X_RATE_LIMIT_DIAG_CONFIG): string | null {
+  if (snapshot.posts_1h >= limits.posts_per_hour) return 'rate_limit_hour';
+  if (snapshot.posts_24h >= limits.posts_per_day) return 'rate_limit_day';
+  if (snapshot.posts_30d >= limits.monthly_post_budget) return 'rate_limit_month';
+  if (snapshot.media_24h >= limits.media_uploads_per_day) return 'rate_limit_media';
+  return null;
+}
+
+// deno-lint-ignore no-explicit-any
+async function getXPostingDiagnostics(supabase: any, body: Record<string, unknown>) {
+  const tweetId = typeof body.tweet_id === 'string' ? body.tweet_id.trim() : '';
+  const limit = Math.min(Math.max(Number(body.limit) || 20, 1), 100);
+  const [settingsRows, threshold] = await Promise.all([
+    supabase.from('settings').select('key, value').in('key', ['x_posting_config', 'x_rate_limits', 'enrichment_config']),
+    loadActiveThreshold(supabase).catch(() => 14),
+  ]);
+  const settings = Object.fromEntries((settingsRows.data ?? []).map((row: Record<string, unknown>) => [String(row.key), row.value]));
+  const xCfg = mergeRecord(DEFAULT_X_POSTING_DIAG_CONFIG, settings.x_posting_config);
+  const xLimits = mergeRecord(DEFAULT_X_RATE_LIMIT_DIAG_CONFIG, settings.x_rate_limits);
+  const enrichCfg = normalizeEnrichmentConfig((settings.enrichment_config ?? { enabled: false }) as Partial<EnrichmentConfig>);
+  const enrichmentRequiredForX = doesEnrichmentBlockX(enrichCfg);
+  const allowCompletedEnrichment = allowCompletedEnrichmentForPosting(enrichCfg);
+
+  const since1h = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const since30d = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
+  const [posts1h, posts24h, posts30d, media24h] = await Promise.all([
+    supabase.from('x_deliveries').select('id', { count: 'exact', head: true }).eq('status', 'posted').gte('created_at', since1h),
+    supabase.from('x_deliveries').select('id', { count: 'exact', head: true }).eq('status', 'posted').gte('created_at', since24h),
+    supabase.from('x_deliveries').select('id', { count: 'exact', head: true }).eq('status', 'posted').gte('created_at', since30d),
+    supabase.from('x_deliveries').select('id', { count: 'exact', head: true }).eq('status', 'posted').gt('media_count', 0).gte('created_at', since24h),
+  ]);
+  const quotaSnapshot = {
+    posts_1h: posts1h.count ?? 0,
+    posts_24h: posts24h.count ?? 0,
+    posts_30d: posts30d.count ?? 0,
+    media_24h: media24h.count ?? 0,
+  };
+  const quotaReason = xQuotaBlock(quotaSnapshot, xLimits);
+
+  let q = supabase
+    .from('posts')
+    .select('tweet_id, text_original, text_translated, created_at, url, author_handle, has_media, delivery_decision, decision_reason, final_score, importance_score, dup_of_tweet_id, dedupe_status, is_truncated, hydrated_at, enrich_status, final_x_text')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (tweetId) q = q.eq('tweet_id', tweetId).limit(1);
+  const { data: posts, error } = await q;
+  if (error) return { success: false, error: error.message };
+
+  const dedupeCutoff = new Date(Date.now() - Number(xCfg.dedupe_window_hours || 48) * 3600 * 1000).toISOString();
+  const startFrom = typeof xCfg.start_posting_from === 'string' ? xCfg.start_posting_from : null;
+  const effectiveCutoff = startFrom && startFrom > dedupeCutoff ? startFrom : dedupeCutoff;
+
+  const items: Array<Record<string, unknown>> = [];
+  for (const post of posts ?? []) {
+    const tid = post.tweet_id as string;
+    const [latestX, activeJobs, mediaRows] = await Promise.all([
+      supabase
+        .from('x_deliveries')
+        .select('status, skip_reason, last_error, x_tweet_id, posted_at, created_at')
+        .eq('post_id', tid)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from('jobs')
+        .select('type, status, last_error, created_at')
+        .in('status', ['pending', 'running'])
+        .filter('payload->>tweet_id', 'eq', tid)
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('media')
+        .select('id, downloaded_at, storage_path, kind, mime_type')
+        .eq('tweet_id', tid),
+    ]);
+    const blockers: XDiagnosticBlocker[] = [];
+    const notes: XDiagnosticBlocker[] = [];
+    const score = typeof post.final_score === 'number'
+      ? post.final_score
+      : typeof post.importance_score === 'number'
+        ? post.importance_score
+        : null;
+    const hasTranslation = typeof post.text_translated === 'string' && post.text_translated.trim().length > 0;
+    const latestStatus = latestX.data?.status as string | undefined;
+    const jobs = (activeJobs.data ?? []) as Array<Record<string, unknown>>;
+    const activeJobTypes = new Set(jobs.map((job) => String(job.type)));
+    const activeEnrichJob = jobs.some((job) => job.type === 'enrich');
+    const activeMediaJob = jobs.some((job) => job.type === 'resolve_media' || job.type === 'download_media');
+    const activeHydrateJob = jobs.some((job) => job.type === 'hydrate_tweet');
+    const media = (mediaRows.data ?? []) as Array<Record<string, unknown>>;
+    const downloadedMedia = media.filter((row) => row.downloaded_at && row.storage_path).length;
+    const enrichStatus = typeof post.enrich_status === 'string' ? post.enrich_status : null;
+    const enrichmentApproved = enrichStatus === 'approved' || enrichStatus === 'enriched' || (enrichStatus === 'completed' && allowCompletedEnrichment);
+
+    if (!xCfg.enabled) blockers.push({ code: 'x_disabled', label: 'X posting is disabled in Settings', severity: 'blocker' });
+    if (post.created_at && String(post.created_at) < effectiveCutoff) blockers.push({ code: 'before_start_posting_from', label: 'Older than X posting cutover window', severity: 'blocker' });
+    if (!hasTranslation) blockers.push({ code: 'missing_translation', label: 'Missing Persian translation', severity: 'blocker' });
+    if (score == null) blockers.push({ code: 'missing_score', label: 'Missing editorial score', severity: 'blocker' });
+    else if (score < Number(xCfg.min_score || threshold)) blockers.push({ code: 'score_below_x_min', label: `Score ${score} is below X minimum ${xCfg.min_score || threshold}`, severity: 'blocker' });
+    if (xCfg.post_only_decision_deliver && post.delivery_decision !== 'deliver') blockers.push({ code: 'decision_not_deliver', label: `Decision is ${post.delivery_decision ?? 'unset'}`, severity: 'blocker' });
+    if (post.dup_of_tweet_id || post.dedupe_status === 'duplicate') blockers.push({ code: 'duplicate_gate', label: `Duplicate of ${post.dup_of_tweet_id ?? 'another post'}`, severity: 'blocker' });
+    if (post.is_truncated === true && !post.hydrated_at) {
+      blockers.push({
+        code: activeHydrateJob ? 'hydration_pending' : 'waiting_hydration',
+        label: activeHydrateJob ? 'Hydration job is pending/running' : 'Tweet is truncated and needs hydration before X',
+        severity: 'deferred',
+      });
+    }
+    if (latestStatus === 'posted') blockers.push({ code: 'already_posted', label: `Already posted to X${latestX.data?.x_tweet_id ? ` (${latestX.data.x_tweet_id})` : ''}`, severity: 'blocker' });
+    if (latestStatus === 'failed' || latestStatus === 'skipped') blockers.push({ code: `previous_x_${latestStatus}`, label: `Previous X row is ${latestStatus}; automatic retry is disabled`, severity: 'blocker' });
+    if (enrichmentRequiredForX && enrichStatus && !enrichmentApproved && enrichStatus !== 'skipped') {
+      blockers.push({ code: `enrichment_${enrichStatus}`, label: `Required enrichment is ${enrichStatus}`, severity: 'blocker' });
+    } else if (enrichStatus === 'pending' && !activeEnrichJob) {
+      notes.push({ code: 'stale_enrichment_pending_ignored', label: 'Stale enrichment pending is ignored because enrichment is not required for X', severity: 'note' });
+    } else if (enrichStatus && !enrichmentApproved && enrichStatus !== 'skipped') {
+      notes.push({ code: `enrichment_${enrichStatus}_not_required`, label: `Enrichment is ${enrichStatus}, but plain X posting is allowed`, severity: 'note' });
+    }
+    if (post.has_media === true && downloadedMedia === 0) {
+      blockers.push({
+        code: activeMediaJob ? 'media_pending' : 'media_missing',
+        label: activeMediaJob ? 'Media is still resolving/downloading' : 'Source has media but no downloaded X-uploadable media',
+        severity: 'deferred',
+      });
+    }
+    if (quotaReason) blockers.push({ code: quotaReason, label: `X quota blocked: ${quotaReason}`, severity: 'blocker' });
+
+    const eligible = blockers.length === 0;
+    items.push({
+      tweet_id: tid,
+      eligible,
+      blockers,
+      notes,
+      score,
+      threshold: xCfg.min_score || threshold,
+      decision: post.delivery_decision ?? null,
+      latest_x: latestX.data ?? null,
+      active_jobs: jobs.map((job) => ({ type: job.type, status: job.status, error: job.last_error ?? null })),
+      active_job_types: [...activeJobTypes],
+      hydration: {
+        is_truncated: post.is_truncated === true,
+        hydrated_at: post.hydrated_at ?? null,
+        active_hydrate_job: activeHydrateJob,
+      },
+      media: {
+        has_media: post.has_media === true,
+        rows: media.length,
+        downloaded: downloadedMedia,
+        active_media_job: activeMediaJob,
+      },
+      enrichment: {
+        status: enrichStatus,
+        pipeline_mode: enrichCfg.pipeline_mode,
+        required_for_x: enrichmentRequiredForX,
+        approved_for_text: enrichmentApproved,
+        text_source: enrichmentApproved && typeof post.final_x_text === 'string' && post.final_x_text.trim() ? 'approved_enrichment' : 'plain_translation',
+      },
+    });
+  }
+
+  return {
+    success: true,
+    diagnostics: {
+      generated_at: new Date().toISOString(),
+      config: {
+        x_enabled: xCfg.enabled,
+        x_min_score: xCfg.min_score,
+        start_posting_from: xCfg.start_posting_from,
+        effective_cutoff: effectiveCutoff,
+        enrichment_pipeline_mode: enrichCfg.pipeline_mode,
+        enrichment_required_for_x: enrichmentRequiredForX,
+      },
+      quota: {
+        ...quotaSnapshot,
+        blocked_reason: quotaReason,
+      },
+      eligible_candidates: items.filter((item) => item.eligible),
+      rejected_or_deferred_candidates: items.filter((item) => !item.eligible),
+      items,
+    },
+  };
+}
+
 function isAudienceClass(v: unknown): v is AudienceClass {
   return v === 'direct_focus' || v === 'adjacent' || v === 'global_exception' || v === 'off_topic';
 }
@@ -3200,6 +3435,19 @@ function validateSettingsValue(key: string, value: unknown): string | null {
         }
         break;
       }
+      case 'enrichment_config': {
+        if (v.enabled !== undefined && typeof v.enabled !== 'boolean') return 'enrichment_config.enabled must be a boolean';
+        if (v.mode !== undefined && v.mode !== 'creator_analysis' && v.mode !== 'legacy') return 'enrichment_config.mode must be creator_analysis|legacy';
+        if (v.pipeline_mode !== undefined && v.pipeline_mode !== 'manual_only' && v.pipeline_mode !== 'shadow_review' && v.pipeline_mode !== 'required_for_x') {
+          return 'enrichment_config.pipeline_mode must be manual_only|shadow_review|required_for_x';
+        }
+        if (v.review_mode !== undefined && v.review_mode !== 'shadow_review' && v.review_mode !== 'auto_high_confidence' && v.review_mode !== 'manual_only') {
+          return 'enrichment_config.review_mode must be shadow_review|auto_high_confidence|manual_only';
+        }
+        if (v.require_approval !== undefined && typeof v.require_approval !== 'boolean') return 'enrichment_config.require_approval must be a boolean';
+        if (v.model !== undefined && (typeof v.model !== 'string' || v.model.length > 100)) return 'enrichment_config.model must be a string <=100';
+        break;
+      }
     }
     return null;
   }
@@ -3242,7 +3490,7 @@ serve(async (req) => {
           return jsonResponse({ error: 'key and value are required' }, 400);
         }
         // Only allow non-secret settings keys
-        const allowedKeys = ['translation_prompt', 'telegram_config', 'message_template', 'content_filter', 'twitter_hydration', 'x_posting_config', 'x_rate_limits', 'x_api_controls', 'editorial_profiles', 'active_profile_id', 'story_memory', 'scoring_policy'];
+        const allowedKeys = ['translation_prompt', 'telegram_config', 'message_template', 'content_filter', 'twitter_hydration', 'x_posting_config', 'x_rate_limits', 'x_api_controls', 'enrichment_config', 'editorial_profiles', 'active_profile_id', 'story_memory', 'scoring_policy'];
         if (!allowedKeys.includes(key)) {
           return jsonResponse({ error: `Setting key "${key}" is not allowed` }, 400);
         }
@@ -3439,6 +3687,10 @@ serve(async (req) => {
         return jsonResponse(await getXApiSummary(supabase, body));
       }
 
+      case 'get_x_posting_diagnostics': {
+        return jsonResponse(await getXPostingDiagnostics(supabase, body));
+      }
+
       case 'score_post_v2': {
         return jsonResponse(await scorePostV2(supabase, body));
       }
@@ -3474,34 +3726,8 @@ serve(async (req) => {
       case 'hydrate_post': {
         const tweetId = typeof body.tweet_id === 'string' ? body.tweet_id.trim() : '';
         if (!tweetId) return jsonResponse({ ok: false, error: 'tweet_id is required' }, 400);
-        const { data: pending } = await supabase
-          .from('jobs')
-          .select('id')
-          .eq('type', 'hydrate_tweet')
-          .in('status', ['pending', 'running'])
-          .filter('payload->>tweet_id', 'eq', tweetId)
-          .limit(1);
-        if (pending && pending.length > 0) {
-          return jsonResponse({ ok: true, queued: false, reason: 'hydrate_job_already_pending' });
-        }
-        const { error } = await supabase.from('jobs').upsert({
-          type: 'hydrate_tweet',
-          payload: { tweet_id: tweetId, source: 'manual_monitoring' },
-          status: 'pending',
-          priority: 15,
-          idempotency_key: `hydrate:manual:${tweetId}`,
-          next_run_at: new Date().toISOString(),
-        }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
-        if (error) throw error;
-        await supabase.from('pipeline_events').insert({
-          subject_type: 'post',
-          subject_id: tweetId,
-          step: 'hydrate',
-          status: 'queued',
-          started_at: new Date().toISOString(),
-          meta: { source: 'admin_actions.hydrate_post' },
-        }).then(() => null, () => null);
-        return jsonResponse({ ok: true, queued: true });
+        const result = await queueHydrationJob(supabase, tweetId, 'manual_monitoring');
+        return jsonResponse({ ok: true, queued: result.queued, reason: result.reason });
       }
 
       case 'get_post_pipeline_status': {
@@ -3548,13 +3774,12 @@ serve(async (req) => {
         }
 
         // Pre-flight: when forcing a specific tweet, ensure it has a translation
-        // and a score. Without this, x-poster filters it out (or in worst case
-        // posts media-only with empty body). Translate+score inline first.
-        let prep: { ran: boolean; ok: boolean; score?: number; decision?: string; error?: string } = { ran: false, ok: true };
-        if (tweetId) {
+        // and a score. Dry-run stays read-only; it never rescues missing state.
+        let prep: { ran: boolean; ok: boolean; score?: number; decision?: string; error?: string; hydrate?: string } = { ran: false, ok: true };
+        if (tweetId && action === 'retry_x_post') {
           const { data: existing } = await supabase
             .from('posts')
-            .select('text_translated, importance_score, final_score')
+            .select('text_translated, importance_score, final_score, is_truncated, hydrated_at')
             .eq('tweet_id', tweetId)
             .maybeSingle();
           const needsRescore = !existing
@@ -3569,6 +3794,22 @@ serve(async (req) => {
             if (!r.ok) {
               return jsonResponse({ ok: false, error: `pre-post translate/score failed: ${r.error}`, prep }, 200);
             }
+          }
+
+          const { data: afterPrep } = await supabase
+            .from('posts')
+            .select('is_truncated, hydrated_at')
+            .eq('tweet_id', tweetId)
+            .maybeSingle();
+          if (afterPrep?.is_truncated === true && !afterPrep?.hydrated_at) {
+            const hydrate = await queueHydrationJob(supabase, tweetId, 'force_x');
+            return jsonResponse({
+              ok: true,
+              status: 'waiting_hydration',
+              queued: hydrate.queued ? 'hydrate' : false,
+              reason: hydrate.reason ?? 'truncated_post_requires_hydration_before_x',
+              prep: { ...prep, hydrate: hydrate.queued ? 'queued' : hydrate.reason },
+            }, 200);
           }
         }
 
@@ -3741,8 +3982,10 @@ serve(async (req) => {
       // ===== Backfill: re-hydrate recent truncated tweets matching new heuristics =====
       case 'rehydrate_recent_truncated': {
         const hours = typeof body.hours === 'number' && body.hours > 0 && body.hours <= 168 ? body.hours : 24;
-        const dryRun = body.dry_run === true;
+        const dryRun = body.dry_run !== false;
+        const force = body.force === true;
         const requestedMax = typeof body.max === 'number' && body.max > 0 ? Math.floor(body.max) : null;
+        const threshold = await loadActiveThreshold(supabase);
         const { data: controlsRow } = await supabase.from('settings').select('value').eq('key', 'x_api_controls').maybeSingle();
         const controls = (controlsRow?.value ?? {}) as Record<string, unknown>;
         const defaultMax = typeof controls.backfill_max_hydrate_jobs_per_run === 'number' ? controls.backfill_max_hydrate_jobs_per_run : 100;
@@ -3752,7 +3995,7 @@ serve(async (req) => {
         // Pull recent posts that haven't been hydrated yet. Cap at 500 to stay safe.
         const { data: posts, error: fetchErr } = await supabase
           .from('posts')
-          .select('tweet_id, text_original, url')
+          .select('tweet_id, text_original, url, delivery_decision, final_score, importance_score')
           .is('hydrated_at', null)
           .gte('created_at', since)
           .order('created_at', { ascending: false })
@@ -3784,7 +4027,13 @@ serve(async (req) => {
           return false;
         };
 
-        const matches = (posts ?? []).filter((p) => looksTruncated(p.text_original as string | null)).slice(0, maxJobs);
+        const truncatedMatches = (posts ?? []).filter((p) => looksTruncated(p.text_original as string | null));
+        const matches = truncatedMatches.filter((p) => {
+          if (force) return true;
+          const score = typeof p.final_score === 'number' ? p.final_score : p.importance_score;
+          return p.delivery_decision === 'deliver' && typeof score === 'number' && score >= threshold;
+        }).slice(0, maxJobs);
+        const excludedByGate = truncatedMatches.length - matches.length;
         let queued = 0;
         let skippedExisting = 0;
         const errors: string[] = [];
@@ -3835,10 +4084,12 @@ serve(async (req) => {
           dry_run: dryRun,
           scanned: posts?.length ?? 0,
           matched: matches.length,
+          excluded_by_gate: excludedByGate,
           queued,
           skipped_existing: skippedExisting,
           max: maxJobs,
           hours,
+          force,
           errors: errors.slice(0, 10),
         });
       }
@@ -4181,26 +4432,12 @@ serve(async (req) => {
 
         await supabase.from('posts').update({ enrich_status: 'approved' }).eq('tweet_id', tweet_id);
         await updateLatestPostEnrichment(supabase, tweet_id, { status: 'approved', approved_at: new Date().toISOString() });
+        await insertAdminPipelineEvent(supabase, tweet_id, 'enrich', 'completed', { source: 'approve_enrichment', approved_for_x: true });
 
-        // Enqueue deliver job with proper lock clearing
-        const { error: delErr } = await supabase.from('jobs').upsert({
-          type: 'deliver',
-          payload: { tweet_id },
-          status: 'pending',
-          priority: 20,
-          idempotency_key: `deliver:${tweet_id}`,
-          next_run_at: new Date().toISOString(),
-          locked_at: null,
-          lease_expires_at: null,
-          last_error: null,
-          attempts: 0,
-        }, { onConflict: 'idempotency_key', ignoreDuplicates: false });
-        if (delErr) console.warn('approve_enrichment: deliver enqueue failed:', delErr.message);
-
-        return jsonResponse({ ok: true, message: `Enrichment approved for ${tweet_id}` });
+        return jsonResponse({ ok: true, message: `Enrichment approved for X text on ${tweet_id}` });
       }
 
-      // ===== Reject enrichment (post will NOT go to X) =====
+      // ===== Reject enrichment (plain X posting can still proceed unless enrichment is explicitly required) =====
       case 'reject_enrichment': {
         const { tweet_id } = body;
         if (!tweet_id) return jsonResponse({ error: 'tweet_id is required' }, 400);
@@ -4231,6 +4468,22 @@ serve(async (req) => {
       case 'enrich_post': {
         const { tweet_id } = body;
         if (!tweet_id) return jsonResponse({ error: 'tweet_id is required' }, 400);
+
+        const { data: existingPost, error: existingErr } = await supabase
+          .from('posts')
+          .select('tweet_id, text_translated, translated_at')
+          .eq('tweet_id', tweet_id)
+          .maybeSingle();
+        if (existingErr) throw existingErr;
+        if (!existingPost) return jsonResponse({ ok: false, error: `Post not found: ${tweet_id}` }, 404);
+
+        let translation: { ok: boolean; translated?: string; model?: string; error?: string } | null = null;
+        if (!existingPost.text_translated && !existingPost.translated_at) {
+          translation = await runTranslationOnly(supabase, tweet_id);
+          if (!translation.ok) {
+            return jsonResponse({ ok: false, error: `translation preflight failed: ${translation.error}`, translation }, 200);
+          }
+        }
 
         // Reset enrichment fields so the pipeline runs fresh
         await supabase.from('posts').update({
@@ -4274,7 +4527,11 @@ serve(async (req) => {
           last_error: null,
         }, { onConflict: 'idempotency_key', ignoreDuplicates: false });
         if (jobErr) throw jobErr;
-        return jsonResponse({ ok: true, message: `Enrichment queued for ${tweet_id}` });
+        await insertAdminPipelineEvent(supabase, tweet_id, 'enrich', 'queued', {
+          source: 'manual_enrich_post',
+          translation_preflight: translation?.ok === true,
+        });
+        return jsonResponse({ ok: true, message: `Enrichment draft queued for ${tweet_id}`, translation_preflight: translation });
       }
 
       default:

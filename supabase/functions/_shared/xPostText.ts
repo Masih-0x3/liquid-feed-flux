@@ -60,7 +60,12 @@ export function isEnrichmentApprovedForPosting(status: string | null | undefined
   return false;
 }
 
-export function isEnrichmentBlockingXPost(status: string | null | undefined, allowCompletedEnrichment: boolean): boolean {
+export function isEnrichmentBlockingXPost(
+  status: string | null | undefined,
+  allowCompletedEnrichment: boolean,
+  enrichmentRequiredForX = true,
+): boolean {
+  if (!enrichmentRequiredForX) return false;
   if (!status || status === 'skipped') return false;
   return !isEnrichmentApprovedForPosting(status, allowCompletedEnrichment);
 }

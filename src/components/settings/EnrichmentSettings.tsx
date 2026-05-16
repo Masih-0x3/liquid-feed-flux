@@ -18,6 +18,7 @@ interface EnrichmentConfig {
   model: string;
   version: string;
   mode: 'creator_analysis' | 'legacy';
+  pipeline_mode: 'manual_only' | 'shadow_review' | 'required_for_x';
   review_mode: 'shadow_review' | 'auto_high_confidence' | 'manual_only';
   source_attribution_policy: 'compact' | 'always' | 'none';
   analyst_prompt: string;
@@ -58,6 +59,7 @@ const DEFAULT_CONFIG: EnrichmentConfig = {
   model: 'gpt-5.4-mini',
   version: 'creator-analysis-v2',
   mode: 'creator_analysis',
+  pipeline_mode: 'manual_only',
   review_mode: 'shadow_review',
   source_attribution_policy: 'compact',
   analyst_prompt: `You are the editorial voice of a Persian-language X account that amplifies Iranians the Islamic Republic tries to silence. Your core worldview:
@@ -207,7 +209,7 @@ export default function EnrichmentSettings() {
                 AI Commentary Pipeline
               </CardTitle>
               <CardDescription>
-                Creator-analysis system: Archivist + Researcher, Humanizer, Composer, and algorithm-aware Critic.
+                Creator-analysis drafts are separate from normal Telegram/X delivery. Manual-only mode lets X keep using plain translations.
               </CardDescription>
             </div>
             <Switch
@@ -234,7 +236,7 @@ export default function EnrichmentSettings() {
                 />
                 <div className="text-sm">
                   {config.require_approval ? (
-                    <span className="text-green-400 font-medium">Enabled -- enriched drafts wait for approval before normal delivery</span>
+                    <span className="text-green-400 font-medium">Enabled -- enriched drafts must be approved before their text is used on X</span>
                   ) : (
                     <span className="text-red-400 font-medium">Disabled -- only auto mode can use approved critic output without review</span>
                   )}
@@ -256,7 +258,7 @@ export default function EnrichmentSettings() {
             Controls the X-facing enrichment posture. Telegram remains translation-first.
           </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-3">
+        <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div className="space-y-2">
             <Label>Mode</Label>
             <Select value={config.mode} onValueChange={(mode) => setConfig({ ...config, mode: mode as EnrichmentConfig['mode'] })}>
@@ -268,7 +270,21 @@ export default function EnrichmentSettings() {
             </Select>
           </div>
           <div className="space-y-2">
-            <Label>Rollout</Label>
+            <Label>Pipeline Mode</Label>
+            <Select value={config.pipeline_mode} onValueChange={(pipeline_mode) => setConfig({ ...config, pipeline_mode: pipeline_mode as EnrichmentConfig['pipeline_mode'] })}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="manual_only">Manual only</SelectItem>
+                <SelectItem value="shadow_review">Shadow + review</SelectItem>
+                <SelectItem value="required_for_x">Required for X</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Manual only does not auto-enrich or block plain X posting. Required for X should stay off until enrichment is production-ready.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label>Draft Review</Label>
             <Select value={config.review_mode} onValueChange={(review_mode) => setConfig({ ...config, review_mode: review_mode as EnrichmentConfig['review_mode'] })}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>

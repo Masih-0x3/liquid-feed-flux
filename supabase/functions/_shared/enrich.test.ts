@@ -1,6 +1,9 @@
 import { assert, assertEquals } from "jsr:@std/assert";
 import {
+  allowCompletedEnrichmentForPosting,
+  doesEnrichmentBlockX,
   evaluateAntiAggregatorGate,
+  isAutoEnrichmentEnabled,
   makeResearchCacheKey,
   normalizeEnrichmentConfig,
 } from "./enrich.ts";
@@ -11,9 +14,30 @@ Deno.test("normalizeEnrichmentConfig defaults to creator-analysis shadow review"
   assertEquals(cfg.model, "gpt-5.4-mini");
   assertEquals(cfg.version, "creator-analysis-v2");
   assertEquals(cfg.mode, "creator_analysis");
+  assertEquals(cfg.pipeline_mode, "shadow_review");
   assertEquals(cfg.review_mode, "shadow_review");
   assertEquals(cfg.source_attribution_policy, "compact");
   assert(cfg.banned_phrases.includes("فوری"));
+});
+
+Deno.test("normalizeEnrichmentConfig keeps disabled enrichment manual-only and non-blocking", () => {
+  const cfg = normalizeEnrichmentConfig({ enabled: false, review_mode: "shadow_review" });
+
+  assertEquals(cfg.pipeline_mode, "manual_only");
+  assertEquals(isAutoEnrichmentEnabled(cfg), false);
+  assertEquals(doesEnrichmentBlockX(cfg), false);
+});
+
+Deno.test("normalizeEnrichmentConfig separates auto generation from X blocking", () => {
+  const shadow = normalizeEnrichmentConfig({ enabled: true, pipeline_mode: "shadow_review" });
+  const required = normalizeEnrichmentConfig({ enabled: true, pipeline_mode: "required_for_x" });
+  const auto = normalizeEnrichmentConfig({ enabled: true, require_approval: false, review_mode: "auto_high_confidence" });
+
+  assertEquals(isAutoEnrichmentEnabled(shadow), true);
+  assertEquals(doesEnrichmentBlockX(shadow), false);
+  assertEquals(isAutoEnrichmentEnabled(required), true);
+  assertEquals(doesEnrichmentBlockX(required), true);
+  assertEquals(allowCompletedEnrichmentForPosting(auto), true);
 });
 
 Deno.test("anti-aggregator gate rejects copied translation with no creator angle", () => {

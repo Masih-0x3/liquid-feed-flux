@@ -127,7 +127,7 @@ async function adminRescorePost(tweetId: string) {
 async function adminRetryXPost(tweetId: string) {
   const { data, error } = await supabase.functions.invoke('admin-actions', { body: { action: 'retry_x_post', tweet_id: tweetId } });
   if (error) throw error;
-  return data as { ok: boolean; error?: string; status?: string; x_tweet_id?: string };
+  return data as { ok: boolean; error?: string; status?: string; x_tweet_id?: string; queued?: string | false; reason?: string };
 }
 
 async function adminClearDup(tweetId: string, relatedTweetId: string | null) {
@@ -155,6 +155,21 @@ async function adminRunDedupe(tweetId: string) {
 type AudienceFeedback = 'too_low' | 'too_high' | 'correct_deliver' | 'correct_skip' | 'should_pass_audience' | 'should_skip' | 'wrong_relevance_class' | 'global_exception_worth_covering' | 'not_global_exception';
 type AudienceClassValue = 'direct_focus' | 'adjacent' | 'global_exception' | 'off_topic';
 type EnrichmentFeedback = 'too_ai' | 'too_cheesy' | 'too_aggregator' | 'strong_angle' | 'needs_more_context' | 'unsafe_for_monetization';
+type XDiagnosticBlocker = { code: string; label: string; severity: 'blocker' | 'deferred' | 'note' };
+type XPostingDiagnosticItem = {
+  tweet_id: string;
+  eligible: boolean;
+  blockers: XDiagnosticBlocker[];
+  notes: XDiagnosticBlocker[];
+  score?: number | null;
+  threshold?: number;
+  decision?: string | null;
+  latest_x?: { status?: string; skip_reason?: string | null; last_error?: string | null; x_tweet_id?: string | null } | null;
+  active_jobs?: Array<{ type?: string; status?: string; error?: string | null }>;
+  hydration?: { is_truncated?: boolean; hydrated_at?: string | null; active_hydrate_job?: boolean };
+  media?: { has_media?: boolean; rows?: number; downloaded?: number; active_media_job?: boolean };
+  enrichment?: { status?: string | null; pipeline_mode?: string; required_for_x?: boolean; approved_for_text?: boolean; text_source?: string };
+};
 
 async function adminSetManualScore(tweetId: string, score: number, reason: string, overrideDuplicate: boolean, expectedAudienceClass?: AudienceClassValue | '') {
   const { data, error } = await supabase.functions.invoke('admin-actions', {
@@ -187,6 +202,16 @@ async function adminEnrichmentDecision(tweetId: string, action: 'approve_enrichm
   if (error) throw error;
   if (data?.ok === false) throw new Error(data.error ?? 'Enrichment action failed');
   return data as { ok: boolean; message?: string };
+}
+
+async function adminGetXPostingDiagnostic(tweetId: string) {
+  const { data, error } = await supabase.functions.invoke('admin-actions', {
+    body: { action: 'get_x_posting_diagnostics', tweet_id: tweetId },
+  });
+  if (error) throw error;
+  if (data?.success === false) throw new Error(data.error ?? 'X diagnostics unavailable');
+  const items = data?.diagnostics?.items as XPostingDiagnosticItem[] | undefined;
+  return items?.[0] ?? null;
 }
 
 async function adminRecordEnrichmentFeedback(tweetId: string, feedback: EnrichmentFeedback) {
@@ -271,7 +296,7 @@ function actionTitle(action: PendingAction | null) {
   if (!action) return '';
   switch (action.type) {
     case 'force_telegram': return 'Force Telegram delivery?';
-    case 'force_x': return 'Force post on X?';
+    case 'force_x': return 'Post plain to X?';
     case 'rescore': return 'Re-score this post?';
     case 'reprocess': return 'Reprocess this post?';
     case 'hydrate': return 'Hydrate this tweet?';
@@ -281,7 +306,7 @@ function actionTitle(action: PendingAction | null) {
     case 'translate': return 'Get translation only?';
     case 'run_dedupe': return 'Run duplicate check?';
     case 'cancel_jobs': return 'Cancel all pending jobs?';
-    case 'approve_enrichment': return 'Approve enriched X draft?';
+    case 'approve_enrichment': return 'Approve enrichment for X?';
     case 'reject_enrichment': return 'Reject enriched X draft?';
   }
 }
@@ -294,7 +319,7 @@ function actionDescription(action: PendingAction | null) {
       return 'Queues Telegram delivery and records the override as feedback.';
     case 'force_x': {
       const reasons = entry?.x_cost_flags?.reasons ?? ['tweet write expected'];
-      return `Queues X posting. Expected X work: ${reasons.join(', ')}.`;
+      return `Runs X preflight, queues hydration first if needed, then posts the plain translation unless an approved enrichment exists. Expected X work: ${reasons.join(', ')}.`;
     }
     case 'rescore':
       return 'Runs the current scoring prompt again and may update the deliver/skip decision.';
@@ -315,7 +340,7 @@ function actionDescription(action: PendingAction | null) {
     case 'cancel_jobs':
       return 'Marks pending and running jobs as failed. This does not call Telegram or X.';
     case 'approve_enrichment':
-      return 'Marks this enrichment approved and queues normal delivery. X posting still respects configured X budgets, media gates, and posting settings.';
+      return 'Marks this draft as approved for X text. It does not call Telegram or X by itself; normal X gates and budgets still apply.';
     case 'reject_enrichment':
       return 'Blocks this enriched draft from delivery. This does not call Telegram or X.';
   }
@@ -377,6 +402,13 @@ export default function Monitoring() {
   });
 
   const selectedEntry = useMemo(() => entries.find((entry) => entry.tweet_id === drawerTweetId) ?? null, [entries, drawerTweetId]);
+  const { data: xDiagnostic, isFetching: xDiagnosticLoading } = useQuery({
+    queryKey: ['x-posting-diagnostic', drawerTweetId],
+    queryFn: () => adminGetXPostingDiagnostic(drawerTweetId as string),
+    enabled: drawerOpen && !!drawerTweetId,
+    staleTime: 15_000,
+    retry: 1,
+  });
   const loadedCounts = useMemo(() => loadedMonitoringCounts(entries), [entries]);
   const counts = overview?.counts ?? loadedCounts;
 
@@ -384,6 +416,7 @@ export default function Monitoring() {
     queryClient.invalidateQueries({ queryKey: ['monitoring'] });
     queryClient.invalidateQueries({ queryKey: ['monitoring-overview'] });
     queryClient.invalidateQueries({ queryKey: ['x-api-summary'] });
+    queryClient.invalidateQueries({ queryKey: ['x-posting-diagnostic'] });
   };
 
   useEffect(() => {
@@ -443,7 +476,7 @@ export default function Monitoring() {
       });
       if (enrichError) throw enrichError;
       if (!data?.ok) throw new Error(data?.error ?? 'Failed to queue enrichment');
-      toast({ title: 'Enrichment queued' });
+      toast({ title: 'Enrichment draft queued', description: data.translation_preflight?.ok ? 'Translation was generated first.' : undefined });
 
       const interval = setInterval(async () => {
         const { data: post } = await supabase
@@ -542,7 +575,7 @@ export default function Monitoring() {
           const res = await adminRetryXPost(entry.tweet_id);
           if (!res.ok) throw new Error(res.error || 'X post failed');
           toast({
-            title: res.status === 'posted' ? 'Posted to X' : `X: ${res.status ?? 'queued'}`,
+            title: res.status === 'posted' ? 'Posted to X' : res.status === 'waiting_hydration' ? 'Hydration queued before X' : `X: ${res.status ?? 'queued'}`,
             description: res.x_tweet_id ? `https://x.com/i/status/${res.x_tweet_id}` : undefined,
           });
           break;
@@ -613,7 +646,7 @@ export default function Monitoring() {
         case 'approve_enrichment':
           if (!entry) throw new Error('Missing post');
           await adminEnrichmentDecision(entry.tweet_id, 'approve_enrichment');
-          toast({ title: 'Enrichment approved', description: 'Normal delivery has been queued.' });
+          toast({ title: 'Enrichment approved for X', description: 'No Telegram or X post was triggered by approval.' });
           break;
         case 'reject_enrichment':
           if (!entry) throw new Error('Missing post');
@@ -848,7 +881,7 @@ export default function Monitoring() {
           <Send className="w-3 h-3 mr-2" />Force Telegram
         </DropdownMenuItem>
         <DropdownMenuItem disabled={!xPostingEnabled} onClick={() => setPendingAction({ type: 'force_x', entry })}>
-          <Twitter className="w-3 h-3 mr-2" />Force on X
+          <Twitter className="w-3 h-3 mr-2" />Post plain to X
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => setPendingAction({ type: 'hydrate', entry })}>
           <Sparkles className="w-3 h-3 mr-2" />Hydrate
@@ -911,7 +944,7 @@ export default function Monitoring() {
           <AlertCircle className="w-4 h-4 mt-0.5 shrink-0 text-amber-500" />
           <div>
             <p className="font-medium">X posting is off</p>
-            <p className="text-muted-foreground">Force on X is disabled until it is enabled under <Link to="/settings#x-automation" className="text-primary underline">Settings</Link>.</p>
+            <p className="text-muted-foreground">Manual X posting is disabled until it is enabled under <Link to="/settings#x-automation" className="text-primary underline">Settings</Link>.</p>
           </div>
         </div>
       )}
@@ -1241,6 +1274,82 @@ export default function Monitoring() {
                     </CardContent>
                   </Card>
 
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="flex items-center gap-2 text-sm">
+                        <Twitter className="h-4 w-4" />Why not on X?
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3 text-sm">
+                      {xDiagnosticLoading ? (
+                        <div className="flex items-center gap-2 text-muted-foreground">
+                          <Loader2 className="h-4 w-4 animate-spin" />Checking X gates...
+                        </div>
+                      ) : xDiagnostic ? (
+                        <>
+                          <div className="flex flex-wrap gap-2">
+                            <Badge className={xDiagnostic.eligible ? toneClass('good') : toneClass('warn')}>
+                              {xDiagnostic.eligible ? 'Eligible for X' : 'Not eligible yet'}
+                            </Badge>
+                            {xDiagnostic.enrichment?.text_source && (
+                              <Badge variant="outline">
+                                Text: {xDiagnostic.enrichment.text_source === 'approved_enrichment' ? 'approved enrichment' : 'plain translation'}
+                              </Badge>
+                            )}
+                            {xDiagnostic.enrichment?.pipeline_mode && (
+                              <Badge variant="outline">Enrichment: {xDiagnostic.enrichment.pipeline_mode.replaceAll('_', ' ')}</Badge>
+                            )}
+                          </div>
+                          {xDiagnostic.blockers.length > 0 ? (
+                            <div className="space-y-2">
+                              {xDiagnostic.blockers.map((blocker) => (
+                                <div key={blocker.code} className="rounded-md border bg-muted/30 p-2">
+                                  <p className="font-medium">{blocker.label}</p>
+                                  <p className="text-xs text-muted-foreground">{blocker.code.replaceAll('_', ' ')}</p>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="rounded-md border border-emerald-500/30 bg-emerald-500/10 p-2 text-emerald-300">
+                              This post passes the local X gates. Normal cron still respects budget, spacing, media, and prior-post checks.
+                            </p>
+                          )}
+                          {xDiagnostic.notes.length > 0 && (
+                            <div className="space-y-1">
+                              {xDiagnostic.notes.map((note) => (
+                                <p key={note.code} className="text-xs text-muted-foreground">{note.label}</p>
+                              ))}
+                            </div>
+                          )}
+                          <div className="grid gap-2 sm:grid-cols-3">
+                            <div className="rounded-md border p-2">
+                              <p className="text-xs text-muted-foreground">Hydration</p>
+                              <p className="font-medium">{xDiagnostic.hydration?.is_truncated ? xDiagnostic.hydration?.hydrated_at ? 'Hydrated' : 'Needed' : 'Not needed'}</p>
+                            </div>
+                            <div className="rounded-md border p-2">
+                              <p className="text-xs text-muted-foreground">Media</p>
+                              <p className="font-medium">{xDiagnostic.media?.has_media ? `${xDiagnostic.media.downloaded ?? 0}/${xDiagnostic.media.rows ?? 0} ready` : 'No media gate'}</p>
+                            </div>
+                            <div className="rounded-md border p-2">
+                              <p className="text-xs text-muted-foreground">Latest X</p>
+                              <p className="font-medium">{xDiagnostic.latest_x?.status ?? 'No row'}</p>
+                            </div>
+                          </div>
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            <Button size="sm" variant="outline" onClick={() => handleTestEnrich(selectedEntry.tweet_id)}>
+                              <Sparkles className="w-3 h-3 mr-1.5" />Generate enrichment draft
+                            </Button>
+                            <Button size="sm" disabled={!xPostingEnabled} onClick={() => setPendingAction({ type: 'force_x', entry: selectedEntry })}>
+                              <Twitter className="w-3 h-3 mr-1.5" />Post plain to X
+                            </Button>
+                          </div>
+                        </>
+                      ) : (
+                        <p className="text-muted-foreground">X diagnostics are not available from the deployed admin function yet.</p>
+                      )}
+                    </CardContent>
+                  </Card>
+
                   {(selectedEntry.dedupe_status || selectedEntry.dup_of_tweet_id) && (
                     <Card>
                       <CardHeader className="pb-2">
@@ -1430,7 +1539,7 @@ export default function Monitoring() {
                         <div className="flex items-center justify-between">
                           <CardTitle className="text-sm">Enrichment Studio</CardTitle>
                           <Button size="sm" variant="outline" onClick={() => handleTestEnrich(selectedEntry.tweet_id)}>
-                            <Sparkles className="w-3 h-3 mr-1.5" />Regenerate
+                            <Sparkles className="w-3 h-3 mr-1.5" />Generate draft
                           </Button>
                         </div>
                       </CardHeader>
@@ -1442,6 +1551,16 @@ export default function Monitoring() {
                           {typeof selectedEntry.ai_voice_risk_score === 'number' && <Badge className={selectedEntry.ai_voice_risk_score >= 70 ? toneClass('bad') : selectedEntry.ai_voice_risk_score >= 35 ? toneClass('warn') : toneClass('good')}>AI voice {selectedEntry.ai_voice_risk_score}</Badge>}
                         </div>
                         {selectedEntry.enrichment_review_reason && <p className="rounded-md border bg-muted/30 p-2">{selectedEntry.enrichment_review_reason}</p>}
+                        <div className="grid gap-2 lg:grid-cols-2">
+                          <div>
+                            <p className="mb-1 text-xs font-medium text-muted-foreground">Original</p>
+                            <p className="max-h-32 overflow-y-auto rounded-md border bg-muted/30 p-2">{selectedEntry.text_original || '[No original text]'}</p>
+                          </div>
+                          <div>
+                            <p className="mb-1 text-xs font-medium text-muted-foreground">Translation</p>
+                            <p dir="rtl" className="max-h-32 overflow-y-auto rounded-md border bg-muted/30 p-2">{selectedEntry.text_translated || '[No translation yet]'}</p>
+                          </div>
+                        </div>
                         {selectedEntry.monetization_risk_flags && selectedEntry.monetization_risk_flags.length > 0 && (
                           <div className="flex flex-wrap gap-1">
                             {selectedEntry.monetization_risk_flags.map((flag) => <Badge key={flag} variant="outline" className="text-xs">{flag}</Badge>)}
@@ -1481,7 +1600,7 @@ export default function Monitoring() {
                         )}
                         <div className="grid gap-2 sm:grid-cols-2">
                           <Button size="sm" onClick={() => setPendingAction({ type: 'approve_enrichment', entry: selectedEntry })} disabled={selectedEntry.enrich_status === 'approved'}>
-                            <Check className="w-3 h-3 mr-1.5" />Approve
+                            <Check className="w-3 h-3 mr-1.5" />Approve for X
                           </Button>
                           <Button size="sm" variant="outline" onClick={() => setPendingAction({ type: 'reject_enrichment', entry: selectedEntry })} disabled={selectedEntry.enrich_status === 'rejected'}>
                             <Ban className="w-3 h-3 mr-1.5" />Reject

@@ -2,7 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
 import { callOpenAI, type ToolFunctionDef } from "../_shared/openai.ts";
-import { normalizeEnrichmentConfig, runEnrichPipeline, type EnrichmentConfig, type VoiceSamples } from "../_shared/enrich.ts";
+import { isAutoEnrichmentEnabled, normalizeEnrichmentConfig, runEnrichPipeline, type EnrichmentConfig, type VoiceSamples } from "../_shared/enrich.ts";
 import {
   SCORE_AXIS_KEYS,
   type ScoreAxisKey,
@@ -1122,18 +1122,20 @@ ${post.text_original}`;
         await insertPipelineEvent(supabase, 'post', tweetId, 'hydrate', 'queued', null, null, null, { source: 'post-score-gate', score: importanceScore });
       }
     } else if (deliveryDecision === 'deliver') {
-      // Check if enrichment pipeline is enabled; if so, route through enrich first
-      let enrichEnabled = false;
+      // Enrichment is an optional X-draft layer. In manual-only mode the main
+      // pipeline must continue with plain translation delivery.
+      let autoEnrichEnabled = false;
       try {
         const { data: enrichCfgRow } = await supabase
           .from('settings')
           .select('value')
           .eq('key', 'enrichment_config')
-          .single();
-        enrichEnabled = enrichCfgRow?.value?.enabled === true;
+          .maybeSingle();
+        const enrichConfig = normalizeEnrichmentConfig((enrichCfgRow?.value ?? { enabled: false }) as Partial<EnrichmentConfig>);
+        autoEnrichEnabled = isAutoEnrichmentEnabled(enrichConfig);
       } catch (_e) { /* default to disabled */ }
 
-      if (enrichEnabled) {
+      if (autoEnrichEnabled) {
         const enrichKey = `enrich:${tweetId}`;
         const { error: enrichJobError } = await supabase
           .from('jobs')
