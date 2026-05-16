@@ -5,7 +5,6 @@ import { AlertCircle, CheckCircle2, RefreshCw, Cloud, Monitor } from 'lucide-rea
 interface BackendVersion {
   sha: string;
   deployed_at: string;
-  function: string;
 }
 
 const frontendSha = typeof __APP_VERSION_SHA__ !== 'undefined' ? __APP_VERSION_SHA__ : 'dev';
@@ -76,7 +75,7 @@ export function VersionBanner() {
   const bothFresh = backend && !error && !uiStale && !apiStale && frontendSha !== 'dev';
 
   return (
-    <div className="flex items-center gap-1.5 select-none">
+    <div className="flex w-full flex-wrap items-center gap-1.5 select-none sm:w-auto sm:justify-end">
       <span
         className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] cursor-default ${
           uiStale
@@ -93,7 +92,9 @@ export function VersionBanner() {
         }
       >
         <Monitor className="w-3 h-3" />
-        Dashboard{uiAge ? ` · ${uiAge}` : ''}
+        <span className="hidden sm:inline">Dashboard</span>
+        <span className="sm:hidden">UI</span>
+        {uiAge && <span className="hidden min-[420px]:inline"> · {uiAge}</span>}
       </span>
 
       {error ? (
@@ -106,12 +107,13 @@ export function VersionBanner() {
           }
         >
           <AlertCircle className="w-3 h-3" />
-          API offline
+          <span>API offline</span>
         </span>
       ) : !backend ? (
         <span className="inline-flex items-center gap-1 rounded-full bg-muted/60 px-2 py-0.5 text-[10px] text-muted-foreground">
           <RefreshCw className="w-3 h-3 animate-spin" />
-          Checking…
+          <span className="hidden min-[420px]:inline">Checking…</span>
+          <span className="min-[420px]:hidden">API</span>
         </span>
       ) : (
         <span
@@ -130,7 +132,7 @@ export function VersionBanner() {
           }
         >
           <Cloud className="w-3 h-3" />
-          API{apiAge ? ` · ${apiAge}` : ''}
+          API{apiAge && <span className="hidden min-[420px]:inline"> · {apiAge}</span>}
         </span>
       )}
 

@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "noImplicitAny": true,
+    "strict": true,
+    "strictNullChecks": true
+  },
+  "include": [
+    "src/vite-env.d.ts",
+    "src/components/layout/**/*.tsx",
+    "src/components/x/**/*.tsx",
+    "src/contexts/**/*.tsx",
+    "src/hooks/**/*.ts",
+    "src/hooks/**/*.tsx",
+    "src/integrations/**/*.ts"
+  ]
+}

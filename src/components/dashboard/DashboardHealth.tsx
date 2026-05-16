@@ -1,126 +1,231 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Activity, AlertTriangle, Zap, Eye, RefreshCw, Play, Loader2 } from 'lucide-react';
-import type { PipelineHealth } from '@/hooks/useDashboardData';
+import { Activity, AlertTriangle, Eye, RefreshCw, Loader2, Settings, Twitter, Wrench, Play, RotateCcw, Clock } from 'lucide-react';
+import type { PipelineHealth, QueueBreakdown, XLocalUsage } from '@/hooks/useDashboardData';
 import { useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 
 interface Props {
   health: PipelineHealth;
+  queue: QueueBreakdown;
+  xUsage: XLocalUsage;
 }
 
-export function DashboardHealth({ health }: Props) {
+export function DashboardHealth({ health, queue, xUsage }: Props) {
   const { toast } = useToast();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
-  const handleQuickAction = async (action: string) => {
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    queryClient.invalidateQueries({ queryKey: ['monitoring'] });
+    queryClient.invalidateQueries({ queryKey: ['monitoring-overview'] });
+  };
+
+  const handleAction = async (action: string) => {
     setActionLoading(action);
     try {
       switch (action) {
-        case 'view-failed':
-          navigate('/monitoring?filter=failed');
-          break;
         case 'retry-deliveries': {
           const { error } = await supabase.functions.invoke('admin-retry', { body: { action: 'retry_failed_deliveries' } });
           if (error) throw error;
-          toast({ title: 'Success', description: 'Retry jobs created for failed deliveries' });
-          queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+          toast({ title: 'Retry jobs queued', description: 'Failed delivery retry jobs were created.' });
+          invalidate();
+          break;
+        }
+        case 'reconcile-jobs': {
+          const { error } = await supabase.functions.invoke('admin-actions', { body: { action: 'reconcile_stuck_jobs' } });
+          if (error) throw error;
+          toast({ title: 'Queue reconciled', description: 'Stuck jobs were checked without calling X.' });
+          invalidate();
+          break;
+        }
+        case 'close-stale-x': {
+          const { error } = await supabase.functions.invoke('admin-actions', {
+            body: { action: 'summarize_stale_x_pending', older_than_hours: 24, close: true },
+          });
+          if (error) throw error;
+          toast({ title: 'Stale X rows closed', description: 'No retry or X API call was made.' });
+          invalidate();
           break;
         }
         case 'test-pipeline': {
           const { error } = await supabase.functions.invoke('admin-retry', { body: { action: 'test_webhook' } });
           if (error) throw error;
-          toast({ title: 'Success', description: 'Test pipeline completed' });
-          queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+          toast({ title: 'Live test sent', description: 'A production test webhook was invoked.' });
+          invalidate();
           break;
         }
       }
     } catch {
-      toast({ title: 'Error', description: `Failed to execute ${action}`, variant: 'destructive' });
+      toast({ title: 'Action failed', description: `Failed to execute ${action}.`, variant: 'destructive' });
     } finally {
       setActionLoading(null);
     }
   };
 
+  const safeRoutes = [
+    { label: 'Needs attention', icon: Eye, route: '/monitoring?filter=needs_attention' },
+    { label: 'Ready to deliver', icon: Activity, route: '/monitoring?filter=ready_to_deliver' },
+    { label: 'My X', icon: Twitter, route: '/x-account' },
+    { label: 'X automation', icon: Settings, route: '/settings#x-automation' },
+  ];
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <Card className="glass-card">
-        <CardHeader>
-          <CardTitle className="text-lg font-display text-glass-foreground flex items-center">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base font-display text-glass-foreground flex items-center">
             {health.isOnline ? <Activity className="w-4 h-4 mr-2 text-success animate-pulse" /> : <AlertTriangle className="w-4 h-4 mr-2 text-destructive" />}
-            Pipeline Health
+            Health Snapshot
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Success Rate</span>
-            <div className="flex items-center space-x-2">
-              <span className={`text-sm font-medium ${health.successRate >= 95 ? 'text-success' : health.successRate >= 80 ? 'text-warning' : 'text-destructive'}`}>
-                {health.successRate}%
-              </span>
-              <div className="w-16 h-2 bg-muted rounded-full overflow-hidden">
-                <div className={`h-full transition-all duration-500 ${health.successRate >= 95 ? 'bg-success' : health.successRate >= 80 ? 'bg-warning' : 'bg-destructive'}`} style={{ width: `${health.successRate}%` }} />
-              </div>
-            </div>
+        <CardContent className="grid grid-cols-2 gap-3 text-sm">
+          <div>
+            <p className="text-xs text-muted-foreground">Success</p>
+            <p className={health.successRate >= 80 ? 'font-semibold text-success' : 'font-semibold text-destructive'}>{health.successRate}%</p>
           </div>
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Avg Latency</span>
-            <span className={`text-sm font-medium ${health.avgLatency <= 2 ? 'text-success' : health.avgLatency <= 5 ? 'text-warning' : 'text-destructive'}`}>{health.avgLatency}s</span>
+          <div>
+            <p className="text-xs text-muted-foreground">Latency</p>
+            <p className="font-semibold text-glass-foreground">{health.avgLatency}s</p>
           </div>
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Active Feeds</span>
-            <span className="text-sm font-medium text-glass-foreground">{health.activeFeeds}</span>
+          <div>
+            <p className="text-xs text-muted-foreground">Queue</p>
+            <p className={queue.pending > 0 ? 'font-semibold text-warning' : 'font-semibold text-success'}>{queue.pending} pending</p>
           </div>
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Queue Size</span>
-            <span className={`text-sm font-medium ${health.queueSize === 0 ? 'text-success' : health.queueSize <= 5 ? 'text-warning' : 'text-destructive'}`}>{health.queueSize}</span>
+          <div>
+            <p className="text-xs text-muted-foreground">Running</p>
+            <p className={queue.staleRunning > 0 ? 'font-semibold text-destructive' : 'font-semibold text-glass-foreground'}>{queue.running}{queue.staleRunning > 0 ? ` / ${queue.staleRunning} stale` : ''}</p>
           </div>
-          <div className="border-t border-border/50 pt-3 mt-3 space-y-2">
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">X Posting</p>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">Success Rate (24h)</span>
-              <span className={`text-sm font-medium ${health.xSuccessRate >= 95 ? 'text-success' : health.xSuccessRate >= 80 ? 'text-warning' : 'text-destructive'}`}>{health.xSuccessRate}%</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">Monthly Budget</span>
-              <div className="flex items-center space-x-2">
-                <span className={`text-sm font-medium ${health.xBudgetUsedPct >= 90 ? 'text-destructive' : health.xBudgetUsedPct >= 70 ? 'text-warning' : 'text-success'}`}>
-                  {health.xMonthlyPosts}/{health.xMonthlyBudget}
-                </span>
-                <div className="w-16 h-2 bg-muted rounded-full overflow-hidden">
-                  <div className={`h-full ${health.xBudgetUsedPct >= 90 ? 'bg-destructive' : health.xBudgetUsedPct >= 70 ? 'bg-warning' : 'bg-success'}`} style={{ width: `${Math.min(100, health.xBudgetUsedPct)}%` }} />
-                </div>
-              </div>
-            </div>
+          <div>
+            <p className="text-xs text-muted-foreground">X Budget</p>
+            <p className={xUsage.budgetUsedPct >= 90 ? 'font-semibold text-destructive' : xUsage.budgetUsedPct >= 70 ? 'font-semibold text-warning' : 'font-semibold text-success'}>
+              {xUsage.monthlyPosts}/{xUsage.monthlyBudget}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Last reconcile</p>
+            <p className="font-semibold text-glass-foreground">
+              {health.lastReconcileAt ? new Date(health.lastReconcileAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Not recorded'}
+            </p>
           </div>
         </CardContent>
       </Card>
 
       <Card className="glass-card">
-        <CardHeader>
-          <CardTitle className="text-lg font-display text-glass-foreground flex items-center">
-            <Zap className="w-4 h-4 mr-2 text-primary" />
-            Quick Actions
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base font-display text-glass-foreground flex items-center">
+            <Wrench className="w-4 h-4 mr-2 text-primary" />
+            Controls
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3">
-          <Button variant="outline" className="w-full justify-start" onClick={() => handleQuickAction('view-failed')} disabled={actionLoading === 'view-failed'}>
-            {actionLoading === 'view-failed' ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Eye className="w-4 h-4 mr-2" />}
-            View Failed Jobs
-          </Button>
-          <Button variant="outline" className="w-full justify-start" onClick={() => handleQuickAction('retry-deliveries')} disabled={actionLoading === 'retry-deliveries'}>
-            {actionLoading === 'retry-deliveries' ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}
-            Retry Failed Deliveries
-          </Button>
-          <Button variant="outline" className="w-full justify-start" onClick={() => handleQuickAction('test-pipeline')} disabled={actionLoading === 'test-pipeline'}>
-            {actionLoading === 'test-pipeline' ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Play className="w-4 h-4 mr-2" />}
-            Test Pipeline
-          </Button>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 gap-2">
+            {safeRoutes.map((item) => (
+              <Button key={item.label} variant="outline" className="justify-start" onClick={() => navigate(item.route)}>
+                <item.icon className="mr-2 h-4 w-4" />
+                {item.label}
+              </Button>
+            ))}
+          </div>
+
+          <div className="space-y-2 border-t border-border/50 pt-3">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Confirmed maintenance</p>
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="outline" className="justify-start" disabled={actionLoading === 'retry-deliveries'}>
+                    {actionLoading === 'retry-deliveries' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                    Retry deliveries
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Queue failed delivery retries?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This creates retry jobs for failed Telegram deliveries. It does not call X.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={() => handleAction('retry-deliveries')}>Queue retries</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="outline" className="justify-start" disabled={actionLoading === 'reconcile-jobs'}>
+                    {actionLoading === 'reconcile-jobs' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
+                    Reconcile jobs
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Reconcile stuck jobs?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This releases expired leases and recreates missing internal jobs. It does not directly call X.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={() => handleAction('reconcile-jobs')}>Reconcile</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="outline" className="justify-start" disabled={actionLoading === 'close-stale-x'}>
+                    {actionLoading === 'close-stale-x' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Clock className="mr-2 h-4 w-4" />}
+                    Close stale X pending
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Close stale X pending rows?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This marks X pending rows older than 24 hours as skipped. It does not retry or call X.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={() => handleAction('close-stale-x')}>Close stale rows</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="outline" className="justify-start border-destructive/40 text-destructive hover:text-destructive" disabled={actionLoading === 'test-pipeline'}>
+                    {actionLoading === 'test-pipeline' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+                    Live test pipeline
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Send a production test webhook?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This may create sample content in the live pipeline. Use only when testing production wiring.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={() => handleAction('test-pipeline')}>Send live test</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </div>
+          </div>
         </CardContent>
       </Card>
     </div>

@@ -15,6 +15,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
 
 type MediaType = "video" | "gif" | "image";
 
@@ -41,123 +42,15 @@ type TweetInfo = {
 const TWEET_REGEX =
   /https?:\/\/(?:www\.)?(?:twitter\.com|x\.com|fxtwitter\.com|vxtwitter\.com)\/([a-zA-Z0-9_]+)\/status\/([0-9]+)/;
 
-/**
- * Force Twitter image CDN URLs to original resolution.
- * pbs.twimg.com serves smaller sizes by default; ?name=orig returns the upload original.
- */
-function upgradeImageUrl(url: string): string {
-  try {
-    const u = new URL(url);
-    if (u.hostname.endsWith("twimg.com")) {
-      u.searchParams.set("name", "orig");
-      // ?format=jpg|png is preserved if present; otherwise leave as-is.
-      return u.toString();
-    }
-  } catch {
-    /* noop */
-  }
-  return url;
-}
-
-/** Pick highest-bitrate MP4 variant. */
-function pickBestVideoVariant<T extends { url: string; bitrate?: number; content_type?: string }>(
-  variants: T[],
-): T | undefined {
-  const mp4s = variants.filter(
-    (v) => (v.content_type ?? "").includes("mp4") || v.url.includes(".mp4"),
-  );
-  const pool = mp4s.length ? mp4s : variants;
-  return [...pool].sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0))[0];
-}
-
-/** Try fxtwitter first (exposes full variants), then fall back to vxtwitter. */
 async function fetchTweet(username: string, id: string): Promise<TweetInfo> {
-  // ---- 1. fxtwitter (preferred, exposes variants[]) ----
-  try {
-    const res = await fetch(`https://api.fxtwitter.com/${username}/status/${id}`);
-    if (res.ok) {
-      const json = await res.json();
-      const t = json?.tweet;
-      if (t && (t.media?.videos?.length || t.media?.photos?.length)) {
-        const media: ResolvedMedia[] = [];
-
-        for (const v of t.media.videos ?? []) {
-          const variants: Array<{
-            url: string;
-            bitrate?: number;
-            content_type?: string;
-          }> = v.variants ?? [];
-          const best = pickBestVideoVariant(variants) ?? { url: v.url, bitrate: undefined };
-          const w = v.width;
-          const h = v.height;
-          media.push({
-            url: best.url,
-            type: (v.type as MediaType) === "gif" ? "gif" : "video",
-            thumbnail_url: v.thumbnail_url,
-            resolution: w && h ? `${w}x${h}` : undefined,
-            bitrate: best.bitrate ? Math.round(best.bitrate / 1000) : undefined,
-            qualityLabel:
-              best.bitrate && h
-                ? `${h}p @ ${(best.bitrate / 1_000_000).toFixed(1)}Mbps`
-                : best.bitrate
-                  ? `${(best.bitrate / 1_000_000).toFixed(1)}Mbps`
-                  : "best",
-          });
-        }
-
-        for (const p of t.media.photos ?? []) {
-          media.push({
-            url: upgradeImageUrl(p.url),
-            type: "image",
-            resolution: p.width && p.height ? `${p.width}x${p.height}` : undefined,
-            qualityLabel: "original",
-          });
-        }
-
-        if (media.length) {
-          return {
-            user_name: t.author?.name ?? username,
-            user_screen_name: t.author?.screen_name ?? username,
-            user_profile_image_url: t.author?.avatar_url,
-            tweetID: id,
-            media,
-          };
-        }
-      }
-    }
-  } catch (err) {
-    console.warn("fxtwitter failed, falling back to vxtwitter", err);
+  const { data, error } = await supabase.functions.invoke("admin-actions", {
+    body: { action: "resolve_x_media", username, tweet_id: id },
+  });
+  if (error) throw error;
+  if (!data?.success || !data?.tweet) {
+    throw new Error(data?.error || "Failed to fetch tweet. The post might be private, deleted, or rate-limited.");
   }
-
-  // ---- 2. vxtwitter fallback ----
-  const vxRes = await fetch(`https://api.vxtwitter.com/${username}/status/${id}`);
-  if (!vxRes.ok) {
-    throw new Error("Failed to fetch tweet. The post might be private, deleted, or rate-limited.");
-  }
-  const vx = await vxRes.json();
-  const items: ResolvedMedia[] = (vx.media_extended ?? []).map(
-    (m: { url: string; type: string; thumbnail_url?: string; size?: { width?: number; height?: number } }) => {
-      const isVideo = m.type === "video" || m.type === "gif";
-      return {
-        url: isVideo ? m.url : upgradeImageUrl(m.url),
-        type: (m.type as MediaType) ?? "image",
-        thumbnail_url: m.thumbnail_url,
-        resolution:
-          m.size?.width && m.size?.height ? `${m.size.width}x${m.size.height}` : undefined,
-        qualityLabel: isVideo ? "best available" : "original",
-      };
-    },
-  );
-
-  if (!items.length) throw new Error("No media found in this post.");
-
-  return {
-    user_name: vx.user_name,
-    user_screen_name: vx.user_screen_name,
-    user_profile_image_url: vx.user_profile_image_url,
-    tweetID: vx.tweetID ?? id,
-    media: items,
-  };
+  return data.tweet as TweetInfo;
 }
 
 export default function Downloader() {

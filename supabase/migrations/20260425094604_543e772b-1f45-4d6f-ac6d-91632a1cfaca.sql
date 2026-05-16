@@ -69,7 +69,10 @@ SELECT cron.schedule(
   $$
   SELECT net.http_post(
     url:='https://jzirqfzzvlbxwfzndaer.supabase.co/functions/v1/x-followers-snapshot',
-    headers:='{"Content-Type":"application/json","Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp6aXJxZnp6dmxieHdmem5kYWVyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY4MzAxNzgsImV4cCI6MjA3MjQwNjE3OH0.bdVRQeXKONOLTjMlBoa0-MvxMGRVMRGyZS5uynejj4g"}'::jsonb,
+    headers:=jsonb_build_object(
+      'Content-Type', 'application/json',
+      'Authorization', 'Bearer ' || current_setting('app.settings.anon_key', true)
+    ),
     body:='{"trigger":"cron"}'::jsonb
   ) AS request_id;
   $$

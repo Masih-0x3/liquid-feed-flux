@@ -1,14 +1,7 @@
-import { NavLink, useLocation } from "react-router-dom";
+import { NavLink } from "react-router-dom";
 import {
-  FileText,
-  Link2,
-  Send,
-  Settings,
   Activity,
   LogOut,
-  Home,
-  Users,
-  Download
 } from "lucide-react";
 import {
   Sidebar,
@@ -26,26 +19,15 @@ import {
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-
-const navigationItems = [
-  { title: "Dashboard", url: "/", icon: Home },
-  { title: "Monitoring", url: "/monitoring", icon: Activity },
-  { title: "Threads", url: "/threads", icon: Link2 },
-  { title: "My X", url: "/x-account", icon: Users },
-  { title: "Downloader", url: "/downloader", icon: Download },
-  { title: "Settings", url: "/settings", icon: Settings },
-];
+import { navigationItems } from "./navigation";
 
 export function AppSidebar() {
-  const { state } = useSidebar();
-  const location = useLocation();
+  const { state, isMobile, setOpenMobile } = useSidebar();
   const { toast } = useToast();
-  const currentPath = location.pathname;
   const collapsed = state === "collapsed";
 
-  const isActive = (path: string) => currentPath === path;
   const getNavCls = ({ isActive }: { isActive: boolean }) =>
-    `glass-button transition-all duration-200 ${
+    `glass-button h-11 justify-start transition-all duration-200 md:h-8 ${
       isActive 
         ? "bg-primary/20 text-primary border-primary/30 glow-primary" 
         : "hover:bg-glass-border/20 hover:text-glass-foreground"
@@ -104,6 +86,9 @@ export function AppSidebar() {
                       to={item.url}
                       end
                       className={getNavCls}
+                      onClick={() => {
+                        if (isMobile) setOpenMobile(false);
+                      }}
                     >
                       <item.icon className="w-4 h-4 flex-shrink-0" />
                       {!collapsed && <span className="ml-3">{item.title}</span>}
@@ -121,7 +106,7 @@ export function AppSidebar() {
           variant="ghost"
           size={collapsed ? "icon" : "sm"}
           onClick={handleSignOut}
-          className="glass-button hover:bg-destructive/20 hover:text-destructive"
+          className="glass-button min-h-11 hover:bg-destructive/20 hover:text-destructive md:min-h-0"
         >
           <LogOut className="w-4 h-4" />
           {!collapsed && <span className="ml-2">Sign Out</span>}

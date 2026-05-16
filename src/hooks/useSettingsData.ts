@@ -23,6 +23,115 @@ export interface EditorialProfile {
   editorial_note?: string;
 }
 
+export type AudienceClass = 'direct_focus' | 'adjacent' | 'global_exception' | 'off_topic';
+export type ScoringPolicyMode = 'shadow' | 'active';
+export type ScoringV2AxisKey =
+  | 'focus_relevance'
+  | 'geopolitical_weight'
+  | 'audience_value'
+  | 'materiality'
+  | 'freshness'
+  | 'credibility'
+  | 'noise_penalty';
+
+export const SCORING_V2_AXIS_KEYS: ScoringV2AxisKey[] = [
+  'focus_relevance',
+  'geopolitical_weight',
+  'audience_value',
+  'materiality',
+  'freshness',
+  'credibility',
+  'noise_penalty',
+];
+
+export interface ScoringPolicyProfile {
+  id: string;
+  name: string;
+  audience_description: string;
+  focus_entities: string[];
+  aliases: string[];
+  geographies: string[];
+  blocked_categories: string[];
+  prompt_notes: string;
+  thresholds: Record<AudienceClass, { threshold: number; cap: number }>;
+  global_exceptions: Array<{ id: string; label: string; description: string; cap: number; threshold: number; examples: string[] }>;
+  axis_weights: Record<ScoringV2AxisKey, number>;
+  author_overrides: Record<string, 'always_deliver' | 'always_skip' | 'always_review'>;
+}
+
+export interface ScoringPolicy {
+  enabled: boolean;
+  version: 'audience-fit-v2';
+  mode: ScoringPolicyMode;
+  active_profile_id: string;
+  profiles: ScoringPolicyProfile[];
+  adjudication: {
+    enabled: boolean;
+    model: string;
+    reasoning_effort: ReasoningEffort;
+    verbosity: Verbosity;
+    confidence_threshold: number;
+    borderline_margin: number;
+  };
+  learning: {
+    mode: 'shadow' | 'applied' | 'human_only';
+    min_examples: number;
+    max_adjustment: number;
+  };
+}
+
+export const DEFAULT_SCORING_POLICY: ScoringPolicy = {
+  enabled: false,
+  version: 'audience-fit-v2',
+  mode: 'shadow',
+  active_profile_id: 'iran-first',
+  profiles: [{
+    id: 'iran-first',
+    name: 'Iran-first',
+    audience_description: 'Iranian audiences on X who want concise, high-signal updates about Iran, Iran-adjacent geopolitics, and exceptional global events that materially affect politics, security, oil, markets, or public attention.',
+    focus_entities: ['Iran', 'Islamic Republic', 'IRGC', 'Quds Force', 'Iran nuclear program', 'Hormuz', 'Persian Gulf', 'sanctions on Iran', 'Israel-Iran', 'US-Iran', 'Hezbollah', 'Houthis', 'Iraqi PMF'],
+    aliases: ['Tehran', 'Khamenei', 'IRGC', 'Sepah', 'JCPOA', 'Persian Gulf', 'Strait of Hormuz'],
+    geographies: ['Iran', 'Middle East', 'Persian Gulf', 'Iraq', 'Syria', 'Lebanon', 'Yemen', 'Israel', 'GCC'],
+    blocked_categories: ['sports', 'entertainment', 'celebrity', 'weather', 'product launch', 'routine tech earnings'],
+    prompt_notes: 'Do not down-score an item merely because the speaker or dateline is American or Western. Score the subject matter and audience value. Related world events pass only when they are major enough that an Iran-focused audience would reasonably expect coverage.',
+    thresholds: {
+      direct_focus: { threshold: 12, cap: 20 },
+      adjacent: { threshold: 13, cap: 16 },
+      global_exception: { threshold: 15, cap: 16 },
+      off_topic: { threshold: 99, cap: 8 },
+    },
+    global_exceptions: [
+      { id: 'world_shock', label: 'World shock', description: 'Coup, war outbreak, assassination, regime change, major terror attack, or systemic event with global attention.', cap: 18, threshold: 15, examples: ['coup d etat', 'prime minister assassination', 'new war', 'major terror attack'] },
+      { id: 'oil_energy', label: 'Oil / energy shock', description: 'Major oil, gas, shipping, OPEC, or energy-security event that may affect Iran, the region, or global markets.', cap: 16, threshold: 15, examples: ['oil price shock', 'OPEC surprise cut', 'prime minister comments on oil supply'] },
+      { id: 'bitcoin_milestone', label: 'Bitcoin milestone', description: 'Major Bitcoin price or policy milestone large enough to become a broad political/economic story.', cap: 16, threshold: 15, examples: ['Bitcoin breaks a major all-time high', 'country adopts Bitcoin reserve'] },
+      { id: 'major_leader_statement', label: 'Major leader statement', description: 'A prime minister, president, monarch, foreign minister, or central-bank head makes a material comment on war, oil, sanctions, or regional security.', cap: 16, threshold: 15, examples: ['prime minister comments on oil', 'president announces sanctions strategy'] },
+    ],
+    axis_weights: {
+      focus_relevance: 1.8,
+      geopolitical_weight: 1.35,
+      audience_value: 1.2,
+      materiality: 1.25,
+      freshness: 0.8,
+      credibility: 0.7,
+      noise_penalty: 1.0,
+    },
+    author_overrides: {},
+  }],
+  adjudication: {
+    enabled: true,
+    model: 'gpt-5.4-mini',
+    reasoning_effort: 'low',
+    verbosity: 'low',
+    confidence_threshold: 0.72,
+    borderline_margin: 1,
+  },
+  learning: {
+    mode: 'shadow',
+    min_examples: 8,
+    max_adjustment: 2,
+  },
+};
+
 export const DEFAULT_AXIS_WEIGHTS: Record<ScoreAxisKey, number> = {
   iran_relevance: 1.5,
   severity: 1.5,
@@ -258,12 +367,19 @@ const defaults = {
   editorial_profiles: {
     profiles: [] as EditorialProfile[],
   },
+  scoring_policy: DEFAULT_SCORING_POLICY,
   active_profile_id: { id: null as string | null },
   story_memory: {
     enabled: false,
-    window_hours: 12,
+    window_hours: 48,
     similarity_threshold: 0.86,
+    candidate_min_similarity: 0.78,
+    auto_duplicate_similarity: 0.94,
     action: 'skip' as 'skip' | 'mark_and_deliver',
+    mode: 'hybrid_ai' as 'hybrid_ai' | 'semantic_only' | 'review_first',
+    adjudicator_model: 'gpt-5.4-mini',
+    adjudicator_reasoning_effort: 'low' as 'low' | 'medium' | 'high' | 'xhigh',
+    adjudicator_confidence_threshold: 0.65,
     bypass_authors: [] as string[],
   },
   twitter_hydration: {
@@ -281,6 +397,13 @@ const defaults = {
     media_bytes_24h: 0,
     last_post_error: null as string | null,
   },
+  x_api_controls: {
+    verify_cache_minutes: 15,
+    follower_snapshot_stale_minutes: 60,
+    usage_sync_interval_hours: 6,
+    backfill_max_hydrate_jobs_per_run: 100,
+    warning_thresholds: [70, 90] as number[],
+  },
   x_posting_config: {
     enabled: false,
     min_score: 14,
@@ -297,6 +420,7 @@ const defaults = {
     posts_per_day: 100,
     monthly_post_budget: 2500,
     media_uploads_per_day: 200,
+    hydrations_per_day: 400,
   },
 };
 

@@ -5,9 +5,10 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1';
 import { requireInternalAuth } from '../_shared/internalAuth.ts';
+import { recordLegacyXApiUsage, recordXApiEvent } from '../_shared/xApiLedger.ts';
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': Deno.env.get('ALLOWED_CORS_ORIGIN') ?? 'https://liquid-feed-flux.lovable.app',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-internal-token',
 };
 
@@ -201,6 +202,8 @@ const UPLOAD_URL = 'https://upload.twitter.com/1.1/media/upload.json';
 
 async function uploadImage(
   bytes: Uint8Array, mime: string, ck: string, cs: string, at: string, ats: string,
+  // deno-lint-ignore no-explicit-any
+  sb: any, tweetId: string,
 ): Promise<string> {
   const b64 = bytesToBase64(bytes);
   const params: Record<string, string> = { media_data: b64 };
@@ -211,6 +214,16 @@ async function uploadImage(
     body: new URLSearchParams(params),
   });
   const text = await resp.text();
+  await recordXApiEvent(sb, {
+    source: 'x-poster',
+    sourceAction: 'media_upload_image',
+    endpoint: UPLOAD_URL,
+    method: 'POST',
+    tweetId,
+    error: resp.ok ? null : `media upload ${resp.status}`,
+    estimatedBillableUnit: 'media_upload',
+  }, resp);
+  await recordLegacyXApiUsage(sb, { error: resp.ok ? null : `media upload ${resp.status}`, mediaUpload: resp.ok });
   if (!resp.ok) throw new Error(`media upload ${resp.status}: ${text.slice(0, 300)} (mime=${mime})`);
   const json = JSON.parse(text);
   return String(json.media_id_string || json.media_id);
@@ -219,6 +232,8 @@ async function uploadImage(
 // ─── X media upload (video, chunked INIT/APPEND/FINALIZE/STATUS) ─────
 async function uploadVideoChunked(
   bytes: Uint8Array, mime: string, ck: string, cs: string, at: string, ats: string,
+  // deno-lint-ignore no-explicit-any
+  sb: any, tweetId: string,
 ): Promise<string> {
   // INIT
   const initParams: Record<string, string> = {
@@ -234,6 +249,16 @@ async function uploadVideoChunked(
     body: new URLSearchParams(initParams),
   });
   const initText = await initResp.text();
+  await recordXApiEvent(sb, {
+    source: 'x-poster',
+    sourceAction: 'media_upload_video_init',
+    endpoint: UPLOAD_URL,
+    method: 'POST',
+    tweetId,
+    error: initResp.ok ? null : `video INIT ${initResp.status}`,
+    estimatedBillableUnit: 'media_upload',
+  }, initResp);
+  await recordLegacyXApiUsage(sb, { error: initResp.ok ? null : `video INIT ${initResp.status}`, mediaUpload: initResp.ok });
   if (!initResp.ok) throw new Error(`video INIT ${initResp.status}: ${initText.slice(0, 300)}`);
   const initJson = JSON.parse(initText);
   const mediaId = String(initJson.media_id_string || initJson.media_id);
@@ -247,13 +272,26 @@ async function uploadVideoChunked(
     form.append('command', 'APPEND');
     form.append('media_id', mediaId);
     form.append('segment_index', String(segment));
-    form.append('media', new Blob([chunk], { type: 'application/octet-stream' }));
+    const chunkBuffer = new ArrayBuffer(chunk.byteLength);
+    new Uint8Array(chunkBuffer).set(chunk);
+    form.append('media', new Blob([chunkBuffer], { type: 'application/octet-stream' }));
     const appendResp = await fetch(UPLOAD_URL, {
       method: 'POST',
       headers: { Authorization: appendAuth },
       body: form,
     });
     const appendText = await appendResp.text();
+    await recordXApiEvent(sb, {
+      source: 'x-poster',
+      sourceAction: 'media_upload_video_append',
+      endpoint: UPLOAD_URL,
+      method: 'POST',
+      tweetId,
+      error: appendResp.ok ? null : `video APPEND ${appendResp.status}`,
+      estimatedBillableUnit: 'media_upload',
+      metadata: { segment },
+    }, appendResp);
+    await recordLegacyXApiUsage(sb, { error: appendResp.ok ? null : `video APPEND ${appendResp.status}` });
     if (!appendResp.ok) throw new Error(`video APPEND seg=${segment} ${appendResp.status}: ${appendText.slice(0, 300)}`);
     segment += 1;
   }
@@ -267,6 +305,16 @@ async function uploadVideoChunked(
     body: new URLSearchParams(finParams),
   });
   const finText = await finResp.text();
+  await recordXApiEvent(sb, {
+    source: 'x-poster',
+    sourceAction: 'media_upload_video_finalize',
+    endpoint: UPLOAD_URL,
+    method: 'POST',
+    tweetId,
+    error: finResp.ok ? null : `video FINALIZE ${finResp.status}`,
+    estimatedBillableUnit: 'media_upload',
+  }, finResp);
+  await recordLegacyXApiUsage(sb, { error: finResp.ok ? null : `video FINALIZE ${finResp.status}` });
   if (!finResp.ok) throw new Error(`video FINALIZE ${finResp.status}: ${finText.slice(0, 300)}`);
   const finJson = JSON.parse(finText);
 
@@ -288,6 +336,16 @@ async function uploadVideoChunked(
       headers: { Authorization: statusAuth },
     });
     const statusText = await statusResp.text();
+    await recordXApiEvent(sb, {
+      source: 'x-poster',
+      sourceAction: 'media_upload_video_status',
+      endpoint: UPLOAD_URL,
+      method: 'GET',
+      tweetId,
+      error: statusResp.ok ? null : `video STATUS ${statusResp.status}`,
+      estimatedBillableUnit: 'media_upload',
+    }, statusResp);
+    await recordLegacyXApiUsage(sb, { error: statusResp.ok ? null : `video STATUS ${statusResp.status}` });
     if (!statusResp.ok) throw new Error(`video STATUS ${statusResp.status}: ${statusText.slice(0, 300)}`);
     const statusJson = JSON.parse(statusText);
     processing = statusJson.processing_info;
@@ -299,6 +357,8 @@ async function uploadVideoChunked(
 // ─── Post tweet ──────────────────────────────────────────────────────
 async function postTweet(
   text: string, mediaIds: string[], ck: string, cs: string, at: string, ats: string,
+  // deno-lint-ignore no-explicit-any
+  sb: any, tweetId: string,
 ): Promise<{ id: string; raw: unknown }> {
   const url = 'https://api.x.com/2/tweets';
   const body: Record<string, unknown> = { text };
@@ -311,6 +371,17 @@ async function postTweet(
   });
   const text2 = await resp.text();
   let json: unknown; try { json = JSON.parse(text2); } catch { json = text2; }
+  await recordXApiEvent(sb, {
+    source: 'x-poster',
+    sourceAction: 'post_tweet',
+    endpoint: url,
+    method: 'POST',
+    tweetId,
+    error: resp.ok ? null : `tweet ${resp.status}`,
+    estimatedBillableUnit: 'post_write',
+    metadata: { media_count: mediaIds.length },
+  }, resp);
+  await recordLegacyXApiUsage(sb, { error: resp.ok ? null : `tweet ${resp.status}`, post: resp.ok });
   if (!resp.ok) {
     const err = new Error(`tweet ${resp.status}: ${text2.slice(0, 400)}`);
     (err as { status?: number }).status = resp.status;
@@ -345,11 +416,10 @@ Deno.serve(async (req) => {
 
   // Load settings
   const { data: settingsRows } = await sb.from('settings').select('key, value')
-    .in('key', ['x_posting_config', 'x_rate_limits', 'x_api_usage']);
+    .in('key', ['x_posting_config', 'x_rate_limits']);
   const sm: Record<string, unknown> = Object.fromEntries((settingsRows || []).map((r) => [r.key, r.value]));
   const cfg: PostingConfig = { ...DEFAULT_CFG, ...(isRecord(sm.x_posting_config) ? sm.x_posting_config : {}) } as PostingConfig;
   const limits: RateLimits = { ...DEFAULT_LIMITS, ...(isRecord(sm.x_rate_limits) ? sm.x_rate_limits : {}) } as RateLimits;
-  const usage = isRecord(sm.x_api_usage) ? sm.x_api_usage as Record<string, unknown> : {};
 
   if (!cfg.enabled && !dryRun) {
     return new Response(JSON.stringify({ skipped: true, reason: 'x_posting_disabled' }), {
@@ -368,26 +438,35 @@ Deno.serve(async (req) => {
     });
   }
 
-  // Quota check
-  const posts24hArr = await trimRollingWindow((usage.posts_24h as string[]) || [], 24 * 60 * 60 * 1000);
-  const posts1hCount = posts24hArr.filter((ts) => new Date(ts).getTime() > Date.now() - 60 * 60 * 1000).length;
-  const mediaUp24hArr = await trimRollingWindow((usage.media_uploads_24h as string[]) || [], 24 * 60 * 60 * 1000);
-
-  const { count: monthlyPosts } = await sb.from('x_deliveries').select('*', { count: 'exact', head: true })
-    .eq('status', 'posted').gte('created_at', new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString());
+  // Quota check: derive posting/media windows from x_deliveries, not the legacy
+  // settings.x_api_usage arrays, which can drift from actual posted rows.
+  const since1h = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const since30d = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
+  const [{ count: monthlyPosts }, { count: posts24hDb }, { count: posts1hDb }, { count: mediaUp24hDb }, { data: lastPostRows }] = await Promise.all([
+    sb.from('x_deliveries').select('*', { count: 'exact', head: true }).eq('status', 'posted').gte('created_at', since30d),
+    sb.from('x_deliveries').select('*', { count: 'exact', head: true }).eq('status', 'posted').gte('created_at', since24h),
+    sb.from('x_deliveries').select('*', { count: 'exact', head: true }).eq('status', 'posted').gte('created_at', since1h),
+    sb.from('x_deliveries').select('*', { count: 'exact', head: true }).eq('status', 'posted').gt('media_count', 0).gte('created_at', since24h),
+    sb.from('x_deliveries').select('created_at, posted_at').eq('status', 'posted').order('created_at', { ascending: false }).limit(1),
+  ]);
+  let posts24hCount = posts24hDb ?? 0;
+  let posts1hCount = posts1hDb ?? 0;
+  let mediaUp24hCount = mediaUp24hDb ?? 0;
+  const lastPostAt = lastPostRows?.[0]?.posted_at || lastPostRows?.[0]?.created_at || null;
+  let lastPostTimeMs = lastPostAt ? new Date(lastPostAt as string).getTime() : 0;
 
   function quotaBlock(): string | null {
     if (posts1hCount >= limits.posts_per_hour) return 'rate_limit_hour';
-    if (posts24hArr.length >= limits.posts_per_day) return 'rate_limit_day';
+    if (posts24hCount >= limits.posts_per_day) return 'rate_limit_day';
     if ((monthlyPosts ?? 0) >= limits.monthly_post_budget) return 'rate_limit_month';
-    if (mediaUp24hArr.length >= limits.media_uploads_per_day) return 'rate_limit_media';
+    if (mediaUp24hCount >= limits.media_uploads_per_day) return 'rate_limit_media';
     // Daily budget cap (anti-aggregator)
-    if (cfg.daily_budget && cfg.daily_budget > 0 && posts24hArr.length >= cfg.daily_budget) return 'daily_budget_reached';
+    if (cfg.daily_budget && cfg.daily_budget > 0 && posts24hCount >= cfg.daily_budget) return 'daily_budget_reached';
     // Minimum spacing between posts
-    if (cfg.min_spacing_minutes && cfg.min_spacing_minutes > 0 && posts24hArr.length > 0) {
-      const lastPostTime = new Date(posts24hArr[posts24hArr.length - 1]).getTime();
+    if (cfg.min_spacing_minutes && cfg.min_spacing_minutes > 0 && lastPostTimeMs > 0) {
       const minGapMs = cfg.min_spacing_minutes * 60 * 1000;
-      if (Date.now() - lastPostTime < minGapMs) return 'min_spacing';
+      if (Date.now() - lastPostTimeMs < minGapMs) return 'min_spacing';
     }
     return null;
   }
@@ -550,22 +629,22 @@ Deno.serve(async (req) => {
           const { data: blob, error: dlErr } = await sb.storage.from('temp-media').download(m.storage_path!);
           if (dlErr || !blob) throw new Error(`download ${m.storage_path}: ${dlErr?.message || 'no blob'}`);
           const buf = new Uint8Array(await blob.arrayBuffer());
-          const id = await uploadVideoChunked(buf, m.mime_type || 'video/mp4', ck, cs, at, ats);
+          const id = await uploadVideoChunked(buf, m.mime_type || 'video/mp4', ck, cs, at, ats, sb, tweetId);
           mediaIds.push(id);
           mediaBytes += buf.length;
           mediaCount = 1;
           mediaKind = 'video';
-          mediaUp24hArr.push(new Date().toISOString());
+          mediaUp24hCount += 1;
         } else {
           for (const m of sel.items) {
             const { data: blob, error: dlErr } = await sb.storage.from('temp-media').download(m.storage_path!);
             if (dlErr || !blob) throw new Error(`download ${m.storage_path}: ${dlErr?.message || 'no blob'}`);
             const buf = new Uint8Array(await blob.arrayBuffer());
-            const id = await uploadImage(buf, m.mime_type || 'image/jpeg', ck, cs, at, ats);
+            const id = await uploadImage(buf, m.mime_type || 'image/jpeg', ck, cs, at, ats, sb, tweetId);
             mediaIds.push(id);
             mediaBytes += buf.length;
             mediaCount += 1;
-            mediaUp24hArr.push(new Date().toISOString());
+            mediaUp24hCount += 1;
           }
           mediaKind = 'image';
         }
@@ -630,9 +709,11 @@ Deno.serve(async (req) => {
 
     // Post tweet
     try {
-      const { id: xId, raw } = await postTweet(text, mediaIds, ck, cs, at, ats);
+      const { id: xId, raw } = await postTweet(text, mediaIds, ck, cs, at, ats, sb, tweetId);
       const latency = Date.now() - startedAt;
-      posts24hArr.push(new Date().toISOString());
+      posts24hCount += 1;
+      posts1hCount += 1;
+      lastPostTimeMs = Date.now();
       const { data: existingPosted } = await sb
         .from('x_deliveries')
         .select('id, attempts')
@@ -678,19 +759,6 @@ Deno.serve(async (req) => {
       if (postFailErr) console.error('[x-poster] x_deliveries insert failed (post)', { tweetId, err: postFailErr.message });
       results.push({ tweet_id: tweetId, status: isRetriable ? 'pending' : 'failed', error: errMsg });
     }
-  }
-
-  // Persist usage
-  if (!dryRun) {
-    const nextUsage = {
-      ...usage,
-      posts_24h: posts24hArr,
-      posts_total: ((usage.posts_total as number) ?? 0) + results.filter((r) => r.status === 'posted').length,
-      media_uploads_24h: mediaUp24hArr,
-      media_bytes_24h: ((usage.media_bytes_24h as number) ?? 0),
-      last_post_error: results.find((r) => r.status === 'failed')?.error ?? null,
-    };
-    await sb.from('settings').upsert({ key: 'x_api_usage', value: nextUsage, updated_at: new Date().toISOString() }, { onConflict: 'key' });
   }
 
   return new Response(JSON.stringify({ ok: true, dry_run: dryRun, processed: results.length, results }), {

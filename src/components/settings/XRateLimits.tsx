@@ -7,6 +7,7 @@ import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { useSaveSettings } from '@/hooks/useSettingsData';
 import { Gauge, Save, Loader2 } from 'lucide-react';
+import { useXApiSummary } from '@/hooks/useMonitoringData';
 
 export interface XRateLimitsValue {
   posts_per_hour: number;
@@ -41,6 +42,7 @@ function pctColor(pct: number) {
 
 export default function XRateLimits({ initial, usage, monthlyPostsCount = 0 }: Props) {
   const save = useSaveSettings();
+  const { data: xApiSummary } = useXApiSummary(24);
   const [cfg, setCfg] = useState<XRateLimitsValue>({ ...DEFAULTS, ...(initial ?? {}) });
 
   useEffect(() => { setCfg({ ...DEFAULTS, ...(initial ?? {}) }); }, [initial]);
@@ -51,9 +53,12 @@ export default function XRateLimits({ initial, usage, monthlyPostsCount = 0 }: P
   const mediaUp24h = (usage?.media_uploads_24h ?? []).filter((ts) => { try { return new Date(ts).getTime() > now - 86400000; } catch { return false; } });
 
   const hourPct = Math.min(100, (posts1h.length / Math.max(1, cfg.posts_per_hour)) * 100);
-  const dayPct = Math.min(100, (posts24h.length / Math.max(1, cfg.posts_per_day)) * 100);
+  const localPosts24h = xApiSummary?.posts_local ?? posts24h.length;
+  const localMedia24h = xApiSummary?.media_posts_local ?? mediaUp24h.length;
+  const localAttempts24h = xApiSummary?.counted_attempts ?? 0;
+  const dayPct = Math.min(100, (localPosts24h / Math.max(1, cfg.posts_per_day)) * 100);
   const monthPct = Math.min(100, (monthlyPostsCount / Math.max(1, cfg.monthly_post_budget)) * 100);
-  const mediaPct = Math.min(100, (mediaUp24h.length / Math.max(1, cfg.media_uploads_per_day)) * 100);
+  const mediaPct = Math.min(100, (localMedia24h / Math.max(1, cfg.media_uploads_per_day)) * 100);
 
   const update = (patch: Partial<XRateLimitsValue>) => setCfg((c) => ({ ...c, ...patch }));
   const handleSave = () => save.mutate({ key: 'x_rate_limits', value: cfg });
@@ -75,7 +80,7 @@ export default function XRateLimits({ initial, usage, monthlyPostsCount = 0 }: P
           <Gauge className="w-5 h-5 mr-2" />Rate Limits & Quotas
         </CardTitle>
         <CardDescription>
-          Hard caps on X posting. The worker will skip posts that exceed any limit. Defaults leave headroom on the X Basic tier.
+          Configured X posting budgets. The worker skips posts that exceed these local limits; official project caps should be checked in the X Developer Console or synced usage panel.
         </CardDescription>
       </CardHeader>
 
@@ -87,9 +92,10 @@ export default function XRateLimits({ initial, usage, monthlyPostsCount = 0 }: P
             <Badge variant="outline" className="text-xs">rolling windows</Badge>
           </div>
           <Row label="Last hour" current={posts1h.length} limit={cfg.posts_per_hour} pct={hourPct} />
-          <Row label="Last 24h" current={posts24h.length} limit={cfg.posts_per_day} pct={dayPct} />
+          <Row label="Last 24h" current={localPosts24h} limit={cfg.posts_per_day} pct={dayPct} />
           <Row label="Last 30 days" current={monthlyPostsCount} limit={cfg.monthly_post_budget} pct={monthPct} />
-          <Row label="Media uploads (24h)" current={mediaUp24h.length} limit={cfg.media_uploads_per_day} pct={mediaPct} />
+          <Row label="Media posts (24h)" current={localMedia24h} limit={cfg.media_uploads_per_day} pct={mediaPct} />
+          <Row label="Local X attempts (24h)" current={localAttempts24h} limit={Math.max(1, cfg.posts_per_day + cfg.hydrations_per_day + cfg.media_uploads_per_day)} pct={Math.min(100, (localAttempts24h / Math.max(1, cfg.posts_per_day + cfg.hydrations_per_day + cfg.media_uploads_per_day)) * 100)} />
         </div>
 
         {/* Edit limits */}
@@ -108,7 +114,7 @@ export default function XRateLimits({ initial, usage, monthlyPostsCount = 0 }: P
             <Label htmlFor="monthly_budget">Monthly post budget</Label>
             <Input id="monthly_budget" type="number" min={1} max={1000000} value={cfg.monthly_post_budget}
               onChange={(e) => update({ monthly_post_budget: Math.max(1, Number(e.target.value) || 1) })} className="glass-input" />
-            <p className="text-xs text-muted-foreground">Default 2,500 leaves headroom on X Basic (3,000 writes/mo).</p>
+            <p className="text-xs text-muted-foreground">Your configured monthly write budget. Keep this aligned with the cap shown in X Developer Console.</p>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="media_uploads_per_day">Media uploads / day</Label>
@@ -119,7 +125,7 @@ export default function XRateLimits({ initial, usage, monthlyPostsCount = 0 }: P
             <Label htmlFor="hydrations_per_day">Tweet hydrations / day (X API reads)</Label>
             <Input id="hydrations_per_day" type="number" min={1} max={10000} value={cfg.hydrations_per_day}
               onChange={(e) => update({ hydrations_per_day: Math.max(1, Number(e.target.value) || 1) })} className="glass-input" />
-            <p className="text-xs text-muted-foreground">Daily cap on X API reads used to hydrate truncated high-scoring tweets. X Basic allows ~500/day; default 400 leaves headroom.</p>
+            <p className="text-xs text-muted-foreground">Daily cap on X API reads used to hydrate truncated high-scoring tweets.</p>
           </div>
         </div>
 

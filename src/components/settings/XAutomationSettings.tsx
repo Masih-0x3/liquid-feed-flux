@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,6 +18,7 @@ import { Key, Shield, CheckCircle2, XCircle, Send, Sparkles, Loader2, AtSign, Al
 import XPostingConfig, { type XPostingConfigValue } from '@/components/settings/XPostingConfig';
 import XRateLimits, { type XRateLimitsValue } from '@/components/settings/XRateLimits';
 import { useXMonthlyPostsCount } from '@/hooks/useXDeliveries';
+import { useXApiSummary } from '@/hooks/useMonitoringData';
 
 interface Props {
   twitterHydration?: { enabled?: boolean; max_attempts?: number };
@@ -34,10 +35,10 @@ const SECRET_KEYS = [
 ] as const;
 
 const DEFAULT_TEST_TWEET = 'Test tweet from automation pipeline ✅ — please ignore.';
-const BASIC_TIER_MONTHLY_LIMIT = 15000;
 
 export default function XAutomationSettings({ twitterHydration, xApiUsage, xPostingConfig, xRateLimits }: Props) {
   const { data: monthlyCount } = useXMonthlyPostsCount();
+  const { data: xApiSummary, refetch: refetchXApiSummary, isFetching: xApiSummaryFetching } = useXApiSummary(24);
   const { toast } = useToast();
   const saveMutation = useSaveSettings();
 
@@ -57,19 +58,21 @@ export default function XAutomationSettings({ twitterHydration, xApiUsage, xPost
   const [hydrateResult, setHydrateResult] = useState<{ ok: boolean; text?: string; note_tweet?: string; lang?: string; raw?: unknown; error?: string } | null>(null);
 
   const [backfillLoading, setBackfillLoading] = useState(false);
-  const [backfillResult, setBackfillResult] = useState<{ ok: boolean; scanned?: number; matched?: number; queued?: number; hours?: number; error?: string } | null>(null);
+  const [backfillResult, setBackfillResult] = useState<{ ok: boolean; dry_run?: boolean; scanned?: number; matched?: number; queued?: number; skipped_existing?: number; max?: number; hours?: number; error?: string } | null>(null);
 
-  const calls24h = Array.isArray(xApiUsage?.calls_24h)
+  const legacyCalls24h = Array.isArray(xApiUsage?.calls_24h)
     ? xApiUsage!.calls_24h!.filter((ts) => {
         try { return new Date(ts).getTime() > Date.now() - 24 * 60 * 60 * 1000; } catch { return false; }
       }).length
     : 0;
+  const calls24h = xApiSummary?.counted_attempts ?? legacyCalls24h;
   const projectedMonthly = calls24h * 30;
-  const overBudget = projectedMonthly > BASIC_TIER_MONTHLY_LIMIT;
+  const configuredMonthlyBudget = xRateLimits?.monthly_post_budget ?? xApiSummary?.configured_budget?.monthly_post_budget ?? 0;
+  const overBudget = configuredMonthlyBudget > 0 && projectedMonthly > configuredMonthlyBudget;
   const tweetCharCount = tweetText.length;
   const tweetTooLong = tweetCharCount > 280;
 
-  const refreshStatus = async () => {
+  const refreshStatus = useCallback(async () => {
     setStatusLoading(true);
     try {
       const { data, error } = await supabase.functions.invoke('admin-actions', { body: { action: 'get_x_status' } });
@@ -80,9 +83,9 @@ export default function XAutomationSettings({ twitterHydration, xApiUsage, xPost
     } finally {
       setStatusLoading(false);
     }
-  };
+  }, [toast]);
 
-  useEffect(() => { refreshStatus(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  useEffect(() => { refreshStatus(); }, [refreshStatus]);
 
   const verifyConnection = async () => {
     setVerifyLoading(true);
@@ -152,19 +155,19 @@ export default function XAutomationSettings({ twitterHydration, xApiUsage, xPost
     }
   };
 
-  const runBackfill = async () => {
+  const runBackfill = async (dryRun: boolean) => {
     setBackfillLoading(true);
     setBackfillResult(null);
     try {
       const { data, error } = await supabase.functions.invoke('admin-actions', {
-        body: { action: 'rehydrate_recent_truncated', hours: 24 },
+        body: { action: 'rehydrate_recent_truncated', hours: 24, dry_run: dryRun },
       });
       if (error) throw error;
       setBackfillResult(data);
       toast({
-        title: data?.ok ? 'Backfill complete' : 'Backfill failed',
+        title: data?.ok ? (dryRun ? 'Backfill estimate ready' : 'Backfill queued') : 'Backfill failed',
         description: data?.ok
-          ? `Scanned ${data.scanned}, matched ${data.matched}, queued ${data.queued}.`
+          ? `Scanned ${data.scanned}, matched ${data.matched}, ${dryRun ? 'would queue' : 'queued'} ${data.queued}.`
           : data?.error,
         variant: data?.ok ? 'default' : 'destructive',
       });
@@ -211,6 +214,10 @@ export default function XAutomationSettings({ twitterHydration, xApiUsage, xPost
             <Button onClick={verifyConnection} disabled={verifyLoading} variant="outline" className="border-primary/50 hover:bg-primary/10">
               {verifyLoading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Verifying...</> : <><Shield className="w-4 h-4 mr-2" />Verify connection</>}
             </Button>
+            <Button onClick={() => refetchXApiSummary()} disabled={xApiSummaryFetching} variant="outline" size="sm">
+              {xApiSummaryFetching ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : null}
+              Refresh usage
+            </Button>
             <Button onClick={refreshStatus} disabled={statusLoading} variant="ghost" size="sm">Refresh status</Button>
             <a href="https://supabase.com/dashboard/project/jzirqfzzvlbxwfzndaer/settings/functions" target="_blank" rel="noreferrer" className="text-xs text-primary inline-flex items-center hover:underline">
               Manage secrets <ExternalLink className="w-3 h-3 ml-1" />
@@ -253,25 +260,27 @@ export default function XAutomationSettings({ twitterHydration, xApiUsage, xPost
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
             <div className="p-3 bg-muted/30 rounded-lg">
-              <p className="text-xs text-muted-foreground">Calls (last 24h)</p>
+              <p className="text-xs text-muted-foreground">Local attempts (24h)</p>
               <p className="text-2xl font-bold text-glass-foreground">{calls24h}</p>
             </div>
             <div className="p-3 bg-muted/30 rounded-lg">
-              <p className="text-xs text-muted-foreground">Total (all time)</p>
-              <p className="text-2xl font-bold text-glass-foreground">{xApiUsage?.total ?? 0}</p>
+              <p className="text-xs text-muted-foreground">Local posts (24h)</p>
+              <p className="text-2xl font-bold text-glass-foreground">{xApiSummary?.posts_local ?? xApiUsage?.posts_24h?.length ?? 0}</p>
               {xApiUsage?.last_call_at && <p className="text-xs text-muted-foreground mt-1">Last: {new Date(xApiUsage.last_call_at).toLocaleString()}</p>}
             </div>
             <div className={`p-3 rounded-lg ${overBudget ? 'bg-destructive/10 border border-destructive/30' : 'bg-muted/30'}`}>
-              <p className="text-xs text-muted-foreground">Projected monthly</p>
+              <p className="text-xs text-muted-foreground">Latest local estimate</p>
               <p className={`text-2xl font-bold ${overBudget ? 'text-destructive' : 'text-glass-foreground'}`}>{projectedMonthly.toLocaleString()}</p>
-              <p className="text-xs text-muted-foreground mt-1">Basic tier: {BASIC_TIER_MONTHLY_LIMIT.toLocaleString()}/mo</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Configured budget: {configuredMonthlyBudget ? configuredMonthlyBudget.toLocaleString() : 'not set'}
+              </p>
             </div>
           </div>
 
           {overBudget && (
             <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">
               <AlertTriangle className="w-4 h-4 text-destructive mt-0.5" />
-              <span>Projected monthly usage exceeds the Basic tier limit. Consider disabling hydration or upgrading your X API plan.</span>
+              <span>Projected local usage exceeds the configured budget. Check the official project cap in X Developer Console before increasing automation.</span>
             </div>
           )}
 
@@ -285,14 +294,23 @@ export default function XAutomationSettings({ twitterHydration, xApiUsage, xPost
                 <p className="text-sm font-medium text-glass-foreground">Re-hydrate recent truncated tweets</p>
                 <p className="text-xs text-muted-foreground">Scans posts from the last 24h, finds ones that look truncated (e.g. ending in <code>pic.</code>, mid-sentence ellipsis, dangling articles), and queues them for X API hydration.</p>
               </div>
-              <Button onClick={runBackfill} disabled={backfillLoading} variant="outline" className="border-primary/50 hover:bg-primary/10">
-                {backfillLoading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Scanning...</> : <><Sparkles className="w-4 h-4 mr-2" />Run backfill (24h)</>}
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={() => runBackfill(true)} disabled={backfillLoading} variant="outline" className="border-primary/50 hover:bg-primary/10">
+                  {backfillLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
+                  Estimate
+                </Button>
+                <Button onClick={() => runBackfill(false)} disabled={backfillLoading} variant="outline">
+                  Queue backfill
+                </Button>
+              </div>
             </div>
             {backfillResult && (
               <div className={`rounded-lg border p-3 text-xs ${backfillResult.ok ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-destructive/30 bg-destructive/5'}`}>
                 {backfillResult.ok ? (
-                  <span>Scanned <strong>{backfillResult.scanned}</strong> · matched <strong>{backfillResult.matched}</strong> · queued <strong>{backfillResult.queued}</strong> hydrate jobs.</span>
+                  <span>
+                    Scanned <strong>{backfillResult.scanned}</strong> · matched <strong>{backfillResult.matched}</strong> · {backfillResult.dry_run ? 'would queue' : 'queued'} <strong>{backfillResult.queued}</strong> hydrate jobs.
+                    {backfillResult.skipped_existing ? <> Existing pending: <strong>{backfillResult.skipped_existing}</strong>.</> : null}
+                  </span>
                 ) : (
                   <span className="text-destructive">{backfillResult.error || 'Unknown error'}</span>
                 )}
@@ -335,6 +353,9 @@ export default function XAutomationSettings({ twitterHydration, xApiUsage, xPost
                   <AlertDialogDescription asChild>
                     <div>
                       <span>This will post the following to your authenticated X account:</span>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Posting as: {verifyResult?.handle ? `@${verifyResult.handle}` : 'configured X account'}
+                      </p>
                       <div className="mt-2 p-3 bg-muted rounded text-sm whitespace-pre-wrap text-foreground">{tweetText}</div>
                       {replyTo && <p className="mt-2 text-xs">As a reply to tweet ID: <code>{replyTo}</code></p>}
                     </div>
@@ -420,7 +441,7 @@ export default function XAutomationSettings({ twitterHydration, xApiUsage, xPost
             </div>
           )}
           <Separator />
-          <p className="text-xs text-muted-foreground">Note: each verification, hydration test, and posted tweet consumes one X API call counted toward your monthly quota.</p>
+          <p className="text-xs text-muted-foreground">Networked verification, hydration, media upload, and post attempts are recorded in the local usage ledger. Missing credentials are not counted as X API calls.</p>
         </CardContent>
       </Card>
 

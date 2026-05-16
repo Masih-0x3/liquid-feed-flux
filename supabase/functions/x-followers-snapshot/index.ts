@@ -1,9 +1,10 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
 import { requireInternalAuth } from "../_shared/internalAuth.ts";
+import { recordLegacyXApiUsage, recordXApiEvent } from "../_shared/xApiLedger.ts";
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': Deno.env.get('ALLOWED_CORS_ORIGIN') ?? 'https://liquid-feed-flux.lovable.app',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-internal-token',
 };
 
@@ -44,21 +45,6 @@ function getCreds() {
 }
 
 // deno-lint-ignore no-explicit-any
-async function recordApiCall(supabase: any, error?: string) {
-  try {
-    const { data } = await supabase.from('settings').select('value').eq('key', 'x_api_usage').maybeSingle();
-    const cur = (data?.value as { total?: number; calls_24h?: string[] } | null) ?? { total: 0, calls_24h: [] };
-    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-    const trimmed = (cur.calls_24h ?? []).filter((ts: string) => { try { return new Date(ts).getTime() > cutoff; } catch { return false; } });
-    trimmed.push(new Date().toISOString());
-    await supabase.from('settings').upsert(
-      { key: 'x_api_usage', value: { total: (cur.total ?? 0) + 1, calls_24h: trimmed, last_call_at: new Date().toISOString(), last_error: error ?? null }, updated_at: new Date().toISOString() },
-      { onConflict: 'key' }
-    );
-  } catch (e) { console.error('recordApiCall failed', e); }
-}
-
-// deno-lint-ignore no-explicit-any
 async function getSelfId(supabase: any, creds: { ck: string; cs: string; at: string; ats: string }): Promise<string> {
   const { data: setting } = await supabase.from('settings').select('value').eq('key', 'x_self_id').maybeSingle();
   const cached = (setting?.value as { id?: string } | null)?.id;
@@ -68,7 +54,13 @@ async function getSelfId(supabase: any, creds: { ck: string; cs: string; at: str
   const auth = await oauthHeader('GET', url, {}, creds.ck, creds.cs, creds.at, creds.ats);
   const resp = await fetch(url, { headers: { Authorization: auth } });
   const text = await resp.text();
-  await recordApiCall(supabase, resp.ok ? undefined : `users/me HTTP ${resp.status}`);
+  await recordXApiEvent(supabase, {
+    source: 'x-followers-snapshot',
+    sourceAction: 'users_me',
+    endpoint: url,
+    method: 'GET',
+  }, resp);
+  await recordLegacyXApiUsage(supabase, { error: resp.ok ? null : `users/me HTTP ${resp.status}` });
   if (!resp.ok) throw new Error(`users/me failed: HTTP ${resp.status}: ${text.slice(0, 300)}`);
   const parsed = JSON.parse(text) as { data?: { id?: string; username?: string; name?: string } };
   const id = parsed.data?.id;
@@ -83,7 +75,8 @@ async function getSelfId(supabase: any, creds: { ck: string; cs: string; at: str
 
 interface FollowerUser { id: string; username?: string; name?: string; profile_image_url?: string }
 
-async function fetchUserPage(userId: string, endpoint: 'followers' | 'following', paginationToken: string | null, creds: { ck: string; cs: string; at: string; ats: string }): Promise<{ users: FollowerUser[]; nextToken: string | null; status: number; errorText?: string }> {
+// deno-lint-ignore no-explicit-any
+async function fetchUserPage(supabase: any, userId: string, endpoint: 'followers' | 'following', paginationToken: string | null, creds: { ck: string; cs: string; at: string; ats: string }): Promise<{ users: FollowerUser[]; nextToken: string | null; status: number; errorText?: string }> {
   const baseUrl = `https://api.x.com/2/users/${userId}/${endpoint}`;
   const qp: Record<string, string> = {
     'max_results': '1000',
@@ -95,6 +88,15 @@ async function fetchUserPage(userId: string, endpoint: 'followers' | 'following'
   const url = `${baseUrl}?${Object.entries(qp).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&')}`;
   const resp = await fetch(url, { headers: { Authorization: auth } });
   const text = await resp.text();
+  await recordXApiEvent(supabase, {
+    source: 'x-followers-snapshot',
+    sourceAction: `fetch_${endpoint}`,
+    endpoint: baseUrl,
+    method: 'GET',
+    userId,
+    error: resp.ok ? null : `${endpoint} HTTP ${resp.status}`,
+  }, resp);
+  await recordLegacyXApiUsage(supabase, { error: resp.ok ? null : `${endpoint} HTTP ${resp.status}` });
   if (!resp.ok) return { users: [], nextToken: null, status: resp.status, errorText: text.slice(0, 500) };
 
   const parsed = JSON.parse(text) as { data?: FollowerUser[]; meta?: { next_token?: string } };
@@ -112,11 +114,60 @@ serve(async (req) => {
   const authErr = await requireInternalAuth(req, supabase, corsHeaders);
   if (authErr) return authErr;
 
-  let body: { trigger?: string } = {};
+  let body: { trigger?: string; force?: boolean; dry_run?: boolean; include_following?: boolean } = {};
   try { body = await req.json(); } catch { /* empty body OK for cron */ }
   const trigger = body.trigger === 'manual' ? 'manual' : 'cron';
+  const force = body.force === true;
+  const dryRun = body.dry_run === true;
+  const includeFollowing = body.include_following !== false;
 
   try {
+    const { data: controlsRow } = await supabase.from('settings').select('value').eq('key', 'x_api_controls').maybeSingle();
+    const controls = (controlsRow?.value ?? {}) as Record<string, unknown>;
+    const staleMinutes = typeof controls.follower_snapshot_stale_minutes === 'number'
+      ? controls.follower_snapshot_stale_minutes
+      : 60;
+
+    const { data: latestSnap } = await supabase
+      .from('x_follower_snapshots')
+      .select('id, taken_at, status, follower_count, following_count, api_calls_used')
+      .order('taken_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const latestAgeMs = latestSnap?.taken_at ? Date.now() - new Date(latestSnap.taken_at as string).getTime() : null;
+    const latestIsFresh = latestAgeMs !== null && latestAgeMs < staleMinutes * 60 * 1000;
+    const followerCountEstimate = Number(latestSnap?.follower_count ?? 0);
+    const followingCountEstimate = Number(latestSnap?.following_count ?? 0);
+    const estimatedCalls = Math.max(1, Math.ceil(Math.max(1, followerCountEstimate) / 1000))
+      + (includeFollowing ? Math.max(1, Math.ceil(Math.max(1, followingCountEstimate) / 1000)) : 0);
+
+    if (dryRun) {
+      return new Response(JSON.stringify({
+        ok: true,
+        dry_run: true,
+        trigger,
+        include_following: includeFollowing,
+        estimated_api_calls: estimatedCalls,
+        latest_snapshot: latestSnap ?? null,
+        latest_age_minutes: latestAgeMs === null ? null : Math.round(latestAgeMs / 60000),
+        stale_minutes: staleMinutes,
+        would_skip_without_force: trigger === 'manual' && latestIsFresh && !force,
+      }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    if (trigger === 'manual' && latestIsFresh && !force) {
+      return new Response(JSON.stringify({
+        ok: true,
+        skipped: true,
+        reason: 'snapshot_recent',
+        latest_snapshot: latestSnap,
+        latest_age_minutes: Math.round((latestAgeMs ?? 0) / 60000),
+        stale_minutes: staleMinutes,
+        estimated_api_calls: estimatedCalls,
+      }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
     // Daily-cap guard for cron only
     if (trigger === 'cron') {
       const { data: recent } = await supabase
@@ -159,9 +210,8 @@ serve(async (req) => {
 
     // Page through followers. Cap at 100 pages (100k followers) as safety.
     while (pages < 100) {
-      const { users, nextToken, status, errorText } = await fetchUserPage(selfId, 'followers', pageToken, creds);
+      const { users, nextToken, status, errorText } = await fetchUserPage(supabase, selfId, 'followers', pageToken, creds);
       apiCalls += 1;
-      await recordApiCall(supabase, status === 200 ? undefined : `followers HTTP ${status}`);
 
       if (status === 429) { halted = { reason: 'rate_limited', status, error: errorText }; break; }
       if (status !== 200) { halted = { reason: 'api_error', status, error: errorText }; break; }
@@ -182,11 +232,10 @@ serve(async (req) => {
     let followingToken: string | null = null;
     let followingPages = 0;
 
-    if (!halted) {
+    if (!halted && includeFollowing) {
       while (followingPages < 100) {
-        const { users, nextToken, status, errorText } = await fetchUserPage(selfId, 'following', followingToken, creds);
+        const { users, nextToken, status, errorText } = await fetchUserPage(supabase, selfId, 'following', followingToken, creds);
         apiCalls += 1;
-        await recordApiCall(supabase, status === 200 ? undefined : `following HTTP ${status}`);
 
         if (status === 429) { halted = { reason: 'rate_limited_following', status, error: errorText }; break; }
         if (status !== 200) { halted = { reason: 'following_api_error', status, error: errorText }; break; }
@@ -320,6 +369,7 @@ serve(async (req) => {
       snapshot_id: snapshotId,
       status: 'complete',
       trigger,
+      include_following: includeFollowing,
       follower_count: allIds.length,
       following_count: followingIds.length,
       pages_fetched: pages + followingPages,

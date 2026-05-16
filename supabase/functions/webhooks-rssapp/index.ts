@@ -3,7 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
 import { requireRssWebhookAuth } from "../_shared/internalAuth.ts";
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': Deno.env.get('ALLOWED_CORS_ORIGIN') ?? 'https://liquid-feed-flux.lovable.app',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-webhook-token, x-rssapp-token',
 };
 
@@ -72,6 +72,69 @@ supabase: any): Promise<boolean> {
   } catch { return true; }
 }
 
+async function isDuplicateGateEnabled(// deno-lint-ignore no-explicit-any
+supabase: any): Promise<boolean> {
+  try {
+    const { data } = await supabase.from('settings').select('value').eq('key', 'story_memory').maybeSingle();
+    const value = data?.value;
+    return !!(value && typeof value === 'object' && (value as Record<string, unknown>).enabled === true);
+  } catch {
+    return false;
+  }
+}
+
+async function enqueueContentPipelineEntry(// deno-lint-ignore no-explicit-any
+supabase: any, tweetId: string, isTruncated: boolean, duplicateGateEnabled: boolean): Promise<void> {
+  const type = duplicateGateEnabled ? 'dedupe' : 'translate';
+  const step = duplicateGateEnabled ? 'dedupe' : 'translate';
+  const idempotencyKey = duplicateGateEnabled ? `dedupe:${tweetId}` : `translate:${tweetId}`;
+  const priority = duplicateGateEnabled ? 30 : 10;
+
+  const { error } = await supabase
+    .from('jobs')
+    .upsert({
+      type,
+      payload: { tweet_id: tweetId },
+      status: 'pending',
+      priority,
+      idempotency_key: idempotencyKey,
+      next_run_at: new Date().toISOString(),
+    }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+
+  if (error) {
+    console.error(`Error creating ${type} job:`, error);
+    return;
+  }
+
+  if (duplicateGateEnabled) {
+    await supabase
+      .from('posts')
+      .update({
+        dedupe_status: 'pending',
+        dedupe_method: null,
+        dedupe_confidence: null,
+        dedupe_reason: 'queued:webhook',
+        dedupe_checked_at: null,
+      })
+      .eq('tweet_id', tweetId)
+      .then(() => null, () => null);
+  }
+
+  console.log(JSON.stringify({ function: 'webhooks-rssapp', action: `${type}_job_created` }));
+  try {
+    await supabase
+      .from('pipeline_events')
+      .insert({
+        subject_type: 'post',
+        subject_id: tweetId,
+        step,
+        status: 'queued',
+        started_at: new Date().toISOString(),
+        meta: { source: 'webhook', is_truncated: isTruncated },
+      });
+  } catch (_e) {}
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -103,7 +166,11 @@ serve(async (req) => {
       });
     }
 
-    console.log('Payload keys:', typeof payload === 'object' && !Array.isArray(payload) ? Object.keys(payload as Record<string, unknown>) : typeof payload);
+    console.log(JSON.stringify({
+      function: 'webhooks-rssapp',
+      action: 'payload_parsed',
+      shape: typeof payload === 'object' && !Array.isArray(payload) ? Object.keys(payload as Record<string, unknown>) : typeof payload,
+    }));
     
 
     // Parse RSS items from the payload - handle RSS.app webhook structure
@@ -131,10 +198,10 @@ serve(async (req) => {
       items = [payload];
     }
     
-    console.log(`Found ${items.length} items to process`);
+    console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'items_detected', count: items.length }));
     
     if (items.length === 0) {
-      console.log('No items found in payload, treating as test notification');
+      console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'test_notification' }));
       return new Response(JSON.stringify({ 
         success: true, 
         message: 'Test notification received',
@@ -145,10 +212,11 @@ serve(async (req) => {
     }
 
     let processedCount = 0;
+    const duplicateGateEnabled = await isDuplicateGateEnabled(supabase);
 
     for (const item of items) {
       try {
-        console.log('Processing item:', JSON.stringify(item, null, 2));
+        console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'processing_item' }));
         
         // Extract item data with multiple fallbacks
         const tweetId = item.guid || item.id || item.link || item.url || `${Date.now()}-${Math.random()}`;
@@ -187,11 +255,44 @@ serve(async (req) => {
         const publishedAt = item.pubDate || item.published || item.date ? 
           new Date(item.pubDate || item.published || item.date) : new Date();
 
-        console.log(`Extracted: tweetId=${tweetId}, text="${text.substring(0, 50)}...", url=${url}, author=${authorHandle || 'unknown'}`);
+        console.log(JSON.stringify({
+          function: 'webhooks-rssapp',
+          action: 'item_extracted',
+          tweet_id_hash: await hashUrl(String(tweetId)),
+          text_length: text.length,
+          has_url: Boolean(url),
+          author_known: Boolean(authorHandle),
+        }));
+
+        const { data: existingPost } = await supabase
+          .from('posts')
+          .select('tweet_id')
+          .eq('tweet_id', tweetId)
+          .maybeSingle();
+        if (existingPost?.tweet_id) {
+          console.log(JSON.stringify({
+            function: 'webhooks-rssapp',
+            action: 'exact_tweet_seen_skip_pipeline',
+            tweet_id_hash: await hashUrl(String(tweetId)),
+          }));
+          try {
+            await supabase.from('pipeline_events').insert({
+              subject_type: 'post',
+              subject_id: tweetId,
+              step: 'dedupe',
+              status: 'completed',
+              started_at: new Date().toISOString(),
+              ended_at: new Date().toISOString(),
+              meta: { source: 'webhook', method: 'exact_tweet', skipped: 'existing_tweet_id' },
+            });
+          } catch (_e) {}
+          processedCount++;
+          continue;
+        }
 
         // Parse media from RSS item
         const mediaItems = parseMediaFromRSSItem(item, text);
-        console.log(`Found ${mediaItems.length} media items for item:`, JSON.stringify(item, null, 2).substring(0, 500));
+        console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'media_detected', count: mediaItems.length }));
 
         // Detect a likely video attachment that RSS cannot deliver directly.
         // Triggers a `resolve_media` job that uses the public fxtwitter/vxtwitter
@@ -209,7 +310,7 @@ serve(async (req) => {
 
         if (accounts && accounts.length > 0) {
           accountId = accounts[0].id;
-          console.log('Using existing account:', accountId);
+            console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'account_found' }));
         } else {
           // Create a default account
           const { data: newAccount, error: accountError } = await supabase
@@ -228,12 +329,12 @@ serve(async (req) => {
 
           if (newAccount) {
             accountId = newAccount.id;
-            console.log('Created new account:', accountId);
+            console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'account_created' }));
           }
         }
 
         if (!accountId) {
-          console.log('No account available, skipping item:', tweetId);
+          console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'account_missing_skip' }));
           continue;
         }
 
@@ -267,7 +368,7 @@ serve(async (req) => {
           continue;
         }
 
-        console.log(`Post upserted: ${tweetId} (truncated=${isTruncated}, hydration_deferred_to_post_score=${isTruncated})`);
+        console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'post_upserted', truncated: isTruncated }));
 
         // Insert media items
         if (mediaItems.length > 0) {
@@ -290,43 +391,13 @@ serve(async (req) => {
           if (mediaError) {
             console.error('Error inserting media:', mediaError);
           } else {
-            console.log(`Inserted ${mediaItems.length} media items for ${tweetId}`);
+            console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'media_inserted', count: mediaItems.length }));
           }
         }
 
-        // ALWAYS enqueue translate first (even for truncated posts).
-        // The worker will gate hydration on the resulting score: only tweets
-        // that pass the editorial threshold AND are truncated will be hydrated.
-        {
-          const { error: translationJobError } = await supabase
-            .from('jobs')
-            .upsert({
-              type: 'translate',
-              payload: { tweet_id: tweetId },
-              status: 'pending',
-              priority: 10,
-              idempotency_key: `translate:${tweetId}`,
-              next_run_at: new Date().toISOString()
-            }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
-
-          if (translationJobError) {
-            console.error('Error creating translation job:', translationJobError);
-          } else {
-            console.log('Translation job created for:', tweetId);
-            try {
-              await supabase
-                .from('pipeline_events')
-                .insert({
-                  subject_type: 'post',
-                  subject_id: tweetId,
-                  step: 'translate',
-                  status: 'queued',
-                  started_at: new Date().toISOString(),
-                  meta: { source: 'webhook', is_truncated: isTruncated }
-                });
-            } catch (_e) {}
-          }
-        }
+        // Enqueue duplicate detection first when enabled. The worker only
+        // advances unique/related items to translation and filtering.
+        await enqueueContentPipelineEntry(supabase, tweetId, isTruncated, duplicateGateEnabled);
 
         // Create media download job for tweets with media
         if (mediaItems.length > 0) {
@@ -343,7 +414,7 @@ serve(async (req) => {
           if (downloadJobError) {
             console.error('Error creating media download job:', downloadJobError);
           } else {
-            console.log('Media download job created for:', tweetId);
+            console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'media_download_job_created' }));
             try {
               await supabase
                 .from('pipeline_events')
@@ -377,7 +448,7 @@ serve(async (req) => {
           if (resolveJobError) {
             console.error('Error creating resolve_media job:', resolveJobError);
           } else {
-            console.log('resolve_media job created for:', tweetId);
+            console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'resolve_media_job_created' }));
             try {
               await supabase.from('pipeline_events').insert({
                 subject_type: 'post', subject_id: tweetId,
@@ -400,7 +471,7 @@ serve(async (req) => {
       }
     }
 
-    console.log(`Successfully processed ${processedCount} out of ${items.length} items`);
+    console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'processed', processed_count: processedCount, item_count: items.length }));
 
     return new Response(JSON.stringify({ 
       success: true, 
@@ -469,7 +540,7 @@ function parseMediaFromRSSItem(item: any, text?: string): Array<{type: string, u
       const twitterMediaRegex = /pic\.twitter\.com\/[a-zA-Z0-9]+/g;
       const twitterMatches = text.match(twitterMediaRegex);
       if (twitterMatches) {
-        console.log(`Found ${twitterMatches.length} pic.twitter.com URLs in text, but skipping as they are not direct media URLs`);
+        console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'pic_urls_skipped', count: twitterMatches.length }));
         // Skip these URLs as they are not direct media URLs
       }
       
@@ -478,7 +549,7 @@ function parseMediaFromRSSItem(item: any, text?: string): Array<{type: string, u
       const directMatches = text.match(directMediaRegex);
       if (directMatches) {
         for (const match of directMatches) {
-          console.log('Found direct media URL in text:', match);
+          console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'direct_media_url_detected' }));
           const isVideo = /\.(mp4|mov)$/i.test(match);
           mediaItems.push({
             type: isVideo ? 'video' : 'image',
@@ -489,7 +560,7 @@ function parseMediaFromRSSItem(item: any, text?: string): Array<{type: string, u
     }
     // Parse thumbnail from RSS.app webhook (Twitter thumbnails)
     if (item.thumbnail && typeof item.thumbnail === 'string') {
-      console.log('Found thumbnail:', item.thumbnail);
+      console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'thumbnail_detected' }));
       mediaItems.push({
         type: 'image',
         url: item.thumbnail
