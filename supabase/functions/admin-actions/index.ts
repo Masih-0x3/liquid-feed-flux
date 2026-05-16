@@ -1506,8 +1506,24 @@ function toMonitoringEntry(
   const isTruncated = (rpc?.is_truncated as boolean) ?? (post.is_truncated as boolean) ?? false;
   const hydratedAt = (rpc?.hydrated_at as string) ?? (post.hydrated_at as string) ?? null;
   const hasMedia = post.has_media === true;
-  const monitoringState = deriveMonitoringState({ ...post, is_truncated: isTruncated, hydrated_at: hydratedAt }, rpc, threshold);
+  let monitoringState = deriveMonitoringState({ ...post, is_truncated: isTruncated, hydrated_at: hydratedAt }, rpc, threshold);
   const duplicateOf = typeof post.dup_of_tweet_id === 'string' ? duplicateTargets.get(post.dup_of_tweet_id) ?? null : null;
+  if (
+    duplicateOf
+    && monitoringState.code === 'blocked_duplicate'
+    && (duplicateOf.coverage_state === 'not_covered' || duplicateOf.coverage_state === 'also_duplicate')
+  ) {
+    monitoringState = {
+      ...monitoringState,
+      code: 'duplicate_coverage_gap',
+      stage_label: 'Duplicate coverage gap',
+      tone: 'warn',
+      decision_label: 'Duplicate not covered',
+      primary_blocker: 'The matched duplicate has not been delivered and is not actively moving through delivery. Review or re-run duplicate check so one item can be evaluated.',
+      needs_attention: true,
+      next_actions: ['run_dedupe', 'manual_score', 'clear_duplicate'],
+    };
+  }
   const mayCallX = monitoringState.code === 'ready_to_deliver' && xStatus !== 'posted';
   const xCostReasons: string[] = [];
   if (monitoringState.code === 'hydration') xCostReasons.push('hydrate read may be needed');
