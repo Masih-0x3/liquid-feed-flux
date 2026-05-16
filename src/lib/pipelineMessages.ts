@@ -26,6 +26,12 @@ export function formatDecisionReason(reason: string | null | undefined): Formatt
   if (below) {
     return withDetail(r, `Below threshold (score ${below[1]} is under ${below[2]})`);
   }
+  const v2Pass = r.match(/^scoring_v2:([^:]+):([\d.]+)>=(\d+)/i);
+  if (v2Pass) return withDetail(r, `Audience ${v2Pass[1].replace(/_/g, ' ')} passed (${v2Pass[2]} ≥ ${v2Pass[3]})`);
+  const v2Below = r.match(/^scoring_v2_below:([^:]+):([\d.]+)<(\d+)/i);
+  if (v2Below) return withDetail(r, `Audience ${v2Below[1].replace(/_/g, ' ')} below threshold (${v2Below[2]} < ${v2Below[3]})`);
+  const v2Author = r.match(/^scoring_v2_author:(always_deliver|always_skip):@(.+)$/i);
+  if (v2Author) return withDetail(r, v2Author[1] === 'always_deliver' ? `V2 author always deliver (@${v2Author[2]})` : `V2 author always skip (@${v2Author[2]})`);
   if (/^score_pass:/i.test(r)) {
     return withDetail(r, 'Met editorial threshold');
   }
@@ -49,6 +55,12 @@ export function formatDecisionReason(reason: string | null | undefined): Formatt
   if (/^author_rule:always_deliver:/i.test(r)) return withDetail(r, 'Author rule: always deliver');
   if (/^author_rule:always_skip:/i.test(r)) return withDetail(r, 'Author rule: always skip');
   if (r === 'dup_cleared_by_admin') return withDetail(r, 'Duplicate cleared by admin');
+  const manualPass = r.match(/^manual_score_pass:([\d.]+)>=(\d+)/);
+  if (manualPass) return withDetail(r, `Manual score passed (${manualPass[1]} ≥ ${manualPass[2]})`);
+  const manualSkip = r.match(/^manual_score_skip:([\d.]+)<(\d+)/);
+  if (manualSkip) return withDetail(r, `Manual score below threshold (${manualSkip[1]} < ${manualSkip[2]})`);
+  const manualDup = r.match(/^manual_score_blocked_duplicate:([\d.]+)>=(\d+)/);
+  if (manualDup) return withDetail(r, `Manual score passed, but duplicate block remains (${manualDup[1]} ≥ ${manualDup[2]})`);
   const boost = r.match(/^feedback_boost:([\d.]+)\+([-\d.]+)>=(\d+)/);
   if (boost) return withDetail(r, `Feedback boosted: AI ${boost[1]} + bias ${boost[2]} met threshold ${boost[3]}`);
   const reduce = r.match(/^feedback_reduce:([\d.]+)\+([-\d.]+)<(\d+)/);

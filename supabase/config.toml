@@ -7,7 +7,7 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.admin-retry]
-verify_jwt = false
+verify_jwt = true
 
 [functions.db-cleanup]
 verify_jwt = false
@@ -19,10 +19,13 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.admin-actions]
-verify_jwt = false
+verify_jwt = true
 
 [functions.x-poster]
 verify_jwt = false
 
 [functions.x-followers-snapshot]
+verify_jwt = false
+
+[functions.digest-compiler]
 verify_jwt = false

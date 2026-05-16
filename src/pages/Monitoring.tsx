@@ -1,53 +1,115 @@
-import { useState, useRef, useEffect } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { formatDistanceToNow } from "date-fns";
+import { Link, useSearchParams } from "react-router-dom";
+import {
+  AlertCircle,
+  Ban,
+  Check,
+  ChevronRight,
+  Clock,
+  ExternalLink,
+  Loader2,
+  MessageSquare,
+  MoreHorizontal,
+  RefreshCw,
+  RotateCcw,
+  Search,
+  Send,
+  SlidersHorizontal,
+  Sparkles,
+  Star,
+  Twitter,
+  Wrench,
+} from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerFooter, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
 import {
-  Select as ThemedSelect, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
-import { useToast } from "@/hooks/use-toast";
-import { Search, RefreshCw, Edit, Check, X, ExternalLink, RotateCcw, Star, Send, Scissors, Sparkles, Twitter, Ban, AlertCircle, Info, Clock, MoreHorizontal, Loader2, FlaskConical } from "lucide-react";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { format } from "date-fns";
-import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerDescription, DrawerClose, DrawerFooter } from "@/components/ui/drawer";
-import { useMonitoringData, type MonitoringEntry, type MonitoringFilter, type PipelineEvent } from "@/hooks/useMonitoringData";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { MediaThumbnails } from "@/components/monitoring/MediaThumbnails";
-import { Link } from "react-router-dom";
+import { Label } from "@/components/ui/label";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import {
+  Select as ThemedSelect,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/hooks/use-toast";
+import {
+  useMonitoringDataSearch,
+  useMonitoringOverview,
+  useXApiSummary,
+  type MonitoringEntry,
+  type MonitoringFilter,
+  type PipelineEvent,
+} from "@/hooks/useMonitoringData";
+import { MediaThumbnails } from "@/components/monitoring/MediaThumbnails";
 import {
   decisionScore,
   formatDecisionReason,
   formatPipelineError,
   formatXBadge,
 } from "@/lib/pipelineMessages";
+import { loadedMonitoringCounts, monitoringDecisionLabel, monitoringStage, type MonitoringTone } from "@/lib/monitoringState";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
-// Admin action helpers
 async function adminEditTranslation(tweetId: string, text: string) {
   const { error } = await supabase.functions.invoke('admin-actions', { body: { action: 'edit_translation', tweet_id: tweetId, text_translated: text } });
   if (error) throw error;
 }
+
 async function adminRetryStep(tweetId: string, step: string) {
   const { error } = await supabase.functions.invoke('admin-actions', { body: { action: 'retry_step', tweet_id: tweetId, step } });
   if (error) throw error;
 }
+
+async function adminHydratePost(tweetId: string) {
+  const { data, error } = await supabase.functions.invoke('admin-actions', { body: { action: 'hydrate_post', tweet_id: tweetId } });
+  if (error) throw error;
+  if (data?.ok === false) throw new Error(data.error ?? 'Hydrate failed');
+  return data as { ok: boolean; queued?: boolean; reason?: string };
+}
+
 async function adminReprocess(tweetId: string) {
   const { error } = await supabase.functions.invoke('admin-actions', { body: { action: 'reprocess', tweet_id: tweetId } });
   if (error) throw error;
 }
-async function adminBulkReprocess(tweetIds: string[]) {
-  const { error } = await supabase.functions.invoke('admin-actions', { body: { action: 'bulk_reprocess', tweet_ids: tweetIds } });
-  if (error) throw error;
-}
+
 async function adminRescorePost(tweetId: string) {
   const { data, error } = await supabase.functions.invoke('admin-actions', { body: { action: 'rescore_post', tweet_id: tweetId } });
   if (error) throw error;
@@ -61,147 +123,200 @@ async function adminRescorePost(tweetId: string) {
     error?: string;
   };
 }
+
 async function adminRetryXPost(tweetId: string) {
   const { data, error } = await supabase.functions.invoke('admin-actions', { body: { action: 'retry_x_post', tweet_id: tweetId } });
   if (error) throw error;
   return data as { ok: boolean; error?: string; status?: string; x_tweet_id?: string };
 }
+
 async function adminClearDup(tweetId: string, relatedTweetId: string | null) {
   const { data, error } = await supabase.functions.invoke('admin-actions', { body: { action: 'clear_dup', tweet_id: tweetId, related_tweet_id: relatedTweetId } });
   if (error) throw error;
   return data as { success: boolean };
 }
 
-function StatusIndicator({ entry }: { entry: MonitoringEntry }) {
-  const steps = [
-    { label: 'Ingest', status: 'completed', error: '', completed: true },
-    { label: 'Media', status: entry.is_translated ? 'completed' : 'pending', error: '', completed: false },
-    { label: 'Translate', status: entry.translation_job_status, error: entry.translation_error, completed: entry.is_translated },
-    { label: 'Deliver', status: entry.delivery_job_status, error: entry.delivery_error, completed: entry.is_delivered },
-  ];
-
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2">
-        {steps.map((step, index) => {
-          let statusColor = 'bg-muted-foreground/30';
-          let textColor = 'text-muted-foreground';
-          let icon = '\u25CF';
-          if (step.completed) { statusColor = 'bg-success'; textColor = 'text-success'; icon = '\u2713'; }
-          else if (step.status === 'running') { statusColor = 'bg-primary animate-pulse'; textColor = 'text-primary'; }
-          else if (step.status === 'failed' || step.error) { statusColor = 'bg-destructive'; textColor = 'text-destructive'; icon = '\u2717'; }
-          else if (step.status === 'pending') { statusColor = 'bg-warning'; textColor = 'text-warning'; }
-          return (
-            <div key={step.label} className="flex items-center gap-2">
-              <div className={`w-3 h-3 rounded-full ${statusColor} flex items-center justify-center`}><span className="text-white text-xs font-bold">{icon}</span></div>
-              <span className={`text-sm font-medium ${textColor}`}>{step.label}</span>
-              {index < steps.length - 1 && <div className="w-8 h-0.5 bg-muted-foreground/20" />}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
+async function adminTranslatePost(tweetId: string) {
+  const { data, error } = await supabase.functions.invoke('admin-actions', { body: { action: 'translate_post', tweet_id: tweetId, mode: 'translation_only' } });
+  if (error) throw error;
+  if (data?.ok === false) throw new Error(data.error ?? 'Translation failed');
+  return data as { ok: boolean; translated?: string; model?: string };
 }
 
-// Single source of truth for "what's going on with this post and what to do".
-// Surfaces skip reasons, threshold gap, and failure details inline so users
-// don't have to hover badges or expand collapsed reasoning.
-function DiagnosticStrip({ entry, threshold }: { entry: MonitoringEntry; threshold: number }) {
-  const decision = decisionScore(entry);
-  const isSkipped = entry.delivery_decision && entry.delivery_decision !== 'deliver';
-  const hasError = !!(entry.translation_error || entry.delivery_error || entry.x_error);
+async function adminRunDedupe(tweetId: string) {
+  const { data, error } = await supabase.functions.invoke('admin-actions', {
+    body: { action: 'run_dedupe', tweet_id: tweetId, force: true, enqueue_next: true },
+  });
+  if (error) throw error;
+  if (data?.ok === false) throw new Error(data.error ?? 'Duplicate check failed');
+  return data as { ok: boolean; result?: { status?: string; reason?: string; dup_of_tweet_id?: string | null } };
+}
 
-  if (!isSkipped && !hasError) return null;
+type AudienceFeedback = 'too_low' | 'too_high' | 'correct_deliver' | 'correct_skip' | 'should_pass_audience' | 'should_skip' | 'wrong_relevance_class' | 'global_exception_worth_covering' | 'not_global_exception';
+type AudienceClassValue = 'direct_focus' | 'adjacent' | 'global_exception' | 'off_topic';
 
-  const variant = hasError ? 'error' : 'skip';
-  const wrapCls = variant === 'error'
-    ? 'border-destructive/30 bg-destructive/5'
-    : 'border-amber-500/30 bg-amber-500/5';
-  const Icon = variant === 'error' ? AlertCircle : Info;
-  const iconCls = variant === 'error' ? 'text-destructive' : 'text-amber-400';
+async function adminSetManualScore(tweetId: string, score: number, reason: string, overrideDuplicate: boolean, expectedAudienceClass?: AudienceClassValue | '') {
+  const { data, error } = await supabase.functions.invoke('admin-actions', {
+    body: { action: 'set_manual_score', tweet_id: tweetId, score, reason, override_duplicate: overrideDuplicate, expected_audience_class: expectedAudienceClass || undefined },
+  });
+  if (error) throw error;
+  if (data?.ok === false) throw new Error(data.error ?? 'Manual score failed');
+  return data as {
+    ok: boolean;
+    score: number;
+    threshold: number;
+    decision: string;
+    translated?: boolean;
+    advance?: { queued: string; reason?: string };
+    translation_error?: string;
+  };
+}
 
-  let headline = '';
-  const details: { label: string; value: string }[] = [];
+async function adminRecordScoreFeedback(tweetId: string, feedback: AudienceFeedback, expectedAudienceClass?: AudienceClassValue | '') {
+  const { data, error } = await supabase.functions.invoke('admin-actions', {
+    body: { action: 'record_score_feedback', tweet_id: tweetId, feedback, expected_audience_class: expectedAudienceClass || undefined },
+  });
+  if (error) throw error;
+  if (data?.ok === false) throw new Error(data.error ?? 'Feedback failed');
+  return data as { ok: boolean; polarity: number };
+}
 
-  if (variant === 'error') {
-    headline = entry.translation_error
-      ? 'Translation failed'
-      : entry.delivery_error
-      ? 'Telegram delivery failed'
-      : 'X post failed';
-    if (entry.translation_error) {
-      const ft = formatPipelineError(entry.translation_error);
-      details.push({ label: 'Translation', value: ft.title });
-      if (ft.detail) details.push({ label: 'Technical', value: ft.detail });
-    }
-    if (entry.delivery_error) {
-      const fd = formatPipelineError(entry.delivery_error);
-      details.push({ label: 'Telegram', value: fd.title });
-      if (fd.detail) details.push({ label: 'Technical', value: fd.detail });
-    }
-    if (entry.x_error) {
-      const fx = formatPipelineError(entry.x_error);
-      details.push({ label: 'X', value: fx.title });
-      if (fx.detail) details.push({ label: 'Technical', value: fx.detail });
-    }
-  } else {
-    const reason = entry.decision_reason;
-    const fr = formatDecisionReason(reason);
-    const isBelow = /below_threshold|threshold/i.test(reason || '');
-    if (isBelow && decision != null) {
-      const gap = (threshold - decision).toFixed(1).replace(/\.0$/, '');
-      headline = `Skipped — score ${Number.isInteger(decision) ? decision : decision.toFixed(1)}/20 is ${gap} points below the ≥${threshold} threshold`;
-      if (fr.detail) details.push({ label: 'Technical code', value: fr.detail });
-    } else {
-      headline = `Skipped — ${fr.title}`;
-    }
-    if (fr.detail && fr.detail !== reason && !details.some((d) => d.value === fr.detail)) {
-      details.push({ label: 'Technical code', value: fr.detail });
-    }
-    if (entry.importance_reasoning) {
-      details.push({ label: 'Model rationale', value: entry.importance_reasoning });
-    }
+type ConfirmAction = 'force_telegram' | 'force_x' | 'rescore' | 'reprocess' | 'hydrate' | 'clear_dup' | 'close_stale_x' | 'translate' | 'run_dedupe' | 'cancel_jobs';
+
+interface PendingAction {
+  type: ConfirmAction;
+  entry?: MonitoringEntry;
+}
+
+const FILTERS: Array<{ value: MonitoringFilter; label: string }> = [
+  { value: 'all', label: 'All' },
+  { value: 'needs_attention', label: 'Needs attention' },
+  { value: 'failed_stuck', label: 'Failed/stuck' },
+  { value: 'needs_score', label: 'Needs score' },
+  { value: 'translation_queue', label: 'Translation queue' },
+  { value: 'below_threshold', label: 'Below threshold' },
+  { value: 'manual_review', label: 'Manual review' },
+  { value: 'duplicates', label: 'Duplicates' },
+  { value: 'ready_to_deliver', label: 'Ready to deliver' },
+  { value: 'telegram_pending', label: 'Telegram pending' },
+  { value: 'x_pending', label: 'X pending' },
+  { value: 'x_failed', label: 'X failed' },
+  { value: 'delivered_24h', label: 'Delivered 24h' },
+  { value: 'hydration', label: 'Hydration' },
+];
+
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(t);
+  }, [value, delayMs]);
+  return debounced;
+}
+
+function compactNumber(value: number | undefined): string {
+  return typeof value === 'number' ? value.toLocaleString() : '—';
+}
+
+function toneClass(tone: MonitoringTone) {
+  if (tone === 'good') return 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30';
+  if (tone === 'bad') return 'bg-destructive/15 text-destructive border-destructive/30';
+  if (tone === 'warn') return 'bg-amber-500/15 text-amber-500 border-amber-500/30';
+  if (tone === 'info') return 'bg-blue-500/15 text-blue-500 border-blue-500/30';
+  return 'bg-muted text-muted-foreground border-border';
+}
+
+function shortText(entry: MonitoringEntry): string {
+  const text = entry.text_translated || entry.text_original || '';
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+function audienceClassLabel(value: string | null | undefined): string {
+  switch (value) {
+    case 'direct_focus': return 'Direct focus';
+    case 'adjacent': return 'Adjacent';
+    case 'global_exception': return 'Global exception';
+    case 'off_topic': return 'Off topic';
+    default: return 'Audience n/a';
   }
+}
 
-  return (
-    <div className={`mb-4 rounded-lg border p-3 ${wrapCls}`}>
-      <div className="flex items-start gap-2">
-        <Icon className={`w-4 h-4 mt-0.5 shrink-0 ${iconCls}`} />
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-foreground">{headline}</p>
-          {details.length > 0 && (
-            <div className="mt-1.5 space-y-1">
-              {details.map((d, i) => (
-                <p key={i} className="text-xs text-muted-foreground leading-relaxed">
-                  <span className="font-semibold text-foreground/80">{d.label}:</span>{' '}
-                  <span className="break-words">{d.value}</span>
-                </p>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
+function actionTitle(action: PendingAction | null) {
+  if (!action) return '';
+  switch (action.type) {
+    case 'force_telegram': return 'Force Telegram delivery?';
+    case 'force_x': return 'Force post on X?';
+    case 'rescore': return 'Re-score this post?';
+    case 'reprocess': return 'Reprocess this post?';
+    case 'hydrate': return 'Hydrate this tweet?';
+    case 'clear_dup': return 'Clear duplicate status?';
+    case 'close_stale_x': return 'Close stale X pending rows?';
+    case 'translate': return 'Get translation only?';
+    case 'run_dedupe': return 'Run duplicate check?';
+    case 'cancel_jobs': return 'Cancel all pending jobs?';
+  }
+}
+
+function actionDescription(action: PendingAction | null) {
+  if (!action) return '';
+  const entry = action.entry;
+  switch (action.type) {
+    case 'force_telegram':
+      return 'Queues Telegram delivery and records the override as feedback.';
+    case 'force_x': {
+      const reasons = entry?.x_cost_flags?.reasons ?? ['tweet write expected'];
+      return `Queues X posting. Expected X work: ${reasons.join(', ')}.`;
+    }
+    case 'rescore':
+      return 'Runs the current scoring prompt again and may update the deliver/skip decision.';
+    case 'reprocess':
+      return 'Queues a full pipeline rerun for this post.';
+    case 'hydrate':
+      return 'Queues one X read for full tweet text unless an equivalent hydrate job is already pending.';
+    case 'clear_dup':
+      return 'Marks this pair as not duplicate and reopens the post for delivery evaluation.';
+    case 'close_stale_x':
+      return 'Marks pending X delivery rows older than 24 hours as skipped. This does not retry, post, or call X.';
+    case 'translate':
+      return 'Runs Persian translation only. This does not change the score, decision, Telegram state, or X eligibility.';
+    case 'run_dedupe':
+      return 'Runs the duplicate gate now. Unique or meaningfully updated posts can continue to translation; duplicates remain blocked.';
+    case 'cancel_jobs':
+      return 'Marks pending and running jobs as failed. This does not call Telegram or X.';
+  }
 }
 
 export default function Monitoring() {
-  const [filter, setFilter] = useState<MonitoringFilter>("all");
-  const { entries, isLoading, hasNextPage, fetchNextPage, isFetchingNextPage } = useMonitoringData(filter);
-  const queryClient = useQueryClient();
-  const [searchTerm, setSearchTerm] = useState("");
+  const [searchParams] = useSearchParams();
+  const initialFilter = (() => {
+    const raw = searchParams.get('filter')?.replaceAll('-', '_');
+    return FILTERS.some((item) => item.value === raw) ? raw as MonitoringFilter : 'needs_attention';
+  })();
+  const [filter, setFilter] = useState<MonitoringFilter>(initialFilter);
+  const [searchTerm, setSearchTerm] = useState(searchParams.get('search') ?? '');
+  const debouncedSearch = useDebouncedValue(searchTerm, 350);
   const [editingEntry, setEditingEntry] = useState<string | null>(null);
-  const [editedContent, setEditedContent] = useState("");
-  const [selectedTweets, setSelectedTweets] = useState<Set<string>>(new Set());
-  const [isReprocessing, setIsReprocessing] = useState(false);
+  const [editedContent, setEditedContent] = useState('');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerTweetId, setDrawerTweetId] = useState<string | null>(null);
   const [timeline, setTimeline] = useState<PipelineEvent[]>([]);
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [manualEntry, setManualEntry] = useState<MonitoringEntry | null>(null);
+  const [manualScore, setManualScore] = useState('');
+  const [manualReason, setManualReason] = useState('');
+  const [manualOverrideDuplicate, setManualOverrideDuplicate] = useState(false);
+  const [manualAudienceClass, setManualAudienceClass] = useState<AudienceClassValue | ''>('');
+  const [manualLoading, setManualLoading] = useState(false);
+  const [feedbackLoading, setFeedbackLoading] = useState<string | null>(null);
+  const pollRefs = useRef<Map<string, { interval: ReturnType<typeof setInterval>; timeout: ReturnType<typeof setTimeout> }>>(new Map());
+  const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  // Active editorial-profile threshold drives the deliver/skip gate.
-  // We surface it in the UI so badges read in context (e.g. 13/20 vs threshold ≥14).
+  const { entries, isLoading, hasNextPage, fetchNextPage, isFetchingNextPage, isFetching, error } = useMonitoringDataSearch(filter, debouncedSearch);
+  const { data: overview } = useMonitoringOverview(24);
+  const { data: xSummary } = useXApiSummary(24);
+
   const { data: deliverThreshold = 14 } = useQuery({
     queryKey: ['active-threshold'],
     queryFn: async () => {
@@ -221,92 +336,20 @@ export default function Monitoring() {
     queryKey: ['x-posting-enabled'],
     queryFn: async () => {
       const { data } = await supabase.from('settings').select('value').eq('key', 'x_posting_config').maybeSingle();
-      const v = (data?.value as { enabled?: boolean } | null)?.enabled;
-      return v === true;
+      return (data?.value as { enabled?: boolean } | null)?.enabled === true;
     },
     staleTime: 30_000,
   });
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['monitoring'] });
+  const selectedEntry = useMemo(() => entries.find((entry) => entry.tweet_id === drawerTweetId) ?? null, [entries, drawerTweetId]);
+  const loadedCounts = useMemo(() => loadedMonitoringCounts(entries), [entries]);
+  const counts = overview?.counts ?? loadedCounts;
 
-  const handleForceDeliver = async (tweetId: string) => {
-    try {
-      await adminRetryStep(tweetId, 'deliver');
-      toast({ title: 'Force delivery queued', description: 'Post will be delivered shortly' });
-      invalidate();
-    } catch { toast({ title: 'Error', description: 'Failed to force deliver', variant: 'destructive' }); }
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ['monitoring'] });
+    queryClient.invalidateQueries({ queryKey: ['monitoring-overview'] });
+    queryClient.invalidateQueries({ queryKey: ['x-api-summary'] });
   };
-
-  const handleSaveEdit = async () => {
-    if (!editingEntry) return;
-    try {
-      await adminEditTranslation(editingEntry, editedContent);
-      toast({ title: 'Success', description: 'Translation updated' });
-      setEditingEntry(null); setEditedContent(''); invalidate();
-    } catch { toast({ title: 'Error', description: 'Failed to update content', variant: 'destructive' }); }
-  };
-
-  const handleRetryTranslation = async (tweetId: string) => {
-    try { await adminRetryStep(tweetId, 'translate'); toast({ title: 'Success', description: 'Translation job queued' }); invalidate(); }
-    catch { toast({ title: 'Error', description: 'Failed to retry translation', variant: 'destructive' }); }
-  };
-
-  const handleReprocessTweet = async (tweetId: string) => {
-    try { await adminReprocess(tweetId); toast({ title: 'Processing started', description: 'Tweet queued for full reprocessing' }); }
-    catch { toast({ title: 'Error', description: 'Failed to reprocess tweet', variant: 'destructive' }); }
-  };
-
-  const handleRetryXPost = async (tweetId: string) => {
-    if (!xPostingEnabled) {
-      toast({
-        title: 'X posting is off',
-        description: 'Enable X posting under Settings → X Automation before posting to X.',
-        variant: 'destructive',
-      });
-      return;
-    }
-    try {
-      const res = await adminRetryXPost(tweetId);
-      if (!res.ok) throw new Error(res.error || 'X retry failed');
-      if (res.status === 'posted' && res.x_tweet_id) {
-        toast({ title: 'Posted to X', description: `https://x.com/i/status/${res.x_tweet_id}` });
-      } else if (res.status === 'failed') {
-        toast({ title: 'X post failed', description: res.error ?? 'See Monitoring badge', variant: 'destructive' });
-      } else {
-        toast({ title: `X: ${res.status ?? 'queued'}`, description: 'Check Monitoring for status' });
-      }
-      invalidate();
-    } catch (e) {
-      toast({ title: 'X retry failed', description: (e as Error).message, variant: 'destructive' });
-    }
-  };
-
-  const handleApproveEnrichment = async (tweetId: string) => {
-    try {
-      const { data, error } = await supabase.functions.invoke('admin-actions', {
-        body: { action: 'approve_enrichment', tweet_id: tweetId },
-      });
-      if (error) throw error;
-      if (!data?.ok) throw new Error(data?.error ?? 'Failed to approve');
-      toast({ title: 'Approved', description: 'Post approved and queued for delivery' });
-      invalidate();
-    } catch (e) { toast({ title: 'Error', description: (e as Error).message, variant: 'destructive' }); }
-  };
-
-  const handleRejectEnrichment = async (tweetId: string) => {
-    try {
-      const { data, error } = await supabase.functions.invoke('admin-actions', {
-        body: { action: 'reject_enrichment', tweet_id: tweetId },
-      });
-      if (error) throw error;
-      if (!data?.ok) throw new Error(data?.error ?? 'Failed to reject');
-      toast({ title: 'Rejected', description: 'Post will not be posted to X' });
-      invalidate();
-    } catch (e) { toast({ title: 'Error', description: (e as Error).message, variant: 'destructive' }); }
-  };
-
-  const [enrichingIds, setEnrichingIds] = useState<Set<string>>(new Set());
-  const pollRefs = useRef<Map<string, { interval: ReturnType<typeof setInterval>; timeout: ReturnType<typeof setTimeout> }>>(new Map());
 
   useEffect(() => {
     const refs = pollRefs.current;
@@ -326,18 +369,46 @@ export default function Monitoring() {
       clearTimeout(entry.timeout);
       pollRefs.current.delete(tweetId);
     }
-    setEnrichingIds(prev => { const n = new Set(prev); n.delete(tweetId); return n; });
+  };
+
+  const openDetails = async (tweetId: string) => {
+    setDrawerTweetId(tweetId);
+    setDrawerOpen(true);
+    try {
+      const { data, error: timelineError } = await supabase
+        .from('pipeline_events')
+        .select('subject_type, subject_id, step, status, started_at, ended_at, error, meta')
+        .eq('subject_type', 'post')
+        .eq('subject_id', tweetId)
+        .order('started_at', { ascending: false });
+      if (timelineError) throw timelineError;
+      setTimeline((data as PipelineEvent[]) || []);
+    } catch {
+      setTimeline([]);
+    }
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingEntry) return;
+    try {
+      await adminEditTranslation(editingEntry, editedContent);
+      toast({ title: 'Translation updated' });
+      setEditingEntry(null);
+      setEditedContent('');
+      invalidate();
+    } catch (e) {
+      toast({ title: 'Save failed', description: (e as Error).message, variant: 'destructive' });
+    }
   };
 
   const handleTestEnrich = async (tweetId: string) => {
     try {
-      setEnrichingIds(prev => new Set(prev).add(tweetId));
-      const { data, error } = await supabase.functions.invoke('admin-actions', {
+      const { data, error: enrichError } = await supabase.functions.invoke('admin-actions', {
         body: { action: 'enrich_post', tweet_id: tweetId },
       });
-      if (error) throw error;
+      if (enrichError) throw enrichError;
       if (!data?.ok) throw new Error(data?.error ?? 'Failed to queue enrichment');
-      toast({ title: 'Enrichment queued', description: 'Pipeline running -- results will appear shortly.' });
+      toast({ title: 'Enrichment queued' });
 
       const interval = setInterval(async () => {
         const { data: post } = await supabase
@@ -351,610 +422,878 @@ export default function Monitoring() {
           toast({ title: 'Enrichment complete', description: `Status: ${post.enrich_status}` });
         }
       }, 3000);
-
-      const timeout = setTimeout(() => { cleanupPoll(tweetId); }, 120_000);
-
+      const timeout = setTimeout(() => cleanupPoll(tweetId), 120_000);
       pollRefs.current.set(tweetId, { interval, timeout });
     } catch (e) {
-      cleanupPoll(tweetId);
       toast({ title: 'Enrich failed', description: (e as Error).message, variant: 'destructive' });
     }
   };
 
-  const handleClearDup = async (tweetId: string, relatedTweetId: string | null) => {
-    try {
-      await adminClearDup(tweetId, relatedTweetId);
-      toast({ title: 'Duplicate cleared', description: 'Post will be re-evaluated for delivery' });
-      invalidate();
-    } catch { toast({ title: 'Error', description: 'Failed to clear duplicate', variant: 'destructive' }); }
+  const openManualScore = (entry: MonitoringEntry) => {
+    const currentScore = decisionScore(entry);
+    setManualEntry(entry);
+    setManualScore(currentScore == null ? '' : String(currentScore));
+    setManualReason('');
+    setManualOverrideDuplicate(false);
+    setManualAudienceClass((entry.audience_class as AudienceClassValue | null) ?? '');
   };
 
-  const handleRescorePost = async (tweetId: string) => {
+  const handleManualSubmit = async () => {
+    if (!manualEntry) return;
+    const score = Number(manualScore);
+    if (!Number.isFinite(score) || score < 1 || score > 20) {
+      toast({ title: 'Invalid score', description: 'Manual score must be between 1 and 20.', variant: 'destructive' });
+      return;
+    }
+    setManualLoading(true);
     try {
-      const res = await adminRescorePost(tweetId);
-      if (!res.ok) throw new Error(res.error || 'Re-score failed');
-      const display = res.final_score ?? res.score;
+      const result = await adminSetManualScore(manualEntry.tweet_id, score, manualReason, manualOverrideDuplicate, manualAudienceClass);
+      const advance = result.advance?.queued && result.advance.queued !== 'none' ? `Queued ${result.advance.queued}` : result.advance?.reason;
       toast({
-        title: `New score: ${display ?? '—'}/20`,
-        description: `Decision: ${res.decision}${res.reasoning ? ` — ${res.reasoning.slice(0, 120)}` : ''}`,
+        title: `Manual score saved: ${score}/20`,
+        description: result.translation_error ? `Translation needed but failed: ${result.translation_error}` : advance,
       });
+      setManualEntry(null);
       invalidate();
     } catch (e) {
-      toast({ title: 'Re-score failed', description: (e as Error).message, variant: 'destructive' });
+      toast({ title: 'Manual score failed', description: (e as Error).message, variant: 'destructive' });
+    } finally {
+      setManualLoading(false);
     }
   };
 
-  const handleReprocessSelected = async () => {
-    if (selectedTweets.size === 0) { toast({ title: 'No Selection', description: 'Please select tweets to reprocess', variant: 'destructive' }); return; }
-    setIsReprocessing(true);
-    try { await adminBulkReprocess(Array.from(selectedTweets)); toast({ title: 'Success', description: `${selectedTweets.size} tweets queued for reprocessing` }); setSelectedTweets(new Set()); invalidate(); }
-    catch { toast({ title: 'Error', description: 'Failed to reprocess selected tweets', variant: 'destructive' }); }
-    finally { setIsReprocessing(false); }
-  };
-
-  const handleSelectTweet = (tweetId: string, checked: boolean) => {
-    const updated = new Set(selectedTweets);
-    if (checked) {
-      updated.add(tweetId);
-    } else {
-      updated.delete(tweetId);
-    }
-    setSelectedTweets(updated);
-  };
-
-  const filteredEntries = searchTerm
-    ? entries.filter((e: MonitoringEntry) =>
-        e.text_original.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        e.text_translated.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        e.account_handle.toLowerCase().includes(searchTerm.toLowerCase())
-      )
-    : entries;
-
-  const totalPosts = entries.length;
-  const translatedPosts = entries.filter(e => e.is_translated).length;
-  const deliveredPosts = entries.filter(e => e.is_delivered).length;
-  const needsTranslation = entries.filter(e => !e.is_translated).length;
-
-  const openDetails = async (tweetId: string) => {
-    setDrawerTweetId(tweetId); setDrawerOpen(true);
+  const handleFeedback = async (entry: MonitoringEntry, feedback: AudienceFeedback, expectedAudienceClass?: AudienceClassValue | '') => {
+    const key = `${entry.tweet_id}:${feedback}`;
+    setFeedbackLoading(key);
     try {
-      const { data, error } = await supabase.from('pipeline_events').select('subject_type, subject_id, step, status, started_at, ended_at, error, meta').eq('subject_type', 'post').eq('subject_id', tweetId).order('started_at', { ascending: false });
-      if (error) throw error;
-      setTimeline((data as PipelineEvent[]) || []);
-    } catch { setTimeline([]); }
+      await adminRecordScoreFeedback(entry.tweet_id, feedback, expectedAudienceClass);
+      toast({ title: 'Feedback recorded' });
+      invalidate();
+    } catch (e) {
+      toast({ title: 'Feedback failed', description: (e as Error).message, variant: 'destructive' });
+    } finally {
+      setFeedbackLoading(null);
+    }
   };
 
-  const retryStep = async (tweetId: string, step: string) => {
-    try { await adminRetryStep(tweetId, step); toast({ title: 'Retry queued', description: `${step} retry scheduled` }); }
-    catch { toast({ title: 'Retry failed', variant: 'destructive' }); }
+  const confirmAction = async () => {
+    if (!pendingAction) return;
+    const entry = pendingAction.entry;
+    setActionLoading(true);
+    try {
+      switch (pendingAction.type) {
+        case 'force_telegram':
+          if (!entry) throw new Error('Missing post');
+          await adminRetryStep(entry.tweet_id, 'deliver');
+          toast({ title: 'Telegram delivery queued' });
+          break;
+        case 'force_x': {
+          if (!entry) throw new Error('Missing post');
+          if (!xPostingEnabled) throw new Error('X posting is disabled in Settings');
+          const res = await adminRetryXPost(entry.tweet_id);
+          if (!res.ok) throw new Error(res.error || 'X post failed');
+          toast({
+            title: res.status === 'posted' ? 'Posted to X' : `X: ${res.status ?? 'queued'}`,
+            description: res.x_tweet_id ? `https://x.com/i/status/${res.x_tweet_id}` : undefined,
+          });
+          break;
+        }
+        case 'rescore': {
+          if (!entry) throw new Error('Missing post');
+          const res = await adminRescorePost(entry.tweet_id);
+          if (!res.ok) throw new Error(res.error || 'Re-score failed');
+          toast({ title: `New score: ${res.final_score ?? res.score ?? '—'}/20`, description: `Decision: ${res.decision ?? '—'}` });
+          break;
+        }
+        case 'reprocess':
+          if (!entry) throw new Error('Missing post');
+          await adminReprocess(entry.tweet_id);
+          toast({ title: 'Reprocess queued' });
+          break;
+        case 'hydrate': {
+          if (!entry) throw new Error('Missing post');
+          const res = await adminHydratePost(entry.tweet_id);
+          toast({ title: res.queued === false ? 'Hydration already queued' : 'Hydration queued', description: res.reason });
+          break;
+        }
+        case 'translate': {
+          if (!entry) throw new Error('Missing post');
+          const res = await adminTranslatePost(entry.tweet_id);
+          toast({ title: 'Translation saved', description: res.model });
+          break;
+        }
+        case 'run_dedupe': {
+          if (!entry) throw new Error('Missing post');
+          const res = await adminRunDedupe(entry.tweet_id);
+          toast({ title: `Duplicate check: ${res.result?.status ?? 'complete'}`, description: res.result?.reason });
+          break;
+        }
+        case 'clear_dup':
+          if (!entry) throw new Error('Missing post');
+          await adminClearDup(entry.tweet_id, entry.dup_of_tweet_id);
+          toast({ title: 'Duplicate cleared' });
+          break;
+        case 'close_stale_x': {
+          const { data, error: closeError } = await supabase.functions.invoke('admin-actions', {
+            body: { action: 'summarize_stale_x_pending', older_than_hours: 24, close: true },
+          });
+          if (closeError) throw closeError;
+          toast({ title: 'Stale X pending closed', description: `${data?.closed ?? 0} row(s) marked skipped` });
+          break;
+        }
+        case 'cancel_jobs': {
+          const { data, error: cancelError } = await supabase.functions.invoke('admin-actions', { body: { action: 'cancel_pending_jobs' } });
+          if (cancelError) throw cancelError;
+          toast({ title: 'Pending jobs canceled', description: `${data?.canceled ?? 0} job(s) marked failed.` });
+          break;
+        }
+      }
+      invalidate();
+    } catch (e) {
+      toast({ title: 'Action failed', description: (e as Error).message, variant: 'destructive' });
+    } finally {
+      setActionLoading(false);
+      setPendingAction(null);
+    }
   };
 
-  if (isLoading) {
+  const renderXBadge = (entry: MonitoringEntry) => {
+    if (!entry.x_status) return <Badge variant="outline" className="text-muted-foreground">X: —</Badge>;
+    const { label, title } = formatXBadge(entry);
+    const cls =
+      entry.x_status === 'posted' ? 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30'
+      : entry.x_status === 'failed' ? 'bg-destructive/15 text-destructive border-destructive/30'
+      : entry.x_status === 'skipped' ? 'bg-muted text-muted-foreground border-border'
+      : 'bg-amber-500/15 text-amber-500 border-amber-500/30';
+    const badge = <Badge className={cls} title={title}>{label}</Badge>;
+    return entry.x_status === 'posted' && entry.x_tweet_id ? (
+      <a href={`https://x.com/i/status/${entry.x_tweet_id}`} target="_blank" rel="noopener noreferrer">{badge}</a>
+    ) : badge;
+  };
+
+  const renderTelegramBadge = (entry: MonitoringEntry) => (
+    <Badge variant={entry.is_delivered ? 'default' : entry.monitoring_state?.code === 'telegram_pending' ? 'secondary' : 'outline'}>
+      {entry.is_delivered ? 'Delivered' : entry.monitoring_state?.telegram_state === 'none' ? 'No row' : entry.monitoring_state?.telegram_state || entry.delivery_status || 'No row'}
+    </Badge>
+  );
+
+  const renderDedupeBadge = (entry: MonitoringEntry) => {
+    if (!entry.dedupe_status) return null;
+    const label =
+      entry.dedupe_status === 'pending' ? 'Duplicate gate pending'
+      : entry.dedupe_status === 'duplicate' ? 'Duplicate'
+      : entry.dedupe_status === 'related_new_info' ? 'Related: new info'
+      : entry.dedupe_status === 'uncertain' ? 'Uncertain duplicate'
+      : entry.dedupe_status === 'failed' ? 'Dedupe failed'
+      : 'Unique';
+    const cls =
+      entry.dedupe_status === 'duplicate' ? 'bg-purple-500/15 text-purple-400 border-purple-500/30'
+      : entry.dedupe_status === 'related_new_info' || entry.dedupe_status === 'unique' ? toneClass('good')
+      : entry.dedupe_status === 'failed' ? toneClass('bad')
+      : entry.dedupe_status === 'uncertain' ? toneClass('warn')
+      : toneClass('info');
+    const title = [
+      entry.dedupe_method,
+      entry.dedupe_confidence != null ? `confidence ${entry.dedupe_confidence.toFixed(2)}` : null,
+      entry.dedupe_reason,
+    ].filter(Boolean).join(' · ');
+    return <Badge className={`${cls} text-[10px]`} title={title}>{label}</Badge>;
+  };
+
+  const renderAudienceBadge = (entry: MonitoringEntry) => {
+    if (!entry.audience_class) return null;
+    const cls =
+      entry.audience_class === 'direct_focus' ? 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30'
+      : entry.audience_class === 'adjacent' ? 'bg-blue-500/15 text-blue-400 border-blue-500/30'
+      : entry.audience_class === 'global_exception' ? 'bg-violet-500/15 text-violet-400 border-violet-500/30'
+      : 'bg-muted text-muted-foreground border-border';
+    const title = [
+      entry.scoring_profile_id ? `profile ${entry.scoring_profile_id}` : null,
+      entry.audience_confidence != null ? `confidence ${entry.audience_confidence.toFixed(2)}` : null,
+      entry.global_exception_class ? `exception ${entry.global_exception_class}` : null,
+      entry.audience_reason,
+    ].filter(Boolean).join(' · ');
+    return <Badge className={`${cls} text-[10px]`} title={title}>{audienceClassLabel(entry.audience_class)}</Badge>;
+  };
+
+  const renderCostFlags = (entry: MonitoringEntry) => (
+    <div className="flex flex-wrap gap-1">
+      {entry.x_cost_flags?.hydration_expected && <Badge variant="outline" className="text-[10px]">read</Badge>}
+      {entry.x_cost_flags?.media_upload_expected && <Badge variant="outline" className="text-[10px]">media</Badge>}
+      {entry.x_cost_flags?.may_call_x && <Badge variant="outline" className="text-[10px]">write</Badge>}
+      {!entry.x_cost_flags?.reasons?.length && <span className="text-muted-foreground">—</span>}
+    </div>
+  );
+
+  const renderScore = (entry: MonitoringEntry) => {
+    const score = decisionScore(entry);
+    if (score == null) return <span className="text-muted-foreground">—</span>;
     return (
-      <div className="container mx-auto p-6">
-        <div className="flex items-center justify-center min-h-[400px]"><RefreshCw className="w-8 h-8 animate-spin" /></div>
-      </div>
+      <span className={score >= deliverThreshold ? 'font-semibold text-emerald-500' : 'font-semibold text-amber-500'}>
+        {Number.isInteger(score) ? score : score.toFixed(1)}
+        <span className="text-xs text-muted-foreground"> / ≥{deliverThreshold}</span>
+      </span>
     );
-  }
+  };
+
+  const renderRowActions = (entry: MonitoringEntry, compact = false) => (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant={compact ? 'outline' : 'ghost'}
+          size={compact ? 'sm' : 'icon'}
+          aria-label="Row actions"
+          className={compact ? 'h-9 flex-1 justify-center' : undefined}
+        >
+          <MoreHorizontal className="w-4 h-4" />
+          {compact && <span className="ml-2">More</span>}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onClick={() => openDetails(entry.tweet_id)}>
+          Details <ChevronRight className="w-3 h-3 ml-2" />
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => setPendingAction({ type: 'translate', entry })}>
+          <MessageSquare className="w-3 h-3 mr-2" />Get translation
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => openManualScore(entry)}>
+          <SlidersHorizontal className="w-3 h-3 mr-2" />Manual score
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => setPendingAction({ type: 'force_telegram', entry })}>
+          <Send className="w-3 h-3 mr-2" />Force Telegram
+        </DropdownMenuItem>
+        <DropdownMenuItem disabled={!xPostingEnabled} onClick={() => setPendingAction({ type: 'force_x', entry })}>
+          <Twitter className="w-3 h-3 mr-2" />Force on X
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => setPendingAction({ type: 'hydrate', entry })}>
+          <Sparkles className="w-3 h-3 mr-2" />Hydrate
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => setPendingAction({ type: 'run_dedupe', entry })}>
+          <Ban className="w-3 h-3 mr-2" />Run duplicate check
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => setPendingAction({ type: 'rescore', entry })}>
+          <Star className="w-3 h-3 mr-2" />Re-score
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => setPendingAction({ type: 'reprocess', entry })}>
+          <RotateCcw className="w-3 h-3 mr-2" />Reprocess
+        </DropdownMenuItem>
+        {entry.dup_of_tweet_id && (
+          <DropdownMenuItem onClick={() => setPendingAction({ type: 'clear_dup', entry })}>
+            <Check className="w-3 h-3 mr-2" />Clear duplicate
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 
   return (
-    <div className="container mx-auto p-6">
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <h1 className="text-3xl font-bold">Content Monitoring</h1>
-          <p className="text-muted-foreground">English → Persian translation pipeline • Live updates enabled</p>
+    <div className="container mx-auto p-0">
+      <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-2xl sm:text-3xl font-bold">Content Monitoring</h1>
+          <p className="text-sm text-muted-foreground">Editorial triage for scoring, translation, delivery blockers, and X visibility</p>
         </div>
-        <div className="flex gap-2">
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button variant="outline" className="text-destructive hover:text-destructive">
-                <Ban className="w-4 h-4 mr-2" />Cancel Pending Jobs
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap lg:justify-end">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="justify-center sm:w-auto">
+                <Wrench className="w-4 h-4 mr-2" />Maintenance
               </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Cancel all pending jobs?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  This marks every <strong>pending</strong> and <strong>running</strong> job as failed so the worker stops processing them automatically. Already-failed jobs are not affected. You can still manually reprocess any post afterward.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Keep them</AlertDialogCancel>
-                <AlertDialogAction onClick={async () => {
-                  try {
-                    const { data, error } = await supabase.functions.invoke('admin-actions', { body: { action: 'cancel_pending_jobs' } });
-                    if (error) throw error;
-                    const d = data as { canceled?: number };
-                    toast({ title: 'Pending jobs canceled', description: `${d?.canceled ?? 0} job(s) marked failed.` });
-                    invalidate();
-                  } catch (e) {
-                    toast({ title: 'Error', description: (e as Error).message || 'Failed to cancel jobs', variant: 'destructive' });
-                  }
-                }}>Cancel jobs</AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-          <Button onClick={invalidate} variant="outline"><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {counts.stale_x_pending_24h > 0 && (
+                <DropdownMenuItem onClick={() => setPendingAction({ type: 'close_stale_x' })}>
+                  <Clock className="w-3 h-3 mr-2" />Close stale X pending
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem className="text-destructive" onClick={() => setPendingAction({ type: 'cancel_jobs' })}>
+                <Ban className="w-3 h-3 mr-2" />Cancel pending jobs
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button onClick={invalidate} variant="outline" className="justify-center sm:w-auto" disabled={isFetching}>
+            {isFetching ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}
+            Refresh
+          </Button>
         </div>
       </div>
 
       {!xPostingEnabled && (
-        <div className="mb-6 flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-foreground">
-          <Info className="w-4 h-4 mt-0.5 shrink-0 text-amber-500" />
+        <div className="mb-5 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
+          <AlertCircle className="w-4 h-4 mt-0.5 shrink-0 text-amber-500" />
           <div>
-            <p className="font-medium">X posting is turned off</p>
-            <p className="text-muted-foreground mt-1">
-              The x-poster job will not run while this is off, and “Force on X” is disabled. Enable it under{' '}
-              <Link to="/settings#x-automation" className="text-primary underline">Settings → X Automation</Link>{' '}
-              when you are ready to publish again. Telegram and translation are unaffected.
-            </p>
+            <p className="font-medium">X posting is off</p>
+            <p className="text-muted-foreground">Force on X is disabled until it is enabled under <Link to="/settings#x-automation" className="text-primary underline">Settings</Link>.</p>
           </div>
         </div>
       )}
 
-      {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-        <Card><CardContent className="p-4"><div className="text-center"><p className="text-2xl font-bold">{totalPosts}</p><p className="text-sm text-muted-foreground">Total Posts</p></div></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="text-center"><p className="text-2xl font-bold text-success">{translatedPosts}</p><p className="text-sm text-muted-foreground">Translated</p></div></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="text-center"><p className="text-2xl font-bold text-primary">{deliveredPosts}</p><p className="text-sm text-muted-foreground">Delivered</p></div></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="text-center"><p className="text-2xl font-bold text-warning">{needsTranslation}</p><p className="text-sm text-muted-foreground">Needs Translation</p>
-          {needsTranslation > 0 && (
-            <Button size="sm" variant="outline" className="mt-2" onClick={() => entries.filter((e: MonitoringEntry) => !e.is_translated).forEach((e: MonitoringEntry) => handleRetryTranslation(e.tweet_id))}>Retry All</Button>
-          )}
-        </div></CardContent></Card>
+      <div className="mb-5 grid grid-cols-2 gap-2 min-[480px]:grid-cols-3 sm:gap-3 md:grid-cols-4 xl:grid-cols-6">
+        {[
+          ['Needs attention', counts.needs_attention, 'text-amber-500'],
+          ['Failed/stuck', counts.failed_stuck, 'text-destructive'],
+          ['Translation queue', counts.translation_queue, 'text-blue-500'],
+          ['Needs score', counts.needs_score, 'text-amber-500'],
+          ['Ready to deliver', counts.ready_to_deliver, 'text-primary'],
+          ['Manual review', counts.manual_review, 'text-purple-500'],
+          ['Duplicates', counts.duplicates, 'text-muted-foreground'],
+          ['Hydration', counts.hydration, 'text-blue-500'],
+          ['X pending', counts.x_pending, 'text-amber-500'],
+          ['X failed', counts.x_failed, 'text-destructive'],
+          ['Delivered 24h', counts.delivered_24h, 'text-emerald-500'],
+        ].map(([label, value, cls]) => (
+          <Card key={label as string}>
+            <CardContent className="p-3">
+              <p className="text-xs text-muted-foreground">{label}</p>
+              <p className={`text-xl font-semibold tabular-nums sm:text-2xl ${cls}`}>{compactNumber(value as number)}</p>
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
-      {/* Search and Bulk Actions */}
-      <Card className="mb-6">
-        <CardContent className="p-4">
-          <div className="flex gap-4 items-center">
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
-              <Input placeholder="Search content..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-10" />
+      <div className="mb-5 grid gap-3 lg:grid-cols-3">
+        <Card className="lg:col-span-2">
+          <CardContent className="grid grid-cols-2 gap-3 p-3 sm:grid-cols-4">
+            {[
+              ['Telegram pending', counts.telegram_pending],
+              ['Below threshold', counts.below_threshold],
+              ['Stale jobs', counts.stale_jobs],
+              ['Stale X pending', counts.stale_x_pending_24h],
+            ].map(([label, value]) => (
+              <div key={label as string}>
+                <p className="text-xs text-muted-foreground">{label}</p>
+                <p className="text-lg font-semibold tabular-nums">{compactNumber(value as number)}</p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="grid grid-cols-3 gap-3 p-3">
+            <div>
+              <p className="text-xs text-muted-foreground">X attempts</p>
+              <p className="text-lg font-semibold tabular-nums">{compactNumber(xSummary?.counted_attempts)}</p>
             </div>
-            <div className="flex items-center gap-4">
-              <div className="w-48">
-                <ThemedSelect value={filter} onValueChange={(v) => setFilter(v as MonitoringFilter)}>
-                  <SelectTrigger className="bg-card text-foreground border-border"><SelectValue placeholder="All" /></SelectTrigger>
-                  <SelectContent className="bg-popover text-popover-foreground border-border">
-                    <SelectGroup><SelectLabel>Filter</SelectLabel>
-                      <SelectItem value="all">All posts</SelectItem>
-                      <SelectItem value="recently-delivered">Delivered</SelectItem>
-                      <SelectItem value="delivery-pending">Pending delivery</SelectItem>
-                      <SelectItem value="needs-translation">Needs translation</SelectItem>
-                      <SelectItem value="failed">Failed</SelectItem>
-                      <SelectItem value="awaiting-review">Awaiting Review</SelectItem>
-                    </SelectGroup>
-                  </SelectContent>
-                </ThemedSelect>
+            <div>
+              <p className="text-xs text-muted-foreground">Local posts</p>
+              <p className="text-lg font-semibold tabular-nums">{compactNumber(xSummary?.posts_local ?? counts.delivered_24h)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Success</p>
+              <p className="text-lg font-semibold tabular-nums">{xSummary ? `${xSummary.success_rate}%` : '—'}</p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <CardTitle className="text-base">Queue</CardTitle>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <div className="relative sm:w-80">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Search author, source, text, tweet ID" className="pl-9" />
               </div>
-              <div className="flex items-center space-x-2">
-                <Checkbox id="select-all" checked={filteredEntries.length > 0 && selectedTweets.size === filteredEntries.length} onCheckedChange={(c) => setSelectedTweets(c ? new Set(filteredEntries.map(e => e.tweet_id)) : new Set())} />
-                <label htmlFor="select-all" className="text-sm font-medium">Select All ({filteredEntries.length})</label>
-              </div>
-              {selectedTweets.size > 0 && (
-                <div className="flex items-center gap-2">
-                  <Badge variant="secondary">{selectedTweets.size} selected</Badge>
-                  <Button onClick={handleReprocessSelected} disabled={isReprocessing} variant="outline" size="sm">
-                    <RotateCcw className="w-4 h-4 mr-2" />{isReprocessing ? 'Processing...' : 'Reprocess Selected'}
-                  </Button>
-                </div>
-              )}
+              <ThemedSelect value={filter} onValueChange={(value) => setFilter(value as MonitoringFilter)}>
+                <SelectTrigger className="w-full sm:w-52"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {FILTERS.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
+                </SelectContent>
+              </ThemedSelect>
             </div>
           </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          {isLoading ? (
+            <div className="flex min-h-[360px] items-center justify-center"><Loader2 className="w-8 h-8 animate-spin" /></div>
+          ) : error ? (
+            <div className="p-6 text-sm text-destructive">Monitoring failed to load: {(error as Error).message}</div>
+          ) : entries.length === 0 ? (
+            <div className="p-8 text-center text-sm text-muted-foreground">No entries found</div>
+          ) : (
+            <>
+              <div className="divide-y divide-border lg:hidden">
+                {entries.map((entry) => {
+                  const stage = monitoringStage(entry);
+                  const decision = formatDecisionReason(entry.decision_reason);
+                  const decisionLabel = monitoringDecisionLabel(entry, entry.delivery_decision ? decision.title : 'No decision');
+                  const blocker = entry.monitoring_state?.primary_blocker;
+                  return (
+                    <article key={entry.tweet_id} className="space-y-3 p-3 sm:p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <button onClick={() => openDetails(entry.tweet_id)} className="block w-full text-left">
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                              <span className="font-mono text-[11px]">{entry.tweet_id.slice(-10)}</span>
+                              <span>{formatDistanceToNow(new Date(entry.created_at), { addSuffix: true })}</span>
+                            </div>
+                            <p className="mt-1 truncate text-sm font-medium">
+                              {entry.author_handle ? `@${entry.author_handle}` : `@${entry.account_handle}`}
+                            </p>
+                          </button>
+                          {entry.url && (
+                            <a href={entry.url} target="_blank" rel="noopener noreferrer" className="mt-1 inline-flex items-center gap-1 text-xs text-primary hover:underline">
+                              Source <ExternalLink className="w-3 h-3" />
+                            </a>
+                          )}
+                        </div>
+                        <Badge className={toneClass(stage.tone)}>{stage.label}</Badge>
+                      </div>
+
+                      <button onClick={() => openDetails(entry.tweet_id)} className="block w-full text-left text-sm leading-5 hover:text-primary">
+                        <span className="line-clamp-3">{shortText(entry) || '[No content]'}</span>
+                      </button>
+
+                      <div className="flex flex-wrap gap-1">
+                        {entry.importance_tags?.slice(0, 3).map((tag) => <Badge key={tag} variant="outline" className="text-[10px]">{tag}</Badge>)}
+                        {entry.dup_of_tweet_id && <Badge className="bg-purple-500/15 text-purple-400 border-purple-500/30 text-[10px]">dup</Badge>}
+                        {renderDedupeBadge(entry)}
+                        {renderAudienceBadge(entry)}
+                        {entry.feedback_locked && <Badge className="bg-blue-500/15 text-blue-400 border-blue-500/30 text-[10px]">locked</Badge>}
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 text-xs min-[520px]:grid-cols-4">
+                        <div className="rounded-md border bg-muted/20 p-2">
+                          <p className="text-muted-foreground">Score</p>
+                          <div className="mt-1">{renderScore(entry)}</div>
+                        </div>
+                        <div className="rounded-md border bg-muted/20 p-2">
+                          <p className="text-muted-foreground">Decision</p>
+                          <p className="mt-1 truncate font-medium" title={blocker || decision.detail || decision.title}>{decisionLabel}</p>
+                        </div>
+                        <div className="rounded-md border bg-muted/20 p-2">
+                          <p className="mb-1 text-muted-foreground">Telegram</p>
+                          {renderTelegramBadge(entry)}
+                        </div>
+                        <div className="rounded-md border bg-muted/20 p-2">
+                          <p className="mb-1 text-muted-foreground">X / cost</p>
+                          <div className="space-y-1">
+                            {renderXBadge(entry)}
+                            {renderCostFlags(entry)}
+                          </div>
+                        </div>
+                      </div>
+
+                      {(blocker || entry.decision_reason) && (
+                        <p className="rounded-md bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                          {blocker || decision.detail || decision.title}
+                        </p>
+                      )}
+
+                      <div className="grid grid-cols-3 gap-2">
+                        <Button variant="outline" size="sm" className="h-9" onClick={() => openDetails(entry.tweet_id)}>
+                          Details
+                        </Button>
+                        <Button variant="outline" size="sm" className="h-9" onClick={() => openManualScore(entry)}>
+                          Score
+                        </Button>
+                        {renderRowActions(entry, true)}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+
+              <div className="hidden overflow-x-auto lg:block">
+                <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[170px]">Source / time</TableHead>
+                    <TableHead className="w-[150px]">Author</TableHead>
+                    <TableHead className="min-w-[320px]">Excerpt</TableHead>
+                    <TableHead>Stage</TableHead>
+                    <TableHead>Score</TableHead>
+                    <TableHead>Decision</TableHead>
+                    <TableHead>Telegram</TableHead>
+                    <TableHead>X</TableHead>
+                    <TableHead>Cost</TableHead>
+                    <TableHead className="w-[72px] text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {entries.map((entry) => {
+                    const stage = monitoringStage(entry);
+                    const decision = formatDecisionReason(entry.decision_reason);
+                    const decisionLabel = monitoringDecisionLabel(entry, entry.delivery_decision ? decision.title : 'No decision');
+                    const blocker = entry.monitoring_state?.primary_blocker;
+                    return (
+                      <TableRow key={entry.tweet_id} className="align-top">
+                        <TableCell className="text-xs">
+                          <div className="space-y-1">
+                            <div className="font-mono text-[11px] text-muted-foreground">{entry.tweet_id.slice(-10)}</div>
+                            <div>{formatDistanceToNow(new Date(entry.created_at), { addSuffix: true })}</div>
+                            {entry.url && (
+                              <a href={entry.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
+                                Source <ExternalLink className="w-3 h-3" />
+                              </a>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="max-w-[140px] truncate font-medium">
+                            {entry.author_handle ? `@${entry.author_handle}` : `@${entry.account_handle}`}
+                          </div>
+                          {entry.account_handle && entry.author_handle && entry.account_handle !== entry.author_handle && (
+                            <p className="text-xs text-muted-foreground truncate">@{entry.account_handle}</p>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <button onClick={() => openDetails(entry.tweet_id)} className="block max-w-[520px] text-left text-sm leading-5 hover:text-primary">
+                            <span className="line-clamp-2">{shortText(entry) || '[No content]'}</span>
+                          </button>
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {entry.importance_tags?.slice(0, 3).map((tag) => <Badge key={tag} variant="outline" className="text-[10px]">{tag}</Badge>)}
+                            {entry.dup_of_tweet_id && <Badge className="bg-purple-500/15 text-purple-400 border-purple-500/30 text-[10px]">dup</Badge>}
+                            {renderDedupeBadge(entry)}
+                            {renderAudienceBadge(entry)}
+                            {entry.feedback_locked && <Badge className="bg-blue-500/15 text-blue-400 border-blue-500/30 text-[10px]">locked</Badge>}
+                          </div>
+                        </TableCell>
+                        <TableCell><Badge className={toneClass(stage.tone)}>{stage.label}</Badge></TableCell>
+                        <TableCell>{renderScore(entry)}</TableCell>
+                        <TableCell className="max-w-[180px]">
+                          <p className="truncate text-sm" title={blocker || decision.detail || decision.title}>{decisionLabel}</p>
+                          {(blocker || entry.decision_reason) && <p className="truncate text-xs text-muted-foreground">{blocker || decision.title}</p>}
+                        </TableCell>
+                        <TableCell>{renderTelegramBadge(entry)}</TableCell>
+                        <TableCell>{renderXBadge(entry)}</TableCell>
+                        <TableCell>{renderCostFlags(entry)}</TableCell>
+                        <TableCell className="text-right">
+                          {renderRowActions(entry)}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+              </div>
+            </>
+          )}
+          {hasNextPage && (
+            <div className="flex justify-center border-t p-4">
+              <Button variant="outline" onClick={() => fetchNextPage()} disabled={isFetchingNextPage}>
+                {isFetchingNextPage ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                Load more
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
 
-      {/* Entries */}
-      <div className="space-y-4">
-        {filteredEntries.length === 0 ? (
-          <Card><CardContent className="p-8 text-center"><p className="text-muted-foreground">No entries found</p></CardContent></Card>
-        ) : filteredEntries.map(entry => {
-          const isEditing = editingEntry === entry.tweet_id;
-          const isSelected = selectedTweets.has(entry.tweet_id);
-          return (
-            <Card key={entry.tweet_id} className={isSelected ? 'ring-2 ring-primary' : ''}>
-              <CardHeader className="pb-2 space-y-0">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="flex min-w-0 flex-1 gap-3">
-                    <Checkbox checked={isSelected} onCheckedChange={(c) => handleSelectTweet(entry.tweet_id, c as boolean)} className="mt-1" />
-                    <div className="min-w-0 flex-1 space-y-2">
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                        <CardTitle className="text-lg">
-                          {entry.author_handle ? `@${entry.author_handle}` : `@${entry.account_handle}`}
-                        </CardTitle>
-                        {(() => {
-                          const decision = decisionScore(entry);
-                          const passes = decision != null && decision >= deliverThreshold;
-                          const close = decision != null && decision >= deliverThreshold - 3;
-                          const axesStr = entry.score_axes
-                            ? Object.entries(entry.score_axes).map(([k, v]) => `${k}:${v}`).join(', ')
-                            : null;
-                          const showDelta = entry.importance_score != null
-                            && entry.final_score != null
-                            && Math.round(entry.importance_score) !== Math.round(entry.final_score);
-                          return (
-                            <>
-                              {decision != null && (
-                                <span className="inline-flex items-center gap-1">
-                                  <Badge
-                                    className={
-                                      passes
-                                        ? 'bg-green-500/20 text-green-400 border-green-500/30'
-                                        : close
-                                        ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
-                                        : 'bg-red-500/20 text-red-400 border-red-500/30'
-                                    }
-                                    title={
-                                      `Decision score: ${decision}/20\n` +
-                                      `Threshold to deliver: ≥${deliverThreshold}\n` +
-                                      (axesStr ? `Axes — ${axesStr}\n` : '') +
-                                      (entry.score_breakdown
-                                        ? `--- Breakdown ---\n` +
-                                          `AI base: ${entry.score_breakdown.ai ?? '—'}\n` +
-                                          (entry.score_breakdown.author_bias ? `Author bias: ${entry.score_breakdown.author_bias > 0 ? '+' : ''}${entry.score_breakdown.author_bias}\n` : '') +
-                                          (entry.score_breakdown.tag_bias ? `Tag bias: ${entry.score_breakdown.tag_bias > 0 ? '+' : ''}${entry.score_breakdown.tag_bias}\n` : '') +
-                                          (entry.score_breakdown.knn_prior ? `Similar posts you labeled: ${entry.score_breakdown.knn_prior > 0 ? '+' : ''}${entry.score_breakdown.knn_prior}\n` : '') +
-                                          `Final: ${entry.score_breakdown.final ?? decision}`
-                                        : '')
-                                    }
-                                  >
-                                    <Star className="w-3 h-3 mr-1" />
-                                    {Number.isInteger(decision) ? decision : decision.toFixed(1)}/20
-                                    <span className="ml-1 opacity-60">· need ≥{deliverThreshold}</span>
-                                  </Badge>
-                                  <button
-                                    className="text-[10px] text-primary hover:text-primary/80 underline underline-offset-2 cursor-pointer whitespace-nowrap"
-                                    onClick={(e) => { e.stopPropagation(); handleRescorePost(entry.tweet_id); }}
-                                    title="Ask AI to re-evaluate this post's importance score (disputes are recorded as feedback)"
-                                  >
-                                    Dispute score
-                                  </button>
-                                </span>
-                              )}
-                              {showDelta && (
-                                <span className="text-xs text-muted-foreground">
-                                  Editorial {Number.isInteger(entry.final_score!) ? entry.final_score : entry.final_score!.toFixed(1)}
-                                  {' · '}
-                                  model {entry.importance_score}
-                                </span>
-                              )}
-                              {entry.dup_of_tweet_id && (
-                                <span className="inline-flex items-center gap-1">
-                                  <Badge
-                                    className="bg-purple-500/20 text-purple-300 border-purple-500/30"
-                                    title={`dup_of ${entry.dup_of_tweet_id}${entry.dup_similarity != null ? ` · cosine ${entry.dup_similarity.toFixed(3)}` : ''}`}
-                                  >
-                                    dup{entry.dup_similarity != null ? ` ${entry.dup_similarity.toFixed(2)}` : ''}
-                                  </Badge>
-                                  <button
-                                    className="text-[10px] text-purple-400 hover:text-purple-200 underline underline-offset-2 cursor-pointer"
-                                    onClick={(e) => { e.stopPropagation(); handleClearDup(entry.tweet_id, entry.dup_of_tweet_id); }}
-                                    title="Mark as not a duplicate — clears dup status and blocklists this pair"
-                                  >
-                                    Not a dup
-                                  </button>
-                                </span>
-                              )}
-                              {entry.feedback_locked && (
-                                <Badge className="bg-blue-500/20 text-blue-300 border-blue-500/30" title="You force-delivered or force-posted this — dedup will not auto-skip it">
-                                  Locked
-                                </Badge>
-                              )}
-                              {entry.hydration_source === 'x_api' && (
-                                <Badge className="bg-green-500/20 text-green-400 border-green-500/30">
-                                  <Sparkles className="w-3 h-3 mr-1" />Hydrated
-                                </Badge>
-                              )}
-                              {entry.is_truncated && !entry.hydrated_at && (
-                                <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30" title="Full text may be fetched from X before posting; X can defer until media and text are ready.">
-                                  <Scissors className="w-3 h-3 mr-1" />Truncated
-                                </Badge>
-                              )}
-                              {entry.hydrated_at && entry.hydration_source && entry.hydration_source !== 'x_api' && (
-                                <Badge variant="outline" className="text-muted-foreground" title={entry.hydration_source}>
-                                  <Scissors className="w-3 h-3 mr-1" />Truncated (fallback)
-                                </Badge>
-                              )}
-                            </>
-                          );
-                        })()}
+      <Drawer open={drawerOpen} onOpenChange={setDrawerOpen}>
+        <DrawerContent className="max-h-[92svh]">
+          <DrawerHeader className="px-4 pb-2 pt-3 text-left">
+            <DrawerTitle className="text-base sm:text-lg">Pipeline Details</DrawerTitle>
+            <DrawerDescription className="break-all">{drawerTweetId}</DrawerDescription>
+          </DrawerHeader>
+          <div className="grid max-h-[76svh] gap-3 overflow-y-auto px-3 pb-4 sm:px-4 lg:grid-cols-[1fr_380px]">
+            <div className="space-y-4">
+              {selectedEntry && (
+                <>
+                  <Card>
+                    <CardHeader className="pb-2"><CardTitle className="text-sm">Why this is here</CardTitle></CardHeader>
+                    <CardContent className="space-y-3 text-sm">
+                      <div className="flex flex-wrap gap-2">
+                        <Badge className={toneClass(monitoringStage(selectedEntry).tone)}>{monitoringStage(selectedEntry).label}</Badge>
+                        <Badge variant="outline">{selectedEntry.monitoring_state?.decision_label ?? selectedEntry.delivery_decision ?? 'No decision'}</Badge>
+                        {selectedEntry.monitoring_state?.translation_state && <Badge variant="outline">Translation: {selectedEntry.monitoring_state.translation_state.replace(/_/g, ' ')}</Badge>}
                       </div>
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
-                        <span>{format(new Date(entry.created_at), 'MMM dd, yyyy HH:mm')}</span>
-                        {entry.url && (
-                          <>
-                            <span aria-hidden>·</span>
-                            <a href={entry.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 hover:underline">
-                              Source <ExternalLink className="w-3 h-3" />
-                            </a>
-                          </>
-                        )}
-                        <span aria-hidden>·</span>
-                        <Link to="/settings#filter" className="text-primary hover:underline text-xs">
-                          How scoring works
-                        </Link>
+                      <p className="text-muted-foreground">
+                        {selectedEntry.monitoring_state?.primary_blocker ?? 'No current blocker. This item is waiting for the next normal pipeline step or is already complete.'}
+                      </p>
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        <div className="rounded-md border p-2">
+                          <p className="text-xs text-muted-foreground">Telegram</p>
+                          <p className="font-medium">{selectedEntry.monitoring_state?.telegram_state === 'none' ? 'No row' : selectedEntry.monitoring_state?.telegram_state ?? selectedEntry.delivery_status ?? 'No row'}</p>
+                        </div>
+                        <div className="rounded-md border p-2">
+                          <p className="text-xs text-muted-foreground">X</p>
+                          <p className="font-medium">{selectedEntry.monitoring_state?.x_state === 'none' ? 'No row' : selectedEntry.monitoring_state?.x_state ?? selectedEntry.x_status ?? 'No row'}</p>
+                        </div>
+                        <div className="rounded-md border p-2">
+                          <p className="text-xs text-muted-foreground">Next actions</p>
+                          <p className="font-medium">{selectedEntry.monitoring_state?.next_actions?.join(', ') || 'Details'}</p>
+                        </div>
                       </div>
-                    </div>
-                  </div>
-                  <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2">
-                    <Badge variant={entry.is_translated && entry.text_translated ? 'default' : 'secondary'}>
-                      {entry.is_translated && entry.text_translated ? 'Translated' : !entry.is_translated ? 'Original' : 'Translation Missing'}
-                    </Badge>
-                    <Badge variant={entry.is_delivered ? 'default' : 'outline'}>{entry.is_delivered ? 'Delivered' : 'Pending'}</Badge>
-                    {(() => {
-                      const xs = entry.x_status;
-                      if (!xs) return <Badge variant="outline" className="text-muted-foreground"><Twitter className="w-3 h-3 mr-1" />X: —</Badge>;
-                      const { label, title } = formatXBadge(entry);
-                      const cls =
-                        xs === 'posted' ? 'bg-green-500/20 text-green-400 border-green-500/30'
-                        : xs === 'failed' ? 'bg-destructive/20 text-destructive border-destructive/30'
-                        : xs === 'skipped' ? 'bg-muted text-muted-foreground border-border'
-                        : 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30';
-                      const inner = (
-                        <Badge className={cls} title={title}>
-                          <Twitter className="w-3 h-3 mr-1" />{label}
-                        </Badge>
-                      );
-                      return xs === 'posted' && entry.x_tweet_id ? (
-                        <a href={`https://x.com/i/status/${entry.x_tweet_id}`} target="_blank" rel="noopener noreferrer">{inner}</a>
-                      ) : inner;
-                    })()}
-                    <Button
-                      size="sm"
-                      variant="default"
-                      onClick={() => handleForceDeliver(entry.tweet_id)}
-                      title={entry.is_delivered ? 'Re-deliver to Telegram (overrides previous delivery)' : 'Force delivery to Telegram'}
-                    >
-                      <Send className="w-3 h-3 mr-1" />{entry.is_delivered ? 'Re-deliver' : 'Force Deliver'}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant={xPostingEnabled ? 'default' : 'outline'}
-                      disabled={!xPostingEnabled}
-                      onClick={() => handleRetryXPost(entry.tweet_id)}
-                      className={!xPostingEnabled ? 'opacity-50 line-through' : ''}
-                      title={
-                        !xPostingEnabled
-                          ? 'X posting is OFF — enable it in Settings → X Automation'
-                          : entry.x_status === 'posted'
-                            ? 'Re-post to X (overrides previous post)'
-                            : 'Force post to X'
-                      }
-                    >
-                      <Twitter className="w-3 h-3 mr-1" />
-                      {!xPostingEnabled ? 'X is OFF' : entry.x_status === 'posted' ? 'Re-post on X' : 'Force on X'}
-                    </Button>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4 pt-0">
-                <div className="border-t border-border pt-3">
-                  <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Pipeline</p>
-                  <StatusIndicator entry={entry} />
-                </div>
+                    </CardContent>
+                  </Card>
 
-                <DiagnosticStrip entry={entry} threshold={deliverThreshold} />
-
-                {entry.importance_tags && entry.importance_tags.length > 0 && (
-                  <div>
-                    <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">Tags</p>
-                    <div className="flex flex-wrap gap-1">
-                      {entry.importance_tags.map((tag) => (
-                        <Badge key={tag} variant="outline" className="text-xs font-normal text-muted-foreground px-2 py-0">
-                          {tag}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <MediaThumbnails tweetId={entry.tweet_id} />
-
-                <div>
-                  <h4 className="mb-2 text-sm font-medium text-muted-foreground">English</h4>
-                  <p className="rounded-md border bg-muted/50 p-3 text-sm">{entry.text_original || '[No content]'}</p>
-                </div>
-
-                <div>
-                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                    <h4 className="text-sm font-medium text-muted-foreground">Persian</h4>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button size="sm" variant="outline"><MoreHorizontal className="w-3 h-3 mr-1" />More</Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => handleReprocessTweet(entry.tweet_id)}>
-                            <RotateCcw className="w-3 h-3 mr-2" />Reprocess
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleRescorePost(entry.tweet_id)}>
-                            <Star className="w-3 h-3 mr-2" />Re-score
-                          </DropdownMenuItem>
-                          {!entry.is_translated && (
-                            <DropdownMenuItem onClick={() => handleRetryTranslation(entry.tweet_id)}>Queue translation</DropdownMenuItem>
-                          )}
-                          {!isEditing && (
-                            <DropdownMenuItem onClick={() => { setEditingEntry(entry.tweet_id); setEditedContent(entry.text_translated || entry.text_original); }}>
-                              <Edit className="w-3 h-3 mr-2" />Edit translation
-                            </DropdownMenuItem>
-                          )}
-                          <DropdownMenuItem onClick={() => openDetails(entry.tweet_id)}>Pipeline details</DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                  </div>
-                  {isEditing ? (
-                    <div className="space-y-3">
-                      <Textarea value={editedContent} onChange={(e) => setEditedContent(e.target.value)} className="min-h-[100px]" placeholder="Enter Persian translation..." />
-                      <div className="flex gap-2">
-                        <Button size="sm" onClick={handleSaveEdit}><Check className="w-3 h-3 mr-1" />Save</Button>
-                        <Button size="sm" variant="outline" onClick={() => { setEditingEntry(null); setEditedContent(''); }}><X className="w-3 h-3 mr-1" />Cancel</Button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className={`rounded-md border p-4 text-sm leading-relaxed break-words ${!entry.text_translated ? 'border-warning/30 bg-warning/10 text-warning' : 'border-border bg-card text-foreground'}`}>
-                      {entry.text_translated ? (
-                        <div className="whitespace-pre-wrap" dir="rtl">{entry.text_translated}</div>
-                      ) : (
+                  {(selectedEntry.dedupe_status || selectedEntry.dup_of_tweet_id) && (
+                    <Card>
+                      <CardHeader className="pb-2">
                         <div className="flex items-center justify-between gap-2">
-                          <span>{entry.is_translated ? '[Translation completed but text is empty — retry]' : '[Not translated yet]'}</span>
-                          <Button size="sm" variant="outline" onClick={() => handleRetryTranslation(entry.tweet_id)}>
-                            <RotateCcw className="w-3 h-3 mr-1" />Retry
+                          <CardTitle className="text-sm">Duplicate Gate</CardTitle>
+                          <Button size="sm" variant="outline" onClick={() => setPendingAction({ type: 'run_dedupe', entry: selectedEntry })}>
+                            <Ban className="w-3 h-3 mr-1.5" />Run
                           </Button>
                         </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Test Enrich Button */}
-                {entry.text_translated && (
-                  <div className="flex items-center gap-2 border-t border-border pt-2 mt-2">
-                    {enrichingIds.has(entry.tweet_id) ? (
-                      <Button size="sm" variant="outline" disabled className="text-xs">
-                        <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />Enriching...
-                      </Button>
-                    ) : (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="text-xs"
-                        onClick={() => handleTestEnrich(entry.tweet_id)}
-                      >
-                        <FlaskConical className="w-3 h-3 mr-1.5" />
-                        {entry.enrich_status && entry.enrich_status !== 'pending' && entry.enrich_status !== 'skipped' ? 'Re-Enrich' : 'Test Enrich'}
-                      </Button>
-                    )}
-                    {entry.enrich_status && entry.enrich_status !== 'pending' && entry.enrich_status !== 'skipped' && (
-                      <span className="text-[10px] text-muted-foreground">Last run: {entry.enrich_status}</span>
-                    )}
-                  </div>
-                )}
-
-                {/* Enrichment Section */}
-                {entry.enrich_status && entry.enrich_status !== 'skipped' && entry.enrich_status !== 'pending' && (
-                  <details className="text-xs border-t border-border pt-2 mt-2">
-                    <summary className="cursor-pointer select-none text-muted-foreground hover:text-foreground flex items-center gap-2">
-                      <Sparkles className="w-3 h-3" />
-                      Enrichment
-                      <Badge variant={entry.enrich_status === 'completed' || entry.enrich_status === 'approved' ? 'default' : entry.enrich_status === 'awaiting_approval' ? 'secondary' : 'destructive'} className="text-[10px] px-1.5 py-0">
-                        {entry.enrich_status}
-                      </Badge>
-                      {entry.enrich_tokens && <span className="text-muted-foreground">({entry.enrich_tokens} tokens, {((entry.enrich_duration_ms ?? 0) / 1000).toFixed(1)}s)</span>}
-                    </summary>
-                    <div className="mt-2 space-y-2">
-                      {entry.narrative_callback && (
-                        <div className="rounded-md border border-blue-500/20 bg-blue-500/5 p-2">
-                          <p className="text-[10px] font-medium text-blue-400 mb-1">Narrative Callback</p>
-                          <p className="text-sm" dir="rtl">{entry.narrative_callback}</p>
+                      </CardHeader>
+                      <CardContent className="space-y-3 text-sm">
+                        <div className="flex flex-wrap gap-2">
+                          {renderDedupeBadge(selectedEntry)}
+                          {selectedEntry.dup_of_tweet_id && <Badge variant="outline">Duplicate of {selectedEntry.dup_of_tweet_id}</Badge>}
+                          {selectedEntry.dedupe_checked_at && <Badge variant="outline">{formatDistanceToNow(new Date(selectedEntry.dedupe_checked_at), { addSuffix: true })}</Badge>}
                         </div>
-                      )}
-                      {entry.background_context?.background_summary && (
-                        <div className="rounded-md border border-border bg-muted/30 p-2">
-                          <p className="text-[10px] font-medium text-muted-foreground mb-1">Research</p>
-                          <p className="text-sm">{entry.background_context.background_summary}</p>
-                          {entry.background_context.key_facts && entry.background_context.key_facts.length > 0 && (
-                            <ul className="list-disc list-inside text-xs text-muted-foreground mt-1">
-                              {entry.background_context.key_facts.map((f, i) => <li key={i}>{f}</li>)}
+                        {selectedEntry.dedupe_reason && <p className="rounded-md border bg-muted/30 p-2">{selectedEntry.dedupe_reason}</p>}
+                        {selectedEntry.dedupe_new_facts && selectedEntry.dedupe_new_facts.length > 0 && (
+                          <div className="rounded-md border bg-muted/30 p-2">
+                            <p className="mb-1 text-xs font-medium uppercase text-muted-foreground">New facts</p>
+                            <ul className="list-disc space-y-1 pl-4">
+                              {selectedEntry.dedupe_new_facts.map((fact) => <li key={fact}>{fact}</li>)}
                             </ul>
-                          )}
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  <Card>
+                    <CardHeader className="pb-2"><CardTitle className="text-sm">Content</CardTitle></CardHeader>
+                    <CardContent className="space-y-3 text-sm">
+                      <div>
+                        <p className="mb-1 text-xs font-medium uppercase text-muted-foreground">English</p>
+                        <p className="rounded-md border bg-muted/30 p-3">{selectedEntry.text_original || '[No content]'}</p>
+                      </div>
+                      <div>
+                        <div className="mb-1 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                          <p className="text-xs font-medium uppercase text-muted-foreground">Persian</p>
+                          <div className="grid grid-cols-2 gap-2 sm:flex">
+                            <Button size="sm" variant="outline" className="justify-center" onClick={() => setPendingAction({ type: 'translate', entry: selectedEntry })}>Get translation</Button>
+                            <Button size="sm" variant="outline" className="justify-center" onClick={() => {
+                              setEditingEntry(selectedEntry.tweet_id);
+                              setEditedContent(selectedEntry.text_translated || selectedEntry.text_original);
+                            }}>Edit</Button>
+                          </div>
                         </div>
-                      )}
-                      {entry.editorial_commentary && (
-                        <div className="rounded-md border border-border bg-muted/30 p-2">
-                          <p className="text-[10px] font-medium text-muted-foreground mb-1">Raw Commentary vs Humanized</p>
-                          <div className="grid grid-cols-2 gap-2">
-                            <div className="text-sm opacity-60 line-through" dir="rtl">{entry.editorial_commentary}</div>
-                            <div className="text-sm font-medium" dir="rtl">{entry.humanized_commentary || entry.editorial_commentary}</div>
+                        {editingEntry === selectedEntry.tweet_id ? (
+                          <div className="space-y-2">
+                            <Textarea value={editedContent} onChange={(e) => setEditedContent(e.target.value)} className="min-h-[120px]" dir="rtl" />
+                            <div className="grid grid-cols-2 gap-2 sm:flex">
+                              <Button size="sm" onClick={handleSaveEdit}>Save</Button>
+                              <Button size="sm" variant="outline" onClick={() => { setEditingEntry(null); setEditedContent(''); }}>Cancel</Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="rounded-md border bg-card p-3 leading-relaxed" dir="rtl">{selectedEntry.text_translated || '[Not translated yet]'}</div>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <MediaThumbnails tweetId={selectedEntry.tweet_id} />
+
+                  <Card>
+                    <CardHeader className="pb-2"><CardTitle className="text-sm">Scoring</CardTitle></CardHeader>
+                    <CardContent className="space-y-3 text-sm">
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        <div className="rounded-md border p-2">
+                          <p className="text-xs text-muted-foreground">Current</p>
+                          <p className="font-medium">{decisionScore(selectedEntry) ?? '—'} / ≥{deliverThreshold}</p>
+                        </div>
+                        <div className="rounded-md border p-2">
+                          <p className="text-xs text-muted-foreground">Decision</p>
+                          <p className="font-medium">{selectedEntry.monitoring_state?.decision_label ?? selectedEntry.delivery_decision ?? 'No decision'}</p>
+                        </div>
+                        <div className="rounded-md border p-2">
+                          <p className="text-xs text-muted-foreground">Feedback</p>
+                          <p className="font-medium">{selectedEntry.feedback_locked ? 'Locked' : 'Open'}</p>
+                        </div>
+                      </div>
+                      {selectedEntry.scoring_version && (
+                        <div className="grid gap-2 sm:grid-cols-4">
+                          <div className="rounded-md border p-2">
+                            <p className="text-xs text-muted-foreground">Audience</p>
+                            <p className="font-medium">{audienceClassLabel(selectedEntry.audience_class)}</p>
+                          </div>
+                          <div className="rounded-md border p-2">
+                            <p className="text-xs text-muted-foreground">Confidence</p>
+                            <p className="font-medium">{selectedEntry.audience_confidence != null ? selectedEntry.audience_confidence.toFixed(2) : '—'}</p>
+                          </div>
+                          <div className="rounded-md border p-2">
+                            <p className="text-xs text-muted-foreground">Profile</p>
+                            <p className="truncate font-medium" title={selectedEntry.scoring_profile_id ?? undefined}>{selectedEntry.scoring_profile_id ?? '—'}</p>
+                          </div>
+                          <div className="rounded-md border p-2">
+                            <p className="text-xs text-muted-foreground">Review</p>
+                            <p className="font-medium">{selectedEntry.score_review_status ?? 'none'}</p>
                           </div>
                         </div>
                       )}
-                      {(entry.composed_post_text || entry.text_translated) && (
-                        <div className="rounded-md border border-green-500/20 bg-green-500/5 p-2 space-y-2">
-                          <p className="text-[10px] font-medium text-green-400 mb-1">
-                            Structured Post Preview {entry.post_format_hint && <span className="opacity-60">({entry.post_format_hint})</span>}
-                          </p>
-                          {entry.text_translated && (
-                            <div className="border-b border-green-500/10 pb-2">
-                              <p className="text-[10px] font-medium text-blue-400 mb-0.5">📰 News (verbatim translation)</p>
-                              <p className="text-sm" dir="rtl">{entry.text_translated}</p>
-                            </div>
-                          )}
-                          {entry.composed_post_text && (
-                            <div>
-                              <p className="text-[10px] font-medium text-amber-400 mb-0.5">💬 Opinion / Context</p>
-                              <p className="text-sm font-medium" dir="rtl">{entry.composed_post_text}</p>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                      {entry.enrich_status === 'awaiting_approval' && (
-                        <div className="flex gap-2 pt-1">
-                          <Button size="sm" variant="default" className="bg-green-600 hover:bg-green-700" onClick={() => handleApproveEnrichment(entry.tweet_id)}>
-                            Approve
-                          </Button>
-                          <Button size="sm" variant="destructive" onClick={() => handleRejectEnrichment(entry.tweet_id)}>
-                            Skip
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  </details>
-                )}
+                      {selectedEntry.audience_reason && <p className="rounded-md border bg-muted/30 p-2">{selectedEntry.audience_reason}</p>}
+                      {selectedEntry.importance_reasoning && <p className="rounded-md border bg-muted/30 p-2">{selectedEntry.importance_reasoning}</p>}
+                      <div className="flex flex-wrap gap-2">
+                        <Button size="sm" className="w-full sm:w-auto" onClick={() => openManualScore(selectedEntry)}>
+                          <SlidersHorizontal className="w-3 h-3 mr-1.5" />Manual score
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => handleFeedback(selectedEntry, 'should_pass_audience', (selectedEntry.audience_class as AudienceClassValue | null) ?? 'direct_focus')} disabled={feedbackLoading === `${selectedEntry.tweet_id}:should_pass_audience`}>
+                          Should pass
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => handleFeedback(selectedEntry, 'should_skip', (selectedEntry.audience_class as AudienceClassValue | null) ?? 'off_topic')} disabled={feedbackLoading === `${selectedEntry.tweet_id}:should_skip`}>
+                          Should skip
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => handleFeedback(selectedEntry, 'wrong_relevance_class')} disabled={feedbackLoading === `${selectedEntry.tweet_id}:wrong_relevance_class`}>
+                          Wrong class
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => handleFeedback(selectedEntry, 'global_exception_worth_covering', 'global_exception')} disabled={feedbackLoading === `${selectedEntry.tweet_id}:global_exception_worth_covering`}>
+                          Global exception
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => handleFeedback(selectedEntry, 'not_global_exception', 'off_topic')} disabled={feedbackLoading === `${selectedEntry.tweet_id}:not_global_exception`}>
+                          Not exception
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
 
-                {entry.importance_reasoning && (
-                  <details className="text-xs">
-                    <summary className="cursor-pointer select-none text-muted-foreground hover:text-foreground">
-                      {entry.final_score != null
-                        && entry.importance_score != null
-                        && Math.round(entry.importance_score) !== Math.round(entry.final_score)
-                        ? `Model rationale (legacy AI score: ${entry.importance_score}/20)`
-                        : `Why this score? (${decisionScore(entry) ?? entry.importance_score ?? '—'}/20)`}
-                    </summary>
-                    <div className="mt-2 rounded-md border border-border bg-muted/30 p-3 whitespace-pre-wrap leading-relaxed text-foreground">
-                      {entry.importance_reasoning}
+                  {selectedEntry.enrich_status && selectedEntry.enrich_status !== 'skipped' && (
+                    <Card>
+                      <CardHeader className="pb-2">
+                        <div className="flex items-center justify-between">
+                          <CardTitle className="text-sm">Enrichment</CardTitle>
+                          <Button size="sm" variant="outline" onClick={() => handleTestEnrich(selectedEntry.tweet_id)}>
+                            <Sparkles className="w-3 h-3 mr-1.5" />Run
+                          </Button>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="space-y-2 text-sm">
+                        <Badge variant={selectedEntry.enrich_status === 'awaiting_approval' ? 'secondary' : 'outline'}>{selectedEntry.enrich_status}</Badge>
+                        {selectedEntry.narrative_callback && <p dir="rtl" className="rounded-md border bg-muted/30 p-2">{selectedEntry.narrative_callback}</p>}
+                        {selectedEntry.composed_post_text && <p dir="rtl" className="rounded-md border bg-muted/30 p-2">{selectedEntry.composed_post_text}</p>}
+                      </CardContent>
+                    </Card>
+                  )}
+                </>
+              )}
+            </div>
+            <Card>
+              <CardHeader className="pb-2"><CardTitle className="text-sm">Timeline</CardTitle></CardHeader>
+              <CardContent className="space-y-2">
+                {timeline.length === 0 ? (
+                  <p className="py-4 text-center text-sm text-muted-foreground">No pipeline events found</p>
+                ) : timeline.map((evt, i) => {
+                  const formatted = evt.error ? formatPipelineError(evt.error) : null;
+                  return (
+                    <div key={`${evt.step}-${i}`} className="rounded-md border bg-muted/20 p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-medium">{evt.step}</span>
+                        <Badge className={evt.status === 'completed' ? toneClass('good') : evt.status === 'failed' ? toneClass('bad') : toneClass('warn')}>
+                          {evt.status}
+                        </Badge>
+                      </div>
+                      {evt.started_at && <p className="mt-1 text-xs text-muted-foreground">{new Date(evt.started_at).toLocaleString()}</p>}
+                      {formatted && <p className="mt-1 text-xs text-destructive">{formatted.title}</p>}
                     </div>
-                  </details>
-                )}
+                  );
+                })}
               </CardContent>
             </Card>
-          );
-        })}
-        {hasNextPage && (
-          <div className="flex justify-center pt-4">
-            <Button variant="outline" onClick={() => fetchNextPage()} disabled={isFetchingNextPage}>
-              {isFetchingNextPage ? <><RefreshCw className="w-4 h-4 mr-2 animate-spin" />Loading...</> : 'Load More'}
-            </Button>
           </div>
-        )}
-      </div>
-
-      {/* Timeline Drawer */}
-      <Drawer open={drawerOpen} onOpenChange={setDrawerOpen}>
-        <DrawerContent>
-          <DrawerHeader>
-            <DrawerTitle>Pipeline Timeline</DrawerTitle>
-            <DrawerDescription>Events for {drawerTweetId}</DrawerDescription>
-          </DrawerHeader>
-          <div className="px-4 pb-4 max-h-96 overflow-y-auto space-y-2">
-            {timeline.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-4">No pipeline events found</p>
-            ) : timeline.map((evt, i) => (
-              <div key={i} className="flex items-start gap-3 p-3 bg-muted/30 rounded-lg">
-                <div className={`w-2 h-2 rounded-full mt-2 ${evt.status === 'completed' ? 'bg-success' : evt.status === 'failed' ? 'bg-destructive' : 'bg-warning'}`} />
-                <div className="flex-1">
-                  <div className="flex justify-between"><span className="text-sm font-medium">{evt.step}</span><Badge variant="outline" className="text-xs">{evt.status}</Badge></div>
-                  {evt.started_at && <p className="text-xs text-muted-foreground">{new Date(evt.started_at).toLocaleString()}</p>}
-                  {evt.error && <p className="text-xs text-destructive mt-1">{evt.error}</p>}
-                </div>
-                {evt.status === 'failed' && <Button size="sm" variant="ghost" onClick={() => retryStep(drawerTweetId!, evt.step)}><RotateCcw className="w-3 h-3" /></Button>}
-              </div>
-            ))}
-          </div>
-          <DrawerFooter><DrawerClose asChild><Button variant="outline">Close</Button></DrawerClose></DrawerFooter>
+          <DrawerFooter className="border-t bg-background/95 px-3 pb-[max(env(safe-area-inset-bottom),0.75rem)] pt-3 sm:px-4">
+            <DrawerClose asChild><Button variant="outline">Close</Button></DrawerClose>
+          </DrawerFooter>
         </DrawerContent>
       </Drawer>
+
+      <Dialog open={!!manualEntry} onOpenChange={(open) => !open && setManualEntry(null)}>
+        <DialogContent className="max-h-[92svh] w-[calc(100vw-1rem)] overflow-y-auto p-4 sm:max-w-lg sm:p-6">
+          <DialogHeader>
+            <DialogTitle>Set manual score</DialogTitle>
+            <DialogDescription>
+              Saves feedback, locks the score, and auto-advances passing items through translation and normal delivery gates.
+            </DialogDescription>
+          </DialogHeader>
+          {manualEntry && (
+            <div className="space-y-4">
+              <div className="rounded-md border bg-muted/30 p-3 text-xs">
+                <p className="font-medium">{manualEntry.author_handle ? `@${manualEntry.author_handle}` : manualEntry.tweet_id}</p>
+                <p className="mt-1 line-clamp-3 text-muted-foreground">{shortText(manualEntry)}</p>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="manual-score">Score</Label>
+                <Input
+                  id="manual-score"
+                  inputMode="decimal"
+                  type="number"
+                  min={1}
+                  max={20}
+                  step={0.1}
+                  value={manualScore}
+                  onChange={(e) => setManualScore(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Threshold is {deliverThreshold}. This score will {Number(manualScore) >= deliverThreshold ? 'pass' : 'skip'} if saved.
+                </p>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="manual-reason">Reason</Label>
+                <Textarea
+                  id="manual-reason"
+                  value={manualReason}
+                  onChange={(e) => setManualReason(e.target.value)}
+                  placeholder="Why this score is right"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label>Audience class feedback</Label>
+                <ThemedSelect value={manualAudienceClass || 'none'} onValueChange={(value) => setManualAudienceClass(value === 'none' ? '' : value as AudienceClassValue)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No class label</SelectItem>
+                    <SelectItem value="direct_focus">Direct focus</SelectItem>
+                    <SelectItem value="adjacent">Adjacent</SelectItem>
+                    <SelectItem value="global_exception">Global exception</SelectItem>
+                    <SelectItem value="off_topic">Off topic</SelectItem>
+                  </SelectContent>
+                </ThemedSelect>
+                <p className="text-xs text-muted-foreground">Optional label for the learning set. It does not bypass Duplicate Gate, X limits, or X posting settings.</p>
+              </div>
+              {manualEntry.dup_of_tweet_id && (
+                <label className="flex items-start gap-2 rounded-md border p-3 text-sm">
+                  <Checkbox
+                    checked={manualOverrideDuplicate}
+                    onCheckedChange={(checked) => setManualOverrideDuplicate(checked === true)}
+                  />
+                  <span>
+                    <span className="block font-medium">Override duplicate block</span>
+                    <span className="block text-xs text-muted-foreground">If checked, this clears the duplicate relation and allows a passing manual score to advance.</span>
+                  </span>
+                </label>
+              )}
+            </div>
+          )}
+          <DialogFooter className="gap-2 sm:gap-0 [&>button]:w-full sm:[&>button]:w-auto">
+            <Button variant="outline" onClick={() => setManualEntry(null)} disabled={manualLoading}>Cancel</Button>
+            <Button onClick={handleManualSubmit} disabled={manualLoading}>
+              {manualLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+              Save score
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={!!pendingAction} onOpenChange={(open) => !open && setPendingAction(null)}>
+        <AlertDialogContent className="w-[calc(100vw-1rem)] max-w-lg p-4 sm:p-6">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{actionTitle(pendingAction)}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {actionDescription(pendingAction)}
+              {pendingAction?.entry && (
+                <span className="mt-2 block rounded-md bg-muted p-3 text-xs text-foreground">
+                  {pendingAction.entry.author_handle ? `@${pendingAction.entry.author_handle}` : pendingAction.entry.tweet_id}
+                  {' · '}
+                  {shortText(pendingAction.entry).slice(0, 180)}
+                </span>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2 sm:gap-0 [&>button]:w-full sm:[&>button]:w-auto">
+            <AlertDialogCancel disabled={actionLoading}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmAction} disabled={actionLoading}>
+              {actionLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+              Confirm
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -1,0 +1,51 @@
+import type { MonitoringEntry, MonitoringOverview } from '@/hooks/useMonitoringData';
+
+export type MonitoringTone = 'good' | 'warn' | 'bad' | 'muted' | 'info';
+
+export function monitoringStage(entry: MonitoringEntry): { label: string; tone: MonitoringTone } {
+  if (entry.monitoring_state) return { label: entry.monitoring_state.stage_label, tone: entry.monitoring_state.tone };
+  if (entry.translation_error || entry.delivery_error || entry.x_error) return { label: 'Failed/stuck', tone: 'bad' };
+  if (entry.dedupe_status === 'failed') return { label: 'Dedupe failed', tone: 'bad' };
+  if (entry.dedupe_status === 'uncertain') return { label: 'Uncertain duplicate', tone: 'warn' };
+  if (entry.dedupe_status === 'related_new_info') return { label: 'Related: new info', tone: 'info' };
+  if (entry.dedupe_status === 'pending') return { label: 'Duplicate gate pending', tone: 'info' };
+  if (entry.score_review_status === 'needs_review') return { label: 'Manual review', tone: 'warn' };
+  if (entry.dup_of_tweet_id || (entry.delivery_decision && entry.delivery_decision !== 'deliver')) return { label: 'Skipped', tone: 'muted' };
+  if (entry.enrich_status === 'awaiting_approval') return { label: 'Manual review', tone: 'warn' };
+  if (entry.is_truncated && !entry.hydrated_at && entry.delivery_decision === 'deliver') return { label: 'Hydration', tone: 'warn' };
+  if (entry.final_score == null && entry.importance_score == null) return { label: 'Needs score', tone: 'warn' };
+  if ((!entry.is_translated || !entry.text_translated) && entry.delivery_decision === 'deliver') return { label: 'Needs translation', tone: 'warn' };
+  if (entry.x_status === 'posted' || entry.is_delivered) return { label: 'Delivered', tone: 'good' };
+  return { label: 'Ready', tone: 'info' };
+}
+
+export function monitoringDecisionLabel(entry: MonitoringEntry, fallbackDecision: string): string {
+  if (entry.monitoring_state?.decision_label) return entry.monitoring_state.decision_label;
+  if (entry.dedupe_status === 'uncertain') return 'Review possible duplicate';
+  if (entry.dedupe_status === 'related_new_info') return 'Related: new info';
+  if (entry.dedupe_status === 'pending') return 'Checking duplicate';
+  if (entry.dup_of_tweet_id) return 'Blocked: duplicate';
+  if (entry.delivery_decision === 'skip') return 'Skipped';
+  if (entry.delivery_decision === 'deliver') return 'Deliver';
+  return fallbackDecision;
+}
+
+export function loadedMonitoringCounts(entries: MonitoringEntry[]): MonitoringOverview['counts'] {
+  return {
+    needs_attention: entries.filter((entry) => entry.monitoring_state?.needs_attention ?? ['bad', 'warn'].includes(monitoringStage(entry).tone)).length,
+    failed_stuck: entries.filter((entry) => entry.monitoring_state?.code === 'failed_stuck' || !!(entry.translation_error || entry.delivery_error || entry.x_error) || entry.dedupe_status === 'failed').length,
+    translation_queue: entries.filter((entry) => ['queued', 'needs_translation'].includes(entry.monitoring_state?.translation_state ?? '')).length,
+    needs_score: entries.filter((entry) => entry.monitoring_state?.code === 'needs_score' || (entry.final_score == null && entry.importance_score == null)).length,
+    ready_to_deliver: entries.filter((entry) => entry.monitoring_state?.code === 'ready_to_deliver').length,
+    manual_review: entries.filter((entry) => entry.monitoring_state?.code === 'manual_review' || entry.enrich_status === 'awaiting_approval' || entry.dedupe_status === 'uncertain' || entry.score_review_status === 'needs_review').length,
+    duplicates: entries.filter((entry) => !!entry.dup_of_tweet_id).length,
+    hydration: entries.filter((entry) => entry.monitoring_state?.code === 'hydration' || (entry.is_truncated && !entry.hydrated_at && entry.delivery_decision === 'deliver')).length,
+    x_pending: entries.filter((entry) => entry.x_status === 'pending').length,
+    x_failed: entries.filter((entry) => entry.x_status === 'failed').length,
+    delivered_24h: entries.filter((entry) => entry.x_status === 'posted' || entry.is_delivered).length,
+    telegram_pending: entries.filter((entry) => entry.monitoring_state?.code === 'telegram_pending').length,
+    below_threshold: entries.filter((entry) => entry.monitoring_state?.code === 'below_threshold' || entry.decision_reason?.startsWith('below_threshold:')).length,
+    stale_jobs: 0,
+    stale_x_pending_24h: 0,
+  };
+}

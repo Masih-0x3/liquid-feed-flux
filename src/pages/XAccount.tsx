@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -14,12 +14,13 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, RefreshCw, UserMinus, UserPlus, Users, ExternalLink, CheckCheck, TrendingUp, Search, ArrowLeftRight } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import {
   useFollowerSnapshots, useUnfollowers, useNewFollowers,
   useFollowerStats, useMarkReviewed, useMarkAllReviewed, useMutualFollowData,
   type FollowerChange, type MutualFollowUser,
 } from "@/hooks/useFollowerData";
+
+const FollowerGrowthChart = lazy(() => import("@/components/x/FollowerGrowthChart"));
 
 function openInBackground(url: string) {
   const w = window.open(url, '_blank', 'noopener');
@@ -42,15 +43,24 @@ export default function XAccount() {
   const markReviewed = useMarkReviewed();
   const markAllReviewed = useMarkAllReviewed();
 
-  const runManual = async () => {
+  const runManual = async (force = false) => {
     setRunning(true);
     try {
       const { data, error } = await supabase.functions.invoke("admin-actions", {
-        body: { action: "run_followers_snapshot" },
+        body: { action: "run_followers_snapshot", include_following: true, force },
       });
       if (error) throw error;
-      const result = data as { ok?: boolean; error?: string; follower_count?: number; api_calls_used?: number };
+      const result = data as { ok?: boolean; skipped?: boolean; reason?: string; latest_age_minutes?: number; error?: string; follower_count?: number; api_calls_used?: number; estimated_api_calls?: number };
       if (!result?.ok) throw new Error(result?.error ?? "Snapshot failed");
+      if (result.skipped) {
+        toast({
+          title: "Snapshot skipped",
+          description: result.latest_age_minutes != null
+            ? `Latest snapshot is ${result.latest_age_minutes} minutes old. Force refresh if you need a new X API pull.`
+            : result.reason,
+        });
+        return;
+      }
       toast({
         title: "Snapshot complete",
         description: `${result.follower_count ?? 0} followers · ${result.api_calls_used ?? 0} API calls used`,
@@ -91,7 +101,13 @@ export default function XAccount() {
     }
   };
 
-  const estimatedCalls = stats ? Math.max(1, Math.ceil(stats.currentCount / 1000)) * 2 : 2;
+  const latestSnapshot = snapshots?.[snapshots.length - 1] ?? null;
+  const latestSnapshotAgeMs = latestSnapshot ? Date.now() - new Date(latestSnapshot.taken_at).getTime() : null;
+  const latestSnapshotAgeMinutes = latestSnapshotAgeMs === null ? null : Math.max(0, Math.round(latestSnapshotAgeMs / 60000));
+  const snapshotLooksFresh = latestSnapshotAgeMinutes !== null && latestSnapshotAgeMinutes < 60;
+  const estimatedFollowerPages = stats ? Math.max(1, Math.ceil(stats.currentCount / 1000)) : 1;
+  const estimatedFollowingPages = latestSnapshot?.following_count ? Math.max(1, Math.ceil(latestSnapshot.following_count / 1000)) : 1;
+  const estimatedCalls = estimatedFollowerPages + estimatedFollowingPages;
 
   const chartData = (snapshots ?? []).map(s => ({
     date: new Date(s.taken_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
@@ -121,11 +137,11 @@ export default function XAccount() {
   }
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6 p-0">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-display font-semibold text-glass-foreground">My X Account</h1>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-2xl sm:text-3xl font-display font-semibold text-glass-foreground">My X Account</h1>
           <p className="text-muted-foreground text-sm">Follower growth, unfollower review, mutual follows</p>
         </div>
         <AlertDialog>
@@ -139,12 +155,18 @@ export default function XAccount() {
             <AlertDialogHeader>
               <AlertDialogTitle>Run a manual snapshot?</AlertDialogTitle>
               <AlertDialogDescription>
-                This will use approximately <strong>{estimatedCalls}</strong> X API call{estimatedCalls === 1 ? "" : "s"} (followers + following lists).
+                Estimated X API calls: <strong>{estimatedCalls}</strong> for followers + following lists.
+                {latestSnapshotAgeMinutes !== null && (
+                  <span className="block mt-2">
+                    Latest snapshot: {latestSnapshotAgeMinutes} minute{latestSnapshotAgeMinutes === 1 ? "" : "s"} ago{snapshotLooksFresh ? " (fresh)" : ""}.
+                  </span>
+                )}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={runManual}>Run snapshot</AlertDialogAction>
+              <Button variant="outline" onClick={() => runManual(true)} disabled={running}>Force refresh</Button>
+              <AlertDialogAction onClick={() => runManual(false)}>Run if stale</AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
@@ -229,20 +251,9 @@ export default function XAccount() {
           </CardHeader>
           <CardContent>
             <div className="h-48">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="followerGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <XAxis dataKey="date" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
-                  <YAxis domain={['dataMin - 20', 'dataMax + 20']} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={50} />
-                  <Tooltip contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px', fontSize: '12px' }} />
-                  <Area type="monotone" dataKey="followers" stroke="hsl(var(--primary))" fillOpacity={1} fill="url(#followerGradient)" strokeWidth={2} />
-                </AreaChart>
-              </ResponsiveContainer>
+              <Suspense fallback={<div className="h-full animate-pulse rounded bg-muted/50" />}>
+                <FollowerGrowthChart data={chartData} />
+              </Suspense>
             </div>
           </CardContent>
         </Card>
@@ -250,17 +261,17 @@ export default function XAccount() {
 
       {/* Main Tabs */}
       <Tabs defaultValue="unfollowers" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="unfollowers" className="gap-1.5">
+        <TabsList className="flex h-auto w-full justify-start gap-1 overflow-x-auto p-1">
+          <TabsTrigger value="unfollowers" className="shrink-0 whitespace-nowrap gap-1.5">
             <UserMinus className="w-4 h-4" /> Unfollowers
           </TabsTrigger>
-          <TabsTrigger value="mutual" className="gap-1.5">
+          <TabsTrigger value="mutual" className="shrink-0 whitespace-nowrap gap-1.5">
             <ArrowLeftRight className="w-4 h-4" /> Mutual Follow
           </TabsTrigger>
-          <TabsTrigger value="new-followers" className="gap-1.5">
+          <TabsTrigger value="new-followers" className="shrink-0 whitespace-nowrap gap-1.5">
             <UserPlus className="w-4 h-4" /> New Followers
           </TabsTrigger>
-          <TabsTrigger value="history" className="gap-1.5">
+          <TabsTrigger value="history" className="shrink-0 whitespace-nowrap gap-1.5">
             <RefreshCw className="w-4 h-4" /> Snapshots
           </TabsTrigger>
         </TabsList>

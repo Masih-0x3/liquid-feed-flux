@@ -43,7 +43,7 @@ export function serviceRoleBearerHeader(): Record<string, string> {
 }
 
 /**
- * RSS / webhook entry: token in query (?token=), x-webhook-token, or x-rssapp-token.
+ * RSS / webhook entry: token in x-webhook-token or x-rssapp-token.
  * When no env token is configured, falls back to Vault WEBHOOK_SHARED_SECRET (same as cron).
  */
 // deno-lint-ignore no-explicit-any
@@ -53,9 +53,17 @@ export async function requireRssWebhookAuth(
   corsHeaders: Record<string, string>,
 ): Promise<Response | null> {
   const urlObj = new URL(req.url);
+  const queryToken = urlObj.searchParams.get('token')?.trim();
+  if (queryToken) {
+    console.warn('Webhook query token rejected; use x-webhook-token or x-rssapp-token header');
+    return new Response(JSON.stringify({ error: 'Webhook token must be sent in a header' }), {
+      status: 401,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
   const provided = (
-    urlObj.searchParams.get('token')?.trim()
-      || req.headers.get('x-webhook-token')?.trim()
+    req.headers.get('x-webhook-token')?.trim()
       || req.headers.get('x-rssapp-token')?.trim()
       || ''
   );

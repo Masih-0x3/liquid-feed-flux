@@ -423,6 +423,12 @@ export type Database = {
           created_at: string
           decision_reason: string | null
           delivery_decision: string | null
+          dedupe_checked_at: string | null
+          dedupe_confidence: number | null
+          dedupe_method: string | null
+          dedupe_new_facts: string[] | null
+          dedupe_reason: string | null
+          dedupe_status: string | null
           dup_of_tweet_id: string | null
           dup_similarity: number | null
           editorial_commentary: string | null
@@ -469,6 +475,12 @@ export type Database = {
           created_at?: string
           decision_reason?: string | null
           delivery_decision?: string | null
+          dedupe_checked_at?: string | null
+          dedupe_confidence?: number | null
+          dedupe_method?: string | null
+          dedupe_new_facts?: string[] | null
+          dedupe_reason?: string | null
+          dedupe_status?: string | null
           dup_of_tweet_id?: string | null
           dup_similarity?: number | null
           editorial_commentary?: string | null
@@ -515,6 +527,12 @@ export type Database = {
           created_at?: string
           decision_reason?: string | null
           delivery_decision?: string | null
+          dedupe_checked_at?: string | null
+          dedupe_confidence?: number | null
+          dedupe_method?: string | null
+          dedupe_new_facts?: string[] | null
+          dedupe_reason?: string | null
+          dedupe_status?: string | null
           dup_of_tweet_id?: string | null
           dup_similarity?: number | null
           editorial_commentary?: string | null
@@ -1222,6 +1240,26 @@ export type Database = {
       cleanup_old_data: {
         Args: { batch_limit?: number; retention_days?: number }
         Returns: Json
+      }
+      find_story_candidates_v3: {
+        Args: {
+          candidate_min_similarity?: number
+          exclude_tweet_id: string
+          match_limit?: number
+          query_embedding: string
+          window_hours?: number
+        }
+        Returns: {
+          author_handle: string | null
+          created_at: string | null
+          normalized_text: string | null
+          similarity: number
+          story_cluster_id: string
+          text_original: string | null
+          text_translated: string | null
+          tweet_id: string
+          url: string | null
+        }[]
       }
       find_similar_story: {
         Args: {

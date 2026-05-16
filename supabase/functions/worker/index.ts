@@ -15,6 +15,18 @@ import {
   applyProfileDecision,
 } from "../_shared/scoring.ts";
 import { requireInternalAuth, serviceRoleBearerHeader } from "../_shared/internalAuth.ts";
+import { recordLegacyXApiUsage, recordXApiEvent } from "../_shared/xApiLedger.ts";
+import {
+  DEFAULT_DUPLICATE_GATE,
+  normalizeDuplicateGateConfig,
+  runDuplicateGate,
+} from "../_shared/dedupe.ts";
+import {
+  SCORING_POLICY_VERSION,
+  normalizeScoringPolicy,
+  runScoringPolicy,
+  type ScoringPolicyResult,
+} from "../_shared/scoringPolicy.ts";
 
 export {
   SCORE_AXIS_KEYS,
@@ -29,7 +41,7 @@ export {
 } from "../_shared/scoring.ts";
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': Deno.env.get('ALLOWED_CORS_ORIGIN') ?? 'https://liquid-feed-flux.lovable.app',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-internal-token',
 };
 
@@ -97,19 +109,16 @@ async function loadConfig(supabase: any): Promise<any> {
       editorial_note?: string;
     },
     storyMemory: {
-      enabled: false,
-      window_hours: 12,
-      similarity_threshold: 0.86,
-      action: 'skip' as 'skip' | 'mark_and_deliver',
-      bypass_authors: [] as string[],
+      ...DEFAULT_DUPLICATE_GATE,
     },
+    scoringPolicy: normalizeScoringPolicy(null),
   };
 
   try {
-    const { data: settings } = await supabase
+      const { data: settings } = await supabase
       .from('settings')
       .select('key, value')
-      .in('key', ['translation_prompt', 'message_template', 'content_filter', 'editorial_profiles', 'active_profile_id', 'story_memory']);
+      .in('key', ['translation_prompt', 'message_template', 'content_filter', 'editorial_profiles', 'active_profile_id', 'story_memory', 'scoring_policy']);
 
     if (settings) {
       // translation_prompt is the authoritative source for OpenAI parameters.
@@ -159,7 +168,10 @@ async function loadConfig(supabase: any): Promise<any> {
           defaults.contentFilter = { ...defaults.contentFilter, ...s.value as Record<string, { rule: string; threshold?: number }> };
         }
         if (s.key === 'story_memory' && typeof s.value === 'object' && s.value !== null) {
-          defaults.storyMemory = { ...defaults.storyMemory, ...s.value as Record<string, unknown> } as typeof defaults.storyMemory;
+          defaults.storyMemory = normalizeDuplicateGateConfig({ ...defaults.storyMemory, ...s.value as Record<string, unknown> });
+        }
+        if (s.key === 'scoring_policy' && typeof s.value === 'object' && s.value !== null) {
+          defaults.scoringPolicy = normalizeScoringPolicy(s.value);
         }
       }
 
@@ -182,178 +194,58 @@ async function loadConfig(supabase: any): Promise<any> {
   return defaults;
 }
 
-// ===== Story Memory (PR3) — semantic near-duplicate detection =====
-function normalizeForHash(s: string): string {
-  return (s || '')
-    .toLowerCase()
-    .replace(/https?:\/\/\S+/g, '')
-    .replace(/[@#]\w+/g, '')
-    .replace(/[^\p{L}\p{N}\s]+/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-// 64-bit SimHash (FNV-1a per token, then sign bit aggregate). Returns BigInt-as-string for Postgres bigint.
-function simHash64(text: string): string {
-  const tokens = text.split(/\s+/).filter(Boolean);
-  if (tokens.length === 0) return '0';
-  const v = new Array<number>(64).fill(0);
-  for (const tok of tokens) {
-    // FNV-1a 64-bit (split into two 32-bit halves)
-    let h1 = 0x811c9dc5 >>> 0, h2 = 0xcbf29ce4 >>> 0;
-    for (let i = 0; i < tok.length; i++) {
-      h1 ^= tok.charCodeAt(i);
-      h1 = Math.imul(h1, 0x01000193) >>> 0;
-      h2 ^= tok.charCodeAt(i);
-      h2 = Math.imul(h2, 0x01000193) >>> 0;
-    }
-    for (let b = 0; b < 32; b++) v[b]      += (h1 >> b) & 1 ? 1 : -1;
-    for (let b = 0; b < 32; b++) v[b + 32] += (h2 >> b) & 1 ? 1 : -1;
-  }
-  let bits = 0n;
-  for (let b = 0; b < 64; b++) if (v[b] > 0) bits |= 1n << BigInt(b);
-  // Convert to signed 64-bit BigInt for Postgres bigint
-  const signed = bits >= (1n << 63n) ? bits - (1n << 64n) : bits;
-  return signed.toString();
-}
-
-async function fetchEmbedding(text: string): Promise<number[] | null> {
-  const apiKey = Deno.env.get('OPENAI_API_KEY');
-  if (!apiKey) return null;
-  try {
-    const resp = await fetch('https://api.openai.com/v1/embeddings', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'text-embedding-3-small', input: text.slice(0, 8000) }),
-    });
-    if (!resp.ok) {
-      console.warn('embedding api error', resp.status, await resp.text().catch(() => ''));
-      return null;
-    }
-    const data = await resp.json();
-    return (data?.data?.[0]?.embedding as number[]) ?? null;
-  } catch (e) {
-    console.warn('embedding fetch failed', (e as Error).message);
-    return null;
-  }
-}
-
-/**
- * Compute the story signature for a post and return any near-duplicate match.
- * Always upserts story_signatures so future posts can match against it.
- * Tie-break: in fuzzy zone [threshold, threshold+0.02], also require Hamming ≤ 12.
- */
 // deno-lint-ignore no-explicit-any
-async function runStoryDedup(supabase: any, post: { tweet_id: string; text_translated: string | null; text_original: string | null; author_handle: string | null }, cfg: { enabled: boolean; window_hours: number; similarity_threshold: number; bypass_authors: string[] }): Promise<{ dup_of: string | null; cluster_id: string | null; similarity: number | null }> {
-  if (!cfg.enabled) return { dup_of: null, cluster_id: null, similarity: null };
-  if (cfg.bypass_authors?.some(a => (post.author_handle || '').toLowerCase() === a.replace(/^@/, '').toLowerCase())) {
-    return { dup_of: null, cluster_id: null, similarity: null };
-  }
-  const raw = (post.text_translated || post.text_original || '').trim();
-  const normalized = normalizeForHash(raw);
-  if (normalized.length < 20) return { dup_of: null, cluster_id: null, similarity: null };
-
-  const simhash = simHash64(normalized);
-  const embedding = await fetchEmbedding(raw);
-  if (!embedding) {
-    // No embedding → cannot do semantic match. Persist the simhash so future
-    // matches can still find this post via embedding-side; signal caller to retry.
-    await supabase.from('story_signatures').upsert({
-      tweet_id: post.tweet_id, simhash, normalized_text: normalized,
-    }, { onConflict: 'tweet_id' });
-    throw new Error('embedding_unavailable');
-  }
-
-  // Find nearest neighbor
-  const embeddingLiteral = '[' + embedding.join(',') + ']';
-  const { data: matches, error: matchErr } = await supabase.rpc('find_similar_story_v2', {
-    query_embedding: embeddingLiteral,
-    query_simhash: simhash,
-    exclude_tweet_id: post.tweet_id,
-    window_hours: cfg.window_hours,
-    similarity_threshold: cfg.similarity_threshold,
-  });
-  if (matchErr) console.warn('find_similar_story error', matchErr.message);
-
-  let dup_of: string | null = null;
-  let cluster_id: string | null = null;
-  let similarity: number | null = null;
-  if (Array.isArray(matches) && matches.length > 0) {
-    const top = matches[0] as { tweet_id: string; story_cluster_id: string; similarity: number; simhash_distance: number };
-    const sim = Number(top.similarity);
-    const hamming = Number(top.simhash_distance ?? 64);
-    // Fuzzy-zone tie-break: only accept when SimHash also agrees
-    const inFuzzy = sim < cfg.similarity_threshold + 0.02;
-    if (!inFuzzy || hamming <= 12) {
-      dup_of = top.tweet_id;
-      cluster_id = top.story_cluster_id;
-      similarity = sim;
-      // Atomic coverage_count++ on the original signature
-      await supabase.rpc('bump_coverage_count', { p_tweet_id: dup_of })
-        .then(() => null, (e: Error) => console.warn('bump_coverage_count failed', e.message));
-    }
-  }
-
-  // Upsert this post's signature (assigning cluster_id if matched)
-  await supabase.from('story_signatures').upsert({
-    tweet_id: post.tweet_id,
-    simhash,
-    embedding: embeddingLiteral,
-    normalized_text: normalized,
-    ...(cluster_id ? { story_cluster_id: cluster_id } : {}),
-  }, { onConflict: 'tweet_id' });
-
-  return { dup_of, cluster_id, similarity };
-}
-
-// deno-lint-ignore no-explicit-any
-async function handleComputeSignatureJob(job: Record<string, unknown>, supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean> {
+async function handleDedupeJob(job: Record<string, unknown>, supabase: any, config: Awaited<ReturnType<typeof loadConfig>>, enqueueNext: boolean): Promise<boolean> {
   const payload = job.payload as Record<string, unknown>;
   const tweetId = payload.tweet_id as string;
-  if (!tweetId) throw new Error('compute_signature: missing tweet_id in job payload');
+  if (!tweetId) throw new Error('dedupe: missing tweet_id in job payload');
   const sm = config.storyMemory;
-  if (!sm?.enabled) return true;
-
-  const { data: post, error } = await supabase
-    .from('posts')
-    .select('tweet_id, text_translated, text_original, author_handle, delivery_decision, feedback_locked')
-    .eq('tweet_id', tweetId)
-    .single();
-  if (error || !post) {
-    console.warn(JSON.stringify({ function: 'worker', action: 'compute_signature_no_post', tweet_id: tweetId }));
+  if (!sm?.enabled) {
+    if (enqueueNext) await queueTranslateFromDedupe(supabase, tweetId, payload.post_hydrate === true);
     return true;
   }
 
-  let dup: { dup_of: string | null; cluster_id: string | null; similarity: number | null };
-  try {
-    dup = await runStoryDedup(supabase, post, sm);
-  } catch (e) {
-    if ((e as Error).message === 'embedding_unavailable') {
-      console.warn(JSON.stringify({ function: 'worker', action: 'compute_signature_embedding_unavailable', tweet_id: tweetId }));
-      throw new Error(`compute_signature[${tweetId}]: embedding_unavailable (retry)`);
-    }
-    throw e;
+  const { data: post, error } = await supabase
+    .from('posts')
+    .select('tweet_id, text_translated, text_original, author_handle, url, created_at, delivery_decision, decision_reason, feedback_locked')
+    .eq('tweet_id', tweetId)
+    .single();
+  if (error || !post) {
+    console.warn(JSON.stringify({ function: 'worker', action: 'dedupe_no_post', tweet_id: tweetId }));
+    return true;
   }
 
-  if (dup.dup_of) {
-    const updates: Record<string, unknown> = {
-      dup_of_tweet_id: dup.dup_of,
-      story_cluster_id: dup.cluster_id,
-      dup_similarity: dup.similarity,
-    };
-    // Respect feedback_locked: record the dup match for visibility but never
-    // flip delivery_decision if the user already force-delivered this post.
-    const locked = post.feedback_locked === true;
-    if (!locked && sm.action === 'skip' && (post.delivery_decision === 'deliver' || post.delivery_decision == null)) {
-      updates.delivery_decision = 'skip';
-      updates.decision_reason = `dup_of ${dup.dup_of} (cosine ${dup.similarity?.toFixed(3)})`;
+  await markDedupePending(supabase, tweetId, payload.post_hydrate === true ? 'running:post_hydrate' : `running:${String(job.type)}`);
+  const result = await runDuplicateGate(supabase, post, sm, {
+    force: payload.force === true,
+    source: payload.post_hydrate === true ? 'post_hydrate' : String(job.type),
+  });
+  if (!result.ok) {
+    if (enqueueNext && result.should_enqueue_translate) {
+      await queueTranslateFromDedupe(supabase, tweetId, payload.post_hydrate === true);
     }
-    await supabase.from('posts').update(updates).eq('tweet_id', tweetId);
-    await insertPipelineEvent(supabase, 'post', tweetId, 'compute_signature', 'completed', null, new Date().toISOString(), null, { dup_of: dup.dup_of, similarity: dup.similarity, action: sm.action, feedback_locked: locked });
-    console.log(JSON.stringify({ function: 'worker', action: 'compute_signature_dup', tweet_id: tweetId, dup_of: dup.dup_of, similarity: dup.similarity, feedback_locked: locked }));
-  } else {
-    await insertPipelineEvent(supabase, 'post', tweetId, 'compute_signature', 'completed', null, new Date().toISOString(), null, { dup_of: null });
+    console.warn(JSON.stringify({
+      function: 'worker',
+      action: 'dedupe_failed_open',
+      tweet_id: tweetId,
+      error: result.error ?? result.reason,
+      enqueue_translate: enqueueNext && result.should_enqueue_translate,
+    }));
+    return true;
   }
+  if (enqueueNext && result.should_enqueue_translate) {
+    await queueTranslateFromDedupe(supabase, tweetId, payload.post_hydrate === true);
+  }
+  console.log(JSON.stringify({
+    function: 'worker',
+    action: 'dedupe_complete',
+    tweet_id: tweetId,
+    status: result.status,
+    method: result.method,
+    dup_of: result.dup_of_tweet_id,
+    confidence: result.confidence,
+    enqueue_translate: enqueueNext && result.should_enqueue_translate,
+  }));
   return true;
 }
 
@@ -378,12 +270,12 @@ serve(async (req) => {
     const config = await loadConfig(supabase);
 
     // Use claim_jobs RPC for transactional job claiming
-    const { data: jobs, error: jobError } = await supabase
+    const { data: jobs, error: claimError } = await supabase
       .rpc('claim_jobs', { batch_size: 20, worker_id: 'worker-' + crypto.randomUUID().slice(0, 8) });
 
-    if (jobError) {
-      console.error(JSON.stringify({ function: 'worker', action: 'claim_error', error: jobError.message }));
-      throw jobError;
+    if (claimError) {
+      console.error(JSON.stringify({ function: 'worker', action: 'claim_error', error: claimError.message }));
+      throw claimError;
     }
 
     if (!jobs || jobs.length === 0) {
@@ -473,8 +365,11 @@ serve(async (req) => {
             case 'resolve_media':
               success = await handleResolveMediaJob(job, supabase);
               break;
+            case 'dedupe':
+              success = await handleDedupeJob(job, supabase, config, true);
+              break;
             case 'compute_signature':
-              success = await handleComputeSignatureJob(job, supabase, config);
+              success = await handleDedupeJob(job, supabase, config, false);
               break;
             case 'enrich':
               success = await handleEnrichJob(job, supabase);
@@ -605,7 +500,10 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
       throw new Error('No original text to translate');
     }
 
-    const filterEnabled = config.contentFilter.enabled || config.contentFilter.score_only;
+    const forceScoringV2 = payload.scoring_policy_v2 === true;
+    const scoringPolicyConfigured = config.scoringPolicy?.enabled === true || forceScoringV2;
+    const legacyFilterEnabled = config.contentFilter.enabled || config.contentFilter.score_only;
+    const filterEnabled = scoringPolicyConfigured || legacyFilterEnabled;
     const scoreOnly = config.contentFilter.score_only && !config.contentFilter.enabled;
     const authorHandle = post.author_handle as string | null;
 
@@ -616,6 +514,7 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
     let data: Record<string, unknown> = {};
     let scoringUsage: Record<string, unknown> | null = null;
     let translationUsage: Record<string, unknown> | null = null;
+    let translationSkippedByFilter = false;
 
     // Resolve scoring params (fall back to translation values if not set)
     const scoringModel = config.scoringModel ?? config.openaiModel;
@@ -772,7 +671,52 @@ ${post.text_original}`;
 
     // ============ SPLIT PATH: score first, translate only on pass ============
     let scoreAxes: ScoreAxes | null = null;
+    let scoringPolicyResult: ScoringPolicyResult | null = null;
+    const scoringPolicyEnabled = scoringPolicyConfigured;
+    const scoringPolicyActive = scoringPolicyEnabled && (config.scoringPolicy?.mode === 'active' || forceScoringV2);
     if (filterEnabled && config.splitCalls) {
+      if (scoringPolicyEnabled) {
+        console.log(JSON.stringify({
+          function: 'worker',
+          action: 'score_v2_start',
+          tweet_id: tweetId,
+          mode: scoringPolicyActive ? 'active' : 'shadow',
+          model: scoringModel,
+        }));
+        scoringPolicyResult = await runScoringPolicy({
+          tweet_id: tweetId,
+          text: String(post.text_original || ''),
+          author_handle: authorHandle,
+          account_name: accountName,
+          url: post.url as string | null,
+          published_at: publishedAt,
+        }, config.scoringPolicy, {
+          apiKey: openaiApiKey,
+          model: scoringModel,
+          maxOutputTokens: scoringMaxTokens,
+          temperature: scoringTemperature,
+          topP: scoringTopP,
+          reasoningEffort: scoringReasoningEffort,
+          verbosity: scoringVerbosity,
+          seed: scoringSeed,
+          serviceTier: scoringServiceTier,
+          parallelToolCalls: scoringParallelTools,
+        });
+        if (!scoringPolicyResult.ok) {
+          throw new Error(`OpenAI scoring v2 error: ${scoringPolicyResult.error ?? scoringPolicyResult.audience_reason}`);
+        }
+        await insertPipelineEvent(supabase, 'post', tweetId, 'score', 'completed', null, new Date().toISOString(), null, {
+          version: SCORING_POLICY_VERSION,
+          mode: scoringPolicyActive ? 'active' : 'shadow',
+          audience_class: scoringPolicyResult.audience_class,
+          final_score: scoringPolicyResult.final_score,
+          threshold: scoringPolicyResult.threshold,
+          decision: scoringPolicyResult.delivery_decision,
+          adjudicated: scoringPolicyResult.adjudicated,
+        });
+      }
+
+      if (!scoringPolicyActive && legacyFilterEnabled) {
       const scoreToolFunction = buildToolFunction(false);
 
       console.log(JSON.stringify({ function: 'worker', action: 'score_start', tweet_id: tweetId, model: scoringModel, reasoning_effort: scoringReasoningEffort }));
@@ -784,7 +728,7 @@ ${post.text_original}`;
           { role: 'system', content: renderSystemPrompt() },
           { role: 'user', content: buildUserMessage() },
         ],
-        tool: scoreToolFunction as ToolFunctionDef,
+        tool: scoreToolFunction as unknown as ToolFunctionDef,
         maxOutputTokens: scoringMaxTokens,
         temperature: scoringTemperature,
         topP: scoringTopP,
@@ -798,7 +742,7 @@ ${post.text_original}`;
       if (!scoreResult.ok) {
         throw new Error(`OpenAI scoring error: ${scoreResult.status} ${scoreResult.rawText}`);
       }
-      scoringUsage = scoreResult.raw?.usage ?? null;
+      scoringUsage = (scoreResult.raw?.usage as Record<string, unknown> | undefined) ?? null;
       data = scoreResult.raw;
 
       if (scoreResult.toolCall) {
@@ -813,14 +757,26 @@ ${post.text_original}`;
             importanceScore = Math.round(computeFinalScore(scoreAxes));
           }
           console.log(JSON.stringify({ function: 'worker', action: 'scored', tweet_id: tweetId, score: importanceScore, axes: scoreAxes, tags: importanceTags, reasoning: importanceReasoning, endpoint: scoreResult.endpoint, model: scoringModel }));
+          await insertPipelineEvent(supabase, 'post', tweetId, 'score', 'completed', null, new Date().toISOString(), null, {
+            score: importanceScore,
+            axes: scoreAxes,
+            model: scoringModel,
+          });
         } catch (parseErr) {
           console.warn('Failed to parse score tool call:', (parseErr as Error).message);
         }
       }
+      }
 
       // Decide gate BEFORE translating
       let preDecision = 'deliver';
-      if (importanceScore !== null && !scoreOnly) {
+      if (scoringPolicyActive && scoringPolicyResult) {
+        importanceScore = Math.round(scoringPolicyResult.final_score);
+        importanceTags = scoringPolicyResult.tags;
+        importanceReasoning = scoringPolicyResult.audience_reason;
+        scoreAxes = scoringPolicyResult.axes as ScoreAxes;
+        preDecision = scoringPolicyResult.delivery_decision;
+      } else if (legacyFilterEnabled && importanceScore !== null && !scoreOnly) {
         if (config.editorialProfile) {
           const r = applyProfileDecision({
             profile: config.editorialProfile,
@@ -868,11 +824,16 @@ ${post.text_original}`;
         if (!trResult.ok) {
           throw new Error(`OpenAI translation error: ${trResult.status} ${trResult.rawText}`);
         }
-        translationUsage = trResult.raw?.usage ?? null;
+        translationUsage = (trResult.raw?.usage as Record<string, unknown> | undefined) ?? null;
         translatedText = trResult.content;
         console.log(JSON.stringify({ function: 'worker', action: 'translate_complete', tweet_id: tweetId, chars: translatedText.length }));
       } else {
+        translationSkippedByFilter = true;
         console.log(JSON.stringify({ function: 'worker', action: 'translate_skipped_by_filter', tweet_id: tweetId, score: importanceScore }));
+        await insertPipelineEvent(supabase, 'post', tweetId, 'translate', 'skipped', null, new Date().toISOString(), null, {
+          reason: 'translation_skipped_not_needed',
+          score: importanceScore,
+        });
       }
     } else if (filterEnabled) {
       // ============ COMBINED PATH (legacy, when split_calls = false) ============
@@ -884,7 +845,7 @@ ${post.text_original}`;
           { role: 'system', content: renderSystemPrompt() },
           { role: 'user', content: buildUserMessage() },
         ],
-        tool: toolFunction as ToolFunctionDef,
+        tool: toolFunction as unknown as ToolFunctionDef,
         maxOutputTokens: config.openaiMaxCompletionTokens,
         temperature: config.openaiTemperature,
         topP: config.openaiTopP,
@@ -951,7 +912,7 @@ ${post.text_original}`;
     // delivery gate and Telegram's template falls back to the English original — so
     // the user sees an English tweet delivered "without translation". Treat empty
     // output as a transient failure and let the job retry.
-    if (!translatedText || !String(translatedText).trim()) {
+    if (!translationSkippedByFilter && (!translatedText || !String(translatedText).trim())) {
       const finishReason = (data?.choices?.[0]?.finish_reason as string | undefined)
         ?? (data?.status as string | undefined)
         ?? 'unknown';
@@ -970,8 +931,10 @@ ${post.text_original}`;
       usage: data.usage ?? null,
       scoring_usage: scoringUsage,
       translation_usage: translationUsage,
+      scoring_v2_usage: scoringPolicyResult?.usage ?? null,
       finished_at: nowIso,
       importance_score: importanceScore,
+      scoring_version: scoringPolicyResult ? SCORING_POLICY_VERSION : null,
       split_calls: !!(filterEnabled && config.splitCalls),
     };
     try {
@@ -981,8 +944,27 @@ ${post.text_original}`;
     // Determine delivery decision based on active editorial profile or legacy content filter
     let deliveryDecision = 'deliver';
     let decisionReason: string | null = null;
-    let finalScore: number | null = scoreAxes ? computeFinalScore(scoreAxes) : (importanceScore ?? null);
-    if (filterEnabled && importanceScore !== null && !scoreOnly) {
+    let finalScore: number | null = scoringPolicyActive && scoringPolicyResult
+      ? scoringPolicyResult.final_score
+      : scoreAxes ? computeFinalScore(scoreAxes) : (importanceScore ?? null);
+    if (filterEnabled && scoringPolicyActive && scoringPolicyResult && !scoreOnly) {
+      deliveryDecision = scoringPolicyResult.delivery_decision;
+      decisionReason = scoringPolicyResult.decision_reason;
+      finalScore = scoringPolicyResult.final_score;
+      importanceScore = Math.round(scoringPolicyResult.final_score);
+      importanceTags = scoringPolicyResult.tags;
+      importanceReasoning = scoringPolicyResult.audience_reason;
+      console.log(JSON.stringify({
+        function: 'worker',
+        action: 'filter_decision_v2',
+        tweet_id: tweetId,
+        decision: deliveryDecision,
+        final_score: finalScore,
+        audience_class: scoringPolicyResult.audience_class,
+        profile: scoringPolicyResult.profile_id,
+        reason: decisionReason,
+      }));
+    } else if (legacyFilterEnabled && importanceScore !== null && !scoreOnly) {
       if (config.editorialProfile) {
         const r = applyProfileDecision({
           profile: config.editorialProfile,
@@ -1018,7 +1000,7 @@ ${post.text_original}`;
       }
     } else if (scoreOnly) {
       decisionReason = 'score_only_mode';
-    } else if (!filterEnabled) {
+    } else if (!legacyFilterEnabled && !scoringPolicyActive) {
       decisionReason = 'filter_disabled';
     }
 
@@ -1061,6 +1043,17 @@ ${post.text_original}`;
           ...(tagDelta ? { tag_bias: Math.round(tagDelta * 1000) / 1000 } : {}),
           ...(knnPrior ? { knn_prior: Math.round(knnPrior * 1000) / 1000 } : {}),
           final: Math.round(finalScore * 10) / 10,
+          ...(scoringPolicyResult ? {
+            scoring_v2: {
+              mode: scoringPolicyActive ? 'active' : 'shadow',
+              profile_id: scoringPolicyResult.profile_id,
+              audience_class: scoringPolicyResult.audience_class,
+              audience_confidence: scoringPolicyResult.audience_confidence,
+              cap: scoringPolicyResult.cap,
+              threshold: scoringPolicyResult.threshold,
+              adjudicated: scoringPolicyResult.adjudicated,
+            },
+          } : {}),
         };
       } catch (biasErr) {
         console.warn('feedback bias (non-fatal):', (biasErr as Error).message);
@@ -1070,12 +1063,14 @@ ${post.text_original}`;
     const { error: updateError } = await supabase
       .from('posts')
       .update({
-        text_translated: translatedText,
-        lang_original: 'en',
-        translated_at: nowIso,
-        translation_model: config.openaiModel,
-        translation_tokens: data?.usage?.total_tokens ?? null,
-        translation_duration_ms: job.started_at ? (Date.now() - new Date(job.started_at as string).getTime()) : null,
+        ...(translationSkippedByFilter ? {} : {
+          text_translated: translatedText,
+          lang_original: 'en',
+          translated_at: nowIso,
+          translation_model: config.openaiModel,
+          translation_tokens: (data?.usage as { total_tokens?: number } | undefined)?.total_tokens ?? null,
+          translation_duration_ms: job.started_at ? (Date.now() - new Date(job.started_at as string).getTime()) : null,
+        }),
         importance_score: importanceScore,
         importance_tags: importanceTags,
         importance_reasoning: importanceReasoning,
@@ -1084,27 +1079,19 @@ ${post.text_original}`;
         final_score: finalScore,
         decision_reason: decisionReason,
         score_breakdown: scoreBreakdown,
+        ...(scoringPolicyResult ? {
+          scoring_version: SCORING_POLICY_VERSION,
+          scoring_profile_id: scoringPolicyResult.profile_id,
+          audience_class: scoringPolicyResult.audience_class,
+          audience_confidence: scoringPolicyResult.audience_confidence,
+          audience_reason: scoringPolicyResult.audience_reason,
+          global_exception_class: scoringPolicyResult.global_exception_class,
+          score_review_status: scoringPolicyActive ? scoringPolicyResult.review_status : 'shadow',
+        } : {}),
       })
       .eq('tweet_id', tweetId);
 
     if (updateError) throw updateError;
-
-    // PR3: enqueue compute_signature for every translated post (regardless of decision),
-    // so the dedup memory window has full coverage.
-    if (config.storyMemory?.enabled) {
-      try {
-        await supabase.from('jobs').upsert({
-          type: 'compute_signature',
-          payload: { tweet_id: tweetId },
-          status: 'pending',
-          priority: 11,
-          idempotency_key: `compute_signature:${tweetId}`,
-          next_run_at: new Date().toISOString(),
-        }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
-      } catch (e) {
-        console.warn('Failed to enqueue compute_signature:', (e as Error).message);
-      }
-    }
 
     // Decide what to enqueue next based on filter decision + truncation state.
     // NEW FLOW: If a tweet PASSED the editorial gate AND is still truncated AND
@@ -1341,8 +1328,8 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
       } catch (_e) { /* best-effort */ }
     }
 
-    // Story Memory (PR3): read-only check. Signature computation happens in
-    // the dedicated `compute_signature` job enqueued right after translate.
+    // Duplicate Gate is expected to run before translation, but keep this
+    // delivery-time guard as a final idempotent safety check.
     try {
       const sm = config.storyMemory;
       if (sm?.enabled && sm.action === 'skip') {
@@ -1887,10 +1874,23 @@ supabase: any): Promise<boolean> {
       await supabase.from('posts').update({ has_media: false }).eq('tweet_id', tweetId);
     }
 
-    await supabase.from('jobs').upsert({
-      type: 'translate', payload: { tweet_id: tweetId }, status: 'pending',
-      idempotency_key: `translate:reprocess:${tweetId}`, next_run_at: new Date().toISOString()
-    }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+    if (await isDuplicateGateEnabled(supabase)) {
+      await supabase.from('jobs').upsert({
+        type: 'dedupe',
+        payload: { tweet_id: tweetId, force: true, source: 'reprocess' },
+        status: 'pending',
+        priority: 30,
+        idempotency_key: `dedupe:reprocess:${tweetId}`,
+        next_run_at: new Date().toISOString(),
+      }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+      await markDedupePending(supabase, tweetId, 'queued:reprocess');
+      await insertPipelineEvent(supabase, 'post', tweetId, 'dedupe', 'queued', new Date().toISOString(), null, null, { source: 'reprocess' });
+    } else {
+      await supabase.from('jobs').upsert({
+        type: 'translate', payload: { tweet_id: tweetId }, status: 'pending',
+        idempotency_key: `translate:reprocess:${tweetId}`, next_run_at: new Date().toISOString()
+      }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+    }
 
     return true;
   } catch (error) {
@@ -2069,22 +2069,22 @@ _supabase: any): Promise<{ ck: string; cs: string; at: string; ats: string } | n
 
 // Best-effort increment of x_api_usage settings counter (rolling 24h).
 async function recordXApiCall(// deno-lint-ignore no-explicit-any
-supabase: any, errorMsg?: string | null): Promise<void> {
-  try {
-    const { data } = await supabase.from('settings').select('value').eq('key', 'x_api_usage').maybeSingle();
-    const cur = (data?.value || {}) as Record<string, unknown>;
-    const total = (typeof cur.total === 'number' ? cur.total : 0) + 1;
-    const calls = Array.isArray(cur.calls_24h) ? (cur.calls_24h as string[]) : [];
-    const now = new Date();
-    const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-    const trimmed = calls.filter((ts) => { try { return new Date(ts) >= cutoff; } catch { return false; } });
-    trimmed.push(now.toISOString());
-    await supabase.from('settings').update({
-      value: { total, calls_24h: trimmed, last_call_at: now.toISOString(), last_error: errorMsg ?? null },
-      updated_at: now.toISOString(),
-    }).eq('key', 'x_api_usage');
-  } catch (e) {
-    console.warn('recordXApiCall failed:', (e as Error).message);
+supabase: any, errorMsg?: string | null, response?: Response | null, tweetId?: string | null): Promise<void> {
+  const requestCounted = errorMsg !== 'no_creds';
+  await recordXApiEvent(supabase, {
+    source: 'worker',
+    sourceAction: 'hydrate_tweet',
+    endpoint: tweetId ? `/2/tweets/${tweetId}` : '/2/tweets/:id',
+    method: 'GET',
+    tweetId,
+    ok: response?.ok ?? false,
+    status: response?.status ?? null,
+    error: errorMsg ?? (response && !response.ok ? `HTTP ${response.status}` : null),
+    requestCounted,
+    estimatedBillableUnit: 'post_read',
+  }, response ?? null);
+  if (requestCounted) {
+    await recordLegacyXApiUsage(supabase, { error: errorMsg ?? (response && !response.ok ? `hydrate: HTTP ${response.status}` : null) });
   }
 }
 
@@ -2154,6 +2154,84 @@ supabase: any, tweetId: string, fallback: boolean): Promise<void> {
   } catch { /* best-effort */ }
 }
 
+async function queueTranslateFromDedupe(// deno-lint-ignore no-explicit-any
+supabase: any, tweetId: string, postHydrate = false): Promise<void> {
+  const idempotencyKey = postHydrate ? `translate:hydrate:${tweetId}` : `translate:${tweetId}`;
+  await supabase.from('jobs').upsert({
+    type: 'translate',
+    payload: { tweet_id: tweetId, ...(postHydrate ? { post_hydrate: true } : {}) },
+    status: 'pending',
+    priority: 10,
+    idempotency_key: idempotencyKey,
+    next_run_at: new Date().toISOString(),
+  }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+
+  try {
+    await supabase.from('pipeline_events').insert({
+      subject_type: 'post',
+      subject_id: tweetId,
+      step: 'translate',
+      status: 'queued',
+      started_at: new Date().toISOString(),
+      meta: { source: postHydrate ? 'dedupe_after_hydrate' : 'dedupe' },
+    });
+  } catch { /* best-effort */ }
+}
+
+async function markDedupePending(// deno-lint-ignore no-explicit-any
+supabase: any, tweetId: string, reason: string): Promise<void> {
+  await supabase
+    .from('posts')
+    .update({
+      dedupe_status: 'pending',
+      dedupe_method: null,
+      dedupe_confidence: null,
+      dedupe_reason: reason,
+      dedupe_checked_at: null,
+    })
+    .eq('tweet_id', tweetId)
+    .then(() => null, () => null);
+}
+
+async function isDuplicateGateEnabled(// deno-lint-ignore no-explicit-any
+supabase: any): Promise<boolean> {
+  try {
+    const { data } = await supabase.from('settings').select('value').eq('key', 'story_memory').maybeSingle();
+    return normalizeDuplicateGateConfig(data?.value ?? DEFAULT_DUPLICATE_GATE).enabled;
+  } catch {
+    return DEFAULT_DUPLICATE_GATE.enabled;
+  }
+}
+
+async function queueDedupeOrTranslateAfterHydrate(// deno-lint-ignore no-explicit-any
+supabase: any, tweetId: string): Promise<void> {
+  if (!(await isDuplicateGateEnabled(supabase))) {
+    await queueTranslateAfterHydrate(supabase, tweetId, false);
+    return;
+  }
+
+  await supabase.from('jobs').upsert({
+    type: 'dedupe',
+    payload: { tweet_id: tweetId, post_hydrate: true },
+    status: 'pending',
+    priority: 30,
+    idempotency_key: `dedupe:hydrate:${tweetId}`,
+    next_run_at: new Date().toISOString(),
+  }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+  await markDedupePending(supabase, tweetId, 'queued:hydrate');
+
+  try {
+    await supabase.from('pipeline_events').insert({
+      subject_type: 'post',
+      subject_id: tweetId,
+      step: 'dedupe',
+      status: 'queued',
+      started_at: new Date().toISOString(),
+      meta: { source: 'hydrate' },
+    });
+  } catch { /* best-effort */ }
+}
+
 // Extract numeric tweet id from RSS guid/url. Twitter tweet IDs are 18-19 digit numbers.
 function extractNumericTweetId(rawTweetId: string, url?: string | null): string | null {
   const candidates: string[] = [rawTweetId];
@@ -2192,8 +2270,8 @@ supabase: any): Promise<boolean> {
   }
 
   if (post.hydrated_at) {
-    console.log('hydrate_tweet: already hydrated, ensuring translate job exists', tweetId);
-    await queueTranslateAfterHydrate(supabase, tweetId, false);
+    console.log('hydrate_tweet: already hydrated, ensuring post-hydrate pipeline exists', tweetId);
+    await queueDedupeOrTranslateAfterHydrate(supabase, tweetId);
     return true;
   }
 
@@ -2269,11 +2347,11 @@ supabase: any): Promise<boolean> {
     res = await fetch(fullUrl, { method: 'GET', headers: { Authorization: auth } });
   } catch (e) {
     console.error('hydrate_tweet: network error', (e as Error).message);
-    await recordXApiCall(supabase, `network: ${(e as Error).message}`);
+    await recordXApiCall(supabase, `network: ${(e as Error).message}`, null, numericId);
     throw new Error(`hydrate_tweet[${tweetId}]: network_error: ${(e as Error).message}`);
   }
 
-  await recordXApiCall(supabase, res.ok ? null : `http_${res.status}`);
+  await recordXApiCall(supabase, res.ok ? null : `http_${res.status}`, res, numericId);
 
   if (res.status === 404) {
     console.warn('hydrate_tweet: tweet not found on X (404), falling back to truncated translate', tweetId);
@@ -2346,7 +2424,7 @@ supabase: any): Promise<boolean> {
   }
 
   console.log(`hydrate_tweet: success ${tweetId} (orig=${(post.text_original || '').length} chars → full=${fullText.length} chars)`);
-  await queueTranslateAfterHydrate(supabase, tweetId, false);
+  await queueDedupeOrTranslateAfterHydrate(supabase, tweetId);
   await maybeEnqueueResolveMedia(supabase, tweetId, fullText);
   return true;
 }

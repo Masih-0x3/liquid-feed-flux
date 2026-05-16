@@ -1,7 +1,21 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { renderHook } from "@testing-library/react";
 import { useAuth, AuthProvider } from "@/contexts/AuthContext";
 import { ReactNode } from "react";
+
+vi.mock("@/integrations/supabase/client", () => ({
+  supabase: {
+    auth: {
+      onAuthStateChange: vi.fn(() => ({
+        data: { subscription: { unsubscribe: vi.fn() } },
+      })),
+      getSession: vi.fn(() => new Promise(() => {})),
+      signInWithPassword: vi.fn(),
+      signOut: vi.fn(),
+    },
+    from: vi.fn(),
+  },
+}));
 
 function wrapper({ children }: { children: ReactNode }) {
   return <AuthProvider>{children}</AuthProvider>;
@@ -9,9 +23,11 @@ function wrapper({ children }: { children: ReactNode }) {
 
 describe("useAuth", () => {
   it("throws when used outside AuthProvider", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     expect(() => {
       renderHook(() => useAuth());
     }).toThrow("useAuth must be used within an AuthProvider");
+    consoleError.mockRestore();
   });
 
   it("returns loading=true initially inside AuthProvider", () => {

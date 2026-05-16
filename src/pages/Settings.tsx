@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { lazy, Suspense, useState, useEffect, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -9,6 +9,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
@@ -17,17 +22,20 @@ import { Brain, MessageSquare, Eye, Code, Sparkles, Send, Shield, Loader2, Filte
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   useSettingsData, useSaveSettings, openaiModels, messagePlaceholders, promptPlaceholders,
-  type TranslationSettings, type TelegramSettings, type MessageTemplateSettings,
+  type TranslationSettings, type TelegramSettings, type MessageTemplateSettings, type ScoringPolicy,
 } from '@/hooks/useSettingsData';
-import ContentFilterSettings, { type ContentFilterConfig } from '@/components/settings/ContentFilterSettings';
-import EditorialProfilesCard from '@/components/settings/EditorialProfilesCard';
-import StoryMemoryCard from '@/components/settings/StoryMemoryCard';
+import type { ContentFilterConfig } from '@/components/settings/ContentFilterSettings';
 import type { EditorialProfile } from '@/hooks/useSettingsData';
-import XAutomationSettings from '@/components/settings/XAutomationSettings';
-import TranslationPlayground from '@/components/settings/TranslationPlayground';
 import PromptEditor from '@/components/settings/PromptEditor';
-import LearnedSignalsCard from '@/components/settings/LearnedSignalsCard';
-import EnrichmentSettings from '@/components/settings/EnrichmentSettings';
+
+const ContentFilterSettings = lazy(() => import('@/components/settings/ContentFilterSettings'));
+const EditorialProfilesCard = lazy(() => import('@/components/settings/EditorialProfilesCard'));
+const ScoringStudio = lazy(() => import('@/components/settings/ScoringStudio'));
+const StoryMemoryCard = lazy(() => import('@/components/settings/StoryMemoryCard'));
+const XAutomationSettings = lazy(() => import('@/components/settings/XAutomationSettings'));
+const TranslationPlayground = lazy(() => import('@/components/settings/TranslationPlayground'));
+const LearnedSignalsCard = lazy(() => import('@/components/settings/LearnedSignalsCard'));
+const EnrichmentSettings = lazy(() => import('@/components/settings/EnrichmentSettings'));
 
 const SETTINGS_TAB_IDS = ['translation', 'filter', 'messages', 'telegram', 'x-automation', 'enrichment'] as const;
 type SettingsTabId = (typeof SETTINGS_TAB_IDS)[number];
@@ -45,6 +53,14 @@ function insertPlaceholder(placeholder: string, textareaId: string, getter: stri
     setter(getter.substring(0, start) + placeholder + getter.substring(end));
     setTimeout(() => { textarea.setSelectionRange(start + placeholder.length, start + placeholder.length); textarea.focus(); }, 0);
   }
+}
+
+function SettingsPanelFallback() {
+  return (
+    <div className="flex min-h-40 items-center justify-center rounded-lg border border-dashed border-border bg-muted/20">
+      <Loader2 className="h-5 w-5 animate-spin text-primary" />
+    </div>
+  );
 }
 
 export default function Settings() {
@@ -143,13 +159,13 @@ export default function Settings() {
       </div>
 
       <Tabs value={settingsTab} onValueChange={(v) => goToSettingsTab(v as SettingsTabId)} className="w-full">
-        <TabsList className="grid w-full grid-cols-6">
-          <TabsTrigger value="translation" className="flex items-center gap-2"><Brain className="w-4 h-4" />Translation</TabsTrigger>
-          <TabsTrigger value="filter" className="flex items-center gap-2"><Filter className="w-4 h-4" />Content Filter</TabsTrigger>
-          <TabsTrigger value="messages" className="flex items-center gap-2"><MessageSquare className="w-4 h-4" />Messages</TabsTrigger>
-          <TabsTrigger value="telegram" className="flex items-center gap-2"><Send className="w-4 h-4" />Telegram</TabsTrigger>
-          <TabsTrigger value="x-automation" className="flex items-center gap-2"><AtSign className="w-4 h-4" />X Automation</TabsTrigger>
-          <TabsTrigger value="enrichment" className="flex items-center gap-2"><Sparkles className="w-4 h-4" />Enrichment</TabsTrigger>
+        <TabsList className="flex h-auto w-full justify-start gap-1 overflow-x-auto p-1">
+          <TabsTrigger value="translation" className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><Brain className="w-4 h-4" />Translation</TabsTrigger>
+          <TabsTrigger value="filter" className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><Filter className="w-4 h-4" />Scoring</TabsTrigger>
+          <TabsTrigger value="messages" className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><MessageSquare className="w-4 h-4" />Messages</TabsTrigger>
+          <TabsTrigger value="telegram" className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><Send className="w-4 h-4" />Telegram</TabsTrigger>
+          <TabsTrigger value="x-automation" className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><AtSign className="w-4 h-4" />X Automation</TabsTrigger>
+          <TabsTrigger value="enrichment" className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><Sparkles className="w-4 h-4" />Enrichment</TabsTrigger>
         </TabsList>
 
         {/* Translation Tab */}
@@ -494,19 +510,35 @@ export default function Settings() {
                   </div>
                 </div>
               )}
-              <div className="flex gap-3">
-                <Button onClick={() => saveMutation.mutate({ key: 'translation_prompt', value: ts })} disabled={saveMutation.isPending} className="bg-gradient-primary hover:opacity-90 text-white flex-1">
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <Button onClick={() => saveMutation.mutate({ key: 'translation_prompt', value: ts })} disabled={saveMutation.isPending} className="bg-gradient-primary hover:opacity-90 text-white w-full sm:flex-1">
                   Save Translation Settings
                 </Button>
-                <Button onClick={async () => {
-                  try {
-                    const { error } = await supabase.functions.invoke('admin-retry', { body: { action: 'test_webhook' } });
-                    if (error) throw error;
-                    toast({ title: 'Test webhook sent!', description: 'Check the Posts page for new sample content' });
-                  } catch { toast({ title: 'Test failed', variant: 'destructive' }); }
-                }} variant="outline" disabled={saveMutation.isPending} className="border-primary/50 hover:bg-primary/10">
-                  Test Pipeline
-                </Button>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="outline" disabled={saveMutation.isPending} className="border-primary/50 hover:bg-primary/10 w-full sm:w-auto">
+                      Test Pipeline
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Send a live pipeline test?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This invokes the production test webhook and may create sample content in the live pipeline.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction onClick={async () => {
+                        try {
+                          const { error } = await supabase.functions.invoke('admin-retry', { body: { action: 'test_webhook' } });
+                          if (error) throw error;
+                          toast({ title: 'Test webhook sent!', description: 'Check the Posts page for new sample content' });
+                        } catch { toast({ title: 'Test failed', variant: 'destructive' }); }
+                      }}>Send test</AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
               </div>
             </CardContent>
           </Card>
@@ -515,30 +547,31 @@ export default function Settings() {
               where they conceptually belong (they only run when filtering/scoring is active). */}
 
           {/* Live Translation Playground */}
-          <TranslationPlayground
-            translationSettings={ts}
-            contentFilter={(settings?.content_filter ?? { enabled: false }) as ContentFilterConfig}
-            sampleTweets={sampleTweets}
-          />
+          <Suspense fallback={<SettingsPanelFallback />}>
+            <TranslationPlayground
+              translationSettings={ts}
+              contentFilter={(settings?.content_filter ?? { enabled: false }) as ContentFilterConfig}
+              sampleTweets={sampleTweets}
+            />
+          </Suspense>
         </TabsContent>
 
         {/* Content Filter Tab */}
         <TabsContent value="filter" className="space-y-6">
           <Alert className="border-primary/25 bg-primary/5">
             <Info className="h-4 w-4" />
-            <AlertTitle>How content filtering fits together</AlertTitle>
+            <AlertTitle>How scoring fits together</AlertTitle>
             <AlertDescription>
               <ul className="mt-2 list-disc space-y-1.5 pl-4 text-muted-foreground">
                 <li>
-                  When an <span className="font-medium text-foreground">editorial profile</span> is active, Telegram deliver/skip uses the axes-weighted{' '}
-                  <span className="font-medium text-foreground">final score</span> compared to that profile&apos;s threshold (plus hard rules like blocked tags).
+                  <span className="font-medium text-foreground">Scoring Studio</span> is the new profile-driven system. It separates audience fit from the final priority score.
                 </li>
                 <li>
-                  The <span className="font-medium text-foreground">legacy content filter</span> below still drives split scoring, priority/low topics, editorial guidelines text, and per-author rules.
-                  When no profile is active, the worker falls back to this path and gates on <span className="font-medium text-foreground">importance_score</span> and the threshold here.
+                  In <span className="font-medium text-foreground">shadow</span> mode, v2 records audience class and score evidence while legacy gates stay in control.
+                  In <span className="font-medium text-foreground">active</span> mode, v2 controls deliver/skip before translation.
                 </li>
                 <li>
-                  <span className="font-medium text-foreground">Story memory</span> only affects near-duplicate detection and related skips — it does not change numeric scores.
+                  <span className="font-medium text-foreground">Duplicate Gate</span> runs before scoring and translation. The novelty axis remains an importance signal, not duplicate enforcement.
                 </li>
                 <li>
                   X posting uses separate thresholds: open the{' '}
@@ -554,19 +587,22 @@ export default function Settings() {
               </ul>
             </AlertDescription>
           </Alert>
-          <EditorialProfilesCard
-            profiles={(settings?.editorial_profiles as { profiles?: EditorialProfile[] } | undefined)?.profiles ?? []}
-            activeProfileId={(settings?.active_profile_id as { id?: string | null } | undefined)?.id ?? null}
-          />
-          <StoryMemoryCard
-            initial={settings?.story_memory as Partial<import('@/components/settings/StoryMemoryCard').StoryMemoryConfig> | undefined}
-          />
-          <ContentFilterSettings
-            initialConfig={settings?.content_filter as ContentFilterConfig | undefined}
-            translationSettings={ts}
-            onTranslationSettingsChange={setTranslationSettings}
-          />
-          <LearnedSignalsCard />
+          <Suspense fallback={<SettingsPanelFallback />}>
+            <ScoringStudio initial={settings?.scoring_policy as ScoringPolicy | undefined} />
+            <EditorialProfilesCard
+              profiles={(settings?.editorial_profiles as { profiles?: EditorialProfile[] } | undefined)?.profiles ?? []}
+              activeProfileId={(settings?.active_profile_id as { id?: string | null } | undefined)?.id ?? null}
+            />
+            <StoryMemoryCard
+              initial={settings?.story_memory as Partial<import('@/components/settings/StoryMemoryCard').StoryMemoryConfig> | undefined}
+            />
+            <ContentFilterSettings
+              initialConfig={settings?.content_filter as ContentFilterConfig | undefined}
+              translationSettings={ts}
+              onTranslationSettingsChange={setTranslationSettings}
+            />
+            <LearnedSignalsCard />
+          </Suspense>
         </TabsContent>
 
         <TabsContent value="messages" className="space-y-6">
@@ -618,19 +654,40 @@ export default function Settings() {
                   </div>
                 </div>
               )}
-              <div className="flex gap-3">
-                <Button onClick={() => saveMutation.mutate({ key: 'message_template', value: mt })} disabled={saveMutation.isPending} className="bg-gradient-primary hover:opacity-90 text-white flex-1">Save Message Template</Button>
-                <Button onClick={async () => {
-                  try {
-                    const { error } = await supabase.functions.invoke('admin-retry', {
-                      body: { action: 'test_template', post: sampleTweets[selectedSample], template: mt.template, settings: { include_source_links: mt.include_source_link, custom_hashtags: mt.custom_hashtags } },
-                    });
-                    if (error) throw error;
-                    toast({ title: 'Test message sent!', description: 'Check your Telegram channel' });
-                  } catch { toast({ title: 'Test failed', variant: 'destructive' }); }
-                }} variant="outline" disabled={saveMutation.isPending || sampleTweets.length === 0} className="border-primary/50 hover:bg-primary/10">
-                  Test Message
-                </Button>
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <Button onClick={() => saveMutation.mutate({ key: 'message_template', value: mt })} disabled={saveMutation.isPending} className="bg-gradient-primary hover:opacity-90 text-white w-full sm:flex-1">Save Message Template</Button>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="outline" disabled={saveMutation.isPending || sampleTweets.length === 0} className="border-primary/50 hover:bg-primary/10 w-full sm:w-auto">
+                      Test Message
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Send a live Telegram test?</AlertDialogTitle>
+                      <AlertDialogDescription asChild>
+                        <div>
+                          <p>This sends the selected sample through the production Telegram template test action.</p>
+                          <div className="mt-2 max-h-48 overflow-auto rounded border bg-muted p-3 text-sm text-foreground whitespace-pre-wrap">
+                            {renderMessagePreview()}
+                          </div>
+                        </div>
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction onClick={async () => {
+                        try {
+                          const { error } = await supabase.functions.invoke('admin-retry', {
+                            body: { action: 'test_template', post: sampleTweets[selectedSample], template: mt.template, settings: { include_source_links: mt.include_source_link, custom_hashtags: mt.custom_hashtags } },
+                          });
+                          if (error) throw error;
+                          toast({ title: 'Test message sent!', description: 'Check your Telegram channel' });
+                        } catch { toast({ title: 'Test failed', variant: 'destructive' }); }
+                      }}>Send message</AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
               </div>
             </CardContent>
           </Card>
@@ -669,20 +726,23 @@ export default function Settings() {
 
         {/* X Automation Tab */}
         <TabsContent value="x-automation" className="space-y-6">
-          <XAutomationSettings
-            twitterHydration={settings?.twitter_hydration as { enabled?: boolean; max_attempts?: number } | undefined}
-            xApiUsage={settings?.x_api_usage as { total?: number; calls_24h?: string[]; last_call_at?: string | null; last_error?: string | null; posts_24h?: string[]; media_uploads_24h?: string[] } | undefined}
-            xPostingConfig={settings?.x_posting_config as Record<string, unknown> | undefined}
-            xRateLimits={settings?.x_rate_limits as Record<string, unknown> | undefined}
-          />
+          <Suspense fallback={<SettingsPanelFallback />}>
+            <XAutomationSettings
+              twitterHydration={settings?.twitter_hydration as { enabled?: boolean; max_attempts?: number } | undefined}
+              xApiUsage={settings?.x_api_usage as { total?: number; calls_24h?: string[]; last_call_at?: string | null; last_error?: string | null; posts_24h?: string[]; media_uploads_24h?: string[] } | undefined}
+              xPostingConfig={settings?.x_posting_config as Record<string, unknown> | undefined}
+              xRateLimits={settings?.x_rate_limits as Record<string, unknown> | undefined}
+            />
+          </Suspense>
         </TabsContent>
 
         {/* Enrichment Tab */}
         <TabsContent value="enrichment" className="space-y-6">
-          <EnrichmentSettings />
+          <Suspense fallback={<SettingsPanelFallback />}>
+            <EnrichmentSettings />
+          </Suspense>
         </TabsContent>
       </Tabs>
     </div>
   );
 }
-
