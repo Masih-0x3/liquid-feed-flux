@@ -681,6 +681,42 @@ export default function Monitoring() {
     );
   };
 
+  const renderDuplicateMatch = (entry: MonitoringEntry, compact = false) => {
+    if (!entry.dup_of_tweet_id) {
+      return <span className="text-xs text-muted-foreground">—</span>;
+    }
+    const target = entry.duplicate_of;
+    const score = target ? target.final_score ?? target.importance_score : null;
+    const matchedLabel = target?.author_handle ? `@${target.author_handle}` : entry.dup_of_tweet_id.slice(-10);
+    return (
+      <div className={`space-y-2 ${compact ? 'rounded-md border bg-muted/20 p-2 text-xs' : 'text-xs'}`}>
+        <div className="flex flex-wrap items-center gap-1">
+          <Badge className={`${duplicateCoverageClass(target?.coverage_state)} text-[10px]`}>
+            {duplicateCoverageLabel(target?.coverage_state)}
+          </Badge>
+          <span className="font-medium text-foreground">with {matchedLabel}</span>
+        </div>
+        {target ? (
+          <>
+            <p className="line-clamp-2 text-muted-foreground">{target.text_original || '[No content]'}</p>
+            <div className="flex flex-wrap gap-x-2 gap-y-1 text-muted-foreground">
+              <span>Score {score ?? '—'}</span>
+              <span>Telegram {target.telegram_state}</span>
+              <span>X {target.x_state}</span>
+            </div>
+            {target.url && (
+              <a href={target.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
+                Open match <ExternalLink className="w-3 h-3" />
+              </a>
+            )}
+          </>
+        ) : (
+          <p className="break-all text-muted-foreground">Matched ID {entry.dup_of_tweet_id}</p>
+        )}
+      </div>
+    );
+  };
+
   const renderAudienceBadge = (entry: MonitoringEntry) => {
     if (!entry.audience_class) return null;
     const cls =
@@ -962,6 +998,13 @@ export default function Monitoring() {
                         </p>
                       )}
 
+                      {entry.dup_of_tweet_id && (
+                        <div>
+                          <p className="mb-1 text-xs font-medium uppercase text-muted-foreground">Duplicate match</p>
+                          {renderDuplicateMatch(entry, true)}
+                        </div>
+                      )}
+
                       <div className="grid grid-cols-3 gap-2">
                         <Button variant="outline" size="sm" className="h-9" onClick={() => openDetails(entry.tweet_id)}>
                           Details
@@ -978,20 +1021,21 @@ export default function Monitoring() {
 
               <div className="hidden overflow-x-auto lg:block">
                 <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[170px]">Source / time</TableHead>
-                    <TableHead className="w-[150px]">Author</TableHead>
-                    <TableHead className="min-w-[320px]">Excerpt</TableHead>
-                    <TableHead>Stage</TableHead>
-                    <TableHead>Score</TableHead>
-                    <TableHead>Decision</TableHead>
-                    <TableHead>Telegram</TableHead>
-                    <TableHead>X</TableHead>
-                    <TableHead>Cost</TableHead>
-                    <TableHead className="w-[72px] text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[170px]">Source / time</TableHead>
+                      <TableHead className="w-[150px]">Author</TableHead>
+                      <TableHead className="min-w-[320px]">Excerpt</TableHead>
+                      <TableHead>Stage</TableHead>
+                      <TableHead>Score</TableHead>
+                      <TableHead>Decision</TableHead>
+                      <TableHead className="min-w-[230px]">Duplicate match</TableHead>
+                      <TableHead>Telegram</TableHead>
+                      <TableHead>X</TableHead>
+                      <TableHead>Cost</TableHead>
+                      <TableHead className="w-[72px] text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
                 <TableBody>
                   {entries.map((entry) => {
                     const stage = monitoringStage(entry);
@@ -1038,6 +1082,7 @@ export default function Monitoring() {
                           <p className="truncate text-sm" title={blocker || decision.detail || decision.title}>{decisionLabel}</p>
                           {(blocker || entry.decision_reason) && <p className="truncate text-xs text-muted-foreground">{blocker || decision.title}</p>}
                         </TableCell>
+                        <TableCell className="max-w-[260px]">{renderDuplicateMatch(entry)}</TableCell>
                         <TableCell>{renderTelegramBadge(entry)}</TableCell>
                         <TableCell>{renderXBadge(entry)}</TableCell>
                         <TableCell>{renderCostFlags(entry)}</TableCell>
@@ -1084,6 +1129,17 @@ export default function Monitoring() {
                       <p className="text-muted-foreground">
                         {selectedEntry.monitoring_state?.primary_blocker ?? 'No current blocker. This item is waiting for the next normal pipeline step or is already complete.'}
                       </p>
+                      {selectedEntry.dup_of_tweet_id && (
+                        <div className="rounded-md border bg-muted/20 p-3">
+                          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-xs font-medium uppercase text-muted-foreground">Duplicate match</p>
+                            <Badge className={duplicateCoverageClass(selectedEntry.duplicate_of?.coverage_state)}>
+                              {duplicateCoverageLabel(selectedEntry.duplicate_of?.coverage_state)}
+                            </Badge>
+                          </div>
+                          {renderDuplicateMatch(selectedEntry)}
+                        </div>
+                      )}
                       <div className="grid gap-2 sm:grid-cols-3">
                         <div className="rounded-md border p-2">
                           <p className="text-xs text-muted-foreground">Telegram</p>
