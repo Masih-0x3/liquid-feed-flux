@@ -1801,6 +1801,23 @@ async function loadDashboardQueueBreakdown(supabase: any, since: string, staleCu
   };
 }
 
+function xDeliveryTime(row: Record<string, unknown>): number {
+  const raw = typeof row.posted_at === 'string' ? row.posted_at : row.created_at;
+  const time = typeof raw === 'string' ? new Date(raw).getTime() : Number.NaN;
+  return Number.isFinite(time) ? time : 0;
+}
+
+function latestXDeliveriesByPost(rows: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  const latest = new Map<string, Record<string, unknown>>();
+  for (const row of rows) {
+    const postId = String(row.post_id ?? '');
+    if (!postId) continue;
+    const existing = latest.get(postId);
+    if (!existing || xDeliveryTime(row) > xDeliveryTime(existing)) latest.set(postId, row);
+  }
+  return [...latest.values()];
+}
+
 // deno-lint-ignore no-explicit-any
 async function loadDashboardXLocalUsage(supabase: any, base: Record<string, unknown>, since: string) {
   const xPosting = (base.x_posting && typeof base.x_posting === 'object' ? base.x_posting : {}) as Record<string, unknown>;
@@ -1810,7 +1827,7 @@ async function loadDashboardXLocalUsage(supabase: any, base: Record<string, unkn
   const [{ data: xRows, error: xError }, { data: eventRows, error: eventError }] = await Promise.all([
     supabase
       .from('x_deliveries')
-      .select('status, media_count, created_at')
+      .select('post_id, status, media_count, created_at, posted_at')
       .gte('created_at', since)
       .order('created_at', { ascending: false })
       .limit(5000),
@@ -1824,8 +1841,10 @@ async function loadDashboardXLocalUsage(supabase: any, base: Record<string, unkn
   if (xError) throw xError;
 
   const deliveries = (xRows ?? []) as Array<Record<string, unknown>>;
-  const posts24h = deliveries.filter((row) => row.status === 'posted').length;
-  const failedPosts24h = deliveries.filter((row) => row.status === 'failed').length;
+  const latestDeliveries = latestXDeliveriesByPost(deliveries);
+  const posts24h = new Set(deliveries.filter((row) => row.status === 'posted').map((row) => row.post_id).filter(Boolean)).size;
+  const failedDeliveryRows24h = deliveries.filter((row) => row.status === 'failed').length;
+  const failedPosts24h = latestDeliveries.filter((row) => row.status === 'failed').length;
   const mediaUploads24h = deliveries.reduce((sum, row) => sum + num(row.media_count), 0);
 
   if (eventError && !isMissingSchemaError(eventError)) throw eventError;
@@ -1845,9 +1864,9 @@ async function loadDashboardXLocalUsage(supabase: any, base: Record<string, unkn
     source: eventsAvailable ? 'x_api_events' : 'x_deliveries_fallback',
     attempts_24h: eventsAvailable ? attempts : num(metrics.x_api_calls_24h),
     counted_attempts_24h: eventsAvailable ? counted : num(metrics.x_api_calls_24h),
-    failed_attempts_24h: eventsAvailable ? failedAttempts : num(metrics.x_failed_24h),
+    failed_attempts_24h: eventsAvailable ? failedAttempts : failedDeliveryRows24h,
     posts_24h: posts24h || num(xPosting.posted_24h),
-    failed_posts_24h: failedPosts24h || num(xPosting.failed_24h),
+    failed_posts_24h: failedPosts24h,
     media_uploads_24h: mediaUploads24h || num(xPosting.media_uploads_24h),
     hydrations_24h: eventsAvailable ? hydrations : num(metrics.posts_hydrated_24h),
     monthly_posts: num(xPosting.monthly_posts, num(health.x_monthly_posts)),
@@ -1961,7 +1980,7 @@ async function getEnhancedDashboardSummary(supabase: any) {
   const [posts, deliveriesRes, xDeliveriesRes, queueBreakdown, xLocalUsage, activity] = await Promise.all([
     loadDashboardPosts(supabase, since, dedupeAvailable),
     supabase.from('deliveries').select('subject_id, status, posted_at, created_at').eq('subject_type', 'post').gte('created_at', since).limit(10000),
-    supabase.from('x_deliveries').select('post_id, status, posted_at, created_at').gte('created_at', since).limit(10000),
+    supabase.from('x_deliveries').select('post_id, status, posted_at, created_at').gte('created_at', since).order('created_at', { ascending: false }).limit(10000),
     loadDashboardQueueBreakdown(supabase, since, staleCutoff),
     loadDashboardXLocalUsage(supabase, dashboard, since),
     loadDashboardActivity(supabase),
@@ -1971,7 +1990,7 @@ async function getEnhancedDashboardSummary(supabase: any) {
 
   const telegramPosted = new Set((deliveriesRes.data ?? []).filter((row: Record<string, unknown>) => row.status === 'posted').map((row: Record<string, unknown>) => row.subject_id));
   const xByTweet = new Map<string, Record<string, unknown>>();
-  for (const row of xDeliveriesRes.data ?? []) {
+  for (const row of latestXDeliveriesByPost((xDeliveriesRes.data ?? []) as Array<Record<string, unknown>>)) {
     const postId = String(row.post_id ?? '');
     if (postId && !xByTweet.has(postId)) xByTweet.set(postId, row);
   }
@@ -1999,8 +2018,9 @@ async function getEnhancedDashboardSummary(supabase: any) {
     if (xByTweet.get(tweetId)?.status === 'failed') xFailed += 1;
   }
 
+  const xFailedActionable = Math.max(xFailed, num(xLocalUsage.failed_posts_24h));
   const failedStuck = queueBreakdown.failed_24h + queueBreakdown.stale_running;
-  const needsAttention = failedStuck + xFailed;
+  const needsAttention = failedStuck + xFailedActionable;
   const lastIngestAge = typeof heartbeat.age_seconds === 'number' ? heartbeat.age_seconds : null;
   const budgetPct = num(xLocalUsage.budget_used_pct, num(health.x_budget_used_pct));
   let severity: 'ok' | 'warning' | 'critical' = 'ok';
@@ -2010,9 +2030,9 @@ async function getEnhancedDashboardSummary(supabase: any) {
     severity = 'critical';
     primaryIssue = `${queueBreakdown.stale_running} stale running job${queueBreakdown.stale_running === 1 ? '' : 's'}`;
     recommendedRoute = '/monitoring?filter=failed_stuck';
-  } else if (xFailed > 0 || num(metrics.x_failed_24h) > 0) {
+  } else if (xFailedActionable > 0) {
     severity = 'critical';
-    primaryIssue = `${Math.max(xFailed, num(metrics.x_failed_24h))} X failure${Math.max(xFailed, num(metrics.x_failed_24h)) === 1 ? '' : 's'} in 24h`;
+    primaryIssue = `${xFailedActionable} X failed post${xFailedActionable === 1 ? '' : 's'} in 24h`;
     recommendedRoute = '/monitoring?filter=x_failed';
   } else if (queueBreakdown.failed_24h > 0) {
     severity = 'warning';
@@ -2050,7 +2070,7 @@ async function getEnhancedDashboardSummary(supabase: any) {
       failed_stuck: failedStuck,
       ready_to_deliver: readyToDeliver,
       translation_queue: queueBreakdown.by_type.find((row) => row.type === 'translate')?.pending ?? 0,
-      x_failed: Math.max(xFailed, num(metrics.x_failed_24h)),
+      x_failed: xFailedActionable,
       stale_jobs: queueBreakdown.stale_running,
     },
     queue_breakdown: queueBreakdown,

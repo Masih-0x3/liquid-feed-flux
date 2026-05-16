@@ -259,7 +259,7 @@ export default function Dashboard() {
                 <p className="font-semibold">{compactNumber(xLocalUsage.posts24h)}</p>
               </div>
               <div>
-                <p className="text-xs text-muted-foreground">X failures 24h</p>
+                <p className="text-xs text-muted-foreground">Failed posts 24h</p>
                 <p className={xLocalUsage.failedPosts24h > 0 ? 'font-semibold text-destructive' : 'font-semibold text-success'}>{compactNumber(xLocalUsage.failedPosts24h)}</p>
               </div>
               <div>
@@ -269,6 +269,10 @@ export default function Dashboard() {
               <div>
                 <p className="text-xs text-muted-foreground">Hydration reads</p>
                 <p className="font-semibold">{compactNumber(xLocalUsage.hydrations24h)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Failed attempts</p>
+                <p className={xLocalUsage.failedAttempts24h > 0 ? 'font-semibold text-warning' : 'font-semibold text-success'}>{compactNumber(xLocalUsage.failedAttempts24h)}</p>
               </div>
             </div>
             <div className="rounded-md border border-border/60 bg-muted/20 p-3 text-xs text-muted-foreground">

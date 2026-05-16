@@ -173,6 +173,8 @@ describe("Dashboard", () => {
     expect(screen.getByText("Pipeline Funnel")).toBeTruthy();
     expect(screen.getByText("X Cost Guard")).toBeTruthy();
     expect(screen.getByText("Needs attention")).toBeTruthy();
+    expect(screen.getByText("Failed posts 24h")).toBeTruthy();
+    expect(screen.getByText("Failed attempts")).toBeTruthy();
 
     expect(screen.getByText(/Official X usage is not synced from Dashboard/)).toBeTruthy();
   });
