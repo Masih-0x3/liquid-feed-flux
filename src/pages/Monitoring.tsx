@@ -647,6 +647,40 @@ export default function Monitoring() {
     return <Badge className={`${cls} text-[10px]`} title={title}>{label}</Badge>;
   };
 
+  const duplicateCoverageLabel = (coverage?: NonNullable<MonitoringEntry['duplicate_of']>['coverage_state']) => {
+    switch (coverage) {
+      case 'delivered': return 'covered: delivered';
+      case 'in_pipeline': return 'covered: in pipeline';
+      case 'also_duplicate': return 'canonical is also duplicate';
+      case 'not_covered': return 'not covered';
+      default: return 'coverage unknown';
+    }
+  };
+
+  const duplicateCoverageClass = (coverage?: NonNullable<MonitoringEntry['duplicate_of']>['coverage_state']) => {
+    switch (coverage) {
+      case 'delivered': return toneClass('good');
+      case 'in_pipeline': return toneClass('info');
+      case 'also_duplicate':
+      case 'not_covered': return toneClass('warn');
+      default: return toneClass('muted');
+    }
+  };
+
+  const renderDuplicateHint = (entry: MonitoringEntry) => {
+    if (!entry.dup_of_tweet_id) return null;
+    const target = entry.duplicate_of;
+    const label = target?.author_handle ? `@${target.author_handle}` : target?.tweet_id ? target.tweet_id.slice(-10) : entry.dup_of_tweet_id.slice(-10);
+    return (
+      <div className="mt-1 flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
+        <span>Matches {label}</span>
+        <Badge className={`${duplicateCoverageClass(target?.coverage_state)} text-[10px]`}>
+          {duplicateCoverageLabel(target?.coverage_state)}
+        </Badge>
+      </div>
+    );
+  };
+
   const renderAudienceBadge = (entry: MonitoringEntry) => {
     if (!entry.audience_class) return null;
     const cls =
@@ -898,6 +932,7 @@ export default function Monitoring() {
                         {renderAudienceBadge(entry)}
                         {entry.feedback_locked && <Badge className="bg-blue-500/15 text-blue-400 border-blue-500/30 text-[10px]">locked</Badge>}
                       </div>
+                      {renderDuplicateHint(entry)}
 
                       <div className="grid grid-cols-2 gap-2 text-xs min-[520px]:grid-cols-4">
                         <div className="rounded-md border bg-muted/20 p-2">
@@ -995,6 +1030,7 @@ export default function Monitoring() {
                             {renderAudienceBadge(entry)}
                             {entry.feedback_locked && <Badge className="bg-blue-500/15 text-blue-400 border-blue-500/30 text-[10px]">locked</Badge>}
                           </div>
+                          {renderDuplicateHint(entry)}
                         </TableCell>
                         <TableCell><Badge className={toneClass(stage.tone)}>{stage.label}</Badge></TableCell>
                         <TableCell>{renderScore(entry)}</TableCell>
@@ -1082,6 +1118,63 @@ export default function Monitoring() {
                           {selectedEntry.dedupe_checked_at && <Badge variant="outline">{formatDistanceToNow(new Date(selectedEntry.dedupe_checked_at), { addSuffix: true })}</Badge>}
                         </div>
                         {selectedEntry.dedupe_reason && <p className="rounded-md border bg-muted/30 p-2">{selectedEntry.dedupe_reason}</p>}
+                        {selectedEntry.dup_of_tweet_id && (
+                          <div className="space-y-3 rounded-md border bg-muted/20 p-3">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div>
+                                <p className="text-xs font-medium uppercase text-muted-foreground">Matched story</p>
+                                <p className="break-all font-mono text-xs">{selectedEntry.dup_of_tweet_id}</p>
+                              </div>
+                              <Badge className={duplicateCoverageClass(selectedEntry.duplicate_of?.coverage_state)}>
+                                {duplicateCoverageLabel(selectedEntry.duplicate_of?.coverage_state)}
+                              </Badge>
+                            </div>
+                            {selectedEntry.duplicate_of ? (
+                              <>
+                                <div className="grid gap-2 sm:grid-cols-4">
+                                  <div className="rounded-md border bg-background/50 p-2">
+                                    <p className="text-xs text-muted-foreground">Author</p>
+                                    <p className="truncate font-medium">{selectedEntry.duplicate_of.author_handle ? `@${selectedEntry.duplicate_of.author_handle}` : 'Unknown'}</p>
+                                  </div>
+                                  <div className="rounded-md border bg-background/50 p-2">
+                                    <p className="text-xs text-muted-foreground">Score</p>
+                                    <p className="font-medium">{selectedEntry.duplicate_of.final_score ?? selectedEntry.duplicate_of.importance_score ?? '—'}</p>
+                                  </div>
+                                  <div className="rounded-md border bg-background/50 p-2">
+                                    <p className="text-xs text-muted-foreground">Telegram</p>
+                                    <p className="truncate font-medium">{selectedEntry.duplicate_of.telegram_state}</p>
+                                  </div>
+                                  <div className="rounded-md border bg-background/50 p-2">
+                                    <p className="text-xs text-muted-foreground">X</p>
+                                    <p className="truncate font-medium">{selectedEntry.duplicate_of.x_state}</p>
+                                  </div>
+                                </div>
+                                <div className="rounded-md border bg-background/50 p-3">
+                                  <p className="mb-1 text-xs text-muted-foreground">Matched excerpt</p>
+                                  <p className="text-sm leading-5">{selectedEntry.duplicate_of.text_original || '[No content]'}</p>
+                                </div>
+                                <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                                  <Badge variant="outline">{selectedEntry.duplicate_of.monitoring_state?.decision_label ?? selectedEntry.duplicate_of.delivery_decision ?? 'No decision'}</Badge>
+                                  {selectedEntry.duplicate_of.decision_reason && <span className="min-w-0 break-words">{selectedEntry.duplicate_of.decision_reason}</span>}
+                                  {selectedEntry.duplicate_of.url && (
+                                    <a href={selectedEntry.duplicate_of.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
+                                      Open matched source <ExternalLink className="w-3 h-3" />
+                                    </a>
+                                  )}
+                                </div>
+                                {(selectedEntry.duplicate_of.coverage_state === 'not_covered' || selectedEntry.duplicate_of.coverage_state === 'also_duplicate') && (
+                                  <p className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-300">
+                                    This match is not delivered yet. Future duplicate checks now treat this as a coverage gap instead of silently blocking the newer item.
+                                  </p>
+                                )}
+                              </>
+                            ) : (
+                              <p className="rounded-md border bg-background/50 p-2 text-xs text-muted-foreground">
+                                The matched post is not included in this page response yet. Re-run duplicate check or refresh after the backend deploy to load its delivery coverage.
+                              </p>
+                            )}
+                          </div>
+                        )}
                         {selectedEntry.dedupe_new_facts && selectedEntry.dedupe_new_facts.length > 0 && (
                           <div className="rounded-md border bg-muted/30 p-2">
                             <p className="mb-1 text-xs font-medium uppercase text-muted-foreground">New facts</p>

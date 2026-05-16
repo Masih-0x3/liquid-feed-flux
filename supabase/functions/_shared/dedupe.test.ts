@@ -51,6 +51,11 @@ Deno.test("runDuplicateGate blocks exact URL duplicates before model calls", asy
       url: "https://example.com/story",
       story_cluster_id: "11111111-1111-1111-1111-111111111111",
     },
+    canonicalPost: {
+      tweet_id: "older",
+      delivery_decision: "deliver",
+      decision_reason: "score_pass:15>=14",
+    },
   });
 
   const result = await runDuplicateGate(supabase, {
@@ -83,7 +88,14 @@ Deno.test("runDuplicateGate marks unique posts and upserts a story signature", a
 });
 
 Deno.test("runDuplicateGate auto-skips very high semantic matches before translation", async () => {
-  const supabase = makeFakeSupabase({ candidates: [candidate({ similarity: 0.97 })] });
+  const supabase = makeFakeSupabase({
+    candidates: [candidate({ similarity: 0.97 })],
+    canonicalPost: {
+      tweet_id: "older",
+      delivery_decision: "deliver",
+      decision_reason: "score_pass:15>=14",
+    },
+  });
   const result = await runDuplicateGate(supabase, basePost(), {
     enabled: true,
     action: "skip",
@@ -95,6 +107,31 @@ Deno.test("runDuplicateGate auto-skips very high semantic matches before transla
   assertEquals(result.should_enqueue_translate, false);
   assertEquals(supabase.updates[0].update.dup_of_tweet_id, "older");
   assertEquals(supabase.updates[0].update.delivery_decision, "skip");
+});
+
+Deno.test("runDuplicateGate does not hard-skip when the matched duplicate has no delivery coverage", async () => {
+  const supabase = makeFakeSupabase({
+    candidates: [candidate({ similarity: 0.97 })],
+    canonicalPost: {
+      tweet_id: "older",
+      delivery_decision: "skip",
+      decision_reason: "below_threshold:4<14",
+      final_score: 4,
+    },
+  });
+  const result = await runDuplicateGate(supabase, basePost(), {
+    enabled: true,
+    action: "skip",
+    auto_duplicate_similarity: 0.94,
+  }, { fetchEmbedding: async () => [0.1, 0.2, 0.3] });
+
+  assertEquals(result.status, "uncertain");
+  assertEquals(result.dup_of_tweet_id, "older");
+  assertEquals(result.should_enqueue_translate, true);
+  assert(result.reason.includes("coverage_gap:"));
+  assertEquals(supabase.updates[0].update.dedupe_status, "uncertain");
+  assertEquals(supabase.updates[0].update.dup_of_tweet_id, "older");
+  assertEquals(supabase.updates[0].update.delivery_decision, undefined);
 });
 
 Deno.test("runDuplicateGate preserves related-new-info items for translation", async () => {
@@ -137,7 +174,11 @@ Deno.test("runDuplicateGate marks low-confidence AI outcomes uncertain without b
 
 function makeFakeSupabase(options: {
   exactDuplicate?: Record<string, unknown>;
+  canonicalPost?: Record<string, unknown>;
   candidates?: Record<string, unknown>[];
+  telegramStatuses?: string[];
+  xStatuses?: string[];
+  jobStatuses?: string[];
 } = {}) {
   const state = {
     updates: [] as Array<{ table: string; update: Record<string, unknown>; filters: Record<string, unknown> }>,
@@ -169,7 +210,13 @@ class FakeBuilder {
   constructor(
     private table: string,
     private state: ReturnType<typeof makeFakeSupabase>,
-    private options: { exactDuplicate?: Record<string, unknown> },
+    private options: {
+      exactDuplicate?: Record<string, unknown>;
+      canonicalPost?: Record<string, unknown>;
+      telegramStatuses?: string[];
+      xStatuses?: string[];
+      jobStatuses?: string[];
+    },
   ) {}
 
   select() { return this; }
@@ -178,6 +225,8 @@ class FakeBuilder {
   order() { return this; }
   limit() { return this; }
   eq(column: string, value: unknown) { this.filters[column] = value; return this; }
+  filter(column: string, operator: string, value: unknown) { this.filters[`${operator}:${column}`] = value; return this; }
+  in(column: string, value: unknown[]) { this.filters[`in:${column}`] = value; return this; }
 
   update(payload: Record<string, unknown>) {
     this.mode = "update";
@@ -218,8 +267,24 @@ class FakeBuilder {
       resolve({ data: null, error: null });
       return;
     }
-    if (this.table === "posts" && this.options.exactDuplicate) {
+    if (this.table === "posts" && this.options.canonicalPost && this.filters.tweet_id === this.options.canonicalPost.tweet_id) {
+      resolve({ data: [this.options.canonicalPost], error: null });
+      return;
+    }
+    if (this.table === "posts" && this.options.exactDuplicate && this.filters["neq:tweet_id"]) {
       resolve({ data: [this.options.exactDuplicate], error: null });
+      return;
+    }
+    if (this.table === "deliveries") {
+      resolve({ data: (this.options.telegramStatuses ?? []).map((status) => ({ status })), error: null });
+      return;
+    }
+    if (this.table === "x_deliveries") {
+      resolve({ data: (this.options.xStatuses ?? []).map((status) => ({ status })), error: null });
+      return;
+    }
+    if (this.table === "jobs") {
+      resolve({ data: (this.options.jobStatuses ?? []).map((status) => ({ status, type: "deliver" })), error: null });
       return;
     }
     resolve({ data: [], error: null });

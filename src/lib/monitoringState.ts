@@ -6,6 +6,7 @@ export function monitoringStage(entry: MonitoringEntry): { label: string; tone: 
   if (entry.monitoring_state) return { label: entry.monitoring_state.stage_label, tone: entry.monitoring_state.tone };
   if (entry.translation_error || entry.delivery_error || entry.x_error) return { label: 'Failed/stuck', tone: 'bad' };
   if (entry.dedupe_status === 'failed') return { label: 'Dedupe failed', tone: 'bad' };
+  if (entry.dedupe_status === 'uncertain' && entry.dup_of_tweet_id && entry.dedupe_reason?.includes('coverage_gap:')) return { label: 'Duplicate coverage gap', tone: 'warn' };
   if (entry.dedupe_status === 'uncertain') return { label: 'Uncertain duplicate', tone: 'warn' };
   if (entry.dedupe_status === 'related_new_info') return { label: 'Related: new info', tone: 'info' };
   if (entry.dedupe_status === 'pending') return { label: 'Duplicate gate pending', tone: 'info' };
@@ -22,6 +23,7 @@ export function monitoringStage(entry: MonitoringEntry): { label: string; tone: 
 
 export function monitoringDecisionLabel(entry: MonitoringEntry, fallbackDecision: string): string {
   if (entry.monitoring_state?.decision_label) return entry.monitoring_state.decision_label;
+  if (entry.dedupe_status === 'uncertain' && entry.dup_of_tweet_id && entry.dedupe_reason?.includes('coverage_gap:')) return 'Possible duplicate, not covered';
   if (entry.dedupe_status === 'uncertain') return 'Review possible duplicate';
   if (entry.dedupe_status === 'related_new_info') return 'Related: new info';
   if (entry.dedupe_status === 'pending') return 'Checking duplicate';

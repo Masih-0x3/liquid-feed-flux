@@ -90,7 +90,7 @@ async function callChatCompletions(p: OpenAICallParams): Promise<NormalizedOpenA
   };
   if (p.maxOutputTokens) body[tokenParam] = p.maxOutputTokens;
   if (!reasoning && typeof p.temperature === 'number') body.temperature = p.temperature;
-  if (typeof p.topP === 'number') body.top_p = p.topP;
+  if (!reasoning && typeof p.topP === 'number') body.top_p = p.topP;
   if (!reasoning) {
     if (typeof p.frequencyPenalty === 'number') body.frequency_penalty = p.frequencyPenalty;
     if (typeof p.presencePenalty === 'number') body.presence_penalty = p.presencePenalty;
@@ -158,11 +158,10 @@ async function callResponsesApi(p: OpenAICallParams): Promise<NormalizedOpenAIRe
   if (p.reasoningEffort) body.reasoning = { effort: p.reasoningEffort };
   if (p.verbosity) body.text = { verbosity: p.verbosity };
 
-  if (typeof p.topP === 'number') body.top_p = p.topP;
   if (typeof p.seed === 'number') body.seed = p.seed;
   if (p.serviceTier && p.serviceTier !== 'auto') body.service_tier = p.serviceTier;
   if (typeof p.parallelToolCalls === 'boolean') body.parallel_tool_calls = p.parallelToolCalls;
-  // Note: temperature, frequency_penalty, presence_penalty are not supported
+  // Note: temperature, top_p, frequency_penalty, presence_penalty are not supported
   // by the Responses API for reasoning models (which is the only family we
   // route here). Intentionally omitted.
 

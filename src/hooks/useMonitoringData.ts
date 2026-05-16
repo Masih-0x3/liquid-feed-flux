@@ -43,6 +43,35 @@ export interface MonitoringEntry {
   x_error: string | null;
   x_skip_reason: string | null;
   dup_of_tweet_id: string | null;
+  duplicate_of: {
+    tweet_id: string;
+    text_original: string;
+    url: string;
+    created_at: string | null;
+    author_handle: string | null;
+    delivery_decision: string | null;
+    decision_reason: string | null;
+    final_score: number | null;
+    importance_score: number | null;
+    dedupe_status: string | null;
+    dup_of_tweet_id: string | null;
+    dup_similarity: number | null;
+    telegram_state: string;
+    x_state: string;
+    coverage_state: 'delivered' | 'in_pipeline' | 'also_duplicate' | 'not_covered';
+    monitoring_state?: {
+      code: string;
+      stage_label: string;
+      tone: 'good' | 'warn' | 'bad' | 'muted' | 'info';
+      decision_label: string;
+      primary_blocker: string | null;
+      translation_state: string;
+      telegram_state: string;
+      x_state: string;
+      needs_attention: boolean;
+      next_actions: string[];
+    };
+  } | null;
   story_cluster_id: string | null;
   dup_similarity: number | null;
   dedupe_status: string | null;
@@ -370,6 +399,7 @@ async function fetchLegacyMonitoringPage(
       x_error: (rpc?.x_error as string) ?? null,
       x_skip_reason: (rpc?.x_skip_reason as string) ?? null,
       dup_of_tweet_id: ((post as { dup_of_tweet_id?: string | null }).dup_of_tweet_id ?? null),
+      duplicate_of: null,
       story_cluster_id: ((post as { story_cluster_id?: string | null }).story_cluster_id ?? null),
       dup_similarity: ((post as { dup_similarity?: number | null }).dup_similarity ?? null),
       dedupe_status: ((post as { dedupe_status?: string | null }).dedupe_status ?? null),

@@ -56,6 +56,12 @@ export interface DuplicateGateResult {
   error?: string;
 }
 
+interface DuplicateCoverage {
+  safe_to_block: boolean;
+  state: 'delivered' | 'active_pipeline' | 'coverage_gap' | 'unknown';
+  reason: string;
+}
+
 export interface DuplicateGateRunOptions {
   dryRun?: boolean;
   force?: boolean;
@@ -220,7 +226,7 @@ export async function runDuplicateGate(
 
   const exact = await findExactUrlDuplicate(supabase, post, config);
   if (exact) {
-    const result = baseResult({
+    let result = baseResult({
       status: 'duplicate',
       method: 'exact_url',
       confidence: 1,
@@ -230,6 +236,7 @@ export async function runDuplicateGate(
       reason: `same_url:${exact.url}`,
       should_enqueue_translate: config.action !== 'skip' || post.feedback_locked === true,
     });
+    result = await preventUncoveredDuplicateSkip(supabase, post, result, config);
     if (!dryRun) await persistDedupeResult(supabase, post, result, config, nowIso, options.source);
     return result;
   }
@@ -296,6 +303,8 @@ export async function runDuplicateGate(
       };
     }
 
+    result = await preventUncoveredDuplicateSkip(supabase, post, result, config);
+
     if (!dryRun) {
       await upsertStorySignature(supabase, post, embeddingLiteral, result);
       await persistDedupeResult(supabase, post, result, config, nowIso, options.source);
@@ -323,6 +332,107 @@ export async function runDuplicateGate(
     }
     return result;
   }
+}
+
+async function preventUncoveredDuplicateSkip(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  post: DuplicateGatePost,
+  result: DuplicateGateResult,
+  config: DuplicateGateConfig,
+): Promise<DuplicateGateResult> {
+  const wouldBlock = result.status === 'duplicate'
+    && !!result.dup_of_tweet_id
+    && config.action === 'skip'
+    && post.feedback_locked !== true;
+  if (!wouldBlock) return result;
+
+  const coverage = await loadDuplicateCoverage(supabase, result.dup_of_tweet_id as string);
+  if (coverage.safe_to_block) {
+    return {
+      ...result,
+      reason: `${result.reason}; canonical_${coverage.state}:${coverage.reason}`,
+    };
+  }
+
+  return {
+    ...result,
+    status: 'uncertain',
+    confidence: result.confidence,
+    dup_of_tweet_id: result.dup_of_tweet_id,
+    reason: `coverage_gap:${coverage.reason}; ${result.reason}`,
+    should_enqueue_translate: true,
+  };
+}
+
+async function loadDuplicateCoverage(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  canonicalTweetId: string,
+): Promise<DuplicateCoverage> {
+  try {
+    const [{ data: postRows, error: postError }, { data: telegramRows }, { data: xRows }, { data: jobRows }] = await Promise.all([
+      supabase
+        .from('posts')
+        .select('tweet_id, delivery_decision, decision_reason, final_score, importance_score, dup_of_tweet_id')
+        .eq('tweet_id', canonicalTweetId)
+        .limit(1),
+      supabase
+        .from('deliveries')
+        .select('status')
+        .eq('subject_type', 'post')
+        .eq('subject_id', canonicalTweetId)
+        .in('status', ['posted', 'pending', 'running'])
+        .limit(5),
+      supabase
+        .from('x_deliveries')
+        .select('status')
+        .eq('post_id', canonicalTweetId)
+        .in('status', ['posted', 'pending', 'running'])
+        .limit(5),
+      supabase
+        .from('jobs')
+        .select('type, status')
+        .filter('payload->>tweet_id', 'eq', canonicalTweetId)
+        .in('status', ['pending', 'running', 'queued'])
+        .limit(10),
+    ]);
+
+    if (postError) return { safe_to_block: false, state: 'unknown', reason: `canonical_lookup_failed:${postError.message}` };
+    const canonical = Array.isArray(postRows) ? postRows[0] as Record<string, unknown> | undefined : undefined;
+    if (!canonical) return { safe_to_block: false, state: 'unknown', reason: 'canonical_not_found' };
+
+    const telegramStatuses = Array.isArray(telegramRows) ? telegramRows.map((r) => (r as Record<string, unknown>).status) : [];
+    const xStatuses = Array.isArray(xRows) ? xRows.map((r) => (r as Record<string, unknown>).status) : [];
+    if (telegramStatuses.includes('posted') || xStatuses.includes('posted')) {
+      return { safe_to_block: true, state: 'delivered', reason: 'canonical_already_delivered' };
+    }
+
+    const hasActiveDelivery = telegramStatuses.some(isActiveStatusValue) || xStatuses.some(isActiveStatusValue);
+    const hasActiveJob = Array.isArray(jobRows) && jobRows.some((row) => isActiveStatusValue((row as Record<string, unknown>).status));
+    if (canonical.delivery_decision === 'deliver' || hasActiveDelivery || hasActiveJob) {
+      return { safe_to_block: true, state: 'active_pipeline', reason: 'canonical_is_deliverable_or_active' };
+    }
+
+    const canonicalScore = typeof canonical.final_score === 'number'
+      ? canonical.final_score
+      : typeof canonical.importance_score === 'number'
+        ? canonical.importance_score
+        : null;
+    const canonicalReason = typeof canonical.decision_reason === 'string' ? canonical.decision_reason : 'no_delivery_path';
+    const scorePart = canonicalScore == null ? '' : `; canonical_score:${canonicalScore}`;
+    return {
+      safe_to_block: false,
+      state: 'coverage_gap',
+      reason: `canonical_not_delivered_or_active:${canonicalReason}${scorePart}`,
+    };
+  } catch (e) {
+    return { safe_to_block: false, state: 'unknown', reason: `canonical_coverage_error:${(e as Error).message}` };
+  }
+}
+
+function isActiveStatusValue(status: unknown): boolean {
+  return status === 'pending' || status === 'running' || status === 'queued';
 }
 
 function classifySemanticOnly(top: StoryCandidate, config: DuplicateGateConfig, candidates: StoryCandidate[]): DuplicateGateResult {
@@ -585,7 +695,7 @@ async function persistDedupeResult(
     dup_similarity: result.similarity,
   };
 
-  if (result.status === 'duplicate') {
+  if ((result.status === 'duplicate' || result.status === 'uncertain') && result.dup_of_tweet_id) {
     update.dup_of_tweet_id = result.dup_of_tweet_id;
     if (duplicateBlocks) {
       update.delivery_decision = 'skip';

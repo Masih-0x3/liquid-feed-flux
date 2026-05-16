@@ -980,6 +980,25 @@ interface MonitoringState {
   next_actions: string[];
 }
 
+interface DuplicateTargetSummary {
+  tweet_id: string;
+  text_original: string;
+  url: string;
+  created_at: string | null;
+  author_handle: string | null;
+  delivery_decision: string | null;
+  decision_reason: string | null;
+  final_score: number | null;
+  importance_score: number | null;
+  dedupe_status: string | null;
+  dup_of_tweet_id: string | null;
+  dup_similarity: number | null;
+  telegram_state: string;
+  x_state: string;
+  monitoring_state: MonitoringState;
+  coverage_state: 'delivered' | 'in_pipeline' | 'also_duplicate' | 'not_covered';
+}
+
 const MONITORING_BASE_POST_COLUMNS = [
   'tweet_id',
   'text_original',
@@ -1124,6 +1143,7 @@ function deriveMonitoringState(
   const hasDeliveryError = !!rpc?.delivery_error || deliveryStatus === 'failed';
   const hasXError = !!rpc?.x_error || xStatus === 'failed';
   const dedupeStatus = typeof post.dedupe_status === 'string' ? post.dedupe_status : null;
+  const dedupeReason = typeof post.dedupe_reason === 'string' ? post.dedupe_reason : '';
   const dedupeJobStatus = rpc?.dedupe_job_status as string | null | undefined;
   const hasDedupeError = !!rpc?.dedupe_error || dedupeJobStatus === 'failed' || dedupeStatus === 'failed';
   const duplicate = !!post.dup_of_tweet_id;
@@ -1138,6 +1158,7 @@ function deriveMonitoringState(
   const needsHydration = post.delivery_decision === 'deliver' && post.is_truncated === true && !post.hydrated_at;
   const review = post.enrich_status === 'awaiting_approval' || post.score_review_status === 'needs_review';
   const passDecision = post.delivery_decision === 'deliver';
+  const duplicateCoverageGap = dedupeStatus === 'uncertain' && duplicate && dedupeReason.includes('coverage_gap:');
 
   let state: MonitoringState = {
     code: 'unknown',
@@ -1154,8 +1175,8 @@ function deriveMonitoringState(
 
   if (activeTranslate) state.translation_state = 'queued';
   else if (hasTranslateError && !hasTranslation) state.translation_state = 'failed';
-  else if (!hasTranslation && (skipped || duplicate || belowThreshold)) state.translation_state = 'not_needed';
-  else if (!hasTranslation && passDecision) state.translation_state = 'needs_translation';
+  else if (!hasTranslation && (skipped || (duplicate && !duplicateCoverageGap) || belowThreshold)) state.translation_state = 'not_needed';
+  else if (!hasTranslation && (passDecision || duplicateCoverageGap)) state.translation_state = 'needs_translation';
 
   if (hasDedupeError || hasTranslateError || hasDeliveryError || hasXError) {
     state = {
@@ -1177,6 +1198,17 @@ function deriveMonitoringState(
       decision_label: 'Checking duplicate',
       primary_blocker: 'Duplicate gate is pending or running',
       next_actions: ['details'],
+    };
+  } else if (duplicateCoverageGap) {
+    state = {
+      ...state,
+      code: 'duplicate_coverage_gap',
+      stage_label: 'Duplicate coverage gap',
+      tone: 'warn',
+      decision_label: 'Possible duplicate, not covered',
+      primary_blocker: 'The matched duplicate has not been delivered and is not actively moving through delivery, so this item should keep moving through normal review.',
+      needs_attention: true,
+      next_actions: ['run_dedupe', 'manual_score', 'clear_duplicate'],
     };
   } else if (dedupeStatus === 'uncertain') {
     state = {
@@ -1459,7 +1491,13 @@ function applyJobStateToRpc(
   return next;
 }
 
-function toMonitoringEntry(post: Record<string, unknown>, rpcRaw: Record<string, unknown> | undefined, threshold: number, jobStateByTweet: Map<string, Map<string, LatestJobState>>) {
+function toMonitoringEntry(
+  post: Record<string, unknown>,
+  rpcRaw: Record<string, unknown> | undefined,
+  threshold: number,
+  jobStateByTweet: Map<string, Map<string, LatestJobState>>,
+  duplicateTargets: Map<string, DuplicateTargetSummary> = new Map(),
+) {
   const rpc = applyJobStateToRpc(post.tweet_id as string, rpcRaw, jobStateByTweet);
   const translatedAt = rpc?.translated_at || post.translated_at;
   const isTranslated = !!(translatedAt || (post.text_translated && post.text_translated !== post.text_original));
@@ -1469,6 +1507,7 @@ function toMonitoringEntry(post: Record<string, unknown>, rpcRaw: Record<string,
   const hydratedAt = (rpc?.hydrated_at as string) ?? (post.hydrated_at as string) ?? null;
   const hasMedia = post.has_media === true;
   const monitoringState = deriveMonitoringState({ ...post, is_truncated: isTruncated, hydrated_at: hydratedAt }, rpc, threshold);
+  const duplicateOf = typeof post.dup_of_tweet_id === 'string' ? duplicateTargets.get(post.dup_of_tweet_id) ?? null : null;
   const mayCallX = monitoringState.code === 'ready_to_deliver' && xStatus !== 'posted';
   const xCostReasons: string[] = [];
   if (monitoringState.code === 'hydration') xCostReasons.push('hydrate read may be needed');
@@ -1515,6 +1554,7 @@ function toMonitoringEntry(post: Record<string, unknown>, rpcRaw: Record<string,
     x_error: (rpc?.x_error as string) ?? null,
     x_skip_reason: (rpc?.x_skip_reason as string) ?? null,
     dup_of_tweet_id: post.dup_of_tweet_id ?? null,
+    duplicate_of: duplicateOf,
     story_cluster_id: post.story_cluster_id ?? null,
     dup_similarity: post.dup_similarity ?? null,
     dedupe_status: post.dedupe_status ?? null,
@@ -1556,6 +1596,66 @@ function toMonitoringEntry(post: Record<string, unknown>, rpcRaw: Record<string,
   };
 }
 
+// deno-lint-ignore no-explicit-any
+async function loadDuplicateTargetMap(supabase: any, rows: Record<string, unknown>[], threshold: number): Promise<Map<string, DuplicateTargetSummary>> {
+  const ids = [...new Set(rows.map((row) => row.dup_of_tweet_id).filter((id): id is string => typeof id === 'string' && id.length > 0))];
+  const map = new Map<string, DuplicateTargetSummary>();
+  if (ids.length === 0) return map;
+
+  const { data, error } = await supabase
+    .from('posts')
+    .select('tweet_id, text_original, url, created_at, author_handle, delivery_decision, decision_reason, importance_score, final_score, dedupe_status, dup_of_tweet_id, dup_similarity, translated_at, text_translated, is_truncated, hydrated_at, enrich_status, score_review_status')
+    .in('tweet_id', ids);
+  if (error) return map;
+
+  const targets = (data ?? []) as Record<string, unknown>[];
+  const targetIds = targets.map((post) => post.tweet_id as string).filter(Boolean);
+  const statusByTweet: Record<string, Record<string, unknown>> = {};
+  const jobStateByTweet = await loadJobStateMap(supabase, targetIds);
+  if (targetIds.length > 0) {
+    const { data: statuses } = await supabase.rpc('get_post_pipeline_status', { tweet_ids: targetIds });
+    for (const row of statuses ?? []) statusByTweet[row.tweet_id as string] = row;
+  }
+
+  for (const post of targets) {
+    const tweetId = post.tweet_id as string;
+    const rpc = applyJobStateToRpc(tweetId, statusByTweet[tweetId], jobStateByTweet);
+    const state = deriveMonitoringState(post, rpc, threshold);
+    const telegramState = state.telegram_state;
+    const xState = state.x_state;
+    const delivered = telegramState === 'delivered' || telegramState === 'posted' || xState === 'posted';
+    const active = isActiveStatus(telegramState) || isActiveStatus(xState) || post.delivery_decision === 'deliver';
+    const coverageState = delivered
+      ? 'delivered'
+      : active
+        ? 'in_pipeline'
+        : post.dup_of_tweet_id
+          ? 'also_duplicate'
+          : 'not_covered';
+
+    map.set(tweetId, {
+      tweet_id: tweetId,
+      text_original: String(post.text_original ?? ''),
+      url: String(post.url ?? ''),
+      created_at: typeof post.created_at === 'string' ? post.created_at : null,
+      author_handle: typeof post.author_handle === 'string' ? post.author_handle : null,
+      delivery_decision: typeof post.delivery_decision === 'string' ? post.delivery_decision : null,
+      decision_reason: typeof post.decision_reason === 'string' ? post.decision_reason : null,
+      final_score: typeof post.final_score === 'number' ? post.final_score : null,
+      importance_score: typeof post.importance_score === 'number' ? post.importance_score : null,
+      dedupe_status: typeof post.dedupe_status === 'string' ? post.dedupe_status : null,
+      dup_of_tweet_id: typeof post.dup_of_tweet_id === 'string' ? post.dup_of_tweet_id : null,
+      dup_similarity: typeof post.dup_similarity === 'number' ? post.dup_similarity : null,
+      telegram_state: telegramState,
+      x_state: xState,
+      monitoring_state: state,
+      coverage_state: coverageState,
+    });
+  }
+
+  return map;
+}
+
 function matchesMonitoringFilter(entry: Record<string, unknown>, filter: MonitoringFilter): boolean {
   if (filter === 'all') return true;
   const state = (entry.monitoring_state ?? {}) as MonitoringState;
@@ -1573,7 +1673,7 @@ function matchesMonitoringFilter(entry: Record<string, unknown>, filter: Monitor
     case 'manual_review':
       return state.code === 'manual_review';
     case 'duplicates':
-      return state.code === 'blocked_duplicate';
+      return !!entry.dup_of_tweet_id;
     case 'ready_to_deliver':
       return state.code === 'ready_to_deliver';
     case 'telegram_pending':
@@ -1667,8 +1767,9 @@ async function getMonitoringEntries(supabase: any, body: Record<string, unknown>
     const { data: statuses } = await supabase.rpc('get_post_pipeline_status', { tweet_ids: tweetIds });
     for (const row of statuses ?? []) statusByTweet[row.tweet_id as string] = row;
   }
+  const duplicateTargets = await loadDuplicateTargetMap(supabase, rows, threshold);
   const entries = rows
-    .map((post) => toMonitoringEntry(post, statusByTweet[post.tweet_id as string], threshold, jobStateByTweet))
+    .map((post) => toMonitoringEntry(post, statusByTweet[post.tweet_id as string], threshold, jobStateByTweet, duplicateTargets))
     .filter((entry: Record<string, unknown>) => matchesMonitoringFilter(entry, filter));
 
   return {
