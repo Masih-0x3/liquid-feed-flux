@@ -693,16 +693,45 @@ export default function Monitoring() {
     }
   };
 
+  const duplicateCoverageDetail = (target?: MonitoringEntry['duplicate_of']) => {
+    if (!target) return 'The matched post was not returned by the backend. Use the tweet ID to inspect it directly.';
+    switch (target.coverage_state) {
+      case 'delivered':
+        return 'Canonical item is covered. At least one delivery path already posted it.';
+      case 'in_pipeline':
+        return 'Canonical item is still active in the pipeline, so this duplicate is blocked while the original moves.';
+      case 'also_duplicate':
+        return 'Canonical item is also marked duplicate. This needs review so the story is not lost.';
+      case 'not_covered':
+        return 'Canonical item is not delivered or active. This is a coverage gap that needs review.';
+      default:
+        return 'Coverage is unknown. Inspect the matched item before trusting the duplicate decision.';
+    }
+  };
+
+  const duplicateStatusSummary = (target?: MonitoringEntry['duplicate_of']) => {
+    if (!target) return 'match not loaded';
+    const decision = target.monitoring_state?.decision_label ?? target.delivery_decision ?? 'No decision';
+    return `${decision} · Telegram ${target.telegram_state} · X ${target.x_state}`;
+  };
+
+  const inspectDuplicateMatch = (tweetId: string) => {
+    setFilter('all');
+    setSearchTerm(tweetId);
+    void openDetails(tweetId);
+  };
+
   const renderDuplicateHint = (entry: MonitoringEntry) => {
     if (!entry.dup_of_tweet_id) return null;
     const target = entry.duplicate_of;
     const label = target?.author_handle ? `@${target.author_handle}` : target?.tweet_id ? target.tweet_id.slice(-10) : entry.dup_of_tweet_id.slice(-10);
     return (
-      <div className="mt-1 flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
-        <span>Matches {label}</span>
+      <div className="mt-2 flex flex-wrap items-center gap-1.5 rounded-md border border-purple-500/20 bg-purple-500/5 px-2 py-1.5 text-[11px] text-muted-foreground">
+        <span className="font-medium text-purple-300">Duplicate of {label}</span>
         <Badge className={`${duplicateCoverageClass(target?.coverage_state)} text-[10px]`}>
           {duplicateCoverageLabel(target?.coverage_state)}
         </Badge>
+        <span className="min-w-0 truncate">{duplicateStatusSummary(target)}</span>
       </div>
     );
   };
@@ -714,22 +743,35 @@ export default function Monitoring() {
     const target = entry.duplicate_of;
     const score = target ? target.final_score ?? target.importance_score : null;
     const matchedLabel = target?.author_handle ? `@${target.author_handle}` : entry.dup_of_tweet_id.slice(-10);
+    const matchedId = target?.tweet_id ?? entry.dup_of_tweet_id;
+    const matchedAge = target?.created_at ? formatDistanceToNow(new Date(target.created_at), { addSuffix: true }) : null;
     return (
-      <div className={`space-y-2 ${compact ? 'rounded-md border bg-muted/20 p-2 text-xs' : 'text-xs'}`}>
-        <div className="flex flex-wrap items-center gap-1">
-          <Badge className={`${duplicateCoverageClass(target?.coverage_state)} text-[10px]`}>
-            {duplicateCoverageLabel(target?.coverage_state)}
-          </Badge>
-          <span className="font-medium text-foreground">with {matchedLabel}</span>
+      <div className={`space-y-2 ${compact ? 'rounded-md border bg-muted/20 p-2 text-xs' : 'rounded-md border border-purple-500/20 bg-purple-500/5 p-2 text-xs'}`}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="font-medium text-foreground">Duplicates {matchedLabel}</span>
+              <Badge className={`${duplicateCoverageClass(target?.coverage_state)} text-[10px]`}>
+                {duplicateCoverageLabel(target?.coverage_state)}
+              </Badge>
+            </div>
+            <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground" title={matchedId}>
+              {matchedId.slice(-10)}{matchedAge ? ` · ${matchedAge}` : ''}
+            </p>
+          </div>
+          <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" onClick={() => inspectDuplicateMatch(matchedId)}>
+            Inspect
+          </Button>
         </div>
         {target ? (
           <>
-            <p className="line-clamp-2 text-muted-foreground">{target.text_original || '[No content]'}</p>
+            <p className="line-clamp-3 text-muted-foreground">{target.text_original || '[No content]'}</p>
             <div className="flex flex-wrap gap-x-2 gap-y-1 text-muted-foreground">
               <span>Score {score ?? '—'}</span>
               <span>Telegram {target.telegram_state}</span>
               <span>X {target.x_state}</span>
             </div>
+            <p className="text-[11px] text-muted-foreground">{duplicateCoverageDetail(target)}</p>
             {target.url && (
               <a href={target.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
                 Open match <ExternalLink className="w-3 h-3" />
@@ -833,7 +875,7 @@ export default function Monitoring() {
   );
 
   return (
-    <div className="container mx-auto p-0">
+    <div className="w-full p-0">
       <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="min-w-0">
           <h1 className="text-2xl sm:text-3xl font-bold">Content Monitoring</h1>
@@ -1048,21 +1090,30 @@ export default function Monitoring() {
                 })}
               </div>
 
-              <div className="hidden overflow-x-auto lg:block">
-                <Table>
+              <div className="hidden overflow-hidden lg:block">
+                <Table className="table-fixed">
+                  <colgroup>
+                    <col className="w-[8%]" />
+                    <col className="w-[9%]" />
+                    <col className="w-[26%]" />
+                    <col className="w-[8%]" />
+                    <col className="w-[7%]" />
+                    <col className="w-[12%]" />
+                    <col className="w-[20%]" />
+                    <col className="w-[6%]" />
+                    <col className="w-[4%]" />
+                  </colgroup>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-[170px]">Source / time</TableHead>
-                      <TableHead className="w-[150px]">Author</TableHead>
-                      <TableHead className="min-w-[320px]">Excerpt</TableHead>
-                      <TableHead>Stage</TableHead>
-                      <TableHead>Score</TableHead>
-                      <TableHead>Decision</TableHead>
-                      <TableHead className="min-w-[230px]">Duplicate match</TableHead>
-                      <TableHead>Telegram</TableHead>
-                      <TableHead>X</TableHead>
-                      <TableHead>Cost</TableHead>
-                      <TableHead className="w-[72px] text-right">Actions</TableHead>
+                      <TableHead className="px-3">Source / time</TableHead>
+                      <TableHead className="px-3">Author</TableHead>
+                      <TableHead className="px-3">Excerpt</TableHead>
+                      <TableHead className="px-3">Stage</TableHead>
+                      <TableHead className="px-3">Score</TableHead>
+                      <TableHead className="px-3">Decision</TableHead>
+                      <TableHead className="px-3">Duplicate evidence</TableHead>
+                      <TableHead className="px-3">Delivery</TableHead>
+                      <TableHead className="px-2 text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                 <TableBody>
@@ -1073,7 +1124,7 @@ export default function Monitoring() {
                     const blocker = entry.monitoring_state?.primary_blocker;
                     return (
                       <TableRow key={entry.tweet_id} className="align-top">
-                        <TableCell className="text-xs">
+                        <TableCell className="px-3 py-4 text-xs">
                           <div className="space-y-1">
                             <div className="font-mono text-[11px] text-muted-foreground">{entry.tweet_id.slice(-10)}</div>
                             <div>{formatDistanceToNow(new Date(entry.created_at), { addSuffix: true })}</div>
@@ -1084,16 +1135,16 @@ export default function Monitoring() {
                             )}
                           </div>
                         </TableCell>
-                        <TableCell>
-                          <div className="max-w-[140px] truncate font-medium">
+                        <TableCell className="px-3 py-4">
+                          <div className="truncate font-medium">
                             {entry.author_handle ? `@${entry.author_handle}` : `@${entry.account_handle}`}
                           </div>
                           {entry.account_handle && entry.author_handle && entry.account_handle !== entry.author_handle && (
                             <p className="text-xs text-muted-foreground truncate">@{entry.account_handle}</p>
                           )}
                         </TableCell>
-                        <TableCell>
-                          <button onClick={() => openDetails(entry.tweet_id)} className="block max-w-[520px] text-left text-sm leading-5 hover:text-primary">
+                        <TableCell className="px-3 py-4">
+                          <button onClick={() => openDetails(entry.tweet_id)} className="block w-full text-left text-sm leading-5 hover:text-primary">
                             <span className="line-clamp-2">{shortText(entry) || '[No content]'}</span>
                           </button>
                           <div className="mt-1 flex flex-wrap gap-1">
@@ -1105,17 +1156,21 @@ export default function Monitoring() {
                           </div>
                           {renderDuplicateHint(entry)}
                         </TableCell>
-                        <TableCell><Badge className={toneClass(stage.tone)}>{stage.label}</Badge></TableCell>
-                        <TableCell>{renderScore(entry)}</TableCell>
-                        <TableCell className="max-w-[180px]">
-                          <p className="truncate text-sm" title={blocker || decision.detail || decision.title}>{decisionLabel}</p>
-                          {(blocker || entry.decision_reason) && <p className="truncate text-xs text-muted-foreground">{blocker || decision.title}</p>}
+                        <TableCell className="px-3 py-4"><Badge className={toneClass(stage.tone)}>{stage.label}</Badge></TableCell>
+                        <TableCell className="px-3 py-4">{renderScore(entry)}</TableCell>
+                        <TableCell className="px-3 py-4">
+                          <p className="line-clamp-2 text-sm" title={blocker || decision.detail || decision.title}>{decisionLabel}</p>
+                          {(blocker || entry.decision_reason) && <p className="line-clamp-2 text-xs text-muted-foreground">{blocker || decision.title}</p>}
                         </TableCell>
-                        <TableCell className="max-w-[260px]">{renderDuplicateMatch(entry)}</TableCell>
-                        <TableCell>{renderTelegramBadge(entry)}</TableCell>
-                        <TableCell>{renderXBadge(entry)}</TableCell>
-                        <TableCell>{renderCostFlags(entry)}</TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="px-3 py-4">{renderDuplicateMatch(entry)}</TableCell>
+                        <TableCell className="px-3 py-4">
+                          <div className="space-y-2">
+                            <div>{renderTelegramBadge(entry)}</div>
+                            <div>{renderXBadge(entry)}</div>
+                            <div>{renderCostFlags(entry)}</div>
+                          </div>
+                        </TableCell>
+                        <TableCell className="px-2 py-4 text-right">
                           {renderRowActions(entry)}
                         </TableCell>
                       </TableRow>

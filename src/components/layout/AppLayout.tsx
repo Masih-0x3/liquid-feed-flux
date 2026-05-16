@@ -1,5 +1,5 @@
 import { ReactNode } from 'react';
-import { Navigate, NavLink } from 'react-router-dom';
+import { Navigate, NavLink, useLocation } from 'react-router-dom';
 import { SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
 import { AppSidebar } from './AppSidebar';
 import { navigationItems } from './navigation';
@@ -13,6 +13,8 @@ interface AppLayoutProps {
 
 export function AppLayout({ children }: AppLayoutProps) {
   const { user, loading, role, isAdmin } = useAuth();
+  const location = useLocation();
+  const isWideOpsRoute = location.pathname.startsWith('/monitoring');
 
   if (loading || (user && role === null)) {
     return (
@@ -66,7 +68,7 @@ export function AppLayout({ children }: AppLayoutProps) {
 
           {/* Main Content */}
           <main className="flex-1 overflow-auto overflow-x-hidden px-2 py-3 pb-24 sm:p-6 md:pb-6">
-            <div className="mx-auto w-full max-w-7xl">
+            <div className={`mx-auto w-full ${isWideOpsRoute ? 'max-w-none' : 'max-w-7xl'}`}>
               {children}
             </div>
           </main>
