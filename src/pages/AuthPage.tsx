@@ -7,7 +7,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
-import { Activity, Mail, Lock, Loader2 } from 'lucide-react';
+import { BrandLogo } from '@/components/layout/BrandLogo';
+import { Mail, Lock, Loader2 } from 'lucide-react';
 
 export default function AuthPage() {
   const { user, signIn, loading: authLoading } = useAuth();
@@ -75,10 +76,8 @@ export default function AuthPage() {
     <div className="min-h-screen flex items-center justify-center p-4 bg-background">
       <div className="w-full max-w-md space-y-6">
         {/* Header */}
-        <div className="text-center space-y-2">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-primary flex items-center justify-center mx-auto glow-primary">
-            <Activity className="w-8 h-8 text-white" />
-          </div>
+        <div className="text-center space-y-3">
+          <BrandLogo className="mx-auto h-32 w-32 shadow-2xl shadow-primary/20 ring-1 ring-glass-border sm:h-40 sm:w-40" />
           <h1 className="text-3xl font-display font-bold text-glass-foreground">XOT Panel</h1>
           <p className="text-muted-foreground">Admin access to your RSS → OpenAI → Telegram pipeline</p>
         </div>

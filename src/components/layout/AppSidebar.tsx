@@ -1,6 +1,5 @@
 import { NavLink } from "react-router-dom";
 import {
-  Activity,
   LogOut,
 } from "lucide-react";
 import {
@@ -20,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { navigationItems } from "./navigation";
+import { BrandLogo } from "./BrandLogo";
 
 export function AppSidebar() {
   const { state, isMobile, setOpenMobile } = useSidebar();
@@ -55,10 +55,8 @@ export function AppSidebar() {
     <Sidebar className={`glass-sidebar border-r border-glass-border ${collapsed ? "w-16" : "w-64"}`} collapsible="icon">
       <SidebarHeader className="p-4">
         {!collapsed && (
-          <div className="flex items-center space-x-2">
-            <div className="w-8 h-8 rounded-lg bg-gradient-primary flex items-center justify-center">
-              <Activity className="w-4 h-4 text-white" />
-            </div>
+          <div className="flex items-center space-x-3">
+            <BrandLogo compact className="h-10 w-10 shrink-0 ring-1 ring-glass-border" />
             <div>
               <h2 className="text-lg font-display font-semibold text-glass-foreground">XOT Panel</h2>
               <p className="text-xs text-muted-foreground">Admin Panel</p>
@@ -66,9 +64,7 @@ export function AppSidebar() {
           </div>
         )}
         {collapsed && (
-          <div className="w-8 h-8 rounded-lg bg-gradient-primary flex items-center justify-center mx-auto">
-            <Activity className="w-4 h-4 text-white" />
-          </div>
+          <BrandLogo compact className="mx-auto h-9 w-9 ring-1 ring-glass-border" />
         )}
       </SidebarHeader>
 

@@ -4,6 +4,7 @@ import { SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
 import { AppSidebar } from './AppSidebar';
 import { navigationItems } from './navigation';
 import { VersionBanner } from './VersionBanner';
+import { BrandLogo } from './BrandLogo';
 import { useAuth } from '@/contexts/AuthContext';
 import { Loader2, ShieldAlert } from 'lucide-react';
 
@@ -53,6 +54,7 @@ export function AppLayout({ children }: AppLayoutProps) {
           {/* Header */}
           <header className="sticky top-0 z-30 min-h-16 border-b border-glass-border glass-panel rounded-none flex flex-wrap items-center gap-3 px-3 py-2 sm:px-6 md:flex-nowrap backdrop-blur-glass">
             <SidebarTrigger className="glass-button h-10 w-10 shrink-0 hover:bg-glass-border/20" />
+            <BrandLogo compact className="hidden h-9 w-9 shrink-0 ring-1 ring-glass-border sm:block" />
             <div className="min-w-0 flex-1">
               <h1 className="text-lg sm:text-xl font-display font-semibold text-glass-foreground">
                 XOT Panel
