@@ -25,17 +25,41 @@ import {
 import {
   allowCompletedEnrichmentForPosting,
   doesEnrichmentBlockX,
+  generatePersonalVoiceProfile,
   normalizeEnrichmentConfig,
+  normalizeVoiceGuide,
+  type VoiceSamples,
   type EnrichmentConfig,
 } from "../_shared/enrich.ts";
 
 const DEPLOY_SHA = Deno.env.get('DEPLOY_GIT_SHA') ?? 'unknown';
 const DEPLOY_TIME = Deno.env.get('DEPLOY_TIME') ?? new Date().toISOString();
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': Deno.env.get('ALLOWED_CORS_ORIGIN') ?? 'https://liquid-feed-flux.lovable.app',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+function makeCorsHeaders(req?: Request): Record<string, string> {
+  const configuredOrigins = (Deno.env.get('ALLOWED_CORS_ORIGIN') ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  const allowedOrigins = new Set([
+    ...configuredOrigins,
+    'https://xot.iraneyes.com',
+    'https://xot.vercel.app',
+    'https://liquid-feed-flux.lovable.app',
+    'http://127.0.0.1:5173',
+    'http://localhost:5173',
+    'http://127.0.0.1:8080',
+    'http://localhost:8080',
+  ]);
+  const origin = req?.headers.get('Origin') ?? '';
+  const fallbackOrigin = configuredOrigins[0] ?? 'https://xot.iraneyes.com';
+  return {
+    'Access-Control-Allow-Origin': origin && allowedOrigins.has(origin) ? origin : fallbackOrigin,
+    'Vary': 'Origin',
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  };
+}
+
+let corsHeaders = makeCorsHeaders();
 
 // Validate JWT and check admin role
 async function requireAdmin(req: Request): Promise<{ userId: string } | Response> {
@@ -676,6 +700,51 @@ async function updateLatestPostEnrichment(supabase: any, tweetId: string, patch:
     .update(patch)
     .eq('id', data.id)
     .then(() => null, () => null);
+}
+
+async function dispatchWorkerForManualEnrich(): Promise<{ ok: boolean; status?: number; processed?: number; message?: string; error?: string }> {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+  if (!supabaseUrl || !serviceKey) {
+    return { ok: false, error: 'missing Supabase URL or service role key' };
+  }
+
+  try {
+    const resp = await fetch(`${supabaseUrl}/functions/v1/worker`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${serviceKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        trigger: 'manual_enrich',
+        job_types: ['enrich'],
+        batch_size: 3,
+      }),
+    });
+    const text = await resp.text();
+    let parsed: Record<string, unknown> = {};
+    try {
+      parsed = JSON.parse(text) as Record<string, unknown>;
+    } catch (_e) {
+      parsed = { message: text.slice(0, 300) };
+    }
+    if (!resp.ok) {
+      return {
+        ok: false,
+        status: resp.status,
+        error: typeof parsed.error === 'string' ? parsed.error : text.slice(0, 300),
+      };
+    }
+    return {
+      ok: true,
+      status: resp.status,
+      processed: typeof parsed.processed === 'number' ? parsed.processed : undefined,
+      message: typeof parsed.message === 'string' ? parsed.message : undefined,
+    };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
 }
 
 // deno-lint-ignore no-explicit-any
@@ -3460,6 +3529,7 @@ function validateSettingsValue(key: string, value: unknown): string | null {
   }
 
 serve(async (req) => {
+  corsHeaders = makeCorsHeaders(req);
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
@@ -4471,7 +4541,21 @@ serve(async (req) => {
         const { tweet_id, feedback, note } = body;
         if (!tweet_id) return jsonResponse({ error: 'tweet_id is required' }, 400);
         if (!feedback || typeof feedback !== 'string') return jsonResponse({ error: 'feedback is required' }, 400);
-        const allowed = new Set(['too_ai', 'too_cheesy', 'too_aggregator', 'strong_angle', 'needs_more_context', 'unsafe_for_monetization']);
+        const allowed = new Set([
+          'too_ai',
+          'too_cheesy',
+          'too_aggregator',
+          'strong_angle',
+          'needs_more_context',
+          'unsafe_for_monetization',
+          'sounds_like_me',
+          'too_soft',
+          'too_newsy',
+          'not_blunt_enough',
+          'too_long',
+          'good_clapback',
+          'too_risky',
+        ]);
         if (!allowed.has(feedback)) return jsonResponse({ error: `unsupported feedback: ${feedback}` }, 400);
         await updateLatestPostEnrichment(supabase, tweet_id, {
           feedback_label: feedback,
@@ -4480,6 +4564,79 @@ serve(async (req) => {
         });
         await insertAdminPipelineEvent(supabase, tweet_id, 'enrich_feedback', 'completed', { feedback });
         return jsonResponse({ ok: true });
+      }
+
+      // ===== Generate and persist @masihh voice profile from the canonical guide =====
+      case 'generate_voice_profile': {
+        const openaiApiKey = Deno.env.get('OPENAI_API_KEY');
+        if (!openaiApiKey) return jsonResponse({ ok: false, error: 'OPENAI_API_KEY is not configured' }, 500);
+
+        const guide = normalizeVoiceGuide({
+          guide: typeof body.guide === 'string' ? body.guide : undefined,
+          updated_at: new Date().toISOString(),
+        });
+        const { data: rows } = await supabase
+          .from('settings')
+          .select('key, value')
+          .in('key', ['enrichment_config', 'voice_samples']);
+        const settings = new Map((rows ?? []).map((row: { key: string; value: unknown }) => [row.key, row.value]));
+        const config = normalizeEnrichmentConfig((settings.get('enrichment_config') ?? { enabled: false }) as Partial<EnrichmentConfig>);
+        const voiceSamples = (settings.get('voice_samples') ?? { samples: [], updated_at: null }) as VoiceSamples;
+        const result = await generatePersonalVoiceProfile({
+          apiKey: openaiApiKey,
+          model: config.model || 'gpt-5.4-mini',
+          voiceGuide: guide,
+          voiceSamples,
+        });
+
+        await supabase.from('settings').upsert([
+          { key: 'voice_guide', value: guide, updated_at: new Date().toISOString() },
+          { key: 'personal_voice_profile', value: result.profile, updated_at: new Date().toISOString() },
+        ], { onConflict: 'key' });
+
+        return jsonResponse({ ok: true, profile: result.profile, usage: result.usage });
+      }
+
+      // ===== Select one manual enrichment variant for the X preview, without posting =====
+      case 'select_enrichment_variant': {
+        const { tweet_id, variant } = body;
+        if (!tweet_id) return jsonResponse({ error: 'tweet_id is required' }, 400);
+        if (!variant || typeof variant !== 'string') return jsonResponse({ error: 'variant is required' }, 400);
+
+        const { data: post, error: postErr } = await supabase
+          .from('posts')
+          .select('source_context')
+          .eq('tweet_id', tweet_id)
+          .maybeSingle();
+        if (postErr) throw postErr;
+        const sourceContext = (post?.source_context && typeof post.source_context === 'object' ? post.source_context : {}) as Record<string, unknown>;
+        const voice = (sourceContext.voice && typeof sourceContext.voice === 'object' ? sourceContext.voice : {}) as Record<string, unknown>;
+        const variants = Array.isArray(voice.variants) ? voice.variants as Array<Record<string, unknown>> : [];
+        const selected = variants.find((item) => item.kind === variant);
+        if (!selected) return jsonResponse({ ok: false, error: `Variant not found: ${variant}` }, 404);
+
+        const updatedVoice = { ...voice, selected_variant: variant };
+        const updatedSourceContext = { ...sourceContext, voice: updatedVoice };
+        const finalXText = typeof selected.final_x_text === 'string' ? selected.final_x_text : null;
+        if (!finalXText) return jsonResponse({ ok: false, error: `Variant ${variant} has no final_x_text` }, 400);
+
+        const patch = {
+          final_x_text: finalXText,
+          composed_post_text: finalXText,
+          creator_angle: typeof selected.creator_angle === 'string' ? selected.creator_angle : null,
+          why_it_matters: typeof selected.why_it_matters === 'string' ? selected.why_it_matters : null,
+          source_context: updatedSourceContext,
+        };
+        const { error: updateErr } = await supabase.from('posts').update(patch).eq('tweet_id', tweet_id);
+        if (updateErr) throw updateErr;
+        await updateLatestPostEnrichment(supabase, tweet_id, {
+          final_x_text: finalXText,
+          creator_angle: patch.creator_angle,
+          why_it_matters: patch.why_it_matters,
+          source_context: updatedSourceContext,
+        });
+        await insertAdminPipelineEvent(supabase, tweet_id, 'enrich_variant', 'completed', { selected_variant: variant });
+        return jsonResponse({ ok: true, selected_variant: variant, final_x_text: finalXText });
       }
 
       // ===== Manually trigger enrichment on a post (never auto-posts) =====
@@ -4549,7 +4706,27 @@ serve(async (req) => {
           source: 'manual_enrich_post',
           translation_preflight: translation?.ok === true,
         });
-        return jsonResponse({ ok: true, message: `Enrichment draft queued for ${tweet_id}`, translation_preflight: translation });
+        const workerDispatch = await dispatchWorkerForManualEnrich();
+        if (!workerDispatch.ok) {
+          await insertAdminPipelineEvent(supabase, tweet_id, 'enrich_dispatch', 'failed', {
+            source: 'manual_enrich_post',
+            queued: true,
+            error: workerDispatch.error,
+            status: workerDispatch.status,
+          }, workerDispatch.error ?? null);
+        } else {
+          await insertAdminPipelineEvent(supabase, tweet_id, 'enrich_dispatch', 'completed', {
+            source: 'manual_enrich_post',
+            processed: workerDispatch.processed,
+            message: workerDispatch.message,
+          });
+        }
+        return jsonResponse({
+          ok: true,
+          message: `Enrichment draft queued for ${tweet_id}`,
+          translation_preflight: translation,
+          worker_dispatch: workerDispatch,
+        });
       }
 
       default:

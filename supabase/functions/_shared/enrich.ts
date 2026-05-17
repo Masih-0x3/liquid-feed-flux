@@ -43,6 +43,57 @@ export interface VoiceSamples {
   updated_at: string | null;
 }
 
+export interface VoiceGuide {
+  guide: string;
+  updated_at: string | null;
+}
+
+export type VoiceIntent = "clapback" | "solidarity" | "political_analysis" | "blunt_observation" | "news_reaction";
+export type VoiceVariantKind = "raw_masihh" | "strategic_masihh" | "short_punch";
+
+export interface PersonalVoiceProfile {
+  version: string;
+  source: "@masihh_voice_guide";
+  handle: string;
+  summary: string;
+  language_rules: string[];
+  tone_rules: string[];
+  intent_rules: Record<VoiceIntent, string>;
+  avoid_rules: string[];
+  risk_notes: string[];
+  hashtags: string[];
+  updated_at: string | null;
+}
+
+export interface VoiceVariantOutput {
+  kind: VoiceVariantKind;
+  label: string;
+  final_x_text: string;
+  creator_angle: string;
+  why_it_matters: string;
+  language_choice: "english" | "persian" | "mixed";
+  intent: VoiceIntent;
+  voice_rationale: string;
+  platform_risk_note: string | null;
+}
+
+export interface VoiceCriticVariantScore {
+  kind: VoiceVariantKind;
+  voice_match: number;
+  too_generic: number;
+  too_ai: number;
+  too_soft: number;
+  too_newsy: number;
+  too_long: number;
+  platform_risk: number;
+  rationale: string;
+}
+
+export interface VoiceCriticOutput {
+  variants: VoiceCriticVariantScore[];
+  overall_reason: string;
+}
+
 export interface ArchivistOutput {
   has_callback: boolean;
   callback_type: "continuation" | "validation" | "contradiction" | "thematic" | null;
@@ -81,11 +132,23 @@ export interface ComposerOutput {
   final_x_text: string;
   creator_angle: string;
   why_it_matters: string;
+  intent: VoiceIntent;
+  language_choice: "english" | "persian" | "mixed";
+  selected_variant: VoiceVariantKind;
+  variants: VoiceVariantOutput[];
   source_context: {
     attribution_policy: EnrichmentConfig["source_attribution_policy"];
     source_label: string | null;
     source_url: string | null;
     sources: string[];
+    voice?: {
+      profile_version: string;
+      intent: VoiceIntent;
+      language_choice: "english" | "persian" | "mixed";
+      selected_variant: VoiceVariantKind;
+      variants: VoiceVariantOutput[];
+      critic?: VoiceCriticOutput;
+    };
   };
   format_used: string;
   thread_continuation: string | null;
@@ -122,6 +185,7 @@ export interface EnrichResult {
   analyst: AnalystOutput;
   humanizer: HumanizerOutput;
   composer: ComposerOutput;
+  voiceCritic: VoiceCriticOutput;
   critic: CriticOutput;
   antiAggregator: AntiAggregatorGateOutput;
   publishRecommendation: "approve" | "needs_human_review" | "reject";
@@ -167,6 +231,103 @@ const DEFAULT_BANNED_PHRASES = [
   "لازم به ذکر است",
   "در همین راستا",
 ];
+
+export const DEFAULT_MASIH_VOICE_GUIDE = `X Voice & Style Guide for @masihh
+
+Purpose: Define the writing voice, tone, language patterns, and reply style of @masihh so AI drafts can sound authentic.
+
+Core identity:
+- Handle: @masihh (Masih🇮🇷🇺🇲)
+- Role: Amplifies Iranian opposition voices, political prisoners, anti-regime protests, and current events involving Iran, Israel, and the United States.
+- Bio spirit: Amplifying Iranians the regime tries to silence. Covering news where reliable coverage falls short.
+
+Overall voice:
+- Direct, bold, unfiltered, and passionate.
+- Activist energy, never neutral or diplomatic.
+- Willing to be harsh, sarcastic, or crude when calling out opponents.
+- Mix serious political analysis with raw immediate reactions.
+- Strong urgency about the Iranian regime and opposition.
+
+Language rules:
+- Bilingual by default. Naturally switch between English and Persian.
+- Use Persian for strong political statements, slogans, insults, and emotional impact.
+- Use English for explanations, international audience, detailed arguments, and clapbacks.
+- Prefer short, punchy statements over long paragraphs.
+- Use emojis sparingly and purposefully, especially flags 🇮🇷 🇬🇧 🇮🇱 🇺🇲.
+
+Tone and attitude:
+- Critical of the Islamic Republic, IRGC, judiciary, and political Islam.
+- Supportive and encouraging toward Iranian opposition and resistance.
+- Highly critical of performative activism, empty rhetoric, and hypocrisy.
+- Direct and confrontational in replies.
+- Occasional dark humor or blunt observations when reacting to images or behavior.
+
+Common modes:
+- Sharp clapback and sarcasm.
+- Blunt observation.
+- Strong anti-regime political statement.
+- Supportive solidarity.
+- Short impact line.
+- Persian political commentary.
+
+Frequently used hashtags:
+- #KingRezaPahlaviForIran
+- #IranRevolution2026
+- #Iran
+- #DigitalBlackOutIran
+
+Avoid:
+- Performative or overly intellectual language.
+- Soft, diplomatic, or corporate tone.
+- Long meandering explanations unless genuinely required.
+- Excessive positivity or empty encouragement.
+- Generic activist-account language.
+
+Generation rules:
+1. Start with the core feeling: clapback, solidarity, political analysis, blunt observation, or news reaction.
+2. Choose English, Persian, or a natural mix based on emotional intensity.
+3. Keep it relatively short and direct.
+4. Add hashtags only when natural.
+5. Make it sound deeply invested in the Iranian opposition cause.`;
+
+export const DEFAULT_PERSONAL_VOICE_PROFILE: PersonalVoiceProfile = {
+  version: "masihh-voice-v1",
+  source: "@masihh_voice_guide",
+  handle: "@masihh",
+  summary: "Direct, bilingual Iranian opposition voice: blunt, urgent, sarcastic when appropriate, anti-regime, pro-opposition, and allergic to neutral news-account tone.",
+  language_rules: [
+    "Use Persian for emotional force, slogans, and short political impact.",
+    "Use English for international framing, detailed argument, and clapbacks.",
+    "Mix English and Persian only when it feels natural, not as decoration.",
+    "Keep drafts short, punchy, and human.",
+  ],
+  tone_rules: [
+    "Be direct, bold, and passionate.",
+    "Default to anti-Islamic-Republic, anti-IRGC, anti-judiciary, and anti-political-Islam framing when relevant.",
+    "Use sarcasm and bluntness when the target deserves it.",
+    "Support Iranian opposition and resistance without generic activist wording.",
+  ],
+  intent_rules: {
+    clapback: "Reactive, sharp, personal, often English or mixed; call out hypocrisy or weak arguments directly.",
+    solidarity: "Encouraging, urgent, and human; usually Persian or mixed with purposeful flags.",
+    political_analysis: "Concise strategic reading; English for international context, Persian for emotional force.",
+    blunt_observation: "Short, cutting, and plain; often Persian.",
+    news_reaction: "Lead with the take, then the fact; avoid sounding like a wire headline.",
+  },
+  avoid_rules: [
+    "Do not sound soft, diplomatic, corporate, or neutral.",
+    "Do not use long meandering setups.",
+    "Do not sound like a generic activist page.",
+    "Do not use performative intellectual flourishes.",
+  ],
+  risk_notes: [
+    "Sharp language is allowed, but flag platform or monetization risk for human review.",
+    "Do not invent facts, threats, or calls for violence.",
+    "Risk warnings are advisory; the reviewer decides.",
+  ],
+  hashtags: ["#KingRezaPahlaviForIran", "#IranRevolution2026", "#Iran", "#DigitalBlackOutIran"],
+  updated_at: null,
+};
 
 const DEFAULT_ENRICHMENT_CONFIG: EnrichmentConfig = {
   enabled: false,
@@ -229,6 +390,136 @@ export function normalizeEnrichmentConfig(raw: Partial<EnrichmentConfig> | null 
   cfg.min_creator_angle_chars = clampNumber(cfg.min_creator_angle_chars, 20, 400, 80);
   cfg.max_critic_tokens = clampNumber(cfg.max_critic_tokens, 500, 8000, 2000);
   return cfg;
+}
+
+export function normalizeVoiceGuide(raw: unknown): VoiceGuide {
+  if (typeof raw === "string") {
+    return { guide: raw.trim() || DEFAULT_MASIH_VOICE_GUIDE, updated_at: null };
+  }
+  if (raw && typeof raw === "object") {
+    const obj = raw as Record<string, unknown>;
+    const guide = typeof obj.guide === "string" && obj.guide.trim() ? obj.guide.trim() : DEFAULT_MASIH_VOICE_GUIDE;
+    const updatedAt = typeof obj.updated_at === "string" ? obj.updated_at : null;
+    return { guide, updated_at: updatedAt };
+  }
+  return { guide: DEFAULT_MASIH_VOICE_GUIDE, updated_at: null };
+}
+
+export function normalizePersonalVoiceProfile(raw: unknown): PersonalVoiceProfile {
+  const input = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+  const intentRules = input.intent_rules && typeof input.intent_rules === "object"
+    ? input.intent_rules as Partial<Record<VoiceIntent, string>>
+    : {};
+  return {
+    ...DEFAULT_PERSONAL_VOICE_PROFILE,
+    ...input,
+    source: "@masihh_voice_guide",
+    version: typeof input.version === "string" && input.version.trim() ? input.version : DEFAULT_PERSONAL_VOICE_PROFILE.version,
+    handle: typeof input.handle === "string" && input.handle.trim() ? input.handle : "@masihh",
+    summary: typeof input.summary === "string" && input.summary.trim() ? input.summary : DEFAULT_PERSONAL_VOICE_PROFILE.summary,
+    language_rules: forceArray(input.language_rules).length ? forceArray(input.language_rules) : DEFAULT_PERSONAL_VOICE_PROFILE.language_rules,
+    tone_rules: forceArray(input.tone_rules).length ? forceArray(input.tone_rules) : DEFAULT_PERSONAL_VOICE_PROFILE.tone_rules,
+    intent_rules: {
+      ...DEFAULT_PERSONAL_VOICE_PROFILE.intent_rules,
+      ...intentRules,
+    },
+    avoid_rules: forceArray(input.avoid_rules).length ? forceArray(input.avoid_rules) : DEFAULT_PERSONAL_VOICE_PROFILE.avoid_rules,
+    risk_notes: forceArray(input.risk_notes).length ? forceArray(input.risk_notes) : DEFAULT_PERSONAL_VOICE_PROFILE.risk_notes,
+    hashtags: forceArray(input.hashtags).length ? forceArray(input.hashtags) : DEFAULT_PERSONAL_VOICE_PROFILE.hashtags,
+    updated_at: typeof input.updated_at === "string" ? input.updated_at : null,
+  };
+}
+
+function voiceContextBlock(voiceGuide: VoiceGuide, voiceProfile: PersonalVoiceProfile): string {
+  return `@masihh VOICE PROFILE:
+Summary: ${voiceProfile.summary}
+Language rules:
+${voiceProfile.language_rules.map((rule) => `- ${rule}`).join("\n")}
+Tone rules:
+${voiceProfile.tone_rules.map((rule) => `- ${rule}`).join("\n")}
+Intent rules:
+${Object.entries(voiceProfile.intent_rules).map(([intent, rule]) => `- ${intent}: ${rule}`).join("\n")}
+Avoid:
+${voiceProfile.avoid_rules.map((rule) => `- ${rule}`).join("\n")}
+Risk notes:
+${voiceProfile.risk_notes.map((rule) => `- ${rule}`).join("\n")}
+
+CANONICAL STYLE GUIDE:
+${voiceGuide.guide}`;
+}
+
+export async function generatePersonalVoiceProfile(params: {
+  apiKey: string;
+  model: string;
+  voiceGuide: VoiceGuide;
+  voiceSamples?: VoiceSamples;
+}): Promise<{ profile: PersonalVoiceProfile; usage: number }> {
+  const samples = params.voiceSamples?.samples?.length
+    ? `\n\nSECONDARY EXAMPLES:\n${params.voiceSamples.samples.map((sample, idx) => `[${idx + 1}] ${sample}`).join("\n")}`
+    : "";
+
+  const tool = {
+    name: "derive_voice_profile",
+    description: "Extract a structured voice profile from the @masihh style guide",
+    parameters: {
+      type: "object",
+      properties: {
+        summary: { type: "string" },
+        language_rules: { type: "array", items: { type: "string" } },
+        tone_rules: { type: "array", items: { type: "string" } },
+        intent_rules: {
+          type: "object",
+          properties: {
+            clapback: { type: "string" },
+            solidarity: { type: "string" },
+            political_analysis: { type: "string" },
+            blunt_observation: { type: "string" },
+            news_reaction: { type: "string" },
+          },
+          required: ["clapback", "solidarity", "political_analysis", "blunt_observation", "news_reaction"],
+        },
+        avoid_rules: { type: "array", items: { type: "string" } },
+        risk_notes: { type: "array", items: { type: "string" } },
+        hashtags: { type: "array", items: { type: "string" } },
+      },
+      required: ["summary", "language_rules", "tone_rules", "intent_rules", "avoid_rules", "risk_notes", "hashtags"],
+    },
+  };
+
+  const resp = await callOpenAI({
+    apiKey: params.apiKey,
+    model: params.model || "gpt-5.4-mini",
+    messages: [
+      {
+        role: "system",
+        content: "You convert a personal X style guide into a compact structured profile for an internal manual-review drafting tool. Preserve the sharp voice. Do not sanitize it. Risk notes are advisory only.",
+      },
+      {
+        role: "user",
+        content: `STYLE GUIDE:\n${params.voiceGuide.guide}${samples}`,
+      },
+    ],
+    tool,
+    maxOutputTokens: 2500,
+    reasoningEffort: "low",
+    verbosity: "low",
+  });
+
+  if (!resp.ok || !resp.toolCall) {
+    throw new Error(`Voice profile generation failed: HTTP ${resp.status} - ${resp.content?.slice(0, 300)}`);
+  }
+
+  const parsed = JSON.parse(resp.toolCall.arguments);
+  return {
+    profile: normalizePersonalVoiceProfile({
+      ...parsed,
+      version: "masihh-voice-v1",
+      source: "@masihh_voice_guide",
+      handle: "@masihh",
+      updated_at: new Date().toISOString(),
+    }),
+    usage: resp.usage?.total_tokens ?? 0,
+  };
 }
 
 export function isAutoEnrichmentEnabled(config: EnrichmentConfig): boolean {
@@ -375,6 +666,8 @@ export async function runEnrichPipeline(params: {
   apiKey: string;
   config: EnrichmentConfig;
   voiceSamples: VoiceSamples;
+  voiceGuide?: VoiceGuide;
+  voiceProfile?: PersonalVoiceProfile;
   tweetId: string;
   textOriginal: string;
   textTranslated: string;
@@ -386,6 +679,8 @@ export async function runEnrichPipeline(params: {
 }): Promise<EnrichResult> {
   const config = normalizeEnrichmentConfig(params.config);
   const { supabase, apiKey, voiceSamples, tweetId, textOriginal, textTranslated, importanceScore, previousFormatUsed } = params;
+  const voiceGuide = normalizeVoiceGuide(params.voiceGuide);
+  const voiceProfile = normalizePersonalVoiceProfile(params.voiceProfile);
   const startTime = Date.now();
   let totalTokens = 0;
 
@@ -405,16 +700,28 @@ export async function runEnrichPipeline(params: {
   if (researcherResult?.usage) totalTokens += researcherResult.usage;
 
   // Phase 2: Analyst
-  const analystResult = await runAnalyst(apiKey, config, textOriginal, textTranslated, archivistResult?.output ?? null, researcherResult?.output ?? null, styleModifier);
+  const analystResult = await runAnalyst(apiKey, config, voiceGuide, voiceProfile, textOriginal, textTranslated, archivistResult?.output ?? null, researcherResult?.output ?? null, styleModifier);
   totalTokens += analystResult.usage;
 
-  // Phase 3: Humanizer
-  const humanizerResult = await runHumanizer(apiKey, config, voiceSamples, analystResult.output, styleModifier);
+  // Phase 3: @masihh Voice Match
+  const humanizerResult = await runHumanizer(apiKey, config, voiceSamples, voiceGuide, voiceProfile, analystResult.output, styleModifier);
   totalTokens += humanizerResult.usage;
 
-  // Phase 4: Composer
-  const composerResult = await runComposer(apiKey, config, textTranslated, humanizerResult.output, analystResult.output, archivistResult?.output ?? null, researcherResult?.output ?? null, previousFormatUsed, styleModifier, params.sourceLabel ?? null, params.sourceUrl ?? null);
+  // Phase 4: Composer with 3 manual-review variants
+  const composerResult = await runComposer(apiKey, config, voiceGuide, voiceProfile, textTranslated, humanizerResult.output, analystResult.output, archivistResult?.output ?? null, researcherResult?.output ?? null, previousFormatUsed, styleModifier, params.sourceLabel ?? null, params.sourceUrl ?? null);
   totalTokens += composerResult.usage;
+
+  // Phase 5: @masihh Voice Critic (advisory only)
+  const voiceCriticResult = await runVoiceCritic(apiKey, config, voiceGuide, voiceProfile, textOriginal, textTranslated, composerResult.output);
+  totalTokens += voiceCriticResult.usage;
+  composerResult.output.source_context.voice = {
+    profile_version: voiceProfile.version,
+    intent: composerResult.output.intent,
+    language_choice: composerResult.output.language_choice,
+    selected_variant: composerResult.output.selected_variant,
+    variants: composerResult.output.variants,
+    critic: voiceCriticResult.output,
+  };
 
   const antiAggregator = evaluateAntiAggregatorGate({
     config,
@@ -427,7 +734,7 @@ export async function runEnrichPipeline(params: {
     sameSourceRecentCount: params.sameSourceRecentCount ?? 0,
   });
 
-  // Phase 5: Algorithm-aware Critic
+  // Phase 6: Algorithm-aware Critic
   const criticResult = await runCritic(apiKey, config, textOriginal, textTranslated, composerResult.output, antiAggregator);
   totalTokens += criticResult.usage;
   const critic = criticResult.output;
@@ -443,6 +750,7 @@ export async function runEnrichPipeline(params: {
     analyst: analystResult.output,
     humanizer: humanizerResult.output,
     composer: composerResult.output,
+    voiceCritic: voiceCriticResult.output,
     critic,
     antiAggregator,
     publishRecommendation,
@@ -634,7 +942,7 @@ IMPORTANT RULES:
 }
 
 // ─── Agent 2: Analyst ─────────────────────────────────────────────────
-async function runAnalyst(apiKey: string, config: EnrichmentConfig, textOriginal: string, textTranslated: string, archivist: ArchivistOutput | null, researcher: ResearcherOutput | null, styleModifier: string): Promise<{ output: AnalystOutput; usage: number }> {
+async function runAnalyst(apiKey: string, config: EnrichmentConfig, voiceGuide: VoiceGuide, voiceProfile: PersonalVoiceProfile, textOriginal: string, textTranslated: string, archivist: ArchivistOutput | null, researcher: ResearcherOutput | null, styleModifier: string): Promise<{ output: AnalystOutput; usage: number }> {
   const contextParts: string[] = [];
   contextParts.push(`NEWS ITEM (English original):\n${textOriginal}`);
 
@@ -647,11 +955,14 @@ async function runAnalyst(apiKey: string, config: EnrichmentConfig, textOriginal
 
   const systemPrompt = `${config.analyst_prompt}
 
+${voiceContextBlock(voiceGuide, voiceProfile)}
+
 CRITICAL INSTRUCTIONS:
 - You receive the news in ENGLISH for precision. Read it carefully.
 - ALL your output (commentary, hook, question) MUST be written in PERSIAN/FARSI.
 - Your core job is ORIGINAL CREATOR ANALYSIS, not a translated news recap.
 - Add one of these forms of value: context, implication, contradiction, broader pattern, human consequence, or strategic reading.
+- Match @masihh's intent and worldview from the guide. Do not soften sharp anti-regime framing by default.
 - The hook should make people stop and think, not scream "BREAKING" or copy a wire-service headline.
 - Style direction for THIS post: ${styleModifier}
 - Never start with "در خبری..." or "طبق گزارش..." -- these are AI-tells.
@@ -709,17 +1020,21 @@ CRITICAL INSTRUCTIONS:
 }
 
 // ─── Agent 3: Humanizer ───────────────────────────────────────────────
-async function runHumanizer(apiKey: string, config: EnrichmentConfig, voiceSamples: VoiceSamples, analyst: AnalystOutput, styleModifier: string): Promise<{ output: HumanizerOutput; usage: number }> {
+async function runHumanizer(apiKey: string, config: EnrichmentConfig, voiceSamples: VoiceSamples, voiceGuide: VoiceGuide, voiceProfile: PersonalVoiceProfile, analyst: AnalystOutput, styleModifier: string): Promise<{ output: HumanizerOutput; usage: number }> {
   const samplesBlock = voiceSamples.samples.length > 0
     ? `\n\nVOICE SAMPLES (real tweets from this author -- match this style):\n${voiceSamples.samples.map((s, i) => `[${i + 1}] ${s}`).join('\n')}`
     : '';
 
   const systemPrompt = `${config.humanizer_prompt}
+${voiceContextBlock(voiceGuide, voiceProfile)}
 ${samplesBlock}
 
 CRITICAL INSTRUCTIONS:
 - Input is in PERSIAN. Output MUST remain in PERSIAN.
-- Your job: make AI-generated text sound like a human wrote it on their phone.
+- Your job: @masihh Voice Match. Make AI-generated text sound like this exact author wrote it on their phone.
+- Classify the tone internally as clapback, solidarity, political analysis, blunt observation, or news reaction, then sharpen accordingly.
+- Allow blunt, sarcastic, anti-regime, anti-IRGC, anti-political-Islam wording when it fits the style guide.
+- Do not sanitize the voice. If something is risky, the later critic flags it for manual review.
 - Style direction for THIS post: ${styleModifier}
 
 ANTI-AI-DETECTION TECHNIQUES (apply at least 3):
@@ -779,9 +1094,25 @@ ANTI-AI-DETECTION TECHNIQUES (apply at least 3):
 // ─── Agent 4: Composer ────────────────────────────────────────────────
 // The Composer now produces a full X-ready draft for creator-analysis mode
 // while also keeping the legacy opinion_section populated for older UI code.
+function normalizeVoiceIntent(value: unknown): VoiceIntent {
+  return value === "clapback" || value === "solidarity" || value === "political_analysis" || value === "blunt_observation" || value === "news_reaction"
+    ? value
+    : "news_reaction";
+}
+
+function normalizeLanguageChoice(value: unknown): "english" | "persian" | "mixed" {
+  return value === "english" || value === "persian" || value === "mixed" ? value : "persian";
+}
+
+function normalizeVariantKind(value: unknown): VoiceVariantKind {
+  return value === "raw_masihh" || value === "strategic_masihh" || value === "short_punch" ? value : "raw_masihh";
+}
+
 async function runComposer(
   apiKey: string,
   config: EnrichmentConfig,
+  voiceGuide: VoiceGuide,
+  voiceProfile: PersonalVoiceProfile,
   textTranslated: string,
   humanizer: HumanizerOutput,
   analyst: AnalystOutput,
@@ -814,12 +1145,20 @@ async function runComposer(
 
   const systemPrompt = `${config.composer_prompt}
 
+${voiceContextBlock(voiceGuide, voiceProfile)}
+
 CRITICAL INSTRUCTIONS:
-- Your output MUST be in PERSIAN/FARSI.
-- You are composing the FULL X draft.
+- You are composing manual-review X draft variants in the @masihh voice.
+- Classify the draft intent: clapback, solidarity, political_analysis, blunt_observation, or news_reaction.
+- Choose English, Persian, or mixed language based on emotional intensity and audience.
 - Lead with original creator analysis, not a wire headline.
 - Include the factual news clearly, but do not let copied translation dominate the post.
 - Add one compact "why this matters" or callback when it genuinely adds value.
+- Produce exactly 3 variants:
+  1. raw_masihh: closest to the style guide, sharpest and most unfiltered.
+  2. strategic_masihh: still direct but cleaner for broader reach.
+  3. short_punch: compact, high-impact, minimal explanation.
+- Risk warnings are advisory. Do not soften raw_masihh by default.
 - Compact attribution policy: ${config.source_attribution_policy}. If attribution is compact, mention the source only when it improves trust and do not make the post link-heavy.
 - Target <= 260 characters before hashtags when possible; never exceed the account's 280 character formatter budget.
 - Never use siren emojis, "BREAKING", "فوری", or formulaic outrage.
@@ -842,6 +1181,29 @@ VARIETY IS CRITICAL. Each post should feel structurally different from the last.
     parameters: {
       type: 'object',
       properties: {
+        intent: { type: 'string', enum: ['clapback', 'solidarity', 'political_analysis', 'blunt_observation', 'news_reaction'], description: 'Primary voice intent for this post' },
+        language_choice: { type: 'string', enum: ['english', 'persian', 'mixed'], description: 'Primary language strategy chosen from the voice guide' },
+        selected_variant: { type: 'string', enum: ['raw_masihh', 'strategic_masihh', 'short_punch'], description: 'Default variant to preview first; usually raw_masihh unless strategic_masihh is clearly stronger' },
+        variants: {
+          type: 'array',
+          minItems: 3,
+          maxItems: 3,
+          items: {
+            type: 'object',
+            properties: {
+              kind: { type: 'string', enum: ['raw_masihh', 'strategic_masihh', 'short_punch'] },
+              label: { type: 'string' },
+              final_x_text: { type: 'string', description: 'Full X-ready draft for this variant' },
+              creator_angle: { type: 'string' },
+              why_it_matters: { type: 'string' },
+              language_choice: { type: 'string', enum: ['english', 'persian', 'mixed'] },
+              intent: { type: 'string', enum: ['clapback', 'solidarity', 'political_analysis', 'blunt_observation', 'news_reaction'] },
+              voice_rationale: { type: 'string', description: 'Why this variant sounds like @masihh' },
+              platform_risk_note: { type: 'string', description: 'Advisory risk note, or empty' },
+            },
+            required: ['kind', 'label', 'final_x_text', 'creator_angle', 'why_it_matters', 'language_choice', 'intent', 'voice_rationale'],
+          },
+        },
         creator_angle: { type: 'string', description: 'Original Persian analytical angle; should stand alone as creator value.' },
         why_it_matters: { type: 'string', description: 'Compact Persian reason this matters to the audience.' },
         opinion_section: { type: 'string', description: 'Legacy opinion/context section in PERSIAN. Do not repeat the full news text here.' },
@@ -849,7 +1211,7 @@ VARIETY IS CRITICAL. Each post should feel structurally different from the last.
         format_used: { type: 'string', enum: ['context_and_take', 'question_and_take', 'callback_take', 'sharp_reaction', 'analytical', 'plain_opinion'], description: 'Which format was chosen' },
         thread_continuation: { type: 'string', description: 'Extended analysis in PERSIAN for a reply thread if the topic warrants depth, or empty' },
       },
-      required: ['creator_angle', 'why_it_matters', 'opinion_section', 'final_x_text', 'format_used'],
+      required: ['intent', 'language_choice', 'selected_variant', 'variants', 'creator_angle', 'why_it_matters', 'opinion_section', 'final_x_text', 'format_used'],
     },
   };
 
@@ -870,16 +1232,55 @@ VARIETY IS CRITICAL. Each post should feel structurally different from the last.
   }
 
   const parsed = JSON.parse(resp.toolCall.arguments);
+  const intent = normalizeVoiceIntent(parsed.intent);
+  const languageChoice = normalizeLanguageChoice(parsed.language_choice);
   const creatorAngle = parsed.creator_angle || analyst.creator_angle || humanizer.humanized_hook || '';
   const whyItMatters = parsed.why_it_matters || analyst.why_it_matters || analyst.significance || '';
   const finalXText = parsed.final_x_text || [creatorAngle, textTranslated, whyItMatters].filter(Boolean).join('\n\n');
+  const parsedVariants = Array.isArray(parsed.variants) ? parsed.variants : [];
+  const variantsByKind = new Map<VoiceVariantKind, VoiceVariantOutput>();
+  for (const raw of parsedVariants) {
+    if (!raw || typeof raw !== 'object') continue;
+    const item = raw as Record<string, unknown>;
+    const kind = normalizeVariantKind(item.kind);
+    const text = cleanText(typeof item.final_x_text === 'string' ? item.final_x_text : '');
+    if (!text) continue;
+    variantsByKind.set(kind, {
+      kind,
+      label: typeof item.label === 'string' && item.label.trim() ? item.label : kind.replaceAll('_', ' '),
+      final_x_text: text,
+      creator_angle: typeof item.creator_angle === 'string' && item.creator_angle.trim() ? item.creator_angle : creatorAngle,
+      why_it_matters: typeof item.why_it_matters === 'string' && item.why_it_matters.trim() ? item.why_it_matters : whyItMatters,
+      language_choice: normalizeLanguageChoice(item.language_choice ?? languageChoice),
+      intent: normalizeVoiceIntent(item.intent ?? intent),
+      voice_rationale: typeof item.voice_rationale === 'string' ? item.voice_rationale : '',
+      platform_risk_note: typeof item.platform_risk_note === 'string' && item.platform_risk_note.trim() ? item.platform_risk_note : null,
+    });
+  }
+  const variants: VoiceVariantOutput[] = (['raw_masihh', 'strategic_masihh', 'short_punch'] as VoiceVariantKind[]).map((kind) => variantsByKind.get(kind) ?? {
+    kind,
+    label: kind === 'raw_masihh' ? 'Raw @masihh' : kind === 'strategic_masihh' ? 'Strategic @masihh' : 'Short punch',
+    final_x_text: finalXText,
+    creator_angle: creatorAngle,
+    why_it_matters: whyItMatters,
+    language_choice: languageChoice,
+    intent,
+    voice_rationale: 'Fallback variant from the main composer draft.',
+    platform_risk_note: null,
+  });
+  const selectedVariant = normalizeVariantKind(parsed.selected_variant);
+  const selected = variants.find((variant) => variant.kind === selectedVariant) ?? variants[0];
   const sources = researcher?.sources?.filter(Boolean) ?? [];
   return {
     output: {
       opinion_section: parsed.opinion_section || '',
-      final_x_text: finalXText,
-      creator_angle: creatorAngle,
-      why_it_matters: whyItMatters,
+      final_x_text: selected.final_x_text || finalXText,
+      creator_angle: selected.creator_angle || creatorAngle,
+      why_it_matters: selected.why_it_matters || whyItMatters,
+      intent: selected.intent,
+      language_choice: selected.language_choice,
+      selected_variant: selected.kind,
+      variants,
       source_context: {
         attribution_policy: config.source_attribution_policy,
         source_label: sourceLabel,
@@ -888,6 +1289,132 @@ VARIETY IS CRITICAL. Each post should feel structurally different from the last.
       },
       format_used: parsed.format_used || 'plain_opinion',
       thread_continuation: parsed.thread_continuation || null,
+    },
+    usage: resp.usage?.total_tokens ?? 0,
+  };
+}
+
+// ─── Agent 5: @masihh Voice Critic ────────────────────────────────────
+async function runVoiceCritic(
+  apiKey: string,
+  config: EnrichmentConfig,
+  voiceGuide: VoiceGuide,
+  voiceProfile: PersonalVoiceProfile,
+  textOriginal: string,
+  textTranslated: string,
+  composer: ComposerOutput,
+): Promise<{ output: VoiceCriticOutput; usage: number }> {
+  const tool = {
+    name: 'critique_voice_match',
+    description: 'Evaluate @masihh voice match for each manual enrichment variant',
+    parameters: {
+      type: 'object',
+      properties: {
+        variants: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              kind: { type: 'string', enum: ['raw_masihh', 'strategic_masihh', 'short_punch'] },
+              voice_match: { type: 'number', description: '0-100, higher means closer to the guide' },
+              too_generic: { type: 'number', description: '0-100' },
+              too_ai: { type: 'number', description: '0-100' },
+              too_soft: { type: 'number', description: '0-100' },
+              too_newsy: { type: 'number', description: '0-100' },
+              too_long: { type: 'number', description: '0-100' },
+              platform_risk: { type: 'number', description: '0-100 advisory platform/monetization risk' },
+              rationale: { type: 'string', description: 'Plain-English reason for the score' },
+            },
+            required: ['kind', 'voice_match', 'too_generic', 'too_ai', 'too_soft', 'too_newsy', 'too_long', 'platform_risk', 'rationale'],
+          },
+        },
+        overall_reason: { type: 'string' },
+      },
+      required: ['variants', 'overall_reason'],
+    },
+  };
+
+  const resp = await callOpenAI({
+    apiKey,
+    model: config.model,
+    messages: [
+      {
+        role: 'system',
+        content: `${voiceContextBlock(voiceGuide, voiceProfile)}
+
+You are the separate @masihh Voice Critic. Score the drafts against the style guide. Do not block storage or approval. Do not sanitize the voice. Flag risk clearly so a human can choose.`,
+      },
+      {
+        role: 'user',
+        content: [
+          `ORIGINAL SOURCE:\n${textOriginal}`,
+          `TRANSLATION:\n${textTranslated}`,
+          `INTENT: ${composer.intent}`,
+          `LANGUAGE: ${composer.language_choice}`,
+          `VARIANTS:\n${composer.variants.map((variant) => `[${variant.kind}]\n${variant.final_x_text}\nRationale: ${variant.voice_rationale}`).join('\n\n')}`,
+        ].join('\n\n---\n\n'),
+      },
+    ],
+    tool,
+    maxOutputTokens: Math.min(config.max_critic_tokens, 2500),
+    reasoningEffort: 'low',
+    verbosity: 'low',
+  });
+
+  if (!resp.ok || !resp.toolCall) {
+    return {
+      output: {
+        variants: composer.variants.map((variant) => ({
+          kind: variant.kind,
+          voice_match: 50,
+          too_generic: 50,
+          too_ai: 50,
+          too_soft: 50,
+          too_newsy: 50,
+          too_long: Math.min(100, Math.max(0, variant.final_x_text.length - 260)),
+          platform_risk: 50,
+          rationale: 'Voice critic failed; manual review required.',
+        })),
+        overall_reason: 'Voice critic failed; manual review required.',
+      },
+      usage: resp.usage?.total_tokens ?? 0,
+    };
+  }
+
+  const parsed = JSON.parse(resp.toolCall.arguments);
+  const scores = Array.isArray(parsed.variants) ? parsed.variants : [];
+  const byKind = new Map<VoiceVariantKind, VoiceCriticVariantScore>();
+  for (const raw of scores) {
+    if (!raw || typeof raw !== 'object') continue;
+    const item = raw as Record<string, unknown>;
+    const kind = normalizeVariantKind(item.kind);
+    byKind.set(kind, {
+      kind,
+      voice_match: clampScore(item.voice_match, 50),
+      too_generic: clampScore(item.too_generic, 50),
+      too_ai: clampScore(item.too_ai, 50),
+      too_soft: clampScore(item.too_soft, 50),
+      too_newsy: clampScore(item.too_newsy, 50),
+      too_long: clampScore(item.too_long, 0),
+      platform_risk: clampScore(item.platform_risk, 50),
+      rationale: typeof item.rationale === 'string' ? item.rationale : '',
+    });
+  }
+
+  return {
+    output: {
+      variants: composer.variants.map((variant) => byKind.get(variant.kind) ?? {
+        kind: variant.kind,
+        voice_match: 50,
+        too_generic: 50,
+        too_ai: 50,
+        too_soft: 50,
+        too_newsy: 50,
+        too_long: 0,
+        platform_risk: 50,
+        rationale: 'No critic score returned for this variant.',
+      }),
+      overall_reason: typeof parsed.overall_reason === 'string' ? parsed.overall_reason : 'Voice critic completed.',
     },
     usage: resp.usage?.total_tokens ?? 0,
   };

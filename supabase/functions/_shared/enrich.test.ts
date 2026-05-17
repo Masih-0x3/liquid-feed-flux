@@ -1,11 +1,14 @@
 import { assert, assertEquals } from "jsr:@std/assert";
 import {
   allowCompletedEnrichmentForPosting,
+  DEFAULT_MASIH_VOICE_GUIDE,
   doesEnrichmentBlockX,
   evaluateAntiAggregatorGate,
   isAutoEnrichmentEnabled,
   makeResearchCacheKey,
   normalizeEnrichmentConfig,
+  normalizePersonalVoiceProfile,
+  normalizeVoiceGuide,
 } from "./enrich.ts";
 
 Deno.test("normalizeEnrichmentConfig defaults to creator-analysis shadow review", () => {
@@ -86,4 +89,32 @@ Deno.test("research cache key is stable by source URL", async () => {
   const a = await makeResearchCacheKey("https://example.com/story?utm=1", "different text");
   const b = await makeResearchCacheKey("https://example.com/story?utm=1", "other text");
   assertEquals(a, b);
+});
+
+Deno.test("voice guide defaults to @masihh manual enrichment source", () => {
+  const guide = normalizeVoiceGuide(null);
+  const profile = normalizePersonalVoiceProfile(null);
+
+  assert(guide.guide.includes("@masihh"));
+  assertEquals(guide.guide, DEFAULT_MASIH_VOICE_GUIDE);
+  assertEquals(profile.handle, "@masihh");
+  assertEquals(profile.intent_rules.clapback.includes("sharp") || profile.intent_rules.clapback.includes("Reactive"), true);
+  assert(profile.language_rules.some((rule) => rule.toLowerCase().includes("persian")));
+});
+
+Deno.test("voice profile normalization preserves generated rules with safe fallbacks", () => {
+  const profile = normalizePersonalVoiceProfile({
+    version: "custom",
+    summary: "Blunt bilingual voice",
+    language_rules: ["Mix English and Persian naturally"],
+    tone_rules: ["Direct, sarcastic, anti-regime"],
+    intent_rules: { news_reaction: "Lead with the take" },
+    hashtags: ["#Iran"],
+  });
+
+  assertEquals(profile.version, "custom");
+  assertEquals(profile.summary, "Blunt bilingual voice");
+  assertEquals(profile.intent_rules.news_reaction, "Lead with the take");
+  assert(profile.intent_rules.clapback.length > 0);
+  assertEquals(profile.hashtags, ["#Iran"]);
 });

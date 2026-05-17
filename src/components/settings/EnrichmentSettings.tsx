@@ -54,6 +54,49 @@ interface VoiceSamples {
   updated_at: string | null;
 }
 
+interface VoiceGuide {
+  guide: string;
+  updated_at: string | null;
+}
+
+interface PersonalVoiceProfile {
+  version?: string;
+  summary?: string;
+  language_rules?: string[];
+  tone_rules?: string[];
+  intent_rules?: Record<string, string>;
+  avoid_rules?: string[];
+  risk_notes?: string[];
+  hashtags?: string[];
+  updated_at?: string | null;
+}
+
+const DEFAULT_MASIH_VOICE_GUIDE = `X Voice & Style Guide for @masihh
+
+Core identity: @masihh amplifies Iranian opposition voices, political prisoners, anti-regime protests, and Iran/Israel/US current events.
+
+Overall voice:
+- Direct, bold, unfiltered, passionate.
+- Activist energy; never neutral or diplomatic.
+- Sharp, sarcastic, blunt when calling out opponents.
+- Serious political analysis mixed with raw immediate reaction.
+
+Language rules:
+- Bilingual by default. Use Persian for emotional impact, slogans, and short political punches.
+- Use English for explanations, international audience, detailed arguments, and clapbacks.
+- Prefer short, punchy statements. Use emojis sparingly, especially flags.
+
+Tone:
+- Critical of the Islamic Republic, IRGC, judiciary, and political Islam.
+- Supportive of Iranian opposition and resistance.
+- Critical of performative activism, empty rhetoric, and hypocrisy.
+- Direct and confrontational in replies.
+
+Common modes: clapback, solidarity, political analysis, blunt observation, news reaction.
+Hashtags: #KingRezaPahlaviForIran #IranRevolution2026 #Iran #DigitalBlackOutIran
+
+Avoid: soft diplomatic tone, generic activist language, long meandering explanations, excessive positivity, performative intellectual flourishes.`;
+
 const DEFAULT_CONFIG: EnrichmentConfig = {
   enabled: false,
   model: 'gpt-5.4-mini',
@@ -109,8 +152,11 @@ export default function EnrichmentSettings() {
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [generatingProfile, setGeneratingProfile] = useState(false);
   const [config, setConfig] = useState<EnrichmentConfig>(DEFAULT_CONFIG);
   const [voiceSamples, setVoiceSamples] = useState<VoiceSamples>({ samples: [], updated_at: null });
+  const [voiceGuide, setVoiceGuide] = useState<VoiceGuide>({ guide: DEFAULT_MASIH_VOICE_GUIDE, updated_at: null });
+  const [voiceProfile, setVoiceProfile] = useState<PersonalVoiceProfile | null>(null);
   const [newSample, setNewSample] = useState('');
   const [newBannedPhrase, setNewBannedPhrase] = useState('');
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -125,11 +171,16 @@ export default function EnrichmentSettings() {
       const { data } = await supabase
         .from('settings')
         .select('key, value')
-        .in('key', ['enrichment_config', 'voice_samples']);
+        .in('key', ['enrichment_config', 'voice_samples', 'voice_guide', 'personal_voice_profile']);
       if (data) {
         for (const row of data) {
           if (row.key === 'enrichment_config' && row.value) setConfig({ ...DEFAULT_CONFIG, ...(row.value as object) });
           if (row.key === 'voice_samples' && row.value) setVoiceSamples(row.value as unknown as VoiceSamples);
+          if (row.key === 'voice_guide' && row.value) {
+            const value = row.value as Partial<VoiceGuide>;
+            setVoiceGuide({ guide: value.guide || DEFAULT_MASIH_VOICE_GUIDE, updated_at: value.updated_at || null });
+          }
+          if (row.key === 'personal_voice_profile' && row.value) setVoiceProfile(row.value as unknown as PersonalVoiceProfile);
         }
       }
     } catch (e) {
@@ -163,6 +214,38 @@ export default function EnrichmentSettings() {
       toast({ title: 'Saved', description: 'Voice samples updated.' });
     } catch (e) {
       toast({ title: 'Error', description: (e as Error).message, variant: 'destructive' });
+    }
+  }
+
+  async function saveVoiceGuideOnly() {
+    const updated = { guide: voiceGuide.guide.trim() || DEFAULT_MASIH_VOICE_GUIDE, updated_at: new Date().toISOString() };
+    setVoiceGuide(updated);
+    try {
+      const { error } = await supabase
+        .from('settings')
+        .upsert([{ key: 'voice_guide', value: updated as never, updated_at: new Date().toISOString() }], { onConflict: 'key' });
+      if (error) throw error;
+      toast({ title: 'Saved', description: '@masihh voice guide updated.' });
+    } catch (e) {
+      toast({ title: 'Error', description: (e as Error).message, variant: 'destructive' });
+    }
+  }
+
+  async function generateVoiceProfile() {
+    setGeneratingProfile(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('admin-actions', {
+        body: { action: 'generate_voice_profile', guide: voiceGuide.guide },
+      });
+      if (error) throw error;
+      if (data?.ok === false) throw new Error(data.error ?? 'Voice profile generation failed');
+      setVoiceProfile(data.profile as PersonalVoiceProfile);
+      setVoiceGuide({ guide: voiceGuide.guide, updated_at: new Date().toISOString() });
+      toast({ title: 'Profile generated', description: `GPT-5.4 Mini used ${data.usage ?? 'unknown'} tokens.` });
+    } catch (e) {
+      toast({ title: 'Profile failed', description: (e as Error).message, variant: 'destructive' });
+    } finally {
+      setGeneratingProfile(false);
     }
   }
 
@@ -363,6 +446,64 @@ export default function EnrichmentSettings() {
               </Button>
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* @masihh Voice Guide */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <PenTool className="w-5 h-5" />
+            @masihh Voice Guide
+          </CardTitle>
+          <CardDescription>
+            Canonical style source for manual enrichment. GPT-5.4 Mini turns this into a structured voice profile; drafts still require review before X uses them.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <Textarea
+            value={voiceGuide.guide}
+            onChange={(e) => setVoiceGuide({ ...voiceGuide, guide: e.target.value })}
+            rows={12}
+            placeholder="Paste your X Voice & Style Guide here..."
+            className="font-mono text-xs"
+          />
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button type="button" variant="outline" onClick={saveVoiceGuideOnly}>
+              <Save className="w-4 h-4 mr-2" />Save guide
+            </Button>
+            <Button type="button" onClick={generateVoiceProfile} disabled={generatingProfile || !voiceGuide.guide.trim()}>
+              {generatingProfile ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Wand2 className="w-4 h-4 mr-2" />}
+              Generate profile
+            </Button>
+          </div>
+          {voiceProfile && (
+            <div className="grid gap-3 lg:grid-cols-2">
+              <div className="rounded-md border bg-muted/30 p-3">
+                <p className="text-xs font-medium text-muted-foreground">Profile summary</p>
+                <p className="mt-1 text-sm">{voiceProfile.summary || 'No summary yet.'}</p>
+                {voiceProfile.version && <Badge variant="outline" className="mt-2">{voiceProfile.version}</Badge>}
+              </div>
+              <div className="rounded-md border bg-muted/30 p-3">
+                <p className="text-xs font-medium text-muted-foreground">Tone rules</p>
+                <ul className="mt-1 space-y-1 text-sm">
+                  {(voiceProfile.tone_rules || []).slice(0, 5).map((rule) => <li key={rule}>{rule}</li>)}
+                </ul>
+              </div>
+              <div className="rounded-md border bg-muted/30 p-3">
+                <p className="text-xs font-medium text-muted-foreground">Language rules</p>
+                <ul className="mt-1 space-y-1 text-sm">
+                  {(voiceProfile.language_rules || []).slice(0, 5).map((rule) => <li key={rule}>{rule}</li>)}
+                </ul>
+              </div>
+              <div className="rounded-md border bg-muted/30 p-3">
+                <p className="text-xs font-medium text-muted-foreground">Risk notes</p>
+                <ul className="mt-1 space-y-1 text-sm">
+                  {(voiceProfile.risk_notes || []).slice(0, 5).map((rule) => <li key={rule}>{rule}</li>)}
+                </ul>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 

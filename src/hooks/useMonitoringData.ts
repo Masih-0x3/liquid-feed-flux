@@ -92,7 +92,43 @@ export interface MonitoringEntry {
   composed_post_text: string | null;
   creator_angle: string | null;
   why_it_matters: string | null;
-  source_context: { attribution_policy?: string; source_label?: string | null; source_url?: string | null; sources?: string[] } | null;
+  source_context: {
+    attribution_policy?: string;
+    source_label?: string | null;
+    source_url?: string | null;
+    sources?: string[];
+    voice?: {
+      profile_version?: string;
+      intent?: string;
+      language_choice?: string;
+      selected_variant?: string;
+      variants?: Array<{
+        kind?: string;
+        label?: string;
+        final_x_text?: string;
+        creator_angle?: string;
+        why_it_matters?: string;
+        language_choice?: string;
+        intent?: string;
+        voice_rationale?: string;
+        platform_risk_note?: string | null;
+      }>;
+      critic?: {
+        variants?: Array<{
+          kind?: string;
+          voice_match?: number;
+          too_generic?: number;
+          too_ai?: number;
+          too_soft?: number;
+          too_newsy?: number;
+          too_long?: number;
+          platform_risk?: number;
+          rationale?: string;
+        }>;
+        overall_reason?: string;
+      };
+    };
+  } | null;
   algorithm_signal_scores: Record<string, number> | null;
   aggregator_risk_score: number | null;
   ai_voice_risk_score: number | null;

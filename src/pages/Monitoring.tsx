@@ -154,7 +154,7 @@ async function adminRunDedupe(tweetId: string) {
 
 type AudienceFeedback = 'too_low' | 'too_high' | 'correct_deliver' | 'correct_skip' | 'should_pass_audience' | 'should_skip' | 'wrong_relevance_class' | 'global_exception_worth_covering' | 'not_global_exception';
 type AudienceClassValue = 'direct_focus' | 'adjacent' | 'global_exception' | 'off_topic';
-type EnrichmentFeedback = 'too_ai' | 'too_cheesy' | 'too_aggregator' | 'strong_angle' | 'needs_more_context' | 'unsafe_for_monetization';
+type EnrichmentFeedback = 'sounds_like_me' | 'too_soft' | 'too_ai' | 'too_newsy' | 'not_blunt_enough' | 'too_long' | 'good_clapback' | 'strong_angle' | 'too_risky' | 'too_cheesy' | 'too_aggregator' | 'needs_more_context' | 'unsafe_for_monetization';
 type XDiagnosticBlocker = { code: string; label: string; severity: 'blocker' | 'deferred' | 'note' };
 type XPostingDiagnosticItem = {
   tweet_id: string;
@@ -221,6 +221,15 @@ async function adminRecordEnrichmentFeedback(tweetId: string, feedback: Enrichme
   if (error) throw error;
   if (data?.ok === false) throw new Error(data.error ?? 'Enrichment feedback failed');
   return data as { ok: boolean };
+}
+
+async function adminSelectEnrichmentVariant(tweetId: string, variant: string) {
+  const { data, error } = await supabase.functions.invoke('admin-actions', {
+    body: { action: 'select_enrichment_variant', tweet_id: tweetId, variant },
+  });
+  if (error) throw error;
+  if (data?.ok === false) throw new Error(data.error ?? 'Variant selection failed');
+  return data as { ok: boolean; selected_variant?: string; final_x_text?: string };
 }
 
 async function adminIgnoreMonitoringItem(tweetId: string, reason = 'reviewed_and_ignored') {
@@ -402,6 +411,8 @@ export default function Monitoring() {
   });
 
   const selectedEntry = useMemo(() => entries.find((entry) => entry.tweet_id === drawerTweetId) ?? null, [entries, drawerTweetId]);
+  const selectedVoice = selectedEntry?.source_context?.voice ?? null;
+  const selectedVoiceScores = selectedVoice?.critic?.variants ?? [];
   const { data: xDiagnostic, isFetching: xDiagnosticLoading } = useQuery({
     queryKey: ['x-posting-diagnostic', drawerTweetId],
     queryFn: () => adminGetXPostingDiagnostic(drawerTweetId as string),
@@ -476,7 +487,13 @@ export default function Monitoring() {
       });
       if (enrichError) throw enrichError;
       if (!data?.ok) throw new Error(data?.error ?? 'Failed to queue enrichment');
-      toast({ title: 'Enrichment draft queued', description: data.translation_preflight?.ok ? 'Translation was generated first.' : undefined });
+      const workerDispatch = data.worker_dispatch as { ok?: boolean; processed?: number; message?: string; error?: string } | undefined;
+      const descriptionParts = [
+        data.translation_preflight?.ok ? 'Translation was generated first.' : null,
+        workerDispatch?.ok === true ? `Worker started${typeof workerDispatch.processed === 'number' ? ` (${workerDispatch.processed} job${workerDispatch.processed === 1 ? '' : 's'} processed)` : ''}.` : null,
+        workerDispatch?.ok === false ? `Queued, but immediate worker dispatch failed: ${workerDispatch.error || 'unknown error'}. Cron can still pick it up.` : null,
+      ].filter(Boolean);
+      toast({ title: 'Enrichment draft queued', description: descriptionParts.join(' ') || undefined });
 
       const interval = setInterval(async () => {
         const { data: post } = await supabase
@@ -490,7 +507,7 @@ export default function Monitoring() {
           toast({ title: 'Enrichment complete', description: `Status: ${post.enrich_status}` });
         }
       }, 3000);
-      const timeout = setTimeout(() => cleanupPoll(tweetId), 120_000);
+      const timeout = setTimeout(() => cleanupPoll(tweetId), 300_000);
       pollRefs.current.set(tweetId, { interval, timeout });
     } catch (e) {
       toast({ title: 'Enrich failed', description: (e as Error).message, variant: 'destructive' });
@@ -553,6 +570,20 @@ export default function Monitoring() {
       invalidate();
     } catch (e) {
       toast({ title: 'Feedback failed', description: (e as Error).message, variant: 'destructive' });
+    } finally {
+      setFeedbackLoading(null);
+    }
+  };
+
+  const handleSelectEnrichmentVariant = async (entry: MonitoringEntry, variant: string) => {
+    const key = `${entry.tweet_id}:variant:${variant}`;
+    setFeedbackLoading(key);
+    try {
+      await adminSelectEnrichmentVariant(entry.tweet_id, variant);
+      toast({ title: 'Variant selected', description: 'X preview updated. It still requires explicit approval before use.' });
+      invalidate();
+    } catch (e) {
+      toast({ title: 'Variant failed', description: (e as Error).message, variant: 'destructive' });
     } finally {
       setFeedbackLoading(null);
     }
@@ -1565,6 +1596,22 @@ export default function Monitoring() {
                           {typeof selectedEntry.ai_voice_risk_score === 'number' && <Badge className={selectedEntry.ai_voice_risk_score >= 70 ? toneClass('bad') : selectedEntry.ai_voice_risk_score >= 35 ? toneClass('warn') : toneClass('good')}>AI voice {selectedEntry.ai_voice_risk_score}</Badge>}
                         </div>
                         {selectedEntry.enrichment_review_reason && <p className="rounded-md border bg-muted/30 p-2">{selectedEntry.enrichment_review_reason}</p>}
+                        {selectedVoice && (
+                          <div className="grid gap-2 sm:grid-cols-3">
+                            <div className="rounded-md border bg-muted/20 p-2">
+                              <p className="text-xs text-muted-foreground">Intent</p>
+                              <p className="font-medium">{selectedVoice.intent?.replaceAll('_', ' ') || '—'}</p>
+                            </div>
+                            <div className="rounded-md border bg-muted/20 p-2">
+                              <p className="text-xs text-muted-foreground">Language</p>
+                              <p className="font-medium">{selectedVoice.language_choice || '—'}</p>
+                            </div>
+                            <div className="rounded-md border bg-muted/20 p-2">
+                              <p className="text-xs text-muted-foreground">Selected</p>
+                              <p className="font-medium">{selectedVoice.selected_variant?.replaceAll('_', ' ') || '—'}</p>
+                            </div>
+                          </div>
+                        )}
                         <div className="grid gap-2 lg:grid-cols-2">
                           <div>
                             <p className="mb-1 text-xs font-medium text-muted-foreground">Original</p>
@@ -1578,6 +1625,47 @@ export default function Monitoring() {
                         {selectedEntry.monetization_risk_flags && selectedEntry.monetization_risk_flags.length > 0 && (
                           <div className="flex flex-wrap gap-1">
                             {selectedEntry.monetization_risk_flags.map((flag) => <Badge key={flag} variant="outline" className="text-xs">{flag}</Badge>)}
+                          </div>
+                        )}
+                        {selectedVoice?.variants && selectedVoice.variants.length > 0 && (
+                          <div>
+                            <div className="mb-2 flex items-center justify-between gap-2">
+                              <p className="text-xs font-medium text-muted-foreground">Manual voice variants</p>
+                              {selectedVoice.critic?.overall_reason && <p className="max-w-[70%] truncate text-xs text-muted-foreground" title={selectedVoice.critic.overall_reason}>{selectedVoice.critic.overall_reason}</p>}
+                            </div>
+                            <div className="grid gap-2 xl:grid-cols-3">
+                              {selectedVoice.variants.map((variant) => {
+                                const score = selectedVoiceScores.find((item) => item.kind === variant.kind);
+                                const selected = selectedVoice.selected_variant === variant.kind;
+                                return (
+                                  <div key={variant.kind || variant.label} className={`rounded-md border bg-muted/20 p-3 ${selected ? 'border-primary/60' : ''}`}>
+                                    <div className="mb-2 flex flex-wrap items-center gap-2">
+                                      <Badge variant={selected ? 'default' : 'outline'}>{variant.label || variant.kind?.replaceAll('_', ' ')}</Badge>
+                                      {typeof score?.voice_match === 'number' && <Badge variant="outline">Voice {score.voice_match}</Badge>}
+                                      {typeof score?.platform_risk === 'number' && <Badge className={score.platform_risk >= 70 ? toneClass('bad') : score.platform_risk >= 35 ? toneClass('warn') : toneClass('good')}>Risk {score.platform_risk}</Badge>}
+                                    </div>
+                                    <p dir="auto" className="whitespace-pre-wrap rounded-md border bg-background/60 p-2 text-sm">{variant.final_x_text}</p>
+                                    <p className="mt-2 text-xs text-muted-foreground">{variant.voice_rationale}</p>
+                                    {score?.rationale && <p className="mt-1 text-xs text-muted-foreground">{score.rationale}</p>}
+                                    <div className="mt-2 grid grid-cols-2 gap-1 text-[11px] text-muted-foreground">
+                                      {typeof score?.too_ai === 'number' && <span>AI {score.too_ai}</span>}
+                                      {typeof score?.too_soft === 'number' && <span>Soft {score.too_soft}</span>}
+                                      {typeof score?.too_newsy === 'number' && <span>Newsy {score.too_newsy}</span>}
+                                      {typeof score?.too_long === 'number' && <span>Long {score.too_long}</span>}
+                                    </div>
+                                    <Button
+                                      size="sm"
+                                      variant={selected ? 'secondary' : 'outline'}
+                                      className="mt-2 w-full"
+                                      onClick={() => handleSelectEnrichmentVariant(selectedEntry, variant.kind || 'raw_masihh')}
+                                      disabled={selected || feedbackLoading === `${selectedEntry.tweet_id}:variant:${variant.kind}`}
+                                    >
+                                      {selected ? 'Selected' : 'Use this preview'}
+                                    </Button>
+                                  </div>
+                                );
+                              })}
+                            </div>
                           </div>
                         )}
                         {selectedEntry.creator_angle && (
@@ -1622,12 +1710,15 @@ export default function Monitoring() {
                         </div>
                         <div className="flex flex-wrap gap-2">
                           {([
+                            ['sounds_like_me', 'Sounds like me'],
+                            ['too_soft', 'Too soft'],
                             ['too_ai', 'Too AI'],
-                            ['too_cheesy', 'Too cheesy'],
-                            ['too_aggregator', 'Too aggregator'],
+                            ['too_newsy', 'Too newsy'],
+                            ['not_blunt_enough', 'Not blunt enough'],
+                            ['too_long', 'Too long'],
+                            ['good_clapback', 'Good clapback'],
                             ['strong_angle', 'Strong angle'],
-                            ['needs_more_context', 'Needs context'],
-                            ['unsafe_for_monetization', 'Unsafe'],
+                            ['too_risky', 'Too risky'],
                           ] as const).map(([value, label]) => (
                             <Button key={value} size="sm" variant="outline" onClick={() => handleEnrichmentFeedback(selectedEntry, value)} disabled={feedbackLoading === `${selectedEntry.tweet_id}:enrich:${value}`}>
                               {label}

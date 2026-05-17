@@ -2,7 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
 import { callOpenAI, type ToolFunctionDef } from "../_shared/openai.ts";
-import { isAutoEnrichmentEnabled, normalizeEnrichmentConfig, runEnrichPipeline, type EnrichmentConfig, type VoiceSamples } from "../_shared/enrich.ts";
+import { isAutoEnrichmentEnabled, normalizeEnrichmentConfig, normalizePersonalVoiceProfile, normalizeVoiceGuide, runEnrichPipeline, type EnrichmentConfig, type VoiceSamples } from "../_shared/enrich.ts";
 import {
   SCORE_AXIS_KEYS,
   type ScoreAxisKey,
@@ -265,15 +265,31 @@ serve(async (req) => {
   if (authError) return authError;
 
   try {
+    let requestBody: Record<string, unknown> = {};
+    try {
+      requestBody = await req.json();
+    } catch (_e) {
+      requestBody = {};
+    }
+    const requestedJobTypes = Array.isArray(requestBody.job_types)
+      ? requestBody.job_types.map((type) => String(type)).filter(Boolean)
+      : null;
+    const requestedBatchSize = typeof requestBody.batch_size === 'number' && Number.isFinite(requestBody.batch_size)
+      ? Math.max(1, Math.min(20, Math.floor(requestBody.batch_size)))
+      : 20;
     const startTime = Date.now();
-    console.log(JSON.stringify({ function: 'worker', action: 'start', trigger: req.url }));
+    console.log(JSON.stringify({ function: 'worker', action: 'start', trigger: req.url, job_types: requestedJobTypes }));
 
     // Load runtime config
     const config = await loadConfig(supabase);
 
     // Use claim_jobs RPC for transactional job claiming
     const { data: jobs, error: claimError } = await supabase
-      .rpc('claim_jobs', { batch_size: 20, worker_id: 'worker-' + crypto.randomUUID().slice(0, 8) });
+      .rpc('claim_jobs', {
+        batch_size: requestedBatchSize,
+        job_types: requestedJobTypes,
+        worker_id: 'worker-' + crypto.randomUUID().slice(0, 8),
+      });
 
     if (claimError) {
       console.error(JSON.stringify({ function: 'worker', action: 'claim_error', error: claimError.message }));
@@ -1620,13 +1636,15 @@ async function handleEnrichJob(job: Record<string, unknown>, supabase: any): Pro
     return true;
   }
 
-  // Load voice samples
-  const { data: voiceRow } = await supabase
+  // Load @masihh voice guide/profile plus secondary voice samples.
+  const { data: voiceRows } = await supabase
     .from('settings')
-    .select('value')
-    .eq('key', 'voice_samples')
-    .single();
-  const voiceSamples = (voiceRow?.value ?? { samples: [], updated_at: null }) as VoiceSamples;
+    .select('key, value')
+    .in('key', ['voice_samples', 'voice_guide', 'personal_voice_profile']);
+  const voiceSettings = new Map((voiceRows ?? []).map((row: { key: string; value: unknown }) => [row.key, row.value]));
+  const voiceSamples = (voiceSettings.get('voice_samples') ?? { samples: [], updated_at: null }) as VoiceSamples;
+  const voiceGuide = normalizeVoiceGuide(voiceSettings.get('voice_guide'));
+  const voiceProfile = normalizePersonalVoiceProfile(voiceSettings.get('personal_voice_profile'));
 
   // Get recent formats for variety (avoid last 3, not just 1)
   const { data: recentFormatPosts } = await supabase
@@ -1663,6 +1681,8 @@ async function handleEnrichJob(job: Record<string, unknown>, supabase: any): Pro
       apiKey: openaiApiKey,
       config: enrichConfig,
       voiceSamples,
+      voiceGuide,
+      voiceProfile,
       tweetId,
       textOriginal: post.text_original,
       textTranslated: post.text_translated,
@@ -1681,6 +1701,19 @@ async function handleEnrichJob(job: Record<string, unknown>, supabase: any): Pro
       : autoCanComplete && result.publishRecommendation === 'approve'
         ? 'completed'
         : 'awaiting_approval';
+    const sourceContextWithVoice = {
+      ...result.composer.source_context,
+      voice: {
+        ...(result.composer.source_context.voice ?? {}),
+        profile_version: voiceProfile.version,
+        intent: result.composer.intent,
+        language_choice: result.composer.language_choice,
+        selected_variant: result.composer.selected_variant,
+        variants: result.composer.variants,
+        critic: result.voiceCritic,
+      },
+    };
+
     await supabase.from('posts').update({
       enrichment_version: enrichConfig.version,
       background_context: result.researcher ? result.researcher : null,
@@ -1693,7 +1726,7 @@ async function handleEnrichJob(job: Record<string, unknown>, supabase: any): Pro
       composed_post_text: result.composer.opinion_section,
       creator_angle: result.composer.creator_angle,
       why_it_matters: result.composer.why_it_matters,
-      source_context: result.composer.source_context,
+      source_context: sourceContextWithVoice,
       algorithm_signal_scores: result.critic.algorithm_signal_scores,
       aggregator_risk_score: result.critic.aggregator_risk_score,
       ai_voice_risk_score: result.critic.ai_voice_risk_score,
@@ -1715,7 +1748,7 @@ async function handleEnrichJob(job: Record<string, unknown>, supabase: any): Pro
       model: enrichConfig.model,
       creator_angle: result.composer.creator_angle,
       why_it_matters: result.composer.why_it_matters,
-      source_context: result.composer.source_context,
+      source_context: sourceContextWithVoice,
       algorithm_signal_scores: result.critic.algorithm_signal_scores,
       aggregator_risk_score: result.critic.aggregator_risk_score,
       ai_voice_risk_score: result.critic.ai_voice_risk_score,
@@ -1726,6 +1759,11 @@ async function handleEnrichJob(job: Record<string, unknown>, supabase: any): Pro
       format_used: result.composer.format_used,
       critic_output: {
         critic: result.critic,
+        voice_critic: result.voiceCritic,
+        voice_variants: result.composer.variants,
+        voice_intent: result.composer.intent,
+        language_choice: result.composer.language_choice,
+        selected_variant: result.composer.selected_variant,
         anti_aggregator: result.antiAggregator,
         publish_recommendation: result.publishRecommendation,
       },
