@@ -1,7 +1,7 @@
 export const ALLOWED_IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-export const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
-export const MAX_STANDARD_VIDEO_DURATION_MS = 120_000;
+export const MAX_VIDEO_BYTES = 512 * 1024 * 1024;
+export const MAX_STANDARD_VIDEO_DURATION_MS = 140_000;
 
 const VIDEO_EXT_RE = /\.(mp4|mov|webm|m4v)(?:[?#].*)?$/i;
 const VIDEO_THUMB_RE = /(tweet_video_thumb|amplify_video_thumb|ext_tw_video_thumb)/i;

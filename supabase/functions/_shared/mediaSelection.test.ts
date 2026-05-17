@@ -72,6 +72,23 @@ Deno.test("valid downloaded video obeys allow_video config", () => {
   });
 });
 
+Deno.test("native X video under documented upload size limit is sendable", () => {
+  const row = {
+    kind: "video",
+    src_url: "https://video.twimg.com/amplify_video/abc/vid/avc1/1280x720/video.mp4",
+    storage_path: "2026/5/video.mp4",
+    downloaded_at: "2026-05-17T00:00:00Z",
+    mime_type: "video/mp4",
+    file_size: 450 * 1024 * 1024,
+    duration_ms: 139_500,
+  };
+
+  assertEquals(selectMediaTier([row], { allowVideo: true }), {
+    tier: "video",
+    items: [row],
+  });
+});
+
 Deno.test("video-intent rows prevent thumbnail fallback when mixed with images", () => {
   const rows = [
     {
