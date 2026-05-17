@@ -8,6 +8,7 @@ import { requireInternalAuth } from '../_shared/internalAuth.ts';
 import { recordLegacyXApiUsage, recordXApiEvent } from '../_shared/xApiLedger.ts';
 import { buildXPostText, isEnrichmentBlockingXPost, pickHashtags } from '../_shared/xPostText.ts';
 import { allowCompletedEnrichmentForPosting, doesEnrichmentBlockX, normalizeEnrichmentConfig } from '../_shared/enrich.ts';
+import { duplicateXSkipReason } from '../_shared/duplicateGuard.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': Deno.env.get('ALLOWED_CORS_ORIGIN') ?? 'https://liquid-feed-flux.lovable.app',
@@ -443,7 +444,7 @@ Deno.serve(async (req) => {
   const existing = new Set((existingRows || []).map((r) => r.post_id as string));
 
   let candidatesQ = sb.from('posts')
-    .select('tweet_id, text_translated, text_original, author_handle, has_media, importance_score, final_score, delivery_decision, url, is_truncated, hydrated_at, created_at, final_x_text, composed_post_text, post_format_hint, humanized_commentary, commentary_hook, commentary_question, narrative_callback, thread_continuation, enrich_status, accounts!inner(handle)')
+    .select('tweet_id, text_translated, text_original, author_handle, has_media, importance_score, final_score, delivery_decision, decision_reason, url, is_truncated, hydrated_at, created_at, final_x_text, composed_post_text, post_format_hint, humanized_commentary, commentary_hook, commentary_question, narrative_callback, thread_continuation, enrich_status, dedupe_status, dup_of_tweet_id, dup_similarity, dedupe_reason, accounts!inner(handle)')
     .gte('created_at', effectiveCutoff)
     .not('text_translated', 'is', null);
 
@@ -514,24 +515,45 @@ Deno.serve(async (req) => {
       continue;
     }
 
-    if (!onlyTweetId) {
-      const { data: latestX } = await sb
-        .from('x_deliveries')
-        .select('status, last_error, skip_reason')
-        .eq('post_id', tweetId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      const latestStatus = (latestX as { status?: string } | null)?.status;
-      if (latestStatus === 'failed' || latestStatus === 'skipped') {
-        results.push({
-          tweet_id: tweetId,
-          status: 'deferred',
-          reason: `previous_x_${latestStatus}`,
+    const { data: latestX } = await sb
+      .from('x_deliveries')
+      .select('status, last_error, skip_reason')
+      .eq('post_id', tweetId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const latestStatus = (latestX as { status?: string } | null)?.status;
+
+    const duplicateSkipReason = duplicateXSkipReason(post as { dedupe_status?: string | null; dup_of_tweet_id?: string | null; dedupe_reason?: string | null });
+    if (duplicateSkipReason) {
+      if (!dryRun && latestStatus !== 'skipped') {
+        const { error: skipErr } = await sb.from('x_deliveries').insert({
+          post_id: tweetId,
+          status: 'skipped',
+          skip_reason: 'duplicate_gate',
+          last_error: duplicateSkipReason,
+          attempts: 0,
         });
-        console.log(`[x-poster] deferring ${tweetId}: previous X status is ${latestStatus}`);
-        continue;
+        if (skipErr) console.error('[x-poster] x_deliveries insert skipped failed (duplicate gate)', { tweetId, err: skipErr.message });
       }
+      results.push({
+        tweet_id: tweetId,
+        status: dryRun ? 'dry_run_skipped' : 'skipped',
+        reason: 'duplicate_gate',
+        dup_of_tweet_id: (post as { dup_of_tweet_id?: string | null }).dup_of_tweet_id ?? null,
+      });
+      console.warn(`[x-poster] refusing ${onlyTweetId ? 'forced ' : ''}X post for ${tweetId}: ${duplicateSkipReason}`);
+      continue;
+    }
+
+    if (!onlyTweetId && (latestStatus === 'failed' || latestStatus === 'skipped')) {
+      results.push({
+        tweet_id: tweetId,
+        status: 'deferred',
+        reason: `previous_x_${latestStatus}`,
+      });
+      console.log(`[x-poster] deferring ${tweetId}: previous X status is ${latestStatus}`);
+      continue;
     }
 
     // Fetch media rows

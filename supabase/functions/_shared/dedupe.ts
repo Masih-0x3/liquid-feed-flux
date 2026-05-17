@@ -30,7 +30,7 @@ export interface DuplicateGatePost {
 
 export interface StoryCandidate {
   tweet_id: string;
-  story_cluster_id: string;
+  story_cluster_id: string | null;
   similarity: number;
   normalized_text?: string | null;
   text_original?: string | null;
@@ -38,6 +38,9 @@ export interface StoryCandidate {
   author_handle?: string | null;
   url?: string | null;
   created_at?: string | null;
+  candidate_dedupe_status?: string | null;
+  candidate_dup_of_tweet_id?: string | null;
+  candidate_delivery_decision?: string | null;
 }
 
 export interface DuplicateGateResult {
@@ -230,12 +233,13 @@ export async function runDuplicateGate(
       status: 'duplicate',
       method: 'exact_url',
       confidence: 1,
-      dup_of_tweet_id: exact.tweet_id,
+      dup_of_tweet_id: canonicalCandidateTweetId(exact),
       story_cluster_id: exact.story_cluster_id ?? null,
       similarity: 1,
       reason: `same_url:${exact.url}`,
       should_enqueue_translate: config.action !== 'skip' || post.feedback_locked === true,
     });
+    result = await canonicalizeResultThroughPosts(supabase, result);
     result = await preventUncoveredDuplicateSkip(supabase, post, result, config);
     if (!dryRun) await persistDedupeResult(supabase, post, result, config, nowIso, options.source);
     return result;
@@ -281,7 +285,7 @@ export async function runDuplicateGate(
           status: 'duplicate',
           method: 'semantic_auto',
           confidence: top.similarity,
-          dup_of_tweet_id: top.tweet_id,
+          dup_of_tweet_id: canonicalCandidateTweetId(top),
           story_cluster_id: top.story_cluster_id,
           similarity: top.similarity,
           reason: `high_semantic_similarity:${top.similarity.toFixed(3)}`,
@@ -293,6 +297,7 @@ export async function runDuplicateGate(
           ? await options.adjudicate(post, candidates, config)
           : await adjudicateWithModel(getOpenAiApiKey(), post, candidates, config);
       }
+      result = canonicalizeDedupeResult(result, candidates);
     }
 
     if (result.status === 'duplicate' && post.feedback_locked === true) {
@@ -303,6 +308,7 @@ export async function runDuplicateGate(
       };
     }
 
+    result = await canonicalizeResultThroughPosts(supabase, result);
     result = await preventUncoveredDuplicateSkip(supabase, post, result, config);
 
     if (!dryRun) {
@@ -437,12 +443,13 @@ function isActiveStatusValue(status: unknown): boolean {
 
 function classifySemanticOnly(top: StoryCandidate, config: DuplicateGateConfig, candidates: StoryCandidate[]): DuplicateGateResult {
   const duplicate = top.similarity >= config.similarity_threshold;
+  const canonicalTweetId = canonicalCandidateTweetId(top);
   return {
     ok: true,
     status: duplicate ? 'duplicate' : 'unique',
     method: 'semantic_auto',
     confidence: top.similarity,
-    dup_of_tweet_id: duplicate ? top.tweet_id : null,
+    dup_of_tweet_id: duplicate ? canonicalTweetId : null,
     story_cluster_id: top.story_cluster_id,
     similarity: top.similarity,
     reason: duplicate ? `semantic_threshold:${top.similarity.toFixed(3)}` : `below_semantic_threshold:${top.similarity.toFixed(3)}`,
@@ -535,7 +542,8 @@ async function adjudicateWithModel(
   const canonicalId = typeof args.canonical_tweet_id === 'string' && args.canonical_tweet_id.trim()
     ? args.canonical_tweet_id.trim()
     : top.tweet_id;
-  const canonical = candidates.find((c) => c.tweet_id === canonicalId) ?? top;
+  const canonical = candidates.find((c) => c.tweet_id === canonicalId || c.candidate_dup_of_tweet_id === canonicalId) ?? top;
+  const canonicalTweetId = canonicalCandidateTweetId(canonical);
   const reason = typeof args.reason === 'string' ? args.reason.slice(0, 1000) : `ai_${decision}`;
   const newFacts = Array.isArray(args.new_facts) ? args.new_facts.map((f) => String(f).trim()).filter(Boolean).slice(0, 10) : [];
 
@@ -561,7 +569,7 @@ async function adjudicateWithModel(
       status: 'duplicate',
       method: 'semantic_ai',
       confidence,
-      dup_of_tweet_id: canonical.tweet_id,
+      dup_of_tweet_id: canonicalTweetId,
       story_cluster_id: canonical.story_cluster_id,
       similarity: canonical.similarity,
       reason,
@@ -607,20 +615,31 @@ async function findExactUrlDuplicate(
   supabase: any,
   post: DuplicateGatePost,
   config: DuplicateGateConfig,
-): Promise<{ tweet_id: string; url?: string; story_cluster_id?: string | null } | null> {
+): Promise<StoryCandidate | null> {
   const url = (post.url || '').trim();
   if (!url) return null;
   const since = new Date(Date.now() - config.window_hours * 60 * 60 * 1000).toISOString();
   const { data, error } = await supabase
     .from('posts')
-    .select('tweet_id, url, story_cluster_id, created_at')
+    .select('tweet_id, url, story_cluster_id, created_at, dedupe_status, dup_of_tweet_id, delivery_decision')
     .eq('url', url)
     .neq('tweet_id', post.tweet_id)
     .gte('created_at', since)
     .order('created_at', { ascending: true })
     .limit(1);
   if (error) throw new Error(`exact_url_lookup_failed:${error.message}`);
-  return data?.[0] ?? null;
+  const row = data?.[0] as Record<string, unknown> | undefined;
+  if (!row) return null;
+  return {
+    tweet_id: String(row.tweet_id),
+    story_cluster_id: typeof row.story_cluster_id === 'string' ? row.story_cluster_id : null,
+    similarity: 1,
+    url: row.url as string | null,
+    created_at: row.created_at as string | null,
+    candidate_dedupe_status: row.dedupe_status as string | null,
+    candidate_dup_of_tweet_id: row.dup_of_tweet_id as string | null,
+    candidate_delivery_decision: row.delivery_decision as string | null,
+  };
 }
 
 async function findSemanticCandidates(
@@ -640,7 +659,7 @@ async function findSemanticCandidates(
   if (error) throw new Error(`find_story_candidates_v3_failed:${error.message}`);
   return (data ?? []).map((row: Record<string, unknown>) => ({
     tweet_id: String(row.tweet_id),
-    story_cluster_id: String(row.story_cluster_id),
+    story_cluster_id: typeof row.story_cluster_id === 'string' ? row.story_cluster_id : null,
     similarity: Number(row.similarity ?? 0),
     normalized_text: row.normalized_text as string | null,
     text_original: row.text_original as string | null,
@@ -648,7 +667,70 @@ async function findSemanticCandidates(
     author_handle: row.author_handle as string | null,
     url: row.url as string | null,
     created_at: row.created_at as string | null,
+    candidate_dedupe_status: row.candidate_dedupe_status as string | null,
+    candidate_dup_of_tweet_id: row.candidate_dup_of_tweet_id as string | null,
+    candidate_delivery_decision: row.candidate_delivery_decision as string | null,
   }));
+}
+
+function canonicalCandidateTweetId(candidate: Pick<StoryCandidate, 'tweet_id' | 'candidate_dedupe_status' | 'candidate_dup_of_tweet_id'>): string {
+  const candidateTarget = typeof candidate.candidate_dup_of_tweet_id === 'string'
+    ? candidate.candidate_dup_of_tweet_id.trim()
+    : '';
+  if (candidate.candidate_dedupe_status === 'duplicate' && candidateTarget) return candidateTarget;
+  return candidate.tweet_id;
+}
+
+function canonicalizeDedupeResult(result: DuplicateGateResult, candidates: StoryCandidate[]): DuplicateGateResult {
+  if (!result.dup_of_tweet_id) return result;
+  const matched = candidates.find((candidate) => candidate.tweet_id === result.dup_of_tweet_id);
+  if (!matched) return result;
+  const canonicalTweetId = canonicalCandidateTweetId(matched);
+  if (canonicalTweetId === result.dup_of_tweet_id) return result;
+  return {
+    ...result,
+    dup_of_tweet_id: canonicalTweetId,
+    reason: `${result.reason}; canonicalized_from:${matched.tweet_id}`,
+  };
+}
+
+async function canonicalizeResultThroughPosts(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  result: DuplicateGateResult,
+): Promise<DuplicateGateResult> {
+  if (!result.dup_of_tweet_id) return result;
+  const canonicalTweetId = await resolveCanonicalTweetId(supabase, result.dup_of_tweet_id);
+  if (!canonicalTweetId || canonicalTweetId === result.dup_of_tweet_id) return result;
+  return {
+    ...result,
+    dup_of_tweet_id: canonicalTweetId,
+    reason: `${result.reason}; canonical_chain:${canonicalTweetId}`,
+  };
+}
+
+async function resolveCanonicalTweetId(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  tweetId: string,
+): Promise<string> {
+  let current = tweetId;
+  const seen = new Set<string>();
+  for (let depth = 0; depth < 8; depth += 1) {
+    if (seen.has(current)) return current;
+    seen.add(current);
+    const { data, error } = await supabase
+      .from('posts')
+      .select('tweet_id, dedupe_status, dup_of_tweet_id')
+      .eq('tweet_id', current)
+      .limit(1);
+    if (error) return current;
+    const row = Array.isArray(data) ? data[0] as Record<string, unknown> | undefined : undefined;
+    const next = typeof row?.dup_of_tweet_id === 'string' ? row.dup_of_tweet_id.trim() : '';
+    if (!row || row.dedupe_status !== 'duplicate' || !next || seen.has(next)) return current;
+    current = next;
+  }
+  return current;
 }
 
 async function upsertStorySignature(

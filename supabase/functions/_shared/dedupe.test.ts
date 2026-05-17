@@ -109,6 +109,93 @@ Deno.test("runDuplicateGate auto-skips very high semantic matches before transla
   assertEquals(supabase.updates[0].update.delivery_decision, "skip");
 });
 
+Deno.test("runDuplicateGate canonicalizes semantic candidates that are themselves duplicates", async () => {
+  const supabase = makeFakeSupabase({
+    candidates: [candidate({
+      tweet_id: "middle",
+      similarity: 0.97,
+      candidate_dedupe_status: "duplicate",
+      candidate_dup_of_tweet_id: "older",
+    })],
+    canonicalPost: {
+      tweet_id: "older",
+      delivery_decision: "deliver",
+      decision_reason: "score_pass:15>=14",
+    },
+  });
+  const result = await runDuplicateGate(supabase, basePost(), {
+    enabled: true,
+    action: "skip",
+    auto_duplicate_similarity: 0.94,
+  }, { fetchEmbedding: async () => [0.1, 0.2, 0.3] });
+
+  assertEquals(result.status, "duplicate");
+  assertEquals(result.dup_of_tweet_id, "older");
+  assertEquals(supabase.updates[0].update.dup_of_tweet_id, "older");
+});
+
+Deno.test("runDuplicateGate canonicalizes AI duplicate decisions from duplicate candidates", async () => {
+  const supabase = makeFakeSupabase({
+    candidates: [candidate({
+      tweet_id: "middle",
+      similarity: 0.86,
+      candidate_dedupe_status: "duplicate",
+      candidate_dup_of_tweet_id: "older",
+    })],
+    canonicalPost: {
+      tweet_id: "older",
+      delivery_decision: "deliver",
+      decision_reason: "score_pass:15>=14",
+    },
+  });
+  const result = await runDuplicateGate(supabase, basePost(), {
+    enabled: true,
+    action: "skip",
+    auto_duplicate_similarity: 0.94,
+  }, {
+    fetchEmbedding: async () => [0.1, 0.2, 0.3],
+    adjudicate: async (_post, candidates) => makeAiResult("duplicate", candidates),
+  });
+
+  assertEquals(result.status, "duplicate");
+  assertEquals(result.dup_of_tweet_id, "older");
+  assertEquals(result.reason.includes("canonicalized_from:middle"), true);
+  assertEquals(supabase.updates[0].update.dup_of_tweet_id, "older");
+});
+
+Deno.test("runDuplicateGate resolves duplicate-of-duplicate chains to the original canonical post", async () => {
+  const supabase = makeFakeSupabase({
+    candidates: [candidate({
+      tweet_id: "newer-duplicate",
+      similarity: 0.97,
+      candidate_dedupe_status: "duplicate",
+      candidate_dup_of_tweet_id: "middle",
+    })],
+    postsById: {
+      middle: {
+        tweet_id: "middle",
+        dedupe_status: "duplicate",
+        dup_of_tweet_id: "older",
+      },
+    },
+    canonicalPost: {
+      tweet_id: "older",
+      delivery_decision: "deliver",
+      decision_reason: "score_pass:15>=14",
+    },
+  });
+  const result = await runDuplicateGate(supabase, basePost(), {
+    enabled: true,
+    action: "skip",
+    auto_duplicate_similarity: 0.94,
+  }, { fetchEmbedding: async () => [0.1, 0.2, 0.3] });
+
+  assertEquals(result.status, "duplicate");
+  assertEquals(result.dup_of_tweet_id, "older");
+  assertEquals(result.reason.includes("canonical_chain:older"), true);
+  assertEquals(supabase.updates[0].update.dup_of_tweet_id, "older");
+});
+
 Deno.test("runDuplicateGate does not hard-skip when the matched duplicate has no delivery coverage", async () => {
   const supabase = makeFakeSupabase({
     candidates: [candidate({ similarity: 0.97 })],
@@ -175,6 +262,7 @@ Deno.test("runDuplicateGate marks low-confidence AI outcomes uncertain without b
 function makeFakeSupabase(options: {
   exactDuplicate?: Record<string, unknown>;
   canonicalPost?: Record<string, unknown>;
+  postsById?: Record<string, Record<string, unknown>>;
   candidates?: Record<string, unknown>[];
   telegramStatuses?: string[];
   xStatuses?: string[];
@@ -213,6 +301,7 @@ class FakeBuilder {
     private options: {
       exactDuplicate?: Record<string, unknown>;
       canonicalPost?: Record<string, unknown>;
+      postsById?: Record<string, Record<string, unknown>>;
       telegramStatuses?: string[];
       xStatuses?: string[];
       jobStatuses?: string[];
@@ -265,6 +354,10 @@ class FakeBuilder {
         options: this.upsertOptions,
       });
       resolve({ data: null, error: null });
+      return;
+    }
+    if (this.table === "posts" && this.filters.tweet_id && this.options.postsById?.[String(this.filters.tweet_id)]) {
+      resolve({ data: [this.options.postsById[String(this.filters.tweet_id)]], error: null });
       return;
     }
     if (this.table === "posts" && this.options.canonicalPost && this.filters.tweet_id === this.options.canonicalPost.tweet_id) {

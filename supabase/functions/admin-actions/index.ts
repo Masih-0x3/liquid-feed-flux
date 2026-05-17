@@ -13,6 +13,7 @@ import {
   normalizeDuplicateGateConfig,
   runDuplicateGate,
 } from "../_shared/dedupe.ts";
+import { duplicateXSkipReason } from "../_shared/duplicateGuard.ts";
 import {
   SCORING_POLICY_VERSION,
   normalizeScoringPolicy,
@@ -883,6 +884,12 @@ async function setManualScore(supabase: any, body: Record<string, unknown>) {
   if (overrideDuplicate && relatedTweetId) {
     updatePayload.dup_of_tweet_id = null;
     updatePayload.dup_similarity = null;
+    updatePayload.dedupe_status = 'unique';
+    updatePayload.dedupe_method = 'none';
+    updatePayload.dedupe_confidence = null;
+    updatePayload.dedupe_reason = 'manual_score_override';
+    updatePayload.dedupe_new_facts = [];
+    updatePayload.dedupe_checked_at = new Date().toISOString();
   }
 
   const { error: upErr } = await supabase.from('posts').update(updatePayload).eq('tweet_id', tweetId);
@@ -3779,9 +3786,20 @@ serve(async (req) => {
         if (tweetId && action === 'retry_x_post') {
           const { data: existing } = await supabase
             .from('posts')
-            .select('text_translated, importance_score, final_score, is_truncated, hydrated_at')
+            .select('text_translated, importance_score, final_score, is_truncated, hydrated_at, dedupe_status, dup_of_tweet_id, dedupe_reason')
             .eq('tweet_id', tweetId)
             .maybeSingle();
+          const duplicateSkipReason = duplicateXSkipReason(existing as { dedupe_status?: string | null; dup_of_tweet_id?: string | null; dedupe_reason?: string | null } | null);
+          if (duplicateSkipReason) {
+            return jsonResponse({
+              ok: false,
+              skipped: true,
+              status: 'skipped',
+              reason: 'duplicate_gate',
+              error: 'This post is marked as a duplicate. Clear or override the duplicate first before forcing X.',
+              dup_of_tweet_id: (existing as { dup_of_tweet_id?: string | null } | null)?.dup_of_tweet_id ?? null,
+            }, 200);
+          }
           const needsRescore = !existing
             || !existing.text_translated
             || typeof existing.text_translated !== 'string'
@@ -3827,7 +3845,7 @@ serve(async (req) => {
           if (!resp.ok) return jsonResponse({ ok: false, error: `x-poster ${resp.status}: ${text.slice(0, 300)}`, raw: parsed, prep }, 200);
           const parsedObj = parsed as { results?: Array<Record<string, unknown>> };
           const result = tweetId ? (parsedObj?.results?.[0] ?? null) : null;
-          if (tweetId && action === 'retry_x_post') {
+          if (tweetId && action === 'retry_x_post' && result?.status === 'posted') {
             await recordFeedback(supabase, tweetId, 'force_x', 1).catch(() => {});
             await supabase.from('posts').update({ feedback_locked: true }).eq('tweet_id', tweetId);
           }

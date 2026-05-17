@@ -21,6 +21,7 @@ import {
   normalizeDuplicateGateConfig,
   runDuplicateGate,
 } from "../_shared/dedupe.ts";
+import { duplicateDecisionPatch } from "../_shared/duplicateGuard.ts";
 import {
   SCORING_POLICY_VERSION,
   normalizeScoringPolicy,
@@ -489,7 +490,7 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
 
     const { data: post, error } = await supabase
       .from('posts')
-      .select('tweet_id, text_original, account_id, url, tweeted_at, has_media, author_handle, is_truncated, hydrated_at, accounts!inner(handle, display_name)')
+      .select('tweet_id, text_original, account_id, url, tweeted_at, has_media, author_handle, is_truncated, hydrated_at, dedupe_status, dup_of_tweet_id, dedupe_reason, accounts!inner(handle, display_name)')
       .eq('tweet_id', tweetId)
       .single();
 
@@ -499,6 +500,29 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
 
     if (!post.text_original) {
       throw new Error('No original text to translate');
+    }
+
+    const initialDuplicatePatch = duplicateDecisionPatch(post as { dedupe_status?: string | null; dup_of_tweet_id?: string | null; dedupe_reason?: string | null });
+    if (initialDuplicatePatch) {
+      const nowIso = new Date().toISOString();
+      const { error: dupSkipUpdateError } = await supabase
+        .from('posts')
+        .update({
+          delivery_decision: initialDuplicatePatch.delivery_decision,
+          decision_reason: initialDuplicatePatch.decision_reason,
+        })
+        .eq('tweet_id', tweetId);
+      if (dupSkipUpdateError) throw dupSkipUpdateError;
+      console.log(JSON.stringify({ function: 'worker', action: 'translate_skip_duplicate_gate', tweet_id: tweetId, reason: initialDuplicatePatch.decision_reason }));
+      await insertPipelineEvent(supabase, 'post', tweetId, 'translate', 'skipped', null, nowIso, null, {
+        reason: 'duplicate_gate',
+        decision_reason: initialDuplicatePatch.decision_reason,
+      });
+      await insertPipelineEvent(supabase, 'post', tweetId, 'deliver', 'completed', null, nowIso, null, {
+        skipped: 'duplicate_gate',
+        decision: 'skip',
+      });
+      return true;
     }
 
     const forceScoringV2 = payload.scoring_policy_v2 === true;
@@ -1048,8 +1072,19 @@ ${post.text_original}`;
     // content filter. In split mode this was already computed before translation
     // so feedback-boosted posts could receive a translation before delivery.
     const finalDecisionState = splitDecisionState ?? await applyFeedbackBiasToDecision(buildBaseDecisionState());
-    const deliveryDecision = finalDecisionState.deliveryDecision;
-    const decisionReason = finalDecisionState.decisionReason;
+    let duplicatePatch: ReturnType<typeof duplicateDecisionPatch> = null;
+    try {
+      const { data: latestDedupe } = await supabase
+        .from('posts')
+        .select('dedupe_status, dup_of_tweet_id, dedupe_reason')
+        .eq('tweet_id', tweetId)
+        .maybeSingle();
+      duplicatePatch = duplicateDecisionPatch(latestDedupe as { dedupe_status?: string | null; dup_of_tweet_id?: string | null; dedupe_reason?: string | null } | null);
+    } catch (dedupeCheckErr) {
+      console.warn('latest dedupe check failed (continuing)', (dedupeCheckErr as Error).message);
+    }
+    const deliveryDecision = duplicatePatch?.delivery_decision ?? finalDecisionState.deliveryDecision;
+    const decisionReason = duplicatePatch?.decision_reason ?? finalDecisionState.decisionReason;
     const finalScore = finalDecisionState.finalScore;
     const scoreBreakdown = finalDecisionState.scoreBreakdown;
 
@@ -1191,7 +1226,12 @@ ${post.text_original}`;
       }
     } else {
       console.log(JSON.stringify({ function: 'worker', action: 'delivery_skipped', tweet_id: tweetId, score: importanceScore, decision: deliveryDecision }));
-      await insertPipelineEvent(supabase, 'post', tweetId, 'deliver', 'completed', null, nowIso, null, { skipped: 'content_filter', score: importanceScore, decision: deliveryDecision });
+      await insertPipelineEvent(supabase, 'post', tweetId, 'deliver', 'completed', null, nowIso, null, {
+        skipped: duplicatePatch ? 'duplicate_gate' : 'content_filter',
+        score: importanceScore,
+        decision: deliveryDecision,
+        decision_reason: decisionReason,
+      });
     }
     
     return true;
