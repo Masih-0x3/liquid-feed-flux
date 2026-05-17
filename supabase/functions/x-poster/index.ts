@@ -9,6 +9,11 @@ import { recordLegacyXApiUsage, recordXApiEvent } from '../_shared/xApiLedger.ts
 import { buildXPostText, isEnrichmentBlockingXPost, pickHashtags } from '../_shared/xPostText.ts';
 import { allowCompletedEnrichmentForPosting, doesEnrichmentBlockX, normalizeEnrichmentConfig } from '../_shared/enrich.ts';
 import { duplicateXSkipReason } from '../_shared/duplicateGuard.ts';
+import {
+  MAX_STANDARD_VIDEO_DURATION_MS,
+  selectMediaTier,
+  type XMediaRow,
+} from '../_shared/mediaSelection.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': Deno.env.get('ALLOWED_CORS_ORIGIN') ?? 'https://liquid-feed-flux.lovable.app',
@@ -103,50 +108,9 @@ async function trimRollingWindow(arr: string[], windowMs: number): Promise<strin
   return (arr || []).filter((ts) => { try { return new Date(ts).getTime() > cutoff; } catch { return false; } });
 }
 
-// ─── Media validation & tier selection ───────────────────────────────
-// Cost-first policy:
-//   - text only        → no media/upload calls at all
-//   - has image(s)     → upload up to 4 images
-//   - has video        → upload ONLY the video (ignore images), one media_id
-const ALLOWED_IMAGE = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;        // 5MB per X spec
-const MAX_VIDEO_BYTES = 50 * 1024 * 1024;       // 50MB safety cap (X allows up to 512MB)
-const MAX_STANDARD_VIDEO_DURATION_MS = 120_000; // current account/API limit observed from X write failures
+// ─── Media upload limits ─────────────────────────────────────────────
 const VIDEO_CHUNK_BYTES = 4 * 1024 * 1024;      // 4MB chunks for APPEND
 const VIDEO_PROCESS_TIMEOUT_MS = 55 * 1000;     // total polling budget
-
-interface MediaRow {
-  id: string;
-  storage_path: string | null;
-  downloaded_at: string | null;
-  mime_type: string | null;
-  file_size: number | null;
-  kind: string | null;
-  duration_ms?: number | null;
-}
-
-type Tier = 'text' | 'image' | 'video';
-interface TierSelection { tier: Tier; items: MediaRow[]; reason?: string }
-
-function selectMediaTier(rows: MediaRow[]): TierSelection {
-  const downloaded = rows.filter((r) => r.downloaded_at && r.storage_path);
-  if (downloaded.length === 0) return { tier: 'text', items: [], reason: 'no_downloaded_media' };
-
-  const video = downloaded.find((r) =>
-    (r.kind === 'video' || (r.mime_type || '').startsWith('video/'))
-    && (r.mime_type || '').startsWith('video/')
-    && (r.file_size ?? 0) > 0
-    && (r.file_size ?? 0) <= MAX_VIDEO_BYTES,
-  );
-  if (video) return { tier: 'video', items: [video] };
-
-  const images = downloaded.filter(
-    (r) => ALLOWED_IMAGE.includes(r.mime_type || '') && (r.file_size ?? 0) <= MAX_IMAGE_BYTES,
-  );
-  if (images.length > 0) return { tier: 'image', items: images.slice(0, 4) };
-
-  return { tier: 'text', items: [], reason: 'no_supported_media' };
-}
 
 // ─── X media upload (image, simple base64) ───────────────────────────
 function bytesToBase64(bytes: Uint8Array): string {
@@ -558,7 +522,7 @@ Deno.serve(async (req) => {
 
     // Fetch media rows
     const { data: mediaRows } = await sb.from('media')
-      .select('id, storage_path, downloaded_at, mime_type, file_size, kind, duration_ms')
+      .select('id, storage_path, downloaded_at, mime_type, file_size, kind, duration_ms, src_url')
       .eq('tweet_id', tweetId)
       .order('ordering', { ascending: true });
 
@@ -568,7 +532,8 @@ Deno.serve(async (req) => {
     // silently burning the post as text.
     const postAgeMs = Date.now() - new Date((post as { created_at: string }).created_at).getTime();
     const hasMediaFlag = (post as { has_media?: boolean }).has_media === true;
-    const anyDownloaded = (mediaRows || []).some((m) => (m as MediaRow).downloaded_at);
+    const mediaRowsForSelection = ((mediaRows as XMediaRow[] | null) ?? []);
+    const anyDownloaded = mediaRowsForSelection.some((m) => m.downloaded_at);
     if (hasMediaFlag && !anyDownloaded) {
       const { data: pendingJobs } = await sb.from('jobs')
         .select('id').in('type', ['resolve_media', 'download_media'])
@@ -582,7 +547,7 @@ Deno.serve(async (req) => {
       // No pending job but media is missing — likely a dropped/collided
       // download_media job. Self-heal: enqueue a unique-keyed download and
       // defer this iteration so we never post text-only when media exists.
-      const hasMediaRowWithSrc = (mediaRows || []).some((m) => (m as MediaRow & { id: string }).id);
+      const hasMediaRowWithSrc = mediaRowsForSelection.some((m) => m.id);
       if (hasMediaRowWithSrc) {
         if (dryRun) {
           results.push({ tweet_id: tweetId, status: 'dry_run_deferred', reason: 'media_pending_self_heal_needed', age_ms: postAgeMs });
@@ -640,7 +605,57 @@ Deno.serve(async (req) => {
     let mediaKind: string | null = null;
     let mediaWarning: string | null = null;
 
-    const sel = selectMediaTier((mediaRows as MediaRow[]) || []);
+    const sel = selectMediaTier(mediaRowsForSelection, { allowVideo: cfg.allow_video === true });
+
+    if (sel.tier === 'blocked') {
+      const reason = sel.reason || 'media_blocked';
+      if (dryRun) {
+        results.push({ tweet_id: tweetId, status: 'dry_run_deferred', reason });
+        continue;
+      }
+
+      if (reason === 'video_disabled_by_config') {
+        const { error: skipErr } = await sb.from('x_deliveries').insert({
+          post_id: tweetId,
+          status: 'skipped',
+          media_count: 0,
+          media_bytes: 0,
+          media_kind: 'video',
+          skip_reason: reason,
+          last_error: 'Video posting is disabled in x_posting_config.allow_video',
+          attempts: 0,
+        });
+        if (skipErr) console.error('[x-poster] x_deliveries insert skipped failed (video disabled)', { tweetId, err: skipErr.message });
+        results.push({ tweet_id: tweetId, status: 'skipped', reason });
+        console.warn(`[x-poster] skipping ${tweetId}: ${reason}`);
+        continue;
+      }
+
+      const { data: mediaJobs } = await sb.from('jobs')
+        .select('id')
+        .in('type', ['resolve_media', 'download_media'])
+        .in('status', ['pending', 'running'])
+        .filter('payload->>tweet_id', 'eq', tweetId)
+        .limit(1);
+
+      if (mediaJobs && mediaJobs.length > 0) {
+        results.push({ tweet_id: tweetId, status: 'deferred', reason, age_ms: postAgeMs });
+        console.log(`[x-poster] deferring ${tweetId}: ${reason}`);
+        continue;
+      }
+
+      await sb.from('jobs').insert({
+        type: 'resolve_media',
+        payload: { tweet_id: tweetId },
+        status: 'pending',
+        idempotency_key: `resolve_media:xposter_heal:${tweetId}:${Date.now()}`,
+        next_run_at: new Date().toISOString(),
+        priority: 12,
+      });
+      results.push({ tweet_id: tweetId, status: 'deferred', reason: `${reason}_self_healed`, age_ms: postAgeMs });
+      console.warn(`[x-poster] refused invalid video media for ${tweetId}; queued resolve_media (${reason})`);
+      continue;
+    }
 
     if (hasMediaFlag && sel.tier === 'text') {
       const reason = sel.reason || 'no_supported_media';

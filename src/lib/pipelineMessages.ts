@@ -91,8 +91,20 @@ export function formatXSkipOrError(skip: string | null | undefined, err: string 
     const subHuman: Record<string, string> = {
       no_supported_media: 'No supported media file yet (X needs image/video bytes, not text-only for posts with media).',
       no_downloaded_media: 'Media not downloaded yet.',
+      video_pending_resolution: 'Video is still being resolved before X can post it.',
+      video_media_mismatch: 'Video row has thumbnail/image bytes; X posting is blocked until media is re-resolved.',
+      video_disabled_by_config: 'Video posting is disabled in Settings.',
     };
     return withDetail(raw, subHuman[sub] ?? `Media required: ${sub.replace(/_/g, ' ')}`);
+  }
+  if (raw === 'video_pending_resolution') {
+    return withDetail(raw, 'Video is still being resolved before X can post it.');
+  }
+  if (raw === 'video_media_mismatch') {
+    return withDetail(raw, 'Video row has thumbnail/image bytes; X posting is blocked until media is re-resolved.');
+  }
+  if (raw === 'video_disabled_by_config') {
+    return withDetail(raw, 'Video posting is disabled in Settings.');
   }
   if (raw.startsWith('media_upload_failed')) {
     return withDetail(raw, 'Media upload to X failed');

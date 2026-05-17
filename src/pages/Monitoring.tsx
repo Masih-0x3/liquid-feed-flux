@@ -167,9 +167,35 @@ type XPostingDiagnosticItem = {
   latest_x?: { status?: string; skip_reason?: string | null; last_error?: string | null; x_tweet_id?: string | null } | null;
   active_jobs?: Array<{ type?: string; status?: string; error?: string | null }>;
   hydration?: { is_truncated?: boolean; hydrated_at?: string | null; active_hydrate_job?: boolean };
-  media?: { has_media?: boolean; rows?: number; downloaded?: number; active_media_job?: boolean };
+  media?: {
+    has_media?: boolean;
+    rows?: number;
+    downloaded?: number;
+    active_media_job?: boolean;
+    selected_tier?: string;
+    selected_reason?: string | null;
+    row_details?: Array<{
+      id?: string | null;
+      kind?: string | null;
+      mime_type?: string | null;
+      file_size?: number | null;
+      downloaded?: boolean;
+      video_intent?: boolean;
+      sendable?: boolean;
+      role?: string;
+    }>;
+  };
   enrichment?: { status?: string | null; pipeline_mode?: string; required_for_x?: boolean; approved_for_text?: boolean; text_source?: string };
 };
+
+function formatBytes(bytes: number | null | undefined): string {
+  if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes <= 0) return '-';
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toFixed(kb >= 10 ? 0 : 1)} KB`;
+  const mb = kb / 1024;
+  return `${mb.toFixed(mb >= 10 ? 0 : 1)} MB`;
+}
 
 async function adminSetManualScore(tweetId: string, score: number, reason: string, overrideDuplicate: boolean, expectedAudienceClass?: AudienceClassValue | '') {
   const { data, error } = await supabase.functions.invoke('admin-actions', {
@@ -1375,6 +1401,34 @@ export default function Monitoring() {
                               <p className="font-medium">{xDiagnostic.latest_x?.status ?? 'No row'}</p>
                             </div>
                           </div>
+                          {(xDiagnostic.media?.row_details?.length ?? 0) > 0 && (
+                            <div className="space-y-2 rounded-md border p-2">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <p className="text-xs font-medium text-muted-foreground">Media rows</p>
+                                <Badge variant="outline">
+                                  {xDiagnostic.media?.selected_tier ?? 'unknown'}
+                                  {xDiagnostic.media?.selected_reason ? `: ${xDiagnostic.media.selected_reason.replaceAll('_', ' ')}` : ''}
+                                </Badge>
+                              </div>
+                              <div className="grid gap-2">
+                                {xDiagnostic.media?.row_details?.map((row, index) => (
+                                  <div key={row.id ?? index} className="grid gap-1 rounded border bg-muted/20 p-2 text-xs sm:grid-cols-[1fr_auto]">
+                                    <div className="min-w-0">
+                                      <p className="font-medium">
+                                        {row.kind ?? 'unknown'} · {row.mime_type ?? 'not downloaded'} · {formatBytes(row.file_size)}
+                                      </p>
+                                      <p className="text-muted-foreground">
+                                        {row.video_intent ? 'video intent' : 'image/text media'} · {row.downloaded ? 'downloaded' : 'not downloaded'}
+                                      </p>
+                                    </div>
+                                    <Badge className={row.sendable ? toneClass('good') : toneClass('warn')}>
+                                      {(row.role ?? 'not_sendable').replaceAll('_', ' ')}
+                                    </Badge>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                           <div className="grid gap-2 sm:grid-cols-2">
                             <Button size="sm" variant="outline" onClick={() => handleTestEnrich(selectedEntry.tweet_id)}>
                               <Sparkles className="w-3 h-3 mr-1.5" />Generate enrichment draft

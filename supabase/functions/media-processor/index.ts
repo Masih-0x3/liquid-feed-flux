@@ -112,11 +112,11 @@ supabase: any, tweetId: string, dryRun: boolean) {
           .limit(1);
         if (existing && existing.length > 0) {
           // Reuse existing storage path
-          await supabase.from('media').update({
+          const updated = await guardedMediaUpdate(supabase, media, {
             storage_path: existing[0].storage_path,
             downloaded_at: new Date().toISOString(),
-          }).eq('id', media.id);
-          downloadedCount++;
+          });
+          if (updated) downloadedCount++;
           continue;
         }
       }
@@ -142,22 +142,20 @@ supabase: any, tweetId: string, dryRun: boolean) {
 
       if (uploadError) throw new Error(`Upload failed: ${uploadError.message}`);
 
-      await supabase.from('media').update({
+      const updated = await guardedMediaUpdate(supabase, media, {
         storage_path: storagePath, downloaded_at: new Date().toISOString(),
         file_size: fileSize, mime_type: contentType
-      }).eq('id', media.id);
+      });
 
-      downloadedCount++;
+      if (updated) {
+        downloadedCount++;
+      } else {
+        await supabase.storage.from('temp-media').remove([storagePath]);
+      }
     } catch (error) {
       console.error(JSON.stringify({ function: 'media-processor', action: 'download_fail', src_url: media.src_url, error: (error as Error).message }));
       // Surface to pipeline_events so monitoring can see media download failures.
-      try {
-        await supabase.from('pipeline_events').insert({
-          subject_type: 'post', subject_id: media.tweet_id, step: 'download_media',
-          status: 'failed', error: (error as Error).message,
-          meta: { src_url: media.src_url, media_id: media.id },
-        });
-      } catch (_e) { /* best-effort */ }
+      await insertMediaDownloadEvent(supabase, media, 'failed', (error as Error).message, {});
       failedCount++;
     }
   }
@@ -167,6 +165,61 @@ supabase: any, tweetId: string, dryRun: boolean) {
   return new Response(JSON.stringify({ success: true, downloaded: downloadedCount, failed: failedCount, total: mediaItems.length }), {
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
+}
+
+async function insertMediaDownloadEvent(// deno-lint-ignore no-explicit-any
+  supabase: any,
+  media: Record<string, unknown>,
+  status: 'completed' | 'failed',
+  error: string | null,
+  meta: Record<string, unknown>,
+): Promise<void> {
+  try {
+    await supabase.from('pipeline_events').insert({
+      subject_type: 'post',
+      subject_id: media.tweet_id,
+      step: 'download_media',
+      status,
+      error,
+      meta: { src_url: media.src_url, media_id: media.id, ...meta },
+    });
+  } catch (_e) { /* best-effort */ }
+}
+
+async function markStaleMediaDownloadIgnored(// deno-lint-ignore no-explicit-any
+  supabase: any,
+  media: Record<string, unknown>,
+  extra: Record<string, unknown> = {},
+): Promise<void> {
+  await insertMediaDownloadEvent(supabase, media, 'completed', null, {
+    event: 'stale_media_download_ignored',
+    ...extra,
+  });
+}
+
+async function guardedMediaUpdate(// deno-lint-ignore no-explicit-any
+  supabase: any,
+  media: Record<string, unknown>,
+  values: Record<string, unknown>,
+): Promise<boolean> {
+  let query = supabase
+    .from('media')
+    .update(values)
+    .eq('id', media.id)
+    .is('storage_path', null);
+
+  const hash = typeof media.src_url_hash === 'string' && media.src_url_hash.length > 0
+    ? media.src_url_hash
+    : null;
+  query = hash ? query.eq('src_url_hash', hash) : query.is('src_url_hash', null);
+
+  const { data, error } = await query.select('id').maybeSingle();
+  if (error) throw new Error(`Media row update failed: ${error.message}`);
+  if (!data) {
+    await markStaleMediaDownloadIgnored(supabase, media, { expected_src_url_hash: hash });
+    return false;
+  }
+  return true;
 }
 
 async function cleanupOldMedia(// deno-lint-ignore no-explicit-any

@@ -31,6 +31,13 @@ import {
   type VoiceSamples,
   type EnrichmentConfig,
 } from "../_shared/enrich.ts";
+import {
+  hasVideoIntent,
+  isSendableImage,
+  isValidVideoDownload,
+  selectMediaTier,
+  type XMediaRow,
+} from "../_shared/mediaSelection.ts";
 
 const DEPLOY_SHA = Deno.env.get('DEPLOY_GIT_SHA') ?? 'unknown';
 const DEPLOY_TIME = Deno.env.get('DEPLOY_TIME') ?? new Date().toISOString();
@@ -2652,6 +2659,7 @@ type XDiagnosticBlocker = {
 const DEFAULT_X_POSTING_DIAG_CONFIG = {
   enabled: false,
   min_score: 14,
+  allow_video: false,
   dedupe_window_hours: 48,
   post_only_decision_deliver: true,
   start_posting_from: null as string | null,
@@ -2745,7 +2753,7 @@ async function getXPostingDiagnostics(supabase: any, body: Record<string, unknow
         .order('created_at', { ascending: false }),
       supabase
         .from('media')
-        .select('id, downloaded_at, storage_path, kind, mime_type')
+        .select('id, downloaded_at, storage_path, kind, mime_type, file_size, duration_ms, src_url')
         .eq('tweet_id', tid),
     ]);
     const blockers: XDiagnosticBlocker[] = [];
@@ -2762,8 +2770,9 @@ async function getXPostingDiagnostics(supabase: any, body: Record<string, unknow
     const activeEnrichJob = jobs.some((job) => job.type === 'enrich');
     const activeMediaJob = jobs.some((job) => job.type === 'resolve_media' || job.type === 'download_media');
     const activeHydrateJob = jobs.some((job) => job.type === 'hydrate_tweet');
-    const media = (mediaRows.data ?? []) as Array<Record<string, unknown>>;
+    const media = ((mediaRows.data ?? []) as XMediaRow[]);
     const downloadedMedia = media.filter((row) => row.downloaded_at && row.storage_path).length;
+    const mediaSelection = selectMediaTier(media, { allowVideo: xCfg.allow_video === true });
     const enrichStatus = typeof post.enrich_status === 'string' ? post.enrich_status : null;
     const enrichmentApproved = enrichStatus === 'approved' || enrichStatus === 'enriched' || (enrichStatus === 'completed' && allowCompletedEnrichment);
 
@@ -2790,7 +2799,18 @@ async function getXPostingDiagnostics(supabase: any, body: Record<string, unknow
     } else if (enrichStatus && !enrichmentApproved && enrichStatus !== 'skipped') {
       notes.push({ code: `enrichment_${enrichStatus}_not_required`, label: `Enrichment is ${enrichStatus}, but plain X posting is allowed`, severity: 'note' });
     }
-    if (post.has_media === true && downloadedMedia === 0) {
+    if (post.has_media === true && mediaSelection.tier === 'blocked') {
+      const labels: Record<string, string> = {
+        video_pending_resolution: activeMediaJob ? 'Video is resolving/downloading' : 'Video media needs resolution before X',
+        video_media_mismatch: 'Video row has non-video bytes; X posting is blocked until media is re-resolved',
+        video_disabled_by_config: 'Video posting is disabled in Settings',
+      };
+      blockers.push({
+        code: mediaSelection.reason ?? 'media_blocked',
+        label: labels[mediaSelection.reason ?? ''] ?? `Media blocked: ${mediaSelection.reason ?? 'unknown reason'}`,
+        severity: mediaSelection.reason === 'video_disabled_by_config' ? 'blocker' : 'deferred',
+      });
+    } else if (post.has_media === true && downloadedMedia === 0) {
       blockers.push({
         code: activeMediaJob ? 'media_pending' : 'media_missing',
         label: activeMediaJob ? 'Media is still resolving/downloading' : 'Source has media but no downloaded X-uploadable media',
@@ -2821,6 +2841,22 @@ async function getXPostingDiagnostics(supabase: any, body: Record<string, unknow
         rows: media.length,
         downloaded: downloadedMedia,
         active_media_job: activeMediaJob,
+        selected_tier: mediaSelection.tier,
+        selected_reason: mediaSelection.reason ?? null,
+        row_details: media.map((row) => ({
+          id: row.id ?? null,
+          kind: row.kind ?? null,
+          mime_type: row.mime_type ?? null,
+          file_size: row.file_size ?? null,
+          downloaded: Boolean(row.downloaded_at && row.storage_path),
+          video_intent: hasVideoIntent(row),
+          sendable: isValidVideoDownload(row) || isSendableImage(row),
+          role: String(row.kind ?? '').toLowerCase() === 'thumbnail'
+            ? 'thumbnail_only'
+            : hasVideoIntent(row)
+              ? isValidVideoDownload(row) ? 'sendable_video' : 'video_blocked'
+              : isSendableImage(row) ? 'sendable_image' : 'not_sendable',
+        })),
       },
       enrichment: {
         status: enrichStatus,

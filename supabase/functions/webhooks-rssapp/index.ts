@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
 import { requireRssWebhookAuth } from "../_shared/internalAuth.ts";
+import { filterSendableIngestMedia } from "../_shared/mediaSelection.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': Deno.env.get('ALLOWED_CORS_ORIGIN') ?? 'https://liquid-feed-flux.lovable.app',
@@ -298,6 +299,15 @@ serve(async (req) => {
         // Triggers a `resolve_media` job that uses the public fxtwitter/vxtwitter
         // proxy (zero X API quota) to fetch the real MP4 URL.
         const hasVideoSignal = detectVideoSignal(item, text, mediaItems);
+        const sendableMediaItems = filterSendableIngestMedia(mediaItems, hasVideoSignal);
+        if (hasVideoSignal && sendableMediaItems.length !== mediaItems.length) {
+          console.log(JSON.stringify({
+            function: 'webhooks-rssapp',
+            action: 'video_thumbnail_suppressed',
+            original_media_count: mediaItems.length,
+            sendable_media_count: sendableMediaItems.length,
+          }));
+        }
 
         // Find or create a default account first
         let accountId = null;
@@ -354,7 +364,7 @@ serve(async (req) => {
             lang_original: 'auto',
             url: url,
             tweeted_at: publishedAt,
-            has_media: mediaItems.length > 0,
+            has_media: mediaItems.length > 0 || hasVideoSignal,
             author_handle: authorHandle,
             is_truncated: isTruncated,
           }, {
@@ -371,9 +381,9 @@ serve(async (req) => {
         console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'post_upserted', truncated: isTruncated }));
 
         // Insert media items
-        if (mediaItems.length > 0) {
+        if (sendableMediaItems.length > 0) {
           const mediaRows = await Promise.all(
-            mediaItems.map(async (media, index) => ({
+            sendableMediaItems.map(async (media, index) => ({
               tweet_id: tweetId,
               kind: media.type,
               src_url: media.url,
@@ -391,7 +401,7 @@ serve(async (req) => {
           if (mediaError) {
             console.error('Error inserting media:', mediaError);
           } else {
-            console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'media_inserted', count: mediaItems.length }));
+            console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'media_inserted', count: sendableMediaItems.length }));
           }
         }
 
@@ -400,7 +410,7 @@ serve(async (req) => {
         await enqueueContentPipelineEntry(supabase, tweetId, isTruncated, duplicateGateEnabled);
 
         // Create media download job for tweets with media
-        if (mediaItems.length > 0) {
+        if (sendableMediaItems.length > 0) {
           const { error: downloadJobError } = await supabase
             .from('jobs')
             .upsert({
@@ -424,7 +434,7 @@ serve(async (req) => {
                   step: 'media',
                   status: 'queued',
                   started_at: new Date().toISOString(),
-                  meta: { source: 'webhook' }
+                  meta: { source: 'webhook', sendable_media_count: sendableMediaItems.length }
                 });
             } catch (_e) {}
           }
