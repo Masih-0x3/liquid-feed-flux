@@ -404,6 +404,7 @@ export default function Monitoring() {
   const [manualAudienceClass, setManualAudienceClass] = useState<AudienceClassValue | ''>('');
   const [manualLoading, setManualLoading] = useState(false);
   const [feedbackLoading, setFeedbackLoading] = useState<string | null>(null);
+  const [enrichingTweetIds, setEnrichingTweetIds] = useState<Set<string>>(() => new Set());
   const pollRefs = useRef<Map<string, { interval: ReturnType<typeof setInterval>; timeout: ReturnType<typeof setTimeout> }>>(new Map());
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -474,6 +475,12 @@ export default function Monitoring() {
       clearTimeout(entry.timeout);
       pollRefs.current.delete(tweetId);
     }
+    setEnrichingTweetIds((prev) => {
+      if (!prev.has(tweetId)) return prev;
+      const next = new Set(prev);
+      next.delete(tweetId);
+      return next;
+    });
   };
 
   const openDetails = async (tweetId: string) => {
@@ -507,6 +514,14 @@ export default function Monitoring() {
   };
 
   const handleTestEnrich = async (tweetId: string) => {
+    if (enrichingTweetIds.has(tweetId)) {
+      toast({ title: 'Enrichment already running', description: 'The draft is still being generated for this post.' });
+      return;
+    }
+    cleanupPoll(tweetId);
+    setEnrichingTweetIds((prev) => new Set(prev).add(tweetId));
+    setDrawerTweetId(tweetId);
+    setDrawerOpen(true);
     try {
       const { data, error: enrichError } = await supabase.functions.invoke('admin-actions', {
         body: { action: 'enrich_post', tweet_id: tweetId },
@@ -529,13 +544,25 @@ export default function Monitoring() {
           .single();
         if (post && post.enrich_status !== 'pending') {
           cleanupPoll(tweetId);
+          if (post.enrich_status === 'awaiting_approval') {
+            setFilter('manual_review');
+            setSearchTerm(tweetId);
+            setDrawerTweetId(tweetId);
+            setDrawerOpen(true);
+          }
           invalidate();
-          toast({ title: 'Enrichment complete', description: `Status: ${post.enrich_status}` });
+          toast({
+            title: post.enrich_status === 'awaiting_approval' ? 'Draft ready for review' : 'Enrichment finished',
+            description: post.enrich_status === 'awaiting_approval'
+              ? 'Switched to Manual review and focused this tweet.'
+              : `Status: ${post.enrich_status}`,
+          });
         }
       }, 3000);
       const timeout = setTimeout(() => cleanupPoll(tweetId), 300_000);
       pollRefs.current.set(tweetId, { interval, timeout });
     } catch (e) {
+      cleanupPoll(tweetId);
       toast({ title: 'Enrich failed', description: (e as Error).message, variant: 'destructive' });
     }
   };
@@ -1430,8 +1457,11 @@ export default function Monitoring() {
                             </div>
                           )}
                           <div className="grid gap-2 sm:grid-cols-2">
-                            <Button size="sm" variant="outline" onClick={() => handleTestEnrich(selectedEntry.tweet_id)}>
-                              <Sparkles className="w-3 h-3 mr-1.5" />Generate enrichment draft
+                            <Button size="sm" variant="outline" onClick={() => handleTestEnrich(selectedEntry.tweet_id)} disabled={enrichingTweetIds.has(selectedEntry.tweet_id)}>
+                              {enrichingTweetIds.has(selectedEntry.tweet_id)
+                                ? <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
+                                : <Sparkles className="w-3 h-3 mr-1.5" />}
+                              {enrichingTweetIds.has(selectedEntry.tweet_id) ? 'Generating draft' : 'Generate enrichment draft'}
                             </Button>
                             <Button size="sm" disabled={!xPostingEnabled} onClick={() => setPendingAction({ type: 'force_x', entry: selectedEntry })}>
                               <Twitter className="w-3 h-3 mr-1.5" />Post plain to X
@@ -1637,8 +1667,11 @@ export default function Monitoring() {
                       <CardHeader className="pb-2">
                         <div className="flex items-center justify-between">
                           <CardTitle className="text-sm">Enrichment Studio</CardTitle>
-                          <Button size="sm" variant="outline" onClick={() => handleTestEnrich(selectedEntry.tweet_id)}>
-                            <Sparkles className="w-3 h-3 mr-1.5" />Generate draft
+                          <Button size="sm" variant="outline" onClick={() => handleTestEnrich(selectedEntry.tweet_id)} disabled={enrichingTweetIds.has(selectedEntry.tweet_id)}>
+                            {enrichingTweetIds.has(selectedEntry.tweet_id)
+                              ? <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
+                              : <Sparkles className="w-3 h-3 mr-1.5" />}
+                            {enrichingTweetIds.has(selectedEntry.tweet_id) ? 'Generating' : 'Generate draft'}
                           </Button>
                         </div>
                       </CardHeader>
