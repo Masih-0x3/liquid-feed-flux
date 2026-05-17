@@ -4,9 +4,11 @@ import {
   DEFAULT_MASIH_VOICE_GUIDE,
   doesEnrichmentBlockX,
   evaluateAntiAggregatorGate,
+  formatNewsWithTake,
   isAutoEnrichmentEnabled,
   makeResearchCacheKey,
   normalizeEnrichmentConfig,
+  normalizeLanguageChoice,
   normalizePersonalVoiceProfile,
   normalizeVoiceGuide,
 } from "./enrich.ts";
@@ -100,20 +102,49 @@ Deno.test("voice guide defaults to @masihh manual enrichment source", () => {
   assertEquals(profile.handle, "@masihh");
   assertEquals(profile.intent_rules.clapback.includes("sharp") || profile.intent_rules.clapback.includes("Reactive"), true);
   assert(profile.language_rules.some((rule) => rule.toLowerCase().includes("persian")));
+  assert(profile.language_rules.some((rule) => rule.toLowerCase().includes("never mix")));
+  assert(guide.guide.includes("پ.ن"));
+});
+
+Deno.test("enrichment language normalization rejects mixed drafts", () => {
+  assertEquals(normalizeLanguageChoice("mixed"), "persian");
+  assertEquals(normalizeLanguageChoice("english"), "english");
+
+  const persian = formatNewsWithTake({
+    language: "persian",
+    news: "نخست‌وزیر اسرائیل درباره ایران موضع تازه‌ای گرفت.",
+    take: "حساب این تهدید آخرش برای تهران می‌رود، نه مردم ایران.",
+  });
+
+  assertEquals(
+    persian,
+    "خبر: نخست‌وزیر اسرائیل درباره ایران موضع تازه‌ای گرفت.\n\nپ.ن: حساب این تهدید آخرش برای تهران می‌رود، نه مردم ایران.",
+  );
+
+  const english = formatNewsWithTake({
+    language: "english",
+    news: "Netanyahu said Iran is now in the frame.",
+    take: "The bill goes to Tehran, not the Iranian people.",
+  });
+
+  assertEquals(
+    english,
+    "News: Netanyahu said Iran is now in the frame.\n\nP.S.: The bill goes to Tehran, not the Iranian people.",
+  );
 });
 
 Deno.test("voice profile normalization preserves generated rules with safe fallbacks", () => {
   const profile = normalizePersonalVoiceProfile({
     version: "custom",
-    summary: "Blunt bilingual voice",
-    language_rules: ["Mix English and Persian naturally"],
+    summary: "Blunt single-language voice",
+    language_rules: ["Choose Persian or English based on audience"],
     tone_rules: ["Direct, sarcastic, anti-regime"],
     intent_rules: { news_reaction: "Lead with the take" },
     hashtags: ["#Iran"],
   });
 
   assertEquals(profile.version, "custom");
-  assertEquals(profile.summary, "Blunt bilingual voice");
+  assertEquals(profile.summary, "Blunt single-language voice");
   assertEquals(profile.intent_rules.news_reaction, "Lead with the take");
   assert(profile.intent_rules.clapback.length > 0);
   assertEquals(profile.hashtags, ["#Iran"]);

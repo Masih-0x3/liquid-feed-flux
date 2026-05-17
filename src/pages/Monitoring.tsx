@@ -1641,6 +1641,7 @@ export default function Monitoring() {
                                   <div key={variant.kind || variant.label} className={`rounded-md border bg-muted/20 p-3 ${selected ? 'border-primary/60' : ''}`}>
                                     <div className="mb-2 flex flex-wrap items-center gap-2">
                                       <Badge variant={selected ? 'default' : 'outline'}>{variant.label || variant.kind?.replaceAll('_', ' ')}</Badge>
+                                      <Badge variant="outline">{variant.language_choice === 'english' ? 'News + P.S.' : 'خبر + پ.ن'}</Badge>
                                       {typeof score?.voice_match === 'number' && <Badge variant="outline">Voice {score.voice_match}</Badge>}
                                       {typeof score?.platform_risk === 'number' && <Badge className={score.platform_risk >= 70 ? toneClass('bad') : score.platform_risk >= 35 ? toneClass('warn') : toneClass('good')}>Risk {score.platform_risk}</Badge>}
                                     </div>
@@ -1683,7 +1684,7 @@ export default function Monitoring() {
                         {selectedEntry.final_x_text && (
                           <div>
                             <p className="mb-1 text-xs font-medium text-muted-foreground">Final X preview</p>
-                            <p dir="rtl" className="whitespace-pre-wrap rounded-md border bg-muted/30 p-2">{selectedEntry.final_x_text}</p>
+                            <p dir="auto" className="whitespace-pre-wrap rounded-md border bg-muted/30 p-2">{selectedEntry.final_x_text}</p>
                           </div>
                         )}
                         {!selectedEntry.final_x_text && selectedEntry.composed_post_text && <p dir="rtl" className="rounded-md border bg-muted/30 p-2">{selectedEntry.composed_post_text}</p>}

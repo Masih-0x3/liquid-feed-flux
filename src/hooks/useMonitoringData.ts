@@ -106,6 +106,8 @@ export interface MonitoringEntry {
         kind?: string;
         label?: string;
         final_x_text?: string;
+        news_section?: string;
+        take_section?: string;
         creator_angle?: string;
         why_it_matters?: string;
         language_choice?: string;

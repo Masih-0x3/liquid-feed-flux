@@ -50,6 +50,7 @@ export interface VoiceGuide {
 
 export type VoiceIntent = "clapback" | "solidarity" | "political_analysis" | "blunt_observation" | "news_reaction";
 export type VoiceVariantKind = "raw_masihh" | "strategic_masihh" | "short_punch";
+export type VoiceLanguageChoice = "english" | "persian";
 
 export interface PersonalVoiceProfile {
   version: string;
@@ -69,9 +70,11 @@ export interface VoiceVariantOutput {
   kind: VoiceVariantKind;
   label: string;
   final_x_text: string;
+  news_section: string;
+  take_section: string;
   creator_angle: string;
   why_it_matters: string;
-  language_choice: "english" | "persian" | "mixed";
+  language_choice: VoiceLanguageChoice;
   intent: VoiceIntent;
   voice_rationale: string;
   platform_risk_note: string | null;
@@ -133,7 +136,7 @@ export interface ComposerOutput {
   creator_angle: string;
   why_it_matters: string;
   intent: VoiceIntent;
-  language_choice: "english" | "persian" | "mixed";
+  language_choice: VoiceLanguageChoice;
   selected_variant: VoiceVariantKind;
   variants: VoiceVariantOutput[];
   source_context: {
@@ -144,7 +147,7 @@ export interface ComposerOutput {
     voice?: {
       profile_version: string;
       intent: VoiceIntent;
-      language_choice: "english" | "persian" | "mixed";
+      language_choice: VoiceLanguageChoice;
       selected_variant: VoiceVariantKind;
       variants: VoiceVariantOutput[];
       critic?: VoiceCriticOutput;
@@ -249,9 +252,10 @@ Overall voice:
 - Strong urgency about the Iranian regime and opposition.
 
 Language rules:
-- Bilingual by default. Naturally switch between English and Persian.
+- Choose one language per post. Do not mix English and Persian in the same X draft.
+- Default to Persian for the main Iranian audience unless an English-only draft is clearly intentional.
 - Use Persian for strong political statements, slogans, insults, and emotional impact.
-- Use English for explanations, international audience, detailed arguments, and clapbacks.
+- Use English-only drafts for international explanations, detailed arguments, and clapbacks when needed.
 - Prefer short, punchy statements over long paragraphs.
 - Use emojis sparingly and purposefully, especially flags 🇮🇷 🇬🇧 🇮🇱 🇺🇲.
 
@@ -285,20 +289,23 @@ Avoid:
 
 Generation rules:
 1. Start with the core feeling: clapback, solidarity, political analysis, blunt observation, or news reaction.
-2. Choose English, Persian, or a natural mix based on emotional intensity.
-3. Keep it relatively short and direct.
-4. Add hashtags only when natural.
-5. Make it sound deeply invested in the Iranian opposition cause.`;
+2. Choose either English or Persian, never both in one draft.
+3. Put the factual news first, then the author's take as a separate postscript.
+4. Persian format: "خبر: ..." then "پ.ن: ..."; English format: "News: ..." then "P.S.: ...".
+5. Keep it relatively short and direct.
+6. Add hashtags only when natural.
+7. Make it sound deeply invested in the Iranian opposition cause.`;
 
 export const DEFAULT_PERSONAL_VOICE_PROFILE: PersonalVoiceProfile = {
   version: "masihh-voice-v1",
   source: "@masihh_voice_guide",
   handle: "@masihh",
-  summary: "Direct, bilingual Iranian opposition voice: blunt, urgent, sarcastic when appropriate, anti-regime, pro-opposition, and allergic to neutral news-account tone.",
+  summary: "Direct Iranian opposition voice: blunt, urgent, sarcastic when appropriate, anti-regime, pro-opposition, and allergic to neutral news-account tone. Drafts must be single-language, not mixed.",
   language_rules: [
+    "Choose one language per draft: Persian or English. Never mix both in the same X post.",
+    "Default to Persian for the core Iranian audience unless an English-only draft is clearly intentional.",
     "Use Persian for emotional force, slogans, and short political impact.",
-    "Use English for international framing, detailed argument, and clapbacks.",
-    "Mix English and Persian only when it feels natural, not as decoration.",
+    "Use English-only drafts for international framing, detailed argument, and clapbacks.",
     "Keep drafts short, punchy, and human.",
   ],
   tone_rules: [
@@ -308,11 +315,11 @@ export const DEFAULT_PERSONAL_VOICE_PROFILE: PersonalVoiceProfile = {
     "Support Iranian opposition and resistance without generic activist wording.",
   ],
   intent_rules: {
-    clapback: "Reactive, sharp, personal, often English or mixed; call out hypocrisy or weak arguments directly.",
-    solidarity: "Encouraging, urgent, and human; usually Persian or mixed with purposeful flags.",
+    clapback: "Reactive, sharp, personal; usually Persian for domestic targets or English-only for international clapbacks.",
+    solidarity: "Encouraging, urgent, and human; usually Persian with purposeful flags.",
     political_analysis: "Concise strategic reading; English for international context, Persian for emotional force.",
     blunt_observation: "Short, cutting, and plain; often Persian.",
-    news_reaction: "Lead with the take, then the fact; avoid sounding like a wire headline.",
+    news_reaction: "Lead with the factual news, then the author's take as a postscript; avoid sounding like a wire headline.",
   },
   avoid_rules: [
     "Do not sound soft, diplomatic, corporate, or neutral.",
@@ -341,7 +348,7 @@ const DEFAULT_ENRICHMENT_CONFIG: EnrichmentConfig = {
   researcher_prompt: "You are a senior news researcher specializing in Iran, the Middle East, and US foreign policy. Return factual background only.",
   humanizer_prompt: "Rewrite Persian analysis so it sounds like a real Iranian commentator, not an AI system or news anchor.",
   archivist_prompt: "You are an editorial archivist. Identify narrative connections to recent coverage only when they genuinely add value.",
-  composer_prompt: "You are a Persian X editor. Compose a creator-quality post that leads with original analysis, then the factual news, then compact context if useful.",
+  composer_prompt: "You are a Persian X editor. Compose a creator-quality post with the factual news first, then the author's take as a clearly separated postscript.",
   critic_prompt: "You are a strict X creator-quality critic. Judge whether this Persian post adds original creator value, avoids aggregator/clickbait patterns, and is likely to earn healthy replies, reposts, dwell, profile clicks, and follows without causing mute/block/report/not-interested reactions. Be conservative.",
   max_research_tokens: 4000,
   max_analysis_tokens: 2000,
@@ -445,7 +452,12 @@ Risk notes:
 ${voiceProfile.risk_notes.map((rule) => `- ${rule}`).join("\n")}
 
 CANONICAL STYLE GUIDE:
-${voiceGuide.guide}`;
+${voiceGuide.guide}
+
+RUNTIME FORMAT OVERRIDE:
+- The style guide may describe bilingual behavior, but this drafting system must choose exactly one language per X draft.
+- Never mix English and Persian in the same draft.
+- The required final structure is factual news first, then the author take as a postscript: "خبر:" + "پ.ن:" for Persian, or "News:" + "P.S.:" for English.`;
 }
 
 export async function generatePersonalVoiceProfile(params: {
@@ -492,7 +504,7 @@ export async function generatePersonalVoiceProfile(params: {
     messages: [
       {
         role: "system",
-        content: "You convert a personal X style guide into a compact structured profile for an internal manual-review drafting tool. Preserve the sharp voice. Do not sanitize it. Risk notes are advisory only.",
+        content: "You convert a personal X style guide into a compact structured profile for an internal manual-review drafting tool. Preserve the sharp voice. Do not sanitize it. Risk notes are advisory only. Important runtime rule: each generated draft must use either Persian or English, never both in the same draft, and must use news first plus postscript take.",
       },
       {
         role: "user",
@@ -550,6 +562,119 @@ function randomTopP(): number {
 
 function cleanText(text: string | null | undefined): string {
   return (text ?? "").replace(/\s+/g, " ").trim();
+}
+
+function multiLineText(text: string | null | undefined): string {
+  return (text ?? "")
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function hasPersianText(text: string): boolean {
+  return /[\u0600-\u06FF]/.test(text);
+}
+
+function latinWordCount(text: string): number {
+  return (text.match(/[A-Za-z]{3,}/g) ?? []).length;
+}
+
+function hasSignificantEnglishText(text: string): boolean {
+  return latinWordCount(text) >= 5 || /[A-Za-z]{3,}\s+[A-Za-z]{3,}\s+[A-Za-z]{3,}/.test(text);
+}
+
+function isMixedLanguageDraft(text: string): boolean {
+  return hasPersianText(text) && hasSignificantEnglishText(text);
+}
+
+export function normalizeLanguageChoice(value: unknown): VoiceLanguageChoice {
+  return value === "english" || value === "persian" ? value : "persian";
+}
+
+export function formatNewsWithTake(params: {
+  language: VoiceLanguageChoice;
+  news: string;
+  take: string;
+}): string {
+  const language = normalizeLanguageChoice(params.language);
+  const news = multiLineText(params.news);
+  const take = multiLineText(params.take);
+  const newsLabel = language === "english" ? "News:" : "خبر:";
+  const takeLabel = language === "english" ? "P.S.:" : "پ.ن:";
+
+  return [
+    news ? `${newsLabel} ${news}` : "",
+    take ? `${takeLabel} ${take}` : "",
+  ].filter(Boolean).join("\n\n");
+}
+
+function stripSectionLabel(text: string): string {
+  return multiLineText(text)
+    .replace(/^(خبر|پ\.ن|پی‌نوشت|News|P\.S\.|PS)\s*[:：]\s*/i, "")
+    .trim();
+}
+
+function fallbackNewsForLanguage(language: VoiceLanguageChoice, textTranslated: string, textOriginal: string): string {
+  if (language === "english") return cleanText(textOriginal) || cleanText(textTranslated);
+  return cleanText(textTranslated) || cleanText(textOriginal);
+}
+
+function enforceSingleLanguageNewsPsDraft(params: {
+  language: VoiceLanguageChoice;
+  finalText: string;
+  newsSection: string;
+  takeSection: string;
+  textTranslated: string;
+  textOriginal: string;
+  fallbackTake: string;
+}): { final_x_text: string; news_section: string; take_section: string; language_choice: VoiceLanguageChoice } {
+  let language = normalizeLanguageChoice(params.language);
+  let news = stripSectionLabel(params.newsSection);
+  let take = stripSectionLabel(params.takeSection);
+  const fallbackTake = stripSectionLabel(params.fallbackTake);
+  const submittedFinalText = multiLineText(params.finalText);
+
+  if ((!news || !take) && submittedFinalText) {
+    const persianMatch = submittedFinalText.match(/خبر\s*[:：]\s*([\s\S]*?)(?:\n\s*(?:پ\.ن|پی‌نوشت)\s*[:：]\s*([\s\S]+))?$/i);
+    const englishMatch = submittedFinalText.match(/News\s*[:：]\s*([\s\S]*?)(?:\n\s*(?:P\.S\.|PS)\s*[:：]\s*([\s\S]+))?$/i);
+    const match = language === "english" ? englishMatch : persianMatch;
+    if (match) {
+      if (!news) news = stripSectionLabel(match[1] ?? "");
+      if (!take) take = stripSectionLabel(match[2] ?? "");
+    }
+  }
+
+  if (!news || isMixedLanguageDraft(news) || (language === "english" && hasPersianText(news))) {
+    news = fallbackNewsForLanguage(language, params.textTranslated, params.textOriginal);
+  }
+  if (!take || isMixedLanguageDraft(take) || (language === "english" && hasPersianText(take))) {
+    take = fallbackTake || "";
+  }
+
+  let finalText = formatNewsWithTake({ language, news, take });
+  if (!take || isMixedLanguageDraft(finalText) || (language === "english" && hasPersianText(finalText))) {
+    language = "persian";
+    news = fallbackNewsForLanguage(language, params.textTranslated, params.textOriginal);
+    take = fallbackTake || stripSectionLabel(params.takeSection) || "";
+    finalText = formatNewsWithTake({ language, news, take });
+  }
+
+  if (!finalText) {
+    finalText = formatNewsWithTake({
+      language: "persian",
+      news: fallbackNewsForLanguage("persian", params.textTranslated, params.textOriginal),
+      take: fallbackTake,
+    });
+    language = "persian";
+  }
+
+  return {
+    final_x_text: finalText,
+    news_section: news,
+    take_section: take,
+    language_choice: language,
+  };
 }
 
 function charLen(text: string | null | undefined): number {
@@ -708,7 +833,7 @@ export async function runEnrichPipeline(params: {
   totalTokens += humanizerResult.usage;
 
   // Phase 4: Composer with 3 manual-review variants
-  const composerResult = await runComposer(apiKey, config, voiceGuide, voiceProfile, textTranslated, humanizerResult.output, analystResult.output, archivistResult?.output ?? null, researcherResult?.output ?? null, previousFormatUsed, styleModifier, params.sourceLabel ?? null, params.sourceUrl ?? null);
+  const composerResult = await runComposer(apiKey, config, voiceGuide, voiceProfile, textOriginal, textTranslated, humanizerResult.output, analystResult.output, archivistResult?.output ?? null, researcherResult?.output ?? null, previousFormatUsed, styleModifier, params.sourceLabel ?? null, params.sourceUrl ?? null);
   totalTokens += composerResult.usage;
 
   // Phase 5: @masihh Voice Critic (advisory only)
@@ -1100,10 +1225,6 @@ function normalizeVoiceIntent(value: unknown): VoiceIntent {
     : "news_reaction";
 }
 
-function normalizeLanguageChoice(value: unknown): "english" | "persian" | "mixed" {
-  return value === "english" || value === "persian" || value === "mixed" ? value : "persian";
-}
-
 function normalizeVariantKind(value: unknown): VoiceVariantKind {
   return value === "raw_masihh" || value === "strategic_masihh" || value === "short_punch" ? value : "raw_masihh";
 }
@@ -1113,6 +1234,7 @@ async function runComposer(
   config: EnrichmentConfig,
   voiceGuide: VoiceGuide,
   voiceProfile: PersonalVoiceProfile,
+  textOriginal: string,
   textTranslated: string,
   humanizer: HumanizerOutput,
   analyst: AnalystOutput,
@@ -1124,6 +1246,7 @@ async function runComposer(
   sourceUrl: string | null,
 ): Promise<{ output: ComposerOutput; usage: number }> {
   const components: string[] = [];
+  components.push(`ORIGINAL SOURCE TEXT:\n${textOriginal}`);
   components.push(`FACTUAL NEWS TRANSLATION (Persian):\n${textTranslated}`);
   components.push(`CREATOR ANGLE (Persian): ${analyst.creator_angle}`);
   components.push(`WHY IT MATTERS (Persian): ${analyst.why_it_matters}`);
@@ -1150,18 +1273,28 @@ ${voiceContextBlock(voiceGuide, voiceProfile)}
 CRITICAL INSTRUCTIONS:
 - You are composing manual-review X draft variants in the @masihh voice.
 - Classify the draft intent: clapback, solidarity, political_analysis, blunt_observation, or news_reaction.
-- Choose English, Persian, or mixed language based on emotional intensity and audience.
-- Lead with original creator analysis, not a wire headline.
-- Include the factual news clearly, but do not let copied translation dominate the post.
-- Add one compact "why this matters" or callback when it genuinely adds value.
+- Choose exactly one language for each draft: english OR persian. Never mix English and Persian in one draft.
+- Default to Persian unless the content clearly needs an English-only audience.
+- Every variant MUST put the factual news first, then the author's take as a separate postscript.
+- Persian format MUST be:
+  خبر: [one concise factual news sentence]
+
+  پ.ن: [@masihh take]
+- English format MUST be:
+  News: [one concise factual news sentence]
+
+  P.S.: [@masihh take]
+- Do not lead with analysis before the news. The user's take belongs after the news in پ.ن/P.S.
+- Add one compact "why this matters" or callback inside the postscript when it genuinely adds value.
 - Produce exactly 3 variants:
   1. raw_masihh: closest to the style guide, sharpest and most unfiltered.
   2. strategic_masihh: still direct but cleaner for broader reach.
   3. short_punch: compact, high-impact, minimal explanation.
 - Risk warnings are advisory. Do not soften raw_masihh by default.
 - Compact attribution policy: ${config.source_attribution_policy}. If attribution is compact, mention the source only when it improves trust and do not make the post link-heavy.
-- Target <= 260 characters before hashtags when possible; never exceed the account's 280 character formatter budget.
+- Target <= 280 characters when possible, but do not destroy the news + postscript structure just to shorten.
 - Never use siren emojis, "BREAKING", "فوری", or formulaic outrage.
+- Never output a sentence like English + Persian + English in the same draft.
 - Style direction: ${styleModifier}
 ${avoidFormats.length > 0 ? `- DO NOT use format "${avoidFormats.join('" or "')}" -- pick something different.` : ''}
 
@@ -1182,7 +1315,7 @@ VARIETY IS CRITICAL. Each post should feel structurally different from the last.
       type: 'object',
       properties: {
         intent: { type: 'string', enum: ['clapback', 'solidarity', 'political_analysis', 'blunt_observation', 'news_reaction'], description: 'Primary voice intent for this post' },
-        language_choice: { type: 'string', enum: ['english', 'persian', 'mixed'], description: 'Primary language strategy chosen from the voice guide' },
+        language_choice: { type: 'string', enum: ['english', 'persian'], description: 'Single language chosen for the default variant. Mixed drafts are invalid.' },
         selected_variant: { type: 'string', enum: ['raw_masihh', 'strategic_masihh', 'short_punch'], description: 'Default variant to preview first; usually raw_masihh unless strategic_masihh is clearly stronger' },
         variants: {
           type: 'array',
@@ -1193,21 +1326,23 @@ VARIETY IS CRITICAL. Each post should feel structurally different from the last.
             properties: {
               kind: { type: 'string', enum: ['raw_masihh', 'strategic_masihh', 'short_punch'] },
               label: { type: 'string' },
-              final_x_text: { type: 'string', description: 'Full X-ready draft for this variant' },
+              news_section: { type: 'string', description: 'One concise factual news sentence in the same single language as this variant. No opinion here.' },
+              take_section: { type: 'string', description: 'The author take only, written as the postscript body. Same single language as this variant.' },
+              final_x_text: { type: 'string', description: 'Full X-ready draft using exactly: News/P.S. for English or خبر/پ.ن for Persian.' },
               creator_angle: { type: 'string' },
               why_it_matters: { type: 'string' },
-              language_choice: { type: 'string', enum: ['english', 'persian', 'mixed'] },
+              language_choice: { type: 'string', enum: ['english', 'persian'] },
               intent: { type: 'string', enum: ['clapback', 'solidarity', 'political_analysis', 'blunt_observation', 'news_reaction'] },
               voice_rationale: { type: 'string', description: 'Why this variant sounds like @masihh' },
               platform_risk_note: { type: 'string', description: 'Advisory risk note, or empty' },
             },
-            required: ['kind', 'label', 'final_x_text', 'creator_angle', 'why_it_matters', 'language_choice', 'intent', 'voice_rationale'],
+            required: ['kind', 'label', 'news_section', 'take_section', 'final_x_text', 'creator_angle', 'why_it_matters', 'language_choice', 'intent', 'voice_rationale'],
           },
         },
         creator_angle: { type: 'string', description: 'Original Persian analytical angle; should stand alone as creator value.' },
         why_it_matters: { type: 'string', description: 'Compact Persian reason this matters to the audience.' },
-        opinion_section: { type: 'string', description: 'Legacy opinion/context section in PERSIAN. Do not repeat the full news text here.' },
-        final_x_text: { type: 'string', description: 'Full X-ready Persian draft. Lead with creator analysis, include factual news, and keep it non-clickbait.' },
+        opinion_section: { type: 'string', description: 'Legacy take/postscript section in PERSIAN. Do not repeat the full news text here.' },
+        final_x_text: { type: 'string', description: 'Full X-ready draft. Must include factual news first, then پ.ن/P.S. take.' },
         format_used: { type: 'string', enum: ['context_and_take', 'question_and_take', 'callback_take', 'sharp_reaction', 'analytical', 'plain_opinion'], description: 'Which format was chosen' },
         thread_continuation: { type: 'string', description: 'Extended analysis in PERSIAN for a reply thread if the topic warrants depth, or empty' },
       },
@@ -1236,22 +1371,43 @@ VARIETY IS CRITICAL. Each post should feel structurally different from the last.
   const languageChoice = normalizeLanguageChoice(parsed.language_choice);
   const creatorAngle = parsed.creator_angle || analyst.creator_angle || humanizer.humanized_hook || '';
   const whyItMatters = parsed.why_it_matters || analyst.why_it_matters || analyst.significance || '';
-  const finalXText = parsed.final_x_text || [creatorAngle, textTranslated, whyItMatters].filter(Boolean).join('\n\n');
+  const fallbackTake = [creatorAngle, whyItMatters].filter(Boolean).join(' ');
+  const mainDraft = enforceSingleLanguageNewsPsDraft({
+    language: languageChoice,
+    finalText: typeof parsed.final_x_text === 'string' ? parsed.final_x_text : '',
+    newsSection: typeof parsed.news_section === 'string' ? parsed.news_section : '',
+    takeSection: typeof parsed.opinion_section === 'string' ? parsed.opinion_section : '',
+    textTranslated,
+    textOriginal,
+    fallbackTake,
+  });
+  const finalXText = mainDraft.final_x_text;
   const parsedVariants = Array.isArray(parsed.variants) ? parsed.variants : [];
   const variantsByKind = new Map<VoiceVariantKind, VoiceVariantOutput>();
   for (const raw of parsedVariants) {
     if (!raw || typeof raw !== 'object') continue;
     const item = raw as Record<string, unknown>;
     const kind = normalizeVariantKind(item.kind);
-    const text = cleanText(typeof item.final_x_text === 'string' ? item.final_x_text : '');
-    if (!text) continue;
+    const variantLanguage = normalizeLanguageChoice(item.language_choice ?? languageChoice);
+    const formatted = enforceSingleLanguageNewsPsDraft({
+      language: variantLanguage,
+      finalText: typeof item.final_x_text === 'string' ? item.final_x_text : '',
+      newsSection: typeof item.news_section === 'string' ? item.news_section : '',
+      takeSection: typeof item.take_section === 'string' ? item.take_section : '',
+      textTranslated,
+      textOriginal,
+      fallbackTake: typeof item.creator_angle === 'string' && item.creator_angle.trim() ? item.creator_angle : fallbackTake,
+    });
+    if (!formatted.final_x_text) continue;
     variantsByKind.set(kind, {
       kind,
       label: typeof item.label === 'string' && item.label.trim() ? item.label : kind.replaceAll('_', ' '),
-      final_x_text: text,
+      final_x_text: formatted.final_x_text,
+      news_section: formatted.news_section,
+      take_section: formatted.take_section,
       creator_angle: typeof item.creator_angle === 'string' && item.creator_angle.trim() ? item.creator_angle : creatorAngle,
       why_it_matters: typeof item.why_it_matters === 'string' && item.why_it_matters.trim() ? item.why_it_matters : whyItMatters,
-      language_choice: normalizeLanguageChoice(item.language_choice ?? languageChoice),
+      language_choice: formatted.language_choice,
       intent: normalizeVoiceIntent(item.intent ?? intent),
       voice_rationale: typeof item.voice_rationale === 'string' ? item.voice_rationale : '',
       platform_risk_note: typeof item.platform_risk_note === 'string' && item.platform_risk_note.trim() ? item.platform_risk_note : null,
@@ -1261,9 +1417,11 @@ VARIETY IS CRITICAL. Each post should feel structurally different from the last.
     kind,
     label: kind === 'raw_masihh' ? 'Raw @masihh' : kind === 'strategic_masihh' ? 'Strategic @masihh' : 'Short punch',
     final_x_text: finalXText,
+    news_section: mainDraft.news_section,
+    take_section: mainDraft.take_section,
     creator_angle: creatorAngle,
     why_it_matters: whyItMatters,
-    language_choice: languageChoice,
+    language_choice: mainDraft.language_choice,
     intent,
     voice_rationale: 'Fallback variant from the main composer draft.',
     platform_risk_note: null,
