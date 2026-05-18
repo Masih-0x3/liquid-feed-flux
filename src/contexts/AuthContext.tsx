@@ -104,11 +104,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [loadUserRole]);
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    return { error };
+    const timeoutError = {
+      name: 'AuthTimeoutError',
+      message: 'Supabase Auth is not responding. Please try again after the backend recovers.',
+      status: 504,
+    } as AuthError;
+
+    return Promise.race([
+      supabase.auth.signInWithPassword({
+        email,
+        password,
+      }),
+      new Promise<{ error: AuthError }>((resolve) => {
+        setTimeout(() => resolve({ error: timeoutError }), 15000);
+      }),
+    ]).then(({ error }) => ({ error }));
   };
 
   const signOut = async () => {
