@@ -916,7 +916,7 @@ async function setManualScore(supabase: any, body: Record<string, unknown>) {
   const overrideDuplicate = body.override_duplicate === true;
   const expectedAudienceClass = isAudienceClass(body.expected_audience_class) ? body.expected_audience_class : null;
   if (!tweetId) return { ok: false, error: 'tweet_id is required' };
-  if (!Number.isFinite(score) || score < 1 || score > 20) return { ok: false, error: 'score must be between 1 and 20' };
+  if (!Number.isInteger(score) || score < 1 || score > 20) return { ok: false, error: 'score must be a whole number between 1 and 20' };
 
   const threshold = await loadActiveThreshold(supabase);
   const { data: post } = await supabase
@@ -940,15 +940,15 @@ async function setManualScore(supabase: any, body: Record<string, unknown>) {
       : `manual_score_skip:${score}<${threshold}`;
   const existingBreakdown = post.score_breakdown && typeof post.score_breakdown === 'object' ? post.score_breakdown as Record<string, unknown> : {};
   const updatePayload: Record<string, unknown> = {
-    final_score: Math.round(score * 10) / 10,
-    importance_score: Math.round(score * 10) / 10,
+    final_score: score,
+    importance_score: score,
     delivery_decision: decision,
     decision_reason: decisionReason,
     feedback_locked: true,
     score_breakdown: {
       ...existingBreakdown,
-      manual: Math.round(score * 10) / 10,
-      final: Math.round(score * 10) / 10,
+      manual: score,
+      final: score,
     },
     ...(expectedAudienceClass ? {
       audience_class: expectedAudienceClass,
@@ -1187,12 +1187,17 @@ type MonitoringFilter =
   | 'below_threshold'
   | 'manual_review'
   | 'duplicates'
+  | 'coverage_gap'
+  | 'possible_duplicate'
+  | 'duplicate_anomalies'
   | 'ready_to_deliver'
   | 'telegram_pending'
   | 'x_pending'
   | 'x_failed'
   | 'delivered_24h'
   | 'hydration';
+
+type MonitoringScoreBucket = 'any' | 'unscored' | 'lt5' | '5_9' | '10_13' | '14_plus' | '17_plus';
 
 type MonitoringTone = 'good' | 'warn' | 'bad' | 'muted' | 'info';
 
@@ -1303,7 +1308,8 @@ function normalizeMonitoringFilter(v: unknown): MonitoringFilter {
   const raw = typeof v === 'string' ? v.replaceAll('-', '_') : 'all';
   const allowed: MonitoringFilter[] = [
     'all', 'needs_attention', 'failed_stuck', 'needs_score', 'translation_queue',
-    'below_threshold', 'manual_review', 'duplicates', 'ready_to_deliver',
+    'below_threshold', 'manual_review', 'duplicates', 'coverage_gap',
+    'possible_duplicate', 'duplicate_anomalies', 'ready_to_deliver',
     'telegram_pending', 'x_pending', 'x_failed', 'delivered_24h', 'hydration',
   ];
   if (raw === 'needs_action') return 'needs_attention';
@@ -1314,6 +1320,12 @@ function normalizeMonitoringFilter(v: unknown): MonitoringFilter {
   if (raw === 'ready_to_publish') return 'ready_to_deliver';
   if (raw === 'needs_translation' || raw === 'delivery_pending') return 'translation_queue';
   return allowed.includes(raw as MonitoringFilter) ? raw as MonitoringFilter : 'all';
+}
+
+function normalizeMonitoringScoreBucket(v: unknown): MonitoringScoreBucket {
+  const raw = typeof v === 'string' ? v : 'any';
+  const allowed: MonitoringScoreBucket[] = ['any', 'unscored', 'lt5', '5_9', '10_13', '14_plus', '17_plus'];
+  return allowed.includes(raw as MonitoringScoreBucket) ? raw as MonitoringScoreBucket : 'any';
 }
 
 function sanitizeSearchTerm(v: unknown): string {
@@ -1346,6 +1358,26 @@ function scoreFromPost(post: Record<string, unknown>): number | null {
   if (typeof post.final_score === 'number') return post.final_score;
   if (typeof post.importance_score === 'number') return post.importance_score;
   return null;
+}
+
+function matchesMonitoringScoreBucket(post: Record<string, unknown>, bucket: MonitoringScoreBucket): boolean {
+  const score = scoreFromPost(post);
+  switch (bucket) {
+    case 'any':
+      return true;
+    case 'unscored':
+      return score == null;
+    case 'lt5':
+      return score != null && score < 5;
+    case '5_9':
+      return score != null && score >= 5 && score < 10;
+    case '10_13':
+      return score != null && score >= 10 && score < 14;
+    case '14_plus':
+      return score != null && score >= 14;
+    case '17_plus':
+      return score != null && score >= 17;
+  }
 }
 
 function isBelowThreshold(post: Record<string, unknown>, threshold: number): boolean {
@@ -1387,7 +1419,8 @@ function deriveMonitoringState(
   const needsHydration = post.delivery_decision === 'deliver' && post.is_truncated === true && !post.hydrated_at;
   const review = post.enrich_status === 'awaiting_approval' || post.score_review_status === 'needs_review';
   const passDecision = post.delivery_decision === 'deliver';
-  const duplicateCoverageGap = dedupeStatus === 'uncertain' && duplicate && dedupeReason.includes('coverage_gap:');
+  const duplicateCoverageGap = dedupeStatus === 'coverage_gap'
+    || (dedupeStatus === 'uncertain' && duplicate && dedupeReason.includes('coverage_gap:'));
 
   let state: MonitoringState = {
     code: 'unknown',
@@ -1901,6 +1934,162 @@ async function loadDuplicateTargetMap(supabase: any, rows: Record<string, unknow
   return map;
 }
 
+function entryTweetId(entry: Record<string, unknown>): string {
+  return String(entry.tweet_id ?? '');
+}
+
+function entryCreatedAtMs(entry: Record<string, unknown>): number {
+  const value = typeof entry.created_at === 'string' ? Date.parse(entry.created_at) : Number.NaN;
+  return Number.isFinite(value) ? value : Number.MAX_SAFE_INTEGER;
+}
+
+function entryIsDeliveredOrPosted(entry: Record<string, unknown>): boolean {
+  const state = (entry.monitoring_state ?? {}) as MonitoringState;
+  return entry.is_delivered === true || entry.x_status === 'posted' || state.telegram_state === 'delivered' || state.x_state === 'posted';
+}
+
+function entryHasActiveDeliveryPath(entry: Record<string, unknown>): boolean {
+  const state = (entry.monitoring_state ?? {}) as MonitoringState;
+  return entry.delivery_decision === 'deliver'
+    || ['ready_to_deliver', 'telegram_pending', 'x_pending', 'hydration'].includes(state.code)
+    || isActiveStatus(state.telegram_state)
+    || isActiveStatus(state.x_state);
+}
+
+function chooseDuplicateCanonical(entries: Record<string, unknown>[]): Record<string, unknown> {
+  return [...entries].sort((a, b) => {
+    const deliveredDelta = Number(entryIsDeliveredOrPosted(b)) - Number(entryIsDeliveredOrPosted(a));
+    if (deliveredDelta !== 0) return deliveredDelta;
+    const activeDelta = Number(entryHasActiveDeliveryPath(b)) - Number(entryHasActiveDeliveryPath(a));
+    if (activeDelta !== 0) return activeDelta;
+    const scoreDelta = (scoreFromPost(b) ?? -1) - (scoreFromPost(a) ?? -1);
+    if (scoreDelta !== 0) return scoreDelta;
+    return entryCreatedAtMs(a) - entryCreatedAtMs(b);
+  })[0];
+}
+
+function clusterMemberFromEntry(entry: Record<string, unknown>, canonicalTweetId: string): Record<string, unknown> {
+  const state = (entry.monitoring_state ?? {}) as MonitoringState;
+  return {
+    tweet_id: entryTweetId(entry),
+    text_original: String(entry.text_original ?? ''),
+    url: String(entry.url ?? ''),
+    created_at: typeof entry.created_at === 'string' ? entry.created_at : null,
+    author_handle: typeof entry.author_handle === 'string' ? entry.author_handle : null,
+    final_score: typeof entry.final_score === 'number' ? entry.final_score : null,
+    importance_score: typeof entry.importance_score === 'number' ? entry.importance_score : null,
+    dedupe_status: typeof entry.dedupe_status === 'string' ? entry.dedupe_status : null,
+    dup_of_tweet_id: typeof entry.dup_of_tweet_id === 'string' ? entry.dup_of_tweet_id : null,
+    dup_similarity: typeof entry.dup_similarity === 'number' ? entry.dup_similarity : null,
+    dedupe_confidence: typeof entry.dedupe_confidence === 'number' ? entry.dedupe_confidence : null,
+    dedupe_reason: typeof entry.dedupe_reason === 'string' ? entry.dedupe_reason : null,
+    telegram_state: state.telegram_state ?? String(entry.delivery_status ?? 'none'),
+    x_state: typeof entry.x_status === 'string' ? entry.x_status : state.x_state ?? 'none',
+    coverage_state: entryIsDeliveredOrPosted(entry) ? 'delivered' : entryHasActiveDeliveryPath(entry) ? 'in_pipeline' : entry.dup_of_tweet_id ? 'also_duplicate' : 'not_covered',
+    is_canonical: entryTweetId(entry) === canonicalTweetId,
+  };
+}
+
+function clusterMemberFromTarget(target: DuplicateTargetSummary, canonicalTweetId: string): Record<string, unknown> {
+  return {
+    tweet_id: target.tweet_id,
+    text_original: target.text_original,
+    url: target.url,
+    created_at: target.created_at,
+    author_handle: target.author_handle,
+    final_score: target.final_score,
+    importance_score: target.importance_score,
+    dedupe_status: target.dedupe_status,
+    dup_of_tweet_id: target.dup_of_tweet_id,
+    dup_similarity: target.dup_similarity,
+    telegram_state: target.telegram_state,
+    x_state: target.x_state,
+    coverage_state: target.coverage_state,
+    is_canonical: target.tweet_id === canonicalTweetId,
+  };
+}
+
+function duplicateClusterCounts(members: Record<string, unknown>[]) {
+  return {
+    total: members.length,
+    delivered: members.filter((m) => m.coverage_state === 'delivered' || m.telegram_state === 'delivered' || m.telegram_state === 'posted').length,
+    x_posted: members.filter((m) => m.x_state === 'posted').length,
+    blocked: members.filter((m) => m.dedupe_status === 'duplicate' || typeof m.dup_of_tweet_id === 'string').length,
+    uncertain: members.filter((m) => m.dedupe_status === 'uncertain').length,
+    coverage_gap: members.filter((m) => m.coverage_state === 'not_covered' || m.dedupe_status === 'coverage_gap').length,
+  };
+}
+
+function attachDuplicateClusters(entries: Record<string, unknown>[]): Record<string, unknown>[] {
+  const referencedIds = new Set(entries.map((entry) => typeof entry.dup_of_tweet_id === 'string' ? entry.dup_of_tweet_id : '').filter(Boolean));
+  const storyCounts = new Map<string, number>();
+  for (const entry of entries) {
+    const story = typeof entry.story_cluster_id === 'string' ? entry.story_cluster_id : '';
+    if (story) storyCounts.set(story, (storyCounts.get(story) ?? 0) + 1);
+  }
+
+  const groups = new Map<string, Record<string, unknown>[]>();
+  for (const entry of entries) {
+    const tweetId = entryTweetId(entry);
+    const story = typeof entry.story_cluster_id === 'string' ? entry.story_cluster_id : '';
+    const dupOf = typeof entry.dup_of_tweet_id === 'string' ? entry.dup_of_tweet_id : '';
+    const key = story && (storyCounts.get(story) ?? 0) > 1
+      ? `story:${story}`
+      : dupOf
+        ? `root:${dupOf}`
+        : referencedIds.has(tweetId)
+          ? `root:${tweetId}`
+          : '';
+    if (!key) continue;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(entry);
+  }
+
+  const clusterByTweet = new Map<string, Record<string, unknown>>();
+  const hidden = new Set<string>();
+  for (const [clusterId, group] of groups) {
+    if (group.length === 0) continue;
+    const canonical = chooseDuplicateCanonical(group);
+    const canonicalTweetId = entryTweetId(canonical);
+    const membersById = new Map<string, Record<string, unknown>>();
+    for (const entry of group) {
+      membersById.set(entryTweetId(entry), clusterMemberFromEntry(entry, canonicalTweetId));
+      const target = entry.duplicate_of as DuplicateTargetSummary | null | undefined;
+      if (target?.tweet_id && !membersById.has(target.tweet_id)) {
+        membersById.set(target.tweet_id, clusterMemberFromTarget(target, canonicalTweetId));
+      }
+    }
+    const members = [...membersById.values()].sort((a, b) => Number(Boolean(b.is_canonical)) - Number(Boolean(a.is_canonical)) || entryCreatedAtMs(a) - entryCreatedAtMs(b));
+    if (members.length < 2) continue;
+    const counts = duplicateClusterCounts(members);
+    const coverageState = counts.delivered > 0 || counts.x_posted > 0
+      ? 'covered'
+      : members.some((m) => m.coverage_state === 'in_pipeline')
+        ? 'in_pipeline'
+        : counts.coverage_gap > 0
+          ? 'coverage_gap'
+          : 'unknown';
+    const cluster = {
+      cluster_id: clusterId,
+      canonical_tweet_id: canonicalTweetId,
+      members,
+      counts,
+      has_x_anomaly: counts.x_posted > 1,
+      coverage_state: coverageState,
+    };
+    for (const entry of group) {
+      clusterByTweet.set(entryTweetId(entry), cluster);
+      if (entryTweetId(entry) !== canonicalTweetId) hidden.add(entryTweetId(entry));
+    }
+  }
+
+  return entries.map((entry) => ({
+    ...entry,
+    duplicate_cluster: clusterByTweet.get(entryTweetId(entry)) ?? null,
+    hidden_in_cluster: hidden.has(entryTweetId(entry)),
+  }));
+}
+
 function matchesMonitoringFilter(entry: Record<string, unknown>, filter: MonitoringFilter): boolean {
   if (filter === 'all') return true;
   const state = (entry.monitoring_state ?? {}) as MonitoringState;
@@ -1919,6 +2108,14 @@ function matchesMonitoringFilter(entry: Record<string, unknown>, filter: Monitor
       return state.code === 'manual_review';
     case 'duplicates':
       return !!entry.dup_of_tweet_id;
+    case 'coverage_gap':
+      return state.code === 'duplicate_coverage_gap' || entry.dedupe_status === 'coverage_gap';
+    case 'possible_duplicate':
+      return entry.dedupe_status === 'uncertain' || entry.dedupe_status === 'coverage_gap' || state.code === 'duplicate_coverage_gap';
+    case 'duplicate_anomalies': {
+      const target = (entry.duplicate_of ?? null) as DuplicateTargetSummary | null;
+      return entry.x_status === 'posted' && target?.x_state === 'posted';
+    }
     case 'ready_to_deliver':
       return state.code === 'ready_to_deliver';
     case 'telegram_pending':
@@ -1937,6 +2134,7 @@ function matchesMonitoringFilter(entry: Record<string, unknown>, filter: Monitor
 // deno-lint-ignore no-explicit-any
 async function getMonitoringEntries(supabase: any, body: Record<string, unknown>) {
   const filter = normalizeMonitoringFilter(body.filter);
+  const scoreBucket = normalizeMonitoringScoreBucket(body.score_bucket);
   const search = sanitizeSearchTerm(body.search);
   const limit = Math.min(Math.max(Number(body.limit) || 50, 1), 100);
   const cursor = Math.max(Number(body.cursor) || 0, 0);
@@ -1953,7 +2151,9 @@ async function getMonitoringEntries(supabase: any, body: Record<string, unknown>
     return { success: true, entries: [], next_cursor: null, filter, search };
   }
 
-  const scanLimit = filter === 'all' || idOrder ? limit : Math.min(limit * 6, 300);
+  const needsInMemoryScoreFilter = scoreBucket !== 'any' && scoreBucket !== 'unscored';
+  const needsInMemoryFilter = filter !== 'all' || needsInMemoryScoreFilter;
+  const scanLimit = idOrder ? limit : needsInMemoryFilter ? Math.min(limit * 8, 500) : limit;
   const buildQuery = (selectColumns: string) => {
     let q = supabase
       .from('posts')
@@ -1970,6 +2170,15 @@ async function getMonitoringEntries(supabase: any, body: Record<string, unknown>
         case 'duplicates':
           q = q.not('dup_of_tweet_id', 'is', null);
           break;
+        case 'coverage_gap':
+          q = q.or('dedupe_status.eq.coverage_gap,dedupe_status.eq.uncertain');
+          break;
+        case 'possible_duplicate':
+          q = q.or('dedupe_status.eq.uncertain,dedupe_status.eq.coverage_gap');
+          break;
+        case 'duplicate_anomalies':
+          q = q.not('dup_of_tweet_id', 'is', null);
+          break;
         case 'hydration':
           q = q.eq('is_truncated', true).is('hydrated_at', null);
           break;
@@ -1982,6 +2191,9 @@ async function getMonitoringEntries(supabase: any, body: Record<string, unknown>
         case 'needs_score':
           q = q.is('final_score', null).is('importance_score', null);
           break;
+      }
+      if (scoreBucket === 'unscored') {
+        q = q.is('final_score', null).is('importance_score', null);
       }
       q = q.range(cursor, cursor + scanLimit - 1);
     }
@@ -2015,13 +2227,16 @@ async function getMonitoringEntries(supabase: any, body: Record<string, unknown>
   const duplicateTargets = await loadDuplicateTargetMap(supabase, rows, threshold);
   const entries = rows
     .map((post) => toMonitoringEntry(post, statusByTweet[post.tweet_id as string], threshold, jobStateByTweet, duplicateTargets))
-    .filter((entry: Record<string, unknown>) => matchesMonitoringFilter(entry, filter));
+    .filter((entry: Record<string, unknown>) => matchesMonitoringFilter(entry, filter) && matchesMonitoringScoreBucket(entry, scoreBucket));
+  const clusteredEntries = attachDuplicateClusters(entries);
+  const visibleEntries = clusteredEntries.filter((entry) => entry.hidden_in_cluster !== true);
 
   return {
     success: true,
-    entries: entries.slice(0, limit),
+    entries: visibleEntries.slice(0, limit),
     next_cursor: rows.length === scanLimit ? cursor + scanLimit : null,
     filter,
+    score_bucket: scoreBucket,
     search,
   };
 }
@@ -2489,6 +2704,9 @@ async function getMonitoringOverview(supabase: any, body: Record<string, unknown
     ready_to_deliver: 0,
     manual_review: 0,
     duplicates: 0,
+    coverage_gap: 0,
+    possible_duplicate: 0,
+    duplicate_anomalies: 0,
     hydration: 0,
     x_pending: 0,
     x_failed: 0,
@@ -2516,6 +2734,15 @@ async function getMonitoringOverview(supabase: any, body: Record<string, unknown
     if (state.code === 'ready_to_deliver') counts.ready_to_deliver += 1;
     if (state.code === 'manual_review') counts.manual_review += 1;
     if (state.code === 'blocked_duplicate') counts.duplicates += 1;
+    if (state.code === 'duplicate_coverage_gap') counts.coverage_gap += 1;
+    if (state.code === 'duplicate_coverage_gap' || post.dedupe_status === 'uncertain') counts.possible_duplicate += 1;
+    if (
+      typeof post.dup_of_tweet_id === 'string'
+      && xByTweet.get(tid)?.x_status === 'posted'
+      && xByTweet.get(post.dup_of_tweet_id)?.x_status === 'posted'
+    ) {
+      counts.duplicate_anomalies += 1;
+    }
     if (state.code === 'hydration') counts.hydration += 1;
     if (state.code === 'x_pending') counts.x_pending += 1;
     if (state.x_state === 'failed') counts.x_failed += 1;

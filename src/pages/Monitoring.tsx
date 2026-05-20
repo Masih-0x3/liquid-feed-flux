@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { formatDistanceToNow } from "date-fns";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   AlertCircle,
   Ban,
   Check,
+  ChevronDown,
   ChevronRight,
   Clock,
   ExternalLink,
@@ -71,12 +72,15 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import {
-  useMonitoringDataSearch,
+  useMonitoringDataSearchWithScore,
   useMonitoringOverview,
   useXApiSummary,
+  type DuplicateCluster,
+  type DuplicateClusterMember,
   type MonitoringEntry,
   type MonitoringFilter,
   type PipelineEvent,
+  type ScoreBucket,
 } from "@/hooks/useMonitoringData";
 import { MediaThumbnails } from "@/components/monitoring/MediaThumbnails";
 import {
@@ -283,12 +287,25 @@ const FILTERS: Array<{ value: MonitoringFilter; label: string }> = [
   { value: 'below_threshold', label: 'Below threshold' },
   { value: 'manual_review', label: 'Manual review' },
   { value: 'duplicates', label: 'Duplicates' },
+  { value: 'coverage_gap', label: 'Coverage gaps' },
+  { value: 'possible_duplicate', label: 'Possible duplicates' },
+  { value: 'duplicate_anomalies', label: 'Duplicate anomalies' },
   { value: 'ready_to_deliver', label: 'Ready to deliver' },
   { value: 'telegram_pending', label: 'Telegram pending' },
   { value: 'x_pending', label: 'X pending' },
   { value: 'x_failed', label: 'X failed' },
   { value: 'delivered_24h', label: 'Delivered 24h' },
   { value: 'hydration', label: 'Hydration' },
+];
+
+const SCORE_BUCKETS: Array<{ value: ScoreBucket; label: string }> = [
+  { value: 'any', label: 'Any score' },
+  { value: 'unscored', label: 'Unscored' },
+  { value: 'lt5', label: '<5' },
+  { value: '5_9', label: '5-9.9' },
+  { value: '10_13', label: '10-13.9' },
+  { value: '14_plus', label: '14+' },
+  { value: '17_plus', label: '17+' },
 ];
 
 function useDebouncedValue<T>(value: T, delayMs: number): T {
@@ -315,6 +332,159 @@ function toneClass(tone: MonitoringTone) {
 function shortText(entry: MonitoringEntry): string {
   const text = entry.text_translated || entry.text_original || '';
   return text.replace(/\s+/g, ' ').trim();
+}
+
+function scoreValue(entry: Pick<MonitoringEntry, 'final_score' | 'importance_score'>): number | null {
+  return entry.final_score ?? entry.importance_score ?? null;
+}
+
+function memberScoreValue(member: DuplicateClusterMember): number | null {
+  return member.final_score ?? member.importance_score ?? null;
+}
+
+function isDeliveredOrPosted(entry: MonitoringEntry): boolean {
+  return entry.is_delivered || entry.x_status === 'posted' || entry.monitoring_state?.telegram_state === 'delivered' || entry.monitoring_state?.x_state === 'posted';
+}
+
+function hasActiveDeliveryPath(entry: MonitoringEntry): boolean {
+  const code = entry.monitoring_state?.code;
+  return entry.delivery_decision === 'deliver'
+    || code === 'ready_to_deliver'
+    || code === 'telegram_pending'
+    || code === 'x_pending'
+    || code === 'hydration'
+    || entry.delivery_status === 'pending'
+    || entry.x_status === 'pending';
+}
+
+function chooseCanonicalEntry(entries: MonitoringEntry[]): MonitoringEntry {
+  return [...entries].sort((a, b) => {
+    const deliveredDelta = Number(isDeliveredOrPosted(b)) - Number(isDeliveredOrPosted(a));
+    if (deliveredDelta !== 0) return deliveredDelta;
+    const activeDelta = Number(hasActiveDeliveryPath(b)) - Number(hasActiveDeliveryPath(a));
+    if (activeDelta !== 0) return activeDelta;
+    const scoreDelta = (scoreValue(b) ?? -1) - (scoreValue(a) ?? -1);
+    if (scoreDelta !== 0) return scoreDelta;
+    return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+  })[0];
+}
+
+function duplicateMemberFromEntry(entry: MonitoringEntry, canonicalTweetId: string): DuplicateClusterMember {
+  return {
+    tweet_id: entry.tweet_id,
+    text_original: entry.text_original,
+    url: entry.url,
+    created_at: entry.created_at,
+    author_handle: entry.author_handle,
+    final_score: entry.final_score,
+    importance_score: entry.importance_score,
+    dedupe_status: entry.dedupe_status,
+    dup_of_tweet_id: entry.dup_of_tweet_id,
+    dup_similarity: entry.dup_similarity,
+    dedupe_confidence: entry.dedupe_confidence,
+    dedupe_reason: entry.dedupe_reason,
+    telegram_state: entry.monitoring_state?.telegram_state ?? entry.delivery_status ?? 'none',
+    x_state: entry.x_status ?? entry.monitoring_state?.x_state ?? 'none',
+    coverage_state: isDeliveredOrPosted(entry) ? 'delivered' : hasActiveDeliveryPath(entry) ? 'in_pipeline' : entry.dup_of_tweet_id ? 'also_duplicate' : 'not_covered',
+    is_canonical: entry.tweet_id === canonicalTweetId,
+  };
+}
+
+function duplicateMemberFromTarget(target: NonNullable<MonitoringEntry['duplicate_of']>, canonicalTweetId: string): DuplicateClusterMember {
+  return {
+    tweet_id: target.tweet_id,
+    text_original: target.text_original,
+    url: target.url,
+    created_at: target.created_at,
+    author_handle: target.author_handle,
+    final_score: target.final_score,
+    importance_score: target.importance_score,
+    dedupe_status: target.dedupe_status,
+    dup_of_tweet_id: target.dup_of_tweet_id,
+    dup_similarity: target.dup_similarity,
+    telegram_state: target.telegram_state,
+    x_state: target.x_state,
+    coverage_state: target.coverage_state,
+    is_canonical: target.tweet_id === canonicalTweetId,
+  };
+}
+
+function buildDuplicateCluster(clusterId: string, canonicalTweetId: string, members: DuplicateClusterMember[]): DuplicateCluster {
+  const uniqueMembers = [...new Map(members.map((member) => [member.tweet_id, member])).values()];
+  const counts = {
+    total: uniqueMembers.length,
+    delivered: uniqueMembers.filter((member) => member.coverage_state === 'delivered' || member.telegram_state === 'delivered' || member.telegram_state === 'posted').length,
+    x_posted: uniqueMembers.filter((member) => member.x_state === 'posted').length,
+    blocked: uniqueMembers.filter((member) => member.dedupe_status === 'duplicate' || Boolean(member.dup_of_tweet_id)).length,
+    uncertain: uniqueMembers.filter((member) => member.dedupe_status === 'uncertain').length,
+    coverage_gap: uniqueMembers.filter((member) => member.coverage_state === 'not_covered' || member.dedupe_status === 'coverage_gap').length,
+  };
+  return {
+    cluster_id: clusterId,
+    canonical_tweet_id: canonicalTweetId,
+    members: uniqueMembers.sort((a, b) => Number(Boolean(b.is_canonical)) - Number(Boolean(a.is_canonical)) || new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime()),
+    counts,
+    has_x_anomaly: counts.x_posted > 1,
+    coverage_state: counts.delivered > 0 || counts.x_posted > 0
+      ? 'covered'
+      : uniqueMembers.some((member) => member.coverage_state === 'in_pipeline')
+        ? 'in_pipeline'
+        : counts.coverage_gap > 0
+          ? 'coverage_gap'
+          : 'unknown',
+  };
+}
+
+function clusterMonitoringEntries(entries: MonitoringEntry[]): MonitoringEntry[] {
+  if (entries.some((entry) => entry.duplicate_cluster || entry.hidden_in_cluster)) {
+    return entries.filter((entry) => !entry.hidden_in_cluster);
+  }
+
+  const referencedIds = new Set(entries.map((entry) => entry.dup_of_tweet_id).filter((id): id is string => Boolean(id)));
+  const storyCounts = entries.reduce((map, entry) => {
+    if (entry.story_cluster_id) map.set(entry.story_cluster_id, (map.get(entry.story_cluster_id) ?? 0) + 1);
+    return map;
+  }, new Map<string, number>());
+  const groups = new Map<string, MonitoringEntry[]>();
+
+  for (const entry of entries) {
+    const key = entry.story_cluster_id && (storyCounts.get(entry.story_cluster_id) ?? 0) > 1
+      ? `story:${entry.story_cluster_id}`
+      : entry.dup_of_tweet_id
+        ? `root:${entry.dup_of_tweet_id}`
+        : referencedIds.has(entry.tweet_id)
+          ? `root:${entry.tweet_id}`
+          : '';
+    if (!key) continue;
+    const group = groups.get(key) ?? [];
+    group.push(entry);
+    groups.set(key, group);
+  }
+
+  const clusterByTweet = new Map<string, DuplicateCluster>();
+  const hidden = new Set<string>();
+  for (const [clusterId, group] of groups) {
+    const canonical = chooseCanonicalEntry(group);
+    const members = group.flatMap((entry) => {
+      const list = [duplicateMemberFromEntry(entry, canonical.tweet_id)];
+      if (entry.duplicate_of) list.push(duplicateMemberFromTarget(entry.duplicate_of, canonical.tweet_id));
+      return list;
+    });
+    const cluster = buildDuplicateCluster(clusterId, canonical.tweet_id, members);
+    if (cluster.counts.total < 2) continue;
+    for (const entry of group) {
+      clusterByTweet.set(entry.tweet_id, cluster);
+      if (entry.tweet_id !== canonical.tweet_id) hidden.add(entry.tweet_id);
+    }
+  }
+
+  return entries
+    .map((entry) => ({
+      ...entry,
+      duplicate_cluster: entry.duplicate_cluster ?? clusterByTweet.get(entry.tweet_id) ?? null,
+      hidden_in_cluster: entry.hidden_in_cluster ?? hidden.has(entry.tweet_id),
+    }))
+    .filter((entry) => !entry.hidden_in_cluster);
 }
 
 function audienceClassLabel(value: string | null | undefined): string {
@@ -385,10 +555,11 @@ export default function Monitoring() {
   const [searchParams] = useSearchParams();
   const initialFilter = (() => {
     const raw = searchParams.get('filter')?.replaceAll('-', '_');
-    return FILTERS.some((item) => item.value === raw) ? raw as MonitoringFilter : 'needs_attention';
+    return FILTERS.some((item) => item.value === raw) ? raw as MonitoringFilter : 'all';
   })();
   const [filter, setFilter] = useState<MonitoringFilter>(initialFilter);
   const [searchTerm, setSearchTerm] = useState(searchParams.get('search') ?? '');
+  const [scoreBucket, setScoreBucket] = useState<ScoreBucket>('any');
   const debouncedSearch = useDebouncedValue(searchTerm, 350);
   const [editingEntry, setEditingEntry] = useState<string | null>(null);
   const [editedContent, setEditedContent] = useState('');
@@ -405,11 +576,12 @@ export default function Monitoring() {
   const [manualLoading, setManualLoading] = useState(false);
   const [feedbackLoading, setFeedbackLoading] = useState<string | null>(null);
   const [enrichingTweetIds, setEnrichingTweetIds] = useState<Set<string>>(() => new Set());
+  const [expandedClusters, setExpandedClusters] = useState<Set<string>>(() => new Set());
   const pollRefs = useRef<Map<string, { interval: ReturnType<typeof setInterval>; timeout: ReturnType<typeof setTimeout> }>>(new Map());
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  const { entries, isLoading, hasNextPage, fetchNextPage, isFetchingNextPage, isFetching, error } = useMonitoringDataSearch(filter, debouncedSearch);
+  const { entries, isLoading, hasNextPage, fetchNextPage, isFetchingNextPage, isFetching, error } = useMonitoringDataSearchWithScore(filter, debouncedSearch, scoreBucket);
   const { data: overview } = useMonitoringOverview(24);
   const { data: xSummary } = useXApiSummary(24);
 
@@ -437,7 +609,12 @@ export default function Monitoring() {
     staleTime: 30_000,
   });
 
-  const selectedEntry = useMemo(() => entries.find((entry) => entry.tweet_id === drawerTweetId) ?? null, [entries, drawerTweetId]);
+  const moderationEntries = useMemo(() => clusterMonitoringEntries(entries), [entries]);
+  const entryByTweetId = useMemo(() => new Map(entries.map((entry) => [entry.tweet_id, entry])), [entries]);
+  const selectedEntry = useMemo(
+    () => moderationEntries.find((entry) => entry.tweet_id === drawerTweetId) ?? entries.find((entry) => entry.tweet_id === drawerTweetId) ?? null,
+    [entries, moderationEntries, drawerTweetId],
+  );
   const selectedVoice = selectedEntry?.source_context?.voice ?? null;
   const selectedVoiceScores = selectedVoice?.critic?.variants ?? [];
   const { data: xDiagnostic, isFetching: xDiagnosticLoading } = useQuery({
@@ -455,6 +632,15 @@ export default function Monitoring() {
     queryClient.invalidateQueries({ queryKey: ['monitoring-overview'] });
     queryClient.invalidateQueries({ queryKey: ['x-api-summary'] });
     queryClient.invalidateQueries({ queryKey: ['x-posting-diagnostic'] });
+  };
+
+  const toggleCluster = (clusterId: string) => {
+    setExpandedClusters((prev) => {
+      const next = new Set(prev);
+      if (next.has(clusterId)) next.delete(clusterId);
+      else next.add(clusterId);
+      return next;
+    });
   };
 
   useEffect(() => {
@@ -545,8 +731,6 @@ export default function Monitoring() {
         if (post && post.enrich_status !== 'pending') {
           cleanupPoll(tweetId);
           if (post.enrich_status === 'awaiting_approval') {
-            setFilter('manual_review');
-            setSearchTerm(tweetId);
             setDrawerTweetId(tweetId);
             setDrawerOpen(true);
           }
@@ -554,7 +738,7 @@ export default function Monitoring() {
           toast({
             title: post.enrich_status === 'awaiting_approval' ? 'Draft ready for review' : 'Enrichment finished',
             description: post.enrich_status === 'awaiting_approval'
-              ? 'Switched to Manual review and focused this tweet.'
+              ? 'The draft is open in the detail drawer. Your current queue filter was left unchanged.'
               : `Status: ${post.enrich_status}`,
           });
         }
@@ -579,8 +763,8 @@ export default function Monitoring() {
   const handleManualSubmit = async () => {
     if (!manualEntry) return;
     const score = Number(manualScore);
-    if (!Number.isFinite(score) || score < 1 || score > 20) {
-      toast({ title: 'Invalid score', description: 'Manual score must be between 1 and 20.', variant: 'destructive' });
+    if (!Number.isInteger(score) || score < 1 || score > 20) {
+      toast({ title: 'Invalid score', description: 'Manual score must be a whole number between 1 and 20.', variant: 'destructive' });
       return;
     }
     setManualLoading(true);
@@ -772,12 +956,14 @@ export default function Monitoring() {
     const label =
       entry.dedupe_status === 'pending' ? 'Duplicate gate pending'
       : entry.dedupe_status === 'duplicate' ? 'Duplicate'
+      : entry.dedupe_status === 'coverage_gap' ? 'Coverage gap'
       : entry.dedupe_status === 'related_new_info' ? 'Related: new info'
       : entry.dedupe_status === 'uncertain' ? 'Uncertain duplicate'
       : entry.dedupe_status === 'failed' ? 'Dedupe failed'
       : 'Unique';
     const cls =
       entry.dedupe_status === 'duplicate' ? 'bg-purple-500/15 text-purple-400 border-purple-500/30'
+      : entry.dedupe_status === 'coverage_gap' ? toneClass('warn')
       : entry.dedupe_status === 'related_new_info' || entry.dedupe_status === 'unique' ? toneClass('good')
       : entry.dedupe_status === 'failed' ? toneClass('bad')
       : entry.dedupe_status === 'uncertain' ? toneClass('warn')
@@ -1000,6 +1186,138 @@ export default function Monitoring() {
     </DropdownMenu>
   );
 
+  const clusterCoverageBadge = (cluster: DuplicateCluster) => {
+    const cls = cluster.has_x_anomaly
+      ? 'border-red-500/30 bg-red-500/15 text-red-300'
+      : cluster.coverage_state === 'covered'
+        ? toneClass('good')
+        : cluster.coverage_state === 'in_pipeline'
+          ? toneClass('info')
+          : cluster.coverage_state === 'coverage_gap'
+            ? toneClass('warn')
+            : toneClass('muted');
+    const label = cluster.has_x_anomaly
+      ? 'Duplicate anomaly'
+      : cluster.coverage_state === 'covered'
+        ? 'Covered'
+        : cluster.coverage_state === 'in_pipeline'
+          ? 'In pipeline'
+          : cluster.coverage_state === 'coverage_gap'
+            ? 'Coverage gap'
+            : 'Coverage unknown';
+    return <Badge className={`${cls} text-[10px]`}>{label}</Badge>;
+  };
+
+  const renderDuplicateClusterSummary = (entry: MonitoringEntry, compact = false) => {
+    const cluster = entry.duplicate_cluster;
+    if (!cluster || cluster.counts.total < 2) return renderDuplicateMatch(entry, compact);
+    const isExpanded = expandedClusters.has(cluster.cluster_id);
+    return (
+      <div className={`${compact ? 'rounded-md border bg-muted/20 p-2' : 'rounded-md border border-purple-500/20 bg-purple-500/5 p-2'} text-xs`}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-7 min-w-0 px-1.5 text-xs"
+            onClick={() => toggleCluster(cluster.cluster_id)}
+          >
+            {isExpanded ? <ChevronDown className="mr-1 h-3 w-3 shrink-0" /> : <ChevronRight className="mr-1 h-3 w-3 shrink-0" />}
+            <span className="truncate">{cluster.counts.total} versions</span>
+          </Button>
+          <div className="flex flex-wrap gap-1">
+            {clusterCoverageBadge(cluster)}
+            {cluster.counts.x_posted > 0 && <Badge variant="outline" className="text-[10px]">X {cluster.counts.x_posted}</Badge>}
+            {cluster.counts.delivered > 0 && <Badge variant="outline" className="text-[10px]">TG {cluster.counts.delivered}</Badge>}
+            {cluster.counts.blocked > 0 && <Badge variant="outline" className="text-[10px]">{cluster.counts.blocked} blocked</Badge>}
+          </div>
+        </div>
+        <p className="mt-1 truncate text-[11px] text-muted-foreground">
+          Canonical {cluster.canonical_tweet_id.slice(-10)} · expand to compare duplicates
+        </p>
+      </div>
+    );
+  };
+
+  const renderDuplicateClusterPanel = (entry: MonitoringEntry) => {
+    const cluster = entry.duplicate_cluster;
+    if (!cluster || cluster.counts.total < 2 || !expandedClusters.has(cluster.cluster_id)) return null;
+    return (
+      <div className="rounded-md border border-purple-500/20 bg-purple-500/5 p-3">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <p className="text-sm font-medium">Duplicate cluster</p>
+            <p className="text-xs text-muted-foreground">
+              {cluster.counts.total} versions · {cluster.counts.delivered} Telegram covered · {cluster.counts.x_posted} X posted
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {clusterCoverageBadge(cluster)}
+            {cluster.has_x_anomaly && <Badge className="border-red-500/30 bg-red-500/15 text-red-300 text-[10px]">Both posted to X</Badge>}
+          </div>
+        </div>
+        <div className="grid gap-2 xl:grid-cols-2">
+          {cluster.members.map((member) => {
+            const fullEntry = entryByTweetId.get(member.tweet_id);
+            const score = memberScoreValue(member);
+            return (
+              <div key={member.tweet_id} className="rounded-md border bg-background/60 p-3 text-xs">
+                <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="font-mono text-[11px] text-muted-foreground">{member.tweet_id.slice(-10)}</span>
+                      {member.is_canonical && <Badge className="bg-primary/15 text-primary border-primary/30 text-[10px]">canonical</Badge>}
+                      {member.dedupe_status && <Badge variant="outline" className="text-[10px]">{member.dedupe_status.replaceAll('_', ' ')}</Badge>}
+                    </div>
+                    <p className="mt-1 font-medium">{member.author_handle ? `@${member.author_handle}` : 'Unknown author'}</p>
+                    {member.created_at && <p className="text-muted-foreground">{formatDistanceToNow(new Date(member.created_at), { addSuffix: true })}</p>}
+                  </div>
+                  <div className="text-right">
+                    <p className={score != null && score >= deliverThreshold ? 'font-semibold text-emerald-500' : 'font-semibold text-amber-500'}>{score == null ? '—' : Number.isInteger(score) ? score : score.toFixed(1)}</p>
+                    <p className="text-[11px] text-muted-foreground">score</p>
+                  </div>
+                </div>
+                <p className="line-clamp-3 leading-5 text-muted-foreground">{member.text_original || '[No content]'}</p>
+                <div className="mt-2 flex flex-wrap gap-1">
+                  <Badge variant="outline" className="text-[10px]">Telegram {member.telegram_state}</Badge>
+                  <Badge variant="outline" className="text-[10px]">X {member.x_state}</Badge>
+                  {member.dup_similarity != null && <Badge variant="outline" className="text-[10px]">sim {member.dup_similarity.toFixed(2)}</Badge>}
+                  {member.dedupe_confidence != null && <Badge variant="outline" className="text-[10px]">conf {member.dedupe_confidence.toFixed(2)}</Badge>}
+                </div>
+                {member.dedupe_reason && <p className="mt-2 line-clamp-2 text-[11px] text-muted-foreground">{member.dedupe_reason}</p>}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" onClick={() => openDetails(member.tweet_id)}>
+                    Details
+                  </Button>
+                  {member.url && (
+                    <a href={member.url} target="_blank" rel="noopener noreferrer" className="inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[11px] text-primary hover:bg-muted">
+                      Source <ExternalLink className="h-3 w-3" />
+                    </a>
+                  )}
+                  {fullEntry && (
+                    <>
+                      <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" onClick={() => setPendingAction({ type: 'run_dedupe', entry: fullEntry })}>
+                        Run duplicate check
+                      </Button>
+                      <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" onClick={() => openManualScore(fullEntry)}>
+                        Manual score
+                      </Button>
+                      {fullEntry.dup_of_tweet_id && (
+                        <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" onClick={() => setPendingAction({ type: 'clear_dup', entry: fullEntry })}>
+                          Clear duplicate
+                        </Button>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="w-full p-0">
       <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -1051,6 +1369,9 @@ export default function Monitoring() {
           ['Ready to deliver', counts.ready_to_deliver, 'text-primary'],
           ['Manual review', counts.manual_review, 'text-purple-500'],
           ['Duplicates', counts.duplicates, 'text-muted-foreground'],
+          ['Coverage gaps', counts.coverage_gap ?? 0, 'text-amber-500'],
+          ['Possible dupes', counts.possible_duplicate ?? 0, 'text-amber-500'],
+          ['Dup anomalies', counts.duplicate_anomalies ?? 0, 'text-destructive'],
           ['Hydration', counts.hydration, 'text-blue-500'],
           ['X pending', counts.x_pending, 'text-amber-500'],
           ['X failed', counts.x_failed, 'text-destructive'],
@@ -1114,6 +1435,12 @@ export default function Monitoring() {
                   {FILTERS.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
                 </SelectContent>
               </ThemedSelect>
+              <ThemedSelect value={scoreBucket} onValueChange={(value) => setScoreBucket(value as ScoreBucket)}>
+                <SelectTrigger className="w-full sm:w-40"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {SCORE_BUCKETS.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
+                </SelectContent>
+              </ThemedSelect>
             </div>
           </div>
         </CardHeader>
@@ -1122,12 +1449,12 @@ export default function Monitoring() {
             <div className="flex min-h-[360px] items-center justify-center"><Loader2 className="w-8 h-8 animate-spin" /></div>
           ) : error ? (
             <div className="p-6 text-sm text-destructive">Monitoring failed to load: {(error as Error).message}</div>
-          ) : entries.length === 0 ? (
+          ) : moderationEntries.length === 0 ? (
             <div className="p-8 text-center text-sm text-muted-foreground">No entries found</div>
           ) : (
             <>
               <div className="divide-y divide-border lg:hidden">
-                {entries.map((entry) => {
+                {moderationEntries.map((entry) => {
                   const stage = monitoringStage(entry);
                   const decision = formatDecisionReason(entry.decision_reason);
                   const decisionLabel = monitoringDecisionLabel(entry, entry.delivery_decision ? decision.title : 'No decision');
@@ -1165,7 +1492,8 @@ export default function Monitoring() {
                         {renderAudienceBadge(entry)}
                         {entry.feedback_locked && <Badge className="bg-blue-500/15 text-blue-400 border-blue-500/30 text-[10px]">locked</Badge>}
                       </div>
-                      {renderDuplicateHint(entry)}
+                      {entry.duplicate_cluster ? renderDuplicateClusterSummary(entry, true) : renderDuplicateHint(entry)}
+                      {renderDuplicateClusterPanel(entry)}
 
                       <div className="grid grid-cols-2 gap-2 text-xs min-[520px]:grid-cols-4">
                         <div className="rounded-md border bg-muted/20 p-2">
@@ -1195,7 +1523,7 @@ export default function Monitoring() {
                         </p>
                       )}
 
-                      {entry.dup_of_tweet_id && (
+                      {entry.dup_of_tweet_id && !entry.duplicate_cluster && (
                         <div>
                           <p className="mb-1 text-xs font-medium uppercase text-muted-foreground">Duplicate match</p>
                           {renderDuplicateMatch(entry, true)}
@@ -1243,63 +1571,72 @@ export default function Monitoring() {
                     </TableRow>
                   </TableHeader>
                 <TableBody>
-                  {entries.map((entry) => {
+                  {moderationEntries.map((entry) => {
                     const stage = monitoringStage(entry);
                     const decision = formatDecisionReason(entry.decision_reason);
                     const decisionLabel = monitoringDecisionLabel(entry, entry.delivery_decision ? decision.title : 'No decision');
                     const blocker = entry.monitoring_state?.primary_blocker;
                     return (
-                      <TableRow key={entry.tweet_id} className="align-top">
-                        <TableCell className="px-3 py-4 text-xs">
-                          <div className="space-y-1">
-                            <div className="font-mono text-[11px] text-muted-foreground">{entry.tweet_id.slice(-10)}</div>
-                            <div>{formatDistanceToNow(new Date(entry.created_at), { addSuffix: true })}</div>
-                            {entry.url && (
-                              <a href={entry.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
-                                Source <ExternalLink className="w-3 h-3" />
-                              </a>
+                      <Fragment key={entry.tweet_id}>
+                        <TableRow className="align-top">
+                          <TableCell className="px-3 py-4 text-xs">
+                            <div className="space-y-1">
+                              <div className="font-mono text-[11px] text-muted-foreground">{entry.tweet_id.slice(-10)}</div>
+                              <div>{formatDistanceToNow(new Date(entry.created_at), { addSuffix: true })}</div>
+                              {entry.url && (
+                                <a href={entry.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
+                                  Source <ExternalLink className="w-3 h-3" />
+                                </a>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell className="px-3 py-4">
+                            <div className="truncate font-medium">
+                              {entry.author_handle ? `@${entry.author_handle}` : `@${entry.account_handle}`}
+                            </div>
+                            {entry.account_handle && entry.author_handle && entry.account_handle !== entry.author_handle && (
+                              <p className="text-xs text-muted-foreground truncate">@{entry.account_handle}</p>
                             )}
-                          </div>
-                        </TableCell>
-                        <TableCell className="px-3 py-4">
-                          <div className="truncate font-medium">
-                            {entry.author_handle ? `@${entry.author_handle}` : `@${entry.account_handle}`}
-                          </div>
-                          {entry.account_handle && entry.author_handle && entry.account_handle !== entry.author_handle && (
-                            <p className="text-xs text-muted-foreground truncate">@{entry.account_handle}</p>
-                          )}
-                        </TableCell>
-                        <TableCell className="px-3 py-4">
-                          <button onClick={() => openDetails(entry.tweet_id)} className="block w-full text-left text-sm leading-5 hover:text-primary">
-                            <span className="line-clamp-2">{shortText(entry) || '[No content]'}</span>
-                          </button>
-                          <div className="mt-1 flex flex-wrap gap-1">
-                            {entry.importance_tags?.slice(0, 3).map((tag) => <Badge key={tag} variant="outline" className="text-[10px]">{tag}</Badge>)}
-                            {entry.dup_of_tweet_id && <Badge className="bg-purple-500/15 text-purple-400 border-purple-500/30 text-[10px]">dup</Badge>}
-                            {renderDedupeBadge(entry)}
-                            {renderAudienceBadge(entry)}
-                            {entry.feedback_locked && <Badge className="bg-blue-500/15 text-blue-400 border-blue-500/30 text-[10px]">locked</Badge>}
-                          </div>
-                          {renderDuplicateHint(entry)}
-                        </TableCell>
-                        <TableCell className="px-3 py-4"><Badge className={toneClass(stage.tone)}>{stage.label}</Badge></TableCell>
-                        <TableCell className="px-3 py-4">{renderScore(entry)}</TableCell>
-                        <TableCell className="px-3 py-4">
-                          <p className="line-clamp-2 text-sm" title={blocker || decision.detail || decision.title}>{decisionLabel}</p>
-                          {(blocker || entry.decision_reason) && <p className="line-clamp-2 text-xs text-muted-foreground">{blocker || decision.title}</p>}
-                        </TableCell>
-                        <TableCell className="px-3 py-4">{renderDuplicateMatch(entry)}</TableCell>
-                        <TableCell className="px-3 py-4">
-                          <div className="space-y-2">
-                            <div>{renderTelegramBadge(entry)}</div>
-                            <div>{renderXBadge(entry)}</div>
-                            <div>{renderCostFlags(entry)}</div>
-                          </div>
-                        </TableCell>
-                        <TableCell className="px-2 py-4 text-right">
-                          {renderRowActions(entry)}
-                        </TableCell>
-                      </TableRow>
+                          </TableCell>
+                          <TableCell className="px-3 py-4">
+                            <button onClick={() => openDetails(entry.tweet_id)} className="block w-full text-left text-sm leading-5 hover:text-primary">
+                              <span className="line-clamp-2">{shortText(entry) || '[No content]'}</span>
+                            </button>
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              {entry.importance_tags?.slice(0, 3).map((tag) => <Badge key={tag} variant="outline" className="text-[10px]">{tag}</Badge>)}
+                              {entry.dup_of_tweet_id && <Badge className="bg-purple-500/15 text-purple-400 border-purple-500/30 text-[10px]">dup</Badge>}
+                              {renderDedupeBadge(entry)}
+                              {renderAudienceBadge(entry)}
+                              {entry.feedback_locked && <Badge className="bg-blue-500/15 text-blue-400 border-blue-500/30 text-[10px]">locked</Badge>}
+                            </div>
+                            {!entry.duplicate_cluster && renderDuplicateHint(entry)}
+                          </TableCell>
+                          <TableCell className="px-3 py-4"><Badge className={toneClass(stage.tone)}>{stage.label}</Badge></TableCell>
+                          <TableCell className="px-3 py-4">{renderScore(entry)}</TableCell>
+                          <TableCell className="px-3 py-4">
+                            <p className="line-clamp-2 text-sm" title={blocker || decision.detail || decision.title}>{decisionLabel}</p>
+                            {(blocker || entry.decision_reason) && <p className="line-clamp-2 text-xs text-muted-foreground">{blocker || decision.title}</p>}
+                          </TableCell>
+                          <TableCell className="px-3 py-4">{renderDuplicateClusterSummary(entry)}</TableCell>
+                          <TableCell className="px-3 py-4">
+                            <div className="space-y-2">
+                              <div>{renderTelegramBadge(entry)}</div>
+                              <div>{renderXBadge(entry)}</div>
+                              <div>{renderCostFlags(entry)}</div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="px-2 py-4 text-right">
+                            {renderRowActions(entry)}
+                          </TableCell>
+                        </TableRow>
+                        {entry.duplicate_cluster && expandedClusters.has(entry.duplicate_cluster.cluster_id) && (
+                          <TableRow>
+                            <TableCell colSpan={9} className="px-3 py-3">
+                              {renderDuplicateClusterPanel(entry)}
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </Fragment>
                     );
                   })}
                 </TableBody>
@@ -1866,11 +2203,11 @@ export default function Monitoring() {
                 <Label htmlFor="manual-score">Score</Label>
                 <Input
                   id="manual-score"
-                  inputMode="decimal"
+                  inputMode="numeric"
                   type="number"
                   min={1}
                   max={20}
-                  step={0.1}
+                  step={1}
                   value={manualScore}
                   onChange={(e) => setManualScore(e.target.value)}
                 />

@@ -159,6 +159,45 @@ export interface MonitoringEntry {
     needs_attention: boolean;
     next_actions: string[];
   };
+  duplicate_cluster?: DuplicateCluster | null;
+  hidden_in_cluster?: boolean;
+}
+
+export type ScoreBucket = 'any' | 'unscored' | 'lt5' | '5_9' | '10_13' | '14_plus' | '17_plus';
+
+export interface DuplicateClusterMember {
+  tweet_id: string;
+  text_original: string;
+  url: string;
+  created_at: string | null;
+  author_handle: string | null;
+  final_score: number | null;
+  importance_score: number | null;
+  dedupe_status: string | null;
+  dup_of_tweet_id: string | null;
+  dup_similarity: number | null;
+  dedupe_confidence?: number | null;
+  dedupe_reason?: string | null;
+  telegram_state: string;
+  x_state: string;
+  coverage_state?: 'delivered' | 'in_pipeline' | 'also_duplicate' | 'not_covered';
+  is_canonical?: boolean;
+}
+
+export interface DuplicateCluster {
+  cluster_id: string;
+  canonical_tweet_id: string;
+  members: DuplicateClusterMember[];
+  counts: {
+    total: number;
+    delivered: number;
+    x_posted: number;
+    blocked: number;
+    uncertain: number;
+    coverage_gap: number;
+  };
+  has_x_anomaly: boolean;
+  coverage_state: 'covered' | 'in_pipeline' | 'coverage_gap' | 'unknown';
 }
 
 export interface PipelineEvent {
@@ -181,6 +220,9 @@ export type MonitoringFilter =
   | 'below_threshold'
   | 'manual_review'
   | 'duplicates'
+  | 'coverage_gap'
+  | 'possible_duplicate'
+  | 'duplicate_anomalies'
   | 'ready_to_deliver'
   | 'telegram_pending'
   | 'x_pending'
@@ -198,6 +240,9 @@ export interface MonitoringOverview {
     ready_to_deliver: number;
     manual_review: number;
     duplicates: number;
+    coverage_gap?: number;
+    possible_duplicate?: number;
+    duplicate_anomalies?: number;
     hydration: number;
     x_pending: number;
     x_failed: number;
@@ -303,6 +348,30 @@ function sanitizeSearch(search: string): string {
   return search.trim().replace(/[%_,()]/g, ' ').replace(/\s+/g, ' ').slice(0, 120);
 }
 
+function entryScore(entry: Pick<MonitoringEntry, 'final_score' | 'importance_score'>): number | null {
+  return entry.final_score ?? entry.importance_score ?? null;
+}
+
+function matchesScoreBucket(entry: Pick<MonitoringEntry, 'final_score' | 'importance_score'>, bucket: ScoreBucket): boolean {
+  const score = entryScore(entry);
+  switch (bucket) {
+    case 'any':
+      return true;
+    case 'unscored':
+      return score == null;
+    case 'lt5':
+      return score != null && score < 5;
+    case '5_9':
+      return score != null && score >= 5 && score < 10;
+    case '10_13':
+      return score != null && score >= 10 && score < 14;
+    case '14_plus':
+      return score != null && score >= 14;
+    case '17_plus':
+      return score != null && score >= 17;
+  }
+}
+
 function isMissingDedupeColumnError(error: unknown): boolean {
   const message = String((error as { message?: unknown })?.message ?? error ?? '');
   return /posts\.(dedupe_|scoring_|audience_|global_exception_class|score_review_status|enrichment_|creator_angle|why_it_matters|source_context|algorithm_signal_scores|aggregator_risk_score|ai_voice_risk_score|monetization_risk_flags|final_x_text)|dedupe_(status|checked_at|method|confidence|reason|new_facts)|scoring_(version|profile_id)|audience_(class|confidence|reason)|score_review_status|global_exception_class|enrichment_version|creator_angle|why_it_matters|source_context|algorithm_signal_scores|aggregator_risk_score|ai_voice_risk_score|monetization_risk_flags|enrichment_review_reason|final_x_text/i.test(message)
@@ -339,6 +408,7 @@ async function fetchLegacyMonitoringPage(
   { pageParam = 0 }: { pageParam: number },
   filter: MonitoringFilter,
   search: string,
+  scoreBucket: ScoreBucket,
 ): Promise<{ entries: MonitoringEntry[]; nextCursor: number | null }> {
   const from = pageParam;
   const to = from + PAGE_SIZE - 1;
@@ -483,7 +553,7 @@ async function fetchLegacyMonitoringPage(
   });
 
   return {
-    entries: entries.filter((entry) => matchesLegacyMonitoringFilter(entry, filter)),
+    entries: entries.filter((entry) => matchesLegacyMonitoringFilter(entry, filter) && matchesScoreBucket(entry, scoreBucket)),
     nextCursor: postsData.length === PAGE_SIZE ? from + PAGE_SIZE : null,
   };
 }
@@ -506,6 +576,12 @@ function matchesLegacyMonitoringFilter(entry: MonitoringEntry, filter: Monitorin
       return entry.enrich_status === 'awaiting_approval';
     case 'duplicates':
       return !!entry.dup_of_tweet_id;
+    case 'coverage_gap':
+      return entry.monitoring_state?.code === 'duplicate_coverage_gap' || entry.dedupe_status === 'coverage_gap';
+    case 'possible_duplicate':
+      return entry.dedupe_status === 'uncertain' || entry.dedupe_status === 'coverage_gap';
+    case 'duplicate_anomalies':
+      return entry.x_status === 'posted' && entry.duplicate_of?.x_state === 'posted';
     case 'ready_to_deliver':
       return stage.label === 'Ready' && entry.delivery_decision === 'deliver' && entry.is_translated && !entry.is_delivered;
     case 'telegram_pending':
@@ -525,6 +601,7 @@ async function fetchMonitoringPage(
   { pageParam = 0 }: { pageParam: number },
   filter: MonitoringFilter,
   search: string,
+  scoreBucket: ScoreBucket,
 ): Promise<{ entries: MonitoringEntry[]; nextCursor: number | null }> {
   try {
     const { data, error } = await supabase.functions.invoke('admin-actions', {
@@ -532,6 +609,7 @@ async function fetchMonitoringPage(
         action: 'get_monitoring_entries',
         filter,
         search: sanitizeSearch(search) || undefined,
+        score_bucket: scoreBucket,
         cursor: pageParam,
         limit: PAGE_SIZE,
       },
@@ -548,7 +626,7 @@ async function fetchMonitoringPage(
     // Keeps local dev usable when the frontend is ahead of the deployed Edge Function.
   }
 
-  return fetchLegacyMonitoringPage({ pageParam }, filter, search);
+  return fetchLegacyMonitoringPage({ pageParam }, filter, search, scoreBucket);
 }
 
 export function useMonitoringData(filter: MonitoringFilter = 'all') {
@@ -556,12 +634,16 @@ export function useMonitoringData(filter: MonitoringFilter = 'all') {
 }
 
 export function useMonitoringDataSearch(filter: MonitoringFilter = 'all', search = '') {
+  return useMonitoringDataSearchWithScore(filter, search, 'any');
+}
+
+export function useMonitoringDataSearchWithScore(filter: MonitoringFilter = 'all', search = '', scoreBucket: ScoreBucket = 'any') {
   const queryClient = useQueryClient();
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const query = useInfiniteQuery({
-    queryKey: ['monitoring', filter, sanitizeSearch(search)],
-    queryFn: (ctx) => fetchMonitoringPage(ctx, filter, search),
+    queryKey: ['monitoring', filter, sanitizeSearch(search), scoreBucket],
+    queryFn: (ctx) => fetchMonitoringPage(ctx, filter, search, scoreBucket),
     initialPageParam: 0,
     getNextPageParam: (lastPage) => lastPage.nextCursor,
     staleTime: 15_000,
