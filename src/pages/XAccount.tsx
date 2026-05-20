@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useCallback, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -12,12 +12,12 @@ import {
 } from "@/components/ui/alert-dialog";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, RefreshCw, UserMinus, UserPlus, Users, ExternalLink, CheckCheck, TrendingUp, Search, ArrowLeftRight } from "lucide-react";
+import { ArrowLeftRight, CalendarDays, ChevronDown, CheckCheck, ExternalLink, Loader2, RefreshCw, Search, TrendingUp, UserMinus, UserPlus, Users } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import {
   useFollowerSnapshots, useUnfollowers, useNewFollowers,
   useFollowerStats, useMarkReviewed, useMarkAllReviewed, useMutualFollowData,
-  type FollowerChange, type MutualFollowUser,
+  type FollowerChange, type MutualFollowUser, type NotFollowingBackGroup,
 } from "@/hooks/useFollowerData";
 
 const FollowerGrowthChart = lazy(() => import("@/components/x/FollowerGrowthChart"));
@@ -34,6 +34,7 @@ export default function XAccount() {
   const [showAllUnfollowers, setShowAllUnfollowers] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [mutualSearch, setMutualSearch] = useState("");
+  const [collapsedNonFollowbackDays, setCollapsedNonFollowbackDays] = useState<Set<string>>(() => new Set());
 
   const { data: snapshots, isLoading: snapsLoading } = useFollowerSnapshots();
   const { data: unfollowers, isLoading: unfLoading } = useUnfollowers(showAllUnfollowers, searchQuery);
@@ -101,6 +102,35 @@ export default function XAccount() {
     }
   };
 
+  const toggleNonFollowbackDay = (dateKey: string) => {
+    setCollapsedNonFollowbackDays((prev) => {
+      const next = new Set(prev);
+      if (next.has(dateKey)) next.delete(dateKey);
+      else next.add(dateKey);
+      return next;
+    });
+  };
+
+  const handleOpenProfilesForDay = (group: NotFollowingBackGroup) => {
+    const openable = group.users.filter((user) => user.username);
+    const skipped = group.users.length - openable.length;
+    if (openable.length === 0) {
+      toast({ title: "No usernames to open", description: "This group only has X user IDs in the cache." });
+      return;
+    }
+
+    for (const user of openable) {
+      openInBackground(`https://x.com/${user.username}`);
+    }
+
+    toast({
+      title: `Opening ${openable.length} profile${openable.length === 1 ? "" : "s"}`,
+      description: skipped > 0
+        ? `${skipped} account${skipped === 1 ? "" : "s"} skipped because no username is cached. Chrome may ask you to allow pop-ups.`
+        : "Each profile opens in its own Chrome tab. Chrome may ask you to allow pop-ups.",
+    });
+  };
+
   const latestSnapshot = snapshots?.[snapshots.length - 1] ?? null;
   const latestSnapshotAgeMs = latestSnapshot ? Date.now() - new Date(latestSnapshot.taken_at).getTime() : null;
   const latestSnapshotAgeMinutes = latestSnapshotAgeMs === null ? null : Math.max(0, Math.round(latestSnapshotAgeMs / 60000));
@@ -114,17 +144,25 @@ export default function XAccount() {
     followers: s.follower_count,
   }));
 
-  // Mutual follow filter
-  const filteredDontFollowBack = (mutualData?.dontFollowBack ?? []).filter(u =>
-    !mutualSearch.trim() ||
-    (u.username?.toLowerCase().includes(mutualSearch.toLowerCase())) ||
-    (u.name?.toLowerCase().includes(mutualSearch.toLowerCase()))
-  );
-  const filteredNotFollowingBack = (mutualData?.notFollowingBack ?? []).filter(u =>
-    !mutualSearch.trim() ||
-    (u.username?.toLowerCase().includes(mutualSearch.toLowerCase())) ||
-    (u.name?.toLowerCase().includes(mutualSearch.toLowerCase()))
-  );
+  const matchesMutualSearch = useCallback((user: MutualFollowUser) => {
+    const term = mutualSearch.trim().toLowerCase();
+    if (!term) return true;
+    return Boolean(
+      user.username?.toLowerCase().includes(term)
+      || user.name?.toLowerCase().includes(term)
+    );
+  }, [mutualSearch]);
+
+  const filteredDontFollowBack = (mutualData?.dontFollowBack ?? []).filter(matchesMutualSearch);
+  const filteredNotFollowingBackGroups = useMemo(() => {
+    return (mutualData?.notFollowingBackGroups ?? [])
+      .map((group) => ({
+        ...group,
+        users: group.users.filter(matchesMutualSearch),
+      }))
+      .filter((group) => group.users.length > 0);
+  }, [matchesMutualSearch, mutualData?.notFollowingBackGroups]);
+  const filteredNotFollowingBack = filteredNotFollowingBackGroups.flatMap((group) => group.users);
 
   const loading = snapsLoading || statsLoading;
 
@@ -366,13 +404,29 @@ export default function XAccount() {
                     )}
                   </TabsContent>
                   <TabsContent value="not-following-me">
-                    <p className="text-xs text-muted-foreground mb-3">You follow these people, but they don't follow you back.</p>
+                    <div className="mb-3 space-y-1">
+                      <p className="text-xs text-muted-foreground">You follow these people, but they don't follow you back.</p>
+                      <p className="text-xs text-muted-foreground">
+                        Grouped by the first snapshot day where they appeared in your following list. "On or before" means they were already present in the first captured following snapshot.
+                      </p>
+                      {mutualData?.latestSnapshotAt && (
+                        <p className="text-xs text-muted-foreground">
+                          Latest snapshot: {formatDistanceToNow(new Date(mutualData.latestSnapshotAt), { addSuffix: true })}
+                        </p>
+                      )}
+                    </div>
                     {filteredNotFollowingBack.length === 0 ? (
                       <p className="text-muted-foreground text-sm text-center py-4">None found.</p>
                     ) : (
-                      <div className="space-y-1 max-h-[500px] overflow-y-auto">
-                        {filteredNotFollowingBack.map(u => (
-                          <MutualFollowRow key={u.user_id} user={u} />
+                      <div className="space-y-3 max-h-[620px] overflow-y-auto pr-1">
+                        {filteredNotFollowingBackGroups.map((group) => (
+                          <NotFollowingBackDayGroup
+                            key={group.date_key}
+                            group={group}
+                            collapsed={collapsedNonFollowbackDays.has(group.date_key)}
+                            onToggle={() => toggleNonFollowbackDay(group.date_key)}
+                            onOpenAll={() => handleOpenProfilesForDay(group)}
+                          />
                         ))}
                       </div>
                     )}
@@ -480,9 +534,65 @@ function UnfollowerRow({ change, onOpenAndMark }: { change: FollowerChange; onOp
   );
 }
 
-function MutualFollowRow({ user }: { user: MutualFollowUser }) {
+function MutualFollowRow({ user, subtitle }: { user: MutualFollowUser; subtitle?: string }) {
   return (
-    <ProfileRow userId={user.user_id} username={user.username} name={user.name} profileImageUrl={user.profile_image_url} />
+    <ProfileRow userId={user.user_id} username={user.username} name={user.name} profileImageUrl={user.profile_image_url} subtitle={subtitle} />
+  );
+}
+
+function NotFollowingBackDayGroup({
+  group,
+  collapsed,
+  onToggle,
+  onOpenAll,
+}: {
+  group: NotFollowingBackGroup;
+  collapsed: boolean;
+  onToggle: () => void;
+  onOpenAll: () => void;
+}) {
+  const openableCount = group.users.filter((user) => user.username).length;
+  const newestUser = group.users[0];
+  const startedLabel = group.started_at
+    ? formatDistanceToNow(new Date(group.started_at), { addSuffix: true })
+    : "unknown";
+
+  return (
+    <div className="rounded-lg border border-border/70 bg-card/40">
+      <div className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
+        <button type="button" onClick={onToggle} className="flex min-w-0 flex-1 items-start gap-3 text-left">
+          <ChevronDown className={`mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform ${collapsed ? "-rotate-90" : ""}`} />
+          <div className="min-w-0 space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <CalendarDays className="h-4 w-4 text-primary" />
+              <span className="font-medium text-sm">{group.label}</span>
+              <Badge variant="secondary" className="text-[10px] px-1.5">{group.users.length}</Badge>
+              {group.approximate && <Badge variant="outline" className="text-[10px] px-1.5">approx</Badge>}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Still not following you back as of the latest snapshot
+              {group.started_at ? ` · first seen ${startedLabel}` : ""}
+              {newestUser?.username ? ` · includes @${newestUser.username}` : ""}.
+            </p>
+          </div>
+        </button>
+        <Button size="sm" variant="outline" onClick={onOpenAll} disabled={openableCount === 0} className="shrink-0">
+          <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
+          Open day ({openableCount})
+        </Button>
+      </div>
+      {!collapsed && (
+        <div className="border-t border-border/60 px-2 py-2">
+          {group.users.map((user) => (
+            <MutualFollowRow
+              key={user.user_id}
+              user={user}
+              subtitle={user.first_following_approximate ? "Already in first captured following snapshot" : "First seen in following snapshot"}
+            />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

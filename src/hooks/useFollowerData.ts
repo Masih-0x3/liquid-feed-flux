@@ -18,6 +18,20 @@ export interface MutualFollowUser {
   profile_image_url: string | null;
 }
 
+export interface NotFollowingBackUser extends MutualFollowUser {
+  first_following_seen_at: string | null;
+  first_following_approximate: boolean;
+  latest_following_order: number;
+}
+
+export interface NotFollowingBackGroup {
+  date_key: string;
+  label: string;
+  started_at: string | null;
+  approximate: boolean;
+  users: NotFollowingBackUser[];
+}
+
 export interface FollowerChange {
   id: string;
   detected_at: string;
@@ -197,32 +211,114 @@ export function useMarkAllReviewed() {
   });
 }
 
+interface SnapshotWithRelationshipIds {
+  taken_at: string;
+  follower_ids: string[];
+  following_ids: string[];
+}
+
+function localDateKey(iso: string | null): string {
+  if (!iso) return 'unknown';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return 'unknown';
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-');
+}
+
+function localDateLabel(iso: string | null, approximate: boolean): string {
+  if (!iso) return 'Unknown start day';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return 'Unknown start day';
+  const label = date.toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+  return approximate ? `On or before ${label}` : label;
+}
+
+function groupNotFollowingBack(users: NotFollowingBackUser[]): NotFollowingBackGroup[] {
+  const groups = new Map<string, NotFollowingBackGroup>();
+
+  for (const user of users) {
+    const key = localDateKey(user.first_following_seen_at);
+    const existing = groups.get(key);
+    if (existing) {
+      existing.users.push(user);
+      existing.approximate = existing.approximate || user.first_following_approximate;
+      continue;
+    }
+
+    groups.set(key, {
+      date_key: key,
+      label: localDateLabel(user.first_following_seen_at, user.first_following_approximate),
+      started_at: user.first_following_seen_at,
+      approximate: user.first_following_approximate,
+      users: [user],
+    });
+  }
+
+  return [...groups.values()]
+    .map((group) => ({
+      ...group,
+      users: group.users.sort((a, b) => a.latest_following_order - b.latest_following_order),
+    }))
+    .sort((a, b) => {
+      if (!a.started_at && !b.started_at) return 0;
+      if (!a.started_at) return 1;
+      if (!b.started_at) return -1;
+      return new Date(b.started_at).getTime() - new Date(a.started_at).getTime();
+    });
+}
+
 export function useMutualFollowData() {
   return useQuery({
     queryKey: ['mutual-follow-data'],
     queryFn: async () => {
-      // Get the latest complete snapshot with follower_ids and following_ids
+      // Use complete snapshots to approximate when an account first entered
+      // the following list. This is stored data only; it does not call X.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: snap, error } = await (supabase.from('x_follower_snapshots') as any)
-        .select('follower_ids, following_ids')
+      const { data: snapshotRows, error } = await (supabase.from('x_follower_snapshots') as any)
+        .select('taken_at, follower_ids, following_ids')
         .eq('status', 'complete')
-        .order('taken_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .order('taken_at', { ascending: true });
 
       if (error) throw error;
-      if (!snap) return { dontFollowBack: [], notFollowingBack: [], hasFollowingData: false };
+      const snapshots = ((snapshotRows ?? []) as SnapshotWithRelationshipIds[])
+        .filter((snap) => Array.isArray(snap.following_ids) && snap.following_ids.length > 0);
 
-      const followerIds: string[] = (snap.follower_ids ?? []) as string[];
-      const followingIds: string[] = (snap.following_ids ?? []) as string[];
+      if (snapshots.length === 0) {
+        return { dontFollowBack: [], notFollowingBack: [], notFollowingBackGroups: [], hasFollowingData: false, latestSnapshotAt: null };
+      }
+
+      const latestSnap = snapshots[snapshots.length - 1];
+      const firstSnapshotAt = snapshots[0]?.taken_at ?? null;
+      const followerIds: string[] = (latestSnap.follower_ids ?? []) as string[];
+      const followingIds: string[] = (latestSnap.following_ids ?? []) as string[];
 
       // following_ids is only populated after a snapshot runs with the updated function
       if (followingIds.length === 0) {
-        return { dontFollowBack: [], notFollowingBack: [], hasFollowingData: false };
+        return { dontFollowBack: [], notFollowingBack: [], notFollowingBackGroups: [], hasFollowingData: false, latestSnapshotAt: latestSnap.taken_at };
       }
 
       const followerSet = new Set(followerIds);
       const followingSet = new Set(followingIds);
+      const firstFollowingSeen = new Map<string, { seenAt: string; approximate: boolean }>();
+
+      for (const snapshot of snapshots) {
+        for (const id of snapshot.following_ids ?? []) {
+          if (!firstFollowingSeen.has(id)) {
+            firstFollowingSeen.set(id, {
+              seenAt: snapshot.taken_at,
+              approximate: snapshot.taken_at === firstSnapshotAt,
+            });
+          }
+        }
+      }
 
       // People who follow me but I don't follow back
       const dontFollowBackIds = followerIds.filter(id => !followingSet.has(id));
@@ -252,11 +348,24 @@ export function useMutualFollowData() {
       const dontFollowBack: MutualFollowUser[] = dontFollowBackIds.map(id =>
         profileMap.get(id) ?? { user_id: id, username: null, name: null, profile_image_url: null }
       );
-      const notFollowingBack: MutualFollowUser[] = notFollowingBackIds.map(id =>
-        profileMap.get(id) ?? { user_id: id, username: null, name: null, profile_image_url: null }
-      );
+      const notFollowingBack: NotFollowingBackUser[] = notFollowingBackIds.map((id, index) => {
+        const profile = profileMap.get(id) ?? { user_id: id, username: null, name: null, profile_image_url: null };
+        const firstSeen = firstFollowingSeen.get(id);
+        return {
+          ...profile,
+          first_following_seen_at: firstSeen?.seenAt ?? latestSnap.taken_at ?? null,
+          first_following_approximate: firstSeen?.approximate ?? true,
+          latest_following_order: index,
+        };
+      });
 
-      return { dontFollowBack, notFollowingBack, hasFollowingData: true };
+      return {
+        dontFollowBack,
+        notFollowingBack,
+        notFollowingBackGroups: groupNotFollowingBack(notFollowingBack),
+        hasFollowingData: true,
+        latestSnapshotAt: latestSnap.taken_at,
+      };
     },
     staleTime: 120_000,
   });
