@@ -17,15 +17,35 @@ import { formatDistanceToNow } from "date-fns";
 import {
   useFollowerSnapshots, useUnfollowers, useNewFollowers,
   useFollowerStats, useMarkReviewed, useMarkAllReviewed, useMutualFollowData,
-  type FollowerChange, type MutualFollowUser, type NotFollowingBackGroup,
+  type FollowerChange, type MutualFollowUser, type NotFollowingBackGroup, type NotFollowingBackUser,
 } from "@/hooks/useFollowerData";
 
 const FollowerGrowthChart = lazy(() => import("@/components/x/FollowerGrowthChart"));
+const NON_FOLLOWBACK_REVIEWED_KEY = "xot:not-following-back-reviewed:v1";
+const NON_FOLLOWBACK_OPEN_BATCH_SIZE = 30;
 
-function openInBackground(url: string) {
+function openInBackground(url: string): boolean {
   const w = window.open(url, '_blank', 'noopener');
-  if (w) w.blur();
+  if (!w) return false;
+  w.blur();
   window.focus();
+  return true;
+}
+
+function loadReviewedNonFollowbacks(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = window.localStorage.getItem(NON_FOLLOWBACK_REVIEWED_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveReviewedNonFollowbacks(ids: Set<string>) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(NON_FOLLOWBACK_REVIEWED_KEY, JSON.stringify([...ids]));
 }
 
 export default function XAccount() {
@@ -35,6 +55,7 @@ export default function XAccount() {
   const [searchQuery, setSearchQuery] = useState("");
   const [mutualSearch, setMutualSearch] = useState("");
   const [collapsedNonFollowbackDays, setCollapsedNonFollowbackDays] = useState<Set<string>>(() => new Set());
+  const [reviewedNonFollowbacks, setReviewedNonFollowbacks] = useState<Set<string>>(() => loadReviewedNonFollowbacks());
 
   const { data: snapshots, isLoading: snapsLoading } = useFollowerSnapshots();
   const { data: unfollowers, isLoading: unfLoading } = useUnfollowers(showAllUnfollowers, searchQuery);
@@ -111,23 +132,68 @@ export default function XAccount() {
     });
   };
 
+  const markNonFollowbacksReviewed = useCallback((userIds: string[]) => {
+    if (userIds.length === 0) return;
+    setReviewedNonFollowbacks((prev) => {
+      const next = new Set(prev);
+      for (const id of userIds) next.add(id);
+      saveReviewedNonFollowbacks(next);
+      return next;
+    });
+  }, []);
+
+  const handleOpenSingleNonFollowback = (user: NotFollowingBackUser) => {
+    if (!user.username) {
+      toast({ title: "No username to open", description: "This account only has an X user ID in the cache." });
+      return;
+    }
+    const opened = openInBackground(`https://x.com/${user.username}`);
+    if (opened) {
+      markNonFollowbacksReviewed([user.user_id]);
+      return;
+    }
+    toast({
+      title: "Chrome blocked the profile tab",
+      description: "Allow pop-ups for xot.iraneyes.com, then click again.",
+      variant: "destructive",
+    });
+  };
+
   const handleOpenProfilesForDay = (group: NotFollowingBackGroup) => {
-    const openable = group.users.filter((user) => user.username);
-    const skipped = group.users.length - openable.length;
-    if (openable.length === 0) {
+    const unreviewedOpenable = group.users
+      .filter((user) => user.username && !reviewedNonFollowbacks.has(user.user_id));
+    const batch = unreviewedOpenable.slice(0, NON_FOLLOWBACK_OPEN_BATCH_SIZE);
+    const skippedNoUsername = group.users.filter((user) => !user.username).length;
+
+    if (batch.length === 0) {
+      const reviewedOpenable = group.users.filter((user) => user.username && reviewedNonFollowbacks.has(user.user_id)).length;
+      if (reviewedOpenable > 0) {
+        toast({ title: "Day already reviewed", description: "All cached profiles for this day have already been opened from this browser." });
+        return;
+      }
       toast({ title: "No usernames to open", description: "This group only has X user IDs in the cache." });
       return;
     }
 
-    for (const user of openable) {
-      openInBackground(`https://x.com/${user.username}`);
+    const openedIds: string[] = [];
+    for (const user of batch) {
+      if (openInBackground(`https://x.com/${user.username}`)) {
+        openedIds.push(user.user_id);
+      }
     }
+    markNonFollowbacksReviewed(openedIds);
+
+    const blocked = batch.length - openedIds.length;
+    const remainingAfterOpen = unreviewedOpenable.length - openedIds.length;
 
     toast({
-      title: `Opening ${openable.length} profile${openable.length === 1 ? "" : "s"}`,
-      description: skipped > 0
-        ? `${skipped} account${skipped === 1 ? "" : "s"} skipped because no username is cached. Chrome may ask you to allow pop-ups.`
-        : "Each profile opens in its own Chrome tab. Chrome may ask you to allow pop-ups.",
+      title: openedIds.length > 0
+        ? `Opened ${openedIds.length} profile${openedIds.length === 1 ? "" : "s"}`
+        : "Chrome blocked the profile tabs",
+      description: blocked > 0
+        ? `Chrome blocked ${blocked} tab${blocked === 1 ? "" : "s"}. Allow pop-ups for xot.iraneyes.com and click again.`
+        : `${remainingAfterOpen} unreviewed profile${remainingAfterOpen === 1 ? "" : "s"} remain for this day.${skippedNoUsername > 0 ? ` ${skippedNoUsername} account${skippedNoUsername === 1 ? "" : "s"} have no cached username.` : ""}`,
+      variant: openedIds.length === 0 ? "destructive" : undefined,
     });
   };
 
@@ -426,6 +492,8 @@ export default function XAccount() {
                             collapsed={collapsedNonFollowbackDays.has(group.date_key)}
                             onToggle={() => toggleNonFollowbackDay(group.date_key)}
                             onOpenAll={() => handleOpenProfilesForDay(group)}
+                            onOpenProfile={handleOpenSingleNonFollowback}
+                            reviewedUserIds={reviewedNonFollowbacks}
                           />
                         ))}
                       </div>
@@ -540,22 +608,58 @@ function MutualFollowRow({ user, subtitle }: { user: MutualFollowUser; subtitle?
   );
 }
 
+function NotFollowingBackRow({
+  user,
+  subtitle,
+  reviewed,
+  onOpen,
+}: {
+  user: NotFollowingBackUser;
+  subtitle?: string;
+  reviewed: boolean;
+  onOpen: () => void;
+}) {
+  return (
+    <ProfileRow
+      userId={user.user_id}
+      username={user.username}
+      name={user.name}
+      profileImageUrl={user.profile_image_url}
+      subtitle={subtitle}
+      reviewed={reviewed}
+      onOpen={onOpen}
+    />
+  );
+}
+
 function NotFollowingBackDayGroup({
   group,
   collapsed,
   onToggle,
   onOpenAll,
+  onOpenProfile,
+  reviewedUserIds,
 }: {
   group: NotFollowingBackGroup;
   collapsed: boolean;
   onToggle: () => void;
   onOpenAll: () => void;
+  onOpenProfile: (user: NotFollowingBackUser) => void;
+  reviewedUserIds: Set<string>;
 }) {
   const openableCount = group.users.filter((user) => user.username).length;
+  const unreviewedOpenableCount = group.users.filter((user) => user.username && !reviewedUserIds.has(user.user_id)).length;
+  const reviewedCount = group.users.filter((user) => reviewedUserIds.has(user.user_id)).length;
+  const nextBatchCount = Math.min(NON_FOLLOWBACK_OPEN_BATCH_SIZE, unreviewedOpenableCount);
   const newestUser = group.users[0];
   const startedLabel = group.started_at
     ? formatDistanceToNow(new Date(group.started_at), { addSuffix: true })
     : "unknown";
+  const openButtonLabel = openableCount === 0
+    ? "No usernames"
+    : nextBatchCount > 0
+      ? `Open next ${nextBatchCount}`
+      : "All reviewed";
 
   return (
     <div className="rounded-lg border border-border/70 bg-card/40">
@@ -567,26 +671,30 @@ function NotFollowingBackDayGroup({
               <CalendarDays className="h-4 w-4 text-primary" />
               <span className="font-medium text-sm">{group.label}</span>
               <Badge variant="secondary" className="text-[10px] px-1.5">{group.users.length}</Badge>
+              {reviewedCount > 0 && <Badge variant="outline" className="text-[10px] px-1.5">{reviewedCount} reviewed</Badge>}
               {group.approximate && <Badge variant="outline" className="text-[10px] px-1.5">approx</Badge>}
             </div>
             <p className="text-xs text-muted-foreground">
               Still not following you back as of the latest snapshot
               {group.started_at ? ` · first seen ${startedLabel}` : ""}
-              {newestUser?.username ? ` · includes @${newestUser.username}` : ""}.
+              {newestUser?.username ? ` · includes @${newestUser.username}` : ""}
+              {openableCount > 0 ? ` · ${unreviewedOpenableCount} left to open` : ""}.
             </p>
           </div>
         </button>
-        <Button size="sm" variant="outline" onClick={onOpenAll} disabled={openableCount === 0} className="shrink-0">
+        <Button size="sm" variant="outline" onClick={onOpenAll} disabled={unreviewedOpenableCount === 0} className="shrink-0">
           <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
-          Open day ({openableCount})
+          {openButtonLabel}
         </Button>
       </div>
       {!collapsed && (
         <div className="border-t border-border/60 px-2 py-2">
           {group.users.map((user) => (
-            <MutualFollowRow
+            <NotFollowingBackRow
               key={user.user_id}
               user={user}
+              reviewed={reviewedUserIds.has(user.user_id)}
+              onOpen={() => onOpenProfile(user)}
               subtitle={user.first_following_approximate ? "Already in first captured following snapshot" : "First seen in following snapshot"}
             />
           ))}
@@ -596,9 +704,25 @@ function NotFollowingBackDayGroup({
   );
 }
 
-function ProfileRow({ userId, username, name, profileImageUrl, subtitle }: { userId: string; username: string | null; name: string | null; profileImageUrl: string | null; subtitle?: string }) {
+function ProfileRow({
+  userId,
+  username,
+  name,
+  profileImageUrl,
+  subtitle,
+  reviewed = false,
+  onOpen,
+}: {
+  userId: string;
+  username: string | null;
+  name: string | null;
+  profileImageUrl: string | null;
+  subtitle?: string;
+  reviewed?: boolean;
+  onOpen?: () => void;
+}) {
   return (
-    <div className="flex items-center justify-between py-2 px-3 rounded-md hover:bg-muted/30">
+    <div className={`flex items-center justify-between py-2 px-3 rounded-md hover:bg-muted/30 ${reviewed ? "opacity-60" : ""}`}>
       <div className="flex items-center gap-3 min-w-0">
         {profileImageUrl ? (
           <img src={profileImageUrl} alt="" className="w-9 h-9 rounded-full" loading="lazy" />
@@ -613,11 +737,18 @@ function ProfileRow({ userId, username, name, profileImageUrl, subtitle }: { use
           </div>
         </div>
       </div>
-      {username && (
-        <button onClick={() => openInBackground(`https://x.com/${username}`)} className="text-muted-foreground hover:text-primary shrink-0 p-2">
-          <ExternalLink className="w-4 h-4" />
-        </button>
-      )}
+      <div className="flex items-center gap-1.5 shrink-0">
+        {reviewed && <Badge variant="secondary" className="text-[10px] px-1.5">reviewed</Badge>}
+        {username && (
+          <button
+            onClick={() => (onOpen ? onOpen() : openInBackground(`https://x.com/${username}`))}
+            className="text-muted-foreground hover:text-primary shrink-0 p-2"
+            aria-label={`Open @${username} on X`}
+          >
+            <ExternalLink className="w-4 h-4" />
+          </button>
+        )}
+      </div>
     </div>
   );
 }
