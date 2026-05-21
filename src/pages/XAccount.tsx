@@ -24,6 +24,14 @@ const FollowerGrowthChart = lazy(() => import("@/components/x/FollowerGrowthChar
 const NON_FOLLOWBACK_REVIEWED_KEY = "xot:not-following-back-reviewed:v1";
 const NON_FOLLOWBACK_OPEN_BATCH_SIZE = 30;
 
+type NonFollowbackReviewBatch = {
+  dateKey: string;
+  label: string;
+  userIds: string[];
+  openedCount: number;
+  blockedCount: number;
+};
+
 function openInBackground(url: string): boolean {
   const w = window.open(url, '_blank', 'noopener');
   if (!w) return false;
@@ -56,6 +64,7 @@ export default function XAccount() {
   const [mutualSearch, setMutualSearch] = useState("");
   const [collapsedNonFollowbackDays, setCollapsedNonFollowbackDays] = useState<Set<string>>(() => new Set());
   const [reviewedNonFollowbacks, setReviewedNonFollowbacks] = useState<Set<string>>(() => loadReviewedNonFollowbacks());
+  const [activeNonFollowbackBatch, setActiveNonFollowbackBatch] = useState<NonFollowbackReviewBatch | null>(null);
 
   const { data: snapshots, isLoading: snapsLoading } = useFollowerSnapshots();
   const { data: unfollowers, isLoading: unfLoading } = useUnfollowers(showAllUnfollowers, searchQuery);
@@ -175,6 +184,20 @@ export default function XAccount() {
       return;
     }
 
+    setCollapsedNonFollowbackDays((prev) => {
+      if (!prev.has(group.date_key)) return prev;
+      const next = new Set(prev);
+      next.delete(group.date_key);
+      return next;
+    });
+    setActiveNonFollowbackBatch({
+      dateKey: group.date_key,
+      label: group.label,
+      userIds: batch.map((user) => user.user_id),
+      openedCount: 0,
+      blockedCount: 0,
+    });
+
     const openedIds: string[] = [];
     for (const user of batch) {
       if (openInBackground(`https://x.com/${user.username}`)) {
@@ -185,6 +208,13 @@ export default function XAccount() {
 
     const blocked = batch.length - openedIds.length;
     const remainingAfterOpen = unreviewedOpenable.length - openedIds.length;
+    setActiveNonFollowbackBatch({
+      dateKey: group.date_key,
+      label: group.label,
+      userIds: batch.map((user) => user.user_id),
+      openedCount: openedIds.length,
+      blockedCount: blocked,
+    });
 
     toast({
       title: openedIds.length > 0
@@ -193,6 +223,45 @@ export default function XAccount() {
       description: blocked > 0
         ? `Chrome blocked ${blocked} tab${blocked === 1 ? "" : "s"}. Allow pop-ups for xot.iraneyes.com and click again.`
         : `${remainingAfterOpen} unreviewed profile${remainingAfterOpen === 1 ? "" : "s"} remain for this day.${skippedNoUsername > 0 ? ` ${skippedNoUsername} account${skippedNoUsername === 1 ? "" : "s"} have no cached username.` : ""}`,
+      variant: openedIds.length === 0 ? "destructive" : undefined,
+    });
+  };
+
+  const handleOpenBatchRemainder = (group: NotFollowingBackGroup) => {
+    if (!activeNonFollowbackBatch || activeNonFollowbackBatch.dateKey !== group.date_key) return;
+    const batchIds = new Set(activeNonFollowbackBatch.userIds);
+    const remaining = group.users
+      .filter((user) => batchIds.has(user.user_id) && user.username && !reviewedNonFollowbacks.has(user.user_id));
+
+    if (remaining.length === 0) {
+      toast({ title: "Batch already reviewed", description: "Every cached profile in this batch has been opened from this browser." });
+      return;
+    }
+
+    const openedIds: string[] = [];
+    for (const user of remaining) {
+      if (openInBackground(`https://x.com/${user.username}`)) {
+        openedIds.push(user.user_id);
+      }
+    }
+    markNonFollowbacksReviewed(openedIds);
+
+    const blocked = remaining.length - openedIds.length;
+    setActiveNonFollowbackBatch((prev) => prev && prev.dateKey === group.date_key
+      ? {
+          ...prev,
+          openedCount: prev.openedCount + openedIds.length,
+          blockedCount: blocked,
+        }
+      : prev);
+
+    toast({
+      title: openedIds.length > 0
+        ? `Opened ${openedIds.length} remaining profile${openedIds.length === 1 ? "" : "s"}`
+        : "Chrome blocked the remaining tabs",
+      description: blocked > 0
+        ? "Chrome is still blocking batch pop-ups. Use the visible batch links below, or allow pop-ups for xot.iraneyes.com."
+        : "Batch opened and marked reviewed.",
       variant: openedIds.length === 0 ? "destructive" : undefined,
     });
   };
@@ -493,7 +562,9 @@ export default function XAccount() {
                             onToggle={() => toggleNonFollowbackDay(group.date_key)}
                             onOpenAll={() => handleOpenProfilesForDay(group)}
                             onOpenProfile={handleOpenSingleNonFollowback}
+                            onOpenBatchRemainder={() => handleOpenBatchRemainder(group)}
                             reviewedUserIds={reviewedNonFollowbacks}
+                            activeBatch={activeNonFollowbackBatch?.dateKey === group.date_key ? activeNonFollowbackBatch : null}
                           />
                         ))}
                       </div>
@@ -638,14 +709,18 @@ function NotFollowingBackDayGroup({
   onToggle,
   onOpenAll,
   onOpenProfile,
+  onOpenBatchRemainder,
   reviewedUserIds,
+  activeBatch,
 }: {
   group: NotFollowingBackGroup;
   collapsed: boolean;
   onToggle: () => void;
   onOpenAll: () => void;
   onOpenProfile: (user: NotFollowingBackUser) => void;
+  onOpenBatchRemainder: () => void;
   reviewedUserIds: Set<string>;
+  activeBatch: NonFollowbackReviewBatch | null;
 }) {
   const openableCount = group.users.filter((user) => user.username).length;
   const unreviewedOpenableCount = group.users.filter((user) => user.username && !reviewedUserIds.has(user.user_id)).length;
@@ -689,6 +764,15 @@ function NotFollowingBackDayGroup({
       </div>
       {!collapsed && (
         <div className="border-t border-border/60 px-2 py-2">
+          {activeBatch && (
+            <ReviewBatchPanel
+              group={group}
+              batch={activeBatch}
+              reviewedUserIds={reviewedUserIds}
+              onOpenProfile={onOpenProfile}
+              onOpenBatchRemainder={onOpenBatchRemainder}
+            />
+          )}
           {group.users.map((user) => (
             <NotFollowingBackRow
               key={user.user_id}
@@ -700,6 +784,77 @@ function NotFollowingBackDayGroup({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function ReviewBatchPanel({
+  group,
+  batch,
+  reviewedUserIds,
+  onOpenProfile,
+  onOpenBatchRemainder,
+}: {
+  group: NotFollowingBackGroup;
+  batch: NonFollowbackReviewBatch;
+  reviewedUserIds: Set<string>;
+  onOpenProfile: (user: NotFollowingBackUser) => void;
+  onOpenBatchRemainder: () => void;
+}) {
+  const batchIds = new Set(batch.userIds);
+  const batchUsers = group.users.filter((user) => batchIds.has(user.user_id));
+  const remaining = batchUsers.filter((user) => user.username && !reviewedUserIds.has(user.user_id));
+  const reviewed = batchUsers.length - remaining.length;
+
+  return (
+    <div className="mb-3 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline" className="border-amber-500/50 text-amber-500">Review batch</Badge>
+            <span className="text-sm font-medium">{reviewed}/{batchUsers.length} opened from this batch</span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Chrome may allow only one automatic tab per click unless pop-ups are allowed for this site.
+            The remaining profiles stay below as individual buttons, so each real click opens one tab and marks it reviewed.
+          </p>
+        </div>
+        <Button size="sm" variant="outline" onClick={onOpenBatchRemainder} disabled={remaining.length === 0} className="shrink-0">
+          <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
+          Try remaining {remaining.length}
+        </Button>
+      </div>
+      {batch.blockedCount > 0 && (
+        <p className="mt-2 text-xs text-amber-500">
+          Chrome blocked {batch.blockedCount} tab{batch.blockedCount === 1 ? "" : "s"}. Allow pop-ups for xot.iraneyes.com to make the batch button open all 30 at once.
+        </p>
+      )}
+      <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        {batchUsers.map((user) => {
+          const isReviewed = reviewedUserIds.has(user.user_id);
+          return (
+            <button
+              key={user.user_id}
+              type="button"
+              disabled={!user.username}
+              onClick={() => onOpenProfile(user)}
+              className={`min-w-0 rounded-md border px-3 py-2 text-left text-xs transition-colors hover:border-primary/60 hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-45 ${
+                isReviewed ? "border-border/60 bg-muted/30 opacity-60" : "border-amber-500/30 bg-background/60"
+              }`}
+            >
+              <div className="flex min-w-0 items-center justify-between gap-2">
+                <span className="truncate font-medium">{user.username ? `@${user.username}` : `id:${user.user_id}`}</span>
+                {isReviewed ? (
+                  <Badge variant="secondary" className="text-[10px] px-1.5">reviewed</Badge>
+                ) : (
+                  <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                )}
+              </div>
+              {user.name && <div className="mt-0.5 truncate text-muted-foreground">{user.name}</div>}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
