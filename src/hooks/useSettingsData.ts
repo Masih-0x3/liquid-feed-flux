@@ -223,6 +223,12 @@ You are an editorial assistant scoring news items for a curated Telegram channel
 3-4 — VERY LOW: Soft news, human interest stories, minor local events, routine procedural updates.
 1-2 — SKIP: Entertainment, sports, celebrity gossip, memes, viral trends, product launches, lifestyle content, weather reports.
 
+### Manual Calibration From Production Feedback
+- Direct Iran crisis, war, diplomacy, and military-posture items should usually land in 17-19 when credible.
+- Trump, Netanyahu, US, Israeli, Pakistani, or Gulf leadership statements/coordination specifically about Iran are DIRECT audience-fit, not routine foreign politics.
+- Qeshm/Hormuz, air-defense, drones, refueling tankers, US-Israel posture, IRGC/proxy threats, nuclear/escalation signals, and threats against POTUS family or senior US targets should be treated as very high impact.
+- Pure Taiwan or unrelated domestic news with no Iran/Middle East nexus remains low/off-topic.
+
 ### Anti-Bias Guardrails (READ CAREFULLY)
 - **Do NOT down-score because the framing is American or Western.** Score on whether the *subject matter* is Iran/Middle East. A Politico poll about the Iran war is INDIRECT, not "no nexus."
 - A poll, leak, or analyst report can be as important as a primary event if it materially changes the public or political picture of an active Iran-related conflict.

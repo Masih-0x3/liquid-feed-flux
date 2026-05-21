@@ -91,6 +91,67 @@ export interface ProfileDecisionResult {
   finalScore: number;
 }
 
+const DIRECT_IRAN_TERMS = [
+  'iran', 'iranian', 'tehran', 'irgc', 'sepah', 'qeshm', 'hormuz', 'persian gulf',
+  'israel-iran', 'us-iran', 'u.s.-iran', 'iran nuclear', 'khamenei',
+];
+
+const HIGH_IMPACT_IRAN_TERMS = [
+  'trump', 'netanyahu', 'president', 'prime minister', 'foreign minister', 'army chief',
+  'idf', 'us military', 'u.s. military', 'refueling tanker', 'drone', 'air defense',
+  'strike', 'attack', 'war', 'military', 'nuclear', 'sanction', 'negotiation', 'talks',
+  'agreement', 'final draft', 'ceasefire', 'peace talks', 'assassinat', 'threat',
+  'hezbollah', 'houthi', 'militia', 'proxy',
+];
+
+const VERY_HIGH_IRAN_TERMS = [
+  'refueling tanker', 'air defense', 'drone', 'strike', 'attack', 'assassinat',
+  'threat', 'war', 'nuclear', 'destroyed',
+];
+
+function hasAnyTerm(haystack: string, terms: string[]): boolean {
+  return terms.some((term) => haystack.includes(term));
+}
+
+function clampFinalScore(score: number): number {
+  return Math.max(0, Math.min(20, Math.round(score * 10) / 10));
+}
+
+function applyIranFirstSignalFloor(input: {
+  finalScore: number;
+  legacyScore: number | null;
+  axes: ScoreAxes | null;
+  tags: string[];
+  text: string;
+}): { finalScore: number; reasonSuffix: string } {
+  const legacy = typeof input.legacyScore === 'number' && Number.isFinite(input.legacyScore)
+    ? input.legacyScore
+    : null;
+  let finalScore = legacy === null ? input.finalScore : Math.max(input.finalScore, legacy);
+  let reasonSuffix = legacy !== null && finalScore > input.finalScore ? ':legacy_floor' : '';
+
+  const haystack = `${input.text || ''} ${(input.tags || []).join(' ')}`.toLowerCase();
+  const iranAxis = input.axes?.iran_relevance ?? 0;
+  const severity = input.axes?.severity ?? 0;
+  const actionability = input.axes?.actionability ?? 0;
+  const noise = input.axes?.noise ?? 0;
+  const directIran = iranAxis >= 6 || hasAnyTerm(haystack, DIRECT_IRAN_TERMS);
+  const highImpact = hasAnyTerm(haystack, HIGH_IMPACT_IRAN_TERMS);
+  const veryHighImpact = hasAnyTerm(haystack, VERY_HIGH_IRAN_TERMS);
+  const currentSignal = legacy ?? finalScore;
+
+  if (directIran && noise <= 3 && highImpact && currentSignal >= 12.5 && finalScore < 17) {
+    finalScore = 17;
+    reasonSuffix += ':iran_high_signal_floor';
+  }
+  if (directIran && noise <= 3 && (veryHighImpact || severity >= 4 || actionability >= 5) && currentSignal >= 15 && finalScore < 18) {
+    finalScore = 18;
+    reasonSuffix += ':iran_very_high_signal_floor';
+  }
+
+  return { finalScore: clampFinalScore(finalScore), reasonSuffix };
+}
+
 /** Apply hard rules + weighted formula. Returns final decision + reason. */
 export function applyProfileDecision(input: ProfileDecisionInput): ProfileDecisionResult {
   const { profile, axes, legacyScore, tags, text, authorHandle } = input;
@@ -125,6 +186,18 @@ export function applyProfileDecision(input: ProfileDecisionInput): ProfileDecisi
   }
 
   let finalScore = axes ? computeFinalScore(axes, profile.weights) : (legacyScore ?? 0);
+  let reasonSuffix = '';
+  if (profile.id === 'iran-war-default' || profile.id === 'iran-first' || /iran/i.test(profile.name || '')) {
+    const adjusted = applyIranFirstSignalFloor({
+      finalScore,
+      legacyScore,
+      axes,
+      tags,
+      text,
+    });
+    finalScore = adjusted.finalScore;
+    reasonSuffix = adjusted.reasonSuffix;
+  }
 
   let boost = 0;
   for (const kw of profile.must_include_keywords || []) {
@@ -133,7 +206,7 @@ export function applyProfileDecision(input: ProfileDecisionInput): ProfileDecisi
   if (boost > 0) finalScore = Math.min(20, finalScore + boost);
 
   if (finalScore >= profile.threshold) {
-    return { decision: 'deliver', reason: `score_pass:${finalScore.toFixed(1)}>=${profile.threshold}${boost ? `(+${boost} kw)` : ''}`, finalScore };
+    return { decision: 'deliver', reason: `score_pass:${finalScore.toFixed(1)}>=${profile.threshold}${boost ? `(+${boost} kw)` : ''}${reasonSuffix}`, finalScore };
   }
-  return { decision: 'skip', reason: `below_threshold:${finalScore.toFixed(1)}<${profile.threshold}`, finalScore };
+  return { decision: 'skip', reason: `below_threshold:${finalScore.toFixed(1)}<${profile.threshold}${reasonSuffix}`, finalScore };
 }

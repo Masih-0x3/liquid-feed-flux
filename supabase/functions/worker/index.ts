@@ -506,7 +506,7 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
 
     const { data: post, error } = await supabase
       .from('posts')
-      .select('tweet_id, text_original, account_id, url, tweeted_at, has_media, author_handle, is_truncated, hydrated_at, dedupe_status, dup_of_tweet_id, dedupe_reason, accounts!inner(handle, display_name)')
+      .select('tweet_id, text_original, text_translated, account_id, url, tweeted_at, has_media, author_handle, is_truncated, hydrated_at, dedupe_status, dup_of_tweet_id, dedupe_reason, feedback_locked, importance_score, importance_tags, importance_reasoning, score_axes, final_score, delivery_decision, decision_reason, score_breakdown, accounts!inner(handle, display_name)')
       .eq('tweet_id', tweetId)
       .single();
 
@@ -556,6 +556,20 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
     let scoringUsage: Record<string, unknown> | null = null;
     let translationUsage: Record<string, unknown> | null = null;
     let translationSkippedByFilter = false;
+    let scoreAxes: ScoreAxes | null = null;
+    const feedbackLocked = post.feedback_locked === true;
+    if (feedbackLocked) {
+      importanceScore = typeof post.importance_score === 'number' ? post.importance_score : Number(post.importance_score ?? NaN) || null;
+      importanceTags = Array.isArray(post.importance_tags) ? post.importance_tags as string[] : null;
+      importanceReasoning = typeof post.importance_reasoning === 'string' ? post.importance_reasoning : null;
+      scoreAxes = parseScoreAxes(post.score_axes);
+      console.log(JSON.stringify({ function: 'worker', action: 'score_skip_feedback_locked', tweet_id: tweetId, score: importanceScore, final_score: post.final_score }));
+      await insertPipelineEvent(supabase, 'post', tweetId, 'score', 'skipped', null, new Date().toISOString(), null, {
+        reason: 'feedback_locked',
+        final_score: post.final_score,
+        importance_score: importanceScore,
+      });
+    }
 
     // Resolve scoring params (fall back to translation values if not set)
     const scoringModel = config.scoringModel ?? config.openaiModel;
@@ -590,6 +604,7 @@ You are an editorial assistant scoring news items for a curated Telegram channel
 - NO IRAN NEXUS (pure US/EU/China domestic): cap at 8.
 
 ### STEP B — Score 1-20 (importance_score)
+- Manual calibration from production feedback: direct Iran crisis, war, diplomacy, and military-posture items should usually land in 17-19 when credible. Trump/Netanyahu/US/Pakistan leadership statements or coordination specifically about Iran are DIRECT audience-fit, not routine foreign politics. Qeshm/Hormuz, air-defense, drones, refueling tankers, US-Israel posture, IRGC/proxy threats, nuclear/escalation signals, and threats against POTUS family or senior US targets should be treated as very high impact. Pure Taiwan or unrelated domestic news with no Iran/Middle East nexus remains low.
 
 ### STEP C — Score the 6 axes (axes object), each 0-10
 - iran_relevance: 8-10 if DIRECT, 4-7 if INDIRECT, 0-3 if NONE.
@@ -711,7 +726,6 @@ ${post.text_original}`;
     };
 
     // ============ SPLIT PATH: score first, translate only on pass ============
-    let scoreAxes: ScoreAxes | null = null;
     let scoringPolicyResult: ScoringPolicyResult | null = null;
     const scoringPolicyEnabled = scoringPolicyConfigured;
     const scoringPolicyActive = scoringPolicyEnabled && (config.scoringPolicy?.mode === 'active' || forceScoringV2);
@@ -727,6 +741,16 @@ ${post.text_original}`;
     };
 
     const buildBaseDecisionState = (): Omit<FeedbackBiasResult, 'scoreBreakdown'> => {
+      if (feedbackLocked) {
+        const lockedFinalScore = typeof post.final_score === 'number'
+          ? post.final_score
+          : Number(post.final_score ?? NaN) || importanceScore;
+        return {
+          deliveryDecision: post.delivery_decision === 'skip' ? 'skip' : 'deliver',
+          decisionReason: typeof post.decision_reason === 'string' ? post.decision_reason : 'feedback_locked',
+          finalScore: lockedFinalScore,
+        };
+      }
       let deliveryDecision = 'deliver';
       let decisionReason: string | null = null;
       let finalScore: number | null = scoringPolicyActive && scoringPolicyResult
@@ -796,6 +820,14 @@ ${post.text_original}`;
     const applyFeedbackBiasToDecision = async (
       state: Omit<FeedbackBiasResult, 'scoreBreakdown'>,
     ): Promise<FeedbackBiasResult> => {
+      if (feedbackLocked) {
+        return {
+          ...state,
+          scoreBreakdown: post.score_breakdown && typeof post.score_breakdown === 'object'
+            ? post.score_breakdown as Record<string, unknown>
+            : null,
+        };
+      }
       if (state.finalScore === null) {
         return { ...state, scoreBreakdown: null };
       }
@@ -835,7 +867,58 @@ ${post.text_original}`;
       }
     };
 
-    if (filterEnabled && config.splitCalls) {
+    if (feedbackLocked) {
+      splitDecisionState = await applyFeedbackBiasToDecision(buildBaseDecisionState());
+      const preDecision = splitDecisionState.deliveryDecision;
+      console.log(JSON.stringify({
+        function: 'worker',
+        action: 'pre_translation_gate_feedback_locked',
+        tweet_id: tweetId,
+        decision: preDecision,
+        final_score: splitDecisionState.finalScore,
+        reason: splitDecisionState.decisionReason,
+      }));
+
+      if (preDecision === 'deliver' || scoreOnly) {
+        if (typeof post.text_translated === 'string' && post.text_translated.trim()) {
+          translatedText = post.text_translated;
+        } else {
+          console.log(JSON.stringify({ function: 'worker', action: 'translate_call_start', tweet_id: tweetId, model: config.openaiModel, reasoning_effort: config.openaiReasoningEffort, source: 'feedback_locked' }));
+          const trResult = await callOpenAI({
+            apiKey: openaiApiKey,
+            model: config.openaiModel,
+            messages: [
+              { role: 'system', content: config.translationPrompt },
+              { role: 'user', content: renderTranslationUserPrompt() },
+            ],
+            maxOutputTokens: config.openaiMaxCompletionTokens,
+            temperature: config.openaiTemperature,
+            topP: config.openaiTopP,
+            frequencyPenalty: config.openaiFrequencyPenalty,
+            presencePenalty: config.openaiPresencePenalty,
+            reasoningEffort: config.openaiReasoningEffort,
+            verbosity: config.openaiVerbosity,
+            seed: config.openaiSeed,
+            serviceTier: config.openaiServiceTier,
+            parallelToolCalls: config.openaiParallelToolCalls,
+          });
+          if (!trResult.ok) {
+            throw new Error(`OpenAI translation error: ${trResult.status} ${trResult.rawText}`);
+          }
+          translationUsage = (trResult.raw?.usage as Record<string, unknown> | undefined) ?? null;
+          data = trResult.raw;
+          translatedText = trResult.content;
+          console.log(JSON.stringify({ function: 'worker', action: 'translate_complete', tweet_id: tweetId, chars: translatedText.length, source: 'feedback_locked' }));
+        }
+      } else {
+        translationSkippedByFilter = true;
+        console.log(JSON.stringify({ function: 'worker', action: 'translate_skipped_feedback_locked', tweet_id: tweetId, score: importanceScore }));
+        await insertPipelineEvent(supabase, 'post', tweetId, 'translate', 'skipped', null, new Date().toISOString(), null, {
+          reason: 'feedback_locked_skip',
+          score: importanceScore,
+        });
+      }
+    } else if (filterEnabled && config.splitCalls) {
       if (scoringPolicyEnabled) {
         console.log(JSON.stringify({
           function: 'worker',
