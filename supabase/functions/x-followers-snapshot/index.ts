@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
 import { requireInternalAuth } from "../_shared/internalAuth.ts";
 import { recordLegacyXApiUsage, recordXApiEvent } from "../_shared/xApiLedger.ts";
+import { isMyXEnabled, MY_X_DISABLED_RESPONSE } from "../_shared/myXControls.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': Deno.env.get('ALLOWED_CORS_ORIGIN') ?? 'https://liquid-feed-flux.lovable.app',
@@ -75,6 +76,13 @@ async function getSelfId(supabase: any, creds: { ck: string; cs: string; at: str
 
 interface FollowerUser { id: string; username?: string; name?: string; profile_image_url?: string }
 
+function myXDisabledResponse() {
+  return new Response(JSON.stringify(MY_X_DISABLED_RESPONSE), {
+    status: 200,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
+}
+
 // deno-lint-ignore no-explicit-any
 async function fetchUserPage(supabase: any, userId: string, endpoint: 'followers' | 'following', paginationToken: string | null, creds: { ck: string; cs: string; at: string; ats: string }): Promise<{ users: FollowerUser[]; nextToken: string | null; status: number; errorText?: string }> {
   const baseUrl = `https://api.x.com/2/users/${userId}/${endpoint}`;
@@ -124,6 +132,8 @@ serve(async (req) => {
   try {
     const { data: controlsRow } = await supabase.from('settings').select('value').eq('key', 'x_api_controls').maybeSingle();
     const controls = (controlsRow?.value ?? {}) as Record<string, unknown>;
+    if (!isMyXEnabled(controls)) return myXDisabledResponse();
+
     const staleMinutes = typeof controls.follower_snapshot_stale_minutes === 'number'
       ? controls.follower_snapshot_stale_minutes
       : 60;

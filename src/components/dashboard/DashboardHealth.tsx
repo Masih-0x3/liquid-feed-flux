@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Activity, AlertTriangle, Eye, RefreshCw, Loader2, Settings, Twitter, Wrench, Play, RotateCcw, Clock } from 'lucide-react';
+import { Activity, AlertTriangle, Eye, RefreshCw, Loader2, Settings, Wrench, Play, RotateCcw, Clock } from 'lucide-react';
 import type { PipelineHealth, QueueBreakdown, XLocalUsage } from '@/hooks/useDashboardData';
 import { useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
@@ -76,7 +76,6 @@ export function DashboardHealth({ health, queue, xUsage }: Props) {
   const safeRoutes = [
     { label: 'Needs attention', icon: Eye, route: '/monitoring?filter=needs_attention' },
     { label: 'Ready to deliver', icon: Activity, route: '/monitoring?filter=ready_to_deliver' },
-    { label: 'My X', icon: Twitter, route: '/x-account' },
     { label: 'X automation', icon: Settings, route: '/settings#x-automation' },
   ];
 

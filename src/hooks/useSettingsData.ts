@@ -404,6 +404,7 @@ const defaults = {
     last_post_error: null as string | null,
   },
   x_api_controls: {
+    my_x_enabled: false,
     verify_cache_minutes: 15,
     follower_snapshot_stale_minutes: 60,
     usage_sync_interval_hours: 6,

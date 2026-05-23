@@ -276,7 +276,7 @@ export default function Dashboard() {
               </div>
             </div>
             <div className="rounded-md border border-border/60 bg-muted/20 p-3 text-xs text-muted-foreground">
-              Official X usage is not synced from Dashboard. Use My X or Settings when a manual sync is needed.
+              Official X usage is not synced from Dashboard. My X follower/following reads are paused; use Settings for X automation controls.
             </div>
           </CardContent>
         </Card>

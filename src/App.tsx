@@ -36,7 +36,7 @@ const Dashboard = lazyWithRetry(() => import("./pages/Dashboard"));
 const Monitoring = lazyWithRetry(() => import("./pages/Monitoring"));
 const Threads = lazyWithRetry(() => import("./pages/Threads"));
 const Settings = lazyWithRetry(() => import("./pages/Settings"));
-const XAccount = lazyWithRetry(() => import("./pages/XAccount"));
+const XAccountDisabled = lazyWithRetry(() => import("./pages/XAccountDisabled"));
 const Downloader = lazyWithRetry(() => import("./pages/Downloader"));
 
 const queryClient = new QueryClient();
@@ -92,7 +92,7 @@ const App = () => (
               <Route path="/" element={<AppLayout><Dashboard /></AppLayout>} />
               <Route path="/monitoring" element={<AppLayout><Monitoring /></AppLayout>} />
               <Route path="/threads" element={<AppLayout><Threads /></AppLayout>} />
-              <Route path="/x-account" element={<AppLayout><XAccount /></AppLayout>} />
+              <Route path="/x-account" element={<AppLayout><XAccountDisabled /></AppLayout>} />
               <Route path="/downloader" element={<AppLayout><Downloader /></AppLayout>} />
               <Route path="/settings" element={<AppLayout><Settings /></AppLayout>} />
               <Route path="*" element={<NotFound />} />

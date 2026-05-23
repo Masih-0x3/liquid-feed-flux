@@ -38,6 +38,7 @@ import {
   selectMediaTier,
   type XMediaRow,
 } from "../_shared/mediaSelection.ts";
+import { isMyXEnabled, MY_X_DISABLED_RESPONSE } from "../_shared/myXControls.ts";
 
 const DEPLOY_SHA = Deno.env.get('DEPLOY_GIT_SHA') ?? 'unknown';
 const DEPLOY_TIME = Deno.env.get('DEPLOY_TIME') ?? new Date().toISOString();
@@ -3755,6 +3756,9 @@ function validateSettingsValue(key: string, value: unknown): string | null {
         break;
       }
       case 'x_api_controls': {
+        if (v.my_x_enabled !== undefined && typeof v.my_x_enabled !== 'boolean') {
+          return 'x_api_controls.my_x_enabled must be a boolean';
+        }
         const nums = [
           ['verify_cache_minutes', 1, 1440],
           ['follower_snapshot_stale_minutes', 1, 1440],
@@ -4215,27 +4219,33 @@ serve(async (req) => {
 
       // ===== X API: verify credentials =====
       case 'x_verify_credentials': {
-        const creds = getXCreds();
-        if (!creds) return jsonResponse({ ok: false, error: 'One or more TWITTER_* secrets are missing' }, 200);
-        const force = body.force === true;
         const { data: controlsRow } = await supabase.from('settings').select('value').eq('key', 'x_api_controls').maybeSingle();
         const controls = (controlsRow?.value ?? {}) as Record<string, unknown>;
         const cacheMinutes = typeof controls.verify_cache_minutes === 'number' ? controls.verify_cache_minutes : 15;
-        if (!force) {
-          const { data: cachedRow } = await supabase.from('settings').select('value').eq('key', 'x_self_id').maybeSingle();
-          const cached = (cachedRow?.value ?? {}) as Record<string, unknown>;
-          const cachedAt = typeof cached.cached_at === 'string' ? new Date(cached.cached_at).getTime() : 0;
-          if (cached.id && cached.username && cachedAt > Date.now() - cacheMinutes * 60 * 1000) {
-            return jsonResponse({
-              ok: true,
-              cached: true,
-              id: cached.id,
-              handle: cached.username,
-              name: cached.name,
-              cached_at: cached.cached_at,
-            });
-          }
+        const { data: cachedRow } = await supabase.from('settings').select('value').eq('key', 'x_self_id').maybeSingle();
+        const cached = (cachedRow?.value ?? {}) as Record<string, unknown>;
+        const cachedAt = typeof cached.cached_at === 'string' ? new Date(cached.cached_at).getTime() : 0;
+        const hasFreshCachedSelf = cached.id && cached.username && cachedAt > Date.now() - cacheMinutes * 60 * 1000;
+        if (hasFreshCachedSelf) {
+          return jsonResponse({
+            ok: true,
+            cached: true,
+            id: cached.id,
+            handle: cached.username,
+            name: cached.name,
+            cached_at: cached.cached_at,
+          });
         }
+        if (!isMyXEnabled(controls)) {
+          return jsonResponse({
+            ok: false,
+            disabled: true,
+            reason: 'owned_reads_disabled',
+            error: 'Owned-read credential verification is paused to prevent X API user-read charges.',
+          }, 200);
+        }
+        const creds = getXCreds();
+        if (!creds) return jsonResponse({ ok: false, error: 'One or more TWITTER_* secrets are missing' }, 200);
         const url = 'https://api.x.com/2/users/me';
         try {
           const auth = await xOauthHeader('GET', url, {}, creds.ck, creds.cs, creds.at, creds.ats);
@@ -4716,6 +4726,12 @@ serve(async (req) => {
 
       // ===== Run X followers snapshot manually =====
       case 'run_followers_snapshot': {
+        const { data: controlsRow } = await supabase.from('settings').select('value').eq('key', 'x_api_controls').maybeSingle();
+        const controls = (controlsRow?.value ?? {}) as Record<string, unknown>;
+        if (!isMyXEnabled(controls)) {
+          return jsonResponse(MY_X_DISABLED_RESPONSE);
+        }
+
         const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
         const svcKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
         const force = body.force === true;

@@ -25,6 +25,7 @@ interface Props {
   xApiUsage?: { total?: number; calls_24h?: string[]; last_call_at?: string | null; last_error?: string | null; posts_24h?: string[]; media_uploads_24h?: string[] };
   xPostingConfig?: Partial<XPostingConfigValue>;
   xRateLimits?: Partial<XRateLimitsValue>;
+  xApiControls?: { my_x_enabled?: boolean };
 }
 
 const SECRET_KEYS = [
@@ -36,7 +37,7 @@ const SECRET_KEYS = [
 
 const DEFAULT_TEST_TWEET = 'Test tweet from automation pipeline ✅ — please ignore.';
 
-export default function XAutomationSettings({ twitterHydration, xApiUsage, xPostingConfig, xRateLimits }: Props) {
+export default function XAutomationSettings({ twitterHydration, xApiUsage, xPostingConfig, xRateLimits, xApiControls }: Props) {
   const { data: monthlyCount } = useXMonthlyPostsCount();
   const { data: xApiSummary, refetch: refetchXApiSummary, isFetching: xApiSummaryFetching } = useXApiSummary(24);
   const { toast } = useToast();
@@ -71,6 +72,7 @@ export default function XAutomationSettings({ twitterHydration, xApiUsage, xPost
   const overBudget = configuredMonthlyBudget > 0 && projectedMonthly > configuredMonthlyBudget;
   const tweetCharCount = tweetText.length;
   const tweetTooLong = tweetCharCount > 280;
+  const ownedReadsEnabled = xApiControls?.my_x_enabled === true;
 
   const refreshStatus = useCallback(async () => {
     setStatusLoading(true);
@@ -88,6 +90,12 @@ export default function XAutomationSettings({ twitterHydration, xApiUsage, xPost
   useEffect(() => { refreshStatus(); }, [refreshStatus]);
 
   const verifyConnection = async () => {
+    if (!ownedReadsEnabled) {
+      const error = 'Owned-read credential verification is paused to prevent X API user-read charges.';
+      setVerifyResult({ ok: false, error });
+      toast({ title: 'Owned reads paused', description: error });
+      return;
+    }
     setVerifyLoading(true);
     setVerifyResult(null);
     try {
@@ -211,7 +219,7 @@ export default function XAutomationSettings({ twitterHydration, xApiUsage, xPost
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <Button onClick={verifyConnection} disabled={verifyLoading} variant="outline" className="border-primary/50 hover:bg-primary/10">
+            <Button onClick={verifyConnection} disabled={verifyLoading || !ownedReadsEnabled} variant="outline" className="border-primary/50 hover:bg-primary/10">
               {verifyLoading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Verifying...</> : <><Shield className="w-4 h-4 mr-2" />Verify connection</>}
             </Button>
             <Button onClick={() => refetchXApiSummary()} disabled={xApiSummaryFetching} variant="outline" size="sm">
@@ -223,6 +231,11 @@ export default function XAutomationSettings({ twitterHydration, xApiUsage, xPost
               Manage secrets <ExternalLink className="w-3 h-3 ml-1" />
             </a>
           </div>
+          {!ownedReadsEnabled && (
+            <p className="text-xs text-muted-foreground">
+              Verification is paused because it calls X user-read endpoints. Tweet posting and tweet hydration stay available.
+            </p>
+          )}
 
           {verifyResult && (
             <div className={`rounded-lg border p-3 text-sm ${verifyResult.ok ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-destructive/30 bg-destructive/5'}`}>
