@@ -721,16 +721,16 @@ Deno.serve(async (req) => {
         results.push({ tweet_id: tweetId, status: 'dry_run_deferred', reason: `media_required:${reason}` });
         continue;
       }
-      const { error: pendErr } = await sb.from('x_deliveries').insert({
+      const { error: skipErr } = await sb.from('x_deliveries').insert({
         post_id: tweetId,
-        status: 'pending',
+        status: 'skipped',
         skip_reason: reason,
         last_error: `media_required:${reason}`,
         attempts: 1,
       });
-      if (pendErr) console.error('[x-poster] x_deliveries insert pending failed', { tweetId, err: pendErr.message });
-      results.push({ tweet_id: tweetId, status: 'deferred', reason: `media_required:${reason}` });
-      console.warn(`[x-poster] refusing text-only post for ${tweetId}: ${reason}`);
+      if (skipErr) console.error('[x-poster] x_deliveries insert skipped failed (media required)', { tweetId, err: skipErr.message });
+      results.push({ tweet_id: tweetId, status: 'skipped', reason: `media_required:${reason}` });
+      console.warn(`[x-poster] skipping text-only post for ${tweetId}: ${reason}`);
       continue;
     }
 
