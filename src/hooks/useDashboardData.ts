@@ -63,6 +63,7 @@ export interface QueueBreakdown {
   pending: number;
   running: number;
   failed24h: number;
+  resolvedFailed24h: number;
   staleRunning: number;
   oldestPendingAgeSeconds: number | null;
   byType: Array<{
@@ -71,6 +72,7 @@ export interface QueueBreakdown {
     pending: number;
     running: number;
     failed: number;
+    resolvedFailed: number;
     queueWaitP50Seconds: number | null;
     queueWaitP95Seconds: number | null;
     runP50Seconds: number | null;
@@ -171,6 +173,7 @@ export interface SystemPerformanceSummary {
     running: number;
     staleRunning: number;
     failed24h: number;
+    resolvedFailed24h: number;
     oldestPendingAgeSeconds: number | null;
     schedulerWaitSeconds: number | null;
     byType: QueueBreakdown['byType'];
@@ -246,8 +249,10 @@ interface RpcResult {
   queue_breakdown?: {
     pending?: number;
     running?: number;
-    failed_24h?: number;
-    failed24h?: number;
+      failed_24h?: number;
+      failed24h?: number;
+      resolved_failed_24h?: number;
+      resolvedFailed24h?: number;
     stale_running?: number;
     staleRunning?: number;
     oldest_pending_age_seconds?: number | null;
@@ -413,6 +418,7 @@ function normalizeSystemPerformance(input: RpcResult['system_performance']): Sys
       running: asNumber(queue.running),
       staleRunning: asNumber(queue.stale_running),
       failed24h: asNumber(queue.failed_24h),
+      resolvedFailed24h: asNumber(queue.resolved_failed_24h),
       oldestPendingAgeSeconds: asNullableNumber(queue.oldest_pending_age_seconds),
       schedulerWaitSeconds: asNullableNumber(queue.scheduler_wait_seconds),
       byType: byTypeRows.map((item) => ({
@@ -421,6 +427,7 @@ function normalizeSystemPerformance(input: RpcResult['system_performance']): Sys
         pending: asNumber(item.pending),
         running: asNumber(item.running),
         failed: asNumber(item.failed),
+        resolvedFailed: asNumber(item.resolved_failed),
         queueWaitP50Seconds: asNullableNumber(item.queue_wait_p50_seconds),
         queueWaitP95Seconds: asNullableNumber(item.queue_wait_p95_seconds),
         runP50Seconds: asNullableNumber(item.run_p50_seconds),
@@ -464,6 +471,7 @@ function normalizeQueueBreakdown(input: RpcResult['queue_breakdown'], metrics: D
     pending: asNumber(input?.pending, health.queueSize),
     running: asNumber(input?.running, health.queueRunning),
     failed24h: asNumber(input?.failed_24h ?? input?.failed24h, metrics.failedJobs),
+    resolvedFailed24h: asNumber(input?.resolved_failed_24h ?? input?.resolvedFailed24h),
     staleRunning: asNumber(input?.stale_running ?? input?.staleRunning, health.staleRunning30m),
     oldestPendingAgeSeconds: asNullableNumber(input?.oldest_pending_age_seconds ?? input?.oldestPendingAgeSeconds),
     byType: rows.map((row) => ({
@@ -472,6 +480,7 @@ function normalizeQueueBreakdown(input: RpcResult['queue_breakdown'], metrics: D
       pending: asNumber(row.pending),
       running: asNumber(row.running),
       failed: asNumber(row.failed),
+      resolvedFailed: asNumber(row.resolved_failed ?? row.resolvedFailed),
       queueWaitP50Seconds: asNullableNumber(row.queue_wait_p50_seconds),
       queueWaitP95Seconds: asNullableNumber(row.queue_wait_p95_seconds),
       runP50Seconds: asNullableNumber(row.run_p50_seconds),

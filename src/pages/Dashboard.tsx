@@ -457,11 +457,12 @@ export default function Dashboard() {
                 <CardDescription>Current queue pressure by job type</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
                   {[
                     ['Pending', queueBreakdown.pending],
                     ['Running', queueBreakdown.running],
                     ['Failed 24h', queueBreakdown.failed24h],
+                    ['Resolved 24h', queueBreakdown.resolvedFailed24h],
                     ['Stale running', queueBreakdown.staleRunning],
                   ].map(([label, value]) => (
                     <div key={label as string} className="rounded-md border border-border/60 p-3">
@@ -477,7 +478,7 @@ export default function Dashboard() {
                       <span className="text-muted-foreground">{row.pending} pending</span>
                       <span className="text-muted-foreground">{row.running} running</span>
                       <span className="text-muted-foreground">wait p95 {formatSeconds(row.queueWaitP95Seconds)}</span>
-                      <span className={row.failed > 0 ? 'text-destructive' : 'text-muted-foreground'}>{row.failed} failed</span>
+                      <span className={row.failed > 0 ? 'text-destructive' : 'text-muted-foreground'}>{row.failed} failed{row.resolvedFailed > 0 ? ` / ${row.resolvedFailed} resolved` : ''}</span>
                     </div>
                   )) : (
                     <div className="rounded-md border border-border/60 p-4 text-sm text-muted-foreground">No active queue pressure.</div>

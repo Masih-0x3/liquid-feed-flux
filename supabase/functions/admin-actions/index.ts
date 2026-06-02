@@ -1098,6 +1098,64 @@ function normalizeMonitoringIgnoreReason(body: Record<string, unknown>): string 
 }
 
 // deno-lint-ignore no-explicit-any
+async function closeJobsForIgnoredTweet(supabase: any, tweetId: string, reason: string, now: string): Promise<{ count: number; rows: Array<Record<string, unknown>>; error?: string }> {
+  const values = tweetReferenceVariants(tweetId);
+  const numericValues = values.filter((value) => /^\d{5,}$/.test(value));
+  const seen = new Set<string>();
+  const rows: Array<Record<string, unknown>> = [];
+  const patch = {
+    status: 'completed',
+    completed_at: now,
+    locked_at: null,
+    locked_by: null,
+    lease_expires_at: null,
+    last_error: null,
+    result_meta: { admin_ignored: true, reason },
+  };
+
+  const collect = (data: Array<Record<string, unknown>> | null | undefined) => {
+    for (const row of data ?? []) {
+      const id = String(row.id ?? '');
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      rows.push(row);
+    }
+  };
+
+  const closeByPayloadField = async (field: string, value: string) => {
+    const { data, error } = await supabase
+      .from('jobs')
+      .update(patch)
+      .filter(`payload->>${field}`, 'eq', value)
+      .in('status', ['pending', 'running', 'failed'])
+      .select('id, type');
+    if (error) return error.message as string;
+    collect(data as Array<Record<string, unknown>>);
+    return null;
+  };
+
+  for (const value of values) {
+    for (const field of ['tweet_id', 'target_tweet_id', 'post_id', 'url', 'src_url']) {
+      const error = await closeByPayloadField(field, value);
+      if (error) return { count: rows.length, rows, error };
+    }
+  }
+
+  for (const value of [...new Set([...numericValues, tweetId].filter((item) => typeof item === 'string' && item.length >= 8))]) {
+    const { data, error } = await supabase
+      .from('jobs')
+      .update(patch)
+      .ilike('idempotency_key', `%${value.replaceAll('%', '\\%').replaceAll('_', '\\_')}%`)
+      .in('status', ['pending', 'running', 'failed'])
+      .select('id, type');
+    if (error) return { count: rows.length, rows, error: error.message };
+    collect(data as Array<Record<string, unknown>>);
+  }
+
+  return { count: rows.length, rows };
+}
+
+// deno-lint-ignore no-explicit-any
 async function ignoreMonitoringItemInternal(supabase: any, tweetIdRaw: unknown, reason: string): Promise<IgnoreMonitoringItemResult> {
   const tweetId = typeof tweetIdRaw === 'string' ? tweetIdRaw.trim() : '';
   if (!tweetId) return { ok: false, tweet_id: String(tweetIdRaw ?? ''), ignored: false, error: 'tweet_id is required' };
@@ -1152,21 +1210,8 @@ async function ignoreMonitoringItemInternal(supabase: any, tweetIdRaw: unknown, 
     .select('id');
   if (deliveryErr) return { ok: false, tweet_id: tweetId, ignored: false, error: deliveryErr.message };
 
-  const { data: jobRows, error: jobErr } = await supabase
-    .from('jobs')
-    .update({
-      status: 'completed',
-      completed_at: now,
-      locked_at: null,
-      locked_by: null,
-      lease_expires_at: null,
-      last_error: null,
-      result_meta: { admin_ignored: true, reason },
-    })
-    .filter('payload->>tweet_id', 'eq', tweetId)
-    .in('status', ['pending', 'running', 'failed'])
-    .select('id, type');
-  if (jobErr) return { ok: false, tweet_id: tweetId, ignored: false, error: jobErr.message };
+  const jobClose = await closeJobsForIgnoredTweet(supabase, tweetId, reason, now);
+  if (jobClose.error) return { ok: false, tweet_id: tweetId, ignored: false, error: jobClose.error };
 
   await updateLatestPostEnrichment(supabase, tweetId, {
     status: 'skipped',
@@ -1179,7 +1224,7 @@ async function ignoreMonitoringItemInternal(supabase: any, tweetIdRaw: unknown, 
     reason,
     x_rows_closed: xRows?.length ?? 0,
     delivery_rows_closed: deliveryRows?.length ?? 0,
-    jobs_closed: jobRows?.length ?? 0,
+    jobs_closed: jobClose.count,
   });
 
   return {
@@ -1189,7 +1234,7 @@ async function ignoreMonitoringItemInternal(supabase: any, tweetIdRaw: unknown, 
     closed: {
       x_deliveries: xRows?.length ?? 0,
       deliveries: deliveryRows?.length ?? 0,
-      jobs: jobRows?.length ?? 0,
+      jobs: jobClose.count,
     },
   };
 }
@@ -1418,6 +1463,39 @@ function getPayloadTweetId(payload: unknown): string | null {
   if (!payload || typeof payload !== 'object') return null;
   const value = (payload as Record<string, unknown>).tweet_id;
   return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function tweetReferenceVariants(value: unknown): string[] {
+  if (typeof value !== 'string' || !value.trim()) return [];
+  const raw = value.trim();
+  const variants = new Set<string>([raw]);
+  const statusMatch = raw.match(/(?:status|statuses)\/(\d{5,})/);
+  const numeric = statusMatch?.[1] ?? (/^\d{5,}$/.test(raw) ? raw : null);
+  if (numeric) {
+    variants.add(numeric);
+    variants.add(`https://twitter.com/i/status/${numeric}`);
+    variants.add(`https://twitter.com/status/${numeric}`);
+    variants.add(`https://x.com/i/status/${numeric}`);
+    variants.add(`https://x.com/status/${numeric}`);
+  }
+  return [...variants];
+}
+
+function jobReferenceValues(row: Record<string, unknown>): string[] {
+  const values = new Set<string>();
+  const payload = row.payload && typeof row.payload === 'object' ? row.payload as Record<string, unknown> : {};
+  for (const key of ['tweet_id', 'target_tweet_id', 'post_id', 'url', 'src_url']) {
+    const value = payload[key];
+    if (typeof value === 'string' && value.trim()) {
+      tweetReferenceVariants(value).forEach((variant) => values.add(variant));
+    }
+  }
+  const idempotency = typeof row.idempotency_key === 'string' ? row.idempotency_key : '';
+  const statusMatch = idempotency.match(/(?:status|statuses)\/(\d{5,})/);
+  const numericMatch = idempotency.match(/(^|[:/])(\d{10,})(?=[:/]|$)/);
+  const numeric = statusMatch?.[1] ?? numericMatch?.[2] ?? null;
+  if (numeric) tweetReferenceVariants(numeric).forEach((variant) => values.add(variant));
+  return [...values];
 }
 
 function isActiveStatus(status: unknown): boolean {
@@ -1739,12 +1817,15 @@ function deriveMonitoringState(
 async function getTweetIdsFromFailedJobs(supabase: any, limit: number, offset: number): Promise<string[]> {
   const { data } = await supabase
     .from('jobs')
-    .select('payload, created_at')
+    .select('id, type, status, payload, result_meta, idempotency_key, created_at')
     .eq('status', 'failed')
     .order('created_at', { ascending: false })
     .range(offset, offset + limit * 3 - 1);
+  const jobRows = (data ?? []) as Array<Record<string, unknown>>;
+  const postByRef = await loadPostsByJobReferences(supabase, jobRows);
   const ids: string[] = [];
-  for (const row of data ?? []) {
+  for (const row of jobRows) {
+    if (!isFailedJobActionable(row, postForJob(row, postByRef))) continue;
     const tid = getPayloadTweetId(row.payload);
     if (tid && !ids.includes(tid)) ids.push(tid);
     if (ids.length >= limit) break;
@@ -2381,6 +2462,55 @@ function num(value: unknown, fallback = 0): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
+function isTerminalSkippedPost(post: Record<string, unknown> | null | undefined): boolean {
+  if (!post) return false;
+  return post.delivery_decision === 'skip' && post.score_review_status !== 'needs_review';
+}
+
+function isFailedJobActionable(job: Record<string, unknown>, post: Record<string, unknown> | null | undefined): boolean {
+  if (job.status !== 'failed') return false;
+  const meta = job.result_meta && typeof job.result_meta === 'object' ? job.result_meta as Record<string, unknown> : {};
+  if (meta.admin_ignored === true) return false;
+  if (isTerminalSkippedPost(post)) return false;
+  return true;
+}
+
+function postForJob(job: Record<string, unknown>, postByRef: Map<string, Record<string, unknown>>): Record<string, unknown> | null {
+  for (const value of jobReferenceValues(job)) {
+    const post = postByRef.get(value);
+    if (post) return post;
+  }
+  return null;
+}
+
+// deno-lint-ignore no-explicit-any
+async function loadPostsByJobReferences(supabase: any, jobs: Array<Record<string, unknown>>): Promise<Map<string, Record<string, unknown>>> {
+  const refs = [...new Set(jobs.flatMap(jobReferenceValues))].slice(0, 10000);
+  const postByRef = new Map<string, Record<string, unknown>>();
+  if (refs.length === 0) return postByRef;
+
+  const columns = 'tweet_id, url, delivery_decision, decision_reason, score_review_status, feedback_locked, dedupe_status, dup_of_tweet_id';
+  const [{ data: byTweet, error: tweetError }, { data: byUrl, error: urlError }] = await Promise.all([
+    supabase.from('posts').select(columns).in('tweet_id', refs),
+    supabase.from('posts').select(columns).in('url', refs),
+  ]);
+  if (tweetError) throw tweetError;
+  if (urlError) throw urlError;
+
+  const addPost = (post: Record<string, unknown>) => {
+    for (const key of ['tweet_id', 'url']) {
+      const value = post[key];
+      if (typeof value !== 'string' || !value.trim()) continue;
+      for (const variant of tweetReferenceVariants(value)) {
+        if (!postByRef.has(variant)) postByRef.set(variant, post);
+      }
+    }
+  };
+  for (const post of (byTweet ?? []) as Array<Record<string, unknown>>) addPost(post);
+  for (const post of (byUrl ?? []) as Array<Record<string, unknown>>) addPost(post);
+  return postByRef;
+}
+
 function isMissingSchemaError(error: unknown): boolean {
   const message = String((error as { message?: unknown; details?: unknown; code?: unknown })?.message ?? error ?? '');
   const details = String((error as { details?: unknown })?.details ?? '');
@@ -2459,7 +2589,7 @@ async function loadDashboardQueueBreakdown(supabase: any, since: string, staleCu
   const [{ data: jobs, error }, { data: activeJobs, error: activeError }] = await Promise.all([
     supabase
       .from('jobs')
-      .select('type, status, created_at, started_at, locked_at, completed_at, lease_expires_at, result_meta')
+      .select('type, status, created_at, started_at, locked_at, completed_at, lease_expires_at, payload, result_meta, idempotency_key')
       .gte('created_at', since)
       .order('created_at', { ascending: false })
       .limit(5000),
@@ -2475,12 +2605,14 @@ async function loadDashboardQueueBreakdown(supabase: any, since: string, staleCu
 
   const rows = (jobs ?? []) as Array<Record<string, unknown>>;
   const activeRows = (activeJobs ?? []) as Array<Record<string, unknown>>;
+  const postByRef = await loadPostsByJobReferences(supabase, rows.filter((row) => row.status === 'failed'));
   const byType = new Map<string, {
     type: string;
     lane: string;
     pending: number;
     running: number;
     failed: number;
+    resolvedFailed: number;
     queueWaits: number[];
     runs: number[];
   }>();
@@ -2492,6 +2624,7 @@ async function loadDashboardQueueBreakdown(supabase: any, since: string, staleCu
       pending: 0,
       running: 0,
       failed: 0,
+      resolvedFailed: 0,
       queueWaits: [],
       runs: [],
     });
@@ -2499,6 +2632,7 @@ async function loadDashboardQueueBreakdown(supabase: any, since: string, staleCu
   };
 
   let failed24h = 0;
+  let resolvedFailed24h = 0;
   for (const row of rows) {
     const item = ensure(row.type);
     const meta = row.result_meta && typeof row.result_meta === 'object' ? row.result_meta as Record<string, unknown> : {};
@@ -2514,9 +2648,12 @@ async function loadDashboardQueueBreakdown(supabase: any, since: string, staleCu
         : null;
     if (queueWaitMs != null && Number.isFinite(queueWaitMs)) item.queueWaits.push(queueWaitMs / 1000);
     if (runMs != null && Number.isFinite(runMs)) item.runs.push(runMs / 1000);
-    if (row.status === 'failed') {
+    if (row.status === 'failed' && isFailedJobActionable(row, postForJob(row, postByRef))) {
       item.failed += 1;
       failed24h += 1;
+    } else if (row.status === 'failed') {
+      item.resolvedFailed += 1;
+      resolvedFailed24h += 1;
     }
   }
 
@@ -2547,6 +2684,7 @@ async function loadDashboardQueueBreakdown(supabase: any, since: string, staleCu
     pending,
     running,
     failed_24h: failed24h,
+    resolved_failed_24h: resolvedFailed24h,
     stale_running: staleRunning,
     oldest_pending_age_seconds: oldestPendingAgeSeconds,
     by_type: [...byType.values()]
@@ -2559,6 +2697,7 @@ async function loadDashboardQueueBreakdown(supabase: any, since: string, staleCu
           pending: item.pending,
           running: item.running,
           failed: item.failed,
+          resolved_failed: item.resolvedFailed,
           queue_wait_p50_seconds: queueSummary.p50_seconds,
           queue_wait_p95_seconds: queueSummary.p95_seconds,
           run_p50_seconds: runSummary.p50_seconds,
@@ -2655,7 +2794,7 @@ async function loadDashboardActivity(supabase: any) {
       .limit(8),
     supabase
       .from('jobs')
-      .select('id, type, status, created_at, last_error, payload')
+      .select('id, type, status, created_at, last_error, payload, result_meta, idempotency_key')
       .in('status', ['failed', 'pending', 'running'])
       .order('created_at', { ascending: false })
       .limit(8),
@@ -2678,6 +2817,8 @@ async function loadDashboardActivity(supabase: any) {
   }
 
   const items: Array<Record<string, unknown>> = [];
+  const jobRows = (jobsRes.data ?? []) as Array<Record<string, unknown>>;
+  const postByJobRef = await loadPostsByJobReferences(supabase, jobRows.filter((row) => row.status === 'failed'));
   for (const post of postsRes.data ?? []) {
     const account = post.accounts as { handle?: string } | null;
     const tweetId = String(post.tweet_id);
@@ -2691,7 +2832,8 @@ async function loadDashboardActivity(supabase: any) {
       route: `/monitoring?search=${encodeURIComponent(tweetId)}`,
     });
   }
-  for (const job of jobsRes.data ?? []) {
+  for (const job of jobRows) {
+    if (job.status === 'failed' && !isFailedJobActionable(job, postForJob(job, postByJobRef))) continue;
     const tweetId = getPayloadTweetId(job.payload);
     items.push({
       id: `job-${job.id}`,
