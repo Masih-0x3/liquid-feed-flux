@@ -155,6 +155,7 @@ export interface SystemResources {
   workerCron: Record<string, unknown> | null;
   workerCadenceSeconds: number | null;
   workerCadenceWarning: boolean;
+  duplicateTranslateJobs24h: number;
 }
 
 export interface SystemPerformanceSummary {
@@ -452,6 +453,7 @@ function normalizeSystemPerformance(input: RpcResult['system_performance']): Sys
       workerCron: resources.worker_cron && typeof resources.worker_cron === 'object' ? resources.worker_cron as Record<string, unknown> : null,
       workerCadenceSeconds: asNullableNumber(resources.worker_cadence_seconds),
       workerCadenceWarning: resources.worker_cadence_warning === true,
+      duplicateTranslateJobs24h: asNumber(resources.duplicate_translate_jobs_24h),
     },
   };
 }

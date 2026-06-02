@@ -355,6 +355,9 @@ export default function Dashboard() {
                 </div>
               ))}
             </div>
+            <p className="mt-3 text-xs text-muted-foreground">
+              Duplicate translate jobs: {compactNumber(systemPerformance.resources.duplicateTranslateJobs24h)} in 24h
+            </p>
           </div>
         </CardContent>
       </Card>

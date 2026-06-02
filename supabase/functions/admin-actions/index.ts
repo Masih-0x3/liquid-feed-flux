@@ -2873,6 +2873,7 @@ function normalizeResourceUsage(raw: unknown): Record<string, unknown> {
     worker_cron: workerCron,
     worker_cadence_seconds: workerCadenceSeconds,
     worker_cadence_warning: workerCadenceSeconds != null && workerCadenceSeconds > 60,
+    duplicate_translate_jobs_24h: num(value.duplicate_translate_jobs_24h),
   };
 }
 

@@ -220,6 +220,7 @@ const dashboardData = {
       workerCron: { jobname: "invoke-worker-every-1m", schedule: "* * * * *", active: true },
       workerCadenceSeconds: 60,
       workerCadenceWarning: false,
+      duplicateTranslateJobs24h: 2,
     },
   },
 };
@@ -264,6 +265,7 @@ describe("Dashboard", () => {
     expect(screen.getByText("Needs attention")).toBeTruthy();
     expect(screen.getByText("Failed posts 24h")).toBeTruthy();
     expect(screen.getByText("Failed attempts")).toBeTruthy();
+    expect(screen.getByText(/Duplicate translate jobs: 2 in 24h/)).toBeTruthy();
 
     expect(screen.getByText(/Official X usage is not synced from Dashboard/)).toBeTruthy();
   });
