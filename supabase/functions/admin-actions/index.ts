@@ -1080,20 +1080,34 @@ async function recordScoreFeedback(supabase: any, body: Record<string, unknown>)
   return { ok: true, tweet_id: tweetId, feedback, polarity: item.polarity };
 }
 
+type IgnoreMonitoringItemResult = {
+  ok: boolean;
+  tweet_id: string;
+  ignored: boolean;
+  closed?: {
+    x_deliveries: number;
+    deliveries: number;
+    jobs: number;
+  };
+  error?: string;
+};
+
+function normalizeMonitoringIgnoreReason(body: Record<string, unknown>): string {
+  const reason = typeof body.reason === 'string' && body.reason.trim() ? body.reason.trim().slice(0, 240) : 'manual_ignore';
+  return reason;
+}
+
 // deno-lint-ignore no-explicit-any
-async function ignoreMonitoringItem(supabase: any, body: Record<string, unknown>) {
-  const tweetId = typeof body.tweet_id === 'string' ? body.tweet_id.trim() : '';
-  const reason = typeof body.reason === 'string' && body.reason.trim()
-    ? body.reason.trim().slice(0, 240)
-    : 'manual_ignore';
-  if (!tweetId) return { ok: false, error: 'tweet_id is required' };
+async function ignoreMonitoringItemInternal(supabase: any, tweetIdRaw: unknown, reason: string): Promise<IgnoreMonitoringItemResult> {
+  const tweetId = typeof tweetIdRaw === 'string' ? tweetIdRaw.trim() : '';
+  if (!tweetId) return { ok: false, tweet_id: String(tweetIdRaw ?? ''), ignored: false, error: 'tweet_id is required' };
 
   const { data: post } = await supabase
     .from('posts')
     .select('tweet_id, dedupe_status')
     .eq('tweet_id', tweetId)
     .maybeSingle();
-  if (!post) return { ok: false, error: `Post not found: ${tweetId}` };
+  if (!post) return { ok: false, tweet_id: tweetId, ignored: false, error: `Post not found: ${tweetId}` };
 
   const now = new Date().toISOString();
   const postPatch: Record<string, unknown> = {
@@ -1110,7 +1124,7 @@ async function ignoreMonitoringItem(supabase: any, body: Record<string, unknown>
   }
 
   const { error: postErr } = await supabase.from('posts').update(postPatch).eq('tweet_id', tweetId);
-  if (postErr) return { ok: false, error: postErr.message };
+  if (postErr) return { ok: false, tweet_id: tweetId, ignored: false, error: postErr.message };
 
   const { data: xRows, error: xErr } = await supabase
     .from('x_deliveries')
@@ -1123,20 +1137,20 @@ async function ignoreMonitoringItem(supabase: any, body: Record<string, unknown>
     .eq('post_id', tweetId)
     .in('status', ['pending', 'failed'])
     .select('id');
-  if (xErr) return { ok: false, error: xErr.message };
+  if (xErr) return { ok: false, tweet_id: tweetId, ignored: false, error: xErr.message };
 
   const { data: deliveryRows, error: deliveryErr } = await supabase
     .from('deliveries')
     .update({
       status: 'skipped',
-      last_error: `admin_ignored:${reason}`,
+      last_error: null,
       last_attempt_at: now,
     })
     .eq('subject_type', 'post')
     .eq('subject_id', tweetId)
     .neq('status', 'posted')
     .select('id');
-  if (deliveryErr) return { ok: false, error: deliveryErr.message };
+  if (deliveryErr) return { ok: false, tweet_id: tweetId, ignored: false, error: deliveryErr.message };
 
   const { data: jobRows, error: jobErr } = await supabase
     .from('jobs')
@@ -1150,9 +1164,9 @@ async function ignoreMonitoringItem(supabase: any, body: Record<string, unknown>
       result_meta: { admin_ignored: true, reason },
     })
     .filter('payload->>tweet_id', 'eq', tweetId)
-    .in('status', ['pending', 'running'])
+    .in('status', ['pending', 'running', 'failed'])
     .select('id, type');
-  if (jobErr) return { ok: false, error: jobErr.message };
+  if (jobErr) return { ok: false, tweet_id: tweetId, ignored: false, error: jobErr.message };
 
   await updateLatestPostEnrichment(supabase, tweetId, {
     status: 'skipped',
@@ -1178,6 +1192,52 @@ async function ignoreMonitoringItem(supabase: any, body: Record<string, unknown>
       jobs: jobRows?.length ?? 0,
     },
   };
+}
+
+async function ignoreMonitoringItems(supabase: any, tweetIds: string[], reason: string) {
+  const uniqueTweetIds = [...new Set(tweetIds.map((id) => (typeof id === 'string' ? id.trim() : '')).filter(Boolean))];
+  if (!uniqueTweetIds.length) return { ok: false, error: 'tweet_ids array is required' };
+
+  const results: IgnoreMonitoringItemResult[] = [];
+  let totalX = 0;
+  let totalDeliveries = 0;
+  let totalJobs = 0;
+
+  for (const tweetId of uniqueTweetIds) {
+    const result = await ignoreMonitoringItemInternal(supabase, tweetId, reason);
+    results.push(result);
+    if (result.ok && result.closed) {
+      totalX += result.closed.x_deliveries;
+      totalDeliveries += result.closed.deliveries;
+      totalJobs += result.closed.jobs;
+    }
+  }
+
+  const successful = results.filter((r) => r.ok);
+  const missing = uniqueTweetIds.filter((id) => !results.find((r) => r.tweet_id === id)?.ok);
+  return {
+    ok: successful.length > 0,
+    requested: uniqueTweetIds.length,
+    found: successful.length,
+    ignored: successful.length,
+    missing,
+    closed: {
+      x_deliveries: totalX,
+      deliveries: totalDeliveries,
+      jobs: totalJobs,
+    },
+    results,
+  };
+}
+
+// deno-lint-ignore no-explicit-any
+async function ignoreMonitoringItem(supabase: any, body: Record<string, unknown>) {
+  const reason = normalizeMonitoringIgnoreReason(body);
+  const tweetId = typeof body.tweet_id === 'string' ? body.tweet_id.trim() : '';
+  if (!tweetId) return { ok: false, error: 'tweet_id is required' };
+  const result = await ignoreMonitoringItemInternal(supabase, tweetId, reason);
+  if (!result.ok) return result;
+  return result;
 }
 
 type MonitoringFilter =
@@ -4414,7 +4474,8 @@ serve(async (req) => {
         if (!tweet_ids || !Array.isArray(tweet_ids) || tweet_ids.length === 0) {
           return jsonResponse({ error: 'tweet_ids array is required' }, 400);
         }
-        const jobs = tweet_ids.map((tid: string) => ({
+        const tweetIds = [...new Set(tweet_ids.map((tid: unknown) => typeof tid === 'string' ? tid.trim() : '').filter(Boolean))];
+        const jobs = tweetIds.map((tid: string) => ({
           type: 'reprocess',
           payload: { tweet_id: tid },
           status: 'pending',
@@ -4423,7 +4484,22 @@ serve(async (req) => {
         }));
         const { error } = await supabase.from('jobs').upsert(jobs, { onConflict: 'idempotency_key', ignoreDuplicates: true });
         if (error) throw error;
-        return jsonResponse({ success: true, message: `${tweet_ids.length} reprocess jobs queued` });
+        return jsonResponse({
+          success: true,
+          requested: tweet_ids.length,
+          queued: tweetIds.length,
+          message: `${tweetIds.length} reprocess job(s) queued`,
+        });
+      }
+
+      // ===== Bulk ignore =====
+      case 'bulk_ignore': {
+        const { tweet_ids, reason } = body;
+        if (!tweet_ids || !Array.isArray(tweet_ids) || tweet_ids.length === 0) {
+          return jsonResponse({ error: 'tweet_ids array is required' }, 400);
+        }
+        const normalizedReason = normalizeMonitoringIgnoreReason({ reason });
+        return jsonResponse(await ignoreMonitoringItems(supabase, tweet_ids as string[], normalizedReason));
       }
 
       // ===== Post thread =====

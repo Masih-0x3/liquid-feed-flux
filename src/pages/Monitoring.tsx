@@ -115,6 +115,15 @@ async function adminReprocess(tweetId: string) {
   if (error) throw error;
 }
 
+async function adminReprocessBatch(tweetIds: string[]) {
+  const { data, error } = await supabase.functions.invoke('admin-actions', {
+    body: { action: 'bulk_reprocess', tweet_ids: tweetIds },
+  });
+  if (error) throw error;
+  if (data?.success === false) throw new Error(data.error ?? 'Bulk reprocess failed');
+  return data as { ok?: boolean; success?: boolean; requested?: number; queued?: number; message?: string };
+}
+
 async function adminRescorePost(tweetId: string) {
   const { data, error } = await supabase.functions.invoke('admin-actions', { body: { action: 'rescore_post', tweet_id: tweetId } });
   if (error) throw error;
@@ -287,11 +296,43 @@ async function adminIgnoreMonitoringItem(tweetId: string, reason = 'reviewed_and
   return data as { ok: boolean; closed?: { x_deliveries?: number; deliveries?: number; jobs?: number } };
 }
 
+async function adminIgnoreMonitoringItems(tweetIds: string[], reason = 'reviewed_and_ignored') {
+  const { data, error } = await supabase.functions.invoke('admin-actions', {
+    body: { action: 'bulk_ignore', tweet_ids: tweetIds, reason },
+  });
+  if (error) throw error;
+  if (data?.ok === false) throw new Error(data.error ?? 'Bulk ignore failed');
+  return data as {
+    ok?: boolean;
+    requested?: number;
+    found?: number;
+    ignored?: number;
+    missing?: string[];
+    closed?: {
+      x_deliveries?: number;
+      deliveries?: number;
+      jobs?: number;
+    };
+    results?: Array<{
+      tweet_id: string;
+      ok: boolean;
+      error?: string;
+      closed?: { x_deliveries: number; deliveries: number; jobs: number };
+    }>;
+  };
+}
+
 type ConfirmAction = 'force_telegram' | 'force_x' | 'rescore' | 'reprocess' | 'hydrate' | 'clear_dup' | 'ignore' | 'close_stale_x' | 'translate' | 'run_dedupe' | 'cancel_jobs' | 'approve_enrichment' | 'reject_enrichment';
+type BulkAction = 'bulk_reprocess' | 'bulk_ignore';
 
 interface PendingAction {
   type: ConfirmAction;
   entry?: MonitoringEntry;
+}
+
+interface PendingBulkAction {
+  type: BulkAction;
+  tweetIds: string[];
 }
 
 const FILTERS: Array<{ value: MonitoringFilter; label: string }> = [
@@ -559,6 +600,11 @@ function actionTitle(action: PendingAction | null) {
   }
 }
 
+function bulkActionTitle(action: BulkAction, count: number) {
+  if (action === 'bulk_reprocess') return `Reprocess ${count} post(s)?`;
+  return `Ignore ${count} post(s)?`;
+}
+
 function actionDescription(action: PendingAction | null) {
   if (!action) return '';
   const entry = action.entry;
@@ -578,7 +624,7 @@ function actionDescription(action: PendingAction | null) {
     case 'clear_dup':
       return 'Marks this pair as not duplicate and reopens the post for delivery evaluation.';
     case 'ignore':
-      return 'Marks this post as reviewed/ignored, closes failed or pending X rows, closes pending Telegram rows, and cancels pending work without calling Telegram or X.';
+      return 'Marks this post as reviewed/ignored, closes failed or pending X rows, closes failed/pending Telegram rows, and cancels failed/pending jobs without calling Telegram or X.';
     case 'close_stale_x':
       return 'Marks pending X delivery rows older than 24 hours as skipped. This does not retry, post, or call X.';
     case 'translate':
@@ -592,6 +638,13 @@ function actionDescription(action: PendingAction | null) {
     case 'reject_enrichment':
       return 'Blocks this enriched draft from delivery. This does not call Telegram or X.';
   }
+}
+
+function bulkActionDescription(action: BulkAction, count: number) {
+  if (action === 'bulk_reprocess') {
+    return 'Queues full pipeline reruns for the selected posts in one action.';
+  }
+  return 'Marks each selected post as reviewed/ignored, closes failed or pending X rows, closes failed/pending Telegram rows, and cancels pending/running/failed jobs without calling Telegram or X.';
 }
 
 export default function Monitoring() {
@@ -610,6 +663,7 @@ export default function Monitoring() {
   const [drawerTweetId, setDrawerTweetId] = useState<string | null>(null);
   const [timeline, setTimeline] = useState<PipelineEvent[]>([]);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [pendingBulkAction, setPendingBulkAction] = useState<PendingBulkAction | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [manualEntry, setManualEntry] = useState<MonitoringEntry | null>(null);
   const [manualScore, setManualScore] = useState('');
@@ -654,6 +708,12 @@ export default function Monitoring() {
 
   const moderationEntries = useMemo(() => clusterMonitoringEntries(entries), [entries]);
   const entryByTweetId = useMemo(() => new Map(entries.map((entry) => [entry.tweet_id, entry])), [entries]);
+  const [selectedTweetIds, setSelectedTweetIds] = useState<Set<string>>(() => new Set());
+  const visibleTweetIds = useMemo(() => moderationEntries.map((entry) => entry.tweet_id), [moderationEntries]);
+  const visibleTweetIdSet = useMemo(() => new Set(visibleTweetIds), [visibleTweetIds]);
+  const selectedCount = selectedTweetIds.size;
+  const selectedVisibleCount = [...selectedTweetIds].filter((id) => visibleTweetIdSet.has(id)).length;
+  const isAllVisibleSelected = visibleTweetIds.length > 0 && selectedVisibleCount === visibleTweetIds.length;
   const selectedEntry = useMemo(
     () => moderationEntries.find((entry) => entry.tweet_id === drawerTweetId) ?? entries.find((entry) => entry.tweet_id === drawerTweetId) ?? null,
     [entries, moderationEntries, drawerTweetId],
@@ -678,6 +738,43 @@ export default function Monitoring() {
   });
   const loadedCounts = useMemo(() => loadedMonitoringCounts(entries), [entries]);
   const counts = overview?.counts ?? loadedCounts;
+
+  useEffect(() => {
+    setSelectedTweetIds((prev) => {
+      const next = new Set<string>();
+      prev.forEach((tweetId) => {
+        if (visibleTweetIdSet.has(tweetId)) {
+          next.add(tweetId);
+        }
+      });
+      return next;
+    });
+  }, [visibleTweetIdSet]);
+
+  const toggleSelectAllVisible = (checked: boolean) => {
+    setSelectedTweetIds((prev) => {
+      const next = new Set(prev);
+      if (checked) {
+        visibleTweetIds.forEach((id) => next.add(id));
+        return next;
+      }
+      visibleTweetIds.forEach((id) => next.delete(id));
+      return next;
+    });
+  };
+
+  const toggleSelect = (tweetId: string, checked: boolean) => {
+    setSelectedTweetIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(tweetId);
+      else next.delete(tweetId);
+      return next;
+    });
+  };
+
+  const clearSelection = () => {
+    setSelectedTweetIds(new Set());
+  };
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['monitoring'] });
@@ -980,6 +1077,52 @@ export default function Monitoring() {
     } finally {
       setActionLoading(false);
       setPendingAction(null);
+    }
+  };
+
+  const confirmBulkAction = async () => {
+    if (!pendingBulkAction) return;
+    const tweetIds = pendingBulkAction.tweetIds;
+    setActionLoading(true);
+    try {
+      if (tweetIds.length === 0) {
+        toast({ title: 'No posts selected', variant: 'destructive' });
+        return;
+      }
+      if (pendingBulkAction.type === 'bulk_reprocess') {
+        const data = await adminReprocessBatch(tweetIds);
+        toast({
+          title: 'Reprocess queued',
+          description: `${data?.queued ?? data?.requested ?? tweetIds.length} post(s) queued`,
+        });
+      } else {
+        const data = await adminIgnoreMonitoringItems(tweetIds);
+        const missing = data?.missing?.length ?? 0;
+        const closed = data?.closed;
+        toast({
+          title: 'Posts ignored',
+          description: data?.ignored == null || data.ignored === tweetIds.length
+            ? `Ignored ${data?.ignored ?? tweetIds.length} post(s)`
+            : `Ignored ${data?.ignored ?? 0} post(s), ${missing} not found or unchanged`,
+        });
+        if (closed) {
+          toast({
+            title: 'Ignore summary',
+            description: `Closed ${closed.x_deliveries ?? 0} X row(s), ${closed.deliveries ?? 0} delivery row(s), ${closed.jobs ?? 0} job(s).`,
+          });
+        }
+      }
+      if (drawerTweetId && tweetIds.includes(drawerTweetId)) {
+        setDrawerOpen(false);
+        setDrawerTweetId(null);
+      }
+      clearSelection();
+      invalidate();
+    } catch (e) {
+      toast({ title: 'Action failed', description: (e as Error).message, variant: 'destructive' });
+    } finally {
+      setActionLoading(false);
+      setPendingBulkAction(null);
     }
   };
 
@@ -1494,6 +1637,27 @@ export default function Monitoring() {
                 </SelectContent>
               </ThemedSelect>
             </div>
+            <div className="flex flex-wrap items-center gap-2 pt-2">
+              <span className="text-xs font-medium text-muted-foreground">{selectedCount} selected</span>
+              <Button size="sm" variant="outline" onClick={() => toggleSelectAllVisible(!isAllVisibleSelected)} disabled={visibleTweetIds.length === 0}>
+                {isAllVisibleSelected ? 'Deselect all visible' : 'Select all visible'}
+              </Button>
+              {selectedCount > 0 && (
+                <>
+                  <Button size="sm" variant="outline" onClick={() => setPendingBulkAction({ type: 'bulk_reprocess', tweetIds: [...selectedTweetIds] })}>
+                    <RotateCcw className="w-3 h-3 mr-2" />
+                    Mass reprocess
+                  </Button>
+                  <Button size="sm" variant="destructive" onClick={() => setPendingBulkAction({ type: 'bulk_ignore', tweetIds: [...selectedTweetIds] })}>
+                    <Ban className="w-3 h-3 mr-2" />
+                    Mass ignore
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={clearSelection}>
+                    Clear selection
+                  </Button>
+                </>
+              )}
+            </div>
           </div>
         </CardHeader>
         <CardContent className="p-0">
@@ -1511,9 +1675,16 @@ export default function Monitoring() {
                   const decision = formatDecisionReason(entry.decision_reason);
                   const decisionLabel = monitoringDecisionLabel(entry, entry.delivery_decision ? decision.title : 'No decision');
                   const blocker = entry.monitoring_state?.primary_blocker;
+                  const isSelected = selectedTweetIds.has(entry.tweet_id);
                   return (
                     <article key={entry.tweet_id} className="space-y-3 p-3 sm:p-4">
-                      <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <Checkbox
+                          checked={isSelected}
+                          onCheckedChange={(checked) => toggleSelect(entry.tweet_id, checked === true)}
+                          onClick={(event) => event.stopPropagation()}
+                          aria-label={`Select ${entry.tweet_id}`}
+                        />
                         <div className="min-w-0 flex-1">
                           <button onClick={() => openDetails(entry.tweet_id)} className="block w-full text-left">
                             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
@@ -1599,6 +1770,7 @@ export default function Monitoring() {
               <div className="hidden overflow-hidden lg:block">
                 <Table className="table-fixed">
                   <colgroup>
+                    <col className="w-[4%]" />
                     <col className="w-[8%]" />
                     <col className="w-[9%]" />
                     <col className="w-[26%]" />
@@ -1611,6 +1783,13 @@ export default function Monitoring() {
                   </colgroup>
                   <TableHeader>
                     <TableRow>
+                      <TableHead className="px-2 text-center">
+                        <Checkbox
+                          checked={isAllVisibleSelected}
+                          onCheckedChange={(checked) => toggleSelectAllVisible(checked === true)}
+                          aria-label="Select all visible posts"
+                        />
+                      </TableHead>
                       <TableHead className="px-3">Source / time</TableHead>
                       <TableHead className="px-3">Author</TableHead>
                       <TableHead className="px-3">Excerpt</TableHead>
@@ -1622,15 +1801,24 @@ export default function Monitoring() {
                       <TableHead className="px-2 text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
-                <TableBody>
+                  <TableBody>
                   {moderationEntries.map((entry) => {
                     const stage = monitoringStage(entry);
                     const decision = formatDecisionReason(entry.decision_reason);
                     const decisionLabel = monitoringDecisionLabel(entry, entry.delivery_decision ? decision.title : 'No decision');
                     const blocker = entry.monitoring_state?.primary_blocker;
+                    const isSelected = selectedTweetIds.has(entry.tweet_id);
                     return (
                       <Fragment key={entry.tweet_id}>
                         <TableRow className="align-top">
+                          <TableCell className="px-2 py-4">
+                            <Checkbox
+                              checked={isSelected}
+                              onCheckedChange={(checked) => toggleSelect(entry.tweet_id, checked === true)}
+                              onClick={(event) => event.stopPropagation()}
+                              aria-label={`Select ${entry.tweet_id}`}
+                            />
+                          </TableCell>
                           <TableCell className="px-3 py-4 text-xs">
                             <div className="space-y-1">
                               <div className="font-mono text-[11px] text-muted-foreground">{entry.tweet_id.slice(-10)}</div>
@@ -1683,7 +1871,7 @@ export default function Monitoring() {
                         </TableRow>
                         {entry.duplicate_cluster && expandedClusters.has(entry.duplicate_cluster.cluster_id) && (
                           <TableRow>
-                            <TableCell colSpan={9} className="px-3 py-3">
+                            <TableCell colSpan={10} className="px-3 py-3">
                               {renderDuplicateClusterPanel(entry)}
                             </TableCell>
                           </TableRow>
@@ -2000,23 +2188,23 @@ export default function Monitoring() {
 
                   <MediaThumbnails tweetId={selectedEntry.tweet_id} />
 
-                  <Card>
-                    <CardHeader className="pb-2"><CardTitle className="text-sm">Scoring</CardTitle></CardHeader>
-                    <CardContent className="space-y-3 text-sm">
-	                      <div className="grid gap-2 sm:grid-cols-3">
-	                        <div className="rounded-md border p-2">
-	                          <p className="text-xs text-muted-foreground">Current</p>
-	                          <p className="font-medium">{decisionScore(selectedEntry) ?? '—'} / ≥{deliverThreshold}</p>
-	                        </div>
+                    <Card>
+                      <CardHeader className="pb-2"><CardTitle className="text-sm">Scoring</CardTitle></CardHeader>
+                      <CardContent className="space-y-3 text-sm">
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        <div className="rounded-md border p-2">
+                          <p className="text-xs text-muted-foreground">Current</p>
+                          <p className="font-medium">{decisionScore(selectedEntry) ?? '—'} / ≥{deliverThreshold}</p>
+                        </div>
                         <div className="rounded-md border p-2">
                           <p className="text-xs text-muted-foreground">Decision</p>
                           <p className="font-medium">{selectedEntry.monitoring_state?.decision_label ?? selectedEntry.delivery_decision ?? 'No decision'}</p>
                         </div>
                         <div className="rounded-md border p-2">
                           <p className="text-xs text-muted-foreground">Feedback</p>
-	                          <p className="font-medium">{selectedEntry.feedback_locked ? 'Locked' : 'Open'}</p>
-	                        </div>
-	                      </div>
+                          <p className="font-medium">{selectedEntry.feedback_locked ? 'Locked' : 'Open'}</p>
+                        </div>
+                      </div>
                       {selectedScoringV2 && (
                         <div className="rounded-md border border-primary/30 bg-primary/5 p-3">
                           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -2054,9 +2242,9 @@ export default function Monitoring() {
                           )}
                         </div>
                       )}
-	                      {selectedEntry.scoring_version && (
-	                        <div className="grid gap-2 sm:grid-cols-4">
-	                          <div className="rounded-md border p-2">
+                      {selectedEntry.scoring_version && (
+                        <div className="grid gap-2 sm:grid-cols-4">
+                          <div className="rounded-md border p-2">
                             <p className="text-xs text-muted-foreground">Audience</p>
                             <p className="font-medium">{audienceClassLabel(selectedEntry.audience_class)}</p>
                           </div>
@@ -2483,24 +2671,39 @@ export default function Monitoring() {
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={!!pendingAction} onOpenChange={(open) => !open && setPendingAction(null)}>
+      <AlertDialog
+        open={!!pendingAction || !!pendingBulkAction}
+        onOpenChange={(open) => {
+          if (open) return;
+          setPendingAction(null);
+          setPendingBulkAction(null);
+        }}
+      >
         <AlertDialogContent className="w-[calc(100vw-1rem)] max-w-lg p-4 sm:p-6">
           <AlertDialogHeader>
-            <AlertDialogTitle>{actionTitle(pendingAction)}</AlertDialogTitle>
+            <AlertDialogTitle>
+              {pendingAction
+                ? actionTitle(pendingAction)
+                : pendingBulkAction ? bulkActionTitle(pendingBulkAction.type, pendingBulkAction.tweetIds.length) : ''}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              {actionDescription(pendingAction)}
-              {pendingAction?.entry && (
+              {pendingAction
+                ? actionDescription(pendingAction)
+                : pendingBulkAction
+                  ? bulkActionDescription(pendingBulkAction.type, pendingBulkAction.tweetIds.length)
+                  : ''}
+              {(pendingAction?.entry || pendingBulkAction) && (
                 <span className="mt-2 block rounded-md bg-muted p-3 text-xs text-foreground">
-                  {pendingAction.entry.author_handle ? `@${pendingAction.entry.author_handle}` : pendingAction.entry.tweet_id}
-                  {' · '}
-                  {shortText(pendingAction.entry).slice(0, 180)}
+                  {pendingAction?.entry
+                    ? `${pendingAction.entry.author_handle ? `@${pendingAction.entry.author_handle}` : pendingAction.entry.tweet_id} · ${shortText(pendingAction.entry).slice(0, 180)}`
+                    : `${pendingBulkAction?.tweetIds.length ?? 0} post IDs selected`}
                 </span>
               )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="gap-2 sm:gap-0 [&>button]:w-full sm:[&>button]:w-auto">
             <AlertDialogCancel disabled={actionLoading}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmAction} disabled={actionLoading}>
+            <AlertDialogAction onClick={pendingAction ? confirmAction : confirmBulkAction} disabled={actionLoading}>
               {actionLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
               Confirm
             </AlertDialogAction>
