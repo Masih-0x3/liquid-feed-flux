@@ -26,10 +26,11 @@ serve(async (req) => {
 
     const reqBody = await req.json().catch(() => ({} as Record<string, unknown>));
     const daysOld = typeof reqBody.days_old === 'number' ? Math.max(1, Math.min(365, Math.floor(reqBody.days_old))) : 1;
-    console.log(JSON.stringify({ function: 'media-cleanup', action: 'invoke_processor', days_old: daysOld }));
+    const dryRun = reqBody.dry_run === true;
+    console.log(JSON.stringify({ function: 'media-cleanup', action: 'invoke_processor', days_old: daysOld, dry_run: dryRun }));
 
     const { data, error } = await supabase.functions.invoke('media-processor', {
-      body: { action: 'cleanup_old_media', days_old: daysOld },
+      body: { action: 'cleanup_old_media', days_old: daysOld, dry_run: dryRun },
       headers: serviceRoleBearerHeader()
     } as Record<string, unknown>);
 
@@ -38,9 +39,9 @@ serve(async (req) => {
       throw new Error(`Media cleanup error: ${error.message}`);
     }
 
-    console.log(JSON.stringify({ function: 'media-cleanup', action: 'complete', deleted: data?.deleted ?? 0, failed: data?.failed ?? 0 }));
+    console.log(JSON.stringify({ function: 'media-cleanup', action: 'complete', dry_run: dryRun, deleted: data?.deleted ?? 0, failed: data?.failed ?? 0, would_delete: data?.would_delete ?? 0 }));
 
-    return new Response(JSON.stringify({ success: true, message: 'Media cleanup completed', result: data }), {
+    return new Response(JSON.stringify({ success: true, dry_run: dryRun, message: dryRun ? 'Media cleanup dry run completed' : 'Media cleanup completed', result: data }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
 

@@ -18,10 +18,34 @@ export interface MutualFollowUser {
   profile_image_url: string | null;
 }
 
+export type NonFollowbackReviewStatus =
+  | 'opened'
+  | 'kept'
+  | 'unfollowed_manually'
+  | 'skipped'
+  | 'whitelisted';
+
+export interface NonFollowbackReview {
+  user_id: string;
+  username: string | null;
+  name: string | null;
+  profile_image_url: string | null;
+  status: NonFollowbackReviewStatus;
+  first_opened_at: string | null;
+  last_opened_at: string | null;
+  opened_count: number;
+  reviewed_at: string | null;
+  reviewed_by: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface NotFollowingBackUser extends MutualFollowUser {
   first_following_seen_at: string | null;
   first_following_approximate: boolean;
   latest_following_order: number;
+  review?: NonFollowbackReview | null;
 }
 
 export interface NotFollowingBackGroup {
@@ -207,6 +231,76 @@ export function useMarkAllReviewed() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['unfollowers'] });
       queryClient.invalidateQueries({ queryKey: ['follower-stats'] });
+    },
+  });
+}
+
+export function useNonFollowbackReviews(userIds: string[]) {
+  const uniqueIds = [...new Set(userIds)].sort();
+
+  return useQuery({
+    queryKey: ['non-followback-reviews', uniqueIds],
+    enabled: uniqueIds.length > 0,
+    queryFn: async () => {
+      const reviews: NonFollowbackReview[] = [];
+
+      for (let i = 0; i < uniqueIds.length; i += 500) {
+        const chunk = uniqueIds.slice(i, i + 500);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data, error } = await (supabase as any)
+          .from('x_non_followback_reviews')
+          .select('user_id, username, name, profile_image_url, status, first_opened_at, last_opened_at, opened_count, reviewed_at, reviewed_by, notes, created_at, updated_at')
+          .in('user_id', chunk);
+
+        if (error) {
+          // The page should still work before the migration reaches production.
+          console.warn('x_non_followback_reviews unavailable; using browser-only review fallback', error.message);
+          return [];
+        }
+
+        reviews.push(...((data ?? []) as NonFollowbackReview[]));
+      }
+
+      return reviews;
+    },
+    staleTime: 30_000,
+  });
+}
+
+export function useUpsertNonFollowbackReviews() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (reviews: Array<{
+      user: MutualFollowUser;
+      status: NonFollowbackReviewStatus;
+      opened_count?: number;
+      first_opened_at?: string | null;
+      last_opened_at?: string | null;
+      notes?: string | null;
+    }>) => {
+      const now = new Date().toISOString();
+      const rows = reviews.map(({ user, status, opened_count, first_opened_at, last_opened_at, notes }) => ({
+        user_id: user.user_id,
+        username: user.username,
+        name: user.name,
+        profile_image_url: user.profile_image_url,
+        status,
+        first_opened_at: first_opened_at ?? (status === 'opened' ? now : null),
+        last_opened_at: last_opened_at ?? (status === 'opened' ? now : null),
+        opened_count: opened_count ?? (status === 'opened' ? 1 : 0),
+        reviewed_at: now,
+        notes: notes ?? null,
+      }));
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error } = await (supabase as any)
+        .from('x_non_followback_reviews')
+        .upsert(rows, { onConflict: 'user_id' });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['non-followback-reviews'] });
     },
   });
 }

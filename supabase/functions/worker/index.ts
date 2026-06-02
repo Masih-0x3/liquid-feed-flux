@@ -22,13 +22,22 @@ import {
   runDuplicateGate,
 } from "../_shared/dedupe.ts";
 import { duplicateDecisionPatch } from "../_shared/duplicateGuard.ts";
+import { evaluateFinalDedupeGuard } from "../_shared/deliveryDedupeGuard.ts";
 import {
   SCORING_POLICY_VERSION,
+  buildScoringPolicyEventMeta,
   normalizeScoringPolicy,
   runScoringPolicy,
   type ScoringPolicyResult,
 } from "../_shared/scoringPolicy.ts";
 import { applyLearnedFeedbackBias, type FeedbackBiasResult } from "../_shared/feedbackBias.ts";
+import {
+  AUTOCHAIN_DUE_WINDOW_MS,
+  AUTOCHAIN_MAX_DEPTH,
+  normalizeChainDepth,
+  selectAutochainJobTypes,
+  shouldAutochain,
+} from "../_shared/workerAutochain.ts";
 
 export {
   SCORE_AXIS_KEYS,
@@ -47,6 +56,41 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-internal-token',
 };
 
+const SETTINGS_CACHE_MS = 45_000;
+// deno-lint-ignore no-explicit-any
+let configCache: { expiresAt: number; value: any } | null = null;
+
+const FAST_LANE_TYPES = new Set(['dedupe', 'resolve_media', 'download_media', 'hydrate_tweet', 'compute_signature']);
+const MODEL_LANE_TYPES = new Set(['translate', 'enrich']);
+const DELIVERY_LANE_TYPES = new Set(['deliver']);
+
+function jobLane(type: string): 'fast' | 'model' | 'delivery' {
+  if (FAST_LANE_TYPES.has(type)) return 'fast';
+  if (MODEL_LANE_TYPES.has(type)) return 'model';
+  if (DELIVERY_LANE_TYPES.has(type)) return 'delivery';
+  return 'fast';
+}
+
+function maxBatchSizeForJobTypes(jobTypes: string[] | null): number {
+  if (jobTypes && jobTypes.length > 0 && jobTypes.every((type) => jobLane(type) === 'fast')) return 40;
+  return 20;
+}
+
+type EdgeRuntimeWithWaitUntil = { waitUntil?: (promise: Promise<unknown>) => void };
+
+function scheduleBackground(promise: Promise<unknown>): boolean {
+  const edgeRuntime = (globalThis as { EdgeRuntime?: EdgeRuntimeWithWaitUntil }).EdgeRuntime;
+  if (edgeRuntime?.waitUntil) {
+    edgeRuntime.waitUntil(promise);
+    return true;
+  }
+  return false;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function hashUrl(url: string): Promise<string> {
   const data = new TextEncoder().encode(url);
   const digest = await crypto.subtle.digest('SHA-256', data);
@@ -55,7 +99,11 @@ async function hashUrl(url: string): Promise<string> {
 
 // Load config from settings table with fallback defaults
 // deno-lint-ignore no-explicit-any
-async function loadConfig(supabase: any): Promise<any> {
+async function loadConfig(supabase: any, options: { bypassCache?: boolean } = {}): Promise<any> {
+  if (!options.bypassCache && configCache && configCache.expiresAt > Date.now()) {
+    return configCache.value;
+  }
+
   const defaults = {
     translationPrompt: "You are a professional translator. Translate the given English text to Persian. Preserve @mentions, #hashtags, URLs, and line breaks exactly. Only return the translated text, nothing else.",
     userPromptTemplate: null as string | null,
@@ -193,6 +241,7 @@ async function loadConfig(supabase: any): Promise<any> {
     console.warn('Failed to load config from settings, using defaults:', (e as Error).message);
   }
 
+  configCache = { expiresAt: Date.now() + SETTINGS_CACHE_MS, value: defaults };
   return defaults;
 }
 
@@ -223,16 +272,18 @@ async function handleDedupeJob(job: Record<string, unknown>, supabase: any, conf
     source: payload.post_hydrate === true ? 'post_hydrate' : String(job.type),
   });
   if (!result.ok) {
-    if (enqueueNext && result.should_enqueue_translate) {
-      await queueTranslateFromDedupe(supabase, tweetId, payload.post_hydrate === true);
-    }
     console.warn(JSON.stringify({
       function: 'worker',
-      action: 'dedupe_failed_open',
+      action: result.retryable ? 'dedupe_failed_retry' : 'dedupe_failed_closed',
       tweet_id: tweetId,
       error: result.error ?? result.reason,
-      enqueue_translate: enqueueNext && result.should_enqueue_translate,
+      failure_phase: result.failure_phase ?? null,
+      retryable: result.retryable === true,
+      enqueue_translate: false,
     }));
+    if (result.retryable) {
+      throw new Error(`dedupe_retryable:${result.failure_phase ?? 'unknown'}:${result.error ?? result.reason}`);
+    }
     return true;
   }
   if (enqueueNext && result.should_enqueue_translate) {
@@ -274,14 +325,25 @@ serve(async (req) => {
     const requestedJobTypes = Array.isArray(requestBody.job_types)
       ? requestBody.job_types.map((type) => String(type)).filter(Boolean)
       : null;
+    const batchCap = maxBatchSizeForJobTypes(requestedJobTypes);
     const requestedBatchSize = typeof requestBody.batch_size === 'number' && Number.isFinite(requestBody.batch_size)
-      ? Math.max(1, Math.min(20, Math.floor(requestBody.batch_size)))
-      : 20;
+      ? Math.max(1, Math.min(batchCap, Math.floor(requestBody.batch_size)))
+      : batchCap;
+    const chainDepth = normalizeChainDepth(requestBody.chain_depth);
+    const bypassSettingsCache = requestBody.bypass_settings_cache === true || requestBody.admin === true || requestBody.manual === true;
     const startTime = Date.now();
-    console.log(JSON.stringify({ function: 'worker', action: 'start', trigger: req.url, job_types: requestedJobTypes }));
+    console.log(JSON.stringify({
+      function: 'worker',
+      action: 'start',
+      trigger: req.url,
+      job_types: requestedJobTypes,
+      chain_depth: chainDepth,
+      batch_size: requestedBatchSize,
+      batch_cap: batchCap,
+    }));
 
     // Load runtime config
-    const config = await loadConfig(supabase);
+    const config = await loadConfig(supabase, { bypassCache: bypassSettingsCache });
 
     // Use claim_jobs RPC for transactional job claiming
     const { data: jobs, error: claimError } = await supabase
@@ -405,18 +467,21 @@ serve(async (req) => {
                 completed_at: new Date().toISOString()
               })
               .eq('id', job.id);
-            
-            await recordPipelineEvent(supabase, job, 'completed');
+
+            const completionMeta = jobTimingMeta(job, 'completed');
+            await mergeJobResultMeta(supabase, job, completionMeta);
+            await recordPipelineEvent(supabase, job, 'completed', undefined, completionMeta);
             console.log(JSON.stringify({ function: 'worker', action: 'job_complete', job_id: job.id, type: job.type }));
             return { success: true, jobId: job.id };
           } else {
             const jt = String(job.type);
+            const failure = new Error(`${jt}: handler returned false (check worker logs for ${jt}_* / job_error)`);
             await handleJobFailure(
               supabase,
               job,
-              new Error(`${jt}: handler returned false (check worker logs for ${jt}_* / job_error)`),
+              failure,
             );
-            await recordPipelineEvent(supabase, job, 'failed');
+            await recordPipelineEvent(supabase, job, 'failed', failure.message);
             return { success: false, jobId: job.id };
           }
 
@@ -452,33 +517,49 @@ serve(async (req) => {
     const latencyMs = Date.now() - startTime;
     console.log(JSON.stringify({ function: 'worker', action: 'complete', processed: processedCount, failed: failedCount, latency_ms: latencyMs }));
 
-    // Auto-chain: if next deliver job is due within ~1.5s, invoke worker again
+    // Auto-chain due-now queue work with a hard depth cap. This cuts scheduler
+    // wait without reintroducing unbounded DB-triggered function churn.
     try {
-      const THRESHOLD_MS = 1500;
-      const { data: nextDeliver } = await supabase
+      const autochainTypes = selectAutochainJobTypes(requestedJobTypes);
+      const dueCutoff = new Date(Date.now() + AUTOCHAIN_DUE_WINDOW_MS).toISOString();
+      const { count: pendingCount, error: pendingError } = await supabase
         .from('jobs')
-        .select('next_run_at')
+        .select('id', { count: 'exact', head: true })
         .eq('status', 'pending')
-        .eq('type', 'deliver')
-        .not('next_run_at', 'is', null)
-        .order('next_run_at', { ascending: true })
-        .limit(1)
-        .single();
-      if (nextDeliver?.next_run_at) {
-        const nextAt = new Date(nextDeliver.next_run_at).getTime();
-        const delta = nextAt - Date.now();
-        if (delta <= THRESHOLD_MS) {
-          console.log(JSON.stringify({ function: 'worker', action: 'autochain', delta_ms: delta }));
-          await supabase.functions.invoke('worker', { body: { trigger: 'autochain' } });
-        }
+        .in('type', autochainTypes)
+        .or(`next_run_at.is.null,next_run_at.lte.${dueCutoff}`);
+
+      if (pendingError) throw pendingError;
+      const duePendingCount = pendingCount ?? 0;
+      if (autochainTypes.length > 0 && shouldAutochain({ chainDepth, pendingCount: duePendingCount, maxDepth: AUTOCHAIN_MAX_DEPTH })) {
+        console.log(JSON.stringify({
+          function: 'worker',
+          action: 'autochain',
+          due_pending: duePendingCount,
+          chain_depth: chainDepth,
+          next_chain_depth: chainDepth + 1,
+          job_types: autochainTypes,
+        }));
+        await supabase.functions.invoke('worker', {
+          body: {
+            trigger: 'autochain',
+            batch_size: requestedBatchSize,
+            chain_depth: chainDepth + 1,
+            job_types: autochainTypes,
+          },
+          headers: serviceRoleBearerHeader(),
+        } as Record<string, unknown>);
       }
-    } catch (_e) { /* best-effort */ }
+    } catch (error) {
+      console.warn(JSON.stringify({ function: 'worker', action: 'autochain_skipped', error: jobError(error).message }));
+    }
 
     return new Response(JSON.stringify({
       success: true,
       processed: processedCount,
       failed: failedCount,
-      total: jobs.length
+      total: jobs.length,
+      chain_depth: chainDepth,
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
@@ -556,6 +637,24 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
     let scoringUsage: Record<string, unknown> | null = null;
     let translationUsage: Record<string, unknown> | null = null;
     let translationSkippedByFilter = false;
+    let scoringCallMs: number | null = null;
+    let translationCallMs: number | null = null;
+    const measureScoringCall = async <T>(fn: () => Promise<T>): Promise<T> => {
+      const started = Date.now();
+      try {
+        return await fn();
+      } finally {
+        scoringCallMs = (scoringCallMs ?? 0) + (Date.now() - started);
+      }
+    };
+    const measureTranslationCall = async <T>(fn: () => Promise<T>): Promise<T> => {
+      const started = Date.now();
+      try {
+        return await fn();
+      } finally {
+        translationCallMs = (translationCallMs ?? 0) + (Date.now() - started);
+      }
+    };
     let scoreAxes: ScoreAxes | null = null;
     const feedbackLocked = post.feedback_locked === true;
     if (feedbackLocked) {
@@ -568,6 +667,7 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
         reason: 'feedback_locked',
         final_score: post.final_score,
         importance_score: importanceScore,
+        scoring_call_ms: scoringCallMs,
       });
     }
 
@@ -851,15 +951,7 @@ ${post.text_original}`;
           tags: importanceTags,
           learnedBiases: biasRow?.value ?? {},
           knnPrior,
-          scoringV2: scoringPolicyResult ? {
-            mode: scoringPolicyActive ? 'active' : 'shadow',
-            profile_id: scoringPolicyResult.profile_id,
-            audience_class: scoringPolicyResult.audience_class,
-            audience_confidence: scoringPolicyResult.audience_confidence,
-            cap: scoringPolicyResult.cap,
-            threshold: scoringPolicyResult.threshold,
-            adjudicated: scoringPolicyResult.adjudicated,
-          } : null,
+          scoringV2: scoringPolicyResult ? buildScoringPolicyEventMeta(scoringPolicyResult, scoringPolicyActive ? 'active' : 'shadow') : null,
         });
       } catch (biasErr) {
         console.warn('feedback bias (non-fatal):', (biasErr as Error).message);
@@ -884,7 +976,7 @@ ${post.text_original}`;
           translatedText = post.text_translated;
         } else {
           console.log(JSON.stringify({ function: 'worker', action: 'translate_call_start', tweet_id: tweetId, model: config.openaiModel, reasoning_effort: config.openaiReasoningEffort, source: 'feedback_locked' }));
-          const trResult = await callOpenAI({
+          const trResult = await measureTranslationCall(() => callOpenAI({
             apiKey: openaiApiKey,
             model: config.openaiModel,
             messages: [
@@ -901,7 +993,7 @@ ${post.text_original}`;
             seed: config.openaiSeed,
             serviceTier: config.openaiServiceTier,
             parallelToolCalls: config.openaiParallelToolCalls,
-          });
+          }));
           if (!trResult.ok) {
             throw new Error(`OpenAI translation error: ${trResult.status} ${trResult.rawText}`);
           }
@@ -916,6 +1008,7 @@ ${post.text_original}`;
         await insertPipelineEvent(supabase, 'post', tweetId, 'translate', 'skipped', null, new Date().toISOString(), null, {
           reason: 'feedback_locked_skip',
           score: importanceScore,
+          scoring_call_ms: scoringCallMs,
         });
       }
     } else if (filterEnabled && config.splitCalls) {
@@ -927,7 +1020,7 @@ ${post.text_original}`;
           mode: scoringPolicyActive ? 'active' : 'shadow',
           model: scoringModel,
         }));
-        scoringPolicyResult = await runScoringPolicy({
+        scoringPolicyResult = await measureScoringCall(() => runScoringPolicy({
           tweet_id: tweetId,
           text: String(post.text_original || ''),
           author_handle: authorHandle,
@@ -945,19 +1038,25 @@ ${post.text_original}`;
           seed: scoringSeed,
           serviceTier: scoringServiceTier,
           parallelToolCalls: scoringParallelTools,
-        });
+        }));
         if (!scoringPolicyResult.ok) {
           throw new Error(`OpenAI scoring v2 error: ${scoringPolicyResult.error ?? scoringPolicyResult.audience_reason}`);
         }
-        await insertPipelineEvent(supabase, 'post', tweetId, 'score', 'completed', null, new Date().toISOString(), null, {
-          version: SCORING_POLICY_VERSION,
-          mode: scoringPolicyActive ? 'active' : 'shadow',
-          audience_class: scoringPolicyResult.audience_class,
-          final_score: scoringPolicyResult.final_score,
-          threshold: scoringPolicyResult.threshold,
-          decision: scoringPolicyResult.delivery_decision,
-          adjudicated: scoringPolicyResult.adjudicated,
-        });
+        await insertPipelineEvent(
+          supabase,
+          'post',
+          tweetId,
+          'score',
+          'completed',
+          null,
+          new Date().toISOString(),
+          null,
+          {
+            ...buildScoringPolicyEventMeta(scoringPolicyResult, scoringPolicyActive ? 'active' : 'shadow'),
+            scoring_call_ms: scoringCallMs,
+            model: scoringModel,
+          },
+        );
       }
 
       if (!scoringPolicyActive && legacyFilterEnabled) {
@@ -965,7 +1064,7 @@ ${post.text_original}`;
 
       console.log(JSON.stringify({ function: 'worker', action: 'score_start', tweet_id: tweetId, model: scoringModel, reasoning_effort: scoringReasoningEffort }));
 
-      const scoreResult = await callOpenAI({
+      const scoreResult = await measureScoringCall(() => callOpenAI({
         apiKey: openaiApiKey,
         model: scoringModel,
         messages: [
@@ -981,7 +1080,7 @@ ${post.text_original}`;
         seed: scoringSeed,
         serviceTier: scoringServiceTier,
         parallelToolCalls: scoringParallelTools,
-      });
+      }));
 
       if (!scoreResult.ok) {
         throw new Error(`OpenAI scoring error: ${scoreResult.status} ${scoreResult.rawText}`);
@@ -1005,6 +1104,7 @@ ${post.text_original}`;
             score: importanceScore,
             axes: scoreAxes,
             model: scoringModel,
+            scoring_call_ms: scoringCallMs,
           });
         } catch (parseErr) {
           console.warn('Failed to parse score tool call:', (parseErr as Error).message);
@@ -1029,7 +1129,7 @@ ${post.text_original}`;
       // Translate only if passing the gate (or in score_only mode where we still translate everything)
       if (preDecision === 'deliver' || scoreOnly) {
         console.log(JSON.stringify({ function: 'worker', action: 'translate_call_start', tweet_id: tweetId, model: config.openaiModel, reasoning_effort: config.openaiReasoningEffort }));
-        const trResult = await callOpenAI({
+        const trResult = await measureTranslationCall(() => callOpenAI({
           apiKey: openaiApiKey,
           model: config.openaiModel,
           messages: [
@@ -1046,7 +1146,7 @@ ${post.text_original}`;
           seed: config.openaiSeed,
           serviceTier: config.openaiServiceTier,
           parallelToolCalls: config.openaiParallelToolCalls,
-        });
+        }));
         if (!trResult.ok) {
           throw new Error(`OpenAI translation error: ${trResult.status} ${trResult.rawText}`);
         }
@@ -1059,12 +1159,13 @@ ${post.text_original}`;
         await insertPipelineEvent(supabase, 'post', tweetId, 'translate', 'skipped', null, new Date().toISOString(), null, {
           reason: 'translation_skipped_not_needed',
           score: importanceScore,
+          scoring_call_ms: scoringCallMs,
         });
       }
     } else if (filterEnabled) {
       // ============ COMBINED PATH (legacy, when split_calls = false) ============
       const toolFunction = buildToolFunction(true);
-      const result = await callOpenAI({
+      const result = await measureTranslationCall(() => callOpenAI({
         apiKey: openaiApiKey,
         model: config.openaiModel,
         messages: [
@@ -1082,7 +1183,8 @@ ${post.text_original}`;
         seed: config.openaiSeed,
         serviceTier: config.openaiServiceTier,
         parallelToolCalls: config.openaiParallelToolCalls,
-      });
+      }));
+      scoringCallMs = scoringCallMs ?? translationCallMs;
       if (!result.ok) throw new Error(`OpenAI API error: ${result.status} ${result.rawText}`);
       data = result.raw;
       if (result.toolCall) {
@@ -1097,6 +1199,14 @@ ${post.text_original}`;
             importanceScore = Math.round(computeFinalScore(scoreAxes));
           }
           console.log(JSON.stringify({ function: 'worker', action: 'scored', tweet_id: tweetId, score: importanceScore, axes: scoreAxes, tags: importanceTags, reasoning: importanceReasoning, endpoint: result.endpoint }));
+          await insertPipelineEvent(supabase, 'post', tweetId, 'score', 'completed', null, new Date().toISOString(), null, {
+            score: importanceScore,
+            axes: scoreAxes,
+            model: config.openaiModel,
+            scoring_call_ms: scoringCallMs,
+            translation_call_ms: translationCallMs,
+            combined_model_call: true,
+          });
         } catch (parseErr) {
           console.warn('Failed to parse tool call, falling back to content:', (parseErr as Error).message);
           translatedText = result.content;
@@ -1106,7 +1216,7 @@ ${post.text_original}`;
       }
     } else {
       // No filtering — simple translation
-      const result = await callOpenAI({
+      const result = await measureTranslationCall(() => callOpenAI({
         apiKey: openaiApiKey,
         model: config.openaiModel,
         messages: [
@@ -1123,7 +1233,7 @@ ${post.text_original}`;
         seed: config.openaiSeed,
         serviceTier: config.openaiServiceTier,
         parallelToolCalls: config.openaiParallelToolCalls,
-      });
+      }));
       if (!result.ok) {
         throw new Error(`OpenAI API error: ${result.status} ${result.rawText}`);
       }
@@ -1158,6 +1268,10 @@ ${post.text_original}`;
       scoring_usage: scoringUsage,
       translation_usage: translationUsage,
       scoring_v2_usage: scoringPolicyResult?.usage ?? null,
+      scoring_call_ms: scoringCallMs,
+      translation_call_ms: translationCallMs,
+      queue_wait_ms: jobTimingMeta(job, 'running').queue_wait_ms,
+      claim_delay_ms: jobTimingMeta(job, 'running').claim_delay_ms,
       finished_at: nowIso,
       importance_score: importanceScore,
       scoring_version: scoringPolicyResult ? SCORING_POLICY_VERSION : null,
@@ -1290,6 +1404,7 @@ ${post.text_original}`;
         // Enrichment v2 is shadow/review-first for X, but Telegram delivery
         // remains translation-first and should not wait on enrichment approval.
         await enqueueDeliverAfterEnrich(supabase, tweetId, 'translate', false);
+        await dispatchXPosterForTarget(supabase, tweetId, 'translate');
       } else {
         const idempotencyKey = `deliver:${tweetId}`;
         const { error: deliveryJobError } = await supabase
@@ -1321,6 +1436,7 @@ ${post.text_original}`;
               });
             }
           } catch (_e) { /* best-effort */ }
+          await dispatchXPosterForTarget(supabase, tweetId, 'translate');
         }
       }
     } else {
@@ -1467,26 +1583,40 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
 
     // Duplicate Gate is expected to run before translation, but keep this
     // delivery-time guard as a final idempotent safety check.
-    try {
-      const sm = config.storyMemory;
-      if (sm?.enabled && sm.action === 'skip') {
-        const { data: dupRow } = await supabase
-          .from('posts')
-          .select('dup_of_tweet_id, dup_similarity, story_cluster_id')
-          .eq('tweet_id', tweetId)
-          .single();
-        if (dupRow?.dup_of_tweet_id) {
-          console.log(JSON.stringify({ function: 'worker', action: 'deliver_skip_story_dup', tweet_id: tweetId, dup_of: dupRow.dup_of_tweet_id, similarity: dupRow.dup_similarity }));
-          await insertPipelineEvent(supabase, 'post', tweetId, 'deliver', 'completed', null, new Date().toISOString(), null, { skipped: 'story_dup', dup_of: dupRow.dup_of_tweet_id, similarity: dupRow.dup_similarity });
-          return true;
-        }
-      }
-    } catch (e) {
-      console.warn('story_dedup_check failed (continuing)', (e as Error).message);
+    const finalGuard = await evaluateFinalDedupeGuard({
+      supabase,
+      tweetId,
+      storyMemory: config.storyMemory,
+      source: 'telegram_final_assertion',
+    });
+    if (finalGuard.action === 'skip') {
+      console.log(JSON.stringify({
+        function: 'worker',
+        action: finalGuard.reason === 'final_duplicate_assertion' ? 'deliver_skip_final_duplicate_assertion' : 'deliver_skip_story_dup',
+        tweet_id: tweetId,
+        ...finalGuard.meta,
+      }));
+      await insertPipelineEvent(supabase, 'post', tweetId, 'deliver', 'completed', null, new Date().toISOString(), null, finalGuard.meta);
+      return true;
+    }
+    if (finalGuard.action === 'fail') {
+      console.warn(JSON.stringify({
+        function: 'worker',
+        action: 'deliver_deferred_dedupe_assertion_failed',
+        tweet_id: tweetId,
+        error: finalGuard.error,
+      }));
+      await insertPipelineEvent(supabase, 'post', tweetId, 'deliver', 'failed', null, new Date().toISOString(), finalGuard.error, finalGuard.meta);
+      return false;
     }
 
     const message = formatMessageWithTemplate(post, account, messageTemplate);
     let telegramMessageIds: string[] = [];
+    const telegramStartedAt = Date.now();
+    const telegramMethods: string[] = [];
+    const addTelegramMethod = (method: string) => {
+      if (!telegramMethods.includes(method)) telegramMethods.push(method);
+    };
 
     if (media && media.length > 0) {
       const images = media.filter((m: Record<string, unknown>) => m.kind === 'image');
@@ -1496,27 +1626,32 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
       if (images.length > 0) {
         if (images.length === 1) {
           const image = images[0];
+          addTelegramMethod('sendPhoto');
           const msgIds = await sendTelegramPhotoFromStorage(supabase, telegramBotToken, telegramChatId, image, message);
           telegramMessageIds.push(...msgIds);
         } else {
+          addTelegramMethod('sendMediaGroup');
           const msgIds = await sendTelegramPhotoGroupFromStorage(supabase, telegramBotToken, telegramChatId, images.slice(0, 10), message);
           telegramMessageIds.push(...msgIds);
         }
       }
 
       for (const video of videos) {
+        addTelegramMethod('sendVideo');
         const videoUrl = await getMediaUrl(supabase, video);
         const msgIds = await sendTelegramMedia('sendVideo', telegramBotToken, telegramChatId, { video: videoUrl }, message);
         telegramMessageIds.push(...msgIds);
       }
 
       for (const audio of audios) {
+        addTelegramMethod('sendAudio');
         const audioUrl = await getMediaUrl(supabase, audio);
         const caption = images.length === 0 && videos.length === 0 ? message : 'Audio from tweet';
         const msgIds = await sendTelegramMedia('sendAudio', telegramBotToken, telegramChatId, { audio: audioUrl }, caption);
         telegramMessageIds.push(...msgIds);
       }
     } else {
+      addTelegramMethod('sendMessage');
       const response = await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ chat_id: telegramChatId, text: message, parse_mode: 'Markdown', disable_web_page_preview: false })
@@ -1549,7 +1684,12 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
       posted_at: new Date().toISOString(), last_attempt_at: new Date().toISOString(), attempts: 1
     });
 
-    await insertPipelineEvent(supabase, 'post', tweetId, 'deliver', 'completed', null, new Date().toISOString(), null, { message_ids: telegramMessageIds });
+    await insertPipelineEvent(supabase, 'post', tweetId, 'deliver', 'completed', null, new Date().toISOString(), null, {
+      message_ids: telegramMessageIds,
+      telegram_api_ms: Date.now() - telegramStartedAt,
+      telegram_method: telegramMethods.join('+') || 'unknown',
+      message_count: telegramMessageIds.length,
+    });
     return true;
 
   } catch (error) {
@@ -1563,6 +1703,19 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
 // to Telegram. Telegram renders inline photos when given real bytes with a
 // proper filename + image/* content-type; passing only a signed URL sometimes
 // causes Telegram to fall back to "document" rendering.
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.max(1, Math.min(limit, items.length));
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex++;
+      results[index] = await fn(items[index], index);
+    }
+  }));
+  return results;
+}
+
 async function fetchImageBytes(// deno-lint-ignore no-explicit-any
 supabase: any, image: Record<string, unknown>): Promise<{ blob: Blob; filename: string } | null> {
   const storagePath = image.storage_path as string | null;
@@ -1610,23 +1763,22 @@ supabase: any, botToken: string, chatId: string, image: Record<string, unknown>,
 
 async function sendTelegramPhotoGroupFromStorage(// deno-lint-ignore no-explicit-any
 supabase: any, botToken: string, chatId: string, images: Record<string, unknown>[], caption: string): Promise<string[]> {
-  const attachments: { blob: Blob; filename: string; attachName: string }[] = [];
-  const mediaArr: Record<string, unknown>[] = [];
-  for (let i = 0; i < images.length; i++) {
-    const bytes = await fetchImageBytes(supabase, images[i]);
+  const loaded = await mapLimit(images, 3, async (image, i) => {
+    const bytes = await fetchImageBytes(supabase, image);
     if (bytes) {
       const attachName = `photo${i}`;
-      attachments.push({ ...bytes, attachName });
       const m: Record<string, unknown> = { type: 'photo', media: `attach://${attachName}` };
       if (i === 0) { m.caption = caption; m.parse_mode = 'Markdown'; }
-      mediaArr.push(m);
+      return { attachment: { ...bytes, attachName }, media: m };
     } else {
-      const url = await getMediaUrl(supabase, images[i]);
+      const url = await getMediaUrl(supabase, image);
       const m: Record<string, unknown> = { type: 'photo', media: url };
       if (i === 0) { m.caption = caption; m.parse_mode = 'Markdown'; }
-      mediaArr.push(m);
+      return { attachment: null, media: m };
     }
-  }
+  });
+  const attachments = loaded.map((item) => item.attachment).filter(Boolean) as { blob: Blob; filename: string; attachName: string }[];
+  const mediaArr = loaded.map((item) => item.media);
   const build = (mArr: Record<string, unknown>[]): FormData => {
     const fd = new FormData();
     fd.append('chat_id', chatId);
@@ -1868,6 +2020,7 @@ async function handleEnrichJob(job: Record<string, unknown>, supabase: any): Pro
     // If not requiring approval AND not a manual test, enqueue deliver immediately
     if (enrichStatus === 'completed') {
       await enqueueDeliverAfterEnrich(supabase, tweetId);
+      await dispatchXPosterForTarget(supabase, tweetId, 'enrich');
     }
 
     console.log(JSON.stringify({
@@ -1979,7 +2132,14 @@ supabase: any, job: Record<string, unknown>, errorOrMessage?: Error | string) {
       console.error(JSON.stringify({ function: 'worker', action: 'dead_letter_failed', job_id: job.id }));
     }
 
-    await supabase.from('jobs').update({ status: 'failed', last_error: errorMsg }).eq('id', job.id);
+    await supabase.from('jobs').update({
+      status: 'failed',
+      last_error: errorMsg,
+      result_meta: {
+        ...(isRecordValue(job.result_meta) ? job.result_meta as Record<string, unknown> : {}),
+        ...jobTimingMeta(job, 'failed', { error: errorMsg }),
+      },
+    }).eq('id', job.id);
     console.log(JSON.stringify({ function: 'worker', action: 'job_dead_lettered', job_id: job.id, attempts }));
   } else {
     // Telegram-aware backoff
@@ -2002,9 +2162,14 @@ supabase: any, job: Record<string, unknown>, errorOrMessage?: Error | string) {
       nextRunAt = new Date(Date.now() + (delaySec + jitterSec) * 1000);
     }
 
-    await supabase.from('jobs').update({ 
+    await supabase.from('jobs').update({
       status: 'pending', last_error: errorMsg, next_run_at: nextRunAt.toISOString(),
-      locked_at: null, locked_by: null, lease_expires_at: null
+      locked_at: null, locked_by: null, lease_expires_at: null,
+      result_meta: {
+        ...(isRecordValue(job.result_meta) ? job.result_meta as Record<string, unknown> : {}),
+        ...jobTimingMeta(job, 'failed', { error: errorMsg, retry_after_seconds: retryAfterSeconds }),
+        rescheduled_for: nextRunAt.toISOString(),
+      },
     }).eq('id', job.id);
   }
 }
@@ -2044,7 +2209,8 @@ supabase: any): Promise<boolean> {
   const payload = job.payload as Record<string, unknown>;
   const tweetId = payload.tweet_id as string;
   try {
-    await insertPipelineEvent(supabase, 'post', tweetId, 'media', 'running', new Date().toISOString());
+    const started = Date.now();
+    await insertPipelineEvent(supabase, 'post', tweetId, 'media', 'running', new Date(started).toISOString());
     
     const { data, error } = await supabase.functions.invoke('media-processor', {
       body: { action: 'download_media', tweet_id: tweetId },
@@ -2052,7 +2218,10 @@ supabase: any): Promise<boolean> {
     } as Record<string, unknown>);
 
     if (error) throw new Error(`Media processor error: ${error.message}`);
-    await insertPipelineEvent(supabase, 'post', tweetId, 'media', 'completed', null, new Date().toISOString());
+    await insertPipelineEvent(supabase, 'post', tweetId, 'media', 'completed', new Date(started).toISOString(), new Date().toISOString(), null, {
+      media_download_ms: Date.now() - started,
+      result: data ?? null,
+    });
     return true;
   } catch (error) {
     const e = jobError(error);
@@ -2133,8 +2302,69 @@ function extractMediaFromText(text: string): Array<{type: string, url: string, w
 }
 
 // Pipeline events helpers
+function isRecordValue(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function timestampMs(value: unknown): number | null {
+  if (typeof value !== 'string' || !value) return null;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : null;
+}
+
+function nonNegativeMs(value: number | null): number | null {
+  if (value == null || !Number.isFinite(value)) return null;
+  return Math.max(0, Math.round(value));
+}
+
+function jobTimingMeta(
+  job: Record<string, unknown>,
+  state: 'running' | 'completed' | 'failed',
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const nowMs = Date.now();
+  const createdMs = timestampMs(job.created_at);
+  const nextRunMs = timestampMs(job.next_run_at);
+  const startedMs = timestampMs(job.locked_at) ?? timestampMs(job.started_at) ?? (state === 'running' ? nowMs : null);
+  const queueReferenceMs = state === 'running' ? nowMs : startedMs ?? nowMs;
+  const retryAfterSeconds = typeof extra.error === 'string' ? parseRetryAfterFromMessage(extra.error) : null;
+  return {
+    job_id: job.id ?? null,
+    job_type: job.type ?? null,
+    lane: jobLane(String(job.type ?? 'unknown')),
+    attempts: job.attempts ?? null,
+    priority: job.priority ?? null,
+    queue_wait_ms: nonNegativeMs(createdMs == null ? null : queueReferenceMs - createdMs),
+    claim_delay_ms: nonNegativeMs(nextRunMs == null ? null : queueReferenceMs - nextRunMs),
+    worker_run_ms: state === 'running' ? null : nonNegativeMs(startedMs == null ? null : nowMs - startedMs),
+    retry_after_seconds: retryAfterSeconds,
+    ...extra,
+  };
+}
+
+async function mergeJobResultMeta(// deno-lint-ignore no-explicit-any
+supabase: any, job: Record<string, unknown>, meta: Record<string, unknown>): Promise<void> {
+  if (!job.id) return;
+  try {
+    const { data } = await supabase
+      .from('jobs')
+      .select('result_meta')
+      .eq('id', job.id)
+      .maybeSingle();
+    const current = isRecordValue(data?.result_meta)
+      ? data.result_meta as Record<string, unknown>
+      : isRecordValue(job.result_meta)
+        ? job.result_meta as Record<string, unknown>
+        : {};
+    await supabase
+      .from('jobs')
+      .update({ result_meta: { ...current, ...meta } })
+      .eq('id', job.id);
+  } catch (_e) { /* best-effort */ }
+}
+
 async function recordPipelineEvent(// deno-lint-ignore no-explicit-any
-supabase: any, job: Record<string, unknown>, state: 'running' | 'completed' | 'failed', error?: string) {
+supabase: any, job: Record<string, unknown>, state: 'running' | 'completed' | 'failed', error?: string, meta: Record<string, unknown> = {}) {
   try {
     const payload = job.payload as Record<string, unknown> | null;
     const subjectType = (payload?.subject_type as string) ?? 'post';
@@ -2142,7 +2372,21 @@ supabase: any, job: Record<string, unknown>, state: 'running' | 'completed' | 'f
     if (!subjectId) return;
     const step = normalizeStep(job.type as string);
     const now = new Date().toISOString();
-    await insertPipelineEvent(supabase, subjectType, subjectId, step, state, state === 'running' ? now : null, state === 'completed' ? now : null, error);
+    const startedAt = state === 'running'
+      ? now
+      : (typeof job.locked_at === 'string' ? job.locked_at : typeof job.started_at === 'string' ? job.started_at : null);
+    const endedAt = state === 'running' ? null : now;
+    await insertPipelineEvent(
+      supabase,
+      subjectType,
+      subjectId,
+      step,
+      state,
+      startedAt,
+      endedAt,
+      error,
+      jobTimingMeta(job, state, { ...meta, ...(error ? { error } : {}) }),
+    );
   } catch (_e) { /* best-effort */ }
 }
 
@@ -2170,6 +2414,42 @@ supabase: any, subjectType: string, subjectId: string,
       started_at: startedAt ?? null, ended_at: endedAt ?? null, error: error ?? null, meta: meta ?? null
     });
   } catch (_e) { /* best-effort */ }
+}
+
+async function dispatchXPosterForTarget(// deno-lint-ignore no-explicit-any
+supabase: any, tweetId: string, source: string): Promise<void> {
+  const meta = {
+    dispatch_source: source,
+    target_tweet_id: tweetId,
+    gated: true,
+  };
+  await insertPipelineEvent(supabase, 'post', tweetId, 'x_dispatch', 'queued', new Date().toISOString(), null, null, meta);
+  const invokePromise = supabase.functions.invoke('x-poster', {
+    body: {
+      source: 'worker-dispatch',
+      target_tweet_id: tweetId,
+    },
+    headers: serviceRoleBearerHeader(),
+  } as Record<string, unknown>).then(({ error }: { error?: { message?: string } | null }) => {
+    if (error) {
+      return insertPipelineEvent(supabase, 'post', tweetId, 'x_dispatch', 'failed', null, new Date().toISOString(), error.message ?? 'x-poster invoke failed', meta);
+    }
+    return undefined;
+  }).catch((error: unknown) => insertPipelineEvent(
+    supabase,
+    'post',
+    tweetId,
+    'x_dispatch',
+    'failed',
+    null,
+    new Date().toISOString(),
+    error instanceof Error ? error.message : String(error),
+    meta,
+  ));
+
+  if (!scheduleBackground(invokePromise)) {
+    await Promise.race([invokePromise, sleep(1500)]);
+  }
 }
 
 // Telegram helpers

@@ -6,6 +6,7 @@ export function monitoringStage(entry: MonitoringEntry): { label: string; tone: 
   if (entry.monitoring_state) return { label: entry.monitoring_state.stage_label, tone: entry.monitoring_state.tone };
   if (entry.translation_error || entry.delivery_error || entry.x_error) return { label: 'Failed/stuck', tone: 'bad' };
   if (entry.dedupe_status === 'failed') return { label: 'Dedupe failed', tone: 'bad' };
+  if (entry.dedupe_status === 'coverage_gap') return { label: 'Duplicate coverage gap', tone: 'warn' };
   if (entry.dedupe_status === 'uncertain' && entry.dup_of_tweet_id && entry.dedupe_reason?.includes('coverage_gap:')) return { label: 'Duplicate coverage gap', tone: 'warn' };
   if (entry.dedupe_status === 'uncertain') return { label: 'Uncertain duplicate', tone: 'warn' };
   if (entry.dedupe_status === 'related_new_info') return { label: 'Related: new info', tone: 'info' };
@@ -23,6 +24,7 @@ export function monitoringStage(entry: MonitoringEntry): { label: string; tone: 
 
 export function monitoringDecisionLabel(entry: MonitoringEntry, fallbackDecision: string): string {
   if (entry.monitoring_state?.decision_label) return entry.monitoring_state.decision_label;
+  if (entry.dedupe_status === 'coverage_gap') return 'Possible duplicate, not covered';
   if (entry.dedupe_status === 'uncertain' && entry.dup_of_tweet_id && entry.dedupe_reason?.includes('coverage_gap:')) return 'Possible duplicate, not covered';
   if (entry.dedupe_status === 'uncertain') return 'Review possible duplicate';
   if (entry.dedupe_status === 'related_new_info') return 'Related: new info';
@@ -44,6 +46,9 @@ export function loadedMonitoringCounts(entries: MonitoringEntry[]): MonitoringOv
     ready_to_deliver: entries.filter((entry) => entry.monitoring_state?.code === 'ready_to_deliver').length,
     manual_review: entries.filter((entry) => entry.monitoring_state?.code === 'manual_review' || entry.enrich_status === 'awaiting_approval' || entry.dedupe_status === 'uncertain' || entry.score_review_status === 'needs_review').length,
     duplicates: entries.filter((entry) => !!entry.dup_of_tweet_id).length,
+    coverage_gap: entries.filter((entry) => entry.monitoring_state?.code === 'duplicate_coverage_gap' || entry.dedupe_status === 'coverage_gap').length,
+    possible_duplicate: entries.filter((entry) => entry.dedupe_status === 'uncertain' || entry.dedupe_status === 'coverage_gap').length,
+    duplicate_anomalies: entries.filter((entry) => entry.x_status === 'posted' && entry.duplicate_of?.x_state === 'posted').length,
     hydration: entries.filter((entry) => entry.monitoring_state?.code === 'hydration' || (entry.is_truncated && !entry.hydrated_at && entry.delivery_decision === 'deliver')).length,
     x_pending: entries.filter((entry) => entry.x_status === 'pending').length,
     x_failed: entries.filter((entry) => entry.x_status === 'failed').length,

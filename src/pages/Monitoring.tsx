@@ -86,10 +86,11 @@ import { MediaThumbnails } from "@/components/monitoring/MediaThumbnails";
 import {
   decisionScore,
   formatDecisionReason,
-  formatPipelineError,
   formatXBadge,
 } from "@/lib/pipelineMessages";
 import { loadedMonitoringCounts, monitoringDecisionLabel, monitoringStage, type MonitoringTone } from "@/lib/monitoringState";
+import { getScoringV2Snapshot, scoringV2DecisionLabel, type ScoringV2Snapshot } from "@/lib/scoringV2Monitoring";
+import { buildDeliverySummary, buildPipelineTimelineGroups, type TimelineTone } from "@/lib/timelineDisplay";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 async function adminEditTranslation(tweetId: string, text: string) {
@@ -169,6 +170,12 @@ type XPostingDiagnosticItem = {
   threshold?: number;
   decision?: string | null;
   latest_x?: { status?: string; skip_reason?: string | null; last_error?: string | null; x_tweet_id?: string | null } | null;
+  candidate?: {
+    sql_gate_passed?: boolean;
+    reason?: string | null;
+    age_ms?: number | null;
+    dispatch_source?: string | null;
+  };
   active_jobs?: Array<{ type?: string; status?: string; error?: string | null }>;
   hydration?: { is_truncated?: boolean; hydrated_at?: string | null; active_hydrate_job?: boolean };
   media?: {
@@ -199,6 +206,15 @@ function formatBytes(bytes: number | null | undefined): string {
   if (kb < 1024) return `${kb.toFixed(kb >= 10 ? 0 : 1)} KB`;
   const mb = kb / 1024;
   return `${mb.toFixed(mb >= 10 ? 0 : 1)} MB`;
+}
+
+function formatAge(seconds: number | null | undefined): string {
+  if (seconds == null || !Number.isFinite(seconds)) return 'unknown';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ${minutes % 60}m`;
+  return `${Math.floor(hours / 24)}d ${hours % 24}h`;
 }
 
 async function adminSetManualScore(tweetId: string, score: number, reason: string, overrideDuplicate: boolean, expectedAudienceClass?: AudienceClassValue | '') {
@@ -286,6 +302,12 @@ const FILTERS: Array<{ value: MonitoringFilter; label: string }> = [
   { value: 'translation_queue', label: 'Translation queue' },
   { value: 'below_threshold', label: 'Below threshold' },
   { value: 'manual_review', label: 'Manual review' },
+  { value: 'v2_would_post', label: 'V2 would post' },
+  { value: 'v2_would_skip', label: 'V2 would skip' },
+  { value: 'v1_post_v2_skip', label: 'V1 post / V2 skip' },
+  { value: 'v1_skip_v2_post', label: 'V1 skip / V2 post' },
+  { value: 'v2_off_topic', label: 'V2 off-topic' },
+  { value: 'v2_needs_review', label: 'V2 needs review' },
   { value: 'duplicates', label: 'Duplicates' },
   { value: 'coverage_gap', label: 'Coverage gaps' },
   { value: 'possible_duplicate', label: 'Possible duplicates' },
@@ -321,12 +343,27 @@ function compactNumber(value: number | undefined): string {
   return typeof value === 'number' ? value.toLocaleString() : '—';
 }
 
-function toneClass(tone: MonitoringTone) {
+function toneClass(tone: MonitoringTone | TimelineTone) {
   if (tone === 'good') return 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30';
   if (tone === 'bad') return 'bg-destructive/15 text-destructive border-destructive/30';
   if (tone === 'warn') return 'bg-amber-500/15 text-amber-500 border-amber-500/30';
   if (tone === 'info') return 'bg-blue-500/15 text-blue-500 border-blue-500/30';
   return 'bg-muted text-muted-foreground border-border';
+}
+
+function timelineIcon(platform: string, className = "h-4 w-4") {
+  if (platform === 'Telegram') return <Send className={className} />;
+  if (platform === 'X' || platform === 'X read') return <Twitter className={className} />;
+  if (platform === 'OpenAI') return <Sparkles className={className} />;
+  if (platform === 'Media') return <MessageSquare className={className} />;
+  return <Wrench className={className} />;
+}
+
+function relativeTimestamp(rawTimestamp: string | null): string | null {
+  if (!rawTimestamp) return null;
+  const date = new Date(rawTimestamp);
+  if (!Number.isFinite(date.getTime())) return null;
+  return formatDistanceToNow(date, { addSuffix: true });
 }
 
 function shortText(entry: MonitoringEntry): string {
@@ -497,6 +534,12 @@ function audienceClassLabel(value: string | null | undefined): string {
   }
 }
 
+function formatScoringV2Score(snapshot: ScoringV2Snapshot | null): string {
+  if (!snapshot || snapshot.final_score == null) return '—';
+  const threshold = snapshot.threshold != null ? ` / ≥${snapshot.threshold}` : '';
+  return `${snapshot.final_score}${threshold}`;
+}
+
 function actionTitle(action: PendingAction | null) {
   if (!action) return '';
   switch (action.type) {
@@ -614,6 +657,15 @@ export default function Monitoring() {
   const selectedEntry = useMemo(
     () => moderationEntries.find((entry) => entry.tweet_id === drawerTweetId) ?? entries.find((entry) => entry.tweet_id === drawerTweetId) ?? null,
     [entries, moderationEntries, drawerTweetId],
+  );
+  const timelineDeliverySummary = useMemo(
+    () => selectedEntry ? buildDeliverySummary(selectedEntry, timeline) : [],
+    [selectedEntry, timeline],
+  );
+  const timelineGroups = useMemo(() => buildPipelineTimelineGroups(timeline), [timeline]);
+  const selectedScoringV2 = useMemo(
+    () => selectedEntry ? getScoringV2Snapshot(selectedEntry, timeline) : null,
+    [selectedEntry, timeline],
   );
   const selectedVoice = selectedEntry?.source_context?.voice ?? null;
   const selectedVoiceScores = selectedVoice?.critic?.variants ?? [];
@@ -1764,6 +1816,17 @@ export default function Monitoring() {
                               <p className="text-xs text-muted-foreground">Latest X</p>
                               <p className="font-medium">{xDiagnostic.latest_x?.status ?? 'No row'}</p>
                             </div>
+                            <div className="rounded-md border p-2 sm:col-span-3">
+                              <p className="text-xs text-muted-foreground">SQL candidate gate</p>
+                              <div className="mt-1 flex flex-wrap items-center gap-2">
+                                <Badge variant={xDiagnostic.candidate?.sql_gate_passed ? 'default' : 'outline'}>
+                                  {xDiagnostic.candidate?.sql_gate_passed ? 'candidate' : 'not candidate'}
+                                </Badge>
+                                {xDiagnostic.candidate?.reason && <span className="text-xs text-muted-foreground">{xDiagnostic.candidate.reason.replaceAll('_', ' ')}</span>}
+                                {xDiagnostic.candidate?.dispatch_source && <span className="text-xs text-muted-foreground">source {xDiagnostic.candidate.dispatch_source}</span>}
+                                {typeof xDiagnostic.candidate?.age_ms === 'number' && <span className="text-xs text-muted-foreground">age {formatAge(Math.round(xDiagnostic.candidate.age_ms / 1000))}</span>}
+                              </div>
+                            </div>
                           </div>
                           {(xDiagnostic.media?.row_details?.length ?? 0) > 0 && (
                             <div className="space-y-2 rounded-md border p-2">
@@ -1940,23 +2003,60 @@ export default function Monitoring() {
                   <Card>
                     <CardHeader className="pb-2"><CardTitle className="text-sm">Scoring</CardTitle></CardHeader>
                     <CardContent className="space-y-3 text-sm">
-                      <div className="grid gap-2 sm:grid-cols-3">
-                        <div className="rounded-md border p-2">
-                          <p className="text-xs text-muted-foreground">Current</p>
-                          <p className="font-medium">{decisionScore(selectedEntry) ?? '—'} / ≥{deliverThreshold}</p>
-                        </div>
+	                      <div className="grid gap-2 sm:grid-cols-3">
+	                        <div className="rounded-md border p-2">
+	                          <p className="text-xs text-muted-foreground">Current</p>
+	                          <p className="font-medium">{decisionScore(selectedEntry) ?? '—'} / ≥{deliverThreshold}</p>
+	                        </div>
                         <div className="rounded-md border p-2">
                           <p className="text-xs text-muted-foreground">Decision</p>
                           <p className="font-medium">{selectedEntry.monitoring_state?.decision_label ?? selectedEntry.delivery_decision ?? 'No decision'}</p>
                         </div>
                         <div className="rounded-md border p-2">
                           <p className="text-xs text-muted-foreground">Feedback</p>
-                          <p className="font-medium">{selectedEntry.feedback_locked ? 'Locked' : 'Open'}</p>
+	                          <p className="font-medium">{selectedEntry.feedback_locked ? 'Locked' : 'Open'}</p>
+	                        </div>
+	                      </div>
+                      {selectedScoringV2 && (
+                        <div className="rounded-md border border-primary/30 bg-primary/5 p-3">
+                          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">V2 comparison</p>
+                              <p className="text-sm font-medium">{selectedScoringV2.profile_id ?? selectedEntry.scoring_profile_id ?? 'iran-first'}</p>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <Badge variant="outline">{selectedScoringV2.mode ?? selectedEntry.score_review_status ?? 'v2'}</Badge>
+                              <Badge className={selectedScoringV2.decision === 'deliver' ? toneClass('good') : selectedScoringV2.decision === 'skip' ? toneClass('muted') : toneClass('info')}>
+                                {scoringV2DecisionLabel(selectedScoringV2.decision)}
+                              </Badge>
+                            </div>
+                          </div>
+                          <div className="grid gap-2 sm:grid-cols-4">
+                            <div className="rounded-md border bg-background/50 p-2">
+                              <p className="text-xs text-muted-foreground">Legacy decision</p>
+                              <p className="font-medium">{selectedEntry.delivery_decision ?? 'No decision'}</p>
+                            </div>
+                            <div className="rounded-md border bg-background/50 p-2">
+                              <p className="text-xs text-muted-foreground">V2 score</p>
+                              <p className="font-medium">{formatScoringV2Score(selectedScoringV2)}</p>
+                            </div>
+                            <div className="rounded-md border bg-background/50 p-2">
+                              <p className="text-xs text-muted-foreground">V2 audience</p>
+                              <p className="font-medium">{audienceClassLabel(selectedScoringV2.audience_class)}</p>
+                            </div>
+                            <div className="rounded-md border bg-background/50 p-2">
+                              <p className="text-xs text-muted-foreground">V2 review</p>
+                              <p className="font-medium">{selectedScoringV2.review_status ?? 'none'}</p>
+                            </div>
+                          </div>
+                          {selectedScoringV2.audience_reason && (
+                            <p className="mt-2 rounded-md border bg-background/50 p-2 text-xs leading-5">{selectedScoringV2.audience_reason}</p>
+                          )}
                         </div>
-                      </div>
-                      {selectedEntry.scoring_version && (
-                        <div className="grid gap-2 sm:grid-cols-4">
-                          <div className="rounded-md border p-2">
+                      )}
+	                      {selectedEntry.scoring_version && (
+	                        <div className="grid gap-2 sm:grid-cols-4">
+	                          <div className="rounded-md border p-2">
                             <p className="text-xs text-muted-foreground">Audience</p>
                             <p className="font-medium">{audienceClassLabel(selectedEntry.audience_class)}</p>
                           </div>
@@ -2156,26 +2256,147 @@ export default function Monitoring() {
                 </>
               )}
             </div>
-            <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-sm">Timeline</CardTitle></CardHeader>
-              <CardContent className="space-y-2">
-                {timeline.length === 0 ? (
-                  <p className="py-4 text-center text-sm text-muted-foreground">No pipeline events found</p>
-                ) : timeline.map((evt, i) => {
-                  const formatted = evt.error ? formatPipelineError(evt.error) : null;
-                  return (
-                    <div key={`${evt.step}-${i}`} className="rounded-md border bg-muted/20 p-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-medium">{evt.step}</span>
-                        <Badge className={evt.status === 'completed' ? toneClass('good') : evt.status === 'failed' ? toneClass('bad') : toneClass('warn')}>
-                          {evt.status}
-                        </Badge>
-                      </div>
-                      {evt.started_at && <p className="mt-1 text-xs text-muted-foreground">{new Date(evt.started_at).toLocaleString()}</p>}
-                      {formatted && <p className="mt-1 text-xs text-destructive">{formatted.title}</p>}
+            <Card className="overflow-hidden">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Delivery timeline</CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  External delivery states first, then internal pipeline work.
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {selectedEntry && (
+                  <div className="grid gap-2">
+                    {timelineDeliverySummary.map((item) => {
+                      const relative = relativeTimestamp(item.rawTimestamp);
+                      return (
+                        <div key={item.platform} className="rounded-lg border bg-muted/20 p-3">
+                          <div className="flex min-w-0 items-start justify-between gap-3">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <span className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border ${toneClass(item.tone)}`}>
+                                {timelineIcon(item.platform, "h-4 w-4")}
+                              </span>
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-semibold">{item.platform}</p>
+                                <p className="line-clamp-2 text-xs text-muted-foreground">{item.detail}</p>
+                              </div>
+                            </div>
+                            <Badge className={`${toneClass(item.tone)} shrink-0`}>{item.label}</Badge>
+                          </div>
+                          {item.timestamp ? (
+                            <div className="mt-3 rounded-md border bg-background/40 px-2 py-1.5">
+                              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                                {item.timestampLabel}
+                              </p>
+                              <time dateTime={item.rawTimestamp ?? undefined} className="block text-xs font-medium">
+                                {item.timestamp}
+                              </time>
+                              {relative && <p className="text-[11px] text-muted-foreground">{relative}</p>}
+                            </div>
+                          ) : (
+                            <p className="mt-2 text-xs text-muted-foreground">No exact platform timestamp available.</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pipeline work</p>
+                    {timelineGroups.length > 0 && (
+                      <Badge variant="outline" className="text-[11px]">
+                        {timeline.length} event{timeline.length === 1 ? '' : 's'}
+                      </Badge>
+                    )}
+                  </div>
+                  {timelineGroups.length === 0 ? (
+                    <p className="rounded-lg border border-dashed py-4 text-center text-sm text-muted-foreground">
+                      No pipeline events found
+                    </p>
+                  ) : (
+                    <div className="relative space-y-3 before:absolute before:bottom-3 before:left-[0.45rem] before:top-3 before:w-px before:bg-border">
+                      {timelineGroups.map((group) => {
+                        const relative = relativeTimestamp(group.rawTimestamp);
+                        const hasExpandedUpdates = group.events.length > 1;
+                        return (
+                          <div key={group.key} className="relative pl-5">
+                            <span className={`absolute left-0 top-3 h-3 w-3 rounded-full border-2 bg-background ${group.statusTone === 'good' ? 'border-emerald-500' : group.statusTone === 'bad' ? 'border-destructive' : group.statusTone === 'warn' ? 'border-amber-500' : group.statusTone === 'info' ? 'border-blue-500' : 'border-muted-foreground'}`} />
+                            <div className="rounded-lg border bg-muted/20 p-3">
+                              <div className="flex min-w-0 items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${toneClass(group.platformTone)}`}>
+                                      {timelineIcon(group.platform, "h-3 w-3")}
+                                      {group.platform}
+                                    </span>
+                                    <p className="text-sm font-semibold">{group.title}</p>
+                                  </div>
+                                  {group.detail && <p className="mt-1 text-xs text-muted-foreground">{group.detail}</p>}
+                                </div>
+                                <Badge className={`${toneClass(group.statusTone)} shrink-0`}>{group.statusLabel}</Badge>
+                              </div>
+
+                              <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+                                <div className="rounded-md border bg-background/40 px-2 py-1.5">
+                                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Latest update</p>
+                                  <time dateTime={group.rawTimestamp ?? undefined} className="block font-medium">
+                                    {group.timestamp}
+                                  </time>
+                                  {relative && <p className="text-[11px] text-muted-foreground">{relative}</p>}
+                                </div>
+                                <div className="rounded-md border bg-background/40 px-2 py-1.5">
+                                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Run details</p>
+                                  <p className="font-medium">
+                                    {group.duration ? `${group.duration} total` : 'Duration not recorded'}
+                                  </p>
+                                  <p className="text-[11px] text-muted-foreground">
+                                    {group.updateCount} update{group.updateCount === 1 ? '' : 's'}
+                                  </p>
+                                  {group.timingBadges.length > 0 && (
+                                    <div className="mt-1.5 flex flex-wrap gap-1">
+                                      {group.timingBadges.map((badge) => (
+                                        <span key={`${badge.label}-${badge.value}`} className="rounded border border-border/70 bg-muted/50 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                                          {badge.label} {badge.value}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              {hasExpandedUpdates && (
+                                <div className="mt-3 space-y-1.5 rounded-md border bg-background/35 p-2">
+                                  {group.events.map((event, eventIndex) => (
+                                    <div key={`${event.rawStep}-${event.statusLabel}-${event.rawTimestamp ?? eventIndex}`} className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
+                                      <Badge variant="outline" className={toneClass(event.statusTone)}>{event.statusLabel}</Badge>
+                                      <span className="font-mono text-muted-foreground">{event.rawStep}</span>
+                                      <span className="text-muted-foreground">{event.timestamp}</span>
+                                      {event.duration && <span className="text-muted-foreground">({event.duration})</span>}
+                                      {event.timingBadges.map((badge) => (
+                                        <span key={`${badge.label}-${badge.value}`} className="rounded border border-border/70 px-1 py-0.5 text-muted-foreground">
+                                          {badge.label} {badge.value}
+                                        </span>
+                                      ))}
+                                      {event.errorTitle && <span className="text-destructive">{event.errorTitle}</span>}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              {!hasExpandedUpdates && group.events[0]?.errorTitle && (
+                                <div className="mt-3 rounded-md border border-destructive/30 bg-destructive/10 p-2 text-xs text-destructive">
+                                  <p className="font-medium">{group.events[0].errorTitle}</p>
+                                  {group.events[0].errorDetail && <p className="mt-1 line-clamp-3">{group.events[0].errorDetail}</p>}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                  );
-                })}
+                  )}
+                </div>
               </CardContent>
             </Card>
           </div>

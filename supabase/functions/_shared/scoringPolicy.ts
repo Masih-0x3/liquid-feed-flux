@@ -126,6 +126,27 @@ export interface ScoringPolicyResult {
   error?: string;
 }
 
+export interface ScoringPolicyEventMeta extends Record<string, unknown> {
+  version: typeof SCORING_POLICY_VERSION;
+  mode: ScoringPolicyMode;
+  profile_id: string;
+  audience_class: AudienceClass;
+  audience_confidence: number;
+  audience_reason: string;
+  global_exception_class: string | null;
+  raw_priority_score: number;
+  uncapped_score: number;
+  final_score: number;
+  threshold: number;
+  cap: number;
+  decision: "deliver" | "skip";
+  decision_reason: string;
+  review_status: "none" | "shadow" | "needs_review";
+  adjudicated: boolean;
+  adjudication_reason?: string;
+  tags: string[];
+}
+
 export const DEFAULT_SCORING_V2_WEIGHTS: Record<ScoringV2AxisKey, number> = {
   focus_relevance: 1.8,
   geopolitical_weight: 1.35,
@@ -435,6 +456,29 @@ export function finalizeScoringPolicyResult(
     review_status: reviewStatus,
     adjudicated: false,
     usage: {},
+  };
+}
+
+export function buildScoringPolicyEventMeta(result: ScoringPolicyResult, mode: ScoringPolicyMode): ScoringPolicyEventMeta {
+  return {
+    version: SCORING_POLICY_VERSION,
+    mode,
+    profile_id: result.profile_id,
+    audience_class: result.audience_class,
+    audience_confidence: result.audience_confidence,
+    audience_reason: result.audience_reason,
+    global_exception_class: result.global_exception_class,
+    raw_priority_score: result.raw_priority_score,
+    uncapped_score: result.uncapped_score,
+    final_score: result.final_score,
+    threshold: result.threshold,
+    cap: result.cap,
+    decision: result.delivery_decision,
+    decision_reason: result.decision_reason,
+    review_status: result.review_status,
+    adjudicated: result.adjudicated,
+    ...(result.adjudication_reason ? { adjudication_reason: result.adjudication_reason } : {}),
+    tags: result.tags,
   };
 }
 
