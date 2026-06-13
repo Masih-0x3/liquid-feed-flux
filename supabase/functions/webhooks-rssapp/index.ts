@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
-import { requireRssWebhookAuth } from "../_shared/internalAuth.ts";
+import { requireRssWebhookAuth, serviceRoleBearerHeader } from "../_shared/internalAuth.ts";
 import { filterSendableIngestMedia } from "../_shared/mediaSelection.ts";
 
 const corsHeaders = {
@@ -85,7 +85,7 @@ supabase: any): Promise<boolean> {
 }
 
 async function enqueueContentPipelineEntry(// deno-lint-ignore no-explicit-any
-supabase: any, tweetId: string, isTruncated: boolean, duplicateGateEnabled: boolean): Promise<void> {
+supabase: any, tweetId: string, isTruncated: boolean, duplicateGateEnabled: boolean): Promise<string | null> {
   const type = duplicateGateEnabled ? 'dedupe' : 'translate';
   const step = duplicateGateEnabled ? 'dedupe' : 'translate';
   const idempotencyKey = duplicateGateEnabled ? `dedupe:${tweetId}` : `translate:${tweetId}`;
@@ -104,7 +104,7 @@ supabase: any, tweetId: string, isTruncated: boolean, duplicateGateEnabled: bool
 
   if (error) {
     console.error(`Error creating ${type} job:`, error);
-    return;
+    return null;
   }
 
   if (duplicateGateEnabled) {
@@ -134,6 +134,90 @@ supabase: any, tweetId: string, isTruncated: boolean, duplicateGateEnabled: bool
         meta: { source: 'webhook', is_truncated: isTruncated },
       });
   } catch (_e) {}
+  return type;
+}
+
+type EdgeRuntimeWithWaitUntil = { waitUntil?: (promise: Promise<unknown>) => void };
+
+function scheduleBackground(promise: Promise<unknown>): boolean {
+  const edgeRuntime = (globalThis as { EdgeRuntime?: EdgeRuntimeWithWaitUntil }).EdgeRuntime;
+  if (edgeRuntime?.waitUntil) {
+    edgeRuntime.waitUntil(promise);
+    return true;
+  }
+  return false;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function insertWorkerDispatchEvents(// deno-lint-ignore no-explicit-any
+supabase: any, tweetIds: string[], status: 'queued' | 'failed', meta: Record<string, unknown>, error?: string | null): Promise<void> {
+  const now = new Date().toISOString();
+  const uniqueTweetIds = [...new Set(tweetIds)].filter(Boolean);
+  if (uniqueTweetIds.length === 0) return;
+  try {
+    await supabase.from('pipeline_events').insert(uniqueTweetIds.map((tweetId) => ({
+      subject_type: 'post',
+      subject_id: tweetId,
+      step: 'worker_dispatch',
+      status,
+      started_at: now,
+      ended_at: status === 'failed' ? now : null,
+      error: error ?? null,
+      meta,
+    })));
+  } catch (eventError) {
+    console.warn('worker dispatch event insert failed:', (eventError as Error).message);
+  }
+}
+
+async function dispatchWorkerAfterWebhook(// deno-lint-ignore no-explicit-any
+supabase: any, tweetIds: string[], jobTypes: string[], processedCount: number): Promise<void> {
+  const uniqueJobTypes = [...new Set(jobTypes)].filter((type) =>
+    ['dedupe', 'translate', 'download_media', 'resolve_media'].includes(type)
+  );
+  const uniqueTweetIds = [...new Set(tweetIds)].filter(Boolean);
+  if (uniqueJobTypes.length === 0 || uniqueTweetIds.length === 0 || processedCount <= 0) return;
+
+  const batchSize = Math.min(20, Math.max(5, processedCount * 3));
+  const body = {
+    trigger: 'webhook-dispatch',
+    job_types: uniqueJobTypes,
+    batch_size: batchSize,
+    chain_depth: 0,
+  };
+  const meta = {
+    dispatch_source: 'webhook',
+    job_types: uniqueJobTypes,
+    batch_size: batchSize,
+    chain_depth: 0,
+    processed_count: processedCount,
+    tweet_count: uniqueTweetIds.length,
+  };
+
+  await insertWorkerDispatchEvents(supabase, uniqueTweetIds, 'queued', meta);
+
+  const dispatchPromise = supabase.functions.invoke('worker', {
+    body,
+    headers: serviceRoleBearerHeader(),
+  } as Record<string, unknown>).then(({ error }: { error?: { message?: string } | null }) => {
+    if (error) {
+      return insertWorkerDispatchEvents(supabase, uniqueTweetIds, 'failed', meta, error.message ?? 'worker invoke failed');
+    }
+    return undefined;
+  }).catch((error: unknown) => insertWorkerDispatchEvents(
+    supabase,
+    uniqueTweetIds,
+    'failed',
+    meta,
+    error instanceof Error ? error.message : String(error),
+  ));
+
+  if (!scheduleBackground(dispatchPromise)) {
+    await Promise.race([dispatchPromise, sleep(1500)]);
+  }
 }
 
 serve(async (req) => {
@@ -213,6 +297,9 @@ serve(async (req) => {
     }
 
     let processedCount = 0;
+    let dispatchableCount = 0;
+    const dispatchTweetIds = new Set<string>();
+    const dispatchJobTypes = new Set<string>();
     const duplicateGateEnabled = await isDuplicateGateEnabled(supabase);
 
     for (const item of items) {
@@ -407,7 +494,12 @@ serve(async (req) => {
 
         // Enqueue duplicate detection first when enabled. The worker only
         // advances unique/related items to translation and filtering.
-        await enqueueContentPipelineEntry(supabase, tweetId, isTruncated, duplicateGateEnabled);
+        const entryJobType = await enqueueContentPipelineEntry(supabase, tweetId, isTruncated, duplicateGateEnabled);
+        if (entryJobType) {
+          dispatchJobTypes.add(entryJobType);
+          dispatchTweetIds.add(tweetId);
+          dispatchableCount++;
+        }
 
         // Create media download job for tweets with media
         if (sendableMediaItems.length > 0) {
@@ -417,6 +509,7 @@ serve(async (req) => {
               type: 'download_media',
               payload: { tweet_id: tweetId },
               status: 'pending',
+              priority: 12,
               idempotency_key: `download_media:${tweetId}`,
               next_run_at: new Date().toISOString()
             }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
@@ -425,6 +518,8 @@ serve(async (req) => {
             console.error('Error creating media download job:', downloadJobError);
           } else {
             console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'media_download_job_created' }));
+            dispatchJobTypes.add('download_media');
+            dispatchTweetIds.add(tweetId);
             try {
               await supabase
                 .from('pipeline_events')
@@ -459,6 +554,8 @@ serve(async (req) => {
             console.error('Error creating resolve_media job:', resolveJobError);
           } else {
             console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'resolve_media_job_created' }));
+            dispatchJobTypes.add('resolve_media');
+            dispatchTweetIds.add(tweetId);
             try {
               await supabase.from('pipeline_events').insert({
                 subject_type: 'post', subject_id: tweetId,
@@ -482,6 +579,7 @@ serve(async (req) => {
     }
 
     console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'processed', processed_count: processedCount, item_count: items.length }));
+    await dispatchWorkerAfterWebhook(supabase, [...dispatchTweetIds], [...dispatchJobTypes], dispatchableCount);
 
     return new Response(JSON.stringify({ 
       success: true, 

@@ -2,6 +2,7 @@ import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-quer
 import { useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { monitoringStage } from '@/lib/monitoringState';
+import { matchesScoringV2Filter } from '@/lib/scoringV2Monitoring';
 
 export interface MonitoringEntry {
   tweet_id: string;
@@ -219,6 +220,12 @@ export type MonitoringFilter =
   | 'translation_queue'
   | 'below_threshold'
   | 'manual_review'
+  | 'v2_would_post'
+  | 'v2_would_skip'
+  | 'v1_post_v2_skip'
+  | 'v1_skip_v2_post'
+  | 'v2_off_topic'
+  | 'v2_needs_review'
   | 'duplicates'
   | 'coverage_gap'
   | 'possible_duplicate'
@@ -574,6 +581,13 @@ function matchesLegacyMonitoringFilter(entry: MonitoringEntry, filter: Monitorin
       return entry.decision_reason?.startsWith('below_threshold:') || entry.delivery_decision === 'skip';
     case 'manual_review':
       return entry.enrich_status === 'awaiting_approval';
+    case 'v2_would_post':
+    case 'v2_would_skip':
+    case 'v1_post_v2_skip':
+    case 'v1_skip_v2_post':
+    case 'v2_off_topic':
+    case 'v2_needs_review':
+      return matchesScoringV2Filter(entry, filter);
     case 'duplicates':
       return !!entry.dup_of_tweet_id;
     case 'coverage_gap':

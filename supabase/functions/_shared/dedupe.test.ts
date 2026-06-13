@@ -1,6 +1,7 @@
 import { assert, assertEquals } from "jsr:@std/assert";
 import {
   type DuplicateGateResult,
+  assertFinalDuplicateState,
   normalizeDuplicateGateConfig,
   normalizeStoryText,
   runDuplicateGate,
@@ -23,6 +24,15 @@ Deno.test("normalizeDuplicateGateConfig keeps legacy settings and fills new gate
   assertEquals(cfg.mode, "hybrid_ai");
   assertEquals(cfg.adjudicator_model, "gpt-5.4-mini");
   assertEquals(cfg.bypass_authors, ["trusted"]);
+});
+
+Deno.test("normalizeDuplicateGateConfig enforces a 48 hour story memory floor", () => {
+  const cfg = normalizeDuplicateGateConfig({
+    enabled: true,
+    window_hours: 12,
+  });
+
+  assertEquals(cfg.window_hours, 48);
 });
 
 Deno.test("normalizeStoryText strips urls, handles, hashtags, and punctuation", () => {
@@ -212,13 +222,58 @@ Deno.test("runDuplicateGate does not hard-skip when the matched duplicate has no
     auto_duplicate_similarity: 0.94,
   }, { fetchEmbedding: async () => [0.1, 0.2, 0.3] });
 
-  assertEquals(result.status, "uncertain");
+  assertEquals(result.status, "coverage_gap");
   assertEquals(result.dup_of_tweet_id, "older");
   assertEquals(result.should_enqueue_translate, true);
   assert(result.reason.includes("coverage_gap:"));
-  assertEquals(supabase.updates[0].update.dedupe_status, "uncertain");
+  assertEquals(supabase.updates[0].update.dedupe_status, "coverage_gap");
   assertEquals(supabase.updates[0].update.dup_of_tweet_id, "older");
   assertEquals(supabase.updates[0].update.delivery_decision, undefined);
+  const eventMeta = supabase.inserts.find((insert) => insert.table === "pipeline_events")?.row.meta as Record<string, unknown>;
+  assertEquals((eventMeta.coverage as Record<string, unknown>).state, "coverage_gap");
+  assertEquals(eventMeta.candidate_count, 1);
+});
+
+Deno.test("runDuplicateGate asks the RPC for 10 semantic candidates", async () => {
+  const supabase = makeFakeSupabase({ candidates: [] });
+  await runDuplicateGate(supabase, basePost(), {
+    enabled: true,
+    action: "skip",
+  }, { fetchEmbedding: async () => [0.1, 0.2, 0.3] });
+
+  assertEquals(supabase.rpcs[0].name, "find_story_candidates_v3");
+  assertEquals(supabase.rpcs[0].args.match_limit, 10);
+});
+
+Deno.test("assertFinalDuplicateState blocks a late high-confidence duplicate before delivery", async () => {
+  const supabase = makeFakeSupabase({
+    currentPost: {
+      tweet_id: "newer",
+      text_original: "A long enough current story body for semantic duplicate checks.",
+      text_translated: null,
+      dedupe_status: "unique",
+      dup_of_tweet_id: null,
+    },
+    signatureEmbedding: "[0.1,0.2,0.3]",
+    candidates: [candidate({ similarity: 0.97 })],
+    canonicalPost: {
+      tweet_id: "older",
+      delivery_decision: "deliver",
+      decision_reason: "score_pass:15>=14",
+    },
+  });
+
+  const result = await assertFinalDuplicateState(supabase, "newer", {
+    enabled: true,
+    action: "skip",
+    auto_duplicate_similarity: 0.94,
+  });
+
+  assertEquals(result.checked, true);
+  assertEquals(result.blocked, true);
+  assertEquals(result.result?.status, "duplicate");
+  assertEquals(supabase.updates.at(-1)?.update.dedupe_status, "duplicate");
+  assertEquals(supabase.updates.at(-1)?.update.delivery_decision, "skip");
 });
 
 Deno.test("runDuplicateGate preserves related-new-info items for translation", async () => {
@@ -237,6 +292,11 @@ Deno.test("runDuplicateGate preserves related-new-info items for translation", a
   assertEquals(supabase.updates[0].update.dedupe_status, "related_new_info");
   assertEquals(supabase.updates[0].update.delivery_decision, undefined);
   assertEquals(supabase.updates[0].update.story_cluster_id, "11111111-1111-1111-1111-111111111111");
+  const eventMeta = supabase.inserts.find((insert) => insert.table === "pipeline_events")?.row.meta as Record<string, unknown>;
+  assertEquals(eventMeta.window_hours, 48);
+  assertEquals((eventMeta.thresholds as Record<string, unknown>).similarity_threshold, 0.86);
+  assertEquals(eventMeta.candidate_count, 1);
+  assertEquals((eventMeta.top_candidates as Array<Record<string, unknown>>)[0].tweet_id, "older");
 });
 
 Deno.test("runDuplicateGate marks low-confidence AI outcomes uncertain without blocking", async () => {
@@ -259,14 +319,75 @@ Deno.test("runDuplicateGate marks low-confidence AI outcomes uncertain without b
   assertEquals(supabase.updates[0].update.delivery_decision, undefined);
 });
 
+Deno.test("runDuplicateGate fails closed when the dedupe post update fails", async () => {
+  const supabase = makeFakeSupabase({
+    candidates: [candidate({ similarity: 0.97 })],
+    canonicalPost: {
+      tweet_id: "older",
+      delivery_decision: "deliver",
+      decision_reason: "score_pass:15>=14",
+    },
+    updateErrorsByDedupeStatus: {
+      duplicate: "new row for relation \"posts\" violates check constraint \"posts_dedupe_status_check\"",
+    },
+  });
+
+  const result = await runDuplicateGate(supabase, basePost(), {
+    enabled: true,
+    action: "skip",
+    auto_duplicate_similarity: 0.94,
+  }, { fetchEmbedding: async () => [0.1, 0.2, 0.3] });
+
+  assertEquals(result.ok, false);
+  assertEquals(result.status, "failed");
+  assertEquals(result.should_enqueue_translate, false);
+  assertEquals(result.failure_phase, "post_update");
+  assertEquals(result.retryable, false);
+  const failedEvent = supabase.inserts.find((insert) =>
+    insert.table === "pipeline_events" && insert.row.status === "failed"
+  );
+  const meta = failedEvent?.row.meta as Record<string, unknown>;
+  assertEquals(meta.failure_phase, "post_update");
+  assertEquals(meta.action, "skip");
+});
+
+Deno.test("runDuplicateGate marks embedding provider failures retryable but does not advance translation", async () => {
+  const supabase = makeFakeSupabase();
+
+  const result = await runDuplicateGate(supabase, basePost(), {
+    enabled: true,
+    action: "skip",
+  }, { fetchEmbedding: async () => {
+    throw new Error("embedding_error:503:upstream unavailable");
+  } });
+
+  assertEquals(result.ok, false);
+  assertEquals(result.status, "failed");
+  assertEquals(result.should_enqueue_translate, false);
+  assertEquals(result.failure_phase, "embedding");
+  assertEquals(result.retryable, true);
+  const failedEvent = supabase.inserts.find((insert) =>
+    insert.table === "pipeline_events" && insert.row.status === "failed"
+  );
+  const meta = failedEvent?.row.meta as Record<string, unknown>;
+  assertEquals(meta.failure_phase, "embedding");
+  assertEquals(meta.retryable, true);
+});
+
 function makeFakeSupabase(options: {
   exactDuplicate?: Record<string, unknown>;
+  currentPost?: Record<string, unknown>;
   canonicalPost?: Record<string, unknown>;
   postsById?: Record<string, Record<string, unknown>>;
   candidates?: Record<string, unknown>[];
+  signatureEmbedding?: string | number[] | null;
   telegramStatuses?: string[];
   xStatuses?: string[];
   jobStatuses?: string[];
+  updateErrorsByDedupeStatus?: Record<string, string>;
+  insertErrors?: Record<string, string>;
+  upsertErrors?: Record<string, string>;
+  rpcErrors?: Record<string, string>;
 } = {}) {
   const state = {
     updates: [] as Array<{ table: string; update: Record<string, unknown>; filters: Record<string, unknown> }>,
@@ -278,6 +399,9 @@ function makeFakeSupabase(options: {
     },
     rpc(name: string, args: Record<string, unknown>) {
       state.rpcs.push({ name, args });
+      if (options.rpcErrors?.[name]) {
+        return Promise.resolve({ data: null, error: { message: options.rpcErrors[name] } });
+      }
       if (name === "find_story_candidates_v3") {
         return Promise.resolve({ data: options.candidates ?? [], error: null });
       }
@@ -300,11 +424,16 @@ class FakeBuilder {
     private state: ReturnType<typeof makeFakeSupabase>,
     private options: {
       exactDuplicate?: Record<string, unknown>;
+      currentPost?: Record<string, unknown>;
       canonicalPost?: Record<string, unknown>;
       postsById?: Record<string, Record<string, unknown>>;
+      signatureEmbedding?: string | number[] | null;
       telegramStatuses?: string[];
       xStatuses?: string[];
       jobStatuses?: string[];
+      updateErrorsByDedupeStatus?: Record<string, string>;
+      insertErrors?: Record<string, string>;
+      upsertErrors?: Record<string, string>;
     },
   ) {}
 
@@ -336,14 +465,34 @@ class FakeBuilder {
     return this;
   }
 
-  then(resolve: (value: { data: unknown; error: null }) => void) {
+  maybeSingle() {
+    if (this.mode !== "select") return Promise.resolve({ data: null, error: null });
+    const data = this.resolveSelectData();
+    const row = Array.isArray(data) ? data[0] ?? null : data ?? null;
+    return Promise.resolve({ data: row, error: null });
+  }
+
+  single() {
+    return this.maybeSingle();
+  }
+
+  then(resolve: (value: { data: unknown; error: { message: string } | null }) => void) {
     if (this.mode === "update") {
       this.state.updates.push({ table: this.table, update: this.updatePayload, filters: this.filters });
+      const status = typeof this.updatePayload.dedupe_status === "string" ? this.updatePayload.dedupe_status : "";
+      if (status && this.options.updateErrorsByDedupeStatus?.[status]) {
+        resolve({ data: null, error: { message: this.options.updateErrorsByDedupeStatus[status] } });
+        return;
+      }
       resolve({ data: null, error: null });
       return;
     }
     if (this.mode === "insert") {
       this.state.inserts.push({ table: this.table, row: this.insertPayload ?? {} });
+      if (this.options.insertErrors?.[this.table]) {
+        resolve({ data: null, error: { message: this.options.insertErrors[this.table] } });
+        return;
+      }
       resolve({ data: null, error: null });
       return;
     }
@@ -353,34 +502,41 @@ class FakeBuilder {
         payload: this.upsertPayload ?? {},
         options: this.upsertOptions,
       });
+      if (this.options.upsertErrors?.[this.table]) {
+        resolve({ data: null, error: { message: this.options.upsertErrors[this.table] } });
+        return;
+      }
       resolve({ data: null, error: null });
       return;
     }
-    if (this.table === "posts" && this.filters.tweet_id && this.options.postsById?.[String(this.filters.tweet_id)]) {
-      resolve({ data: [this.options.postsById[String(this.filters.tweet_id)]], error: null });
-      return;
-    }
-    if (this.table === "posts" && this.options.canonicalPost && this.filters.tweet_id === this.options.canonicalPost.tweet_id) {
-      resolve({ data: [this.options.canonicalPost], error: null });
-      return;
+    resolve({ data: this.resolveSelectData(), error: null });
+  }
+
+  private resolveSelectData(): unknown {
+    if (this.table === "posts" && this.filters.tweet_id) {
+      const id = String(this.filters.tweet_id);
+      if (this.options.currentPost && id === this.options.currentPost.tweet_id) return [this.options.currentPost];
+      if (this.options.postsById?.[id]) return [this.options.postsById[id]];
+      if (this.options.canonicalPost && id === this.options.canonicalPost.tweet_id) return [this.options.canonicalPost];
     }
     if (this.table === "posts" && this.options.exactDuplicate && this.filters["neq:tweet_id"]) {
-      resolve({ data: [this.options.exactDuplicate], error: null });
-      return;
+      return [this.options.exactDuplicate];
+    }
+    if (this.table === "story_signatures" && this.filters.tweet_id) {
+      return this.options.signatureEmbedding === undefined
+        ? []
+        : [{ embedding: this.options.signatureEmbedding }];
     }
     if (this.table === "deliveries") {
-      resolve({ data: (this.options.telegramStatuses ?? []).map((status) => ({ status })), error: null });
-      return;
+      return (this.options.telegramStatuses ?? []).map((status) => ({ status }));
     }
     if (this.table === "x_deliveries") {
-      resolve({ data: (this.options.xStatuses ?? []).map((status) => ({ status })), error: null });
-      return;
+      return (this.options.xStatuses ?? []).map((status) => ({ status }));
     }
     if (this.table === "jobs") {
-      resolve({ data: (this.options.jobStatuses ?? []).map((status) => ({ status, type: "deliver" })), error: null });
-      return;
+      return (this.options.jobStatuses ?? []).map((status) => ({ status, type: "deliver" }));
     }
-    resolve({ data: [], error: null });
+    return [];
   }
 }
 

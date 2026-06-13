@@ -1,6 +1,7 @@
 import { assertEquals } from "jsr:@std/assert";
 import {
   DEFAULT_SCORING_POLICY,
+  buildScoringPolicyEventMeta,
   computeScoringV2AxisScore,
   finalizeScoringPolicyResult,
   getActiveScoringProfile,
@@ -50,6 +51,43 @@ Deno.test("adjacent items cap at 16 but can still pass", () => {
   assertEquals(result.delivery_decision, "deliver");
   assertEquals(result.cap, 16);
   assertEquals(result.final_score <= 16, true);
+});
+
+Deno.test("balanced adjacent threshold allows 12.5 but skips 12.4", () => {
+  const policy = normalizeScoringPolicy({
+    ...DEFAULT_SCORING_POLICY,
+    profiles: [{
+      ...DEFAULT_SCORING_POLICY.profiles[0],
+      thresholds: {
+        ...DEFAULT_SCORING_POLICY.profiles[0].thresholds,
+        adjacent: { threshold: 12.5, cap: 16 },
+      },
+    }],
+  });
+  const profile = getActiveScoringProfile(policy);
+  const skipped = finalizeScoringPolicyResult({
+    audience_class: "adjacent",
+    audience_confidence: 0.9,
+    priority_score: 12.4,
+    axes: boundaryAxes(),
+    tags: ["regional"],
+    audience_reason: "Relevant but not enough for the balanced adjacent threshold.",
+  }, policy, profile);
+  const delivered = finalizeScoringPolicyResult({
+    audience_class: "adjacent",
+    audience_confidence: 0.9,
+    priority_score: 12.5,
+    axes: boundaryAxes(),
+    tags: ["regional"],
+    audience_reason: "Relevant enough for the balanced adjacent threshold.",
+  }, policy, profile);
+
+  assertEquals(skipped.final_score, 12.4);
+  assertEquals(skipped.delivery_decision, "skip");
+  assertEquals(skipped.threshold, 12.5);
+  assertEquals(delivered.final_score >= 12.5, true);
+  assertEquals(delivered.delivery_decision, "deliver");
+  assertEquals(delivered.threshold, 12.5);
 });
 
 Deno.test("routine off-topic content is capped at 8 and skipped", () => {
@@ -163,6 +201,34 @@ Deno.test("runScoringPolicy uses injected GPT calls and adjudicates global excep
   assertEquals(calls, 2);
 });
 
+Deno.test("scoring policy event metadata includes production rollout fields", () => {
+  const policy = normalizeScoringPolicy(DEFAULT_SCORING_POLICY);
+  const profile = getActiveScoringProfile(policy);
+  const result = finalizeScoringPolicyResult({
+    audience_class: "direct_focus",
+    audience_confidence: 0.82,
+    priority_score: 15,
+    axes: highAxes(),
+    tags: ["Iran"],
+    audience_reason: "Direct Iran item.",
+  }, policy, profile, "source");
+
+  const meta = buildScoringPolicyEventMeta(result, "shadow");
+
+  assertEquals(meta.mode, "shadow");
+  assertEquals(meta.profile_id, "iran-first");
+  assertEquals(meta.audience_class, "direct_focus");
+  assertEquals(meta.audience_confidence, 0.82);
+  assertEquals(meta.audience_reason, "Direct Iran item.");
+  assertEquals(meta.final_score, result.final_score);
+  assertEquals(meta.threshold, 12);
+  assertEquals(meta.cap, 20);
+  assertEquals(meta.decision, "deliver");
+  assertEquals(meta.review_status, result.review_status);
+  assertEquals(meta.adjudicated, false);
+  assertEquals(meta.global_exception_class, null);
+});
+
 function highAxes() {
   return {
     focus_relevance: 9,
@@ -184,6 +250,18 @@ function midAxes() {
     freshness: 6,
     credibility: 7,
     noise_penalty: 1,
+  };
+}
+
+function boundaryAxes() {
+  return {
+    focus_relevance: 7,
+    geopolitical_weight: 7,
+    audience_value: 6,
+    materiality: 6,
+    freshness: 6,
+    credibility: 6,
+    noise_penalty: 0,
   };
 }
 

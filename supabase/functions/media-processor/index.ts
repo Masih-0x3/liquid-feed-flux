@@ -93,32 +93,52 @@ supabase: any, tweetId: string, dryRun: boolean) {
   }
 
   let downloadedCount = 0;
+  let reusedCount = 0;
   let failedCount = 0;
+  const startedAt = Date.now();
+  const hashes = [...new Set((mediaItems as Array<Record<string, unknown>>)
+    .map((media) => typeof media.src_url_hash === 'string' ? media.src_url_hash : null)
+    .filter(Boolean) as string[])];
+  const existingByHash = new Map<string, string>();
+  if (hashes.length > 0) {
+    const { data: existingRows } = await supabase
+      .from('media')
+      .select('src_url_hash, storage_path')
+      .in('src_url_hash', hashes)
+      .not('storage_path', 'is', null);
+    for (const row of (existingRows ?? []) as Array<Record<string, unknown>>) {
+      const hash = typeof row.src_url_hash === 'string' ? row.src_url_hash : null;
+      const storagePath = typeof row.storage_path === 'string' ? row.storage_path : null;
+      if (hash && storagePath && !existingByHash.has(hash)) existingByHash.set(hash, storagePath);
+    }
+  }
 
-  for (const media of mediaItems as any[]) {
+  await mapLimit(mediaItems as any[], 3, async (media) => {
+    const itemStartedAt = Date.now();
     try {
       if (!media.src_url || media.src_url.includes('pic.twitter.com')) {
         failedCount++;
-        continue;
+        await insertMediaDownloadEvent(supabase, media, 'failed', 'unsupported_or_placeholder_url', {
+          media_download_ms: Date.now() - itemStartedAt,
+        });
+        return;
       }
 
-      // Dedup by src_url_hash: check if another media with same hash already has storage_path
-      if (media.src_url_hash) {
-        const { data: existing } = await supabase
-          .from('media')
-          .select('storage_path')
-          .eq('src_url_hash', media.src_url_hash)
-          .not('storage_path', 'is', null)
-          .limit(1);
-        if (existing && existing.length > 0) {
-          // Reuse existing storage path
-          const updated = await guardedMediaUpdate(supabase, media, {
-            storage_path: existing[0].storage_path,
-            downloaded_at: new Date().toISOString(),
+      const reusableStoragePath = typeof media.src_url_hash === 'string' ? existingByHash.get(media.src_url_hash) : null;
+      if (reusableStoragePath) {
+        const updated = await guardedMediaUpdate(supabase, media, {
+          storage_path: reusableStoragePath,
+          downloaded_at: new Date().toISOString(),
+        });
+        if (updated) {
+          reusedCount++;
+          await insertMediaDownloadEvent(supabase, media, 'completed', null, {
+            reused: true,
+            storage_path: reusableStoragePath,
+            media_download_ms: Date.now() - itemStartedAt,
           });
-          if (updated) downloadedCount++;
-          continue;
         }
+        return;
       }
       
       const response = await fetch(media.src_url, {
@@ -149,22 +169,63 @@ supabase: any, tweetId: string, dryRun: boolean) {
 
       if (updated) {
         downloadedCount++;
+        await insertMediaDownloadEvent(supabase, media, 'completed', null, {
+          reused: false,
+          storage_path: storagePath,
+          file_size: fileSize,
+          mime_type: contentType,
+          media_download_ms: Date.now() - itemStartedAt,
+        });
       } else {
         await supabase.storage.from('temp-media').remove([storagePath]);
       }
     } catch (error) {
       console.error(JSON.stringify({ function: 'media-processor', action: 'download_fail', src_url: media.src_url, error: (error as Error).message }));
       // Surface to pipeline_events so monitoring can see media download failures.
-      await insertMediaDownloadEvent(supabase, media, 'failed', (error as Error).message, {});
+      await insertMediaDownloadEvent(supabase, media, 'failed', (error as Error).message, {
+        media_download_ms: Date.now() - itemStartedAt,
+      });
       failedCount++;
     }
-  }
+  });
 
-  console.log(JSON.stringify({ function: 'media-processor', action: 'download_complete', downloaded: downloadedCount, failed: failedCount }));
+  const downloadMs = Date.now() - startedAt;
+  console.log(JSON.stringify({
+    function: 'media-processor',
+    action: 'download_complete',
+    downloaded: downloadedCount,
+    reused: reusedCount,
+    failed: failedCount,
+    download_ms: downloadMs,
+  }));
 
-  return new Response(JSON.stringify({ success: true, downloaded: downloadedCount, failed: failedCount, total: mediaItems.length }), {
+  return new Response(JSON.stringify({
+    success: true,
+    downloaded: downloadedCount,
+    reused: reusedCount,
+    failed: failedCount,
+    total: mediaItems.length,
+    media_items_total: mediaItems.length,
+    media_downloaded: downloadedCount,
+    media_reused: reusedCount,
+    media_failed: failedCount,
+    media_download_ms: downloadMs,
+  }), {
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
+}
+
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.max(1, Math.min(limit, items.length));
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex++;
+      results[index] = await fn(items[index], index);
+    }
+  }));
+  return results;
 }
 
 async function insertMediaDownloadEvent(// deno-lint-ignore no-explicit-any

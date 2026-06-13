@@ -1,7 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Activity, AlertTriangle, Eye, RefreshCw, Loader2, Settings, Wrench, Play, RotateCcw, Clock } from 'lucide-react';
-import type { PipelineHealth, QueueBreakdown, XLocalUsage } from '@/hooks/useDashboardData';
+import type { PipelineHealth, QueueBreakdown, SystemPerformanceSummary, XLocalUsage } from '@/hooks/useDashboardData';
 import { useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -17,9 +17,10 @@ interface Props {
   health: PipelineHealth;
   queue: QueueBreakdown;
   xUsage: XLocalUsage;
+  systemPerformance?: SystemPerformanceSummary;
 }
 
-export function DashboardHealth({ health, queue, xUsage }: Props) {
+export function DashboardHealth({ health, queue, xUsage, systemPerformance }: Props) {
   const { toast } = useToast();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -55,6 +56,16 @@ export function DashboardHealth({ health, queue, xUsage }: Props) {
           });
           if (error) throw error;
           toast({ title: 'Stale X rows closed', description: 'No retry or X API call was made.' });
+          invalidate();
+          break;
+        }
+        case 'media-cleanup-dry-run': {
+          const { data, error } = await supabase.functions.invoke('admin-actions', {
+            body: { action: 'dry_run_old_media_cleanup', days_old: 1 },
+          });
+          if (error) throw error;
+          const wouldDelete = data?.result?.would_delete ?? 0;
+          toast({ title: 'Media cleanup dry run complete', description: `${wouldDelete} old media object(s) are currently safe to clean.` });
           invalidate();
           break;
         }
@@ -115,6 +126,15 @@ export function DashboardHealth({ health, queue, xUsage }: Props) {
             <p className="text-xs text-muted-foreground">Last reconcile</p>
             <p className="font-semibold text-glass-foreground">
               {health.lastReconcileAt ? new Date(health.lastReconcileAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Not recorded'}
+            </p>
+          </div>
+          <div className="col-span-2 rounded-md border border-border/50 p-2">
+            <p className="text-xs text-muted-foreground">Worker dispatch</p>
+            <p className="font-semibold text-glass-foreground">
+              {systemPerformance?.resources.workerDispatchMode ?? 'event-driven + cron fallback'}
+            </p>
+            <p className={systemPerformance?.resources.workerCadenceWarning ? 'text-xs text-warning' : 'text-xs text-muted-foreground'}>
+              Cron fallback: {systemPerformance?.resources.workerCadenceSeconds ? `${systemPerformance.resources.workerCadenceSeconds}s` : 'unknown'}
             </p>
           </div>
         </CardContent>
@@ -202,6 +222,11 @@ export function DashboardHealth({ health, queue, xUsage }: Props) {
                   </AlertDialogFooter>
                 </AlertDialogContent>
               </AlertDialog>
+
+              <Button variant="outline" className="justify-start" disabled={actionLoading === 'media-cleanup-dry-run'} onClick={() => handleAction('media-cleanup-dry-run')}>
+                {actionLoading === 'media-cleanup-dry-run' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Clock className="mr-2 h-4 w-4" />}
+                Dry-run media cleanup
+              </Button>
 
               <AlertDialog>
                 <AlertDialogTrigger asChild>

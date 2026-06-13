@@ -13,6 +13,7 @@ function clean(value: unknown): string | null {
 export function duplicateBlockTarget(post: DuplicateGateFields | null | undefined): string | null {
   if (!post) return null;
   const explicitTarget = clean(post.dup_of_tweet_id);
+  if (post.dedupe_status === 'coverage_gap' || post.dedupe_status === 'uncertain' || post.dedupe_status === 'related_new_info') return null;
   if (explicitTarget) return explicitTarget;
   return post.dedupe_status === 'duplicate' ? 'duplicate' : null;
 }

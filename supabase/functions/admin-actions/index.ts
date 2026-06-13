@@ -16,6 +16,7 @@ import {
 import { duplicateXSkipReason } from "../_shared/duplicateGuard.ts";
 import {
   SCORING_POLICY_VERSION,
+  buildScoringPolicyEventMeta,
   normalizeScoringPolicy,
   runScoringPolicy,
   type AudienceClass,
@@ -1079,20 +1080,92 @@ async function recordScoreFeedback(supabase: any, body: Record<string, unknown>)
   return { ok: true, tweet_id: tweetId, feedback, polarity: item.polarity };
 }
 
+type IgnoreMonitoringItemResult = {
+  ok: boolean;
+  tweet_id: string;
+  ignored: boolean;
+  closed?: {
+    x_deliveries: number;
+    deliveries: number;
+    jobs: number;
+  };
+  error?: string;
+};
+
+function normalizeMonitoringIgnoreReason(body: Record<string, unknown>): string {
+  const reason = typeof body.reason === 'string' && body.reason.trim() ? body.reason.trim().slice(0, 240) : 'manual_ignore';
+  return reason;
+}
+
 // deno-lint-ignore no-explicit-any
-async function ignoreMonitoringItem(supabase: any, body: Record<string, unknown>) {
-  const tweetId = typeof body.tweet_id === 'string' ? body.tweet_id.trim() : '';
-  const reason = typeof body.reason === 'string' && body.reason.trim()
-    ? body.reason.trim().slice(0, 240)
-    : 'manual_ignore';
-  if (!tweetId) return { ok: false, error: 'tweet_id is required' };
+async function closeJobsForIgnoredTweet(supabase: any, tweetId: string, reason: string, now: string): Promise<{ count: number; rows: Array<Record<string, unknown>>; error?: string }> {
+  const values = tweetReferenceVariants(tweetId);
+  const numericValues = values.filter((value) => /^\d{5,}$/.test(value));
+  const seen = new Set<string>();
+  const rows: Array<Record<string, unknown>> = [];
+  const patch = {
+    status: 'completed',
+    completed_at: now,
+    locked_at: null,
+    locked_by: null,
+    lease_expires_at: null,
+    last_error: null,
+    result_meta: { admin_ignored: true, reason },
+  };
+
+  const collect = (data: Array<Record<string, unknown>> | null | undefined) => {
+    for (const row of data ?? []) {
+      const id = String(row.id ?? '');
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      rows.push(row);
+    }
+  };
+
+  const closeByPayloadField = async (field: string, value: string) => {
+    const { data, error } = await supabase
+      .from('jobs')
+      .update(patch)
+      .filter(`payload->>${field}`, 'eq', value)
+      .in('status', ['pending', 'running', 'failed'])
+      .select('id, type');
+    if (error) return error.message as string;
+    collect(data as Array<Record<string, unknown>>);
+    return null;
+  };
+
+  for (const value of values) {
+    for (const field of ['tweet_id', 'target_tweet_id', 'post_id', 'url', 'src_url']) {
+      const error = await closeByPayloadField(field, value);
+      if (error) return { count: rows.length, rows, error };
+    }
+  }
+
+  for (const value of [...new Set([...numericValues, tweetId].filter((item) => typeof item === 'string' && item.length >= 8))]) {
+    const { data, error } = await supabase
+      .from('jobs')
+      .update(patch)
+      .ilike('idempotency_key', `%${value.replaceAll('%', '\\%').replaceAll('_', '\\_')}%`)
+      .in('status', ['pending', 'running', 'failed'])
+      .select('id, type');
+    if (error) return { count: rows.length, rows, error: error.message };
+    collect(data as Array<Record<string, unknown>>);
+  }
+
+  return { count: rows.length, rows };
+}
+
+// deno-lint-ignore no-explicit-any
+async function ignoreMonitoringItemInternal(supabase: any, tweetIdRaw: unknown, reason: string): Promise<IgnoreMonitoringItemResult> {
+  const tweetId = typeof tweetIdRaw === 'string' ? tweetIdRaw.trim() : '';
+  if (!tweetId) return { ok: false, tweet_id: String(tweetIdRaw ?? ''), ignored: false, error: 'tweet_id is required' };
 
   const { data: post } = await supabase
     .from('posts')
     .select('tweet_id, dedupe_status')
     .eq('tweet_id', tweetId)
     .maybeSingle();
-  if (!post) return { ok: false, error: `Post not found: ${tweetId}` };
+  if (!post) return { ok: false, tweet_id: tweetId, ignored: false, error: `Post not found: ${tweetId}` };
 
   const now = new Date().toISOString();
   const postPatch: Record<string, unknown> = {
@@ -1109,7 +1182,7 @@ async function ignoreMonitoringItem(supabase: any, body: Record<string, unknown>
   }
 
   const { error: postErr } = await supabase.from('posts').update(postPatch).eq('tweet_id', tweetId);
-  if (postErr) return { ok: false, error: postErr.message };
+  if (postErr) return { ok: false, tweet_id: tweetId, ignored: false, error: postErr.message };
 
   const { data: xRows, error: xErr } = await supabase
     .from('x_deliveries')
@@ -1122,36 +1195,23 @@ async function ignoreMonitoringItem(supabase: any, body: Record<string, unknown>
     .eq('post_id', tweetId)
     .in('status', ['pending', 'failed'])
     .select('id');
-  if (xErr) return { ok: false, error: xErr.message };
+  if (xErr) return { ok: false, tweet_id: tweetId, ignored: false, error: xErr.message };
 
   const { data: deliveryRows, error: deliveryErr } = await supabase
     .from('deliveries')
     .update({
       status: 'skipped',
-      last_error: `admin_ignored:${reason}`,
+      last_error: null,
       last_attempt_at: now,
     })
     .eq('subject_type', 'post')
     .eq('subject_id', tweetId)
     .neq('status', 'posted')
     .select('id');
-  if (deliveryErr) return { ok: false, error: deliveryErr.message };
+  if (deliveryErr) return { ok: false, tweet_id: tweetId, ignored: false, error: deliveryErr.message };
 
-  const { data: jobRows, error: jobErr } = await supabase
-    .from('jobs')
-    .update({
-      status: 'completed',
-      completed_at: now,
-      locked_at: null,
-      locked_by: null,
-      lease_expires_at: null,
-      last_error: null,
-      result_meta: { admin_ignored: true, reason },
-    })
-    .filter('payload->>tweet_id', 'eq', tweetId)
-    .in('status', ['pending', 'running'])
-    .select('id, type');
-  if (jobErr) return { ok: false, error: jobErr.message };
+  const jobClose = await closeJobsForIgnoredTweet(supabase, tweetId, reason, now);
+  if (jobClose.error) return { ok: false, tweet_id: tweetId, ignored: false, error: jobClose.error };
 
   await updateLatestPostEnrichment(supabase, tweetId, {
     status: 'skipped',
@@ -1164,7 +1224,7 @@ async function ignoreMonitoringItem(supabase: any, body: Record<string, unknown>
     reason,
     x_rows_closed: xRows?.length ?? 0,
     delivery_rows_closed: deliveryRows?.length ?? 0,
-    jobs_closed: jobRows?.length ?? 0,
+    jobs_closed: jobClose.count,
   });
 
   return {
@@ -1174,9 +1234,55 @@ async function ignoreMonitoringItem(supabase: any, body: Record<string, unknown>
     closed: {
       x_deliveries: xRows?.length ?? 0,
       deliveries: deliveryRows?.length ?? 0,
-      jobs: jobRows?.length ?? 0,
+      jobs: jobClose.count,
     },
   };
+}
+
+async function ignoreMonitoringItems(supabase: any, tweetIds: string[], reason: string) {
+  const uniqueTweetIds = [...new Set(tweetIds.map((id) => (typeof id === 'string' ? id.trim() : '')).filter(Boolean))];
+  if (!uniqueTweetIds.length) return { ok: false, error: 'tweet_ids array is required' };
+
+  const results: IgnoreMonitoringItemResult[] = [];
+  let totalX = 0;
+  let totalDeliveries = 0;
+  let totalJobs = 0;
+
+  for (const tweetId of uniqueTweetIds) {
+    const result = await ignoreMonitoringItemInternal(supabase, tweetId, reason);
+    results.push(result);
+    if (result.ok && result.closed) {
+      totalX += result.closed.x_deliveries;
+      totalDeliveries += result.closed.deliveries;
+      totalJobs += result.closed.jobs;
+    }
+  }
+
+  const successful = results.filter((r) => r.ok);
+  const missing = uniqueTweetIds.filter((id) => !results.find((r) => r.tweet_id === id)?.ok);
+  return {
+    ok: successful.length > 0,
+    requested: uniqueTweetIds.length,
+    found: successful.length,
+    ignored: successful.length,
+    missing,
+    closed: {
+      x_deliveries: totalX,
+      deliveries: totalDeliveries,
+      jobs: totalJobs,
+    },
+    results,
+  };
+}
+
+// deno-lint-ignore no-explicit-any
+async function ignoreMonitoringItem(supabase: any, body: Record<string, unknown>) {
+  const reason = normalizeMonitoringIgnoreReason(body);
+  const tweetId = typeof body.tweet_id === 'string' ? body.tweet_id.trim() : '';
+  if (!tweetId) return { ok: false, error: 'tweet_id is required' };
+  const result = await ignoreMonitoringItemInternal(supabase, tweetId, reason);
+  if (!result.ok) return result;
+  return result;
 }
 
 type MonitoringFilter =
@@ -1187,6 +1293,12 @@ type MonitoringFilter =
   | 'translation_queue'
   | 'below_threshold'
   | 'manual_review'
+  | 'v2_would_post'
+  | 'v2_would_skip'
+  | 'v1_post_v2_skip'
+  | 'v1_skip_v2_post'
+  | 'v2_off_topic'
+  | 'v2_needs_review'
   | 'duplicates'
   | 'coverage_gap'
   | 'possible_duplicate'
@@ -1310,6 +1422,8 @@ function normalizeMonitoringFilter(v: unknown): MonitoringFilter {
   const allowed: MonitoringFilter[] = [
     'all', 'needs_attention', 'failed_stuck', 'needs_score', 'translation_queue',
     'below_threshold', 'manual_review', 'duplicates', 'coverage_gap',
+    'v2_would_post', 'v2_would_skip', 'v1_post_v2_skip', 'v1_skip_v2_post',
+    'v2_off_topic', 'v2_needs_review',
     'possible_duplicate', 'duplicate_anomalies', 'ready_to_deliver',
     'telegram_pending', 'x_pending', 'x_failed', 'delivered_24h', 'hydration',
   ];
@@ -1351,6 +1465,39 @@ function getPayloadTweetId(payload: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+function tweetReferenceVariants(value: unknown): string[] {
+  if (typeof value !== 'string' || !value.trim()) return [];
+  const raw = value.trim();
+  const variants = new Set<string>([raw]);
+  const statusMatch = raw.match(/(?:status|statuses)\/(\d{5,})/);
+  const numeric = statusMatch?.[1] ?? (/^\d{5,}$/.test(raw) ? raw : null);
+  if (numeric) {
+    variants.add(numeric);
+    variants.add(`https://twitter.com/i/status/${numeric}`);
+    variants.add(`https://twitter.com/status/${numeric}`);
+    variants.add(`https://x.com/i/status/${numeric}`);
+    variants.add(`https://x.com/status/${numeric}`);
+  }
+  return [...variants];
+}
+
+function jobReferenceValues(row: Record<string, unknown>): string[] {
+  const values = new Set<string>();
+  const payload = row.payload && typeof row.payload === 'object' ? row.payload as Record<string, unknown> : {};
+  for (const key of ['tweet_id', 'target_tweet_id', 'post_id', 'url', 'src_url']) {
+    const value = payload[key];
+    if (typeof value === 'string' && value.trim()) {
+      tweetReferenceVariants(value).forEach((variant) => values.add(variant));
+    }
+  }
+  const idempotency = typeof row.idempotency_key === 'string' ? row.idempotency_key : '';
+  const statusMatch = idempotency.match(/(?:status|statuses)\/(\d{5,})/);
+  const numericMatch = idempotency.match(/(^|[:/])(\d{10,})(?=[:/]|$)/);
+  const numeric = statusMatch?.[1] ?? numericMatch?.[2] ?? null;
+  if (numeric) tweetReferenceVariants(numeric).forEach((variant) => values.add(variant));
+  return [...values];
+}
+
 function isActiveStatus(status: unknown): boolean {
   return status === 'pending' || status === 'running' || status === 'queued';
 }
@@ -1388,6 +1535,57 @@ function isBelowThreshold(post: Record<string, unknown>, threshold: number): boo
     || reason.startsWith('feedback_reduce:')
     || reason.startsWith('manual_score_skip:')
     || (post.delivery_decision === 'skip' && score != null && score < threshold);
+}
+
+function monitoringScoringV2Snapshot(post: Record<string, unknown>): Record<string, unknown> | null {
+  const breakdown = post.score_breakdown && typeof post.score_breakdown === 'object'
+    ? post.score_breakdown as Record<string, unknown>
+    : {};
+  const fromBreakdown = breakdown.scoring_v2 && typeof breakdown.scoring_v2 === 'object'
+    ? breakdown.scoring_v2 as Record<string, unknown>
+    : null;
+  if (fromBreakdown) return fromBreakdown;
+  if (!post.scoring_version && !post.audience_class && post.audience_confidence == null) return null;
+  return {
+    version: post.scoring_version ?? null,
+    mode: post.score_review_status === 'shadow' ? 'shadow' : null,
+    profile_id: post.scoring_profile_id ?? null,
+    audience_class: post.audience_class ?? null,
+    audience_confidence: post.audience_confidence ?? null,
+    audience_reason: post.audience_reason ?? null,
+    global_exception_class: post.global_exception_class ?? null,
+    final_score: post.final_score ?? null,
+    decision: post.delivery_decision ?? null,
+    review_status: post.score_review_status ?? null,
+  };
+}
+
+function monitoringScoringV2Decision(post: Record<string, unknown>): string | null {
+  const snapshot = monitoringScoringV2Snapshot(post);
+  const decision = snapshot?.decision;
+  return decision === 'deliver' || decision === 'skip' ? decision : null;
+}
+
+function matchesMonitoringScoringV2Filter(entry: Record<string, unknown>, filter: MonitoringFilter): boolean {
+  const snapshot = monitoringScoringV2Snapshot(entry);
+  if (!snapshot) return false;
+  const decision = monitoringScoringV2Decision(entry);
+  switch (filter) {
+    case 'v2_would_post':
+      return decision === 'deliver';
+    case 'v2_would_skip':
+      return decision === 'skip';
+    case 'v1_post_v2_skip':
+      return entry.delivery_decision === 'deliver' && decision === 'skip';
+    case 'v1_skip_v2_post':
+      return entry.delivery_decision === 'skip' && decision === 'deliver';
+    case 'v2_off_topic':
+      return snapshot.audience_class === 'off_topic';
+    case 'v2_needs_review':
+      return snapshot.review_status === 'needs_review';
+    default:
+      return false;
+  }
 }
 
 function deriveMonitoringState(
@@ -1619,12 +1817,15 @@ function deriveMonitoringState(
 async function getTweetIdsFromFailedJobs(supabase: any, limit: number, offset: number): Promise<string[]> {
   const { data } = await supabase
     .from('jobs')
-    .select('payload, created_at')
+    .select('id, type, status, payload, result_meta, idempotency_key, created_at')
     .eq('status', 'failed')
     .order('created_at', { ascending: false })
     .range(offset, offset + limit * 3 - 1);
+  const jobRows = (data ?? []) as Array<Record<string, unknown>>;
+  const postByRef = await loadPostsByJobReferences(supabase, jobRows);
   const ids: string[] = [];
-  for (const row of data ?? []) {
+  for (const row of jobRows) {
+    if (!isFailedJobActionable(row, postForJob(row, postByRef))) continue;
     const tid = getPayloadTweetId(row.payload);
     if (tid && !ids.includes(tid)) ids.push(tid);
     if (ids.length >= limit) break;
@@ -2107,6 +2308,13 @@ function matchesMonitoringFilter(entry: Record<string, unknown>, filter: Monitor
       return state.code === 'below_threshold';
     case 'manual_review':
       return state.code === 'manual_review';
+    case 'v2_would_post':
+    case 'v2_would_skip':
+    case 'v1_post_v2_skip':
+    case 'v1_skip_v2_post':
+    case 'v2_off_topic':
+    case 'v2_needs_review':
+      return matchesMonitoringScoringV2Filter(entry, filter);
     case 'duplicates':
       return !!entry.dup_of_tweet_id;
     case 'coverage_gap':
@@ -2186,6 +2394,14 @@ async function getMonitoringEntries(supabase: any, body: Record<string, unknown>
         case 'below_threshold':
           q = q.eq('delivery_decision', 'skip');
           break;
+        case 'v2_would_post':
+        case 'v2_would_skip':
+        case 'v1_post_v2_skip':
+        case 'v1_skip_v2_post':
+        case 'v2_off_topic':
+        case 'v2_needs_review':
+          q = q.not('scoring_version', 'is', null);
+          break;
         case 'ready_to_deliver':
           q = q.eq('delivery_decision', 'deliver').not('text_translated', 'is', null).or('is_truncated.eq.false,hydrated_at.not.is.null');
           break;
@@ -2246,6 +2462,55 @@ function num(value: unknown, fallback = 0): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
+function isTerminalSkippedPost(post: Record<string, unknown> | null | undefined): boolean {
+  if (!post) return false;
+  return post.delivery_decision === 'skip' && post.score_review_status !== 'needs_review';
+}
+
+function isFailedJobActionable(job: Record<string, unknown>, post: Record<string, unknown> | null | undefined): boolean {
+  if (job.status !== 'failed') return false;
+  const meta = job.result_meta && typeof job.result_meta === 'object' ? job.result_meta as Record<string, unknown> : {};
+  if (meta.admin_ignored === true) return false;
+  if (isTerminalSkippedPost(post)) return false;
+  return true;
+}
+
+function postForJob(job: Record<string, unknown>, postByRef: Map<string, Record<string, unknown>>): Record<string, unknown> | null {
+  for (const value of jobReferenceValues(job)) {
+    const post = postByRef.get(value);
+    if (post) return post;
+  }
+  return null;
+}
+
+// deno-lint-ignore no-explicit-any
+async function loadPostsByJobReferences(supabase: any, jobs: Array<Record<string, unknown>>): Promise<Map<string, Record<string, unknown>>> {
+  const refs = [...new Set(jobs.flatMap(jobReferenceValues))].slice(0, 10000);
+  const postByRef = new Map<string, Record<string, unknown>>();
+  if (refs.length === 0) return postByRef;
+
+  const columns = 'tweet_id, url, delivery_decision, decision_reason, score_review_status, feedback_locked, dedupe_status, dup_of_tweet_id';
+  const [{ data: byTweet, error: tweetError }, { data: byUrl, error: urlError }] = await Promise.all([
+    supabase.from('posts').select(columns).in('tweet_id', refs),
+    supabase.from('posts').select(columns).in('url', refs),
+  ]);
+  if (tweetError) throw tweetError;
+  if (urlError) throw urlError;
+
+  const addPost = (post: Record<string, unknown>) => {
+    for (const key of ['tweet_id', 'url']) {
+      const value = post[key];
+      if (typeof value !== 'string' || !value.trim()) continue;
+      for (const variant of tweetReferenceVariants(value)) {
+        if (!postByRef.has(variant)) postByRef.set(variant, post);
+      }
+    }
+  };
+  for (const post of (byTweet ?? []) as Array<Record<string, unknown>>) addPost(post);
+  for (const post of (byUrl ?? []) as Array<Record<string, unknown>>) addPost(post);
+  return postByRef;
+}
+
 function isMissingSchemaError(error: unknown): boolean {
   const message = String((error as { message?: unknown; details?: unknown; code?: unknown })?.message ?? error ?? '');
   const details = String((error as { details?: unknown })?.details ?? '');
@@ -2293,12 +2558,38 @@ async function loadDashboardPosts(supabase: any, since: string, dedupeAvailable:
   return (data ?? []) as Record<string, unknown>[];
 }
 
+function queueLaneForType(type: string): 'fast' | 'model' | 'delivery' {
+  if (['translate', 'enrich'].includes(type)) return 'model';
+  if (type === 'deliver') return 'delivery';
+  return 'fast';
+}
+
+function summarizeLanePressure(byType: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  const lanes = new Map<string, { lane: string; pending: number; running: number; failed: number; queueWaitP95: Array<number | null> }>();
+  for (const row of byType) {
+    const lane = typeof row.lane === 'string' ? row.lane : queueLaneForType(String(row.type ?? 'unknown'));
+    if (!lanes.has(lane)) lanes.set(lane, { lane, pending: 0, running: 0, failed: 0, queueWaitP95: [] });
+    const item = lanes.get(lane)!;
+    item.pending += num(row.pending);
+    item.running += num(row.running);
+    item.failed += num(row.failed);
+    item.queueWaitP95.push(typeof row.queue_wait_p95_seconds === 'number' ? row.queue_wait_p95_seconds : null);
+  }
+  return [...lanes.values()].map((lane) => ({
+    lane: lane.lane,
+    pending: lane.pending,
+    running: lane.running,
+    failed: lane.failed,
+    max_queue_wait_p95_seconds: Math.max(0, ...lane.queueWaitP95.filter((value): value is number => typeof value === 'number' && Number.isFinite(value))),
+  }));
+}
+
 // deno-lint-ignore no-explicit-any
 async function loadDashboardQueueBreakdown(supabase: any, since: string, staleCutoff: string) {
   const [{ data: jobs, error }, { data: activeJobs, error: activeError }] = await Promise.all([
     supabase
       .from('jobs')
-      .select('type, status, created_at, locked_at, lease_expires_at')
+      .select('type, status, created_at, started_at, locked_at, completed_at, lease_expires_at, payload, result_meta, idempotency_key')
       .gte('created_at', since)
       .order('created_at', { ascending: false })
       .limit(5000),
@@ -2314,19 +2605,55 @@ async function loadDashboardQueueBreakdown(supabase: any, since: string, staleCu
 
   const rows = (jobs ?? []) as Array<Record<string, unknown>>;
   const activeRows = (activeJobs ?? []) as Array<Record<string, unknown>>;
-  const byType = new Map<string, { type: string; pending: number; running: number; failed: number }>();
+  const postByRef = await loadPostsByJobReferences(supabase, rows.filter((row) => row.status === 'failed'));
+  const byType = new Map<string, {
+    type: string;
+    lane: string;
+    pending: number;
+    running: number;
+    failed: number;
+    resolvedFailed: number;
+    queueWaits: number[];
+    runs: number[];
+  }>();
   const ensure = (type: unknown) => {
     const key = typeof type === 'string' && type ? type : 'unknown';
-    if (!byType.has(key)) byType.set(key, { type: key, pending: 0, running: 0, failed: 0 });
+    if (!byType.has(key)) byType.set(key, {
+      type: key,
+      lane: queueLaneForType(key),
+      pending: 0,
+      running: 0,
+      failed: 0,
+      resolvedFailed: 0,
+      queueWaits: [],
+      runs: [],
+    });
     return byType.get(key)!;
   };
 
   let failed24h = 0;
+  let resolvedFailed24h = 0;
   for (const row of rows) {
     const item = ensure(row.type);
-    if (row.status === 'failed') {
+    const meta = row.result_meta && typeof row.result_meta === 'object' ? row.result_meta as Record<string, unknown> : {};
+    const queueWaitMs = typeof meta.queue_wait_ms === 'number'
+      ? meta.queue_wait_ms
+      : durationSeconds(row.created_at, row.started_at ?? row.locked_at) != null
+        ? Number(durationSeconds(row.created_at, row.started_at ?? row.locked_at)) * 1000
+        : null;
+    const runMs = typeof meta.worker_run_ms === 'number'
+      ? meta.worker_run_ms
+      : durationSeconds(row.started_at ?? row.locked_at, row.completed_at) != null
+        ? Number(durationSeconds(row.started_at ?? row.locked_at, row.completed_at)) * 1000
+        : null;
+    if (queueWaitMs != null && Number.isFinite(queueWaitMs)) item.queueWaits.push(queueWaitMs / 1000);
+    if (runMs != null && Number.isFinite(runMs)) item.runs.push(runMs / 1000);
+    if (row.status === 'failed' && isFailedJobActionable(row, postForJob(row, postByRef))) {
       item.failed += 1;
       failed24h += 1;
+    } else if (row.status === 'failed') {
+      item.resolvedFailed += 1;
+      resolvedFailed24h += 1;
     }
   }
 
@@ -2357,9 +2684,28 @@ async function loadDashboardQueueBreakdown(supabase: any, since: string, staleCu
     pending,
     running,
     failed_24h: failed24h,
+    resolved_failed_24h: resolvedFailed24h,
     stale_running: staleRunning,
     oldest_pending_age_seconds: oldestPendingAgeSeconds,
-    by_type: [...byType.values()].sort((a, b) => (b.pending + b.running + b.failed) - (a.pending + a.running + a.failed)).slice(0, 8),
+    by_type: [...byType.values()]
+      .map((item) => {
+        const queueSummary = summarizeDurations(item.queueWaits);
+        const runSummary = summarizeDurations(item.runs);
+        return {
+          type: item.type,
+          lane: item.lane,
+          pending: item.pending,
+          running: item.running,
+          failed: item.failed,
+          resolved_failed: item.resolvedFailed,
+          queue_wait_p50_seconds: queueSummary.p50_seconds,
+          queue_wait_p95_seconds: queueSummary.p95_seconds,
+          run_p50_seconds: runSummary.p50_seconds,
+          run_p95_seconds: runSummary.p95_seconds,
+        };
+      })
+      .sort((a, b) => (b.pending + b.running + b.failed) - (a.pending + a.running + a.failed))
+      .slice(0, 8),
   };
 }
 
@@ -2448,7 +2794,7 @@ async function loadDashboardActivity(supabase: any) {
       .limit(8),
     supabase
       .from('jobs')
-      .select('id, type, status, created_at, last_error, payload')
+      .select('id, type, status, created_at, last_error, payload, result_meta, idempotency_key')
       .in('status', ['failed', 'pending', 'running'])
       .order('created_at', { ascending: false })
       .limit(8),
@@ -2471,6 +2817,8 @@ async function loadDashboardActivity(supabase: any) {
   }
 
   const items: Array<Record<string, unknown>> = [];
+  const jobRows = (jobsRes.data ?? []) as Array<Record<string, unknown>>;
+  const postByJobRef = await loadPostsByJobReferences(supabase, jobRows.filter((row) => row.status === 'failed'));
   for (const post of postsRes.data ?? []) {
     const account = post.accounts as { handle?: string } | null;
     const tweetId = String(post.tweet_id);
@@ -2484,7 +2832,8 @@ async function loadDashboardActivity(supabase: any) {
       route: `/monitoring?search=${encodeURIComponent(tweetId)}`,
     });
   }
-  for (const job of jobsRes.data ?? []) {
+  for (const job of jobRows) {
+    if (job.status === 'failed' && !isFailedJobActionable(job, postForJob(job, postByJobRef))) continue;
     const tweetId = getPayloadTweetId(job.payload);
     items.push({
       id: `job-${job.id}`,
@@ -2526,6 +2875,245 @@ async function loadDashboardActivity(supabase: any) {
     .slice(0, 16);
 }
 
+function toTimeMs(value: unknown): number | null {
+  if (typeof value !== 'string' || value.length === 0) return null;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : null;
+}
+
+function durationSeconds(start: unknown, end: unknown): number | null {
+  const startMs = toTimeMs(start);
+  const endMs = toTimeMs(end);
+  if (startMs == null || endMs == null || endMs < startMs) return null;
+  return Math.round((endMs - startMs) / 100) / 10;
+}
+
+function summarizeDurations(values: Array<number | null>): Record<string, unknown> {
+  const sorted = values
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+    .sort((a, b) => a - b);
+  if (sorted.length === 0) {
+    return { count: 0, avg_seconds: null, p50_seconds: null, p90_seconds: null, p95_seconds: null };
+  }
+  const percentile = (p: number) => sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * p))];
+  const avg = sorted.reduce((sum, value) => sum + value, 0) / sorted.length;
+  return {
+    count: sorted.length,
+    avg_seconds: Math.round(avg * 10) / 10,
+    p50_seconds: Math.round(percentile(0.5) * 10) / 10,
+    p90_seconds: Math.round(percentile(0.9) * 10) / 10,
+    p95_seconds: Math.round(percentile(0.95) * 10) / 10,
+  };
+}
+
+function latestTimestampBySubject(rows: Array<Record<string, unknown>>, idKey: string): Map<string, string> {
+  const latest = new Map<string, string>();
+  for (const row of rows) {
+    const id = String(row[idKey] ?? '');
+    const timestamp = String(row.posted_at ?? row.created_at ?? '');
+    if (!id || !timestamp) continue;
+    const existing = latest.get(id);
+    if (!existing || new Date(timestamp).getTime() > new Date(existing).getTime()) latest.set(id, timestamp);
+  }
+  return latest;
+}
+
+function latestEventTimestampBySubject(rows: Array<Record<string, unknown>>, idKey: string): Map<string, string> {
+  const latest = new Map<string, string>();
+  for (const row of rows) {
+    const id = String(row[idKey] ?? '');
+    const timestamp = String(row.ended_at ?? row.started_at ?? row.created_at ?? '');
+    if (!id || !timestamp) continue;
+    const existing = latest.get(id);
+    if (!existing || new Date(timestamp).getTime() > new Date(existing).getTime()) latest.set(id, timestamp);
+  }
+  return latest;
+}
+
+function estimateMonthlyRuns(schedule: unknown): number {
+  const value = String(schedule ?? '').trim();
+  if (value === '* * * * *') return 43_200;
+  if (value === '*/2 * * * *') return 21_600;
+  if (value === '*/10 * * * *') return 4_320;
+  if (/^0 \*\/6 \* \* \*$/.test(value)) return 120;
+  if (/^0 \d+ \* \* \*$/.test(value)) return 30;
+  if (/^0 \d+ \* \* [0-6]$/.test(value)) return 4;
+  return 30;
+}
+
+function cronCadenceSeconds(schedule: unknown): number | null {
+  const value = String(schedule ?? '').trim();
+  if (value === '* * * * *') return 60;
+  if (value === '*/2 * * * *') return 120;
+  if (value === '*/10 * * * *') return 600;
+  const everySeconds = value.match(/^\*\/(\d+) \* \* \* \* \*$/);
+  if (everySeconds) return Number(everySeconds[1]);
+  const everyMinutes = value.match(/^\*\/(\d+) \* \* \* \*$/);
+  if (everyMinutes) return Number(everyMinutes[1]) * 60;
+  return null;
+}
+
+function percentUsed(used: number, limit: number): number | null {
+  if (!Number.isFinite(used) || !Number.isFinite(limit) || limit <= 0) return null;
+  return Math.round((used / limit) * 1000) / 10;
+}
+
+// deno-lint-ignore no-explicit-any
+async function loadPerformanceWindow(supabase: any, windowHours: number) {
+  const since = new Date(Date.now() - windowHours * 60 * 60 * 1000).toISOString();
+  const postsRes = await supabase
+    .from('posts')
+    .select('tweet_id, created_at, dedupe_checked_at, translated_at')
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(10000);
+  if (postsRes.error && !isMissingSchemaError(postsRes.error)) throw postsRes.error;
+
+  const posts = ((postsRes.error ? [] : postsRes.data) ?? []) as Array<Record<string, unknown>>;
+  const [{ data: deliveries, error: deliveryError }, { data: xDeliveries, error: xError }, { data: scoreEvents, error: scoreError }] = await Promise.all([
+    supabase
+      .from('deliveries')
+      .select('subject_id, status, created_at, posted_at')
+      .eq('subject_type', 'post')
+      .eq('status', 'posted')
+      .gte('created_at', since)
+      .limit(10000),
+    supabase
+      .from('x_deliveries')
+      .select('post_id, status, created_at, posted_at')
+      .eq('status', 'posted')
+      .gte('created_at', since)
+      .limit(10000),
+    supabase
+      .from('pipeline_events')
+      .select('subject_id, status, created_at, started_at, ended_at')
+      .eq('subject_type', 'post')
+      .eq('step', 'score')
+      .in('status', ['completed', 'skipped'])
+      .gte('created_at', since)
+      .limit(10000),
+  ]);
+  if (deliveryError) throw deliveryError;
+  if (xError) throw xError;
+  if (scoreError) throw scoreError;
+
+  const telegramByTweet = latestTimestampBySubject((deliveries ?? []) as Array<Record<string, unknown>>, 'subject_id');
+  const xByTweet = latestTimestampBySubject((xDeliveries ?? []) as Array<Record<string, unknown>>, 'post_id');
+  const scoreByTweet = latestEventTimestampBySubject((scoreEvents ?? []) as Array<Record<string, unknown>>, 'subject_id');
+
+  const ingestToDedupe: Array<number | null> = [];
+  const ingestToScore: Array<number | null> = [];
+  const dedupeToTranslation: Array<number | null> = [];
+  const scoreToTranslation: Array<number | null> = [];
+  const ingestToTranslation: Array<number | null> = [];
+  const translationToTelegram: Array<number | null> = [];
+  const translationToX: Array<number | null> = [];
+  const telegramEndToEnd: Array<number | null> = [];
+  const xEndToEnd: Array<number | null> = [];
+
+  for (const post of posts) {
+    const tweetId = String(post.tweet_id ?? '');
+    const scoreAt = scoreByTweet.get(tweetId);
+    ingestToDedupe.push(durationSeconds(post.created_at, post.dedupe_checked_at));
+    ingestToScore.push(durationSeconds(post.created_at, scoreAt));
+    dedupeToTranslation.push(durationSeconds(post.dedupe_checked_at, post.translated_at));
+    scoreToTranslation.push(durationSeconds(scoreAt, post.translated_at));
+    ingestToTranslation.push(durationSeconds(post.created_at, post.translated_at));
+    const telegramAt = telegramByTweet.get(tweetId);
+    const xAt = xByTweet.get(tweetId);
+    translationToTelegram.push(durationSeconds(post.translated_at, telegramAt));
+    translationToX.push(durationSeconds(post.translated_at, xAt));
+    telegramEndToEnd.push(durationSeconds(post.created_at, telegramAt));
+    xEndToEnd.push(durationSeconds(post.created_at, xAt));
+  }
+
+  return {
+    window_hours: windowHours,
+    sampled_posts: posts.length,
+    stages: {
+      ingest_to_dedupe: summarizeDurations(ingestToDedupe),
+      ingest_to_score: summarizeDurations(ingestToScore),
+      dedupe_to_translation: summarizeDurations(dedupeToTranslation),
+      score_to_translation: summarizeDurations(scoreToTranslation),
+      ingest_to_translation: summarizeDurations(ingestToTranslation),
+      translation_to_telegram: summarizeDurations(translationToTelegram),
+      translation_to_x: summarizeDurations(translationToX),
+      telegram_end_to_end: summarizeDurations(telegramEndToEnd),
+      x_end_to_end: summarizeDurations(xEndToEnd),
+    },
+  };
+}
+
+function normalizeResourceUsage(raw: unknown): Record<string, unknown> {
+  const value = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+  const dbBytes = num(value.db_bytes);
+  const dbLimit = num(value.db_limit_bytes, 500_000_000);
+  const storageBytes = num(value.temp_media_bytes);
+  const storageLimit = num(value.storage_limit_bytes, 1_000_000_000);
+  const edgeLimit = num(value.edge_monthly_limit, 500_000);
+  const cronJobs = Array.isArray(value.cron_jobs) ? value.cron_jobs as Array<Record<string, unknown>> : [];
+  const projectedCronMonthly = cronJobs.reduce((sum, job) => sum + (job.active === false ? 0 : estimateMonthlyRuns(job.schedule)), 0);
+  const workerCron = cronJobs.find((job) => job.active !== false && String(job.jobname ?? '').startsWith('invoke-worker-every')) ?? null;
+  const workerCadenceSeconds = workerCron ? cronCadenceSeconds(workerCron.schedule) : null;
+
+  return {
+    available: value.available !== false,
+    error: typeof value.error === 'string' ? value.error : null,
+    db_bytes: dbBytes,
+    db_limit_bytes: dbLimit,
+    db_used_pct: percentUsed(dbBytes, dbLimit),
+    temp_media_bytes: storageBytes,
+    temp_media_objects: num(value.temp_media_objects),
+    storage_limit_bytes: storageLimit,
+    storage_used_pct: percentUsed(storageBytes, storageLimit),
+    edge_monthly_limit: edgeLimit,
+    projected_cron_invocations_monthly: projectedCronMonthly,
+    edge_cron_used_pct: percentUsed(projectedCronMonthly, edgeLimit),
+    cron_failures_24h: typeof value.cron_failures_24h === 'number' ? value.cron_failures_24h : null,
+    cron_jobs: cronJobs,
+    worker_dispatch_mode: 'event-driven + cron fallback',
+    worker_cron: workerCron,
+    worker_cadence_seconds: workerCadenceSeconds,
+    worker_cadence_warning: workerCadenceSeconds != null && workerCadenceSeconds > 60,
+    duplicate_translate_jobs_24h: num(value.duplicate_translate_jobs_24h),
+  };
+}
+
+// deno-lint-ignore no-explicit-any
+async function getSystemPerformanceSummary(supabase: any) {
+  const staleCutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const [window6h, window24h, resourceRes, queueBreakdown] = await Promise.all([
+    loadPerformanceWindow(supabase, 6),
+    loadPerformanceWindow(supabase, 24),
+    supabase.rpc('get_system_resource_usage'),
+    loadDashboardQueueBreakdown(supabase, since24h, staleCutoff),
+  ]);
+  const byType = Array.isArray(queueBreakdown.by_type) ? queueBreakdown.by_type as Array<Record<string, unknown>> : [];
+
+  return {
+    success: true,
+    generated_at: new Date().toISOString(),
+    windows: {
+      '6h': window6h,
+      '24h': window24h,
+    },
+    queue: {
+      pending: queueBreakdown.pending,
+      running: queueBreakdown.running,
+      stale_running: queueBreakdown.stale_running,
+      failed_24h: queueBreakdown.failed_24h,
+      oldest_pending_age_seconds: queueBreakdown.oldest_pending_age_seconds,
+      scheduler_wait_seconds: queueBreakdown.oldest_pending_age_seconds,
+      by_type: byType,
+      lane_pressure: summarizeLanePressure(byType),
+    },
+    resources: resourceRes.error && isMissingSchemaError(resourceRes.error)
+      ? normalizeResourceUsage({ available: false, error: resourceRes.error.message })
+      : normalizeResourceUsage(resourceRes.data),
+  };
+}
+
 // deno-lint-ignore no-explicit-any
 async function getEnhancedDashboardSummary(supabase: any) {
   const { data: base, error } = await supabase.rpc('get_dashboard_summary');
@@ -2539,13 +3127,17 @@ async function getEnhancedDashboardSummary(supabase: any) {
   const staleCutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
 
   const dedupeAvailable = await hasDedupePostColumns(supabase);
-  const [posts, deliveriesRes, xDeliveriesRes, queueBreakdown, xLocalUsage, activity] = await Promise.all([
+  const [posts, deliveriesRes, xDeliveriesRes, queueBreakdown, xLocalUsage, activity, systemPerformance] = await Promise.all([
     loadDashboardPosts(supabase, since, dedupeAvailable),
     supabase.from('deliveries').select('subject_id, status, posted_at, created_at').eq('subject_type', 'post').gte('created_at', since).limit(10000),
     supabase.from('x_deliveries').select('post_id, status, posted_at, created_at').gte('created_at', since).order('created_at', { ascending: false }).limit(10000),
     loadDashboardQueueBreakdown(supabase, since, staleCutoff),
     loadDashboardXLocalUsage(supabase, dashboard, since),
     loadDashboardActivity(supabase),
+    getSystemPerformanceSummary(supabase).catch((error) => ({
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    })),
   ]);
   if (deliveriesRes.error) throw deliveriesRes.error;
   if (xDeliveriesRes.error) throw xDeliveriesRes.error;
@@ -2570,7 +3162,11 @@ async function getEnhancedDashboardSummary(supabase: any) {
     const hasScore = typeof score === 'number';
     const hasTranslation = typeof post.text_translated === 'string' && post.text_translated.trim() !== '' && post.text_translated !== post.text_original;
     const dedupeStatus = typeof post.dedupe_status === 'string' ? post.dedupe_status : null;
-    const duplicate = Boolean(post.dup_of_tweet_id) || dedupeStatus === 'duplicate';
+    const duplicate = dedupeStatus === 'duplicate'
+      || (
+        Boolean(post.dup_of_tweet_id)
+        && !['coverage_gap', 'uncertain', 'related_new_info'].includes(dedupeStatus ?? '')
+      );
     if (hasScore) scored += 1;
     else if (!duplicate) needsScore += 1;
     if (hasTranslation) translated += 1;
@@ -2637,6 +3233,7 @@ async function getEnhancedDashboardSummary(supabase: any) {
     },
     queue_breakdown: queueBreakdown,
     x_local_usage: xLocalUsage,
+    system_performance: systemPerformance,
     activity,
   };
 }
@@ -2951,12 +3548,23 @@ async function getXPostingDiagnostics(supabase: any, body: Record<string, unknow
 
   let q = supabase
     .from('posts')
-    .select('tweet_id, text_original, text_translated, created_at, url, author_handle, has_media, delivery_decision, decision_reason, final_score, importance_score, dup_of_tweet_id, dedupe_status, is_truncated, hydrated_at, enrich_status, final_x_text')
+    .select('tweet_id, text_original, text_translated, created_at, url, author_handle, has_media, delivery_decision, decision_reason, final_score, importance_score, dup_of_tweet_id, dedupe_status, dedupe_reason, is_truncated, hydrated_at, enrich_status, final_x_text')
     .order('created_at', { ascending: false })
     .limit(limit);
   if (tweetId) q = q.eq('tweet_id', tweetId).limit(1);
   const { data: posts, error } = await q;
   if (error) return { success: false, error: error.message };
+  const candidateRes = await supabase.rpc('get_x_post_candidates', {
+    candidate_limit: limit,
+    target_tweet_id: tweetId || null,
+  }).catch((candidateError: unknown) => ({ data: [], error: candidateError }));
+  const sqlCandidatesById = new Map<string, Record<string, unknown>>();
+  if (!candidateRes.error) {
+    for (const row of (candidateRes.data ?? []) as Array<Record<string, unknown>>) {
+      const id = String(row.tweet_id ?? '');
+      if (id) sqlCandidatesById.set(id, row);
+    }
+  }
 
   const dedupeCutoff = new Date(Date.now() - Number(xCfg.dedupe_window_hours || 48) * 3600 * 1000).toISOString();
   const startFrom = typeof xCfg.start_posting_from === 'string' ? xCfg.start_posting_from : null;
@@ -3010,7 +3618,14 @@ async function getXPostingDiagnostics(supabase: any, body: Record<string, unknow
     if (score == null) blockers.push({ code: 'missing_score', label: 'Missing editorial score', severity: 'blocker' });
     else if (score < Number(xCfg.min_score || threshold)) blockers.push({ code: 'score_below_x_min', label: `Score ${score} is below X minimum ${xCfg.min_score || threshold}`, severity: 'blocker' });
     if (xCfg.post_only_decision_deliver && post.delivery_decision !== 'deliver') blockers.push({ code: 'decision_not_deliver', label: `Decision is ${post.delivery_decision ?? 'unset'}`, severity: 'blocker' });
-    if (post.dup_of_tweet_id || post.dedupe_status === 'duplicate') blockers.push({ code: 'duplicate_gate', label: `Duplicate of ${post.dup_of_tweet_id ?? 'another post'}`, severity: 'blocker' });
+    const duplicateSkipReason = duplicateXSkipReason(post as { dedupe_status?: string | null; dup_of_tweet_id?: string | null; dedupe_reason?: string | null });
+    if (duplicateSkipReason) {
+      blockers.push({ code: 'duplicate_gate', label: `Duplicate of ${post.dup_of_tweet_id ?? 'another post'}`, severity: 'blocker' });
+    } else if (post.dedupe_status === 'coverage_gap') {
+      notes.push({ code: 'coverage_gap', label: `Possible duplicate is not covered yet (${post.dup_of_tweet_id ?? 'no canonical'})`, severity: 'note' });
+    } else if (post.dedupe_status === 'uncertain' && post.dup_of_tweet_id) {
+      notes.push({ code: 'possible_duplicate', label: `Possible duplicate of ${post.dup_of_tweet_id}; human review or re-run dedupe recommended`, severity: 'note' });
+    }
     if (post.is_truncated === true && !post.hydrated_at) {
       blockers.push({
         code: activeHydrateJob ? 'hydration_pending' : 'waiting_hydration',
@@ -3048,6 +3663,7 @@ async function getXPostingDiagnostics(supabase: any, body: Record<string, unknow
     if (quotaReason) blockers.push({ code: quotaReason, label: `X quota blocked: ${quotaReason}`, severity: 'blocker' });
 
     const eligible = blockers.length === 0;
+    const sqlCandidate = sqlCandidatesById.get(tid) ?? null;
     items.push({
       tweet_id: tid,
       eligible,
@@ -3057,6 +3673,12 @@ async function getXPostingDiagnostics(supabase: any, body: Record<string, unknow
       threshold: xCfg.min_score || threshold,
       decision: post.delivery_decision ?? null,
       latest_x: latestX.data ?? null,
+      candidate: {
+        sql_gate_passed: Boolean(sqlCandidate),
+        reason: sqlCandidate?.candidate_reason ?? (eligible ? 'local_gate_only' : 'blocked'),
+        age_ms: sqlCandidate?.candidate_age_ms ?? (post.created_at ? Date.now() - new Date(String(post.created_at)).getTime() : null),
+        dispatch_source: sqlCandidate?.dispatch_source ?? null,
+      },
       active_jobs: jobs.map((job) => ({ type: job.type, status: job.status, error: job.last_error ?? null })),
       active_job_types: [...activeJobTypes],
       hydration: {
@@ -3148,6 +3770,7 @@ async function loadScoringModelOptions(supabase: any) {
 }
 
 function scoringPolicyPostUpdate(result: ScoringPolicyResult, active: boolean): Record<string, unknown> {
+  const scoringV2Meta = buildScoringPolicyEventMeta(result, active ? 'active' : 'shadow');
   return {
     scoring_version: SCORING_POLICY_VERSION,
     scoring_profile_id: result.profile_id,
@@ -3164,13 +3787,7 @@ function scoringPolicyPostUpdate(result: ScoringPolicyResult, active: boolean): 
       ai: result.uncapped_score,
       final: result.final_score,
       scoring_v2: {
-        mode: active ? 'active' : 'shadow',
-        profile_id: result.profile_id,
-        audience_class: result.audience_class,
-        audience_confidence: result.audience_confidence,
-        cap: result.cap,
-        threshold: result.threshold,
-        adjudicated: result.adjudicated,
+        ...scoringV2Meta,
       },
     },
     ...(active ? {
@@ -3222,15 +3839,7 @@ async function scorePostV2(supabase: any, body: Record<string, unknown>) {
       .update(scoringPolicyPostUpdate(result, active))
       .eq('tweet_id', tweetId);
     if (updateError) return { ok: false, error: updateError.message };
-    await insertAdminPipelineEvent(supabase, tweetId, 'score', 'completed', {
-      version: SCORING_POLICY_VERSION,
-      mode: active ? 'active' : 'shadow',
-      audience_class: result.audience_class,
-      final_score: result.final_score,
-      threshold: result.threshold,
-      decision: result.delivery_decision,
-      adjudicated: result.adjudicated,
-    });
+    await insertAdminPipelineEvent(supabase, tweetId, 'score', 'completed', buildScoringPolicyEventMeta(result, active ? 'active' : 'shadow'));
   }
 
   return { ok: true, dry_run: dryRun, active, result };
@@ -3509,6 +4118,43 @@ async function backfillDedupeAdminAction(supabase: any, body: Record<string, unk
     max,
     scanned: posts?.length ?? 0,
     queued,
+  };
+}
+
+// deno-lint-ignore no-explicit-any
+async function auditDuplicateCandidatesAdminAction(supabase: any, body: Record<string, unknown>) {
+  const windowHours = typeof body.window_hours === 'number' && body.window_hours > 0 && body.window_hours <= 168
+    ? Math.floor(body.window_hours)
+    : 48;
+  const candidateMinSimilarity = typeof body.candidate_min_similarity === 'number'
+    ? Math.min(Math.max(body.candidate_min_similarity, 0.5), 0.99)
+    : 0.78;
+  const limit = typeof body.limit === 'number' && body.limit > 0
+    ? Math.min(Math.floor(body.limit), 5000)
+    : 500;
+
+  const { data, error } = await supabase.rpc('audit_duplicate_candidates', {
+    window_hours: windowHours,
+    candidate_min_similarity: candidateMinSimilarity,
+    match_limit: limit,
+  });
+  if (error) return { ok: false, error: error.message };
+
+  const rows = (data ?? []) as Array<Record<string, unknown>>;
+  const proposed = rows.reduce<Record<string, number>>((acc, row) => {
+    const key = typeof row.proposed_status === 'string' ? row.proposed_status : 'unknown';
+    acc[key] = (acc[key] ?? 0) + 1;
+    return acc;
+  }, {});
+
+  return {
+    ok: true,
+    dry_run: true,
+    window_hours: windowHours,
+    candidate_min_similarity: candidateMinSimilarity,
+    count: rows.length,
+    proposed,
+    rows,
   };
 }
 
@@ -3857,7 +4503,9 @@ serve(async (req) => {
           const { data: prev } = await supabase.from('settings').select('value').eq('key', 'x_posting_config').maybeSingle();
           const prevCfg = (prev?.value ?? {}) as Record<string, unknown>;
           const nextCfg = value as Record<string, unknown>;
-          const userProvidedStart = typeof nextCfg.start_posting_from === 'string';
+          const prevStart = typeof prevCfg.start_posting_from === 'string' ? prevCfg.start_posting_from : null;
+          const nextStart = typeof nextCfg.start_posting_from === 'string' ? nextCfg.start_posting_from : null;
+          const userProvidedStart = !!nextStart && nextStart !== prevStart;
 
           const prevEnabled = !!prevCfg.enabled;
           const nextEnabled = !!nextCfg.enabled;
@@ -3873,7 +4521,7 @@ serve(async (req) => {
           if (!userProvidedStart && (enableTransition || thresholdLowered || mediaLoosened || decisionGateLoosened)) {
             valueToSave = { ...nextCfg, start_posting_from: new Date().toISOString() };
             console.log('[admin-actions] re-stamped x_posting_config.start_posting_from', {
-              enableTransition, thresholdLowered, mediaLoosened, decisionGateLoosened, prevMin, nextMin,
+              enableTransition, thresholdLowered, mediaLoosened, decisionGateLoosened, prevMin, nextMin, prevStart, nextStart,
             });
           }
         }
@@ -3968,7 +4616,8 @@ serve(async (req) => {
         if (!tweet_ids || !Array.isArray(tweet_ids) || tweet_ids.length === 0) {
           return jsonResponse({ error: 'tweet_ids array is required' }, 400);
         }
-        const jobs = tweet_ids.map((tid: string) => ({
+        const tweetIds = [...new Set(tweet_ids.map((tid: unknown) => typeof tid === 'string' ? tid.trim() : '').filter(Boolean))];
+        const jobs = tweetIds.map((tid: string) => ({
           type: 'reprocess',
           payload: { tweet_id: tid },
           status: 'pending',
@@ -3977,7 +4626,22 @@ serve(async (req) => {
         }));
         const { error } = await supabase.from('jobs').upsert(jobs, { onConflict: 'idempotency_key', ignoreDuplicates: true });
         if (error) throw error;
-        return jsonResponse({ success: true, message: `${tweet_ids.length} reprocess jobs queued` });
+        return jsonResponse({
+          success: true,
+          requested: tweet_ids.length,
+          queued: tweetIds.length,
+          message: `${tweetIds.length} reprocess job(s) queued`,
+        });
+      }
+
+      // ===== Bulk ignore =====
+      case 'bulk_ignore': {
+        const { tweet_ids, reason } = body;
+        if (!tweet_ids || !Array.isArray(tweet_ids) || tweet_ids.length === 0) {
+          return jsonResponse({ error: 'tweet_ids array is required' }, 400);
+        }
+        const normalizedReason = normalizeMonitoringIgnoreReason({ reason });
+        return jsonResponse(await ignoreMonitoringItems(supabase, tweet_ids as string[], normalizedReason));
       }
 
       // ===== Post thread =====
@@ -4017,6 +4681,21 @@ serve(async (req) => {
       case 'get_dashboard_summary': {
         const dashboard = await getEnhancedDashboardSummary(supabase);
         return jsonResponse({ success: true, dashboard });
+      }
+
+      case 'get_system_performance_summary': {
+        return jsonResponse(await getSystemPerformanceSummary(supabase));
+      }
+
+      case 'dry_run_old_media_cleanup': {
+        const daysOld = typeof body.days_old === 'number' ? Math.max(1, Math.min(365, Math.floor(body.days_old))) : 1;
+        const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+        const { data, error } = await supabase.functions.invoke('media-processor', {
+          body: { action: 'cleanup_old_media', days_old: daysOld, dry_run: true },
+          headers: { Authorization: `Bearer ${serviceKey}` },
+        } as Record<string, unknown>);
+        if (error) throw error;
+        return jsonResponse({ success: true, dry_run: true, result: data });
       }
 
       case 'get_monitoring_overview': {
@@ -4061,6 +4740,10 @@ serve(async (req) => {
 
       case 'backfill_dedupe': {
         return jsonResponse(await backfillDedupeAdminAction(supabase, body));
+      }
+
+      case 'audit_duplicate_candidates': {
+        return jsonResponse(await auditDuplicateCandidatesAdminAction(supabase, body));
       }
 
       case 'summarize_stale_x_pending': {

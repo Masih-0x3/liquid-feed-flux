@@ -9,6 +9,7 @@ import { recordLegacyXApiUsage, recordXApiEvent } from '../_shared/xApiLedger.ts
 import { buildXPostText, isEnrichmentBlockingXPost, pickHashtags } from '../_shared/xPostText.ts';
 import { allowCompletedEnrichmentForPosting, doesEnrichmentBlockX, normalizeEnrichmentConfig } from '../_shared/enrich.ts';
 import { duplicateXSkipReason } from '../_shared/duplicateGuard.ts';
+import { assertFinalDuplicateState, normalizeDuplicateGateConfig, type FinalDuplicateAssertionResult } from '../_shared/dedupe.ts';
 import {
   MAX_STANDARD_VIDEO_DURATION_MS,
   selectMediaTier,
@@ -337,14 +338,16 @@ Deno.serve(async (req) => {
   const body = await req.json().catch(() => ({} as Record<string, unknown>));
   const dryRun = body.dry_run === true;
   const onlyTweetId = typeof body.tweet_id === 'string' ? body.tweet_id : null;
+  const targetTweetId = typeof body.target_tweet_id === 'string' ? body.target_tweet_id : null;
 
   // Load settings
   const { data: settingsRows } = await sb.from('settings').select('key, value')
-    .in('key', ['x_posting_config', 'x_rate_limits', 'enrichment_config']);
+    .in('key', ['x_posting_config', 'x_rate_limits', 'enrichment_config', 'story_memory']);
   const sm: Record<string, unknown> = Object.fromEntries((settingsRows || []).map((r) => [r.key, r.value]));
   const cfg: PostingConfig = { ...DEFAULT_CFG, ...(isRecord(sm.x_posting_config) ? sm.x_posting_config : {}) } as PostingConfig;
   const limits: RateLimits = { ...DEFAULT_LIMITS, ...(isRecord(sm.x_rate_limits) ? sm.x_rate_limits : {}) } as RateLimits;
   const enrichmentCfg = normalizeEnrichmentConfig(isRecord(sm.enrichment_config) ? sm.enrichment_config : { enabled: false });
+  const duplicateGateCfg = normalizeDuplicateGateConfig(isRecord(sm.story_memory) ? sm.story_memory : { enabled: false });
   const allowCompletedEnrichment = allowCompletedEnrichmentForPosting(enrichmentCfg);
   const enrichmentRequiredForX = doesEnrichmentBlockX(enrichmentCfg);
 
@@ -407,60 +410,66 @@ Deno.serve(async (req) => {
   const { data: existingRows } = await sb.from('x_deliveries').select('post_id').eq('status', 'posted').gte('created_at', dedupeCutoff);
   const existing = new Set((existingRows || []).map((r) => r.post_id as string));
 
-  let candidatesQ = sb.from('posts')
-    .select('tweet_id, text_translated, text_original, author_handle, has_media, importance_score, final_score, delivery_decision, decision_reason, url, is_truncated, hydrated_at, created_at, final_x_text, composed_post_text, post_format_hint, humanized_commentary, commentary_hook, commentary_question, narrative_callback, thread_continuation, enrich_status, dedupe_status, dup_of_tweet_id, dup_similarity, dedupe_reason, accounts!inner(handle)')
-    .gte('created_at', effectiveCutoff)
-    .not('text_translated', 'is', null);
-
-  if (onlyTweetId) candidatesQ = candidatesQ.eq('tweet_id', onlyTweetId);
-  else {
-    candidatesQ = candidatesQ.or(
-      `final_score.gte.${cfg.min_score},and(final_score.is.null,importance_score.gte.${cfg.min_score})`,
-    );
-    if (cfg.post_only_decision_deliver) candidatesQ = candidatesQ.eq('delivery_decision', 'deliver');
-    // Hydration gate: skip posts that are still truncated and awaiting hydration.
-    // Without this, x-poster can publish the truncated first translation before
-    // the hydrate_tweet job completes (~1-2 min later).
-    candidatesQ = candidatesQ.or('is_truncated.eq.false,hydrated_at.not.is.null');
-    if (enrichmentRequiredForX) {
-      const allowedEnrichStatuses = allowCompletedEnrichment
-        ? 'approved,enriched,completed,skipped'
-        : 'approved,enriched,skipped';
-      candidatesQ = candidatesQ.or(`enrich_status.is.null,enrich_status.in.(${allowedEnrichStatuses})`);
+  let posts: Array<Record<string, unknown>> = [];
+  let postsErr: { message: string } | null = null;
+  if (!onlyTweetId) {
+    const rpcLimit = targetTweetId ? 1 : 20;
+    const rpcRes = await sb.rpc('get_x_post_candidates', {
+      candidate_limit: rpcLimit,
+      target_tweet_id: targetTweetId,
+    });
+    if (!rpcRes.error) {
+      posts = ((rpcRes.data ?? []) as Array<Record<string, unknown>>).map((row) => ({
+        ...row,
+        accounts: { handle: row.account_handle },
+      }));
+    } else {
+      console.warn('[x-poster] get_x_post_candidates RPC unavailable, using fallback query', rpcRes.error.message);
+      let candidatesQ = sb.from('posts')
+        .select('tweet_id, text_translated, text_original, author_handle, has_media, importance_score, final_score, delivery_decision, decision_reason, url, is_truncated, hydrated_at, created_at, final_x_text, composed_post_text, post_format_hint, humanized_commentary, commentary_hook, commentary_question, narrative_callback, thread_continuation, enrich_status, dedupe_status, dup_of_tweet_id, dup_similarity, dedupe_reason, accounts!inner(handle)')
+        .gte('created_at', effectiveCutoff)
+        .not('text_translated', 'is', null)
+        .or(`final_score.gte.${cfg.min_score},and(final_score.is.null,importance_score.gte.${cfg.min_score})`);
+      if (targetTweetId) candidatesQ = candidatesQ.eq('tweet_id', targetTweetId);
+      if (cfg.post_only_decision_deliver) candidatesQ = candidatesQ.eq('delivery_decision', 'deliver');
+      candidatesQ = candidatesQ.or('is_truncated.eq.false,hydrated_at.not.is.null');
+      if (enrichmentRequiredForX) {
+        const allowedEnrichStatuses = allowCompletedEnrichment
+          ? 'approved,enriched,completed,skipped'
+          : 'approved,enriched,skipped';
+        candidatesQ = candidatesQ.or(`enrich_status.is.null,enrich_status.in.(${allowedEnrichStatuses})`);
+      }
+      const fallbackRes = await candidatesQ.order('created_at', { ascending: false }).limit(rpcLimit);
+      posts = (fallbackRes.data ?? []) as Array<Record<string, unknown>>;
+      postsErr = fallbackRes.error;
     }
-    // NOTE: require_media is intentionally NOT applied as a DB filter.
-    // We post all eligible items; media is attached only when present & valid.
-    // The legacy `require_media` flag is kept in the type for back-compat but no longer gates posting.
-    candidatesQ = candidatesQ.order('created_at', { ascending: false }).limit(5);
+  } else {
+    const forceRes = await sb.from('posts')
+      .select('tweet_id, text_translated, text_original, author_handle, has_media, importance_score, final_score, delivery_decision, decision_reason, url, is_truncated, hydrated_at, created_at, final_x_text, composed_post_text, post_format_hint, humanized_commentary, commentary_hook, commentary_question, narrative_callback, thread_continuation, enrich_status, dedupe_status, dup_of_tweet_id, dup_similarity, dedupe_reason, accounts!inner(handle)')
+      .eq('tweet_id', onlyTweetId)
+      .limit(1);
+    posts = (forceRes.data ?? []) as Array<Record<string, unknown>>;
+    postsErr = forceRes.error;
   }
 
-  const { data: posts, error: postsErr } = await candidatesQ;
   if (postsErr) {
     return new Response(JSON.stringify({ error: postsErr.message }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 
-  const ENRICH_GRACE_MS = 5 * 60 * 1000;
-
   const results: Array<Record<string, unknown>> = [];
   const candidates = (posts || []).filter((p) => {
-    if (!onlyTweetId && existing.has(p.tweet_id)) return false;
-    // Grace period: if enrichment is actively running and the post is fresh,
-    // defer briefly so the pipeline can finish. After the grace window, fall
-    // through and post with the plain translation template.
-    if (p.enrich_status === 'pending') {
-      const age = Date.now() - new Date((p as { created_at: string }).created_at).getTime();
-      if (age < ENRICH_GRACE_MS) {
-        console.log(`[x-poster] deferring ${p.tweet_id}: enrichment pending, age=${Math.round(age / 1000)}s < grace ${ENRICH_GRACE_MS / 1000}s`);
-        return false;
-      }
-      console.log(`[x-poster] enrichment grace expired for ${p.tweet_id} (age=${Math.round(age / 1000)}s), falling back to plain template`);
-    }
+    const id = String(p.tweet_id ?? '');
+    if (!onlyTweetId && existing.has(id)) return false;
     return true;
   });
 
   for (const post of candidates) {
-    const tweetId = post.tweet_id;
+    const tweetId = String(post.tweet_id ?? '');
+    if (!tweetId) continue;
     const startedAt = Date.now();
+    const dispatchSource = String(post.dispatch_source ?? (targetTweetId ? 'event' : onlyTweetId ? 'force' : 'cron'));
+    const candidateReason = typeof post.candidate_reason === 'string' ? post.candidate_reason : null;
+    const candidateAgeMs = typeof post.candidate_age_ms === 'number' ? post.candidate_age_ms : null;
     const enrichStatus = (post as { enrich_status?: string | null }).enrich_status;
 
     if (!onlyTweetId && isEnrichmentBlockingXPost(enrichStatus, allowCompletedEnrichment, enrichmentRequiredForX)) {
@@ -488,6 +497,65 @@ Deno.serve(async (req) => {
       .maybeSingle();
     const latestStatus = (latestX as { status?: string } | null)?.status;
 
+    if (!onlyTweetId && (latestStatus === 'failed' || latestStatus === 'skipped')) {
+      results.push({
+        tweet_id: tweetId,
+        status: 'deferred',
+        reason: `previous_x_${latestStatus}`,
+      });
+      console.log(`[x-poster] deferring ${tweetId}: previous X status is ${latestStatus}`);
+      continue;
+    }
+
+    let finalDuplicateAssertion: FinalDuplicateAssertionResult;
+    try {
+      finalDuplicateAssertion = await assertFinalDuplicateState(sb, tweetId, duplicateGateCfg, {
+        dryRun,
+        source: onlyTweetId ? 'x_force_final_assertion' : targetTweetId ? 'x_target_final_assertion' : 'x_final_assertion',
+      });
+    } catch (e) {
+      const error = (e as Error).message;
+      if (!dryRun && latestStatus !== 'failed') {
+        const { error: failErr } = await sb.from('x_deliveries').insert({
+          post_id: tweetId,
+          status: 'failed',
+          skip_reason: 'dedupe_assertion_failed',
+          last_error: `dedupe_assertion_failed:${error}`.slice(0, 1000),
+          attempts: 0,
+        });
+        if (failErr) console.error('[x-poster] x_deliveries insert failed (dedupe assertion)', { tweetId, err: failErr.message });
+      }
+      results.push({
+        tweet_id: tweetId,
+        status: dryRun ? 'dry_run_deferred' : 'failed',
+        reason: 'dedupe_assertion_failed',
+        error,
+      });
+      console.warn(`[x-poster] refusing ${onlyTweetId ? 'forced ' : ''}X post for ${tweetId}: dedupe_assertion_failed:${error}`);
+      continue;
+    }
+    if (finalDuplicateAssertion.blocked) {
+      if (!dryRun && latestStatus !== 'skipped') {
+        const { error: skipErr } = await sb.from('x_deliveries').insert({
+          post_id: tweetId,
+          status: 'skipped',
+          skip_reason: 'duplicate_gate',
+          last_error: finalDuplicateAssertion.reason ?? 'duplicate_gate',
+          attempts: 0,
+        });
+        if (skipErr) console.error('[x-poster] x_deliveries insert skipped failed (final duplicate assertion)', { tweetId, err: skipErr.message });
+      }
+      results.push({
+        tweet_id: tweetId,
+        status: dryRun ? 'dry_run_skipped' : 'skipped',
+        reason: 'duplicate_gate',
+        dup_of_tweet_id: finalDuplicateAssertion.result?.dup_of_tweet_id ?? (post as { dup_of_tweet_id?: string | null }).dup_of_tweet_id ?? null,
+        final_assertion: finalDuplicateAssertion.reason,
+      });
+      console.warn(`[x-poster] refusing ${onlyTweetId ? 'forced ' : ''}X post for ${tweetId}: ${finalDuplicateAssertion.reason ?? 'duplicate_gate'}`);
+      continue;
+    }
+
     const duplicateSkipReason = duplicateXSkipReason(post as { dedupe_status?: string | null; dup_of_tweet_id?: string | null; dedupe_reason?: string | null });
     if (duplicateSkipReason) {
       if (!dryRun && latestStatus !== 'skipped') {
@@ -507,16 +575,6 @@ Deno.serve(async (req) => {
         dup_of_tweet_id: (post as { dup_of_tweet_id?: string | null }).dup_of_tweet_id ?? null,
       });
       console.warn(`[x-poster] refusing ${onlyTweetId ? 'forced ' : ''}X post for ${tweetId}: ${duplicateSkipReason}`);
-      continue;
-    }
-
-    if (!onlyTweetId && (latestStatus === 'failed' || latestStatus === 'skipped')) {
-      results.push({
-        tweet_id: tweetId,
-        status: 'deferred',
-        reason: `previous_x_${latestStatus}`,
-      });
-      console.log(`[x-poster] deferring ${tweetId}: previous X status is ${latestStatus}`);
       continue;
     }
 
@@ -663,16 +721,16 @@ Deno.serve(async (req) => {
         results.push({ tweet_id: tweetId, status: 'dry_run_deferred', reason: `media_required:${reason}` });
         continue;
       }
-      const { error: pendErr } = await sb.from('x_deliveries').insert({
+      const { error: skipErr } = await sb.from('x_deliveries').insert({
         post_id: tweetId,
-        status: 'pending',
+        status: 'skipped',
         skip_reason: reason,
         last_error: `media_required:${reason}`,
         attempts: 1,
       });
-      if (pendErr) console.error('[x-poster] x_deliveries insert pending failed', { tweetId, err: pendErr.message });
-      results.push({ tweet_id: tweetId, status: 'deferred', reason: `media_required:${reason}` });
-      console.warn(`[x-poster] refusing text-only post for ${tweetId}: ${reason}`);
+      if (skipErr) console.error('[x-poster] x_deliveries insert skipped failed (media required)', { tweetId, err: skipErr.message });
+      results.push({ tweet_id: tweetId, status: 'skipped', reason: `media_required:${reason}` });
+      console.warn(`[x-poster] skipping text-only post for ${tweetId}: ${reason}`);
       continue;
     }
 
@@ -758,13 +816,15 @@ Deno.serve(async (req) => {
     });
 
     if (dryRun) {
-      results.push({ tweet_id: tweetId, status: 'dry_run', preview_text: text, media_count: mediaCount, media_kind: mediaKind });
+      results.push({ tweet_id: tweetId, status: 'dry_run', preview_text: text, media_count: mediaCount, media_kind: mediaKind, candidate_reason: candidateReason, candidate_age_ms: candidateAgeMs, dispatch_source: dispatchSource });
       continue;
     }
 
     // Post tweet
+    const xApiStartedAt = Date.now();
     try {
       const { id: xId, raw } = await postTweet(text, mediaIds, ck, cs, at, ats, sb, tweetId);
+      const xApiMs = Date.now() - xApiStartedAt;
       const latency = Date.now() - startedAt;
       posts24hCount += 1;
       posts1hCount += 1;
@@ -801,8 +861,19 @@ Deno.serve(async (req) => {
         writeErr = insErr;
       }
       if (writeErr) console.error('[x-poster] x_deliveries write failed', { tweetId, xId, err: writeErr.message });
-      results.push({ tweet_id: tweetId, status: 'posted', x_tweet_id: xId, latency_ms: latency });
+      await insertXPipelineEvent(sb, tweetId, 'completed', new Date(xApiStartedAt).toISOString(), new Date().toISOString(), null, {
+        x_tweet_id: xId,
+        x_api_ms: xApiMs,
+        latency_ms: latency,
+        media_count: mediaCount,
+        media_kind: mediaKind,
+        candidate_reason: candidateReason,
+        candidate_age_ms: candidateAgeMs,
+        dispatch_source: dispatchSource,
+      });
+      results.push({ tweet_id: tweetId, status: 'posted', x_tweet_id: xId, latency_ms: latency, x_api_ms: xApiMs, candidate_reason: candidateReason, candidate_age_ms: candidateAgeMs, dispatch_source: dispatchSource });
     } catch (e) {
+      const xApiMs = Date.now() - xApiStartedAt;
       const status = (e as { status?: number }).status || 0;
       const errMsg = (e as Error).message;
       const isRetriable = status === 429 || status >= 500;
@@ -812,7 +883,13 @@ Deno.serve(async (req) => {
         api_response: (e as { raw?: unknown }).raw ?? null,
       });
       if (postFailErr) console.error('[x-poster] x_deliveries insert failed (post)', { tweetId, err: postFailErr.message });
-      results.push({ tweet_id: tweetId, status: isRetriable ? 'pending' : 'failed', error: errMsg });
+      await insertXPipelineEvent(sb, tweetId, isRetriable ? 'pending' : 'failed', new Date(xApiStartedAt).toISOString(), new Date().toISOString(), errMsg, {
+        x_api_ms: xApiMs,
+        candidate_reason: candidateReason,
+        candidate_age_ms: candidateAgeMs,
+        dispatch_source: dispatchSource,
+      });
+      results.push({ tweet_id: tweetId, status: isRetriable ? 'pending' : 'failed', error: errMsg, x_api_ms: xApiMs, candidate_reason: candidateReason, candidate_age_ms: candidateAgeMs, dispatch_source: dispatchSource });
     }
   }
 
@@ -820,3 +897,27 @@ Deno.serve(async (req) => {
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
 });
+
+async function insertXPipelineEvent(
+  // deno-lint-ignore no-explicit-any
+  sb: any,
+  tweetId: string,
+  status: string,
+  startedAt: string | null,
+  endedAt: string | null,
+  error: string | null,
+  meta: Record<string, unknown>,
+): Promise<void> {
+  try {
+    await sb.from('pipeline_events').insert({
+      subject_type: 'post',
+      subject_id: tweetId,
+      step: 'x_post',
+      status,
+      started_at: startedAt,
+      ended_at: endedAt,
+      error,
+      meta,
+    });
+  } catch (_e) { /* best-effort */ }
+}

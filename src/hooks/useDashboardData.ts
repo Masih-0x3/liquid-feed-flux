@@ -47,6 +47,7 @@ export interface PipelineCounts {
   duplicateGateAvailable: boolean;
   duplicates: number | null;
   scored: number;
+  needsScore: number;
   translated: number;
   telegramDelivered: number;
   xPosted: number;
@@ -62,13 +63,20 @@ export interface QueueBreakdown {
   pending: number;
   running: number;
   failed24h: number;
+  resolvedFailed24h: number;
   staleRunning: number;
   oldestPendingAgeSeconds: number | null;
   byType: Array<{
     type: string;
+    lane: string;
     pending: number;
     running: number;
     failed: number;
+    resolvedFailed: number;
+    queueWaitP50Seconds: number | null;
+    queueWaitP95Seconds: number | null;
+    runP50Seconds: number | null;
+    runP95Seconds: number | null;
   }>;
 }
 
@@ -104,6 +112,80 @@ export interface ActivityItem {
   status: 'success' | 'pending' | 'failed' | 'warning';
   kind?: 'post' | 'job' | 'delivery' | 'x' | 'system';
   route?: string;
+}
+
+export interface StageTiming {
+  count: number;
+  avgSeconds: number | null;
+  p50Seconds: number | null;
+  p90Seconds: number | null;
+  p95Seconds: number | null;
+}
+
+export interface SystemPerformanceWindow {
+  windowHours: number;
+  sampledPosts: number;
+  stages: {
+    ingestToDedupe: StageTiming;
+    ingestToScore: StageTiming;
+    dedupeToTranslation: StageTiming;
+    scoreToTranslation: StageTiming;
+    ingestToTranslation: StageTiming;
+    translationToTelegram: StageTiming;
+    translationToX: StageTiming;
+    telegramEndToEnd: StageTiming;
+    xEndToEnd: StageTiming;
+  };
+}
+
+export interface SystemResources {
+  available: boolean;
+  error: string | null;
+  dbBytes: number;
+  dbLimitBytes: number;
+  dbUsedPct: number | null;
+  tempMediaBytes: number;
+  tempMediaObjects: number;
+  storageLimitBytes: number;
+  storageUsedPct: number | null;
+  edgeMonthlyLimit: number;
+  projectedCronInvocationsMonthly: number;
+  edgeCronUsedPct: number | null;
+  cronFailures24h: number | null;
+  cronJobs: Array<Record<string, unknown>>;
+  workerDispatchMode: string;
+  workerCron: Record<string, unknown> | null;
+  workerCadenceSeconds: number | null;
+  workerCadenceWarning: boolean;
+  duplicateTranslateJobs24h: number;
+}
+
+export interface SystemPerformanceSummary {
+  success: boolean;
+  error: string | null;
+  generatedAt: string | null;
+  windows: {
+    sixHours: SystemPerformanceWindow;
+    twentyFourHours: SystemPerformanceWindow;
+  };
+  queue: {
+    pending: number;
+    running: number;
+    staleRunning: number;
+    failed24h: number;
+    resolvedFailed24h: number;
+    oldestPendingAgeSeconds: number | null;
+    schedulerWaitSeconds: number | null;
+    byType: QueueBreakdown['byType'];
+    lanePressure: Array<{
+      lane: string;
+      pending: number;
+      running: number;
+      failed: number;
+      maxQueueWaitP95Seconds: number | null;
+    }>;
+  };
+  resources: SystemResources;
 }
 
 interface RpcResult {
@@ -167,8 +249,10 @@ interface RpcResult {
   queue_breakdown?: {
     pending?: number;
     running?: number;
-    failed_24h?: number;
-    failed24h?: number;
+      failed_24h?: number;
+      failed24h?: number;
+      resolved_failed_24h?: number;
+      resolvedFailed24h?: number;
     stale_running?: number;
     staleRunning?: number;
     oldest_pending_age_seconds?: number | null;
@@ -177,6 +261,7 @@ interface RpcResult {
     byType?: Array<Record<string, unknown>>;
   };
   x_local_usage?: Record<string, unknown>;
+  system_performance?: Record<string, unknown>;
   activity?: Array<Record<string, unknown>>;
 }
 
@@ -265,6 +350,7 @@ function normalizePipelineCounts(input: RpcResult['pipeline_counts'], metrics: D
     duplicateGateAvailable: Boolean(input?.duplicate_gate_available),
     duplicates: input && 'duplicates' in input ? asNullableNumber(input.duplicates) : null,
     scored: asNumber(input?.scored, Math.max(metrics.postsTranslated, metrics.postsDelivered, metrics.xPosts24h)),
+    needsScore: asNumber(input?.needs_score, 0),
     translated: asNumber(input?.translated, metrics.postsTranslated),
     telegramDelivered: asNumber(input?.telegram_delivered, metrics.postsDelivered),
     xPosted: asNumber(input?.x_posted, metrics.xPosts24h),
@@ -277,19 +363,128 @@ function normalizePipelineCounts(input: RpcResult['pipeline_counts'], metrics: D
   };
 }
 
+function normalizeTiming(input: unknown): StageTiming {
+  const row = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+  return {
+    count: asNumber(row.count),
+    avgSeconds: asNullableNumber(row.avg_seconds),
+    p50Seconds: asNullableNumber(row.p50_seconds),
+    p90Seconds: asNullableNumber(row.p90_seconds),
+    p95Seconds: asNullableNumber(row.p95_seconds),
+  };
+}
+
+function emptyTiming(): StageTiming {
+  return { count: 0, avgSeconds: null, p50Seconds: null, p90Seconds: null, p95Seconds: null };
+}
+
+function normalizePerformanceWindow(input: unknown, windowHours: number): SystemPerformanceWindow {
+  const row = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+  const stages = row.stages && typeof row.stages === 'object' ? row.stages as Record<string, unknown> : {};
+  return {
+    windowHours: asNumber(row.window_hours, windowHours),
+    sampledPosts: asNumber(row.sampled_posts),
+    stages: {
+      ingestToDedupe: normalizeTiming(stages.ingest_to_dedupe ?? emptyTiming()),
+      ingestToScore: normalizeTiming(stages.ingest_to_score ?? emptyTiming()),
+      dedupeToTranslation: normalizeTiming(stages.dedupe_to_translation ?? emptyTiming()),
+      scoreToTranslation: normalizeTiming(stages.score_to_translation ?? emptyTiming()),
+      ingestToTranslation: normalizeTiming(stages.ingest_to_translation ?? emptyTiming()),
+      translationToTelegram: normalizeTiming(stages.translation_to_telegram ?? emptyTiming()),
+      translationToX: normalizeTiming(stages.translation_to_x ?? emptyTiming()),
+      telegramEndToEnd: normalizeTiming(stages.telegram_end_to_end ?? emptyTiming()),
+      xEndToEnd: normalizeTiming(stages.x_end_to_end ?? emptyTiming()),
+    },
+  };
+}
+
+function normalizeSystemPerformance(input: RpcResult['system_performance']): SystemPerformanceSummary {
+  const row = input && typeof input === 'object' ? input : {};
+  const windows = row.windows && typeof row.windows === 'object' ? row.windows as Record<string, unknown> : {};
+  const queue = row.queue && typeof row.queue === 'object' ? row.queue as Record<string, unknown> : {};
+  const resources = row.resources && typeof row.resources === 'object' ? row.resources as Record<string, unknown> : {};
+  const byTypeRows = Array.isArray(queue.by_type) ? queue.by_type as Array<Record<string, unknown>> : [];
+  const laneRows = Array.isArray(queue.lane_pressure) ? queue.lane_pressure as Array<Record<string, unknown>> : [];
+  return {
+    success: row.success !== false,
+    error: typeof row.error === 'string' ? row.error : null,
+    generatedAt: typeof row.generated_at === 'string' ? row.generated_at : null,
+    windows: {
+      sixHours: normalizePerformanceWindow(windows['6h'], 6),
+      twentyFourHours: normalizePerformanceWindow(windows['24h'], 24),
+    },
+    queue: {
+      pending: asNumber(queue.pending),
+      running: asNumber(queue.running),
+      staleRunning: asNumber(queue.stale_running),
+      failed24h: asNumber(queue.failed_24h),
+      resolvedFailed24h: asNumber(queue.resolved_failed_24h),
+      oldestPendingAgeSeconds: asNullableNumber(queue.oldest_pending_age_seconds),
+      schedulerWaitSeconds: asNullableNumber(queue.scheduler_wait_seconds),
+      byType: byTypeRows.map((item) => ({
+        type: String(item.type ?? 'unknown'),
+        lane: String(item.lane ?? 'fast'),
+        pending: asNumber(item.pending),
+        running: asNumber(item.running),
+        failed: asNumber(item.failed),
+        resolvedFailed: asNumber(item.resolved_failed),
+        queueWaitP50Seconds: asNullableNumber(item.queue_wait_p50_seconds),
+        queueWaitP95Seconds: asNullableNumber(item.queue_wait_p95_seconds),
+        runP50Seconds: asNullableNumber(item.run_p50_seconds),
+        runP95Seconds: asNullableNumber(item.run_p95_seconds),
+      })),
+      lanePressure: laneRows.map((item) => ({
+        lane: String(item.lane ?? 'fast'),
+        pending: asNumber(item.pending),
+        running: asNumber(item.running),
+        failed: asNumber(item.failed),
+        maxQueueWaitP95Seconds: asNullableNumber(item.max_queue_wait_p95_seconds),
+      })),
+    },
+    resources: {
+      available: resources.available !== false,
+      error: typeof resources.error === 'string' ? resources.error : null,
+      dbBytes: asNumber(resources.db_bytes),
+      dbLimitBytes: asNumber(resources.db_limit_bytes, 500_000_000),
+      dbUsedPct: asNullableNumber(resources.db_used_pct),
+      tempMediaBytes: asNumber(resources.temp_media_bytes),
+      tempMediaObjects: asNumber(resources.temp_media_objects),
+      storageLimitBytes: asNumber(resources.storage_limit_bytes, 1_000_000_000),
+      storageUsedPct: asNullableNumber(resources.storage_used_pct),
+      edgeMonthlyLimit: asNumber(resources.edge_monthly_limit, 500_000),
+      projectedCronInvocationsMonthly: asNumber(resources.projected_cron_invocations_monthly),
+      edgeCronUsedPct: asNullableNumber(resources.edge_cron_used_pct),
+      cronFailures24h: asNullableNumber(resources.cron_failures_24h),
+      cronJobs: Array.isArray(resources.cron_jobs) ? resources.cron_jobs as Array<Record<string, unknown>> : [],
+      workerDispatchMode: String(resources.worker_dispatch_mode ?? 'event-driven + cron fallback'),
+      workerCron: resources.worker_cron && typeof resources.worker_cron === 'object' ? resources.worker_cron as Record<string, unknown> : null,
+      workerCadenceSeconds: asNullableNumber(resources.worker_cadence_seconds),
+      workerCadenceWarning: resources.worker_cadence_warning === true,
+      duplicateTranslateJobs24h: asNumber(resources.duplicate_translate_jobs_24h),
+    },
+  };
+}
+
 function normalizeQueueBreakdown(input: RpcResult['queue_breakdown'], metrics: DashboardMetrics, health: PipelineHealth): QueueBreakdown {
   const rows = input?.by_type ?? input?.byType ?? [];
   return {
     pending: asNumber(input?.pending, health.queueSize),
     running: asNumber(input?.running, health.queueRunning),
     failed24h: asNumber(input?.failed_24h ?? input?.failed24h, metrics.failedJobs),
+    resolvedFailed24h: asNumber(input?.resolved_failed_24h ?? input?.resolvedFailed24h),
     staleRunning: asNumber(input?.stale_running ?? input?.staleRunning, health.staleRunning30m),
     oldestPendingAgeSeconds: asNullableNumber(input?.oldest_pending_age_seconds ?? input?.oldestPendingAgeSeconds),
     byType: rows.map((row) => ({
       type: String(row.type ?? 'unknown'),
+      lane: String(row.lane ?? 'fast'),
       pending: asNumber(row.pending),
       running: asNumber(row.running),
       failed: asNumber(row.failed),
+      resolvedFailed: asNumber(row.resolved_failed ?? row.resolvedFailed),
+      queueWaitP50Seconds: asNullableNumber(row.queue_wait_p50_seconds),
+      queueWaitP95Seconds: asNullableNumber(row.queue_wait_p95_seconds),
+      runP50Seconds: asNullableNumber(row.run_p50_seconds),
+      runP95Seconds: asNullableNumber(row.run_p95_seconds),
     })),
   };
 }
@@ -401,9 +596,10 @@ async function fetchDashboard() {
   const pipelineCounts = normalizePipelineCounts(rpc.pipeline_counts, metrics, health);
   const queueBreakdown = normalizeQueueBreakdown(rpc.queue_breakdown, metrics, health);
   const xLocalUsage = normalizeXLocalUsage(rpc.x_local_usage, metrics, health);
+  const systemPerformance = normalizeSystemPerformance(rpc.system_performance);
   const activities = normalizeActivity(rpc);
 
-  return { metrics, health, activities, heartbeat, opsStatus, pipelineCounts, queueBreakdown, xLocalUsage };
+  return { metrics, health, activities, heartbeat, opsStatus, pipelineCounts, queueBreakdown, xLocalUsage, systemPerformance };
 }
 
 export function useDashboardData() {

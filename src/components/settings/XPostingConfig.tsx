@@ -115,6 +115,16 @@ export default function XPostingConfig({ initial }: Props) {
     update({ hashtag_pool: parsePool(raw) });
   };
 
+  const handleEnabledChange = (enabled: boolean) => {
+    setCfg((current) => {
+      const next = { ...current, enabled };
+      if (enabled && !current.enabled) {
+        delete next.start_posting_from;
+      }
+      return next;
+    });
+  };
+
   const handleSave = () => save.mutate({ key: 'x_posting_config', value: { ...cfg, hashtag_pool: parsePool(hashtagPoolText) } });
 
   const insertPlaceholder = (ph: string) => update({ post_template: cfg.post_template + ' ' + ph });
@@ -173,7 +183,7 @@ export default function XPostingConfig({ initial }: Props) {
               Telegram delivery and the translate/score pipeline are unchanged.
             </p>
           </div>
-          <Switch id="x_enabled" checked={cfg.enabled} onCheckedChange={(v) => update({ enabled: v })} />
+          <Switch id="x_enabled" checked={cfg.enabled} onCheckedChange={handleEnabledChange} />
         </div>
 
         {/* Score gate */}

@@ -26,3 +26,12 @@ Deno.test("duplicate guard ignores cleared or unique rows", () => {
   assertEquals(duplicateDecisionPatch({ dedupe_status: "uncertain", dup_of_tweet_id: null }), null);
   assertEquals(duplicateXSkipReason(null), null);
 });
+
+Deno.test("duplicate guard does not block coverage gaps or review states with a matched target", () => {
+  for (const status of ["coverage_gap", "uncertain", "related_new_info"]) {
+    const post = { dedupe_status: status, dup_of_tweet_id: "canonical" };
+    assertEquals(duplicateBlockTarget(post), null);
+    assertEquals(duplicateDecisionPatch(post), null);
+    assertEquals(duplicateXSkipReason(post), null);
+  }
+});
