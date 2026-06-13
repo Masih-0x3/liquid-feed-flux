@@ -188,6 +188,16 @@ export interface SystemPerformanceSummary {
   resources: SystemResources;
 }
 
+export interface ScoringTuningSummary {
+  regionalAuto24h: number;
+  globalPilotReview24h: number;
+  globalTunedAuto24h: number;
+  manualScoreOverrides24h: number;
+  manualFeedback24h: number;
+  projectedAddedPostsMonth: number;
+  error: string | null;
+}
+
 interface RpcResult {
   metrics: {
     posts_ingested: number;
@@ -262,6 +272,7 @@ interface RpcResult {
   };
   x_local_usage?: Record<string, unknown>;
   system_performance?: Record<string, unknown>;
+  scoring_tuning?: Record<string, unknown>;
   activity?: Array<Record<string, unknown>>;
 }
 
@@ -465,6 +476,19 @@ function normalizeSystemPerformance(input: RpcResult['system_performance']): Sys
   };
 }
 
+function normalizeScoringTuning(input: RpcResult['scoring_tuning']): ScoringTuningSummary {
+  const row = input && typeof input === 'object' ? input : {};
+  return {
+    regionalAuto24h: asNumber(row.regional_auto_24h),
+    globalPilotReview24h: asNumber(row.global_pilot_review_24h),
+    globalTunedAuto24h: asNumber(row.global_tuned_auto_24h),
+    manualScoreOverrides24h: asNumber(row.manual_score_overrides_24h),
+    manualFeedback24h: asNumber(row.manual_feedback_24h),
+    projectedAddedPostsMonth: asNumber(row.projected_added_posts_month),
+    error: typeof row.error === 'string' ? row.error : null,
+  };
+}
+
 function normalizeQueueBreakdown(input: RpcResult['queue_breakdown'], metrics: DashboardMetrics, health: PipelineHealth): QueueBreakdown {
   const rows = input?.by_type ?? input?.byType ?? [];
   return {
@@ -597,9 +621,10 @@ async function fetchDashboard() {
   const queueBreakdown = normalizeQueueBreakdown(rpc.queue_breakdown, metrics, health);
   const xLocalUsage = normalizeXLocalUsage(rpc.x_local_usage, metrics, health);
   const systemPerformance = normalizeSystemPerformance(rpc.system_performance);
+  const scoringTuning = normalizeScoringTuning(rpc.scoring_tuning);
   const activities = normalizeActivity(rpc);
 
-  return { metrics, health, activities, heartbeat, opsStatus, pipelineCounts, queueBreakdown, xLocalUsage, systemPerformance };
+  return { metrics, health, activities, heartbeat, opsStatus, pipelineCounts, queueBreakdown, xLocalUsage, systemPerformance, scoringTuning };
 }
 
 export function useDashboardData() {

@@ -155,4 +155,42 @@ describe("monitoring state helpers", () => {
     expect(monitoringStage(uncertain).label).toBe("Uncertain duplicate");
     expect(loadedMonitoringCounts([uncertain]).manual_review).toBe(1);
   });
+
+  it("counts V2 tuning diagnostics from loaded rows", () => {
+    const regionalAuto = entry({
+      delivery_decision: "deliver",
+      score_breakdown: {
+        scoring_v2: {
+          version: "audience-fit-v2",
+          decision: "deliver",
+          audience_class: "adjacent",
+          final_score: 10.8,
+          threshold: 12.5,
+          policy_rule_applied: "regional_escalation_auto",
+        },
+      },
+    });
+    const globalPilot = entry({
+      delivery_decision: "skip",
+      score_breakdown: {
+        scoring_v2: {
+          version: "audience-fit-v2",
+          decision: "skip",
+          audience_class: "global_exception",
+          global_exception_class: "global_mega_event",
+          review_status: "needs_review",
+          policy_rule_applied: "global_mega_event_review",
+        },
+      },
+    });
+    const manualFeedback = entry({
+      feedback_locked: true,
+      decision_reason: "score_feedback_skip:should_skip",
+    });
+
+    const counts = loadedMonitoringCounts([regionalAuto, globalPilot, manualFeedback]);
+    expect(counts.v2_regional_auto).toBe(1);
+    expect(counts.global_pilot_review).toBe(1);
+    expect(counts.manual_scoring_feedback).toBe(1);
+  });
 });

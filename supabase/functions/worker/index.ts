@@ -28,6 +28,7 @@ import {
   buildScoringPolicyEventMeta,
   normalizeScoringPolicy,
   runScoringPolicy,
+  type ScoringPolicyCalibrationExample,
   type ScoringPolicyResult,
 } from "../_shared/scoringPolicy.ts";
 import { applyLearnedFeedbackBias, type FeedbackBiasResult } from "../_shared/feedbackBias.ts";
@@ -63,6 +64,23 @@ let configCache: { expiresAt: number; value: any } | null = null;
 const FAST_LANE_TYPES = new Set(['dedupe', 'resolve_media', 'download_media', 'hydrate_tweet', 'compute_signature']);
 const MODEL_LANE_TYPES = new Set(['translate', 'enrich']);
 const DELIVERY_LANE_TYPES = new Set(['deliver']);
+
+// deno-lint-ignore no-explicit-any
+async function loadScoringCalibrationExamples(supabase: any, profileId: string): Promise<ScoringPolicyCalibrationExample[]> {
+  try {
+    const { data, error } = await supabase
+      .from('scoring_examples')
+      .select('text_original, author_handle, expected_audience_class, expected_decision, expected_score, expected_global_exception_class, note')
+      .eq('profile_id', profileId)
+      .order('created_at', { ascending: false })
+      .limit(8);
+    if (error) throw error;
+    return (data ?? []) as ScoringPolicyCalibrationExample[];
+  } catch (error) {
+    console.warn('worker: failed to load scoring calibration examples:', error instanceof Error ? error.message : String(error));
+    return [];
+  }
+}
 
 function jobLane(type: string): 'fast' | 'model' | 'delivery' {
   if (FAST_LANE_TYPES.has(type)) return 'fast';
@@ -1020,6 +1038,10 @@ ${post.text_original}`;
           mode: scoringPolicyActive ? 'active' : 'shadow',
           model: scoringModel,
         }));
+        const calibrationExamples = await loadScoringCalibrationExamples(
+          supabase,
+          config.scoringPolicy.active_profile_id,
+        );
         scoringPolicyResult = await measureScoringCall(() => runScoringPolicy({
           tweet_id: tweetId,
           text: String(post.text_original || ''),
@@ -1038,6 +1060,8 @@ ${post.text_original}`;
           seed: scoringSeed,
           serviceTier: scoringServiceTier,
           parallelToolCalls: scoringParallelTools,
+        }, {
+          calibrationExamples,
         }));
         if (!scoringPolicyResult.ok) {
           throw new Error(`OpenAI scoring v2 error: ${scoringPolicyResult.error ?? scoringPolicyResult.audience_reason}`);

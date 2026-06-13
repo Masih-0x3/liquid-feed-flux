@@ -30,6 +30,17 @@ export interface ScoringClassRule {
   cap: number;
 }
 
+export type ScoringPolicyRuleKind = "regional_escalation_auto" | "global_mega_event_review";
+
+export interface ScoringPolicyAppliedRule {
+  kind: ScoringPolicyRuleKind;
+  original_decision: "deliver" | "skip";
+  original_threshold: number;
+  original_review_status: "none" | "shadow" | "needs_review";
+  matched_terms: string[];
+  reason: string;
+}
+
 export interface GlobalExceptionRule {
   id: string;
   label: string;
@@ -50,8 +61,19 @@ export interface ScoringPolicyProfile {
   prompt_notes: string;
   thresholds: Record<AudienceClass, ScoringClassRule>;
   global_exceptions: GlobalExceptionRule[];
+  review_only_exception_ids: string[];
   axis_weights: Record<ScoringV2AxisKey, number>;
   author_overrides: Record<string, "always_deliver" | "always_skip" | "always_review">;
+}
+
+export interface ScoringPolicyCalibrationExample {
+  text_original: string;
+  author_handle?: string | null;
+  expected_audience_class: AudienceClass;
+  expected_decision: "deliver" | "skip" | "review";
+  expected_score?: number | null;
+  expected_global_exception_class?: string | null;
+  note?: string | null;
 }
 
 export interface ScoringPolicy {
@@ -118,6 +140,7 @@ export interface ScoringPolicyResult {
   review_status: "none" | "shadow" | "needs_review";
   adjudicated: boolean;
   adjudication_reason?: string;
+  policy_rule_applied?: ScoringPolicyAppliedRule | null;
   usage: {
     scoring?: Record<string, number> | null;
     adjudication?: Record<string, number> | null;
@@ -144,6 +167,8 @@ export interface ScoringPolicyEventMeta extends Record<string, unknown> {
   review_status: "none" | "shadow" | "needs_review";
   adjudicated: boolean;
   adjudication_reason?: string;
+  policy_rule_applied?: ScoringPolicyRuleKind | null;
+  policy_rule?: ScoringPolicyAppliedRule | null;
   tags: string[];
 }
 
@@ -184,7 +209,7 @@ export const DEFAULT_IRAN_FIRST_SCORING_PROFILE: ScoringPolicyProfile = {
     "Do not down-score an item merely because the speaker or dateline is American or Western. Score the subject matter and audience value. Related world events pass only when they are major enough that an Iran-focused audience would reasonably expect coverage.",
   thresholds: {
     direct_focus: { threshold: 12, cap: 20 },
-    adjacent: { threshold: 13, cap: 16 },
+    adjacent: { threshold: 12.5, cap: 16 },
     global_exception: { threshold: 15, cap: 16 },
     off_topic: { threshold: 99, cap: 8 },
   },
@@ -202,7 +227,7 @@ export const DEFAULT_IRAN_FIRST_SCORING_PROFILE: ScoringPolicyProfile = {
       label: "Oil / energy shock",
       description: "Major oil, gas, shipping, OPEC, or energy-security event that may affect Iran, the region, or global markets.",
       cap: 16,
-      threshold: 15,
+      threshold: 14,
       examples: ["oil price shock", "OPEC surprise cut", "prime minister comments on oil supply"],
     },
     {
@@ -218,13 +243,45 @@ export const DEFAULT_IRAN_FIRST_SCORING_PROFILE: ScoringPolicyProfile = {
       label: "Major leader statement",
       description: "A prime minister, president, monarch, foreign minister, or central-bank head makes a material comment on war, oil, sanctions, or regional security.",
       cap: 16,
-      threshold: 15,
+      threshold: 14,
       examples: ["prime minister comments on oil", "president announces sanctions strategy"],
     },
+    {
+      id: "global_mega_event",
+      label: "Global mega-event",
+      description: "A globally dominant, exceptional non-Iran story that is important enough for an Iran-first audience to review even without an Iran nexus.",
+      cap: 18,
+      threshold: 18,
+      examples: ["major AI company IPO with global market impact", "major migration crisis with worldwide political consequences", "major technology or market shock dominating global attention"],
+    },
   ],
+  review_only_exception_ids: ["global_mega_event"],
   axis_weights: { ...DEFAULT_SCORING_V2_WEIGHTS },
   author_overrides: {},
 };
+
+const REGIONAL_ESCALATION_TERMS = [
+  "ballistic",
+  "missile",
+  "air raid",
+  "sirens",
+  "explosion",
+  "explosions",
+  "drone attack",
+  "fighter jets",
+  "iranian attacks",
+  "crude",
+  "oil",
+  "terminal",
+  "hormuz",
+  "houthi",
+  "houthis",
+  "erbil",
+  "saudi",
+  "dubai",
+  "oman",
+  "gulf",
+];
 
 export const DEFAULT_SCORING_POLICY: ScoringPolicy = {
   enabled: false,
@@ -316,6 +373,7 @@ function normalizeProfile(v: unknown, fallback: ScoringPolicyProfile): ScoringPo
       off_topic: normalizeClassRule(thresholds.off_topic, fallback.thresholds.off_topic),
     },
     global_exceptions: rawExceptions.slice(0, 30).map((item, index) => normalizeException(item, fallbackExceptions[index] ?? fallbackExceptions[0])),
+    review_only_exception_ids: strings(src.review_only_exception_ids, fallback.review_only_exception_ids).slice(0, 30),
     axis_weights: axisWeights,
     author_overrides: authorOverrides,
   };
@@ -396,6 +454,11 @@ function normalizeAudienceClass(v: unknown): AudienceClass {
   return AUDIENCE_CLASSES.includes(v as AudienceClass) ? v as AudienceClass : "off_topic";
 }
 
+function matchedRegionalEscalationTerms(text: string): string[] {
+  const lower = text.toLowerCase();
+  return REGIONAL_ESCALATION_TERMS.filter((term) => lower.includes(term));
+}
+
 function normalizeModelResult(rawArgs: Record<string, unknown>, profile: ScoringPolicyProfile): Omit<ScoringPolicyResult, "ok" | "version" | "profile_id" | "profile_name" | "delivery_decision" | "decision_reason" | "review_status" | "adjudicated" | "usage"> {
   const audienceClass = normalizeAudienceClass(rawArgs.audience_class);
   const globalExceptionClass = audienceClass === "global_exception" && typeof rawArgs.global_exception_class === "string"
@@ -430,6 +493,7 @@ export function finalizeScoringPolicyResult(
   policy: ScoringPolicy,
   profile: ScoringPolicyProfile,
   authorHandle?: string | null,
+  postText = "",
 ): ScoringPolicyResult {
   const base = normalizeModelResult(rawArgs, profile);
   const handle = (authorHandle ?? "").toLowerCase().replace(/^@/, "");
@@ -437,14 +501,54 @@ export function finalizeScoringPolicyResult(
   let decision: "deliver" | "skip" = base.final_score >= base.threshold ? "deliver" : "skip";
   let reason = `scoring_v2:${base.audience_class}:${base.final_score.toFixed(1)}>=${base.threshold}`;
   if (base.final_score < base.threshold) reason = `scoring_v2_below:${base.audience_class}:${base.final_score.toFixed(1)}<${base.threshold}`;
-  if (authorRule === "always_deliver") {
+  let reviewStatus: "none" | "shadow" | "needs_review" = shouldAdjudicate(base, policy) || authorRule === "always_review" ? "needs_review" : "none";
+  const originalDecision = decision;
+  const originalThreshold = base.threshold;
+  const originalReviewStatus = reviewStatus;
+  let appliedRule: ScoringPolicyAppliedRule | null = null;
+
+  if (base.audience_class === "global_exception" && base.global_exception_class && profile.review_only_exception_ids.includes(base.global_exception_class)) {
+    decision = "skip";
+    reviewStatus = "needs_review";
+    reason = `scoring_v2_review_only_exception:${base.global_exception_class}:${base.final_score.toFixed(1)}>=${base.threshold}`;
+    appliedRule = {
+      kind: "global_mega_event_review",
+      original_decision: originalDecision,
+      original_threshold: originalThreshold,
+      original_review_status: originalReviewStatus,
+      matched_terms: [base.global_exception_class],
+      reason: "Global mega-event pilot is review-only and cannot auto-deliver.",
+    };
+  } else if (
+    authorRule !== "always_skip" &&
+    base.audience_class === "adjacent" &&
+    decision === "skip" &&
+    base.final_score >= 10 &&
+    base.final_score < base.threshold
+  ) {
+    const matchedTerms = matchedRegionalEscalationTerms(postText);
+    if (matchedTerms.length > 0) {
+      decision = "deliver";
+      reviewStatus = authorRule === "always_review" ? "needs_review" : "none";
+      reason = `scoring_v2_rule:regional_escalation_auto:${base.final_score.toFixed(1)}<${base.threshold}`;
+      appliedRule = {
+        kind: "regional_escalation_auto",
+        original_decision: originalDecision,
+        original_threshold: originalThreshold,
+        original_review_status: originalReviewStatus,
+        matched_terms: matchedTerms,
+        reason: "Adjacent regional-security or Gulf/oil escalation item promoted by policy rule.",
+      };
+    }
+  }
+
+  if (authorRule === "always_deliver" && appliedRule?.kind !== "global_mega_event_review") {
     decision = "deliver";
     reason = `scoring_v2_author:always_deliver:@${handle}`;
   } else if (authorRule === "always_skip") {
     decision = "skip";
     reason = `scoring_v2_author:always_skip:@${handle}`;
   }
-  const reviewStatus = shouldAdjudicate(base, policy) || authorRule === "always_review" ? "needs_review" : "none";
   return {
     ok: true,
     version: SCORING_POLICY_VERSION,
@@ -455,6 +559,7 @@ export function finalizeScoringPolicyResult(
     decision_reason: reason,
     review_status: reviewStatus,
     adjudicated: false,
+    policy_rule_applied: appliedRule,
     usage: {},
   };
 }
@@ -478,6 +583,10 @@ export function buildScoringPolicyEventMeta(result: ScoringPolicyResult, mode: S
     review_status: result.review_status,
     adjudicated: result.adjudicated,
     ...(result.adjudication_reason ? { adjudication_reason: result.adjudication_reason } : {}),
+    ...(result.policy_rule_applied ? {
+      policy_rule_applied: result.policy_rule_applied.kind,
+      policy_rule: result.policy_rule_applied,
+    } : {}),
     tags: result.tags,
   };
 }
@@ -548,7 +657,25 @@ function adjudicationTool(): ToolFunctionDef {
   };
 }
 
-function renderScoringPrompt(profile: ScoringPolicyProfile): string {
+function renderCalibrationExamples(examples: ScoringPolicyCalibrationExample[] = []): string {
+  const normalized = examples
+    .filter((example) => typeof example.text_original === "string" && example.text_original.trim())
+    .slice(0, 8)
+    .map((example, index) => ({
+      n: index + 1,
+      author: example.author_handle ? `@${example.author_handle.replace(/^@/, "")}` : "unknown",
+      expected_audience_class: example.expected_audience_class,
+      expected_decision: example.expected_decision,
+      expected_score: typeof example.expected_score === "number" ? example.expected_score : null,
+      expected_global_exception_class: example.expected_global_exception_class ?? null,
+      note: example.note ?? null,
+      text: example.text_original.slice(0, 700),
+    }));
+  if (normalized.length === 0) return "";
+  return `\n\nRecent human calibration examples:\n${JSON.stringify(normalized, null, 2)}\nUse these examples to calibrate audience fit, but still apply the policy to the current item.`;
+}
+
+function renderScoringPrompt(profile: ScoringPolicyProfile, calibrationExamples: ScoringPolicyCalibrationExample[] = []): string {
   return `You are the audience-fit scorer for an automated news account.
 
 Use ONLY the provided scoring policy. Do not enforce duplicate detection; that already ran before this step.
@@ -568,7 +695,7 @@ Scoring rules:
 - Apply blocked categories by lowering audience_class to off_topic when appropriate.
 - A global exception must match one configured exception id; otherwise choose off_topic.
 - Be narrow by default. Broad world news only passes when it is truly exceptional for this profile.
-- Explain the audience fit in audience_reason.`;
+- Explain the audience fit in audience_reason.${renderCalibrationExamples(calibrationExamples)}`;
 }
 
 function renderPostInput(input: ScoringPolicyPostInput): string {
@@ -599,17 +726,19 @@ export async function runScoringPolicy(
   opts: {
     profileId?: string | null;
     forceAdjudication?: boolean;
+    calibrationExamples?: ScoringPolicyCalibrationExample[];
     callOpenAIImpl?: typeof callOpenAI;
   } = {},
 ): Promise<ScoringPolicyResult> {
   const policy = normalizeScoringPolicy(policyInput);
   const profile = getActiveScoringProfile(policy, opts.profileId);
   const call = opts.callOpenAIImpl ?? callOpenAI;
+  const calibrationExamples = opts.calibrationExamples ?? [];
   const scoringResponse = await call({
     apiKey: modelOptions.apiKey,
     model: modelOptions.model || "gpt-5.4-mini",
     messages: [
-      { role: "system", content: renderScoringPrompt(profile) },
+      { role: "system", content: renderScoringPrompt(profile, calibrationExamples) },
       { role: "user", content: renderPostInput(input) },
     ],
     tool: scoringTool(),
@@ -649,7 +778,7 @@ export async function runScoringPolicy(
     };
   }
 
-  let result = finalizeScoringPolicyResult(rawArgs, policy, profile, input.author_handle);
+  let result = finalizeScoringPolicyResult(rawArgs, policy, profile, input.author_handle, input.text);
   result.usage.scoring = scoringResponse.usage;
   result.raw = { scoring: scoringResponse.raw };
 
@@ -658,7 +787,7 @@ export async function runScoringPolicy(
       apiKey: modelOptions.apiKey,
       model: policy.adjudication.model || modelOptions.model || "gpt-5.4-mini",
       messages: [
-        { role: "system", content: `${renderScoringPrompt(profile)}\n\nYou are adjudicating a borderline or low-confidence first pass. Correct it only when the evidence supports a better class or score.` },
+        { role: "system", content: `${renderScoringPrompt(profile, calibrationExamples)}\n\nYou are adjudicating a borderline or low-confidence first pass. Correct it only when the evidence supports a better class or score.` },
         { role: "user", content: `${renderPostInput(input)}\n\nFirst pass:\n${JSON.stringify(result, null, 2)}` },
       ],
       tool: adjudicationTool(),
@@ -672,10 +801,12 @@ export async function runScoringPolicy(
     });
     const adjudicatedArgs = await parseToolResult(adjudicationResponse);
     if (!adjudicatedArgs.error) {
-      const next = finalizeScoringPolicyResult(adjudicatedArgs, policy, profile, input.author_handle);
+      const next = finalizeScoringPolicyResult(adjudicatedArgs, policy, profile, input.author_handle, input.text);
       result = {
         ...next,
-        review_status: stillNeedsReviewAfterAdjudication(next, policy) ? "needs_review" : "none",
+        review_status: next.policy_rule_applied?.kind === "global_mega_event_review"
+          ? "needs_review"
+          : stillNeedsReviewAfterAdjudication(next, policy) ? "needs_review" : "none",
         adjudicated: true,
         adjudication_reason: "borderline_or_low_confidence",
         usage: { scoring: scoringResponse.usage, adjudication: adjudicationResponse.usage },

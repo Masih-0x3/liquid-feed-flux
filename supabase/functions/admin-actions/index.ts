@@ -20,6 +20,7 @@ import {
   normalizeScoringPolicy,
   runScoringPolicy,
   type AudienceClass,
+  type ScoringPolicyCalibrationExample,
   type ScoringPolicy,
   type ScoringPolicyResult,
 } from "../_shared/scoringPolicy.ts";
@@ -910,15 +911,40 @@ async function queueManualAdvance(supabase: any, tweetId: string): Promise<{ que
   return { queued: 'deliver' };
 }
 
+const SCORING_FEEDBACK_REASON_TAGS = new Set([
+  'regional_escalation',
+  'oil_shipping',
+  'leader_statement',
+  'global_mega_event',
+  'direct_focus',
+  'adjacent_context',
+  'should_skip',
+  'wrong_class',
+  'duplicate',
+  'stale',
+  'source_trust',
+  'broad_global',
+  'other',
+]);
+
+function normalizeScoringFeedbackReasonTag(body: Record<string, unknown>): string {
+  const tag = typeof body.reason_tag === 'string'
+    ? body.reason_tag.trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_').slice(0, 80)
+    : '';
+  return SCORING_FEEDBACK_REASON_TAGS.has(tag) ? tag : '';
+}
+
 // deno-lint-ignore no-explicit-any
 async function setManualScore(supabase: any, body: Record<string, unknown>) {
   const tweetId = typeof body.tweet_id === 'string' ? body.tweet_id.trim() : '';
   const score = Number(body.score);
   const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 500) : '';
+  const reasonTag = normalizeScoringFeedbackReasonTag(body);
   const overrideDuplicate = body.override_duplicate === true;
   const expectedAudienceClass = isAudienceClass(body.expected_audience_class) ? body.expected_audience_class : null;
   if (!tweetId) return { ok: false, error: 'tweet_id is required' };
   if (!Number.isInteger(score) || score < 1 || score > 20) return { ok: false, error: 'score must be a whole number between 1 and 20' };
+  if (!reasonTag) return { ok: false, error: 'reason_tag is required for manual score feedback' };
 
   const threshold = await loadActiveThreshold(supabase);
   const { data: post } = await supabase
@@ -990,6 +1016,7 @@ async function setManualScore(supabase: any, body: Record<string, unknown>) {
     old_score: oldScore,
     manual_score: score,
     threshold,
+    reason_tag: reasonTag,
     reason,
     override_duplicate: overrideDuplicate,
     decision,
@@ -1001,7 +1028,7 @@ async function setManualScore(supabase: any, body: Record<string, unknown>) {
       expected_class: expectedAudienceClass,
       expected_decision: passes ? 'deliver' : 'skip',
       expected_score: score,
-      note: reason || 'Manual score label',
+      note: [reasonTag, reason].filter(Boolean).join(': ') || 'Manual score label',
       source: 'manual_score',
     }).catch(() => null);
   }
@@ -1010,6 +1037,8 @@ async function setManualScore(supabase: any, body: Record<string, unknown>) {
     manual_score: score,
     threshold,
     decision,
+    reason_tag: reasonTag,
+    reason,
   });
 
   let translation: { ok: boolean; error?: string } | null = null;
@@ -1039,6 +1068,8 @@ async function setManualScore(supabase: any, body: Record<string, unknown>) {
 async function recordScoreFeedback(supabase: any, body: Record<string, unknown>) {
   const tweetId = typeof body.tweet_id === 'string' ? body.tweet_id.trim() : '';
   const feedback = typeof body.feedback === 'string' ? body.feedback : '';
+  const reasonTag = normalizeScoringFeedbackReasonTag(body);
+  const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 500) : '';
   const map: Record<string, { action: string; polarity: number }> = {
     too_low: { action: 'score_too_low', polarity: 2 },
     too_high: { action: 'score_too_high', polarity: -2 },
@@ -1053,7 +1084,8 @@ async function recordScoreFeedback(supabase: any, body: Record<string, unknown>)
   if (!tweetId) return { ok: false, error: 'tweet_id is required' };
   const item = map[feedback];
   if (!item) return { ok: false, error: 'feedback must be a supported score feedback action' };
-  await recordFeedback(supabase, tweetId, item.action, item.polarity, { feedback });
+  if (!reasonTag) return { ok: false, error: 'reason_tag is required for score feedback' };
+  await recordFeedback(supabase, tweetId, item.action, item.polarity, { feedback, reason_tag: reasonTag, reason });
   const reviewPatch: Record<string, unknown> = { feedback_locked: true };
   if (['correct_skip', 'should_skip', 'not_global_exception'].includes(feedback)) {
     reviewPatch.score_review_status = 'rejected';
@@ -1072,12 +1104,12 @@ async function recordScoreFeedback(supabase: any, body: Record<string, unknown>)
       tweet_id: tweetId,
       expected_class: inferredClass,
       expected_decision: expectedDecision,
-      note: feedback,
+      note: [reasonTag, reason || feedback].filter(Boolean).join(': '),
       source: 'score_feedback',
     }).catch(() => null);
   }
-  await insertAdminPipelineEvent(supabase, tweetId, 'score_feedback', 'completed', { feedback, polarity: item.polarity });
-  return { ok: true, tweet_id: tweetId, feedback, polarity: item.polarity };
+  await insertAdminPipelineEvent(supabase, tweetId, 'score_feedback', 'completed', { feedback, polarity: item.polarity, reason_tag: reasonTag, reason });
+  return { ok: true, tweet_id: tweetId, feedback, polarity: item.polarity, reason_tag: reasonTag };
 }
 
 type IgnoreMonitoringItemResult = {
@@ -1299,6 +1331,9 @@ type MonitoringFilter =
   | 'v1_skip_v2_post'
   | 'v2_off_topic'
   | 'v2_needs_review'
+  | 'v2_regional_auto'
+  | 'global_pilot_review'
+  | 'manual_scoring_feedback'
   | 'duplicates'
   | 'coverage_gap'
   | 'possible_duplicate'
@@ -1423,7 +1458,8 @@ function normalizeMonitoringFilter(v: unknown): MonitoringFilter {
     'all', 'needs_attention', 'failed_stuck', 'needs_score', 'translation_queue',
     'below_threshold', 'manual_review', 'duplicates', 'coverage_gap',
     'v2_would_post', 'v2_would_skip', 'v1_post_v2_skip', 'v1_skip_v2_post',
-    'v2_off_topic', 'v2_needs_review',
+    'v2_off_topic', 'v2_needs_review', 'v2_regional_auto', 'global_pilot_review',
+    'manual_scoring_feedback',
     'possible_duplicate', 'duplicate_anomalies', 'ready_to_deliver',
     'telegram_pending', 'x_pending', 'x_failed', 'delivered_24h', 'hydration',
   ];
@@ -1566,10 +1602,24 @@ function monitoringScoringV2Decision(post: Record<string, unknown>): string | nu
   return decision === 'deliver' || decision === 'skip' ? decision : null;
 }
 
+function monitoringPolicyRuleKind(snapshot: Record<string, unknown>): string | null {
+  if (typeof snapshot.policy_rule_applied === 'string') return snapshot.policy_rule_applied;
+  const rule = snapshot.policy_rule && typeof snapshot.policy_rule === 'object' ? snapshot.policy_rule as Record<string, unknown> : null;
+  return typeof rule?.kind === 'string' ? rule.kind : null;
+}
+
+function isManualScoringFeedbackEntry(entry: Record<string, unknown>): boolean {
+  const reason = typeof entry.decision_reason === 'string' ? entry.decision_reason : '';
+  return reason.startsWith('manual_score_')
+    || reason.startsWith('score_feedback_')
+    || (entry.feedback_locked === true && (entry.score_review_status === 'approved' || entry.score_review_status === 'rejected'));
+}
+
 function matchesMonitoringScoringV2Filter(entry: Record<string, unknown>, filter: MonitoringFilter): boolean {
   const snapshot = monitoringScoringV2Snapshot(entry);
   if (!snapshot) return false;
   const decision = monitoringScoringV2Decision(entry);
+  const policyRule = monitoringPolicyRuleKind(snapshot);
   switch (filter) {
     case 'v2_would_post':
       return decision === 'deliver';
@@ -1583,6 +1633,10 @@ function matchesMonitoringScoringV2Filter(entry: Record<string, unknown>, filter
       return snapshot.audience_class === 'off_topic';
     case 'v2_needs_review':
       return snapshot.review_status === 'needs_review';
+    case 'v2_regional_auto':
+      return policyRule === 'regional_escalation_auto';
+    case 'global_pilot_review':
+      return policyRule === 'global_mega_event_review' || (snapshot.global_exception_class === 'global_mega_event' && snapshot.review_status === 'needs_review');
     default:
       return false;
   }
@@ -2314,7 +2368,11 @@ function matchesMonitoringFilter(entry: Record<string, unknown>, filter: Monitor
     case 'v1_skip_v2_post':
     case 'v2_off_topic':
     case 'v2_needs_review':
+    case 'v2_regional_auto':
+    case 'global_pilot_review':
       return matchesMonitoringScoringV2Filter(entry, filter);
+    case 'manual_scoring_feedback':
+      return isManualScoringFeedbackEntry(entry);
     case 'duplicates':
       return !!entry.dup_of_tweet_id;
     case 'coverage_gap':
@@ -2400,7 +2458,12 @@ async function getMonitoringEntries(supabase: any, body: Record<string, unknown>
         case 'v1_skip_v2_post':
         case 'v2_off_topic':
         case 'v2_needs_review':
+        case 'v2_regional_auto':
+        case 'global_pilot_review':
           q = q.not('scoring_version', 'is', null);
+          break;
+        case 'manual_scoring_feedback':
+          q = q.eq('feedback_locked', true);
           break;
         case 'ready_to_deliver':
           q = q.eq('delivery_decision', 'deliver').not('text_translated', 'is', null).or('is_truncated.eq.false,hydrated_at.not.is.null');
@@ -3115,6 +3178,61 @@ async function getSystemPerformanceSummary(supabase: any) {
 }
 
 // deno-lint-ignore no-explicit-any
+async function loadScoringTuningSummary(supabase: any) {
+  const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const [scoreEventsRes, feedbackRes] = await Promise.all([
+    supabase
+      .from('pipeline_events')
+      .select('meta, created_at, started_at, ended_at')
+      .eq('step', 'score')
+      .eq('status', 'completed')
+      .gte('created_at', since24h)
+      .limit(5000),
+    supabase
+      .from('feedback_events')
+      .select('action, created_at')
+      .gte('created_at', since24h)
+      .in('action', ['manual_score', 'should_pass_audience', 'should_skip_audience', 'wrong_relevance_class', 'global_exception_worth_covering', 'not_global_exception'])
+      .limit(5000),
+  ]);
+  if (scoreEventsRes.error) throw scoreEventsRes.error;
+  if (feedbackRes.error) throw feedbackRes.error;
+
+  let regionalAuto24h = 0;
+  let globalPilotReview24h = 0;
+  let globalTunedAuto24h = 0;
+  for (const event of scoreEventsRes.data ?? []) {
+    const meta = event.meta && typeof event.meta === 'object' ? event.meta as Record<string, unknown> : {};
+    const rule = monitoringPolicyRuleKind(meta);
+    if (rule === 'regional_escalation_auto') regionalAuto24h += 1;
+    if (rule === 'global_mega_event_review' || (meta.global_exception_class === 'global_mega_event' && meta.review_status === 'needs_review')) globalPilotReview24h += 1;
+    const score = typeof meta.final_score === 'number' ? meta.final_score : Number(meta.final_score);
+    const threshold = typeof meta.threshold === 'number' ? meta.threshold : Number(meta.threshold);
+    if (
+      meta.audience_class === 'global_exception'
+      && meta.decision === 'deliver'
+      && threshold === 14
+      && score >= 14
+      && score < 15
+      && (meta.global_exception_class === 'oil_energy' || meta.global_exception_class === 'major_leader_statement')
+    ) {
+      globalTunedAuto24h += 1;
+    }
+  }
+
+  const manualScoreOverrides24h = (feedbackRes.data ?? []).filter((row: Record<string, unknown>) => row.action === 'manual_score').length;
+  const manualFeedback24h = (feedbackRes.data ?? []).length;
+  return {
+    regional_auto_24h: regionalAuto24h,
+    global_pilot_review_24h: globalPilotReview24h,
+    global_tuned_auto_24h: globalTunedAuto24h,
+    manual_score_overrides_24h: manualScoreOverrides24h,
+    manual_feedback_24h: manualFeedback24h,
+    projected_added_posts_month: Math.round((regionalAuto24h + globalTunedAuto24h) * 30),
+  };
+}
+
+// deno-lint-ignore no-explicit-any
 async function getEnhancedDashboardSummary(supabase: any) {
   const { data: base, error } = await supabase.rpc('get_dashboard_summary');
   if (error) throw error;
@@ -3127,7 +3245,7 @@ async function getEnhancedDashboardSummary(supabase: any) {
   const staleCutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
 
   const dedupeAvailable = await hasDedupePostColumns(supabase);
-  const [posts, deliveriesRes, xDeliveriesRes, queueBreakdown, xLocalUsage, activity, systemPerformance] = await Promise.all([
+  const [posts, deliveriesRes, xDeliveriesRes, queueBreakdown, xLocalUsage, activity, systemPerformance, scoringTuning] = await Promise.all([
     loadDashboardPosts(supabase, since, dedupeAvailable),
     supabase.from('deliveries').select('subject_id, status, posted_at, created_at').eq('subject_type', 'post').gte('created_at', since).limit(10000),
     supabase.from('x_deliveries').select('post_id, status, posted_at, created_at').gte('created_at', since).order('created_at', { ascending: false }).limit(10000),
@@ -3137,6 +3255,15 @@ async function getEnhancedDashboardSummary(supabase: any) {
     getSystemPerformanceSummary(supabase).catch((error) => ({
       success: false,
       error: error instanceof Error ? error.message : String(error),
+    })),
+    loadScoringTuningSummary(supabase).catch((error) => ({
+      error: error instanceof Error ? error.message : String(error),
+      regional_auto_24h: 0,
+      global_pilot_review_24h: 0,
+      global_tuned_auto_24h: 0,
+      manual_score_overrides_24h: 0,
+      manual_feedback_24h: 0,
+      projected_added_posts_month: 0,
     })),
   ]);
   if (deliveriesRes.error) throw deliveriesRes.error;
@@ -3234,6 +3361,7 @@ async function getEnhancedDashboardSummary(supabase: any) {
     queue_breakdown: queueBreakdown,
     x_local_usage: xLocalUsage,
     system_performance: systemPerformance,
+    scoring_tuning: scoringTuning,
     activity,
   };
 }
@@ -3253,7 +3381,7 @@ async function getMonitoringOverview(supabase: any, body: Record<string, unknown
   ] = await Promise.all([
     supabase
       .from('posts')
-      .select('tweet_id, text_original, text_translated, translated_at, has_media, delivery_decision, final_score, importance_score, decision_reason, dup_of_tweet_id, is_truncated, hydrated_at, enrich_status, dedupe_status, dedupe_reason')
+      .select('tweet_id, text_original, text_translated, translated_at, has_media, delivery_decision, final_score, importance_score, decision_reason, dup_of_tweet_id, is_truncated, hydrated_at, enrich_status, dedupe_status, dedupe_reason, scoring_version, audience_class, global_exception_class, score_review_status, score_breakdown, feedback_locked')
       .order('created_at', { ascending: false })
       .limit(10000),
     supabase
@@ -3311,6 +3439,9 @@ async function getMonitoringOverview(supabase: any, body: Record<string, unknown
     delivered_24h: 0,
     telegram_pending: 0,
     below_threshold: 0,
+    v2_regional_auto: 0,
+    global_pilot_review: 0,
+    manual_scoring_feedback: 0,
     stale_jobs: staleJobs.count ?? 0,
     stale_x_pending_24h: staleXPending.count ?? 0,
   };
@@ -3346,6 +3477,9 @@ async function getMonitoringOverview(supabase: any, body: Record<string, unknown
     if (state.x_state === 'failed') counts.x_failed += 1;
     if (state.code === 'telegram_pending') counts.telegram_pending += 1;
     if (state.code === 'below_threshold') counts.below_threshold += 1;
+    if (matchesMonitoringScoringV2Filter(post, 'v2_regional_auto')) counts.v2_regional_auto += 1;
+    if (matchesMonitoringScoringV2Filter(post, 'global_pilot_review')) counts.global_pilot_review += 1;
+    if (isManualScoringFeedbackEntry(post)) counts.manual_scoring_feedback += 1;
   }
 
   for (const row of xDeliveriesRes.data ?? []) {
@@ -3769,6 +3903,23 @@ async function loadScoringModelOptions(supabase: any) {
   };
 }
 
+// deno-lint-ignore no-explicit-any
+async function loadScoringCalibrationExamples(supabase: any, profileId: string): Promise<ScoringPolicyCalibrationExample[]> {
+  try {
+    const { data, error } = await supabase
+      .from('scoring_examples')
+      .select('text_original, author_handle, expected_audience_class, expected_decision, expected_score, expected_global_exception_class, note')
+      .eq('profile_id', profileId)
+      .order('created_at', { ascending: false })
+      .limit(8);
+    if (error) throw error;
+    return (data ?? []) as ScoringPolicyCalibrationExample[];
+  } catch (error) {
+    console.warn('admin-actions: failed to load scoring calibration examples:', error instanceof Error ? error.message : String(error));
+    return [];
+  }
+}
+
 function scoringPolicyPostUpdate(result: ScoringPolicyResult, active: boolean): Record<string, unknown> {
   const scoringV2Meta = buildScoringPolicyEventMeta(result, active ? 'active' : 'shadow');
   return {
@@ -3819,6 +3970,8 @@ async function scorePostV2(supabase: any, body: Record<string, unknown>) {
   if (!openaiApiKey) return { ok: false, error: 'OPENAI_API_KEY is not configured' };
   const model = await loadScoringModelOptions(supabase);
   const account = post.accounts as Record<string, unknown> | null;
+  const profileId = typeof body.profile_id === 'string' ? body.profile_id : null;
+  const calibrationExamples = await loadScoringCalibrationExamples(supabase, profileId ?? policy.active_profile_id);
   const result = await runScoringPolicy({
     tweet_id: tweetId,
     text: post.text_original,
@@ -3827,8 +3980,9 @@ async function scorePostV2(supabase: any, body: Record<string, unknown>) {
     url: post.url,
     published_at: post.tweeted_at,
   }, policy, { apiKey: openaiApiKey, ...model }, {
-    profileId: typeof body.profile_id === 'string' ? body.profile_id : null,
+    profileId,
     forceAdjudication: body.force_adjudication === true,
+    calibrationExamples,
   });
   if (!result.ok) return { ok: false, error: result.error ?? result.audience_reason, result };
 
@@ -3854,14 +4008,17 @@ async function previewScoringPolicy(supabase: any, body: Record<string, unknown>
   if (!openaiApiKey) return { ok: false, error: 'OPENAI_API_KEY is not configured' };
   const policy = await loadScoringPolicyConfig(supabase);
   const model = await loadScoringModelOptions(supabase);
+  const profileId = typeof body.profile_id === 'string' ? body.profile_id : null;
+  const calibrationExamples = await loadScoringCalibrationExamples(supabase, profileId ?? policy.active_profile_id);
   const result = await runScoringPolicy({
     text,
     author_handle: typeof body.author_handle === 'string' ? body.author_handle : null,
     url: typeof body.url === 'string' ? body.url : null,
     published_at: new Date().toISOString(),
   }, policy, { apiKey: openaiApiKey, ...model }, {
-    profileId: typeof body.profile_id === 'string' ? body.profile_id : null,
+    profileId,
     forceAdjudication: body.force_adjudication === true,
+    calibrationExamples,
   });
   return { ok: result.ok, result, error: result.ok ? undefined : result.error };
 }
@@ -3961,11 +4118,14 @@ async function runScoringEval(supabase: any, body: Record<string, unknown>) {
   let falseNegative = 0;
   let ambiguous = 0;
   for (const example of examples ?? []) {
+    const calibrationExamples = (examples ?? [])
+      .filter((candidate) => candidate.id !== example.id)
+      .slice(0, 8) as ScoringPolicyCalibrationExample[];
     const result = await runScoringPolicy({
       text: example.text_original as string,
       author_handle: example.author_handle as string | null,
       published_at: new Date().toISOString(),
-    }, policy, { apiKey: openaiApiKey, ...model }, { profileId });
+    }, policy, { apiKey: openaiApiKey, ...model }, { profileId, calibrationExamples });
     const expectedDecision = example.expected_decision as string;
     const expectedClass = example.expected_audience_class as string;
     const classOk = result.audience_class === expectedClass;
@@ -4384,7 +4544,8 @@ function validateSettingsValue(key: string, value: unknown): string | null {
           const p = profile as Record<string, unknown>;
           if (typeof p.id !== 'string' || !p.id || p.id.length > 80) return 'scoring profile id required (<=80)';
           if (typeof p.name !== 'string' || !p.name || p.name.length > 120) return 'scoring profile name required (<=120)';
-          for (const arrKey of ['focus_entities', 'aliases', 'geographies', 'blocked_categories']) {
+          for (const arrKey of ['focus_entities', 'aliases', 'geographies', 'blocked_categories', 'review_only_exception_ids']) {
+            if (p[arrKey] === undefined && arrKey === 'review_only_exception_ids') continue;
             if (!Array.isArray(p[arrKey])) return `scoring profile ${arrKey} must be an array`;
             if ((p[arrKey] as unknown[]).some((x) => typeof x !== 'string' || x.length > 120)) return `scoring profile ${arrKey} entries must be strings <=120`;
           }

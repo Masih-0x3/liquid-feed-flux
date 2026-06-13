@@ -19,6 +19,7 @@ import {
   RefreshCw,
   Send,
   ShieldCheck,
+  SlidersHorizontal,
   Star,
   TimerReset,
   Twitter,
@@ -85,6 +86,16 @@ function quotaTone(value: number | null | undefined): string {
   return 'text-success';
 }
 
+const EMPTY_SCORING_TUNING = {
+  regionalAuto24h: 0,
+  globalPilotReview24h: 0,
+  globalTunedAuto24h: 0,
+  manualScoreOverrides24h: 0,
+  manualFeedback24h: 0,
+  projectedAddedPostsMonth: 0,
+  error: null as string | null,
+};
+
 export default function Dashboard() {
   const { data, isLoading, isError, error, dataUpdatedAt, isFetching } = useDashboardData();
   const queryClient = useQueryClient();
@@ -144,6 +155,7 @@ export default function Dashboard() {
   }
 
   const { metrics, health, activities, heartbeat, opsStatus, pipelineCounts, queueBreakdown, xLocalUsage, systemPerformance } = data;
+  const scoringTuning = data.scoringTuning ?? EMPTY_SCORING_TUNING;
   const maxPipeline = Math.max(
     pipelineCounts.ingested,
     pipelineCounts.duplicateGateChecked ?? 0,
@@ -214,6 +226,51 @@ export default function Dashboard() {
             Open recommended view
             <ArrowRight className="ml-2 h-4 w-4" />
           </Button>
+        </CardContent>
+      </Card>
+
+      <Card className="glass-card border-primary/20">
+        <CardContent className="p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="font-semibold text-glass-foreground">V2 scoring tuning</p>
+              <p className="text-sm text-muted-foreground">
+                Regional auto-promotions, global pilot reviews, and manual scoring feedback over the last 24h.
+              </p>
+            </div>
+            <Badge variant="outline">{compactNumber(scoringTuning.manualFeedback24h)} feedback events</Badge>
+          </div>
+          <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded border border-border/50 px-3 py-2 text-xs">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <ShieldCheck className="h-3.5 w-3.5 text-primary" />
+                <span>Regional auto 24h</span>
+              </div>
+              <p className="mt-1 text-base font-semibold tabular-nums text-glass-foreground">{compactNumber(scoringTuning.regionalAuto24h)}</p>
+            </div>
+            <div className="rounded border border-border/50 px-3 py-2 text-xs">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Star className="h-3.5 w-3.5 text-primary" />
+                <span>Global pilot review</span>
+              </div>
+              <p className="mt-1 text-base font-semibold tabular-nums text-glass-foreground">{compactNumber(scoringTuning.globalPilotReview24h)}</p>
+            </div>
+            <div className="rounded border border-border/50 px-3 py-2 text-xs">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <SlidersHorizontal className="h-3.5 w-3.5 text-primary" />
+                <span>Manual overrides</span>
+              </div>
+              <p className="mt-1 text-base font-semibold tabular-nums text-glass-foreground">{compactNumber(scoringTuning.manualScoreOverrides24h)}</p>
+            </div>
+            <div className="rounded border border-border/50 px-3 py-2 text-xs">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <BarChart3 className="h-3.5 w-3.5 text-primary" />
+                <span>Projected added/month</span>
+              </div>
+              <p className="mt-1 text-base font-semibold tabular-nums text-glass-foreground">{compactNumber(scoringTuning.projectedAddedPostsMonth)}</p>
+            </div>
+          </div>
+          {scoringTuning.error && <p className="mt-2 text-xs text-warning">Scoring tuning diagnostics partial: {scoringTuning.error}</p>}
         </CardContent>
       </Card>
 

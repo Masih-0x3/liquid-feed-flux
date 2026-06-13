@@ -29,6 +29,10 @@ describe("ScoringStudio", () => {
     expect(screen.getByText("Direct focus")).toBeTruthy();
     expect(screen.getByText("Global exception")).toBeTruthy();
     expect(screen.getByText("Neutral axis weights")).toBeTruthy();
+    expect(screen.getByText("Active tuning state")).toBeTruthy();
+    expect(screen.getByText("Regional escalation auto")).toBeTruthy();
+    expect(screen.getByText(/Oil \/ energy shock >=14/)).toBeTruthy();
+    expect(screen.getByText(/Global mega-event review pilot/)).toBeTruthy();
   });
 
   it("previews scoring policy results", async () => {
