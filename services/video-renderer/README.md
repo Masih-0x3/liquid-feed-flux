@@ -10,8 +10,12 @@ Required Ubuntu packages:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y ffmpeg fonts-vazirmatn python3 python3-opencv python3-numpy
+sudo apt-get install -y ffmpeg fontconfig fonts-noto-core python3 python3-opencv python3-numpy
 ```
+
+Docker installs Vazirmatn from the pinned npm package and copies the TTF files
+into the image font directory. Native installs should either install Vazirmatn
+manually or use Docker Compose.
 
 Required environment:
 

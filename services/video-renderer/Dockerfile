@@ -10,7 +10,8 @@ RUN apt-get update \
     ca-certificates \
     curl \
     ffmpeg \
-    fonts-vazirmatn \
+    fontconfig \
+    fonts-noto-core \
     python3 \
     python3-numpy \
     python3-opencv \
@@ -20,6 +21,10 @@ WORKDIR /app
 
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
+
+RUN mkdir -p /usr/local/share/fonts/vazirmatn \
+  && cp node_modules/vazirmatn/fonts/ttf/*.ttf /usr/local/share/fonts/vazirmatn/ \
+  && fc-cache -f
 
 COPY src ./src
 COPY scripts ./scripts
