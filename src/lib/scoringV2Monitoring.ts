@@ -20,12 +20,22 @@ export interface ScoringV2Snapshot {
   decision_reason?: string | null;
   review_status?: string | null;
   adjudicated?: boolean | null;
+  policy_rule_applied?: string | null;
+  policy_rule?: {
+    kind?: string | null;
+    original_decision?: string | null;
+    original_threshold?: number | null;
+    original_review_status?: string | null;
+    matched_terms?: string[] | null;
+    reason?: string | null;
+  } | null;
   tags?: string[] | null;
 }
 
 export type ScoringV2MonitoringFilter = Extract<
   MonitoringFilter,
   "v2_would_post" | "v2_would_skip" | "v1_post_v2_skip" | "v1_skip_v2_post" | "v2_off_topic" | "v2_needs_review"
+  | "v2_regional_auto" | "global_pilot_review"
 >;
 
 function stringValue(value: unknown): string | null {
@@ -64,6 +74,7 @@ export function normalizeScoringV2Snapshot(raw: unknown): ScoringV2Snapshot | nu
   const threshold = numberValue(value.threshold);
   const decision = decisionValue(value.decision);
   if (!version && !mode && !audienceClass && finalScore == null && threshold == null && !decision) return null;
+  const policyRuleRaw = value.policy_rule && typeof value.policy_rule === "object" ? value.policy_rule as Record<string, unknown> : null;
   return {
     version,
     mode,
@@ -81,6 +92,15 @@ export function normalizeScoringV2Snapshot(raw: unknown): ScoringV2Snapshot | nu
     decision_reason: stringValue(value.decision_reason),
     review_status: stringValue(value.review_status),
     adjudicated: booleanValue(value.adjudicated),
+    policy_rule_applied: stringValue(value.policy_rule_applied),
+    policy_rule: policyRuleRaw ? {
+      kind: stringValue(policyRuleRaw.kind),
+      original_decision: stringValue(policyRuleRaw.original_decision),
+      original_threshold: numberValue(policyRuleRaw.original_threshold),
+      original_review_status: stringValue(policyRuleRaw.original_review_status),
+      matched_terms: tagsValue(policyRuleRaw.matched_terms),
+      reason: stringValue(policyRuleRaw.reason),
+    } : null,
     tags: tagsValue(value.tags),
   };
 }
@@ -120,10 +140,15 @@ export function getScoringV2Snapshot(entry: MonitoringEntry, events: PipelineEve
   };
 }
 
+function policyRuleKind(snapshot: ScoringV2Snapshot): string | null {
+  return snapshot.policy_rule_applied ?? snapshot.policy_rule?.kind ?? null;
+}
+
 export function matchesScoringV2Filter(entry: MonitoringEntry, filter: ScoringV2MonitoringFilter): boolean {
   const snapshot = getScoringV2Snapshot(entry);
   if (!snapshot) return false;
   const v1Decision = entry.delivery_decision;
+  const rule = policyRuleKind(snapshot);
   switch (filter) {
     case "v2_would_post":
       return snapshot.decision === "deliver";
@@ -137,6 +162,10 @@ export function matchesScoringV2Filter(entry: MonitoringEntry, filter: ScoringV2
       return snapshot.audience_class === "off_topic";
     case "v2_needs_review":
       return snapshot.review_status === "needs_review";
+    case "v2_regional_auto":
+      return rule === "regional_escalation_auto";
+    case "global_pilot_review":
+      return rule === "global_mega_event_review" || (snapshot.global_exception_class === "global_mega_event" && snapshot.review_status === "needs_review");
   }
 }
 

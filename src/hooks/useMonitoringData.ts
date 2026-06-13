@@ -226,6 +226,9 @@ export type MonitoringFilter =
   | 'v1_skip_v2_post'
   | 'v2_off_topic'
   | 'v2_needs_review'
+  | 'v2_regional_auto'
+  | 'global_pilot_review'
+  | 'manual_scoring_feedback'
   | 'duplicates'
   | 'coverage_gap'
   | 'possible_duplicate'
@@ -256,6 +259,9 @@ export interface MonitoringOverview {
     delivered_24h: number;
     telegram_pending: number;
     below_threshold: number;
+    v2_regional_auto: number;
+    global_pilot_review: number;
+    manual_scoring_feedback: number;
     stale_jobs: number;
     stale_x_pending_24h: number;
     needs_action?: number;
@@ -587,7 +593,16 @@ function matchesLegacyMonitoringFilter(entry: MonitoringEntry, filter: Monitorin
     case 'v1_skip_v2_post':
     case 'v2_off_topic':
     case 'v2_needs_review':
+    case 'v2_regional_auto':
+    case 'global_pilot_review':
       return matchesScoringV2Filter(entry, filter);
+    case 'manual_scoring_feedback':
+      return entry.feedback_locked === true && (
+        entry.score_review_status === 'approved'
+        || entry.score_review_status === 'rejected'
+        || entry.decision_reason?.startsWith('manual_score_') === true
+        || entry.decision_reason?.startsWith('score_feedback_') === true
+      );
     case 'duplicates':
       return !!entry.dup_of_tweet_id;
     case 'coverage_gap':

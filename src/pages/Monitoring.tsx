@@ -168,6 +168,7 @@ async function adminRunDedupe(tweetId: string) {
 
 type AudienceFeedback = 'too_low' | 'too_high' | 'correct_deliver' | 'correct_skip' | 'should_pass_audience' | 'should_skip' | 'wrong_relevance_class' | 'global_exception_worth_covering' | 'not_global_exception';
 type AudienceClassValue = 'direct_focus' | 'adjacent' | 'global_exception' | 'off_topic';
+type ScoringFeedbackReasonTag = 'regional_escalation' | 'oil_shipping' | 'leader_statement' | 'global_mega_event' | 'direct_focus' | 'adjacent_context' | 'should_skip' | 'wrong_class' | 'duplicate' | 'stale' | 'source_trust' | 'broad_global' | 'other';
 type EnrichmentFeedback = 'sounds_like_me' | 'too_soft' | 'too_ai' | 'too_newsy' | 'not_blunt_enough' | 'too_long' | 'good_clapback' | 'strong_angle' | 'too_risky' | 'too_cheesy' | 'too_aggregator' | 'needs_more_context' | 'unsafe_for_monetization';
 type XDiagnosticBlocker = { code: string; label: string; severity: 'blocker' | 'deferred' | 'note' };
 type XPostingDiagnosticItem = {
@@ -226,9 +227,49 @@ function formatAge(seconds: number | null | undefined): string {
   return `${Math.floor(hours / 24)}d ${hours % 24}h`;
 }
 
-async function adminSetManualScore(tweetId: string, score: number, reason: string, overrideDuplicate: boolean, expectedAudienceClass?: AudienceClassValue | '') {
+const SCORING_REASON_TAGS: Array<{ value: ScoringFeedbackReasonTag; label: string }> = [
+  { value: 'regional_escalation', label: 'Regional escalation' },
+  { value: 'oil_shipping', label: 'Oil / shipping' },
+  { value: 'leader_statement', label: 'Leader statement' },
+  { value: 'global_mega_event', label: 'Global mega-event' },
+  { value: 'direct_focus', label: 'Direct focus' },
+  { value: 'adjacent_context', label: 'Adjacent context' },
+  { value: 'should_skip', label: 'Should skip' },
+  { value: 'wrong_class', label: 'Wrong class' },
+  { value: 'duplicate', label: 'Duplicate' },
+  { value: 'stale', label: 'Stale' },
+  { value: 'source_trust', label: 'Source trust' },
+  { value: 'broad_global', label: 'Broad global' },
+  { value: 'other', label: 'Other' },
+];
+
+function defaultReasonTag(feedback: AudienceFeedback, expectedAudienceClass?: AudienceClassValue | ''): ScoringFeedbackReasonTag {
+  if (feedback === 'global_exception_worth_covering') return expectedAudienceClass === 'global_exception' ? 'global_mega_event' : 'broad_global';
+  if (feedback === 'not_global_exception' || feedback === 'should_skip') return 'should_skip';
+  if (feedback === 'wrong_relevance_class') return 'wrong_class';
+  if (expectedAudienceClass === 'direct_focus') return 'direct_focus';
+  if (expectedAudienceClass === 'adjacent') return 'adjacent_context';
+  return 'other';
+}
+
+function scoringReasonTagLabel(value: string | null | undefined): string {
+  return SCORING_REASON_TAGS.find((tag) => tag.value === value)?.label ?? (value ? value.replaceAll('_', ' ') : 'None');
+}
+
+function scoringRuleLabel(value: string | null | undefined): string {
+  switch (value) {
+    case 'regional_escalation_auto':
+      return 'Regional escalation auto';
+    case 'global_mega_event_review':
+      return 'Global mega-event review';
+    default:
+      return value ? value.replaceAll('_', ' ') : 'No tuning rule';
+  }
+}
+
+async function adminSetManualScore(tweetId: string, score: number, reason: string, reasonTag: ScoringFeedbackReasonTag, overrideDuplicate: boolean, expectedAudienceClass?: AudienceClassValue | '') {
   const { data, error } = await supabase.functions.invoke('admin-actions', {
-    body: { action: 'set_manual_score', tweet_id: tweetId, score, reason, override_duplicate: overrideDuplicate, expected_audience_class: expectedAudienceClass || undefined },
+    body: { action: 'set_manual_score', tweet_id: tweetId, score, reason, reason_tag: reasonTag, override_duplicate: overrideDuplicate, expected_audience_class: expectedAudienceClass || undefined },
   });
   if (error) throw error;
   if (data?.ok === false) throw new Error(data.error ?? 'Manual score failed');
@@ -244,8 +285,9 @@ async function adminSetManualScore(tweetId: string, score: number, reason: strin
 }
 
 async function adminRecordScoreFeedback(tweetId: string, feedback: AudienceFeedback, expectedAudienceClass?: AudienceClassValue | '') {
+  const reasonTag = defaultReasonTag(feedback, expectedAudienceClass);
   const { data, error } = await supabase.functions.invoke('admin-actions', {
-    body: { action: 'record_score_feedback', tweet_id: tweetId, feedback, expected_audience_class: expectedAudienceClass || undefined },
+    body: { action: 'record_score_feedback', tweet_id: tweetId, feedback, expected_audience_class: expectedAudienceClass || undefined, reason_tag: reasonTag },
   });
   if (error) throw error;
   if (data?.ok === false) throw new Error(data.error ?? 'Feedback failed');
@@ -349,6 +391,9 @@ const FILTERS: Array<{ value: MonitoringFilter; label: string }> = [
   { value: 'v1_skip_v2_post', label: 'V1 skip / V2 post' },
   { value: 'v2_off_topic', label: 'V2 off-topic' },
   { value: 'v2_needs_review', label: 'V2 needs review' },
+  { value: 'v2_regional_auto', label: 'V2 regional auto' },
+  { value: 'global_pilot_review', label: 'Global pilot review' },
+  { value: 'manual_scoring_feedback', label: 'Manual scoring feedback' },
   { value: 'duplicates', label: 'Duplicates' },
   { value: 'coverage_gap', label: 'Coverage gaps' },
   { value: 'possible_duplicate', label: 'Possible duplicates' },
@@ -667,6 +712,7 @@ export default function Monitoring() {
   const [actionLoading, setActionLoading] = useState(false);
   const [manualEntry, setManualEntry] = useState<MonitoringEntry | null>(null);
   const [manualScore, setManualScore] = useState('');
+  const [manualReasonTag, setManualReasonTag] = useState<ScoringFeedbackReasonTag | ''>('');
   const [manualReason, setManualReason] = useState('');
   const [manualOverrideDuplicate, setManualOverrideDuplicate] = useState(false);
   const [manualAudienceClass, setManualAudienceClass] = useState<AudienceClassValue | ''>('');
@@ -727,6 +773,14 @@ export default function Monitoring() {
     () => selectedEntry ? getScoringV2Snapshot(selectedEntry, timeline) : null,
     [selectedEntry, timeline],
   );
+  const selectedManualScoringFeedback = useMemo(() => {
+    const event = timeline.find((item) => item.step === 'score_feedback' || item.meta?.source === 'manual_score' || item.meta?.source === 'score_feedback' || typeof item.meta?.reason_tag === 'string');
+    const meta = event?.meta ?? {};
+    const reasonTag = typeof meta.reason_tag === 'string' ? meta.reason_tag : null;
+    const reason = typeof meta.reason === 'string' ? meta.reason : null;
+    const feedback = typeof meta.feedback === 'string' ? meta.feedback : null;
+    return reasonTag || reason || feedback ? { reasonTag, reason, feedback } : null;
+  }, [timeline]);
   const selectedVoice = selectedEntry?.source_context?.voice ?? null;
   const selectedVoiceScores = selectedVoice?.critic?.variants ?? [];
   const { data: xDiagnostic, isFetching: xDiagnosticLoading } = useQuery({
@@ -904,6 +958,7 @@ export default function Monitoring() {
     const currentScore = decisionScore(entry);
     setManualEntry(entry);
     setManualScore(currentScore == null ? '' : String(currentScore));
+    setManualReasonTag('');
     setManualReason('');
     setManualOverrideDuplicate(false);
     setManualAudienceClass((entry.audience_class as AudienceClassValue | null) ?? '');
@@ -916,9 +971,13 @@ export default function Monitoring() {
       toast({ title: 'Invalid score', description: 'Manual score must be a whole number between 1 and 20.', variant: 'destructive' });
       return;
     }
+    if (!manualReasonTag) {
+      toast({ title: 'Reason tag required', description: 'Choose why the manual score is being changed.', variant: 'destructive' });
+      return;
+    }
     setManualLoading(true);
     try {
-      const result = await adminSetManualScore(manualEntry.tweet_id, score, manualReason, manualOverrideDuplicate, manualAudienceClass);
+      const result = await adminSetManualScore(manualEntry.tweet_id, score, manualReason, manualReasonTag, manualOverrideDuplicate, manualAudienceClass);
       const advance = result.advance?.queued && result.advance.queued !== 'none' ? `Queued ${result.advance.queued}` : result.advance?.reason;
       toast({
         title: `Manual score saved: ${score}/20`,
@@ -1589,6 +1648,9 @@ export default function Monitoring() {
               ['Below threshold', counts.below_threshold],
               ['Stale jobs', counts.stale_jobs],
               ['Stale X pending', counts.stale_x_pending_24h],
+              ['Regional auto', counts.v2_regional_auto],
+              ['Global pilot', counts.global_pilot_review],
+              ['Manual scoring', counts.manual_scoring_feedback],
             ].map(([label, value]) => (
               <div key={label as string}>
                 <p className="text-xs text-muted-foreground">{label}</p>
@@ -2242,6 +2304,55 @@ export default function Monitoring() {
                           )}
                         </div>
                       )}
+                      {(selectedScoringV2?.policy_rule_applied || selectedScoringV2?.policy_rule || selectedManualScoringFeedback) && (
+                        <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3">
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">V2 tuning</p>
+                              <p className="text-sm font-medium">
+                                {scoringRuleLabel(selectedScoringV2?.policy_rule_applied ?? selectedScoringV2?.policy_rule?.kind)}
+                              </p>
+                            </div>
+                            {selectedManualScoringFeedback?.reasonTag && (
+                              <Badge variant="outline">{scoringReasonTagLabel(selectedManualScoringFeedback.reasonTag)}</Badge>
+                            )}
+                          </div>
+                          {selectedScoringV2?.policy_rule && (
+                            <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                              <div className="rounded-md border bg-background/50 p-2">
+                                <p className="text-xs text-muted-foreground">Original V2 decision</p>
+                                <p className="font-medium">{scoringV2DecisionLabel(selectedScoringV2.policy_rule.original_decision)}</p>
+                              </div>
+                              <div className="rounded-md border bg-background/50 p-2">
+                                <p className="text-xs text-muted-foreground">Final decision</p>
+                                <p className="font-medium">{scoringV2DecisionLabel(selectedScoringV2.decision)}</p>
+                              </div>
+                              <div className="rounded-md border bg-background/50 p-2">
+                                <p className="text-xs text-muted-foreground">Original threshold</p>
+                                <p className="font-medium">{selectedScoringV2.policy_rule.original_threshold}</p>
+                              </div>
+                            </div>
+                          )}
+                          {selectedScoringV2?.policy_rule?.matched_terms?.length ? (
+                            <p className="mt-2 rounded-md border bg-background/50 p-2 text-xs">
+                              <span className="text-muted-foreground">Matched terms:</span> {selectedScoringV2.policy_rule.matched_terms.join(', ')}
+                            </p>
+                          ) : null}
+                          {selectedScoringV2?.policy_rule?.reason && (
+                            <p className="mt-2 text-xs text-muted-foreground">{selectedScoringV2.policy_rule.reason}</p>
+                          )}
+                          {selectedManualScoringFeedback && (
+                            <div className="mt-2 rounded-md border bg-background/50 p-2 text-xs">
+                              <p className="font-medium">Manual scoring feedback</p>
+                              <p className="text-muted-foreground">
+                                {selectedManualScoringFeedback.reasonTag ? scoringReasonTagLabel(selectedManualScoringFeedback.reasonTag) : 'No reason tag'}
+                                {selectedManualScoringFeedback.feedback ? ` - ${selectedManualScoringFeedback.feedback.replaceAll('_', ' ')}` : ''}
+                              </p>
+                              {selectedManualScoringFeedback.reason && <p className="mt-1 text-muted-foreground">{selectedManualScoringFeedback.reason}</p>}
+                            </div>
+                          )}
+                        </div>
+                      )}
                       {selectedEntry.scoring_version && (
                         <div className="grid gap-2 sm:grid-cols-4">
                           <div className="rounded-md border p-2">
@@ -2625,12 +2736,24 @@ export default function Monitoring() {
                 </p>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="manual-reason">Reason</Label>
+                <Label>Reason tag</Label>
+                <ThemedSelect value={manualReasonTag || 'none'} onValueChange={(value) => setManualReasonTag(value === 'none' ? '' : value as ScoringFeedbackReasonTag)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Choose a reason</SelectItem>
+                    {SCORING_REASON_TAGS.map((tag) => (
+                      <SelectItem key={tag.value} value={tag.value}>{tag.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </ThemedSelect>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="manual-reason">Reason note</Label>
                 <Textarea
                   id="manual-reason"
                   value={manualReason}
                   onChange={(e) => setManualReason(e.target.value)}
-                  placeholder="Why this score is right"
+                  placeholder="Optional extra context"
                 />
               </div>
               <div className="grid gap-2">
@@ -2663,7 +2786,7 @@ export default function Monitoring() {
           )}
           <DialogFooter className="gap-2 sm:gap-0 [&>button]:w-full sm:[&>button]:w-auto">
             <Button variant="outline" onClick={() => setManualEntry(null)} disabled={manualLoading}>Cancel</Button>
-            <Button onClick={handleManualSubmit} disabled={manualLoading}>
+            <Button onClick={handleManualSubmit} disabled={manualLoading || !manualReasonTag}>
               {manualLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
               Save score
             </Button>
