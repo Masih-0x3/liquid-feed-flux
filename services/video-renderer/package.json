@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.0",
-    "vazirmatn": "33.0.3"
+    "vazirmatn": "33.0.3",
+    "ws": "8.21.0"
   }
 }
