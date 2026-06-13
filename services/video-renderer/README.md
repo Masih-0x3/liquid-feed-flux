@@ -103,10 +103,12 @@ sudo cp .env.example /opt/xot-renderer/.env.video-renderer
 sudo chmod 600 /opt/xot-renderer/.env.video-renderer
 sudoedit /opt/xot-renderer/.env.video-renderer
 docker compose up -d --build
-curl http://127.0.0.1:8787/health
+curl http://127.0.0.1:8797/health
 ```
 
-The compose file binds the service only to `127.0.0.1:8787` and reads secrets
+The compose file binds the service only to host port `127.0.0.1:8797`, while
+the container listens internally on `8787`. The non-default host port avoids
+colliding with the Hermes WebUI on shared Hermes/XOT servers. Secrets are read
 from `/opt/xot-renderer/.env.video-renderer`. Do not commit or copy that env
 file back into the repository.
 

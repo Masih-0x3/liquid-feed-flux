@@ -11,7 +11,7 @@ services:
       WORK_DIR: /tmp/xot-video-renderer
       RENDER_CONCURRENCY: "1"
     ports:
-      - "127.0.0.1:8787:8787"
+      - "127.0.0.1:8797:8787"
     volumes:
       - xot-video-renderer-tmp:/tmp/xot-video-renderer
     healthcheck:
