@@ -15,6 +15,15 @@ import {
   selectMediaTier,
   type XMediaRow,
 } from '../_shared/mediaSelection.ts';
+import {
+  applyRenderedVideoPreference,
+  decideVideoRenderGate,
+  type VideoRenderRow,
+} from '../_shared/videoRenderGate.ts';
+import {
+  normalizeVideoRenderConfigValue,
+  type VideoRenderConfig,
+} from '../_shared/videoRenderConfig.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': Deno.env.get('ALLOWED_CORS_ORIGIN') ?? 'https://liquid-feed-flux.lovable.app',
@@ -89,9 +98,147 @@ const DEFAULT_CFG: PostingConfig = {
 const DEFAULT_LIMITS: RateLimits = {
   posts_per_hour: 20, posts_per_day: 100, monthly_post_budget: 2500, media_uploads_per_day: 200,
 };
+const VIDEO_RENDER_VERSION = 'persian-subtitles-masihh-v1';
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 function isRecord(v: unknown): v is Record<string, unknown> { return typeof v === 'object' && v !== null && !Array.isArray(v); }
+
+// deno-lint-ignore no-explicit-any
+async function loadVideoRenderConfig(sb: any): Promise<VideoRenderConfig> {
+  try {
+    const { data } = await sb.from('settings').select('value').eq('key', 'video_render_config').maybeSingle();
+    return normalizeVideoRenderConfigValue(data?.value);
+  } catch (_e) {
+    return normalizeVideoRenderConfigValue({ render_version: VIDEO_RENDER_VERSION });
+  }
+}
+
+// deno-lint-ignore no-explicit-any
+async function insertVideoRenderPipelineEvent(
+  sb: any,
+  tweetId: string,
+  status: string,
+  error: string | null,
+  meta: Record<string, unknown>,
+): Promise<void> {
+  try {
+    await sb.from('pipeline_events').insert({
+      subject_type: 'post',
+      subject_id: tweetId,
+      step: 'video_render',
+      status,
+      error,
+      meta,
+    });
+  } catch (_e) { /* best-effort */ }
+}
+
+// deno-lint-ignore no-explicit-any
+async function dispatchVideoRendererForTarget(sb: any, renderId: string, tweetId: string, source: string): Promise<void> {
+  const rendererUrl = (Deno.env.get('VIDEO_RENDERER_URL') ?? '').replace(/\/+$/, '');
+  const rendererToken = Deno.env.get('VIDEO_RENDERER_TOKEN') ?? '';
+  const meta = { render_id: renderId, dispatch_source: source };
+  if (!rendererUrl) {
+    await insertVideoRenderPipelineEvent(sb, tweetId, 'queued', null, { ...meta, mode: 'poller_only' });
+    return;
+  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 3500);
+  try {
+    const resp = await fetch(`${rendererUrl}/v1/render`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(rendererToken ? { Authorization: `Bearer ${rendererToken}` } : {}),
+      },
+      body: JSON.stringify({ render_id: renderId, tweet_id: tweetId, source }),
+      signal: controller.signal,
+    });
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      await insertVideoRenderPipelineEvent(sb, tweetId, 'failed', `renderer ${resp.status}: ${text.slice(0, 300)}`, meta);
+    }
+  } catch (error) {
+    await insertVideoRenderPipelineEvent(sb, tweetId, 'failed', error instanceof Error ? error.message : String(error), meta);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// deno-lint-ignore no-explicit-any
+async function gateXVideoRender(
+  sb: any,
+  tweetId: string,
+  mediaRows: XMediaRow[],
+  dispatchSource: string,
+  dryRun: boolean,
+): Promise<{ ready: boolean; blocked: boolean; reason?: string; mediaRows: XMediaRow[] }> {
+  const cfg = await loadVideoRenderConfig(sb);
+  const { data: renderRows, error } = await sb
+    .from('video_renders')
+    .select('id, tweet_id, source_media_id, status, failure_policy, output_storage_path, output_mime_type, output_file_size, duration_ms, width, height, render_version, error, block_reason, source_language, target_language, preflight, created_at, updated_at')
+    .eq('tweet_id', tweetId)
+    .order('updated_at', { ascending: false });
+  if (error) throw error;
+
+  const decision = decideVideoRenderGate({
+    tweetId,
+    mediaRows,
+    renderRows: (renderRows ?? []) as VideoRenderRow[],
+    renderingEnabled: cfg.mode !== 'disabled',
+  });
+
+  if (cfg.mode === 'disabled') {
+    return { ready: true, blocked: false, mediaRows };
+  }
+
+  if (cfg.mode === 'shadow') {
+    if (decision.action === 'enqueue_render' && decision.media.id && !dryRun) {
+      const { data: renderId, error: enqueueError } = await sb.rpc('enqueue_video_render', {
+        p_tweet_id: tweetId,
+        p_source_media_id: decision.media.id,
+        p_render_version: cfg.renderVersion,
+        p_failure_policy: cfg.failurePolicy,
+      });
+      if (enqueueError) throw enqueueError;
+      if (renderId) await dispatchVideoRendererForTarget(sb, String(renderId), tweetId, dispatchSource);
+    }
+    await insertVideoRenderPipelineEvent(sb, tweetId, 'queued', null, {
+      shadow: true,
+      gate_action: decision.action,
+      dispatch_source: dispatchSource,
+    });
+    return { ready: true, blocked: false, mediaRows };
+  }
+
+  if (decision.action === 'none' || decision.action === 'use_original') {
+    return { ready: true, blocked: false, mediaRows };
+  }
+  if (decision.action === 'use_render') {
+    return { ready: true, blocked: false, mediaRows: applyRenderedVideoPreference(mediaRows, decision) };
+  }
+  if (decision.action === 'block') {
+    return { ready: false, blocked: true, reason: decision.reason || 'video_render_blocked' , mediaRows };
+  }
+  if (decision.action === 'enqueue_render') {
+    if (!decision.media.id) return { ready: false, blocked: true, reason: 'video_render_source_missing_id', mediaRows };
+    if (!dryRun) {
+      const { data: renderId, error: enqueueError } = await sb.rpc('enqueue_video_render', {
+        p_tweet_id: tweetId,
+        p_source_media_id: decision.media.id,
+        p_render_version: cfg.renderVersion,
+        p_failure_policy: cfg.failurePolicy,
+      });
+      if (enqueueError) throw enqueueError;
+      if (renderId) await dispatchVideoRendererForTarget(sb, String(renderId), tweetId, dispatchSource);
+    }
+    return { ready: false, blocked: false, reason: dryRun ? 'video_render_required' : 'video_render_queued', mediaRows };
+  }
+  if (decision.action === 'wait_media') {
+    return { ready: false, blocked: false, reason: 'source_video_pending', mediaRows };
+  }
+  return { ready: false, blocked: false, reason: 'video_render_pending', mediaRows };
+}
 
 /** Persian (Jalali) date string like "۱۴ اردیبهشت ۱۴۰۵" using fa-IR Intl. */
 function persianDateNow(): string {
@@ -590,7 +737,7 @@ Deno.serve(async (req) => {
     // silently burning the post as text.
     const postAgeMs = Date.now() - new Date((post as { created_at: string }).created_at).getTime();
     const hasMediaFlag = (post as { has_media?: boolean }).has_media === true;
-    const mediaRowsForSelection = ((mediaRows as XMediaRow[] | null) ?? []);
+    let mediaRowsForSelection = ((mediaRows as XMediaRow[] | null) ?? []);
     const anyDownloaded = mediaRowsForSelection.some((m) => m.downloaded_at);
     if (hasMediaFlag && !anyDownloaded) {
       const { data: pendingJobs } = await sb.from('jobs')
@@ -640,6 +787,32 @@ Deno.serve(async (req) => {
       console.log(`[x-poster] self-healed missing media rows for ${tweetId}, deferring`);
       continue;
     }
+
+    const renderGate = await gateXVideoRender(sb, tweetId, mediaRowsForSelection, dispatchSource, dryRun);
+    if (!renderGate.ready) {
+      const reason = renderGate.reason ?? 'video_render_pending';
+      if (renderGate.blocked) {
+        if (!dryRun) {
+          const { error: skipErr } = await sb.from('x_deliveries').insert({
+            post_id: tweetId,
+            status: 'skipped',
+            media_count: 0,
+            media_bytes: 0,
+            media_kind: 'video',
+            skip_reason: reason,
+            last_error: reason,
+            attempts: 0,
+          });
+          if (skipErr) console.error('[x-poster] x_deliveries insert skipped failed (video render)', { tweetId, err: skipErr.message });
+        }
+        results.push({ tweet_id: tweetId, status: dryRun ? 'dry_run_skipped' : 'skipped', reason });
+      } else {
+        results.push({ tweet_id: tweetId, status: dryRun ? 'dry_run_deferred' : 'deferred', reason });
+        console.log(`[x-poster] deferring ${tweetId}: ${reason}`);
+      }
+      continue;
+    }
+    mediaRowsForSelection = renderGate.mediaRows;
 
     // Quota check (per-iteration in case prior iterations posted)
     const blocked = quotaBlock();
@@ -871,6 +1044,13 @@ Deno.serve(async (req) => {
         candidate_age_ms: candidateAgeMs,
         dispatch_source: dispatchSource,
       });
+      const renderCfg = await loadVideoRenderConfig(sb);
+      try {
+        await sb.rpc('mark_video_render_posted', {
+          p_tweet_id: tweetId,
+          p_retention_hours: renderCfg.retentionHours,
+        });
+      } catch (_e) { /* best-effort */ }
       results.push({ tweet_id: tweetId, status: 'posted', x_tweet_id: xId, latency_ms: latency, x_api_ms: xApiMs, candidate_reason: candidateReason, candidate_age_ms: candidateAgeMs, dispatch_source: dispatchSource });
     } catch (e) {
       const xApiMs = Date.now() - xApiStartedAt;

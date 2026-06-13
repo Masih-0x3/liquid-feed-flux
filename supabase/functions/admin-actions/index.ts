@@ -40,6 +40,11 @@ import {
   selectMediaTier,
   type XMediaRow,
 } from "../_shared/mediaSelection.ts";
+import { selectSourceVideo } from "../_shared/videoRenderGate.ts";
+import {
+  normalizeVideoRenderConfigValue,
+  serializeVideoRenderConfig,
+} from "../_shared/videoRenderConfig.ts";
 import { isMyXEnabled, MY_X_DISABLED_RESPONSE } from "../_shared/myXControls.ts";
 
 const DEPLOY_SHA = Deno.env.get('DEPLOY_GIT_SHA') ?? 'unknown';
@@ -3609,6 +3614,320 @@ async function getXApiSummary(supabase: any, body: Record<string, unknown>) {
   };
 }
 
+const VIDEO_RENDER_FEEDBACK_LABELS = new Set([
+  'pass',
+  'needs_review',
+  'fail',
+  'language',
+  'transcription',
+  'translation',
+  'subtitle_timing',
+  'subtitle_style',
+  'subtitle_placement',
+  'watermark',
+  'delogo',
+  'wrong_decision',
+  'other',
+]);
+
+function sanitizeVideoRenderFeedbackLabel(value: unknown): string {
+  const label = typeof value === 'string' ? value.trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_').slice(0, 80) : '';
+  return VIDEO_RENDER_FEEDBACK_LABELS.has(label) ? label : 'other';
+}
+
+function latestTimestamp(...values: Array<unknown>): string {
+  const times = values
+    .filter((value): value is string => typeof value === 'string' && value.length > 0)
+    .map((value) => Date.parse(value))
+    .filter(Number.isFinite);
+  return times.length ? new Date(Math.max(...times)).toISOString() : new Date(0).toISOString();
+}
+
+function videoRenderActionLabel(row: Record<string, unknown>): string {
+  const preflight = row.preflight && typeof row.preflight === 'object' ? row.preflight as Record<string, unknown> : {};
+  if (row.status === 'blocked') return 'blocked';
+  if (row.output_storage_path) return 'rendered';
+  if (preflight.processingMode === 'original_unmodified' || preflight.processing_mode === 'original_unmodified') return 'original-selected';
+  return String(row.status ?? 'unknown');
+}
+
+async function signedTempMediaUrl(supabase: any, path: unknown): Promise<string | null> {
+  if (typeof path !== 'string' || !path.trim()) return null;
+  const { data, error } = await supabase.storage.from('temp-media').createSignedUrl(path, 3600);
+  if (error) return null;
+  return data?.signedUrl ?? null;
+}
+
+// deno-lint-ignore no-explicit-any
+async function loadVideoRenderConfigAdmin(supabase: any) {
+  const { data, error } = await supabase.from('settings').select('value').eq('key', 'video_render_config').maybeSingle();
+  if (error) throw error;
+  const config = normalizeVideoRenderConfigValue(data?.value);
+  return { ok: true, config: serializeVideoRenderConfig(config) };
+}
+
+// deno-lint-ignore no-explicit-any
+async function updateVideoRenderConfigAdmin(supabase: any, body: Record<string, unknown>) {
+  const patch = body.config && typeof body.config === 'object' ? body.config : body;
+  const { data: existing } = await supabase.from('settings').select('value').eq('key', 'video_render_config').maybeSingle();
+  const existingConfig = normalizeVideoRenderConfigValue(existing?.value);
+  const next = normalizeVideoRenderConfigValue({
+    ...serializeVideoRenderConfig(existingConfig),
+    ...(patch as Record<string, unknown>),
+  });
+  const serialized = serializeVideoRenderConfig(next);
+  const { error } = await supabase.from('settings').upsert({
+    key: 'video_render_config',
+    value: serialized,
+    description: 'Video subtitle, delogo, and @Masihh watermark renderer configuration',
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'key' });
+  if (error) throw error;
+  return { ok: true, config: serialized };
+}
+
+// deno-lint-ignore no-explicit-any
+async function getVideoRenderOverview(supabase: any) {
+  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const [cfg, rendersRes, heartbeatRes] = await Promise.all([
+    loadVideoRenderConfigAdmin(supabase),
+    supabase
+      .from('video_renders')
+      .select('status, metrics, queued_at, started_at, completed_at, failed_at, blocked_at, updated_at, output_file_size')
+      .gte('created_at', since)
+      .order('updated_at', { ascending: false })
+      .limit(5000),
+    supabase
+      .from('video_renderer_heartbeats')
+      .select('renderer_id, status, version, render_version, running, processed, failed, last_error, last_seen_at, metadata')
+      .order('last_seen_at', { ascending: false })
+      .limit(10),
+  ]);
+  if (rendersRes.error) throw rendersRes.error;
+  if (heartbeatRes.error) throw heartbeatRes.error;
+
+  const counts: Record<string, number> = { queued: 0, running: 0, completed: 0, failed: 0, blocked: 0, expired: 0 };
+  const totals = { render_ms: [] as number[], total_ms: [] as number[], output_bytes: 0 };
+  let oldestQueuedAt: string | null = null;
+  for (const row of rendersRes.data ?? []) {
+    const status = String(row.status ?? 'unknown');
+    counts[status] = (counts[status] ?? 0) + 1;
+    if (status === 'queued' && typeof row.queued_at === 'string') {
+      oldestQueuedAt = oldestQueuedAt && oldestQueuedAt < row.queued_at ? oldestQueuedAt : row.queued_at;
+    }
+    const metrics = row.metrics && typeof row.metrics === 'object' ? row.metrics as Record<string, unknown> : {};
+    const renderMs = Number(metrics.ffmpeg_encode_ms ?? metrics.render_ms);
+    const totalMs = Number(metrics.total_ms);
+    if (Number.isFinite(renderMs)) totals.render_ms.push(renderMs);
+    if (Number.isFinite(totalMs)) totals.total_ms.push(totalMs);
+    const bytes = Number(row.output_file_size ?? 0);
+    if (Number.isFinite(bytes) && bytes > 0) totals.output_bytes += bytes;
+  }
+  const median = (values: number[]) => {
+    if (!values.length) return null;
+    const sorted = [...values].sort((a, b) => a - b);
+    return sorted[Math.floor(sorted.length / 2)];
+  };
+
+  return {
+    ok: true,
+    config: cfg.config,
+    counts,
+    oldest_queued_at: oldestQueuedAt,
+    medians: {
+      render_ms: median(totals.render_ms),
+      total_ms: median(totals.total_ms),
+    },
+    output_bytes_7d: totals.output_bytes,
+    heartbeats: heartbeatRes.data ?? [],
+  };
+}
+
+function normalizeVideoRenderStatuses(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length === 0) return ['queued', 'running', 'failed', 'blocked', 'completed'];
+  const allowed = new Set(['queued', 'running', 'completed', 'failed', 'blocked', 'expired']);
+  return value.map((item) => String(item)).filter((item) => allowed.has(item)).slice(0, 6);
+}
+
+// deno-lint-ignore no-explicit-any
+async function getVideoRenderQueue(supabase: any, body: Record<string, unknown>) {
+  const limit = Math.min(Math.max(Number(body.limit) || 50, 1), 100);
+  const statuses = normalizeVideoRenderStatuses(body.statuses ?? body.status);
+  const { data: renders, error } = await supabase
+    .from('video_renders')
+    .select('id, tweet_id, source_media_id, status, failure_policy, render_version, output_storage_path, output_file_size, width, height, duration_ms, source_language, target_language, metrics, error, block_reason, attempts, queued_at, started_at, completed_at, failed_at, blocked_at, updated_at, created_at, preflight')
+    .in('status', statuses)
+    .order('updated_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+
+  const tweetIds = [...new Set((renders ?? []).map((row: Record<string, unknown>) => String(row.tweet_id)).filter(Boolean))];
+  const mediaIds = [...new Set((renders ?? []).map((row: Record<string, unknown>) => String(row.source_media_id)).filter(Boolean))];
+  const [postsRes, mediaRes, feedbackRes] = await Promise.all([
+    tweetIds.length
+      ? supabase.from('posts').select('tweet_id, text_original, url, author_handle, created_at, delivery_decision, final_score').in('tweet_id', tweetIds)
+      : Promise.resolve({ data: [], error: null }),
+    mediaIds.length
+      ? supabase.from('media').select('id, kind, storage_path, mime_type, src_url, file_size, duration_ms, width, height').in('id', mediaIds)
+      : Promise.resolve({ data: [], error: null }),
+    (renders?.length ?? 0) > 0
+      ? supabase.from('video_render_feedback').select('render_id, label, note, created_at').in('render_id', (renders ?? []).map((row: Record<string, unknown>) => row.id))
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (postsRes.error) throw postsRes.error;
+  if (mediaRes.error) throw mediaRes.error;
+  if (feedbackRes.error) throw feedbackRes.error;
+  const posts = new Map((postsRes.data ?? []).map((row: Record<string, unknown>) => [row.tweet_id, row]));
+  const media = new Map((mediaRes.data ?? []).map((row: Record<string, unknown>) => [row.id, row]));
+  const feedbackByRender = new Map<string, Record<string, unknown>>();
+  for (const item of feedbackRes.data ?? []) {
+    if (!feedbackByRender.has(String(item.render_id))) feedbackByRender.set(String(item.render_id), item);
+  }
+
+  return {
+    ok: true,
+    rows: (renders ?? []).map((row: Record<string, unknown>) => ({
+      ...row,
+      post: posts.get(row.tweet_id) ?? null,
+      media: media.get(row.source_media_id) ?? null,
+      latest_feedback: feedbackByRender.get(String(row.id)) ?? null,
+      action_label: videoRenderActionLabel(row),
+      activity_at: latestTimestamp(row.updated_at, row.completed_at, row.failed_at, row.blocked_at, row.started_at, row.queued_at),
+    })),
+  };
+}
+
+// deno-lint-ignore no-explicit-any
+async function getVideoRenderDetail(supabase: any, body: Record<string, unknown>) {
+  const renderId = typeof body.render_id === 'string' ? body.render_id.trim() : '';
+  const tweetId = typeof body.tweet_id === 'string' ? body.tweet_id.trim() : '';
+  let query = supabase
+    .from('video_renders')
+    .select('id, tweet_id, source_media_id, status, failure_policy, render_version, output_storage_path, output_mime_type, output_file_size, width, height, duration_ms, original_srt, persian_srt, translated_srt, ass_subtitles, source_language, target_language, preflight, metrics, error, block_reason, attempts, queued_at, started_at, completed_at, failed_at, blocked_at, posted_at, expires_at, created_at, updated_at')
+    .order('updated_at', { ascending: false })
+    .limit(1);
+  if (renderId) query = query.eq('id', renderId);
+  else if (tweetId) query = query.eq('tweet_id', tweetId);
+  else return { ok: false, error: 'render_id or tweet_id is required' };
+
+  const { data: renderRows, error } = await query;
+  if (error) throw error;
+  const render = renderRows?.[0] as Record<string, unknown> | undefined;
+  if (!render) return { ok: false, error: 'video render not found' };
+
+  const [postRes, mediaRes, feedbackRes] = await Promise.all([
+    supabase.from('posts').select('tweet_id, text_original, text_translated, url, author_handle, created_at, delivery_decision, final_score, x_tweet_id').eq('tweet_id', render.tweet_id).maybeSingle(),
+    supabase.from('media').select('id, kind, storage_path, mime_type, src_url, file_size, duration_ms, width, height').eq('id', render.source_media_id).maybeSingle(),
+    supabase.from('video_render_feedback').select('id, label, note, metadata, created_at, created_by').eq('render_id', render.id).order('created_at', { ascending: false }).limit(50),
+  ]);
+  if (postRes.error) throw postRes.error;
+  if (mediaRes.error) throw mediaRes.error;
+  if (feedbackRes.error) throw feedbackRes.error;
+
+  const sourceUrl = await signedTempMediaUrl(supabase, mediaRes.data?.storage_path);
+  const outputUrl = await signedTempMediaUrl(supabase, render.output_storage_path);
+  return {
+    ok: true,
+    render: {
+      ...render,
+      action_label: videoRenderActionLabel(render),
+      source_signed_url: sourceUrl,
+      output_signed_url: outputUrl,
+    },
+    post: postRes.data ?? null,
+    media: mediaRes.data ?? null,
+    feedback: feedbackRes.data ?? [],
+  };
+}
+
+// deno-lint-ignore no-explicit-any
+async function retryVideoRenderAdmin(supabase: any, body: Record<string, unknown>) {
+  const renderId = typeof body.render_id === 'string' ? body.render_id.trim() : '';
+  const tweetId = typeof body.tweet_id === 'string' ? body.tweet_id.trim() : '';
+  const cfg = normalizeVideoRenderConfigValue((await supabase.from('settings').select('value').eq('key', 'video_render_config').maybeSingle()).data?.value);
+  let render: Record<string, unknown> | null = null;
+
+  if (renderId) {
+    const { data, error } = await supabase.from('video_renders').select('id, tweet_id, source_media_id').eq('id', renderId).maybeSingle();
+    if (error) throw error;
+    render = data ?? null;
+  }
+
+  if (!render && tweetId) {
+    const { data: mediaRows, error: mediaError } = await supabase
+      .from('media')
+      .select('id, storage_path, downloaded_at, mime_type, file_size, kind, duration_ms, src_url')
+      .eq('tweet_id', tweetId)
+      .order('ordering', { ascending: true });
+    if (mediaError) throw mediaError;
+    const source = selectSourceVideo((mediaRows ?? []) as XMediaRow[]);
+    if (!source?.id) return { ok: false, error: 'No downloaded source video found for this post' };
+    const { data: id, error } = await supabase.rpc('enqueue_video_render', {
+      p_tweet_id: tweetId,
+      p_source_media_id: source.id,
+      p_render_version: cfg.renderVersion,
+      p_failure_policy: cfg.failurePolicy,
+    });
+    if (error) throw error;
+    render = { id, tweet_id: tweetId, source_media_id: source.id };
+  }
+
+  if (!render?.id || !render?.tweet_id || !render?.source_media_id) return { ok: false, error: 'render_id or tweet_id is required' };
+
+  const { error: updateError } = await supabase.from('video_renders').update({
+    status: 'queued',
+    failure_policy: cfg.failurePolicy,
+    render_version: cfg.renderVersion,
+    output_storage_path: null,
+    output_file_size: null,
+    error: null,
+    block_reason: null,
+    locked_at: null,
+    locked_by: null,
+    lease_expires_at: null,
+    queued_at: new Date().toISOString(),
+    started_at: null,
+    completed_at: null,
+    failed_at: null,
+    blocked_at: null,
+  }).eq('id', render.id);
+  if (updateError) throw updateError;
+
+  await insertAdminPipelineEvent(supabase, String(render.tweet_id), 'video_render', 'queued', {
+    source: 'admin_retry_video_render',
+    render_id: render.id,
+    mode: cfg.mode,
+  });
+
+  return { ok: true, render_id: render.id, tweet_id: render.tweet_id, mode: cfg.mode };
+}
+
+// deno-lint-ignore no-explicit-any
+async function saveVideoRenderFeedbackAdmin(supabase: any, body: Record<string, unknown>, userId?: string) {
+  const renderId = typeof body.render_id === 'string' ? body.render_id.trim() : '';
+  if (!renderId) return { ok: false, error: 'render_id is required' };
+  const label = sanitizeVideoRenderFeedbackLabel(body.label);
+  const note = typeof body.note === 'string' ? body.note.trim().slice(0, 1000) : null;
+  const metadata = body.metadata && typeof body.metadata === 'object' ? body.metadata as Record<string, unknown> : {};
+  const { data: render, error: renderError } = await supabase.from('video_renders').select('tweet_id').eq('id', renderId).maybeSingle();
+  if (renderError) throw renderError;
+  if (!render?.tweet_id) return { ok: false, error: 'video render not found' };
+  const { data, error } = await supabase.from('video_render_feedback').insert({
+    render_id: renderId,
+    tweet_id: render.tweet_id,
+    label,
+    note,
+    metadata,
+    created_by: userId ?? null,
+  }).select('id, label, note, created_at').single();
+  if (error) throw error;
+  await insertAdminPipelineEvent(supabase, String(render.tweet_id), 'video_render_feedback', 'completed', {
+    render_id: renderId,
+    label,
+  });
+  return { ok: true, feedback: data };
+}
+
 type XDiagnosticBlocker = {
   code: string;
   label: string;
@@ -4869,6 +5188,34 @@ serve(async (req) => {
 
       case 'get_x_api_summary': {
         return jsonResponse(await getXApiSummary(supabase, body));
+      }
+
+      case 'get_video_render_config': {
+        return jsonResponse(await loadVideoRenderConfigAdmin(supabase));
+      }
+
+      case 'update_video_render_config': {
+        return jsonResponse(await updateVideoRenderConfigAdmin(supabase, body));
+      }
+
+      case 'get_video_render_overview': {
+        return jsonResponse(await getVideoRenderOverview(supabase));
+      }
+
+      case 'get_video_render_queue': {
+        return jsonResponse(await getVideoRenderQueue(supabase, body));
+      }
+
+      case 'get_video_render_detail': {
+        return jsonResponse(await getVideoRenderDetail(supabase, body));
+      }
+
+      case 'retry_video_render': {
+        return jsonResponse(await retryVideoRenderAdmin(supabase, body));
+      }
+
+      case 'save_video_render_feedback': {
+        return jsonResponse(await saveVideoRenderFeedbackAdmin(supabase, body, authResult.userId));
       }
 
       case 'get_x_posting_diagnostics': {
