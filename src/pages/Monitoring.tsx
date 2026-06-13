@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Clock,
   ExternalLink,
+  Film,
   Loader2,
   MessageSquare,
   MoreHorizontal,
@@ -83,6 +84,7 @@ import {
   type ScoreBucket,
 } from "@/hooks/useMonitoringData";
 import { MediaThumbnails } from "@/components/monitoring/MediaThumbnails";
+import { VideoRenderDetailPanel } from "@/components/video/VideoRenderDetailPanel";
 import {
   decisionScore,
   formatDecisionReason,
@@ -261,9 +263,9 @@ function scoringRuleLabel(value: string | null | undefined): string {
     case 'regional_escalation_auto':
       return 'Regional escalation auto';
     case 'global_mega_event_review':
-      return 'Global mega-event review';
+      return 'Global mega-event review pilot';
     default:
-      return value ? value.replaceAll('_', ' ') : 'No tuning rule';
+      return value ? value.replaceAll('_', ' ') : 'No rule';
   }
 }
 
@@ -1422,6 +1424,11 @@ export default function Monitoring() {
         <DropdownMenuItem onClick={() => setPendingAction({ type: 'run_dedupe', entry })}>
           <Ban className="w-3 h-3 mr-2" />Run duplicate check
         </DropdownMenuItem>
+        {entry.has_media && (
+          <DropdownMenuItem onClick={() => openDetails(entry.tweet_id)}>
+            <Film className="w-3 h-3 mr-2" />Review video render
+          </DropdownMenuItem>
+        )}
         <DropdownMenuItem onClick={() => setPendingAction({ type: 'rescore', entry })}>
           <Star className="w-3 h-3 mr-2" />Re-score
         </DropdownMenuItem>
@@ -2249,6 +2256,11 @@ export default function Monitoring() {
                   </Card>
 
                   <MediaThumbnails tweetId={selectedEntry.tweet_id} />
+                  {selectedEntry.has_media && (
+                    <div className="mt-4">
+                      <VideoRenderDetailPanel tweetId={selectedEntry.tweet_id} enabled={drawerOpen} compact />
+                    </div>
+                  )}
 
                     <Card>
                       <CardHeader className="pb-2"><CardTitle className="text-sm">Scoring</CardTitle></CardHeader>

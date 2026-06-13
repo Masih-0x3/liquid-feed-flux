@@ -1,0 +1,25 @@
+services:
+  xot-video-renderer:
+    build:
+      context: .
+    image: xot-video-renderer:latest
+    restart: unless-stopped
+    env_file:
+      - ../../.env.video-renderer
+    environment:
+      PORT: "8787"
+      WORK_DIR: /tmp/xot-video-renderer
+      RENDER_CONCURRENCY: "1"
+    ports:
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - xot-video-renderer-tmp:/tmp/xot-video-renderer
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8787/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  xot-video-renderer-tmp:

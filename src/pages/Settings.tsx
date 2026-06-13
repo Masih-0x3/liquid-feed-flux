@@ -18,7 +18,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Brain, MessageSquare, Eye, Code, Sparkles, Send, Shield, Loader2, Filter, AtSign, ChevronDown, Info } from 'lucide-react';
+import { Brain, MessageSquare, Eye, Code, Sparkles, Send, Shield, Loader2, Filter, AtSign, ChevronDown, Info, Film } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   useSettingsData, useSaveSettings, openaiModels, messagePlaceholders, promptPlaceholders,
@@ -36,8 +36,9 @@ const XAutomationSettings = lazy(() => import('@/components/settings/XAutomation
 const TranslationPlayground = lazy(() => import('@/components/settings/TranslationPlayground'));
 const LearnedSignalsCard = lazy(() => import('@/components/settings/LearnedSignalsCard'));
 const EnrichmentSettings = lazy(() => import('@/components/settings/EnrichmentSettings'));
+const VideoRenderingSettings = lazy(() => import('@/components/settings/VideoRenderingSettings'));
 
-const SETTINGS_TAB_IDS = ['translation', 'filter', 'messages', 'telegram', 'x-automation', 'enrichment'] as const;
+const SETTINGS_TAB_IDS = ['translation', 'filter', 'messages', 'telegram', 'x-automation', 'video-rendering', 'enrichment'] as const;
 type SettingsTabId = (typeof SETTINGS_TAB_IDS)[number];
 
 function tabIdFromHash(hash: string): SettingsTabId | null {
@@ -165,6 +166,7 @@ export default function Settings() {
           <TabsTrigger value="messages" className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><MessageSquare className="w-4 h-4" />Messages</TabsTrigger>
           <TabsTrigger value="telegram" className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><Send className="w-4 h-4" />Telegram</TabsTrigger>
           <TabsTrigger value="x-automation" className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><AtSign className="w-4 h-4" />X Automation</TabsTrigger>
+          <TabsTrigger value="video-rendering" className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><Film className="w-4 h-4" />Video</TabsTrigger>
           <TabsTrigger value="enrichment" className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><Sparkles className="w-4 h-4" />Enrichment</TabsTrigger>
         </TabsList>
 
@@ -734,6 +736,13 @@ export default function Settings() {
               xRateLimits={settings?.x_rate_limits as Record<string, unknown> | undefined}
               xApiControls={settings?.x_api_controls as { my_x_enabled?: boolean } | undefined}
             />
+          </Suspense>
+        </TabsContent>
+
+        {/* Video Rendering Tab */}
+        <TabsContent value="video-rendering" className="space-y-6">
+          <Suspense fallback={<SettingsPanelFallback />}>
+            <VideoRenderingSettings />
           </Suspense>
         </TabsContent>
 

@@ -1,0 +1,17 @@
+node_modules
+npm-debug.log
+.env*
+tmp
+previews
+golden/output
+golden/outputs
+golden/sources
+golden/*.json
+golden/*.md
+**/*.mp4
+**/*.mov
+**/*.webm
+**/*.srt
+**/*.ass
+**/*contact-sheet*.jpg
+**/*contact-sheet*.png

@@ -39,6 +39,17 @@ import {
   selectAutochainJobTypes,
   shouldAutochain,
 } from "../_shared/workerAutochain.ts";
+import {
+  applyRenderedVideoPreference,
+  decideVideoRenderGate,
+  type VideoRenderGateDecision,
+  type VideoRenderRow,
+} from "../_shared/videoRenderGate.ts";
+import {
+  normalizeVideoRenderConfigValue,
+  type VideoRenderConfig,
+} from "../_shared/videoRenderConfig.ts";
+import type { XMediaRow } from "../_shared/mediaSelection.ts";
 
 export {
   SCORE_AXIS_KEYS,
@@ -64,6 +75,8 @@ let configCache: { expiresAt: number; value: any } | null = null;
 const FAST_LANE_TYPES = new Set(['dedupe', 'resolve_media', 'download_media', 'hydrate_tweet', 'compute_signature']);
 const MODEL_LANE_TYPES = new Set(['translate', 'enrich']);
 const DELIVERY_LANE_TYPES = new Set(['deliver']);
+const VIDEO_RENDER_VERSION = 'persian-subtitles-masihh-v1';
+const VIDEO_RENDER_DEFER_MS = 30_000;
 
 // deno-lint-ignore no-explicit-any
 async function loadScoringCalibrationExamples(supabase: any, profileId: string): Promise<ScoringPolicyCalibrationExample[]> {
@@ -79,6 +92,18 @@ async function loadScoringCalibrationExamples(supabase: any, profileId: string):
   } catch (error) {
     console.warn('worker: failed to load scoring calibration examples:', error instanceof Error ? error.message : String(error));
     return [];
+  }
+}
+
+class JobDeferred extends Error {
+  nextRunAt: string;
+  meta: Record<string, unknown>;
+
+  constructor(message: string, delayMs = VIDEO_RENDER_DEFER_MS, meta: Record<string, unknown> = {}) {
+    super(message);
+    this.name = 'JobDeferred';
+    this.nextRunAt = new Date(Date.now() + delayMs).toISOString();
+    this.meta = meta;
   }
 }
 
@@ -504,6 +529,33 @@ serve(async (req) => {
           }
 
         } catch (error) {
+          if (error instanceof JobDeferred) {
+            await supabase
+              .from('jobs')
+              .update({
+                status: 'pending',
+                next_run_at: error.nextRunAt,
+                locked_at: null,
+                locked_by: null,
+                lease_expires_at: null,
+                last_error: null,
+              })
+              .eq('id', job.id);
+            await recordPipelineEvent(supabase, job, 'queued', undefined, {
+              deferred: true,
+              next_run_at: error.nextRunAt,
+              ...error.meta,
+            });
+            console.log(JSON.stringify({
+              function: 'worker',
+              action: 'job_deferred',
+              job_id: job.id,
+              type: job.type,
+              next_run_at: error.nextRunAt,
+              reason: error.message,
+            }));
+            return { success: false, deferred: true, jobId: job.id, reason: error.message };
+          }
           const err = jobError(error);
           console.error(JSON.stringify({ function: 'worker', action: 'job_error', job_id: job.id, type: job.type, error: err.message }));
           await handleJobFailure(supabase, job, err);
@@ -523,17 +575,20 @@ serve(async (req) => {
     
     let processedCount = 0;
     let failedCount = 0;
+    let deferredCount = 0;
     
     results.forEach((result) => {
       if (result.status === 'fulfilled' && result.value.success) {
         processedCount++;
+      } else if (result.status === 'fulfilled' && result.value.deferred) {
+        deferredCount++;
       } else {
         failedCount++;
       }
     });
 
     const latencyMs = Date.now() - startTime;
-    console.log(JSON.stringify({ function: 'worker', action: 'complete', processed: processedCount, failed: failedCount, latency_ms: latencyMs }));
+    console.log(JSON.stringify({ function: 'worker', action: 'complete', processed: processedCount, deferred: deferredCount, failed: failedCount, latency_ms: latencyMs }));
 
     // Auto-chain due-now queue work with a hard depth cap. This cuts scheduler
     // wait without reintroducing unbounded DB-triggered function churn.
@@ -575,6 +630,7 @@ serve(async (req) => {
     return new Response(JSON.stringify({
       success: true,
       processed: processedCount,
+      deferred: deferredCount,
       failed: failedCount,
       total: jobs.length,
       chain_depth: chainDepth,
@@ -590,6 +646,274 @@ serve(async (req) => {
     });
   }
 });
+
+// deno-lint-ignore no-explicit-any
+async function loadVideoRenderConfig(supabase: any): Promise<VideoRenderConfig> {
+  try {
+    const { data } = await supabase
+      .from('settings')
+      .select('value')
+      .eq('key', 'video_render_config')
+      .maybeSingle();
+    return normalizeVideoRenderConfigValue(data?.value);
+  } catch (_e) {
+    return normalizeVideoRenderConfigValue({ render_version: VIDEO_RENDER_VERSION });
+  }
+}
+
+// deno-lint-ignore no-explicit-any
+async function loadVideoRenderDecision(supabase: any, tweetId: string, renderingEnabled = true): Promise<{
+  decision: VideoRenderGateDecision;
+  mediaRows: XMediaRow[];
+}> {
+  const [mediaRes, renderRes] = await Promise.all([
+    supabase
+      .from('media')
+      .select('id, storage_path, downloaded_at, mime_type, file_size, kind, duration_ms, src_url, ordering')
+      .eq('tweet_id', tweetId)
+      .order('ordering', { ascending: true }),
+    supabase
+      .from('video_renders')
+      .select('id, tweet_id, source_media_id, status, failure_policy, output_storage_path, output_mime_type, output_file_size, duration_ms, width, height, render_version, error, block_reason, source_language, target_language, preflight, created_at, updated_at')
+      .eq('tweet_id', tweetId)
+      .order('updated_at', { ascending: false }),
+  ]);
+  if (mediaRes.error) throw mediaRes.error;
+  if (renderRes.error) throw renderRes.error;
+  const mediaRows = (mediaRes.data ?? []) as XMediaRow[];
+  const renderRows = (renderRes.data ?? []) as VideoRenderRow[];
+  return {
+    mediaRows,
+    decision: decideVideoRenderGate({
+      tweetId,
+      mediaRows,
+      renderRows,
+      renderingEnabled,
+    }),
+  };
+}
+
+// deno-lint-ignore no-explicit-any
+async function dispatchVideoRendererForTarget(supabase: any, renderId: string, tweetId: string, source: string): Promise<void> {
+  const rendererUrl = (Deno.env.get('VIDEO_RENDERER_URL') ?? '').replace(/\/+$/, '');
+  const rendererToken = Deno.env.get('VIDEO_RENDERER_TOKEN') ?? '';
+  const meta = { render_id: renderId, dispatch_source: source };
+
+  if (!rendererUrl) {
+    await insertPipelineEvent(supabase, 'post', tweetId, 'video_render_dispatch', 'queued', new Date().toISOString(), null, null, {
+      ...meta,
+      mode: 'poller_only',
+    });
+    return;
+  }
+
+  await insertPipelineEvent(supabase, 'post', tweetId, 'video_render_dispatch', 'queued', new Date().toISOString(), null, null, meta);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 3500);
+  const invokePromise = fetch(`${rendererUrl}/v1/render`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(rendererToken ? { Authorization: `Bearer ${rendererToken}` } : {}),
+    },
+    body: JSON.stringify({ render_id: renderId, tweet_id: tweetId, source }),
+    signal: controller.signal,
+  }).then(async (resp) => {
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      await insertPipelineEvent(supabase, 'post', tweetId, 'video_render_dispatch', 'failed', null, new Date().toISOString(), `renderer ${resp.status}: ${text.slice(0, 300)}`, meta);
+    }
+  }).catch((error: unknown) => insertPipelineEvent(
+    supabase,
+    'post',
+    tweetId,
+    'video_render_dispatch',
+    'failed',
+    null,
+    new Date().toISOString(),
+    error instanceof Error ? error.message : String(error),
+    meta,
+  )).finally(() => clearTimeout(timeout));
+
+  if (!scheduleBackground(invokePromise)) {
+    await Promise.race([invokePromise, sleep(1200)]);
+  }
+}
+
+// deno-lint-ignore no-explicit-any
+async function prepareVideoRenderGate(supabase: any, tweetId: string, source: string): Promise<{
+  ready: boolean;
+  blocked: boolean;
+  blockReason?: string;
+  decision: VideoRenderGateDecision;
+  mediaRows: XMediaRow[];
+}> {
+  const cfg = await loadVideoRenderConfig(supabase);
+  const { decision, mediaRows } = await loadVideoRenderDecision(supabase, tweetId, cfg.mode !== 'disabled');
+
+  if (cfg.mode === 'disabled') {
+    return { ready: true, blocked: false, decision, mediaRows };
+  }
+
+  if (decision.action === 'enqueue_render') {
+    if (!decision.media.id) throw new Error(`video_render_source_missing_id:${tweetId}`);
+    const { data: renderId, error } = await supabase.rpc('enqueue_video_render', {
+      p_tweet_id: tweetId,
+      p_source_media_id: decision.media.id,
+      p_render_version: cfg.renderVersion,
+      p_failure_policy: cfg.failurePolicy,
+    });
+    if (error) throw error;
+    if (renderId) await dispatchVideoRendererForTarget(supabase, String(renderId), tweetId, source);
+    if (cfg.mode === 'shadow') {
+      await insertPipelineEvent(supabase, 'post', tweetId, 'video_render', 'queued', null, null, null, {
+        source,
+        shadow: true,
+        render_id: renderId,
+        reason: decision.reason,
+      });
+      return { ready: true, blocked: false, decision, mediaRows };
+    }
+    return { ready: false, blocked: false, decision, mediaRows };
+  }
+
+  if (decision.action === 'wait_media') {
+    await supabase.from('jobs').upsert({
+      type: 'download_media',
+      payload: { tweet_id: tweetId, source: 'video_render_gate' },
+      status: 'pending',
+      priority: 12,
+      idempotency_key: `download_media:video_render:${tweetId}`,
+      next_run_at: new Date().toISOString(),
+      locked_at: null,
+      locked_by: null,
+      lease_expires_at: null,
+      last_error: null,
+      attempts: 0,
+    }, { onConflict: 'idempotency_key', ignoreDuplicates: false });
+    await insertPipelineEvent(supabase, 'post', tweetId, 'video_render', 'queued', null, null, null, {
+      source,
+      shadow: cfg.mode === 'shadow',
+      reason: decision.reason,
+      waiting_for: 'source_media_download',
+    });
+    if (cfg.mode === 'shadow') return { ready: true, blocked: false, decision, mediaRows };
+    return { ready: false, blocked: false, decision, mediaRows };
+  }
+
+  if (decision.action === 'wait_render') {
+    await insertPipelineEvent(supabase, 'post', tweetId, 'video_render', 'running', null, null, null, {
+      source,
+      shadow: cfg.mode === 'shadow',
+      render_id: decision.render.id,
+      reason: decision.reason,
+    });
+    if (cfg.mode === 'shadow') return { ready: true, blocked: false, decision, mediaRows };
+    return { ready: false, blocked: false, decision, mediaRows };
+  }
+
+  if (decision.action === 'block') {
+    await insertPipelineEvent(supabase, 'post', tweetId, 'video_render', 'blocked', null, new Date().toISOString(), decision.reason, {
+      source,
+      shadow: cfg.mode === 'shadow',
+      render_id: decision.render.id,
+      reason: decision.reason,
+    });
+    if (cfg.mode === 'shadow') return { ready: true, blocked: false, decision, mediaRows };
+    return { ready: false, blocked: true, blockReason: decision.reason, decision, mediaRows };
+  }
+
+  if (cfg.mode === 'shadow') return { ready: true, blocked: false, decision, mediaRows };
+  return { ready: true, blocked: false, decision, mediaRows };
+}
+
+// deno-lint-ignore no-explicit-any
+async function enqueueDeliverJob(supabase: any, tweetId: string, source: string, resetExisting = true, delayMs = 0) {
+  const idempotencyKey = `deliver:${tweetId}`;
+  const nextRunAt = new Date(Date.now() + Math.max(0, delayMs)).toISOString();
+  const { error: deliveryJobError } = await supabase
+    .from('jobs')
+    .upsert({
+      type: 'deliver',
+      payload: { tweet_id: tweetId },
+      status: 'pending',
+      priority: 20,
+      idempotency_key: idempotencyKey,
+      next_run_at: nextRunAt,
+      locked_at: null,
+      locked_by: null,
+      lease_expires_at: null,
+      last_error: null,
+      attempts: 0,
+    }, { onConflict: 'idempotency_key', ignoreDuplicates: !resetExisting });
+  if (deliveryJobError) {
+    console.warn(`${source}: failed to enqueue deliver:`, deliveryJobError.message);
+    return false;
+  }
+
+  await insertPipelineEvent(supabase, 'post', tweetId, 'deliver', 'queued', null, null, null, { source, next_run_at: nextRunAt });
+  try {
+    const { data: existingDel } = await supabase
+      .from('deliveries')
+      .select('id')
+      .eq('subject_type', 'post')
+      .eq('subject_id', tweetId)
+      .eq('status', 'pending')
+      .limit(1);
+    if (!existingDel || existingDel.length === 0) {
+      await supabase.from('deliveries').insert({
+        subject_type: 'post', subject_id: tweetId, status: 'pending', attempts: 0
+      });
+    }
+  } catch (_e) { /* best-effort */ }
+  return true;
+}
+
+// deno-lint-ignore no-explicit-any
+async function enqueuePostDeliveryAfterRenderGate(supabase: any, tweetId: string, source = 'worker', resetExisting = true) {
+  const gate = await prepareVideoRenderGate(supabase, tweetId, source);
+  if (gate.blocked) {
+    await insertPipelineEvent(supabase, 'post', tweetId, 'deliver', 'completed', null, new Date().toISOString(), null, {
+      skipped: 'video_render_blocked',
+      reason: gate.blockReason,
+      gate_action: gate.decision.action,
+      source,
+    });
+    console.log(JSON.stringify({
+      function: 'worker',
+      action: 'delivery_skipped_video_render_blocked',
+      tweet_id: tweetId,
+      source,
+      reason: gate.blockReason,
+    }));
+    return;
+  }
+  const delayMs = gate.ready ? 0 : VIDEO_RENDER_DEFER_MS;
+  const queued = await enqueueDeliverJob(supabase, tweetId, source, resetExisting, delayMs);
+  if (queued && gate.ready) {
+    await dispatchXPosterForTarget(supabase, tweetId, source);
+  }
+  if (!gate.ready) {
+    console.log(JSON.stringify({
+      function: 'worker',
+      action: 'delivery_waiting_video_render',
+      tweet_id: tweetId,
+      source,
+      gate_action: gate.decision.action,
+    }));
+  }
+}
+
+// deno-lint-ignore no-explicit-any
+async function markVideoRenderPosted(supabase: any, tweetId: string): Promise<void> {
+  const cfg = await loadVideoRenderConfig(supabase);
+  try {
+    await supabase.rpc('mark_video_render_posted', {
+      p_tweet_id: tweetId,
+      p_retention_hours: cfg.retentionHours,
+    });
+  } catch (_e) { /* best-effort */ }
+}
 
 async function handleTranslateJob(job: Record<string, unknown>, // deno-lint-ignore no-explicit-any
 supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean> {
@@ -1427,41 +1751,9 @@ ${post.text_original}`;
         }
         // Enrichment v2 is shadow/review-first for X, but Telegram delivery
         // remains translation-first and should not wait on enrichment approval.
-        await enqueueDeliverAfterEnrich(supabase, tweetId, 'translate', false);
-        await dispatchXPosterForTarget(supabase, tweetId, 'translate');
+        await enqueuePostDeliveryAfterRenderGate(supabase, tweetId, 'translate', false);
       } else {
-        const idempotencyKey = `deliver:${tweetId}`;
-        const { error: deliveryJobError } = await supabase
-          .from('jobs')
-          .upsert({
-            type: 'deliver',
-            payload: { tweet_id: tweetId },
-            status: 'pending',
-            priority: 20,
-            idempotency_key: idempotencyKey,
-            next_run_at: new Date().toISOString()
-          }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
-
-        if (deliveryJobError) {
-          console.warn('Failed to create delivery job:', deliveryJobError);
-        } else {
-          await insertPipelineEvent(supabase, 'post', tweetId, 'deliver', 'queued', null, null, null, { source: 'worker' });
-          try {
-            const { data: existingDel } = await supabase
-              .from('deliveries')
-              .select('id')
-              .eq('subject_type', 'post')
-              .eq('subject_id', tweetId)
-              .eq('status', 'pending')
-              .limit(1);
-            if (!existingDel || existingDel.length === 0) {
-              await supabase.from('deliveries').insert({
-                subject_type: 'post', subject_id: tweetId, status: 'pending', attempts: 0
-              });
-            }
-          } catch (_e) { /* best-effort */ }
-          await dispatchXPosterForTarget(supabase, tweetId, 'translate');
-        }
+        await enqueuePostDeliveryAfterRenderGate(supabase, tweetId, 'worker', true);
       }
     } else {
       console.log(JSON.stringify({ function: 'worker', action: 'delivery_skipped', tweet_id: tweetId, score: importanceScore, decision: deliveryDecision }));
@@ -1567,7 +1859,7 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
 
     const { data: media } = await supabase
       .from('media')
-      .select('id, kind, src_url, storage_path, ordering')
+      .select('id, kind, src_url, storage_path, ordering, downloaded_at, mime_type, file_size, duration_ms')
       .eq('tweet_id', tweetId)
       .order('ordering');
 
@@ -1634,6 +1926,29 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
       return false;
     }
 
+    const renderGate = await prepareVideoRenderGate(supabase, tweetId, 'telegram_delivery');
+    if (renderGate.blocked) {
+      await insertPipelineEvent(supabase, 'post', tweetId, 'deliver', 'completed', null, new Date().toISOString(), null, {
+        skipped: 'video_render_blocked',
+        reason: renderGate.blockReason,
+        gate_action: renderGate.decision.action,
+      });
+      console.log(JSON.stringify({
+        function: 'worker',
+        action: 'deliver_skip_video_render_blocked',
+        tweet_id: tweetId,
+        reason: renderGate.blockReason,
+      }));
+      return true;
+    }
+    if (!renderGate.ready) {
+      throw new JobDeferred(`video_render_pending:${renderGate.decision.action}`, VIDEO_RENDER_DEFER_MS, {
+        tweet_id: tweetId,
+        gate_action: renderGate.decision.action,
+      });
+    }
+    const deliveryMedia = applyRenderedVideoPreference(renderGate.mediaRows.length > 0 ? renderGate.mediaRows : ((media as XMediaRow[] | null) ?? []), renderGate.decision);
+
     const message = formatMessageWithTemplate(post, account, messageTemplate);
     let telegramMessageIds: string[] = [];
     const telegramStartedAt = Date.now();
@@ -1642,10 +1957,11 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
       if (!telegramMethods.includes(method)) telegramMethods.push(method);
     };
 
-    if (media && media.length > 0) {
-      const images = media.filter((m: Record<string, unknown>) => m.kind === 'image');
-      const videos = media.filter((m: Record<string, unknown>) => m.kind === 'video');
-      const audios = media.filter((m: Record<string, unknown>) => m.kind === 'audio');
+    const deliveryMediaRecords = deliveryMedia as Array<Record<string, unknown>>;
+    if (deliveryMediaRecords && deliveryMediaRecords.length > 0) {
+      const images = deliveryMediaRecords.filter((m: Record<string, unknown>) => m.kind === 'image');
+      const videos = deliveryMediaRecords.filter((m: Record<string, unknown>) => m.kind === 'video');
+      const audios = deliveryMediaRecords.filter((m: Record<string, unknown>) => m.kind === 'audio');
 
       if (images.length > 0) {
         if (images.length === 1) {
@@ -1714,6 +2030,7 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
       telegram_method: telegramMethods.join('+') || 'unknown',
       message_count: telegramMessageIds.length,
     });
+    await markVideoRenderPosted(supabase, tweetId);
     return true;
 
   } catch (error) {
@@ -2044,7 +2361,6 @@ async function handleEnrichJob(job: Record<string, unknown>, supabase: any): Pro
     // If not requiring approval AND not a manual test, enqueue deliver immediately
     if (enrichStatus === 'completed') {
       await enqueueDeliverAfterEnrich(supabase, tweetId);
-      await dispatchXPosterForTarget(supabase, tweetId, 'enrich');
     }
 
     console.log(JSON.stringify({
@@ -2063,40 +2379,7 @@ async function handleEnrichJob(job: Record<string, unknown>, supabase: any): Pro
 
 // deno-lint-ignore no-explicit-any
 async function enqueueDeliverAfterEnrich(supabase: any, tweetId: string, source = 'enrich', resetExisting = true) {
-  const idempotencyKey = `deliver:${tweetId}`;
-  const { error: deliveryJobError } = await supabase
-    .from('jobs')
-    .upsert({
-      type: 'deliver',
-      payload: { tweet_id: tweetId },
-      status: 'pending',
-      priority: 20,
-      idempotency_key: idempotencyKey,
-      next_run_at: new Date().toISOString(),
-      locked_at: null,
-      lease_expires_at: null,
-      last_error: null,
-      attempts: 0,
-    }, { onConflict: 'idempotency_key', ignoreDuplicates: !resetExisting });
-  if (deliveryJobError) {
-    console.warn('enrich: failed to enqueue deliver:', deliveryJobError.message);
-  } else {
-    await insertPipelineEvent(supabase, 'post', tweetId, 'deliver', 'queued', null, null, null, { source });
-    try {
-      const { data: existingDel } = await supabase
-        .from('deliveries')
-        .select('id')
-        .eq('subject_type', 'post')
-        .eq('subject_id', tweetId)
-        .eq('status', 'pending')
-        .limit(1);
-      if (!existingDel || existingDel.length === 0) {
-        await supabase.from('deliveries').insert({
-          subject_type: 'post', subject_id: tweetId, status: 'pending', attempts: 0
-        });
-      }
-    } catch (_e) { /* best-effort */ }
-  }
+  await enqueuePostDeliveryAfterRenderGate(supabase, tweetId, source, resetExisting);
 }
 
 // Retry policy with dead-lettering
@@ -2343,7 +2626,7 @@ function nonNegativeMs(value: number | null): number | null {
 
 function jobTimingMeta(
   job: Record<string, unknown>,
-  state: 'running' | 'completed' | 'failed',
+  state: 'queued' | 'running' | 'completed' | 'failed',
   extra: Record<string, unknown> = {},
 ): Record<string, unknown> {
   const nowMs = Date.now();
@@ -2360,7 +2643,7 @@ function jobTimingMeta(
     priority: job.priority ?? null,
     queue_wait_ms: nonNegativeMs(createdMs == null ? null : queueReferenceMs - createdMs),
     claim_delay_ms: nonNegativeMs(nextRunMs == null ? null : queueReferenceMs - nextRunMs),
-    worker_run_ms: state === 'running' ? null : nonNegativeMs(startedMs == null ? null : nowMs - startedMs),
+    worker_run_ms: state === 'running' || state === 'queued' ? null : nonNegativeMs(startedMs == null ? null : nowMs - startedMs),
     retry_after_seconds: retryAfterSeconds,
     ...extra,
   };
@@ -2388,7 +2671,7 @@ supabase: any, job: Record<string, unknown>, meta: Record<string, unknown>): Pro
 }
 
 async function recordPipelineEvent(// deno-lint-ignore no-explicit-any
-supabase: any, job: Record<string, unknown>, state: 'running' | 'completed' | 'failed', error?: string, meta: Record<string, unknown> = {}) {
+supabase: any, job: Record<string, unknown>, state: 'queued' | 'running' | 'completed' | 'failed', error?: string, meta: Record<string, unknown> = {}) {
   try {
     const payload = job.payload as Record<string, unknown> | null;
     const subjectType = (payload?.subject_type as string) ?? 'post';
@@ -2396,10 +2679,12 @@ supabase: any, job: Record<string, unknown>, state: 'running' | 'completed' | 'f
     if (!subjectId) return;
     const step = normalizeStep(job.type as string);
     const now = new Date().toISOString();
-    const startedAt = state === 'running'
+    const startedAt = state === 'queued'
+      ? null
+      : state === 'running'
       ? now
       : (typeof job.locked_at === 'string' ? job.locked_at : typeof job.started_at === 'string' ? job.started_at : null);
-    const endedAt = state === 'running' ? null : now;
+    const endedAt = state === 'running' || state === 'queued' ? null : now;
     await insertPipelineEvent(
       supabase,
       subjectType,
