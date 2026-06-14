@@ -39,7 +39,7 @@ import { DashboardActivity } from '@/components/dashboard/DashboardActivity';
 import { DashboardHealth } from '@/components/dashboard/DashboardHealth';
 import { IngestHeartbeatAlert } from '@/components/dashboard/IngestHeartbeatAlert';
 import { useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import type { ReactNode } from 'react';
 
@@ -110,6 +110,9 @@ function joinParts(parts: Array<string | null | undefined>): string {
 
 const STORAGE_WARNING_PCT = 85;
 const STORAGE_CRITICAL_PCT = 90;
+const DASHBOARD_TAB_IDS = ['activity', 'pipeline', 'x', 'controls'] as const;
+
+type DashboardTabId = (typeof DASHBOARD_TAB_IDS)[number];
 
 type AlertSummary = {
   severity: DashboardSeverity;
@@ -138,9 +141,9 @@ function getStorageAlert(resources: SystemPerformanceSummary['resources']): Aler
   return {
     severity,
     title: severity === 'critical' ? 'Temp media storage critical' : 'Temp media storage high',
-    detail: `${storagePct}% used - ${formatBytes(resources.tempMediaBytes)} across ${compactNumber(resources.tempMediaObjects)} objects`,
-    route: '/settings#video-rendering',
-    ctaLabel: 'Review storage risk',
+    detail: `${storagePct}% used - ${formatBytes(resources.tempMediaBytes)} of ${formatBytes(resources.storageLimitBytes)} across ${compactNumber(resources.tempMediaObjects)} objects`,
+    route: '/?tab=controls',
+    ctaLabel: 'Review media cleanup',
   };
 }
 
@@ -184,6 +187,7 @@ export default function Dashboard() {
   const { data, isLoading, isError, error, dataUpdatedAt, isFetching } = useDashboardData();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['dashboard'] });
 
@@ -239,6 +243,17 @@ export default function Dashboard() {
   }
 
   const { metrics, health, activities, heartbeat, opsStatus, pipelineCounts, queueBreakdown, xLocalUsage, systemPerformance } = data;
+  const requestedTab = searchParams.get('tab');
+  const activeTab = DASHBOARD_TAB_IDS.includes(requestedTab as DashboardTabId) ? requestedTab as DashboardTabId : 'activity';
+  const setDashboardTab = (value: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (value === 'activity') {
+      next.delete('tab');
+    } else {
+      next.set('tab', value);
+    }
+    setSearchParams(next, { replace: true });
+  };
   const scoringTuning = data.scoringTuning ?? EMPTY_SCORING_TUNING;
   const maxPipeline = Math.max(
     pipelineCounts.ingested,
@@ -675,7 +690,7 @@ export default function Dashboard() {
         </Card>
       </div>
 
-      <Tabs defaultValue="activity" className="space-y-3">
+      <Tabs value={activeTab} onValueChange={setDashboardTab} className="space-y-3">
         <TabsList className="grid h-auto w-full grid-cols-2 gap-1 sm:inline-flex sm:w-auto">
           <TabsTrigger value="activity">Activity</TabsTrigger>
           <TabsTrigger value="pipeline">Pipeline</TabsTrigger>

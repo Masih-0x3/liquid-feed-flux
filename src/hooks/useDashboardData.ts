@@ -276,6 +276,8 @@ interface RpcResult {
   activity?: Array<Record<string, unknown>>;
 }
 
+const DEFAULT_STORAGE_LIMIT_BYTES = 100_000_000_000;
+
 function asNumber(value: unknown, fallback = 0): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
@@ -460,7 +462,7 @@ function normalizeSystemPerformance(input: RpcResult['system_performance']): Sys
       dbUsedPct: asNullableNumber(resources.db_used_pct),
       tempMediaBytes: asNumber(resources.temp_media_bytes),
       tempMediaObjects: asNumber(resources.temp_media_objects),
-      storageLimitBytes: asNumber(resources.storage_limit_bytes, 1_000_000_000),
+      storageLimitBytes: asNumber(resources.storage_limit_bytes, DEFAULT_STORAGE_LIMIT_BYTES),
       storageUsedPct: asNullableNumber(resources.storage_used_pct),
       edgeMonthlyLimit: asNumber(resources.edge_monthly_limit, 500_000),
       projectedCronInvocationsMonthly: asNumber(resources.projected_cron_invocations_monthly),

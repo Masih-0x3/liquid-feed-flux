@@ -23,12 +23,12 @@ vi.mock("@/integrations/supabase/client", () => ({
 
 const mockedUseDashboardData = vi.mocked(useDashboardData);
 
-function renderDashboard() {
+function renderDashboard(initialEntries = ["/"]) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <MemoryRouter>
+        <MemoryRouter initialEntries={initialEntries}>
           <Dashboard />
         </MemoryRouter>
       </TooltipProvider>
@@ -234,8 +234,8 @@ const dashboardData = {
       dbUsedPct: 36,
       tempMediaBytes: 620_000_000,
       tempMediaObjects: 1000,
-      storageLimitBytes: 1_000_000_000,
-      storageUsedPct: 62,
+      storageLimitBytes: 100_000_000_000,
+      storageUsedPct: 0.6,
       edgeMonthlyLimit: 500_000,
       projectedCronInvocationsMonthly: 90_000,
       edgeCronUsedPct: 18,
@@ -335,6 +335,7 @@ describe("Dashboard", () => {
             ...dashboardData.systemPerformance.resources,
             storageUsedPct: 86,
             tempMediaBytes: 860_000_000,
+            storageLimitBytes: 1_000_000_000,
           },
         },
       },
@@ -348,7 +349,7 @@ describe("Dashboard", () => {
     renderDashboard();
 
     expect(screen.getByText("Temp media storage high")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Review storage risk/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Review media cleanup/i })).toBeTruthy();
   });
 
   it("lets critical storage risk outrank warning-level failed jobs", () => {
@@ -361,6 +362,7 @@ describe("Dashboard", () => {
             ...dashboardData.systemPerformance.resources,
             storageUsedPct: 92,
             tempMediaBytes: 920_000_000,
+            storageLimitBytes: 1_000_000_000,
           },
         },
       },
@@ -374,7 +376,85 @@ describe("Dashboard", () => {
     renderDashboard();
 
     expect(screen.getByText("Temp media storage critical")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Review storage risk/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Review media cleanup/i })).toBeTruthy();
+  });
+
+  it("does not warn when temp media is below paid storage quota pressure", () => {
+    mockedUseDashboardData.mockReturnValue({
+      data: {
+        ...dashboardData,
+        opsStatus: {
+          ...dashboardData.opsStatus,
+          severity: "ok" as const,
+          primaryIssue: "Pipeline is operating normally",
+          recommendedRoute: "/monitoring",
+        },
+        pipelineCounts: {
+          ...dashboardData.pipelineCounts,
+          failedStuck: 0,
+        },
+        systemPerformance: {
+          ...dashboardData.systemPerformance,
+          resources: {
+            ...dashboardData.systemPerformance.resources,
+            tempMediaBytes: 926_235_953,
+            tempMediaObjects: 1475,
+            storageLimitBytes: 100_000_000_000,
+            storageUsedPct: 0.9,
+          },
+        },
+      },
+      isLoading: false,
+      isError: false,
+      error: null,
+      dataUpdatedAt: Date.now(),
+      isFetching: false,
+    } as ReturnType<typeof useDashboardData>);
+
+    renderDashboard();
+
+    expect(screen.queryByText(/Temp media storage/i)).toBeNull();
+    expect(screen.getByText("Pipeline is operating normally")).toBeTruthy();
+  });
+
+  it("opens media storage controls from a storage alert", () => {
+    mockedUseDashboardData.mockReturnValue({
+      data: {
+        ...dashboardData,
+        opsStatus: {
+          ...dashboardData.opsStatus,
+          severity: "ok" as const,
+          primaryIssue: "Pipeline is operating normally",
+          recommendedRoute: "/monitoring",
+        },
+        pipelineCounts: {
+          ...dashboardData.pipelineCounts,
+          failedStuck: 0,
+        },
+        systemPerformance: {
+          ...dashboardData.systemPerformance,
+          resources: {
+            ...dashboardData.systemPerformance.resources,
+            storageUsedPct: 86,
+            tempMediaBytes: 860_000_000,
+            storageLimitBytes: 1_000_000_000,
+          },
+        },
+      },
+      isLoading: false,
+      isError: false,
+      error: null,
+      dataUpdatedAt: Date.now(),
+      isFetching: false,
+    } as ReturnType<typeof useDashboardData>);
+
+    renderDashboard();
+
+    fireEvent.click(screen.getByRole("button", { name: /Review media cleanup/i }));
+
+    expect(screen.getByText("Media Storage")).toBeTruthy();
+    expect(screen.getByText("Allowance")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Dry-run media cleanup/i })).toBeTruthy();
   });
 
   it("filters recent activity by operator status", () => {
