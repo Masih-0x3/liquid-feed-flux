@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { invokeAdminAction } from '@/api/adminActions';
 import { useToast } from '@/hooks/use-toast';
 
 export type VideoRenderMode = 'disabled' | 'shadow' | 'enabled';
@@ -137,17 +137,10 @@ export interface VideoRenderDetail {
   feedback: Array<{ id: string; label: string; note: string | null; metadata?: Record<string, unknown>; created_at: string }>;
 }
 
-async function adminAction<T>(body: Record<string, unknown>): Promise<T> {
-  const { data, error } = await supabase.functions.invoke('admin-actions', { body });
-  if (error) throw error;
-  if (data?.ok === false || data?.success === false) throw new Error(data.error ?? 'Admin action failed');
-  return data as T;
-}
-
 export function useVideoRenderOverview() {
   return useQuery({
     queryKey: ['video-render-overview'],
-    queryFn: () => adminAction<VideoRenderOverview>({ action: 'get_video_render_overview' }),
+    queryFn: () => invokeAdminAction<VideoRenderOverview>({ action: 'get_video_render_overview' }),
     staleTime: 15_000,
     retry: 1,
   });
@@ -156,7 +149,7 @@ export function useVideoRenderOverview() {
 export function useVideoRenderQueue(statuses?: VideoRenderStatus[]) {
   return useQuery({
     queryKey: ['video-render-queue', statuses?.join(',') ?? 'default'],
-    queryFn: () => adminAction<{ ok: boolean; rows: VideoRenderQueueRow[] }>({
+    queryFn: () => invokeAdminAction<{ ok: boolean; rows: VideoRenderQueueRow[] }>({
       action: 'get_video_render_queue',
       statuses,
       limit: 100,
@@ -169,7 +162,7 @@ export function useVideoRenderQueue(statuses?: VideoRenderStatus[]) {
 export function useVideoRenderDetail(input: { renderId?: string | null; tweetId?: string | null; enabled?: boolean }) {
   return useQuery({
     queryKey: ['video-render-detail', input.renderId ?? '', input.tweetId ?? ''],
-    queryFn: () => adminAction<VideoRenderDetail>({
+    queryFn: () => invokeAdminAction<VideoRenderDetail>({
       action: 'get_video_render_detail',
       render_id: input.renderId ?? undefined,
       tweet_id: input.tweetId ?? undefined,
@@ -183,7 +176,7 @@ export function useVideoRenderDetail(input: { renderId?: string | null; tweetId?
 export function useVideoRenderConfig() {
   return useQuery({
     queryKey: ['video-render-config'],
-    queryFn: () => adminAction<{ ok: boolean; config: VideoRenderConfigValue }>({ action: 'get_video_render_config' }),
+    queryFn: () => invokeAdminAction<{ ok: boolean; config: VideoRenderConfigValue }>({ action: 'get_video_render_config' }),
     staleTime: 30_000,
     retry: 1,
   });
@@ -193,7 +186,7 @@ export function useUpdateVideoRenderConfig() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   return useMutation({
-    mutationFn: (config: Partial<VideoRenderConfigValue>) => adminAction<{ ok: boolean; config: VideoRenderConfigValue }>({
+    mutationFn: (config: Partial<VideoRenderConfigValue>) => invokeAdminAction<{ ok: boolean; config: VideoRenderConfigValue }>({
       action: 'update_video_render_config',
       config,
     }),
@@ -212,7 +205,7 @@ export function useRetryVideoRender() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   return useMutation({
-    mutationFn: (input: { render_id?: string; tweet_id?: string }) => adminAction<{ ok: boolean; render_id: string; tweet_id: string; mode: VideoRenderMode }>({
+    mutationFn: (input: { render_id?: string; tweet_id?: string }) => invokeAdminAction<{ ok: boolean; render_id: string; tweet_id: string; mode: VideoRenderMode }>({
       action: 'retry_video_render',
       ...input,
     }),
@@ -232,7 +225,7 @@ export function useSaveVideoRenderFeedback() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   return useMutation({
-    mutationFn: (input: { render_id: string; label: string; note?: string; metadata?: Record<string, unknown> }) => adminAction({
+    mutationFn: (input: { render_id: string; label: string; note?: string; metadata?: Record<string, unknown> }) => invokeAdminAction({
       action: 'save_video_render_feedback',
       ...input,
     }),

@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { invokeAdminAction } from '@/api/adminActions';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
@@ -479,10 +480,7 @@ export function useSaveSettings() {
 
   return useMutation({
     mutationFn: async ({ key, value }: { key: string; value: unknown }) => {
-      const { error } = await supabase.functions.invoke('admin-actions', {
-        body: { action: 'save_settings', key, value },
-      });
-      if (error) throw error;
+      await invokeAdminAction<{ ok?: boolean }>({ action: 'save_settings', key, value });
     },
     onSuccess: () => {
       toast({ title: 'Settings saved successfully' });
@@ -523,10 +521,10 @@ export function useTranslationPreview() {
   const { toast } = useToast();
   return useMutation<PreviewTranslationResult, Error, PreviewTranslationInput>({
     mutationFn: async (input) => {
-      const { data, error } = await supabase.functions.invoke('admin-actions', {
-        body: { action: 'preview_translation', ...input },
+      const data = await invokeAdminAction<{ ok?: boolean; error?: string; result: PreviewTranslationResult }>({
+        action: 'preview_translation',
+        ...input,
       });
-      if (error) throw error;
       if (!data?.ok) throw new Error(data?.error || 'Preview failed');
       return data.result as PreviewTranslationResult;
     },

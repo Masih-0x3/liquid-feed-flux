@@ -46,7 +46,7 @@ function frontendAdminActionLiterals() {
 
   for (const file of sourceFiles(repoPath("src"))) {
     const source = readFileSync(file, "utf8");
-    const wrappedInvokes = source.matchAll(/adminAction(?:<[^>]+>)?\(\s*\{([\s\S]*?)\}\s*\)/g);
+    const wrappedInvokes = source.matchAll(/(?:adminAction|invokeAdminAction)(?:<[^>]+>)?\(\s*\{([\s\S]*?)\}\s*\)/g);
 
     for (const invoke of source.matchAll(directInvokePattern)) {
       const close = source.indexOf(");", invoke.index);

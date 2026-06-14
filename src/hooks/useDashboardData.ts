@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useCallback } from 'react';
+import { invokeAdminAction } from '@/api/adminActions';
 import { supabase } from '@/integrations/supabase/client';
 
 export interface DashboardMetrics {
@@ -562,10 +563,7 @@ async function fetchDashboard() {
   let rpc: RpcResult;
 
   try {
-    const { data, error } = await supabase.functions.invoke('admin-actions', {
-      body: { action: 'get_dashboard_summary' },
-    });
-    if (error) throw error;
+    const data = await invokeAdminAction<{ success?: boolean; error?: string; dashboard: unknown }>({ action: 'get_dashboard_summary' });
     if (!data?.success) throw new Error(data?.error || 'Failed to load dashboard summary');
     rpc = data.dashboard as unknown as RpcResult;
   } catch (edgeError) {

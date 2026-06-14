@@ -1,5 +1,6 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useCallback } from 'react';
+import { invokeAdminAction } from '@/api/adminActions';
 import { supabase } from '@/integrations/supabase/client';
 import { monitoringStage } from '@/lib/monitoringState';
 import { matchesScoringV2Filter } from '@/lib/scoringV2Monitoring';
@@ -459,11 +460,12 @@ async function fetchLegacyMonitoringPage(
   const allTweetIds = postsData.map(p => p.tweet_id);
   const statusByTweet: Record<string, Record<string, unknown>> = {};
   try {
-    const { data: rpcData, error: rpcError } = await supabase.functions.invoke('admin-actions', {
-      body: { action: 'get_post_pipeline_status', tweet_ids: allTweetIds },
+    const rpcData = await invokeAdminAction<{ success?: boolean; statuses?: Record<string, unknown>[] }>({
+      action: 'get_post_pipeline_status',
+      tweet_ids: allTweetIds,
     });
     const rows = rpcData?.statuses as Record<string, unknown>[] | undefined;
-    if (!rpcError && rows) {
+    if (rows) {
       rows.forEach((row) => {
         statusByTweet[row.tweet_id as string] = row;
       });
@@ -633,17 +635,14 @@ async function fetchMonitoringPage(
   scoreBucket: ScoreBucket,
 ): Promise<{ entries: MonitoringEntry[]; nextCursor: number | null }> {
   try {
-    const { data, error } = await supabase.functions.invoke('admin-actions', {
-      body: {
-        action: 'get_monitoring_entries',
-        filter,
-        search: sanitizeSearch(search) || undefined,
-        score_bucket: scoreBucket,
-        cursor: pageParam,
-        limit: PAGE_SIZE,
-      },
+    const data = await invokeAdminAction<{ success?: boolean; error?: string; entries?: unknown[]; next_cursor?: unknown }>({
+      action: 'get_monitoring_entries',
+      filter,
+      search: sanitizeSearch(search) || undefined,
+      score_bucket: scoreBucket,
+      cursor: pageParam,
+      limit: PAGE_SIZE,
     });
-    if (error) throw error;
     if (data?.success && Array.isArray(data.entries)) {
       return {
         entries: data.entries as MonitoringEntry[],
@@ -713,10 +712,10 @@ export function useMonitoringOverview(windowHours = 24) {
   return useQuery({
     queryKey: ['monitoring-overview', windowHours],
     queryFn: async (): Promise<MonitoringOverview> => {
-      const { data, error } = await supabase.functions.invoke('admin-actions', {
-        body: { action: 'get_monitoring_overview', window_hours: windowHours },
+      const data = await invokeAdminAction<{ success?: boolean; error?: string; overview?: MonitoringOverview }>({
+        action: 'get_monitoring_overview',
+        window_hours: windowHours,
       });
-      if (error) throw error;
       if (data?.success && data.overview) return data.overview as MonitoringOverview;
       throw new Error(data?.error ?? 'Monitoring overview unavailable');
     },
@@ -729,10 +728,11 @@ export function useXApiSummary(windowHours = 24, syncOfficialUsage = false) {
   return useQuery({
     queryKey: ['x-api-summary', windowHours, syncOfficialUsage],
     queryFn: async (): Promise<XApiSummary> => {
-      const { data, error } = await supabase.functions.invoke('admin-actions', {
-        body: { action: 'get_x_api_summary', window_hours: windowHours, sync_official_usage: syncOfficialUsage },
+      const data = await invokeAdminAction<{ success?: boolean; error?: string; summary?: XApiSummary }>({
+        action: 'get_x_api_summary',
+        window_hours: windowHours,
+        sync_official_usage: syncOfficialUsage,
       });
-      if (error) throw error;
       if (data?.success && data.summary) return data.summary as XApiSummary;
       throw new Error(data?.error ?? 'X API summary unavailable');
     },
