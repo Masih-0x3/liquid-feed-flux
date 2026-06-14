@@ -51,6 +51,39 @@ export type ParsedClassifierToolCall = {
   scoreAxes: ScoreAxes | null;
 };
 
+export type ScoringCallConfig = {
+  scoringModel?: string | null;
+  openaiModel: string;
+  scoringTemperature?: number | null;
+  openaiTemperature?: number | null;
+  scoringMaxCompletionTokens?: number | null;
+  openaiMaxCompletionTokens?: number | null;
+  scoringTopP?: number | null;
+  openaiTopP?: number | null;
+  scoringReasoningEffort?: string | null;
+  openaiReasoningEffort?: string | null;
+  scoringVerbosity?: string | null;
+  openaiVerbosity?: string | null;
+  scoringSeed?: number | null;
+  openaiSeed?: number | null;
+  scoringServiceTier?: string | null;
+  openaiServiceTier?: string | null;
+  scoringParallelToolCalls?: boolean | null;
+  openaiParallelToolCalls?: boolean | null;
+};
+
+export type ScoringCallOptions = {
+  model: string;
+  temperature?: number | null;
+  maxOutputTokens?: number | null;
+  topP?: number | null;
+  reasoningEffort?: string | null;
+  verbosity?: string | null;
+  seed?: number | null;
+  serviceTier?: string | null;
+  parallelToolCalls?: boolean | null;
+};
+
 const FALLBACK_SCORING_RUBRIC = `You have two tasks. Complete both carefully.
 
 ## Task 1: Translation
@@ -234,4 +267,23 @@ export function parseClassifierToolCallArguments(
   }
 
   return parsed;
+}
+
+export function resolveScoringCallOptions(
+  config: ScoringCallConfig,
+): ScoringCallOptions {
+  return {
+    model: config.scoringModel ?? config.openaiModel,
+    temperature: config.scoringTemperature ?? config.openaiTemperature,
+    maxOutputTokens: config.scoringMaxCompletionTokens ??
+      config.openaiMaxCompletionTokens,
+    topP: config.scoringTopP ?? config.openaiTopP,
+    reasoningEffort: config.scoringReasoningEffort ??
+      config.openaiReasoningEffort,
+    verbosity: config.scoringVerbosity ?? config.openaiVerbosity,
+    seed: config.scoringSeed ?? config.openaiSeed,
+    serviceTier: config.scoringServiceTier ?? config.openaiServiceTier,
+    parallelToolCalls: config.scoringParallelToolCalls ??
+      config.openaiParallelToolCalls,
+  };
 }

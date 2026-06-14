@@ -5,6 +5,7 @@ import {
   parseClassifierToolCallArguments,
   renderScoringSystemPrompt,
   renderScoringUserMessage,
+  resolveScoringCallOptions,
   SCORING_AXES_SCHEMA,
 } from "./scoringWorkflow.ts";
 
@@ -218,6 +219,69 @@ Deno.test("parseClassifierToolCallArguments returns translated text for combined
       importanceTags: ["diplomacy"],
       importanceReasoning: "direct diplomacy",
       scoreAxes: null,
+    },
+  );
+});
+
+Deno.test("resolveScoringCallOptions falls back to translation model settings", () => {
+  assertEquals(
+    resolveScoringCallOptions({
+      openaiModel: "gpt-main",
+      openaiTemperature: 0.2,
+      openaiMaxCompletionTokens: 1200,
+      openaiTopP: 0.9,
+      openaiReasoningEffort: "low",
+      openaiVerbosity: "medium",
+      openaiSeed: 44,
+      openaiServiceTier: "default",
+      openaiParallelToolCalls: false,
+    }),
+    {
+      model: "gpt-main",
+      temperature: 0.2,
+      maxOutputTokens: 1200,
+      topP: 0.9,
+      reasoningEffort: "low",
+      verbosity: "medium",
+      seed: 44,
+      serviceTier: "default",
+      parallelToolCalls: false,
+    },
+  );
+});
+
+Deno.test("resolveScoringCallOptions prefers scoring-specific settings", () => {
+  assertEquals(
+    resolveScoringCallOptions({
+      openaiModel: "gpt-main",
+      openaiTemperature: 0.2,
+      openaiMaxCompletionTokens: 1200,
+      openaiTopP: 0.9,
+      openaiReasoningEffort: "low",
+      openaiVerbosity: "medium",
+      openaiSeed: 44,
+      openaiServiceTier: "default",
+      openaiParallelToolCalls: false,
+      scoringModel: "gpt-score",
+      scoringTemperature: 0,
+      scoringMaxCompletionTokens: 600,
+      scoringTopP: 0.7,
+      scoringReasoningEffort: "minimal",
+      scoringVerbosity: "low",
+      scoringSeed: 12,
+      scoringServiceTier: "auto",
+      scoringParallelToolCalls: true,
+    }),
+    {
+      model: "gpt-score",
+      temperature: 0,
+      maxOutputTokens: 600,
+      topP: 0.7,
+      reasoningEffort: "minimal",
+      verbosity: "low",
+      seed: 12,
+      serviceTier: "auto",
+      parallelToolCalls: true,
     },
   );
 });

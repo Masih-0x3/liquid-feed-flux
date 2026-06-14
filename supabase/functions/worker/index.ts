@@ -94,6 +94,7 @@ import {
   parseClassifierToolCallArguments,
   renderScoringSystemPrompt,
   renderScoringUserMessage,
+  resolveScoringCallOptions,
 } from "./scoringWorkflow.ts";
 import {
   renderTranslationUserPrompt as renderTranslationUserPromptText,
@@ -776,16 +777,17 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
       });
     }
 
-    // Resolve scoring params (fall back to translation values if not set)
-    const scoringModel = config.scoringModel ?? config.openaiModel;
-    const scoringTemperature = config.scoringTemperature ?? config.openaiTemperature;
-    const scoringMaxTokens = config.scoringMaxCompletionTokens ?? config.openaiMaxCompletionTokens;
-    const scoringTopP = config.scoringTopP ?? config.openaiTopP;
-    const scoringReasoningEffort = config.scoringReasoningEffort ?? config.openaiReasoningEffort;
-    const scoringVerbosity = config.scoringVerbosity ?? config.openaiVerbosity;
-    const scoringSeed = config.scoringSeed ?? config.openaiSeed;
-    const scoringServiceTier = config.scoringServiceTier ?? config.openaiServiceTier;
-    const scoringParallelTools = config.scoringParallelToolCalls ?? config.openaiParallelToolCalls;
+    const {
+      model: scoringModel,
+      temperature: scoringTemperature,
+      maxOutputTokens: scoringMaxTokens,
+      topP: scoringTopP,
+      reasoningEffort: scoringReasoningEffort,
+      verbosity: scoringVerbosity,
+      seed: scoringSeed,
+      serviceTier: scoringServiceTier,
+      parallelToolCalls: scoringParallelTools,
+    } = resolveScoringCallOptions(config);
 
     const accountData = (post as Record<string, unknown>).accounts as Record<string, unknown> | null;
     const authorDisplay = authorHandle || (accountData?.handle as string) || 'unknown';
