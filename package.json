@@ -20,6 +20,7 @@
     "test:functions": "npx --yes deno task test:functions",
     "check:vite-env": "node scripts/check-vite-env.mjs",
     "check:function-inventory": "node scripts/check-function-inventory.mjs",
+    "check:release-state": "bash scripts/check-release-state.sh",
     "check:strict": "tsc --noEmit -p tsconfig.strict.json",
     "test": "vitest run",
     "test:watch": "vitest",
