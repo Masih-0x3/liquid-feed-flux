@@ -141,6 +141,22 @@ async function maybeInvokePostingFunctions(supabase, rpcResult, tweetId) {
   }
 }
 
+export async function recordRenderFailure(supabase, { renderId, error, metrics }) {
+  const message = error instanceof Error ? error.message : String(error);
+  try {
+    const { data, error: rpcError } = await supabase.rpc("fail_video_render", {
+      p_render_id: renderId,
+      p_error: message,
+      p_metrics: metrics,
+    });
+    if (rpcError) throw rpcError;
+    return data;
+  } catch (failError) {
+    console.warn("fail_video_render failed:", failError instanceof Error ? failError.message : String(failError));
+    return null;
+  }
+}
+
 async function loadRenderSource(supabase, row) {
   const { data, error } = await supabase
     .from("media")
@@ -800,12 +816,11 @@ export async function processRenderRow({ supabase, row, config }) {
     });
   } catch (error) {
     metrics.total_ms = Date.now() - started;
-    const message = error instanceof Error ? error.message : String(error);
-    const { data } = await supabase.rpc("fail_video_render", {
-      p_render_id: row.id,
-      p_error: message,
-      p_metrics: metrics,
-    }).catch(() => ({ data: null }));
+    const data = await recordRenderFailure(supabase, {
+      renderId: row.id,
+      error,
+      metrics,
+    });
     await maybeInvokePostingFunctions(supabase, data, row.tweet_id);
     throw error;
   } finally {
