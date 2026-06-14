@@ -24,10 +24,10 @@ Main checkout preserved:
 /Users/stevmq/Finalized XOT
 ```
 
-Current implementation branch after Phase 12:
+Current implementation branch after Phase 13:
 
 ```text
-codex/xot-cleanup-22-monitoring-data-contracts
+codex/xot-cleanup-23-settings-dashboard-xaccount
 ```
 
 Current safe-state rule:
@@ -1288,18 +1288,25 @@ Apply the same cleanup discipline to Settings, Dashboard, and XAccount without b
 
 ## Steps
 
-- [ ] Locate direct settings table writes.
+- [x] Locate direct settings table writes.
 
 ```bash
 rg -n "from\\(['\\\"]settings|\\.update\\(|\\.insert\\(|\\.upsert\\(|admin-actions|admin-retry" src/pages/Settings.tsx src/hooks/useSettingsData.ts src/components/settings src/hooks/useDashboardData.ts src/components/dashboard src/pages/XAccount.tsx
 ```
 
-- [ ] Move settings reads/writes to `src/api/settingsData.ts`.
-- [ ] Route `EnrichmentSettings` through the same settings save path as other settings components.
-- [ ] Move dashboard summary fetch and normalization to `src/api/dashboardData.ts`.
-- [ ] Move X account status/follower snapshot actions to `src/api/xAccountData.ts`.
-- [ ] Add tests for normalization behavior and action names.
-- [ ] Keep UI layout unchanged unless a layout bug is found during browser checks.
+- [x] Move settings reads/writes to `src/api/settingsData.ts`.
+- [x] Route `EnrichmentSettings` through the same settings save path as other settings components.
+- [x] Move dashboard summary fetch and normalization to `src/api/dashboardData.ts`.
+- [x] Move X account status/follower snapshot actions to `src/api/xAccountData.ts`.
+- [x] Add tests for normalization behavior and action names.
+- [x] Keep UI layout unchanged unless a layout bug is found during browser checks.
+
+## Implementation Notes
+
+- [x] `src/hooks/useSettingsData.ts` now owns only React Query mutation/query glue and re-exports contracts from `src/api/settingsData.ts`.
+- [x] `src/components/settings/EnrichmentSettings.tsx` now loads special enrichment setting rows through `fetchSettingsRows` and saves `enrichment_config`, `voice_samples`, and `voice_guide` through the shared `save_settings` admin-action path.
+- [x] `src/hooks/useDashboardData.ts` now owns only query/subscription glue and re-exports contracts from `src/api/dashboardData.ts`.
+- [x] `src/pages/XAccount.tsx` now calls `runFollowersSnapshot` from `src/api/xAccountData.ts` instead of embedding the admin-action payload in the page.
 
 ## Validation
 
@@ -1311,19 +1318,33 @@ npm test
 npm run build
 ```
 
+Completed validation:
+
+- [x] `npm run lint` passed with the existing 8 Fast Refresh warnings only.
+- [x] `npm run check:strict` passed.
+- [x] `npm test -- src/test/settings-data.test.ts src/test/dashboard-data.test.ts src/test/x-account-data.test.ts` passed: 3 files, 9 tests.
+- [x] `npm test` passed: 19 files, 81 tests.
+- [x] `npm run lint:functions` passed: Deno lint checked 95 files.
+- [x] `npm run check:functions` passed.
+- [x] `npm run test:functions` passed: 257 Deno tests.
+- [x] `npm run check:function-inventory` passed: 10 functions.
+- [x] Env-backed `npm run build` passed.
+- [x] `git diff --check` passed.
+- [x] `npm run check:release-state` passed read-only with live hosts 200, main CI green, active Supabase functions/cron, online renderer heartbeat, Vercel CLI unavailable, and known Supabase migration drift still present.
+
 ## Commit
 
 ```bash
-git add src/pages/Settings.tsx src/hooks/useSettingsData.ts src/components/settings/EnrichmentSettings.tsx src/components/settings/XAutomationSettings.tsx src/hooks/useDashboardData.ts src/components/dashboard/DashboardHealth.tsx src/pages/XAccount.tsx src/api/settingsData.ts src/api/dashboardData.ts src/api/xAccountData.ts src/test/settings-data.test.ts src/test/dashboard-data.test.ts src/test/x-account-data.test.ts
+git add src/hooks/useSettingsData.ts src/api/settingsData.ts src/components/settings/EnrichmentSettings.tsx src/hooks/useDashboardData.ts src/api/dashboardData.ts src/pages/XAccount.tsx src/api/xAccountData.ts src/test/settings-data.test.ts src/test/dashboard-data.test.ts src/test/x-account-data.test.ts docs/superpowers/plans/2026-06-14-xot-cleanup-master-plan.md
 git commit -m "refactor: centralize settings dashboard and x account data access"
 ```
 
 ## Exit Criteria
 
-- [ ] Settings writes have one primary frontend path.
-- [ ] Dashboard data fallback and normalization are not buried in UI components.
-- [ ] XAccount page is easier to review.
-- [ ] No operator workflow is removed.
+- [x] Settings writes have one primary frontend path.
+- [x] Dashboard data fallback and normalization are not buried in UI components.
+- [x] XAccount page is easier to review.
+- [x] No operator workflow is removed.
 
 ---
 

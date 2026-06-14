@@ -11,8 +11,8 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ChevronDown, Plus, X, Sparkles, Search, PenTool, Wand2, Layout, BookOpen, Loader2, Save } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { supabase } from '@/integrations/supabase/client';
 import { invokeAdminAction } from '@/api/adminActions';
+import { fetchSettingsRows, saveSetting } from '@/api/settingsData';
 
 interface EnrichmentConfig {
   enabled: boolean;
@@ -177,10 +177,7 @@ export default function EnrichmentSettings() {
   async function loadSettings() {
     setLoading(true);
     try {
-      const { data } = await supabase
-        .from('settings')
-        .select('key, value')
-        .in('key', ['enrichment_config', 'voice_samples', 'voice_guide', 'personal_voice_profile']);
+      const data = await fetchSettingsRows(['enrichment_config', 'voice_samples', 'voice_guide', 'personal_voice_profile']);
       if (data) {
         for (const row of data) {
           if (row.key === 'enrichment_config' && row.value) setConfig({ ...DEFAULT_CONFIG, ...(row.value as object) });
@@ -201,10 +198,7 @@ export default function EnrichmentSettings() {
   async function saveConfig() {
     setSaving(true);
     try {
-      const { error } = await supabase
-        .from('settings')
-        .upsert([{ key: 'enrichment_config', value: config as never, updated_at: new Date().toISOString() }], { onConflict: 'key' });
-      if (error) throw error;
+      await saveSetting({ key: 'enrichment_config', value: config });
       toast({ title: 'Saved', description: 'Enrichment configuration updated.' });
     } catch (e) {
       toast({ title: 'Error', description: (e as Error).message, variant: 'destructive' });
@@ -216,10 +210,7 @@ export default function EnrichmentSettings() {
     const updated = { samples, updated_at: new Date().toISOString() };
     setVoiceSamples(updated);
     try {
-      const { error } = await supabase
-        .from('settings')
-        .upsert([{ key: 'voice_samples', value: updated as never, updated_at: new Date().toISOString() }], { onConflict: 'key' });
-      if (error) throw error;
+      await saveSetting({ key: 'voice_samples', value: updated });
       toast({ title: 'Saved', description: 'Voice samples updated.' });
     } catch (e) {
       toast({ title: 'Error', description: (e as Error).message, variant: 'destructive' });
@@ -230,10 +221,7 @@ export default function EnrichmentSettings() {
     const updated = { guide: voiceGuide.guide.trim() || DEFAULT_MASIH_VOICE_GUIDE, updated_at: new Date().toISOString() };
     setVoiceGuide(updated);
     try {
-      const { error } = await supabase
-        .from('settings')
-        .upsert([{ key: 'voice_guide', value: updated as never, updated_at: new Date().toISOString() }], { onConflict: 'key' });
-      if (error) throw error;
+      await saveSetting({ key: 'voice_guide', value: updated });
       toast({ title: 'Saved', description: '@masihh voice guide updated.' });
     } catch (e) {
       toast({ title: 'Error', description: (e as Error).message, variant: 'destructive' });
