@@ -1,12 +1,12 @@
-import { ReactNode, useEffect, useState } from 'react';
+import { ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { Navigate, NavLink, useLocation } from 'react-router-dom';
-import { SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
-import { AppSidebar } from './AppSidebar';
 import { navigationItems } from './navigation';
 import { VersionBanner } from './VersionBanner';
 import { BrandLogo } from './BrandLogo';
 import { useAuth } from '@/contexts/AuthContext';
-import { Loader2, ShieldAlert } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { useToast } from '@/hooks/use-toast';
+import { Loader2, LogOut, ShieldAlert } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface AppLayoutProps {
@@ -14,24 +14,141 @@ interface AppLayoutProps {
 }
 
 export function AppLayout({ children }: AppLayoutProps) {
-  const { user, loading, role, isAdmin } = useAuth();
+  const { user, loading, role, isAdmin, signOut } = useAuth();
+  const { toast } = useToast();
   const location = useLocation();
-  const [headerDocked, setHeaderDocked] = useState(false);
+  const [headerState, setHeaderState] = useState({ docked: false, hidden: false });
+  const mainRef = useRef<HTMLElement | null>(null);
+  const lastScrollTopRef = useRef(0);
+  const hideTimerRef = useRef<number | null>(null);
+  const reduceMotionRef = useRef(false);
   const isWideOpsRoute = location.pathname.startsWith('/monitoring') || location.pathname.startsWith('/video-renders');
   const activeItem = navigationItems.find((item) =>
     item.url === '/' ? location.pathname === '/' : location.pathname.startsWith(item.url)
   ) ?? navigationItems[0];
 
+  const clearHideTimer = useCallback(() => {
+    if (hideTimerRef.current) {
+      window.clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = null;
+    }
+  }, []);
+
+  const setHeaderVisibility = useCallback((next: { docked: boolean; hidden: boolean }) => {
+    setHeaderState((current) =>
+      current.docked === next.docked && current.hidden === next.hidden ? current : next
+    );
+  }, []);
+
+  const revealHeader = useCallback(() => {
+    clearHideTimer();
+    const scrollTop = mainRef.current?.scrollTop ?? 0;
+    setHeaderVisibility({ docked: scrollTop > 24, hidden: false });
+  }, [clearHideTimer, setHeaderVisibility]);
+
   useEffect(() => {
-    const updateHeaderState = () => {
-      const nextDocked = window.scrollY > 24;
-      setHeaderDocked((current) => current === nextDocked ? current : nextDocked);
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const applyPreference = () => {
+      reduceMotionRef.current = media.matches;
+      if (media.matches) revealHeader();
     };
 
-    updateHeaderState();
-    window.addEventListener('scroll', updateHeaderState, { passive: true });
-    return () => window.removeEventListener('scroll', updateHeaderState);
-  }, [location.pathname]);
+    applyPreference();
+    media.addEventListener('change', applyPreference);
+    return () => media.removeEventListener('change', applyPreference);
+  }, [revealHeader]);
+
+  useEffect(() => {
+    clearHideTimer();
+    lastScrollTopRef.current = 0;
+    const mainEl = mainRef.current;
+    if (mainEl) {
+      if (typeof mainEl.scrollTo === 'function') {
+        mainEl.scrollTo({ top: 0 });
+      } else {
+        mainEl.scrollTop = 0;
+      }
+    }
+    setHeaderVisibility({ docked: false, hidden: false });
+  }, [clearHideTimer, location.pathname, setHeaderVisibility]);
+
+  useEffect(() => {
+    const handleIntentToReveal = (event: PointerEvent | TouchEvent | KeyboardEvent) => {
+      if (event instanceof KeyboardEvent) {
+        if (event.key === 'Tab') revealHeader();
+        return;
+      }
+
+      let topEdge: number | undefined;
+      if (typeof TouchEvent !== 'undefined' && event instanceof TouchEvent) {
+        topEdge = event.touches[0]?.clientY;
+      } else if ('clientY' in event) {
+        topEdge = event.clientY;
+      }
+
+      if (typeof topEdge === 'number' && topEdge <= 56) {
+        revealHeader();
+      }
+    };
+
+    window.addEventListener('pointermove', handleIntentToReveal, { passive: true });
+    window.addEventListener('touchstart', handleIntentToReveal, { passive: true });
+    window.addEventListener('keydown', handleIntentToReveal);
+    return () => {
+      window.removeEventListener('pointermove', handleIntentToReveal);
+      window.removeEventListener('touchstart', handleIntentToReveal);
+      window.removeEventListener('keydown', handleIntentToReveal);
+    };
+  }, [revealHeader]);
+
+  const handleMainScroll = useCallback((event: React.UIEvent<HTMLElement>) => {
+    const scrollTop = event.currentTarget.scrollTop;
+    const lastScrollTop = lastScrollTopRef.current;
+    const docked = scrollTop > 24;
+    const scrollingDown = scrollTop > lastScrollTop + 4;
+    const scrollingUp = scrollTop < lastScrollTop - 4;
+
+    lastScrollTopRef.current = scrollTop;
+
+    if (reduceMotionRef.current || scrollTop <= 96 || scrollingUp) {
+      clearHideTimer();
+      setHeaderVisibility({ docked, hidden: false });
+      return;
+    }
+
+    if (scrollingDown) {
+      setHeaderVisibility({ docked: true, hidden: headerState.hidden });
+      if (!headerState.hidden && !hideTimerRef.current) {
+        hideTimerRef.current = window.setTimeout(() => {
+          hideTimerRef.current = null;
+          if (!reduceMotionRef.current && lastScrollTopRef.current > 96) {
+            setHeaderVisibility({ docked: true, hidden: true });
+          }
+        }, 600);
+      }
+      return;
+    }
+
+    setHeaderVisibility({ docked, hidden: headerState.hidden });
+  }, [clearHideTimer, headerState.hidden, setHeaderVisibility]);
+
+  const handleSignOut = async () => {
+    try {
+      const { error } = await signOut();
+      if (error) throw error;
+
+      toast({
+        title: 'Signed out successfully',
+        description: 'You have been logged out of the XOT Panel.',
+      });
+    } catch {
+      toast({
+        title: 'Error signing out',
+        description: 'Please try again.',
+        variant: 'destructive',
+      });
+    }
+  };
 
   if (loading || (user && role === null)) {
     return (
@@ -63,82 +180,91 @@ export function AppLayout({ children }: AppLayoutProps) {
   }
 
   return (
-    <SidebarProvider defaultOpen>
-      <div className="flex h-svh min-h-svh w-full overflow-hidden bg-background">
-        <AppSidebar />
-        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          {/* Header */}
-          <header className="sticky top-0 z-30 flex shrink-0 justify-center px-3 py-2 sm:px-5">
-            <div
-              className={cn(
-                'grid min-h-12 w-full max-w-[92rem] grid-cols-[auto_1fr_auto] items-center gap-3 border transition-all duration-300 ease-out motion-reduce:transition-none',
-                headerDocked
-                  ? 'rounded-none border-glass-border/70 bg-background/72 px-3 py-2 shadow-[0_18px_55px_rgba(0,0,0,0.28)] backdrop-blur-glass-lg'
-                  : 'border-transparent bg-transparent px-0 py-1 shadow-none'
-              )}
-            >
-              <div className="flex min-w-0 items-center gap-2">
-                <SidebarTrigger className="glass-button h-9 w-9 shrink-0 px-0 py-0 hover:bg-glass-border/20" />
-                <BrandLogo compact className="h-8 w-8 shrink-0 rounded-lg ring-1 ring-glass-border/70" />
-                <div className="min-w-0">
-                  <div className="text-sm font-display font-semibold leading-tight text-glass-foreground">
-                    XOT
-                  </div>
-                  <div className="truncate text-[11px] uppercase leading-tight tracking-[0.14em] text-muted-foreground">
-                    {activeItem.title}
-                  </div>
+    <div className="relative flex h-svh min-h-svh w-full overflow-hidden bg-background">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        {/* Header */}
+        <header
+          className={cn(
+            'fixed inset-x-0 top-0 z-50 flex justify-center px-3 py-2 transition-transform duration-300 ease-out motion-reduce:transform-none motion-reduce:transition-none sm:px-5',
+            headerState.hidden ? '-translate-y-[calc(100%+0.75rem)]' : 'translate-y-0'
+          )}
+          onFocusCapture={revealHeader}
+        >
+          <div
+            className={cn(
+              'grid min-h-12 w-full max-w-[96rem] grid-cols-[auto_1fr_auto] items-center gap-2 border transition-all duration-300 ease-out motion-reduce:transition-none sm:gap-3',
+              headerState.docked
+                ? 'rounded-lg border-glass-border/70 bg-background/80 px-2 py-2 shadow-[0_18px_55px_rgba(0,0,0,0.28)] backdrop-blur-glass-lg sm:px-3'
+                : 'rounded-lg border-glass-border/30 bg-background/50 px-2 py-2 shadow-none backdrop-blur-glass sm:px-3'
+            )}
+          >
+            <div className="flex min-w-0 items-center gap-2">
+              <BrandLogo compact className="h-8 w-8 shrink-0 rounded-lg ring-1 ring-glass-border/70" />
+              <div className="min-w-0">
+                <div className="text-sm font-display font-semibold leading-tight text-glass-foreground">
+                  XOT
+                </div>
+                <div className="truncate text-[11px] uppercase leading-tight tracking-[0.14em] text-muted-foreground">
+                  {activeItem.title}
                 </div>
               </div>
+            </div>
 
-              <nav aria-label="Primary navigation" className="hidden min-w-0 justify-center xl:flex">
-                <div
-                  className={cn(
-                    'flex items-center gap-1 border border-glass-border/40 bg-background/28 px-1 py-1 backdrop-blur-glass transition-all duration-300 motion-reduce:transition-none',
-                    headerDocked ? 'rounded-none' : 'rounded-md'
-                  )}
-                >
-                  {navigationItems.map((item) => (
-                    <NavLink
-                      key={item.title}
-                      to={item.url}
-                      end
-                      className={({ isActive }) =>
-                        cn(
-                          'inline-flex h-8 items-center gap-2 px-3 text-xs font-mono font-medium text-muted-foreground transition-colors hover:bg-glass-border/20 hover:text-glass-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70',
-                          headerDocked ? 'rounded-none' : 'rounded',
-                          isActive && 'bg-primary/15 text-primary'
-                        )
-                      }
-                    >
-                      <item.icon className="h-3.5 w-3.5 shrink-0" />
-                      <span>{item.title}</span>
-                    </NavLink>
-                  ))}
-                </div>
-              </nav>
+            <nav aria-label="Primary navigation" className="hidden min-w-0 justify-center md:flex">
+              <div className="flex min-w-0 items-center gap-1 rounded-md border border-glass-border/40 bg-background/32 px-1 py-1 backdrop-blur-glass">
+                {navigationItems.map((item) => (
+                  <NavLink
+                    key={item.title}
+                    to={item.url}
+                    end
+                    aria-label={item.title}
+                    title={item.title}
+                    className={({ isActive }) =>
+                      cn(
+                        'inline-flex h-8 min-w-8 items-center justify-center gap-2 rounded px-2 text-xs font-mono font-medium text-muted-foreground transition-colors hover:bg-glass-border/20 hover:text-glass-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70 lg:px-3',
+                        isActive && 'bg-primary/15 text-primary'
+                      )
+                    }
+                  >
+                    <item.icon className="h-3.5 w-3.5 shrink-0" />
+                    <span className="hidden lg:inline">{item.title}</span>
+                  </NavLink>
+                ))}
+              </div>
+            </nav>
 
-              <div className="hidden min-w-0 justify-end sm:flex">
+            <div className="flex min-w-0 items-center justify-end gap-2">
+              <div className="hidden min-w-0 xl:flex">
                 <VersionBanner />
               </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleSignOut}
+                className="h-9 shrink-0 rounded-md px-2 text-muted-foreground hover:bg-destructive/15 hover:text-destructive sm:px-3"
+                aria-label="Sign out"
+              >
+                <LogOut className="h-4 w-4" />
+                <span className="ml-2 hidden lg:inline">Sign out</span>
+              </Button>
             </div>
-          </header>
+          </div>
+        </header>
 
-          {/* Main Content */}
-          <main
-            className="flex-1 overflow-auto overflow-x-hidden px-2 py-3 pb-24 sm:p-6 md:pb-6"
-            onScroll={(event) => {
-              const nextDocked = event.currentTarget.scrollTop > 24 || window.scrollY > 24;
-              setHeaderDocked((current) => current === nextDocked ? current : nextDocked);
-            }}
-          >
-            <div className={`mx-auto w-full ${isWideOpsRoute ? 'max-w-none' : 'max-w-7xl'}`}>
-              {children}
-            </div>
-          </main>
-        </div>
-        <MobileBottomNav />
+        {/* Main Content */}
+        <main
+          ref={mainRef}
+          className="flex-1 overflow-auto overflow-x-hidden px-2 pb-24 pt-20 sm:px-5 sm:pb-6 sm:pt-[5.5rem]"
+          onScroll={handleMainScroll}
+        >
+          <div className={`mx-auto w-full ${isWideOpsRoute ? 'max-w-none' : 'max-w-7xl'}`}>
+            {children}
+          </div>
+        </main>
       </div>
-    </SidebarProvider>
+      <MobileBottomNav />
+    </div>
   );
 }
 
