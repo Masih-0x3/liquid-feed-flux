@@ -1,4 +1,5 @@
 import type { MonitoringEntry, MonitoringOverview } from '@/hooks/useMonitoringData';
+import { getScoringV2Snapshot } from '@/lib/scoringV2Monitoring';
 
 export type MonitoringTone = 'good' | 'warn' | 'bad' | 'muted' | 'info';
 
@@ -38,6 +39,12 @@ export function monitoringDecisionLabel(entry: MonitoringEntry, fallbackDecision
 }
 
 export function loadedMonitoringCounts(entries: MonitoringEntry[]): MonitoringOverview['counts'] {
+  const policyRule = (entry: MonitoringEntry): string | null => {
+    const snapshot = getScoringV2Snapshot(entry);
+    const rule = snapshot?.policy_rule;
+    if (snapshot?.policy_rule_applied) return snapshot.policy_rule_applied;
+    return rule?.kind ?? null;
+  };
   return {
     needs_attention: entries.filter((entry) => entry.monitoring_state?.needs_attention ?? ['bad', 'warn'].includes(monitoringStage(entry).tone)).length,
     failed_stuck: entries.filter((entry) => entry.monitoring_state?.code === 'failed_stuck' || !!(entry.translation_error || entry.delivery_error || entry.x_error) || entry.dedupe_status === 'failed').length,
@@ -55,6 +62,9 @@ export function loadedMonitoringCounts(entries: MonitoringEntry[]): MonitoringOv
     delivered_24h: entries.filter((entry) => entry.x_status === 'posted' || entry.is_delivered).length,
     telegram_pending: entries.filter((entry) => entry.monitoring_state?.code === 'telegram_pending').length,
     below_threshold: entries.filter((entry) => entry.monitoring_state?.code === 'below_threshold' || entry.decision_reason?.startsWith('below_threshold:')).length,
+    v2_regional_auto: entries.filter((entry) => policyRule(entry) === 'regional_escalation_auto').length,
+    global_pilot_review: entries.filter((entry) => policyRule(entry) === 'global_mega_event_review' || (entry.global_exception_class === 'global_mega_event' && entry.score_review_status === 'needs_review')).length,
+    manual_scoring_feedback: entries.filter((entry) => entry.feedback_locked === true && (entry.score_review_status === 'approved' || entry.score_review_status === 'rejected' || entry.decision_reason?.startsWith('manual_score_') || entry.decision_reason?.startsWith('score_feedback_'))).length,
     stale_jobs: 0,
     stale_x_pending_24h: 0,
   };

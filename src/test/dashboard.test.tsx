@@ -116,6 +116,7 @@ const dashboardData = {
     pending: 4,
     running: 1,
     failed24h: 1,
+    resolvedFailed24h: 0,
     staleRunning: 0,
     oldestPendingAgeSeconds: 600,
     byType: [{
@@ -186,6 +187,7 @@ const dashboardData = {
       running: 1,
       staleRunning: 0,
       failed24h: 1,
+      resolvedFailed24h: 0,
       oldestPendingAgeSeconds: 600,
       schedulerWaitSeconds: 600,
       byType: [{
@@ -222,6 +224,15 @@ const dashboardData = {
       workerCadenceWarning: false,
       duplicateTranslateJobs24h: 2,
     },
+  },
+  scoringTuning: {
+    regionalAuto24h: 3,
+    globalPilotReview24h: 1,
+    globalTunedAuto24h: 2,
+    manualScoreOverrides24h: 4,
+    manualFeedback24h: 6,
+    projectedAddedPostsMonth: 310,
+    error: null,
   },
 };
 
@@ -266,6 +277,9 @@ describe("Dashboard", () => {
     expect(screen.getByText("Failed posts 24h")).toBeTruthy();
     expect(screen.getByText("Failed attempts")).toBeTruthy();
     expect(screen.getByText(/Duplicate translate jobs: 2 in 24h/)).toBeTruthy();
+    expect(screen.getByText("Regional auto 24h")).toBeTruthy();
+    expect(screen.getByText("Projected added/month")).toBeTruthy();
+    expect(screen.getByText("310")).toBeTruthy();
 
     expect(screen.getByText(/Official X usage is not synced from Dashboard/)).toBeTruthy();
   });

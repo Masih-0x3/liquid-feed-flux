@@ -55,6 +55,7 @@ export interface ScoringPolicyProfile {
   prompt_notes: string;
   thresholds: Record<AudienceClass, { threshold: number; cap: number }>;
   global_exceptions: Array<{ id: string; label: string; description: string; cap: number; threshold: number; examples: string[] }>;
+  review_only_exception_ids: string[];
   axis_weights: Record<ScoringV2AxisKey, number>;
   author_overrides: Record<string, 'always_deliver' | 'always_skip' | 'always_review'>;
 }
@@ -96,16 +97,18 @@ export const DEFAULT_SCORING_POLICY: ScoringPolicy = {
     prompt_notes: 'Do not down-score an item merely because the speaker or dateline is American or Western. Score the subject matter and audience value. Related world events pass only when they are major enough that an Iran-focused audience would reasonably expect coverage.',
     thresholds: {
       direct_focus: { threshold: 12, cap: 20 },
-      adjacent: { threshold: 13, cap: 16 },
+      adjacent: { threshold: 12.5, cap: 16 },
       global_exception: { threshold: 15, cap: 16 },
       off_topic: { threshold: 99, cap: 8 },
     },
     global_exceptions: [
       { id: 'world_shock', label: 'World shock', description: 'Coup, war outbreak, assassination, regime change, major terror attack, or systemic event with global attention.', cap: 18, threshold: 15, examples: ['coup d etat', 'prime minister assassination', 'new war', 'major terror attack'] },
-      { id: 'oil_energy', label: 'Oil / energy shock', description: 'Major oil, gas, shipping, OPEC, or energy-security event that may affect Iran, the region, or global markets.', cap: 16, threshold: 15, examples: ['oil price shock', 'OPEC surprise cut', 'prime minister comments on oil supply'] },
+      { id: 'oil_energy', label: 'Oil / energy shock', description: 'Major oil, gas, shipping, OPEC, or energy-security event that may affect Iran, the region, or global markets.', cap: 16, threshold: 14, examples: ['oil price shock', 'OPEC surprise cut', 'prime minister comments on oil supply'] },
       { id: 'bitcoin_milestone', label: 'Bitcoin milestone', description: 'Major Bitcoin price or policy milestone large enough to become a broad political/economic story.', cap: 16, threshold: 15, examples: ['Bitcoin breaks a major all-time high', 'country adopts Bitcoin reserve'] },
-      { id: 'major_leader_statement', label: 'Major leader statement', description: 'A prime minister, president, monarch, foreign minister, or central-bank head makes a material comment on war, oil, sanctions, or regional security.', cap: 16, threshold: 15, examples: ['prime minister comments on oil', 'president announces sanctions strategy'] },
+      { id: 'major_leader_statement', label: 'Major leader statement', description: 'A prime minister, president, monarch, foreign minister, or central-bank head makes a material comment on war, oil, sanctions, or regional security.', cap: 16, threshold: 14, examples: ['prime minister comments on oil', 'president announces sanctions strategy'] },
+      { id: 'global_mega_event', label: 'Global mega-event', description: 'A globally dominant, exceptional non-Iran story that is important enough for an Iran-first audience to review even without an Iran nexus.', cap: 18, threshold: 18, examples: ['major AI company IPO with global market impact', 'major migration crisis with worldwide political consequences', 'major technology or market shock dominating global attention'] },
     ],
+    review_only_exception_ids: ['global_mega_event'],
     axis_weights: {
       focus_relevance: 1.8,
       geopolitical_weight: 1.35,

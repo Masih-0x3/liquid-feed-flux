@@ -292,20 +292,31 @@ supabase: any, dryRun: boolean, daysOld = 1) {
 
   if (queryError) throw new Error(`Failed to query old media: ${queryError.message}`);
 
-  if (!oldMediaArr || oldMediaArr.length === 0) {
+  const { data: expiredRenders, error: renderQueryError } = await supabase.rpc('get_expired_video_render_paths', { limit_count: 200 });
+  if (renderQueryError) throw new Error(`Failed to query expired video renders: ${renderQueryError.message}`);
+  const expiredRenderArr: any[] = (expiredRenders as any[]) ?? [];
+
+  if ((!oldMediaArr || oldMediaArr.length === 0) && expiredRenderArr.length === 0) {
     return new Response(JSON.stringify({ success: true, message: 'No old media to cleanup', deleted: 0 }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 
   if (dryRun) {
-    return new Response(JSON.stringify({ success: true, dry_run: true, would_delete: oldMediaArr.length }), {
+    return new Response(JSON.stringify({
+      success: true,
+      dry_run: true,
+      would_delete: oldMediaArr.length + expiredRenderArr.length,
+      would_delete_original_media: oldMediaArr.length,
+      would_delete_processed_video_renders: expiredRenderArr.length,
+    }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 
   const BATCH_SIZE = 100;
   let deletedCount = 0;
+  let deletedProcessedCount = 0;
   let failedCount = 0;
 
   for (let i = 0; i < oldMediaArr.length; i += BATCH_SIZE) {
@@ -323,9 +334,40 @@ supabase: any, dryRun: boolean, daysOld = 1) {
     }).in('id', ids);
   }
 
-  console.log(JSON.stringify({ function: 'media-processor', action: 'cleanup_complete', deleted: deletedCount, failed: failedCount }));
+  for (let i = 0; i < expiredRenderArr.length; i += BATCH_SIZE) {
+    const batch = expiredRenderArr.slice(i, i + BATCH_SIZE);
+    const paths = batch.map((m: Record<string, unknown>) => m.output_storage_path as string).filter(Boolean);
+    const ids = batch.map((m: Record<string, unknown>) => m.id as string).filter(Boolean);
 
-  return new Response(JSON.stringify({ success: true, deleted: deletedCount, failed: failedCount, total: oldMediaArr.length }), {
+    if (paths.length > 0) {
+      const { error: storageError } = await supabase.storage.from('temp-media').remove(paths);
+      if (storageError) {
+        failedCount += paths.length;
+        continue;
+      }
+      deletedProcessedCount += paths.length;
+    }
+    if (ids.length > 0) {
+      await supabase.rpc('mark_video_renders_expired', { render_ids: ids });
+    }
+  }
+
+  console.log(JSON.stringify({
+    function: 'media-processor',
+    action: 'cleanup_complete',
+    deleted: deletedCount,
+    deleted_processed: deletedProcessedCount,
+    failed: failedCount,
+  }));
+
+  return new Response(JSON.stringify({
+    success: true,
+    deleted: deletedCount + deletedProcessedCount,
+    deleted_original_media: deletedCount,
+    deleted_processed_video_renders: deletedProcessedCount,
+    failed: failedCount,
+    total: oldMediaArr.length + expiredRenderArr.length,
+  }), {
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
 }

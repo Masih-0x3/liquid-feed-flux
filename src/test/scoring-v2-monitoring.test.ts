@@ -177,4 +177,51 @@ describe("scoring v2 monitoring helpers", () => {
       final_score: 14.2,
     });
   });
+
+  it("filters tuning rules for regional auto and global pilot review", () => {
+    const regionalAuto = entry({
+      delivery_decision: "deliver",
+      score_breakdown: {
+        scoring_v2: {
+          version: "audience-fit-v2",
+          mode: "active",
+          decision: "deliver",
+          audience_class: "adjacent",
+          final_score: 10.4,
+          threshold: 12.5,
+          review_status: "none",
+          policy_rule_applied: "regional_escalation_auto",
+          policy_rule: {
+            kind: "regional_escalation_auto",
+            original_decision: "skip",
+            original_threshold: 12.5,
+            original_review_status: "needs_review",
+            matched_terms: ["sirens", "saudi"],
+            reason: "Adjacent regional item promoted.",
+          },
+        },
+      },
+    });
+    const globalPilot = entry({
+      delivery_decision: "skip",
+      score_breakdown: {
+        scoring_v2: {
+          version: "audience-fit-v2",
+          mode: "active",
+          decision: "skip",
+          audience_class: "global_exception",
+          global_exception_class: "global_mega_event",
+          final_score: 18,
+          threshold: 18,
+          review_status: "needs_review",
+          policy_rule_applied: "global_mega_event_review",
+        },
+      },
+    });
+
+    expect(matchesScoringV2Filter(regionalAuto, "v2_regional_auto")).toBe(true);
+    expect(matchesScoringV2Filter(regionalAuto, "global_pilot_review")).toBe(false);
+    expect(matchesScoringV2Filter(globalPilot, "global_pilot_review")).toBe(true);
+    expect(getScoringV2Snapshot(regionalAuto)?.policy_rule?.matched_terms).toEqual(["sirens", "saudi"]);
+  });
 });

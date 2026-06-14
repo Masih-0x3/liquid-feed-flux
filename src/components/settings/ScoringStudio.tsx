@@ -44,12 +44,37 @@ const AXIS_LABELS: Record<ScoringV2AxisKey, string> = {
 
 const EXAMPLE_TEXT = 'Bitcoin breaks a major all-time high while oil markets react to new Middle East shipping risk.';
 
+function normalizeStudioProfile(profile: ScoringPolicyProfile, index: number): ScoringPolicyProfile {
+  const fallback = DEFAULT_SCORING_POLICY.profiles.find((item) => item.id === profile.id) ?? DEFAULT_SCORING_POLICY.profiles[index] ?? DEFAULT_SCORING_POLICY.profiles[0];
+  const raw = profile as Partial<ScoringPolicyProfile>;
+  return {
+    ...fallback,
+    ...raw,
+    id: raw.id ?? fallback.id,
+    name: raw.name ?? fallback.name,
+    audience_description: raw.audience_description ?? fallback.audience_description,
+    focus_entities: Array.isArray(raw.focus_entities) ? raw.focus_entities : fallback.focus_entities,
+    aliases: Array.isArray(raw.aliases) ? raw.aliases : fallback.aliases,
+    geographies: Array.isArray(raw.geographies) ? raw.geographies : fallback.geographies,
+    blocked_categories: Array.isArray(raw.blocked_categories) ? raw.blocked_categories : fallback.blocked_categories,
+    prompt_notes: raw.prompt_notes ?? fallback.prompt_notes,
+    thresholds: { ...fallback.thresholds, ...(raw.thresholds ?? {}) },
+    global_exceptions: Array.isArray(raw.global_exceptions) ? raw.global_exceptions : fallback.global_exceptions,
+    review_only_exception_ids: Array.isArray(raw.review_only_exception_ids) ? raw.review_only_exception_ids : fallback.review_only_exception_ids,
+    axis_weights: { ...fallback.axis_weights, ...(raw.axis_weights ?? {}) },
+    author_overrides: { ...fallback.author_overrides, ...(raw.author_overrides ?? {}) },
+  };
+}
+
 function normalizeInitial(initial?: ScoringPolicy): ScoringPolicy {
   if (!initial) return DEFAULT_SCORING_POLICY;
+  const profiles = Array.isArray(initial.profiles) && initial.profiles.length > 0
+    ? initial.profiles.map((profile, index) => normalizeStudioProfile(profile, index))
+    : DEFAULT_SCORING_POLICY.profiles;
   return {
     ...DEFAULT_SCORING_POLICY,
     ...initial,
-    profiles: Array.isArray(initial.profiles) && initial.profiles.length > 0 ? initial.profiles : DEFAULT_SCORING_POLICY.profiles,
+    profiles,
     adjudication: { ...DEFAULT_SCORING_POLICY.adjudication, ...initial.adjudication },
     learning: { ...DEFAULT_SCORING_POLICY.learning, ...initial.learning },
   };
@@ -84,6 +109,10 @@ export default function ScoringStudio({ initial }: Props) {
   const activeProfile = useMemo(() => {
     return policy.profiles.find((profile) => profile.id === policy.active_profile_id) ?? policy.profiles[0] ?? DEFAULT_SCORING_POLICY.profiles[0];
   }, [policy.profiles, policy.active_profile_id]);
+  const oilEnergyRule = activeProfile.global_exceptions.find((rule) => rule.id === 'oil_energy');
+  const leaderRule = activeProfile.global_exceptions.find((rule) => rule.id === 'major_leader_statement');
+  const globalMegaRule = activeProfile.global_exceptions.find((rule) => rule.id === 'global_mega_event');
+  const globalMegaReviewOnly = Boolean(globalMegaRule && activeProfile.review_only_exception_ids.includes('global_mega_event'));
 
   const updatePolicy = (patch: Partial<ScoringPolicy>) => setPolicy((current) => ({ ...current, ...patch }));
 
@@ -244,6 +273,34 @@ export default function ScoringStudio({ initial }: Props) {
                     <SelectItem value="active">Active: v2 controls deliver/skip</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+            </div>
+
+            <div className="rounded-md border border-primary/25 bg-primary/5 p-3">
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold">Active tuning state</h3>
+                  <p className="text-xs text-muted-foreground">Production V2 editorial tuning currently applied by this profile.</p>
+                </div>
+                <Badge variant="outline">{policy.mode === 'active' ? 'active' : 'shadow'}</Badge>
+              </div>
+              <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+                <div className="rounded border bg-background/50 px-2 py-1.5">
+                  <p className="font-medium">Regional escalation auto</p>
+                  <p className="text-muted-foreground">Adjacent skips from 10.0 to 12.49 with urgent regional/security/oil terms deliver.</p>
+                </div>
+                <div className="rounded border bg-background/50 px-2 py-1.5">
+                  <p className="font-medium">Oil / energy shock &gt;={oilEnergyRule?.threshold ?? 14}</p>
+                  <p className="text-muted-foreground">Lowered global exception threshold for oil, shipping, OPEC, and energy-security events.</p>
+                </div>
+                <div className="rounded border bg-background/50 px-2 py-1.5">
+                  <p className="font-medium">Major leader statement &gt;={leaderRule?.threshold ?? 14}</p>
+                  <p className="text-muted-foreground">Lowered threshold for material war, oil, sanctions, and regional-security statements.</p>
+                </div>
+                <div className="rounded border bg-background/50 px-2 py-1.5">
+                  <p className="font-medium">Global mega-event {globalMegaReviewOnly ? 'review pilot' : 'not review-only'}</p>
+                  <p className="text-muted-foreground">&gt;={globalMegaRule?.threshold ?? 18} / cap {globalMegaRule?.cap ?? 18}; review-only items do not auto-deliver.</p>
+                </div>
               </div>
             </div>
 

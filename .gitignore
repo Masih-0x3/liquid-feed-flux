@@ -29,3 +29,24 @@ dist-ssr
 
 # Supabase CLI local temp (do not commit)
 supabase/.temp/
+
+# Local analysis and generated media artifacts
+.codegraph/
+reports/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+services/video-renderer/golden/output/
+services/video-renderer/golden/outputs/
+services/video-renderer/golden/sources/
+services/video-renderer/golden/*.json
+services/video-renderer/golden/*.md
+services/video-renderer/tmp/
+services/video-renderer/previews/
+services/video-renderer/**/*.mp4
+services/video-renderer/**/*.mov
+services/video-renderer/**/*.webm
+services/video-renderer/**/*.srt
+services/video-renderer/**/*.ass
+services/video-renderer/**/*contact-sheet*.jpg
+services/video-renderer/**/*contact-sheet*.png

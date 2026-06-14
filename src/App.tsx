@@ -34,6 +34,7 @@ function lazyWithRetry<T extends React.ComponentType<unknown>>(
 // Lazy-loaded pages (Issue 39: route-level code splitting)
 const Dashboard = lazyWithRetry(() => import("./pages/Dashboard"));
 const Monitoring = lazyWithRetry(() => import("./pages/Monitoring"));
+const VideoRenders = lazyWithRetry(() => import("./pages/VideoRenders"));
 const Threads = lazyWithRetry(() => import("./pages/Threads"));
 const Settings = lazyWithRetry(() => import("./pages/Settings"));
 const XAccountDisabled = lazyWithRetry(() => import("./pages/XAccountDisabled"));
@@ -91,6 +92,7 @@ const App = () => (
               <Route path="/auth" element={<AuthPage />} />
               <Route path="/" element={<AppLayout><Dashboard /></AppLayout>} />
               <Route path="/monitoring" element={<AppLayout><Monitoring /></AppLayout>} />
+              <Route path="/video-renders" element={<AppLayout><VideoRenders /></AppLayout>} />
               <Route path="/threads" element={<AppLayout><Threads /></AppLayout>} />
               <Route path="/x-account" element={<AppLayout><XAccountDisabled /></AppLayout>} />
               <Route path="/downloader" element={<AppLayout><Downloader /></AppLayout>} />

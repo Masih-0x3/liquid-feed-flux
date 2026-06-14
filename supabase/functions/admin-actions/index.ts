@@ -20,6 +20,7 @@ import {
   normalizeScoringPolicy,
   runScoringPolicy,
   type AudienceClass,
+  type ScoringPolicyCalibrationExample,
   type ScoringPolicy,
   type ScoringPolicyResult,
 } from "../_shared/scoringPolicy.ts";
@@ -39,6 +40,11 @@ import {
   selectMediaTier,
   type XMediaRow,
 } from "../_shared/mediaSelection.ts";
+import { selectSourceVideo } from "../_shared/videoRenderGate.ts";
+import {
+  normalizeVideoRenderConfigValue,
+  serializeVideoRenderConfig,
+} from "../_shared/videoRenderConfig.ts";
 import { isMyXEnabled, MY_X_DISABLED_RESPONSE } from "../_shared/myXControls.ts";
 
 const DEPLOY_SHA = Deno.env.get('DEPLOY_GIT_SHA') ?? 'unknown';
@@ -910,15 +916,40 @@ async function queueManualAdvance(supabase: any, tweetId: string): Promise<{ que
   return { queued: 'deliver' };
 }
 
+const SCORING_FEEDBACK_REASON_TAGS = new Set([
+  'regional_escalation',
+  'oil_shipping',
+  'leader_statement',
+  'global_mega_event',
+  'direct_focus',
+  'adjacent_context',
+  'should_skip',
+  'wrong_class',
+  'duplicate',
+  'stale',
+  'source_trust',
+  'broad_global',
+  'other',
+]);
+
+function normalizeScoringFeedbackReasonTag(body: Record<string, unknown>): string {
+  const tag = typeof body.reason_tag === 'string'
+    ? body.reason_tag.trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_').slice(0, 80)
+    : '';
+  return SCORING_FEEDBACK_REASON_TAGS.has(tag) ? tag : '';
+}
+
 // deno-lint-ignore no-explicit-any
 async function setManualScore(supabase: any, body: Record<string, unknown>) {
   const tweetId = typeof body.tweet_id === 'string' ? body.tweet_id.trim() : '';
   const score = Number(body.score);
   const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 500) : '';
+  const reasonTag = normalizeScoringFeedbackReasonTag(body);
   const overrideDuplicate = body.override_duplicate === true;
   const expectedAudienceClass = isAudienceClass(body.expected_audience_class) ? body.expected_audience_class : null;
   if (!tweetId) return { ok: false, error: 'tweet_id is required' };
   if (!Number.isInteger(score) || score < 1 || score > 20) return { ok: false, error: 'score must be a whole number between 1 and 20' };
+  if (!reasonTag) return { ok: false, error: 'reason_tag is required for manual score feedback' };
 
   const threshold = await loadActiveThreshold(supabase);
   const { data: post } = await supabase
@@ -990,6 +1021,7 @@ async function setManualScore(supabase: any, body: Record<string, unknown>) {
     old_score: oldScore,
     manual_score: score,
     threshold,
+    reason_tag: reasonTag,
     reason,
     override_duplicate: overrideDuplicate,
     decision,
@@ -1001,7 +1033,7 @@ async function setManualScore(supabase: any, body: Record<string, unknown>) {
       expected_class: expectedAudienceClass,
       expected_decision: passes ? 'deliver' : 'skip',
       expected_score: score,
-      note: reason || 'Manual score label',
+      note: [reasonTag, reason].filter(Boolean).join(': ') || 'Manual score label',
       source: 'manual_score',
     }).catch(() => null);
   }
@@ -1010,6 +1042,8 @@ async function setManualScore(supabase: any, body: Record<string, unknown>) {
     manual_score: score,
     threshold,
     decision,
+    reason_tag: reasonTag,
+    reason,
   });
 
   let translation: { ok: boolean; error?: string } | null = null;
@@ -1039,6 +1073,8 @@ async function setManualScore(supabase: any, body: Record<string, unknown>) {
 async function recordScoreFeedback(supabase: any, body: Record<string, unknown>) {
   const tweetId = typeof body.tweet_id === 'string' ? body.tweet_id.trim() : '';
   const feedback = typeof body.feedback === 'string' ? body.feedback : '';
+  const reasonTag = normalizeScoringFeedbackReasonTag(body);
+  const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 500) : '';
   const map: Record<string, { action: string; polarity: number }> = {
     too_low: { action: 'score_too_low', polarity: 2 },
     too_high: { action: 'score_too_high', polarity: -2 },
@@ -1053,7 +1089,8 @@ async function recordScoreFeedback(supabase: any, body: Record<string, unknown>)
   if (!tweetId) return { ok: false, error: 'tweet_id is required' };
   const item = map[feedback];
   if (!item) return { ok: false, error: 'feedback must be a supported score feedback action' };
-  await recordFeedback(supabase, tweetId, item.action, item.polarity, { feedback });
+  if (!reasonTag) return { ok: false, error: 'reason_tag is required for score feedback' };
+  await recordFeedback(supabase, tweetId, item.action, item.polarity, { feedback, reason_tag: reasonTag, reason });
   const reviewPatch: Record<string, unknown> = { feedback_locked: true };
   if (['correct_skip', 'should_skip', 'not_global_exception'].includes(feedback)) {
     reviewPatch.score_review_status = 'rejected';
@@ -1072,12 +1109,12 @@ async function recordScoreFeedback(supabase: any, body: Record<string, unknown>)
       tweet_id: tweetId,
       expected_class: inferredClass,
       expected_decision: expectedDecision,
-      note: feedback,
+      note: [reasonTag, reason || feedback].filter(Boolean).join(': '),
       source: 'score_feedback',
     }).catch(() => null);
   }
-  await insertAdminPipelineEvent(supabase, tweetId, 'score_feedback', 'completed', { feedback, polarity: item.polarity });
-  return { ok: true, tweet_id: tweetId, feedback, polarity: item.polarity };
+  await insertAdminPipelineEvent(supabase, tweetId, 'score_feedback', 'completed', { feedback, polarity: item.polarity, reason_tag: reasonTag, reason });
+  return { ok: true, tweet_id: tweetId, feedback, polarity: item.polarity, reason_tag: reasonTag };
 }
 
 type IgnoreMonitoringItemResult = {
@@ -1299,6 +1336,9 @@ type MonitoringFilter =
   | 'v1_skip_v2_post'
   | 'v2_off_topic'
   | 'v2_needs_review'
+  | 'v2_regional_auto'
+  | 'global_pilot_review'
+  | 'manual_scoring_feedback'
   | 'duplicates'
   | 'coverage_gap'
   | 'possible_duplicate'
@@ -1423,7 +1463,8 @@ function normalizeMonitoringFilter(v: unknown): MonitoringFilter {
     'all', 'needs_attention', 'failed_stuck', 'needs_score', 'translation_queue',
     'below_threshold', 'manual_review', 'duplicates', 'coverage_gap',
     'v2_would_post', 'v2_would_skip', 'v1_post_v2_skip', 'v1_skip_v2_post',
-    'v2_off_topic', 'v2_needs_review',
+    'v2_off_topic', 'v2_needs_review', 'v2_regional_auto', 'global_pilot_review',
+    'manual_scoring_feedback',
     'possible_duplicate', 'duplicate_anomalies', 'ready_to_deliver',
     'telegram_pending', 'x_pending', 'x_failed', 'delivered_24h', 'hydration',
   ];
@@ -1566,10 +1607,24 @@ function monitoringScoringV2Decision(post: Record<string, unknown>): string | nu
   return decision === 'deliver' || decision === 'skip' ? decision : null;
 }
 
+function monitoringPolicyRuleKind(snapshot: Record<string, unknown>): string | null {
+  if (typeof snapshot.policy_rule_applied === 'string') return snapshot.policy_rule_applied;
+  const rule = snapshot.policy_rule && typeof snapshot.policy_rule === 'object' ? snapshot.policy_rule as Record<string, unknown> : null;
+  return typeof rule?.kind === 'string' ? rule.kind : null;
+}
+
+function isManualScoringFeedbackEntry(entry: Record<string, unknown>): boolean {
+  const reason = typeof entry.decision_reason === 'string' ? entry.decision_reason : '';
+  return reason.startsWith('manual_score_')
+    || reason.startsWith('score_feedback_')
+    || (entry.feedback_locked === true && (entry.score_review_status === 'approved' || entry.score_review_status === 'rejected'));
+}
+
 function matchesMonitoringScoringV2Filter(entry: Record<string, unknown>, filter: MonitoringFilter): boolean {
   const snapshot = monitoringScoringV2Snapshot(entry);
   if (!snapshot) return false;
   const decision = monitoringScoringV2Decision(entry);
+  const policyRule = monitoringPolicyRuleKind(snapshot);
   switch (filter) {
     case 'v2_would_post':
       return decision === 'deliver';
@@ -1583,6 +1638,10 @@ function matchesMonitoringScoringV2Filter(entry: Record<string, unknown>, filter
       return snapshot.audience_class === 'off_topic';
     case 'v2_needs_review':
       return snapshot.review_status === 'needs_review';
+    case 'v2_regional_auto':
+      return policyRule === 'regional_escalation_auto';
+    case 'global_pilot_review':
+      return policyRule === 'global_mega_event_review' || (snapshot.global_exception_class === 'global_mega_event' && snapshot.review_status === 'needs_review');
     default:
       return false;
   }
@@ -2314,7 +2373,11 @@ function matchesMonitoringFilter(entry: Record<string, unknown>, filter: Monitor
     case 'v1_skip_v2_post':
     case 'v2_off_topic':
     case 'v2_needs_review':
+    case 'v2_regional_auto':
+    case 'global_pilot_review':
       return matchesMonitoringScoringV2Filter(entry, filter);
+    case 'manual_scoring_feedback':
+      return isManualScoringFeedbackEntry(entry);
     case 'duplicates':
       return !!entry.dup_of_tweet_id;
     case 'coverage_gap':
@@ -2400,7 +2463,12 @@ async function getMonitoringEntries(supabase: any, body: Record<string, unknown>
         case 'v1_skip_v2_post':
         case 'v2_off_topic':
         case 'v2_needs_review':
+        case 'v2_regional_auto':
+        case 'global_pilot_review':
           q = q.not('scoring_version', 'is', null);
+          break;
+        case 'manual_scoring_feedback':
+          q = q.eq('feedback_locked', true);
           break;
         case 'ready_to_deliver':
           q = q.eq('delivery_decision', 'deliver').not('text_translated', 'is', null).or('is_truncated.eq.false,hydrated_at.not.is.null');
@@ -3115,6 +3183,61 @@ async function getSystemPerformanceSummary(supabase: any) {
 }
 
 // deno-lint-ignore no-explicit-any
+async function loadScoringTuningSummary(supabase: any) {
+  const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const [scoreEventsRes, feedbackRes] = await Promise.all([
+    supabase
+      .from('pipeline_events')
+      .select('meta, created_at, started_at, ended_at')
+      .eq('step', 'score')
+      .eq('status', 'completed')
+      .gte('created_at', since24h)
+      .limit(5000),
+    supabase
+      .from('feedback_events')
+      .select('action, created_at')
+      .gte('created_at', since24h)
+      .in('action', ['manual_score', 'should_pass_audience', 'should_skip_audience', 'wrong_relevance_class', 'global_exception_worth_covering', 'not_global_exception'])
+      .limit(5000),
+  ]);
+  if (scoreEventsRes.error) throw scoreEventsRes.error;
+  if (feedbackRes.error) throw feedbackRes.error;
+
+  let regionalAuto24h = 0;
+  let globalPilotReview24h = 0;
+  let globalTunedAuto24h = 0;
+  for (const event of scoreEventsRes.data ?? []) {
+    const meta = event.meta && typeof event.meta === 'object' ? event.meta as Record<string, unknown> : {};
+    const rule = monitoringPolicyRuleKind(meta);
+    if (rule === 'regional_escalation_auto') regionalAuto24h += 1;
+    if (rule === 'global_mega_event_review' || (meta.global_exception_class === 'global_mega_event' && meta.review_status === 'needs_review')) globalPilotReview24h += 1;
+    const score = typeof meta.final_score === 'number' ? meta.final_score : Number(meta.final_score);
+    const threshold = typeof meta.threshold === 'number' ? meta.threshold : Number(meta.threshold);
+    if (
+      meta.audience_class === 'global_exception'
+      && meta.decision === 'deliver'
+      && threshold === 14
+      && score >= 14
+      && score < 15
+      && (meta.global_exception_class === 'oil_energy' || meta.global_exception_class === 'major_leader_statement')
+    ) {
+      globalTunedAuto24h += 1;
+    }
+  }
+
+  const manualScoreOverrides24h = (feedbackRes.data ?? []).filter((row: Record<string, unknown>) => row.action === 'manual_score').length;
+  const manualFeedback24h = (feedbackRes.data ?? []).length;
+  return {
+    regional_auto_24h: regionalAuto24h,
+    global_pilot_review_24h: globalPilotReview24h,
+    global_tuned_auto_24h: globalTunedAuto24h,
+    manual_score_overrides_24h: manualScoreOverrides24h,
+    manual_feedback_24h: manualFeedback24h,
+    projected_added_posts_month: Math.round((regionalAuto24h + globalTunedAuto24h) * 30),
+  };
+}
+
+// deno-lint-ignore no-explicit-any
 async function getEnhancedDashboardSummary(supabase: any) {
   const { data: base, error } = await supabase.rpc('get_dashboard_summary');
   if (error) throw error;
@@ -3127,7 +3250,7 @@ async function getEnhancedDashboardSummary(supabase: any) {
   const staleCutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
 
   const dedupeAvailable = await hasDedupePostColumns(supabase);
-  const [posts, deliveriesRes, xDeliveriesRes, queueBreakdown, xLocalUsage, activity, systemPerformance] = await Promise.all([
+  const [posts, deliveriesRes, xDeliveriesRes, queueBreakdown, xLocalUsage, activity, systemPerformance, scoringTuning] = await Promise.all([
     loadDashboardPosts(supabase, since, dedupeAvailable),
     supabase.from('deliveries').select('subject_id, status, posted_at, created_at').eq('subject_type', 'post').gte('created_at', since).limit(10000),
     supabase.from('x_deliveries').select('post_id, status, posted_at, created_at').gte('created_at', since).order('created_at', { ascending: false }).limit(10000),
@@ -3137,6 +3260,15 @@ async function getEnhancedDashboardSummary(supabase: any) {
     getSystemPerformanceSummary(supabase).catch((error) => ({
       success: false,
       error: error instanceof Error ? error.message : String(error),
+    })),
+    loadScoringTuningSummary(supabase).catch((error) => ({
+      error: error instanceof Error ? error.message : String(error),
+      regional_auto_24h: 0,
+      global_pilot_review_24h: 0,
+      global_tuned_auto_24h: 0,
+      manual_score_overrides_24h: 0,
+      manual_feedback_24h: 0,
+      projected_added_posts_month: 0,
     })),
   ]);
   if (deliveriesRes.error) throw deliveriesRes.error;
@@ -3234,6 +3366,7 @@ async function getEnhancedDashboardSummary(supabase: any) {
     queue_breakdown: queueBreakdown,
     x_local_usage: xLocalUsage,
     system_performance: systemPerformance,
+    scoring_tuning: scoringTuning,
     activity,
   };
 }
@@ -3253,7 +3386,7 @@ async function getMonitoringOverview(supabase: any, body: Record<string, unknown
   ] = await Promise.all([
     supabase
       .from('posts')
-      .select('tweet_id, text_original, text_translated, translated_at, has_media, delivery_decision, final_score, importance_score, decision_reason, dup_of_tweet_id, is_truncated, hydrated_at, enrich_status, dedupe_status, dedupe_reason')
+      .select('tweet_id, text_original, text_translated, translated_at, has_media, delivery_decision, final_score, importance_score, decision_reason, dup_of_tweet_id, is_truncated, hydrated_at, enrich_status, dedupe_status, dedupe_reason, scoring_version, audience_class, global_exception_class, score_review_status, score_breakdown, feedback_locked')
       .order('created_at', { ascending: false })
       .limit(10000),
     supabase
@@ -3311,6 +3444,9 @@ async function getMonitoringOverview(supabase: any, body: Record<string, unknown
     delivered_24h: 0,
     telegram_pending: 0,
     below_threshold: 0,
+    v2_regional_auto: 0,
+    global_pilot_review: 0,
+    manual_scoring_feedback: 0,
     stale_jobs: staleJobs.count ?? 0,
     stale_x_pending_24h: staleXPending.count ?? 0,
   };
@@ -3346,6 +3482,9 @@ async function getMonitoringOverview(supabase: any, body: Record<string, unknown
     if (state.x_state === 'failed') counts.x_failed += 1;
     if (state.code === 'telegram_pending') counts.telegram_pending += 1;
     if (state.code === 'below_threshold') counts.below_threshold += 1;
+    if (matchesMonitoringScoringV2Filter(post, 'v2_regional_auto')) counts.v2_regional_auto += 1;
+    if (matchesMonitoringScoringV2Filter(post, 'global_pilot_review')) counts.global_pilot_review += 1;
+    if (isManualScoringFeedbackEntry(post)) counts.manual_scoring_feedback += 1;
   }
 
   for (const row of xDeliveriesRes.data ?? []) {
@@ -3473,6 +3612,320 @@ async function getXApiSummary(supabase: any, body: Record<string, unknown>) {
       official_usage: officialUsage,
     },
   };
+}
+
+const VIDEO_RENDER_FEEDBACK_LABELS = new Set([
+  'pass',
+  'needs_review',
+  'fail',
+  'language',
+  'transcription',
+  'translation',
+  'subtitle_timing',
+  'subtitle_style',
+  'subtitle_placement',
+  'watermark',
+  'delogo',
+  'wrong_decision',
+  'other',
+]);
+
+function sanitizeVideoRenderFeedbackLabel(value: unknown): string {
+  const label = typeof value === 'string' ? value.trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_').slice(0, 80) : '';
+  return VIDEO_RENDER_FEEDBACK_LABELS.has(label) ? label : 'other';
+}
+
+function latestTimestamp(...values: Array<unknown>): string {
+  const times = values
+    .filter((value): value is string => typeof value === 'string' && value.length > 0)
+    .map((value) => Date.parse(value))
+    .filter(Number.isFinite);
+  return times.length ? new Date(Math.max(...times)).toISOString() : new Date(0).toISOString();
+}
+
+function videoRenderActionLabel(row: Record<string, unknown>): string {
+  const preflight = row.preflight && typeof row.preflight === 'object' ? row.preflight as Record<string, unknown> : {};
+  if (row.status === 'blocked') return 'blocked';
+  if (row.output_storage_path) return 'rendered';
+  if (preflight.processingMode === 'original_unmodified' || preflight.processing_mode === 'original_unmodified') return 'original-selected';
+  return String(row.status ?? 'unknown');
+}
+
+async function signedTempMediaUrl(supabase: any, path: unknown): Promise<string | null> {
+  if (typeof path !== 'string' || !path.trim()) return null;
+  const { data, error } = await supabase.storage.from('temp-media').createSignedUrl(path, 3600);
+  if (error) return null;
+  return data?.signedUrl ?? null;
+}
+
+// deno-lint-ignore no-explicit-any
+async function loadVideoRenderConfigAdmin(supabase: any) {
+  const { data, error } = await supabase.from('settings').select('value').eq('key', 'video_render_config').maybeSingle();
+  if (error) throw error;
+  const config = normalizeVideoRenderConfigValue(data?.value);
+  return { ok: true, config: serializeVideoRenderConfig(config) };
+}
+
+// deno-lint-ignore no-explicit-any
+async function updateVideoRenderConfigAdmin(supabase: any, body: Record<string, unknown>) {
+  const patch = body.config && typeof body.config === 'object' ? body.config : body;
+  const { data: existing } = await supabase.from('settings').select('value').eq('key', 'video_render_config').maybeSingle();
+  const existingConfig = normalizeVideoRenderConfigValue(existing?.value);
+  const next = normalizeVideoRenderConfigValue({
+    ...serializeVideoRenderConfig(existingConfig),
+    ...(patch as Record<string, unknown>),
+  });
+  const serialized = serializeVideoRenderConfig(next);
+  const { error } = await supabase.from('settings').upsert({
+    key: 'video_render_config',
+    value: serialized,
+    description: 'Video subtitle, delogo, and @Masihh watermark renderer configuration',
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'key' });
+  if (error) throw error;
+  return { ok: true, config: serialized };
+}
+
+// deno-lint-ignore no-explicit-any
+async function getVideoRenderOverview(supabase: any) {
+  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const [cfg, rendersRes, heartbeatRes] = await Promise.all([
+    loadVideoRenderConfigAdmin(supabase),
+    supabase
+      .from('video_renders')
+      .select('status, metrics, queued_at, started_at, completed_at, failed_at, blocked_at, updated_at, output_file_size')
+      .gte('created_at', since)
+      .order('updated_at', { ascending: false })
+      .limit(5000),
+    supabase
+      .from('video_renderer_heartbeats')
+      .select('renderer_id, status, version, render_version, running, processed, failed, last_error, last_seen_at, metadata')
+      .order('last_seen_at', { ascending: false })
+      .limit(10),
+  ]);
+  if (rendersRes.error) throw rendersRes.error;
+  if (heartbeatRes.error) throw heartbeatRes.error;
+
+  const counts: Record<string, number> = { queued: 0, running: 0, completed: 0, failed: 0, blocked: 0, expired: 0 };
+  const totals = { render_ms: [] as number[], total_ms: [] as number[], output_bytes: 0 };
+  let oldestQueuedAt: string | null = null;
+  for (const row of rendersRes.data ?? []) {
+    const status = String(row.status ?? 'unknown');
+    counts[status] = (counts[status] ?? 0) + 1;
+    if (status === 'queued' && typeof row.queued_at === 'string') {
+      oldestQueuedAt = oldestQueuedAt && oldestQueuedAt < row.queued_at ? oldestQueuedAt : row.queued_at;
+    }
+    const metrics = row.metrics && typeof row.metrics === 'object' ? row.metrics as Record<string, unknown> : {};
+    const renderMs = Number(metrics.ffmpeg_encode_ms ?? metrics.render_ms);
+    const totalMs = Number(metrics.total_ms);
+    if (Number.isFinite(renderMs)) totals.render_ms.push(renderMs);
+    if (Number.isFinite(totalMs)) totals.total_ms.push(totalMs);
+    const bytes = Number(row.output_file_size ?? 0);
+    if (Number.isFinite(bytes) && bytes > 0) totals.output_bytes += bytes;
+  }
+  const median = (values: number[]) => {
+    if (!values.length) return null;
+    const sorted = [...values].sort((a, b) => a - b);
+    return sorted[Math.floor(sorted.length / 2)];
+  };
+
+  return {
+    ok: true,
+    config: cfg.config,
+    counts,
+    oldest_queued_at: oldestQueuedAt,
+    medians: {
+      render_ms: median(totals.render_ms),
+      total_ms: median(totals.total_ms),
+    },
+    output_bytes_7d: totals.output_bytes,
+    heartbeats: heartbeatRes.data ?? [],
+  };
+}
+
+function normalizeVideoRenderStatuses(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length === 0) return ['queued', 'running', 'failed', 'blocked', 'completed'];
+  const allowed = new Set(['queued', 'running', 'completed', 'failed', 'blocked', 'expired']);
+  return value.map((item) => String(item)).filter((item) => allowed.has(item)).slice(0, 6);
+}
+
+// deno-lint-ignore no-explicit-any
+async function getVideoRenderQueue(supabase: any, body: Record<string, unknown>) {
+  const limit = Math.min(Math.max(Number(body.limit) || 50, 1), 100);
+  const statuses = normalizeVideoRenderStatuses(body.statuses ?? body.status);
+  const { data: renders, error } = await supabase
+    .from('video_renders')
+    .select('id, tweet_id, source_media_id, status, failure_policy, render_version, output_storage_path, output_file_size, width, height, duration_ms, source_language, target_language, metrics, error, block_reason, attempts, queued_at, started_at, completed_at, failed_at, blocked_at, updated_at, created_at, preflight')
+    .in('status', statuses)
+    .order('updated_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+
+  const tweetIds = [...new Set((renders ?? []).map((row: Record<string, unknown>) => String(row.tweet_id)).filter(Boolean))];
+  const mediaIds = [...new Set((renders ?? []).map((row: Record<string, unknown>) => String(row.source_media_id)).filter(Boolean))];
+  const [postsRes, mediaRes, feedbackRes] = await Promise.all([
+    tweetIds.length
+      ? supabase.from('posts').select('tweet_id, text_original, url, author_handle, created_at, delivery_decision, final_score').in('tweet_id', tweetIds)
+      : Promise.resolve({ data: [], error: null }),
+    mediaIds.length
+      ? supabase.from('media').select('id, kind, storage_path, mime_type, src_url, file_size, duration_ms, width, height').in('id', mediaIds)
+      : Promise.resolve({ data: [], error: null }),
+    (renders?.length ?? 0) > 0
+      ? supabase.from('video_render_feedback').select('render_id, label, note, created_at').in('render_id', (renders ?? []).map((row: Record<string, unknown>) => row.id))
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (postsRes.error) throw postsRes.error;
+  if (mediaRes.error) throw mediaRes.error;
+  if (feedbackRes.error) throw feedbackRes.error;
+  const posts = new Map((postsRes.data ?? []).map((row: Record<string, unknown>) => [row.tweet_id, row]));
+  const media = new Map((mediaRes.data ?? []).map((row: Record<string, unknown>) => [row.id, row]));
+  const feedbackByRender = new Map<string, Record<string, unknown>>();
+  for (const item of feedbackRes.data ?? []) {
+    if (!feedbackByRender.has(String(item.render_id))) feedbackByRender.set(String(item.render_id), item);
+  }
+
+  return {
+    ok: true,
+    rows: (renders ?? []).map((row: Record<string, unknown>) => ({
+      ...row,
+      post: posts.get(row.tweet_id) ?? null,
+      media: media.get(row.source_media_id) ?? null,
+      latest_feedback: feedbackByRender.get(String(row.id)) ?? null,
+      action_label: videoRenderActionLabel(row),
+      activity_at: latestTimestamp(row.updated_at, row.completed_at, row.failed_at, row.blocked_at, row.started_at, row.queued_at),
+    })),
+  };
+}
+
+// deno-lint-ignore no-explicit-any
+async function getVideoRenderDetail(supabase: any, body: Record<string, unknown>) {
+  const renderId = typeof body.render_id === 'string' ? body.render_id.trim() : '';
+  const tweetId = typeof body.tweet_id === 'string' ? body.tweet_id.trim() : '';
+  let query = supabase
+    .from('video_renders')
+    .select('id, tweet_id, source_media_id, status, failure_policy, render_version, output_storage_path, output_mime_type, output_file_size, width, height, duration_ms, original_srt, persian_srt, translated_srt, ass_subtitles, source_language, target_language, preflight, metrics, error, block_reason, attempts, queued_at, started_at, completed_at, failed_at, blocked_at, posted_at, expires_at, created_at, updated_at')
+    .order('updated_at', { ascending: false })
+    .limit(1);
+  if (renderId) query = query.eq('id', renderId);
+  else if (tweetId) query = query.eq('tweet_id', tweetId);
+  else return { ok: false, error: 'render_id or tweet_id is required' };
+
+  const { data: renderRows, error } = await query;
+  if (error) throw error;
+  const render = renderRows?.[0] as Record<string, unknown> | undefined;
+  if (!render) return { ok: false, error: 'video render not found' };
+
+  const [postRes, mediaRes, feedbackRes] = await Promise.all([
+    supabase.from('posts').select('tweet_id, text_original, text_translated, url, author_handle, created_at, delivery_decision, final_score, x_tweet_id').eq('tweet_id', render.tweet_id).maybeSingle(),
+    supabase.from('media').select('id, kind, storage_path, mime_type, src_url, file_size, duration_ms, width, height').eq('id', render.source_media_id).maybeSingle(),
+    supabase.from('video_render_feedback').select('id, label, note, metadata, created_at, created_by').eq('render_id', render.id).order('created_at', { ascending: false }).limit(50),
+  ]);
+  if (postRes.error) throw postRes.error;
+  if (mediaRes.error) throw mediaRes.error;
+  if (feedbackRes.error) throw feedbackRes.error;
+
+  const sourceUrl = await signedTempMediaUrl(supabase, mediaRes.data?.storage_path);
+  const outputUrl = await signedTempMediaUrl(supabase, render.output_storage_path);
+  return {
+    ok: true,
+    render: {
+      ...render,
+      action_label: videoRenderActionLabel(render),
+      source_signed_url: sourceUrl,
+      output_signed_url: outputUrl,
+    },
+    post: postRes.data ?? null,
+    media: mediaRes.data ?? null,
+    feedback: feedbackRes.data ?? [],
+  };
+}
+
+// deno-lint-ignore no-explicit-any
+async function retryVideoRenderAdmin(supabase: any, body: Record<string, unknown>) {
+  const renderId = typeof body.render_id === 'string' ? body.render_id.trim() : '';
+  const tweetId = typeof body.tweet_id === 'string' ? body.tweet_id.trim() : '';
+  const cfg = normalizeVideoRenderConfigValue((await supabase.from('settings').select('value').eq('key', 'video_render_config').maybeSingle()).data?.value);
+  let render: Record<string, unknown> | null = null;
+
+  if (renderId) {
+    const { data, error } = await supabase.from('video_renders').select('id, tweet_id, source_media_id').eq('id', renderId).maybeSingle();
+    if (error) throw error;
+    render = data ?? null;
+  }
+
+  if (!render && tweetId) {
+    const { data: mediaRows, error: mediaError } = await supabase
+      .from('media')
+      .select('id, storage_path, downloaded_at, mime_type, file_size, kind, duration_ms, src_url')
+      .eq('tweet_id', tweetId)
+      .order('ordering', { ascending: true });
+    if (mediaError) throw mediaError;
+    const source = selectSourceVideo((mediaRows ?? []) as XMediaRow[]);
+    if (!source?.id) return { ok: false, error: 'No downloaded source video found for this post' };
+    const { data: id, error } = await supabase.rpc('enqueue_video_render', {
+      p_tweet_id: tweetId,
+      p_source_media_id: source.id,
+      p_render_version: cfg.renderVersion,
+      p_failure_policy: cfg.failurePolicy,
+    });
+    if (error) throw error;
+    render = { id, tweet_id: tweetId, source_media_id: source.id };
+  }
+
+  if (!render?.id || !render?.tweet_id || !render?.source_media_id) return { ok: false, error: 'render_id or tweet_id is required' };
+
+  const { error: updateError } = await supabase.from('video_renders').update({
+    status: 'queued',
+    failure_policy: cfg.failurePolicy,
+    render_version: cfg.renderVersion,
+    output_storage_path: null,
+    output_file_size: null,
+    error: null,
+    block_reason: null,
+    locked_at: null,
+    locked_by: null,
+    lease_expires_at: null,
+    queued_at: new Date().toISOString(),
+    started_at: null,
+    completed_at: null,
+    failed_at: null,
+    blocked_at: null,
+  }).eq('id', render.id);
+  if (updateError) throw updateError;
+
+  await insertAdminPipelineEvent(supabase, String(render.tweet_id), 'video_render', 'queued', {
+    source: 'admin_retry_video_render',
+    render_id: render.id,
+    mode: cfg.mode,
+  });
+
+  return { ok: true, render_id: render.id, tweet_id: render.tweet_id, mode: cfg.mode };
+}
+
+// deno-lint-ignore no-explicit-any
+async function saveVideoRenderFeedbackAdmin(supabase: any, body: Record<string, unknown>, userId?: string) {
+  const renderId = typeof body.render_id === 'string' ? body.render_id.trim() : '';
+  if (!renderId) return { ok: false, error: 'render_id is required' };
+  const label = sanitizeVideoRenderFeedbackLabel(body.label);
+  const note = typeof body.note === 'string' ? body.note.trim().slice(0, 1000) : null;
+  const metadata = body.metadata && typeof body.metadata === 'object' ? body.metadata as Record<string, unknown> : {};
+  const { data: render, error: renderError } = await supabase.from('video_renders').select('tweet_id').eq('id', renderId).maybeSingle();
+  if (renderError) throw renderError;
+  if (!render?.tweet_id) return { ok: false, error: 'video render not found' };
+  const { data, error } = await supabase.from('video_render_feedback').insert({
+    render_id: renderId,
+    tweet_id: render.tweet_id,
+    label,
+    note,
+    metadata,
+    created_by: userId ?? null,
+  }).select('id, label, note, created_at').single();
+  if (error) throw error;
+  await insertAdminPipelineEvent(supabase, String(render.tweet_id), 'video_render_feedback', 'completed', {
+    render_id: renderId,
+    label,
+  });
+  return { ok: true, feedback: data };
 }
 
 type XDiagnosticBlocker = {
@@ -3769,6 +4222,23 @@ async function loadScoringModelOptions(supabase: any) {
   };
 }
 
+// deno-lint-ignore no-explicit-any
+async function loadScoringCalibrationExamples(supabase: any, profileId: string): Promise<ScoringPolicyCalibrationExample[]> {
+  try {
+    const { data, error } = await supabase
+      .from('scoring_examples')
+      .select('text_original, author_handle, expected_audience_class, expected_decision, expected_score, expected_global_exception_class, note')
+      .eq('profile_id', profileId)
+      .order('created_at', { ascending: false })
+      .limit(8);
+    if (error) throw error;
+    return (data ?? []) as ScoringPolicyCalibrationExample[];
+  } catch (error) {
+    console.warn('admin-actions: failed to load scoring calibration examples:', error instanceof Error ? error.message : String(error));
+    return [];
+  }
+}
+
 function scoringPolicyPostUpdate(result: ScoringPolicyResult, active: boolean): Record<string, unknown> {
   const scoringV2Meta = buildScoringPolicyEventMeta(result, active ? 'active' : 'shadow');
   return {
@@ -3819,6 +4289,8 @@ async function scorePostV2(supabase: any, body: Record<string, unknown>) {
   if (!openaiApiKey) return { ok: false, error: 'OPENAI_API_KEY is not configured' };
   const model = await loadScoringModelOptions(supabase);
   const account = post.accounts as Record<string, unknown> | null;
+  const profileId = typeof body.profile_id === 'string' ? body.profile_id : null;
+  const calibrationExamples = await loadScoringCalibrationExamples(supabase, profileId ?? policy.active_profile_id);
   const result = await runScoringPolicy({
     tweet_id: tweetId,
     text: post.text_original,
@@ -3827,8 +4299,9 @@ async function scorePostV2(supabase: any, body: Record<string, unknown>) {
     url: post.url,
     published_at: post.tweeted_at,
   }, policy, { apiKey: openaiApiKey, ...model }, {
-    profileId: typeof body.profile_id === 'string' ? body.profile_id : null,
+    profileId,
     forceAdjudication: body.force_adjudication === true,
+    calibrationExamples,
   });
   if (!result.ok) return { ok: false, error: result.error ?? result.audience_reason, result };
 
@@ -3854,14 +4327,17 @@ async function previewScoringPolicy(supabase: any, body: Record<string, unknown>
   if (!openaiApiKey) return { ok: false, error: 'OPENAI_API_KEY is not configured' };
   const policy = await loadScoringPolicyConfig(supabase);
   const model = await loadScoringModelOptions(supabase);
+  const profileId = typeof body.profile_id === 'string' ? body.profile_id : null;
+  const calibrationExamples = await loadScoringCalibrationExamples(supabase, profileId ?? policy.active_profile_id);
   const result = await runScoringPolicy({
     text,
     author_handle: typeof body.author_handle === 'string' ? body.author_handle : null,
     url: typeof body.url === 'string' ? body.url : null,
     published_at: new Date().toISOString(),
   }, policy, { apiKey: openaiApiKey, ...model }, {
-    profileId: typeof body.profile_id === 'string' ? body.profile_id : null,
+    profileId,
     forceAdjudication: body.force_adjudication === true,
+    calibrationExamples,
   });
   return { ok: result.ok, result, error: result.ok ? undefined : result.error };
 }
@@ -3961,11 +4437,14 @@ async function runScoringEval(supabase: any, body: Record<string, unknown>) {
   let falseNegative = 0;
   let ambiguous = 0;
   for (const example of examples ?? []) {
+    const calibrationExamples = (examples ?? [])
+      .filter((candidate) => candidate.id !== example.id)
+      .slice(0, 8) as ScoringPolicyCalibrationExample[];
     const result = await runScoringPolicy({
       text: example.text_original as string,
       author_handle: example.author_handle as string | null,
       published_at: new Date().toISOString(),
-    }, policy, { apiKey: openaiApiKey, ...model }, { profileId });
+    }, policy, { apiKey: openaiApiKey, ...model }, { profileId, calibrationExamples });
     const expectedDecision = example.expected_decision as string;
     const expectedClass = example.expected_audience_class as string;
     const classOk = result.audience_class === expectedClass;
@@ -4384,7 +4863,8 @@ function validateSettingsValue(key: string, value: unknown): string | null {
           const p = profile as Record<string, unknown>;
           if (typeof p.id !== 'string' || !p.id || p.id.length > 80) return 'scoring profile id required (<=80)';
           if (typeof p.name !== 'string' || !p.name || p.name.length > 120) return 'scoring profile name required (<=120)';
-          for (const arrKey of ['focus_entities', 'aliases', 'geographies', 'blocked_categories']) {
+          for (const arrKey of ['focus_entities', 'aliases', 'geographies', 'blocked_categories', 'review_only_exception_ids']) {
+            if (p[arrKey] === undefined && arrKey === 'review_only_exception_ids') continue;
             if (!Array.isArray(p[arrKey])) return `scoring profile ${arrKey} must be an array`;
             if ((p[arrKey] as unknown[]).some((x) => typeof x !== 'string' || x.length > 120)) return `scoring profile ${arrKey} entries must be strings <=120`;
           }
@@ -4708,6 +5188,34 @@ serve(async (req) => {
 
       case 'get_x_api_summary': {
         return jsonResponse(await getXApiSummary(supabase, body));
+      }
+
+      case 'get_video_render_config': {
+        return jsonResponse(await loadVideoRenderConfigAdmin(supabase));
+      }
+
+      case 'update_video_render_config': {
+        return jsonResponse(await updateVideoRenderConfigAdmin(supabase, body));
+      }
+
+      case 'get_video_render_overview': {
+        return jsonResponse(await getVideoRenderOverview(supabase));
+      }
+
+      case 'get_video_render_queue': {
+        return jsonResponse(await getVideoRenderQueue(supabase, body));
+      }
+
+      case 'get_video_render_detail': {
+        return jsonResponse(await getVideoRenderDetail(supabase, body));
+      }
+
+      case 'retry_video_render': {
+        return jsonResponse(await retryVideoRenderAdmin(supabase, body));
+      }
+
+      case 'save_video_render_feedback': {
+        return jsonResponse(await saveVideoRenderFeedbackAdmin(supabase, body, authResult.userId));
       }
 
       case 'get_x_posting_diagnostics': {

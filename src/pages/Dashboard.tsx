@@ -11,6 +11,7 @@ import {
   CheckCircle,
   Clock,
   Database,
+  Film,
   Gauge,
   HardDrive,
   Languages,
@@ -19,6 +20,7 @@ import {
   RefreshCw,
   Send,
   ShieldCheck,
+  SlidersHorizontal,
   Star,
   TimerReset,
   Twitter,
@@ -27,6 +29,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { useDashboardData, type DashboardSeverity } from '@/hooks/useDashboardData';
+import { useVideoRenderOverview } from '@/hooks/useVideoRenderData';
 import { DashboardActivity } from '@/components/dashboard/DashboardActivity';
 import { DashboardHealth } from '@/components/dashboard/DashboardHealth';
 import { IngestHeartbeatAlert } from '@/components/dashboard/IngestHeartbeatAlert';
@@ -85,8 +88,19 @@ function quotaTone(value: number | null | undefined): string {
   return 'text-success';
 }
 
+const EMPTY_SCORING_TUNING = {
+  regionalAuto24h: 0,
+  globalPilotReview24h: 0,
+  globalTunedAuto24h: 0,
+  manualScoreOverrides24h: 0,
+  manualFeedback24h: 0,
+  projectedAddedPostsMonth: 0,
+  error: null,
+};
+
 export default function Dashboard() {
   const { data, isLoading, isError, error, dataUpdatedAt, isFetching } = useDashboardData();
+  const videoRenderOverview = useVideoRenderOverview();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
@@ -144,6 +158,7 @@ export default function Dashboard() {
   }
 
   const { metrics, health, activities, heartbeat, opsStatus, pipelineCounts, queueBreakdown, xLocalUsage, systemPerformance } = data;
+  const scoringTuning = data.scoringTuning ?? EMPTY_SCORING_TUNING;
   const maxPipeline = Math.max(
     pipelineCounts.ingested,
     pipelineCounts.duplicateGateChecked ?? 0,
@@ -162,6 +177,11 @@ export default function Dashboard() {
     { label: 'X failed', value: pipelineCounts.xFailed, icon: Twitter, route: '/monitoring?filter=x_failed', tone: 'text-destructive' },
     { label: 'Stale jobs', value: pipelineCounts.staleJobs, icon: TimerReset, route: '/monitoring?filter=failed_stuck', tone: 'text-amber-500' },
   ];
+  const videoHeartbeat = videoRenderOverview.data?.heartbeats?.[0] ?? null;
+  const videoHeartbeatFresh = videoHeartbeat?.last_seen_at
+    ? Date.now() - new Date(videoHeartbeat.last_seen_at).getTime() < 90_000
+    : false;
+  const videoIssueCount = (videoRenderOverview.data?.counts?.failed ?? 0) + (videoRenderOverview.data?.counts?.blocked ?? 0);
 
   const funnel = [
     { label: 'Ingested', value: pipelineCounts.ingested, icon: Activity, note: 'RSS intake' },
@@ -178,29 +198,27 @@ export default function Dashboard() {
   ];
 
   return (
-    <div className="space-y-4 animate-fade-in-up">
-      <div className="sticky top-0 z-20 -mx-2 rounded-b-xl border-b border-border/60 bg-background/95 px-2 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:static sm:mx-0 sm:rounded-none sm:border-0 sm:bg-transparent sm:p-0">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <h1 className="text-2xl font-display font-bold text-glass-foreground sm:text-3xl">Dashboard</h1>
-            <p className="text-sm text-muted-foreground sm:text-base">Ops triage for RSS, scoring, Telegram, and X automation</p>
+    <div className="space-y-3 animate-fade-in-up">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <h1 className="text-2xl font-display font-bold text-glass-foreground sm:text-3xl">Dashboard</h1>
+          <p className="text-sm text-muted-foreground sm:text-base">Ops triage for RSS, scoring, Telegram, and X automation</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" onClick={refresh} disabled={isFetching}>
+            {isFetching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+            Refresh
+          </Button>
+          <div className="flex items-center gap-2 rounded-md border border-border/60 px-3 py-2 text-sm">
+            {health.isOnline ? <Wifi className="h-4 w-4 text-success" /> : <WifiOff className="h-4 w-4 text-destructive" />}
+            <span>{health.isOnline ? 'Online' : 'Offline'}</span>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" size="sm" onClick={refresh} disabled={isFetching}>
-              {isFetching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-              Refresh
-            </Button>
-            <div className="flex items-center gap-2 rounded-md border border-border/60 px-3 py-2 text-sm">
-              {health.isOnline ? <Wifi className="h-4 w-4 text-success" /> : <WifiOff className="h-4 w-4 text-destructive" />}
-              <span>{health.isOnline ? 'Online' : 'Offline'}</span>
-            </div>
-            <div className="text-xs text-muted-foreground">Updated {new Date(dataUpdatedAt).toLocaleTimeString()}</div>
-          </div>
+          <div className="text-xs text-muted-foreground">Updated {new Date(dataUpdatedAt).toLocaleTimeString()}</div>
         </div>
       </div>
 
       <Card className={`glass-card border ${severityClasses(opsStatus.severity)}`}>
-        <CardContent className="flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between">
+        <CardContent className="flex flex-col gap-3 p-3 sm:p-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-start gap-3">
             <span className={`mt-1 h-3 w-3 shrink-0 rounded-full ${statusDot(opsStatus.severity)}`} />
             <div>
@@ -223,7 +241,7 @@ export default function Dashboard() {
             key={card.label}
             type="button"
             onClick={() => navigate(card.route)}
-            className="rounded-lg border bg-card p-3 text-left transition-colors hover:border-primary/50 hover:bg-muted/30"
+            className="rounded-lg border bg-card p-2.5 text-left transition-colors hover:border-primary/50 hover:bg-muted/30 sm:p-3"
           >
             <div className="flex items-center justify-between gap-2">
               <p className="text-xs text-muted-foreground">{card.label}</p>
@@ -233,6 +251,29 @@ export default function Dashboard() {
           </button>
         ))}
       </div>
+
+      <Card className="glass-card">
+        <CardContent className="flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-start gap-3">
+            <Film className="mt-1 h-5 w-5 text-primary" />
+            <div>
+              <p className="font-semibold text-glass-foreground">Video subtitle renderer</p>
+              <p className="text-sm text-muted-foreground">
+                Mode {videoRenderOverview.data?.config?.mode ?? 'unknown'} · {videoRenderOverview.data?.counts?.queued ?? 0} queued · {videoIssueCount} failed/blocked
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline" className={videoHeartbeatFresh && videoHeartbeat?.status === 'online' ? 'border-emerald-500/40 text-emerald-500' : 'border-amber-500/40 text-amber-500'}>
+              {videoHeartbeatFresh && videoHeartbeat?.status === 'online' ? 'Renderer online' : 'No fresh heartbeat'}
+            </Badge>
+            <Button variant="outline" size="sm" onClick={() => navigate('/video-renders')}>
+              Open console
+              <ArrowRight className="ml-2 h-4 w-4" />
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card className="glass-card">
         <CardHeader className="pb-3">
@@ -358,6 +399,37 @@ export default function Dashboard() {
             <p className="mt-3 text-xs text-muted-foreground">
               Duplicate translate jobs: {compactNumber(systemPerformance.resources.duplicateTranslateJobs24h)} in 24h
             </p>
+            <div className="mt-3 grid gap-2 sm:grid-cols-4">
+              <div className="rounded border border-border/50 px-2 py-1.5 text-xs">
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <ShieldCheck className="h-3.5 w-3.5 text-primary" />
+                  <span>Regional auto 24h</span>
+                </div>
+                <p className="mt-1 text-base font-semibold tabular-nums text-glass-foreground">{compactNumber(scoringTuning.regionalAuto24h)}</p>
+              </div>
+              <div className="rounded border border-border/50 px-2 py-1.5 text-xs">
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Star className="h-3.5 w-3.5 text-primary" />
+                  <span>Global pilot review</span>
+                </div>
+                <p className="mt-1 text-base font-semibold tabular-nums text-glass-foreground">{compactNumber(scoringTuning.globalPilotReview24h)}</p>
+              </div>
+              <div className="rounded border border-border/50 px-2 py-1.5 text-xs">
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <SlidersHorizontal className="h-3.5 w-3.5 text-primary" />
+                  <span>Manual overrides</span>
+                </div>
+                <p className="mt-1 text-base font-semibold tabular-nums text-glass-foreground">{compactNumber(scoringTuning.manualScoreOverrides24h)}</p>
+              </div>
+              <div className="rounded border border-border/50 px-2 py-1.5 text-xs">
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <BarChart3 className="h-3.5 w-3.5 text-primary" />
+                  <span>Projected added/month</span>
+                </div>
+                <p className="mt-1 text-base font-semibold tabular-nums text-glass-foreground">{compactNumber(scoringTuning.projectedAddedPostsMonth)}</p>
+              </div>
+            </div>
+            {scoringTuning.error && <p className="mt-2 text-xs text-warning">Scoring tuning diagnostics partial: {scoringTuning.error}</p>}
           </div>
         </CardContent>
       </Card>
