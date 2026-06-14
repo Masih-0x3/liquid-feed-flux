@@ -195,6 +195,28 @@ Secret/config rollback:
 
 Add new entries at the top.
 
+### 2026-06-14 - PR #13 XOT cleanup integration
+
+```text
+Date: 2026-06-14
+Operator: Codex
+Git SHA: 8f0b93db7e57bbc0b6108db12e929e220715970c
+GitHub PR: https://github.com/Masihhedayati/liquid-feed-flux/pull/13
+CI run: https://github.com/Masihhedayati/liquid-feed-flux/actions/runs/27507054048
+Vercel deployment: dpl_4y8m9mYj5qFggB9nX5TehuMDQHC9
+Vercel aliases: https://xot.iraneyes.com, https://xot.vercel.app
+Supabase project ref: jzirqfzzvlbxwfzndaer
+Migration head before: latest shared local/remote migration 20260614064657; known local-only 20260609201533 and 20260609213357 were not applied
+Migration head after: unchanged; no migrations applied
+Function versions before: last recorded baseline from docs/operations/xot-system-inventory.md was webhooks-rssapp 199, worker 227, admin-retry 155, db-cleanup 126, media-processor 165, media-cleanup 162, admin-actions 150, x-poster 102, x-followers-snapshot 76, digest-compiler 82
+Function versions after: webhooks-rssapp 201, worker 229, admin-retry 157, db-cleanup 128, media-processor 167, media-cleanup 164, admin-actions 152, x-poster 104, x-followers-snapshot 78, digest-compiler 84
+DEPLOY_GIT_SHA: deploy script stamped 8f0b93db7e57bbc0b6108db12e929e220715970c; Supabase secret timestamp 2026-06-14T17:57:28.900Z
+Renderer heartbeat: hermes-masih-1 online, version 0.1.0, render_version persian-subtitles-masihh-v1, processed 3, failed 0, last_seen_at 2026-06-14 18:25:58.825+00
+Smoke checks: post-release npm run check:release-state passed; authenticated Chrome smoke loaded Dashboard, Monitoring, Settings, Video Renders, and /x-account; Dashboard showed frontend 8f0b93d and backend 8f0b93db7e57bbc0b6108db12e929e220715970c
+Rollback target: frontend dpl_JEAKMGeLPRzpe3ZMTeNEAMGysHf9 / git 5d351a9db81809fac4e668c5d03f298f03647808; functions rollback by checking out 5d351a9db81809fac4e668c5d03f298f03647808 and running DEPLOY_ALLOW_NON_MAIN=1 ./scripts/deploy-functions.sh
+Notes: Vercel connector confirmed production deployment metadata and aliases. Vercel CLI was unavailable locally, so connector plus host headers were used. All expected cron jobs were active, including invoke-worker-every-1m and x-poster-tick. Queue health contained completed jobs only and stale running jobs query returned no rows. Known Supabase migration drift remains intentionally unresolved.
+```
+
 ### Template
 
 ```text
