@@ -51,10 +51,7 @@ import {
   jobLane,
   jobTimingMeta,
   maxBatchSizeForJobTypes,
-  rmPickBestVariant,
-  rmUpgradeImageUrl,
   stripMarkdownToPlain,
-  type ResolvedVariant,
 } from "./workerUtils.ts";
 import {
   handleJobFailure,
@@ -86,6 +83,12 @@ import {
   loadHydrationSettings,
   recordXApiCall,
 } from "./xApiWorkflow.ts";
+import {
+  buildResolvedMediaRows,
+  buildResolveMediaDownloadJob,
+  rmFetchFromFx,
+  rmFetchFromVx,
+} from "./mediaWorkflow.ts";
 
 export {
   SCORE_AXIS_KEYS,
@@ -2455,97 +2458,6 @@ async function maybeEnqueueResolveMedia(// deno-lint-ignore no-explicit-any
   }
 }
 
-// ───────────────────────────────────────────────────────────────────────────
-// resolve_media: zero-X-API video/media discovery via public proxies.
-// Mirrors the client-side Downloader page logic so we don't burn quota.
-// ───────────────────────────────────────────────────────────────────────────
-
-type ResolvedMediaRow = {
-  kind: 'video' | 'image' | 'gif';
-  url: string;
-  width?: number;
-  height?: number;
-  duration_ms?: number;
-};
-
-async function rmFetchFromFx(handle: string, id: string): Promise<ResolvedMediaRow[] | null> {
-  try {
-    const res = await fetch(`https://api.fxtwitter.com/${handle}/status/${id}`);
-    if (!res.ok) return null;
-    const json = await res.json() as Record<string, unknown>;
-    const t = (json?.tweet ?? {}) as Record<string, unknown>;
-    const media = (t.media ?? {}) as Record<string, unknown>;
-    const out: ResolvedMediaRow[] = [];
-
-    const videos = (media.videos as Array<Record<string, unknown>> | undefined) ?? [];
-    for (const v of videos) {
-      const variants = (v.variants as ResolvedVariant[] | undefined) ?? [];
-      let url = (v.url as string) || '';
-      if (variants.length) {
-        const best = rmPickBestVariant(variants);
-        if (best?.url) url = best.url;
-      }
-      if (!url) continue;
-      // fxtwitter returns `duration` in SECONDS (often fractional, e.g. 5.9).
-      // Our media.duration_ms column is INTEGER → must convert + round.
-      const rawDur = v.duration as number | undefined;
-      const durMs = typeof rawDur === 'number' && isFinite(rawDur)
-        ? Math.round(rawDur * 1000) : null;
-      out.push({
-        kind: (v.type as string) === 'gif' ? 'gif' : 'video',
-        url,
-        width: v.width as number | undefined,
-        height: v.height as number | undefined,
-        duration_ms: durMs ?? undefined,
-      });
-    }
-
-    const photos = (media.photos as Array<Record<string, unknown>> | undefined) ?? [];
-    for (const p of photos) {
-      const url = p.url as string | undefined;
-      if (!url) continue;
-      out.push({
-        kind: 'image',
-        url: rmUpgradeImageUrl(url),
-        width: p.width as number | undefined,
-        height: p.height as number | undefined,
-      });
-    }
-    return out.length ? out : null;
-  } catch (e) {
-    console.warn('resolve_media: fxtwitter failed', (e as Error).message);
-    return null;
-  }
-}
-
-async function rmFetchFromVx(handle: string, id: string): Promise<ResolvedMediaRow[] | null> {
-  try {
-    const res = await fetch(`https://api.vxtwitter.com/${handle}/status/${id}`);
-    if (!res.ok) return null;
-    const json = await res.json() as Record<string, unknown>;
-    const extended = (json.media_extended as Array<Record<string, unknown>> | undefined) ?? [];
-    const out: ResolvedMediaRow[] = [];
-    for (const m of extended) {
-      const type = String(m.type || '');
-      const url = m.url as string | undefined;
-      if (!url) continue;
-      if (type === 'video' || type === 'gif') {
-        out.push({
-          kind: type === 'gif' ? 'gif' : 'video',
-          url,
-          duration_ms: m.duration_millis as number | undefined,
-        });
-      } else if (type === 'image') {
-        out.push({ kind: 'image', url: rmUpgradeImageUrl(url) });
-      }
-    }
-    return out.length ? out : null;
-  } catch (e) {
-    console.warn('resolve_media: vxtwitter failed', (e as Error).message);
-    return null;
-  }
-}
-
 async function handleResolveMediaJob(job: Record<string, unknown>, // deno-lint-ignore no-explicit-any
 supabase: any): Promise<boolean> {
   const payload = (job.payload || {}) as Record<string, unknown>;
@@ -2599,20 +2511,7 @@ supabase: any): Promise<boolean> {
   // attached, and download_media (which filters `storage_path IS NULL`)
   // would skip the row — causing x-poster to upload the thumbnail bytes as
   // the "video" and Telegram to send it as a document.
-  const rows = await Promise.all(resolved.map(async (m, index) => ({
-    tweet_id: tweetId,
-    kind: m.kind,
-    src_url: m.url,
-    src_url_hash: await hashUrl(m.url),
-    width: m.width != null ? Math.round(m.width) : null,
-    height: m.height != null ? Math.round(m.height) : null,
-    duration_ms: m.duration_ms != null ? Math.round(m.duration_ms) : null,
-    ordering: index,
-    storage_path: null,
-    downloaded_at: null,
-    file_size: null,
-    mime_type: null,
-  })));
+  const rows = await buildResolvedMediaRows(tweetId, resolved);
 
   const { error: insErr } = await supabase.from('media').upsert(rows, { onConflict: 'tweet_id,ordering' });
   if (insErr) {
@@ -2640,14 +2539,7 @@ supabase: any): Promise<boolean> {
   // completed job from an earlier resolve attempt and (with
   // ignoreDuplicates) get silently dropped — leaving freshly-resolved rows
   // with storage_path=null and causing text-only posts.
-  const dlKey = `download_media:resolve:${tweetId}:${Date.now()}`;
-  const { error: dlErr } = await supabase.from('jobs').insert({
-    type: 'download_media',
-    payload: { tweet_id: tweetId },
-    status: 'pending',
-    idempotency_key: dlKey,
-    next_run_at: new Date().toISOString(),
-  });
+  const { error: dlErr } = await supabase.from('jobs').insert(buildResolveMediaDownloadJob(tweetId));
   if (dlErr) console.warn('resolve_media: failed to enqueue download_media', dlErr.message);
 
   await insertPipelineEvent(supabase, 'post', tweetId, 'resolve_media', 'completed',
