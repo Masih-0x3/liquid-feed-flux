@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   Activity,
   AlertTriangle,
@@ -13,6 +14,7 @@ import {
   Database,
   Gauge,
   HardDrive,
+  Info,
   Languages,
   Loader2,
   MessageSquare,
@@ -27,12 +29,19 @@ import {
   WifiOff,
   XCircle,
 } from 'lucide-react';
-import { useDashboardData, type DashboardSeverity } from '@/hooks/useDashboardData';
+import {
+  useDashboardData,
+  type DashboardSeverity,
+  type PipelineCounts,
+  type SystemPerformanceSummary,
+} from '@/hooks/useDashboardData';
 import { DashboardActivity } from '@/components/dashboard/DashboardActivity';
 import { DashboardHealth } from '@/components/dashboard/DashboardHealth';
 import { IngestHeartbeatAlert } from '@/components/dashboard/IngestHeartbeatAlert';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+import { cn } from '@/lib/utils';
+import type { ReactNode } from 'react';
 
 function compactNumber(value: number | null | undefined): string {
   return typeof value === 'number' ? value.toLocaleString() : '-';
@@ -84,6 +93,81 @@ function quotaTone(value: number | null | undefined): string {
   if (value >= 85) return 'text-destructive';
   if (value >= 70) return 'text-warning';
   return 'text-success';
+}
+
+function plural(value: number, singular: string, pluralLabel = `${singular}s`): string {
+  return `${compactNumber(value)} ${value === 1 ? singular : pluralLabel}`;
+}
+
+function nonNegativeDelta(from: number | null | undefined, to: number | null | undefined): number {
+  if (typeof from !== 'number' || typeof to !== 'number') return 0;
+  return Math.max(0, from - to);
+}
+
+function joinParts(parts: Array<string | null | undefined>): string {
+  return parts.filter(Boolean).join(' - ');
+}
+
+const STORAGE_WARNING_PCT = 85;
+const STORAGE_CRITICAL_PCT = 90;
+
+type AlertSummary = {
+  severity: DashboardSeverity;
+  title: string;
+  detail: string;
+  route: string;
+  ctaLabel: string;
+};
+
+function getOpsCtaLabel(opsStatus: { recommendedRoute: string }, pipelineCounts: PipelineCounts): string {
+  if (opsStatus.recommendedRoute.includes('x_failed')) return 'Open X failures';
+  if (opsStatus.recommendedRoute.includes('ready_to_deliver')) return 'Open ready queue';
+  if (opsStatus.recommendedRoute.includes('failed_stuck')) {
+    const count = Math.max(pipelineCounts.failedStuck, pipelineCounts.staleJobs);
+    return `Review ${plural(count || 1, 'failed job')}`;
+  }
+  if (opsStatus.recommendedRoute.includes('needs_attention')) return 'Review needs attention';
+  return 'Open monitoring';
+}
+
+function getStorageAlert(resources: SystemPerformanceSummary['resources']): AlertSummary | null {
+  const storagePct = resources.storageUsedPct;
+  if (storagePct == null || storagePct < STORAGE_WARNING_PCT) return null;
+
+  const severity: DashboardSeverity = storagePct >= STORAGE_CRITICAL_PCT ? 'critical' : 'warning';
+  return {
+    severity,
+    title: severity === 'critical' ? 'Temp media storage critical' : 'Temp media storage high',
+    detail: `${storagePct}% used - ${formatBytes(resources.tempMediaBytes)} across ${compactNumber(resources.tempMediaObjects)} objects`,
+    route: '/settings#video-rendering',
+    ctaLabel: 'Review storage risk',
+  };
+}
+
+function getPrimaryAlert(
+  opsStatus: AlertSummary,
+  storageAlert: AlertSummary | null,
+): AlertSummary {
+  if (!storageAlert) return opsStatus;
+  if (storageAlert.severity === 'critical' && opsStatus.severity !== 'critical') return storageAlert;
+  if (opsStatus.severity === 'ok') return storageAlert;
+  return opsStatus;
+}
+
+function MetricHelp({ children, description }: { children: ReactNode; description: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex cursor-help items-center gap-1">
+          {children}
+          <Info className="h-3 w-3 text-muted-foreground" />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xs text-xs">
+        {description}
+      </TooltipContent>
+    </Tooltip>
+  );
 }
 
 const EMPTY_SCORING_TUNING = {
@@ -165,28 +249,176 @@ export default function Dashboard() {
     pipelineCounts.xPosted,
     1,
   );
+  const storageAlert = getStorageAlert(systemPerformance.resources);
+  const opsAlert: AlertSummary = {
+    severity: opsStatus.severity,
+    title: opsStatus.primaryIssue,
+    detail: `Last ingest ${formatAge(opsStatus.lastIngestAgeSeconds)} ago - ${opsStatus.staleJobCount} stale running jobs`,
+    route: opsStatus.recommendedRoute,
+    ctaLabel: getOpsCtaLabel(opsStatus, pipelineCounts),
+  };
+  const primaryAlert = getPrimaryAlert(opsAlert, storageAlert);
+  const oldestPendingSeconds = systemPerformance.queue.oldestPendingAgeSeconds ?? queueBreakdown.oldestPendingAgeSeconds;
+  const storagePct = systemPerformance.resources.storageUsedPct;
 
   const triageCards = [
-    { label: 'Needs attention', value: pipelineCounts.needsAttention, icon: AlertTriangle, route: '/monitoring?filter=needs_attention', tone: 'text-amber-500' },
-    { label: 'Failed/stuck', value: pipelineCounts.failedStuck, icon: XCircle, route: '/monitoring?filter=failed_stuck', tone: 'text-destructive' },
-    { label: 'Ready to deliver', value: pipelineCounts.readyToDeliver, icon: Send, route: '/monitoring?filter=ready_to_deliver', tone: 'text-primary' },
-    { label: 'Translation queue', value: pipelineCounts.translationQueue, icon: MessageSquare, route: '/monitoring?filter=translation_queue', tone: 'text-blue-500' },
-    { label: 'X failed', value: pipelineCounts.xFailed, icon: Twitter, route: '/monitoring?filter=x_failed', tone: 'text-destructive' },
-    { label: 'Stale jobs', value: pipelineCounts.staleJobs, icon: TimerReset, route: '/monitoring?filter=failed_stuck', tone: 'text-amber-500' },
+    {
+      label: 'Needs attention',
+      value: pipelineCounts.needsAttention,
+      icon: AlertTriangle,
+      route: '/monitoring?filter=needs_attention',
+      tone: pipelineCounts.needsAttention > 0 ? 'text-amber-500' : 'text-muted-foreground',
+      context: joinParts([
+        pipelineCounts.failedStuck > 0 ? `${compactNumber(pipelineCounts.failedStuck)} failed` : null,
+        pipelineCounts.readyToDeliver > 0 ? `${compactNumber(pipelineCounts.readyToDeliver)} ready` : null,
+      ]) || 'No active triage',
+    },
+    {
+      label: 'Failed/stuck',
+      value: pipelineCounts.failedStuck,
+      icon: XCircle,
+      route: '/monitoring?filter=failed_stuck',
+      tone: pipelineCounts.failedStuck > 0 ? 'text-destructive' : 'text-muted-foreground',
+      context: `${compactNumber(queueBreakdown.failed24h)} failed 24h - ${compactNumber(queueBreakdown.staleRunning)} stale`,
+    },
+    {
+      label: 'Ready to deliver',
+      value: pipelineCounts.readyToDeliver,
+      icon: Send,
+      route: '/monitoring?filter=ready_to_deliver',
+      tone: 'text-primary',
+      context: `${compactNumber(pipelineCounts.readyToDeliver)} route-ready`,
+    },
+    {
+      label: 'Translation queue',
+      value: pipelineCounts.translationQueue,
+      icon: MessageSquare,
+      route: '/monitoring?filter=translation_queue',
+      tone: pipelineCounts.translationQueue > 0 ? 'text-amber-500' : 'text-primary',
+      context: `${compactNumber(pipelineCounts.translationQueue)} queued`,
+    },
+    {
+      label: 'X failed',
+      value: pipelineCounts.xFailed,
+      icon: Twitter,
+      route: '/monitoring?filter=x_failed',
+      tone: pipelineCounts.xFailed > 0 ? 'text-destructive' : 'text-muted-foreground',
+      context: `${compactNumber(xLocalUsage.failedPosts24h)} posts - ${compactNumber(xLocalUsage.failedAttempts24h)} attempts`,
+    },
+    {
+      label: 'Stale jobs',
+      value: pipelineCounts.staleJobs,
+      icon: TimerReset,
+      route: '/monitoring?filter=failed_stuck',
+      tone: pipelineCounts.staleJobs > 0 ? 'text-amber-500' : 'text-muted-foreground',
+      context: oldestPendingSeconds == null ? `${compactNumber(queueBreakdown.staleRunning)} stale running` : `oldest pending ${formatAge(oldestPendingSeconds)}`,
+    },
   ];
 
   const funnel = [
-    { label: 'Ingested', value: pipelineCounts.ingested, icon: Activity, note: 'RSS intake' },
+    { label: 'Ingested', value: pipelineCounts.ingested, icon: Activity, note: 'RSS intake', noteTone: 'text-muted-foreground' },
     {
       label: 'Duplicate gate',
       value: pipelineCounts.duplicateGateAvailable ? pipelineCounts.duplicateGateChecked : null,
       icon: ShieldCheck,
       note: pipelineCounts.duplicateGateAvailable ? `${compactNumber(pipelineCounts.duplicates)} blocked` : 'Schema pending',
+      noteTone: 'text-muted-foreground',
     },
-    { label: 'Scored', value: pipelineCounts.scored, icon: Star, note: `${compactNumber(pipelineCounts.needsScore)} need score` },
-    { label: 'Translated', value: pipelineCounts.translated, icon: MessageSquare, note: `${compactNumber(pipelineCounts.translationQueue)} queued` },
-    { label: 'Telegram', value: pipelineCounts.telegramDelivered, icon: Send, note: 'Delivered locally' },
-    { label: 'X posted', value: pipelineCounts.xPosted, icon: Twitter, note: 'Local posts only' },
+    {
+      label: 'Scored',
+      value: pipelineCounts.scored,
+      icon: Star,
+      note: `${compactNumber(nonNegativeDelta(pipelineCounts.duplicateGateChecked ?? pipelineCounts.ingested, pipelineCounts.scored))} not scored`,
+      noteTone: nonNegativeDelta(pipelineCounts.duplicateGateChecked ?? pipelineCounts.ingested, pipelineCounts.scored) > 0 ? 'text-warning' : 'text-muted-foreground',
+    },
+    {
+      label: 'Translated',
+      value: pipelineCounts.translated,
+      icon: MessageSquare,
+      note: `${compactNumber(nonNegativeDelta(pipelineCounts.scored, pipelineCounts.translated))} not translated`,
+      noteTone: nonNegativeDelta(pipelineCounts.scored, pipelineCounts.translated) > 0 ? 'text-warning' : 'text-muted-foreground',
+    },
+    {
+      label: 'Telegram',
+      value: pipelineCounts.telegramDelivered,
+      icon: Send,
+      note: `${compactNumber(nonNegativeDelta(pipelineCounts.translated, pipelineCounts.telegramDelivered))} awaiting Telegram`,
+      noteTone: nonNegativeDelta(pipelineCounts.translated, pipelineCounts.telegramDelivered) > 0 ? 'text-warning' : 'text-muted-foreground',
+    },
+    {
+      label: 'X posted',
+      value: pipelineCounts.xPosted,
+      icon: Twitter,
+      note: `${compactNumber(nonNegativeDelta(pipelineCounts.telegramDelivered, pipelineCounts.xPosted))} not X posted`,
+      noteTone: nonNegativeDelta(pipelineCounts.telegramDelivered, pipelineCounts.xPosted) > 0 ? 'text-warning' : 'text-muted-foreground',
+    },
+  ];
+
+  const stickyStatusItems = [
+    pipelineCounts.failedStuck > 0
+      ? { label: `${compactNumber(pipelineCounts.failedStuck)} failed/stuck`, className: 'border-destructive/30 text-destructive' }
+      : null,
+    storagePct != null && storagePct >= STORAGE_WARNING_PCT
+      ? { label: `Temp media ${storagePct}%`, className: storagePct >= STORAGE_CRITICAL_PCT ? 'border-destructive/30 text-destructive' : 'border-warning/30 text-warning' }
+      : null,
+    { label: health.isOnline ? 'Online' : 'Offline', className: health.isOnline ? 'border-success/30 text-success' : 'border-destructive/30 text-destructive' },
+    { label: `Updated ${new Date(dataUpdatedAt).toLocaleTimeString()}`, className: 'border-border/60 text-muted-foreground' },
+  ].filter(Boolean) as Array<{ label: string; className: string }>;
+
+  const provenanceCopy = 'Supabase-local telemetry only; dashboard loads do not call X, hydrate tweets, sync official usage, or snapshot followers.';
+
+  const speedMetrics = [
+    { label: 'Telegram p95', icon: Send, value: formatSeconds(systemPerformance.windows.sixHours.stages.telegramEndToEnd.p95Seconds), note: '6h end-to-end', tone: 'text-glass-foreground' },
+    { label: 'X p95', icon: Twitter, value: formatSeconds(systemPerformance.windows.sixHours.stages.xEndToEnd.p95Seconds), note: '6h end-to-end', tone: 'text-glass-foreground' },
+    { label: 'Score p95', icon: Gauge, value: formatSeconds(systemPerformance.windows.sixHours.stages.ingestToScore.p95Seconds), note: 'ingest to score', tone: 'text-glass-foreground' },
+    { label: 'Translate p95', icon: Languages, value: formatSeconds(systemPerformance.windows.sixHours.stages.scoreToTranslation.p95Seconds), note: 'score to translated', tone: 'text-glass-foreground' },
+    {
+      label: 'Scheduler wait',
+      icon: Clock,
+      value: formatAge(systemPerformance.queue.schedulerWaitSeconds),
+      note: `${compactNumber(systemPerformance.queue.pending)} pending jobs`,
+      tone: systemPerformance.queue.schedulerWaitSeconds != null && systemPerformance.queue.schedulerWaitSeconds > 60 ? 'text-warning' : 'text-glass-foreground',
+      help: 'Oldest scheduler wait for pending queue work.',
+    },
+    {
+      label: 'Worker cron',
+      icon: Activity,
+      value: systemPerformance.resources.workerCadenceSeconds ? `${systemPerformance.resources.workerCadenceSeconds}s` : 'unknown',
+      note: systemPerformance.resources.workerDispatchMode,
+      tone: systemPerformance.resources.workerCadenceWarning ? 'text-warning' : 'text-glass-foreground',
+    },
+  ];
+
+  const resourceMetrics = [
+    {
+      label: 'Database',
+      icon: Database,
+      value: systemPerformance.resources.dbUsedPct == null ? '-' : `${systemPerformance.resources.dbUsedPct}%`,
+      note: formatBytes(systemPerformance.resources.dbBytes),
+      tone: quotaTone(systemPerformance.resources.dbUsedPct),
+    },
+    {
+      label: 'Temp media',
+      icon: HardDrive,
+      value: systemPerformance.resources.storageUsedPct == null ? '-' : `${systemPerformance.resources.storageUsedPct}%`,
+      note: `${formatBytes(systemPerformance.resources.tempMediaBytes)} / ${compactNumber(systemPerformance.resources.tempMediaObjects)} objects`,
+      tone: quotaTone(systemPerformance.resources.storageUsedPct),
+    },
+    {
+      label: 'Edge quota',
+      icon: BarChart3,
+      value: systemPerformance.resources.edgeCronUsedPct == null ? '-' : `${systemPerformance.resources.edgeCronUsedPct}%`,
+      note: `${compactNumber(systemPerformance.resources.projectedCronInvocationsMonthly)} / ${compactNumber(systemPerformance.resources.edgeMonthlyLimit)} monthly`,
+      tone: quotaTone(systemPerformance.resources.edgeCronUsedPct),
+    },
+    {
+      label: 'Duplicate translate jobs',
+      icon: AlertTriangle,
+      value: compactNumber(systemPerformance.resources.duplicateTranslateJobs24h),
+      note: 'last 24h',
+      tone: systemPerformance.resources.duplicateTranslateJobs24h > 0 ? 'text-warning' : 'text-success',
+      help: 'Duplicate translate jobs created in the last 24 hours.',
+    },
   ];
 
   return (
@@ -195,6 +427,7 @@ export default function Dashboard() {
         <div>
           <h1 className="text-2xl font-display font-bold text-glass-foreground sm:text-3xl">Dashboard</h1>
           <p className="text-sm text-muted-foreground sm:text-base">Ops triage for RSS, scoring, Telegram, and X automation</p>
+          <p className="mt-1 max-w-3xl text-xs text-muted-foreground">{provenanceCopy}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" size="sm" onClick={refresh} disabled={isFetching}>
@@ -209,19 +442,27 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <Card className={`glass-card border ${severityClasses(opsStatus.severity)}`}>
+      <div className="sticky top-16 z-30 -mx-2 rounded-lg border border-border/60 bg-background/90 px-2 py-2 shadow-lg backdrop-blur-glass sm:top-20 sm:-mx-3 sm:px-3">
+        <div className="flex flex-wrap items-center gap-2">
+          {stickyStatusItems.map((item) => (
+            <span key={item.label} className={cn('rounded-full border px-2.5 py-1 text-xs font-medium', item.className)}>
+              {item.label}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <Card className={`glass-card border ${severityClasses(primaryAlert.severity)}`}>
         <CardContent className="flex flex-col gap-3 p-3 sm:p-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-start gap-3">
-            <span className={`mt-1 h-3 w-3 shrink-0 rounded-full ${statusDot(opsStatus.severity)}`} />
+            <span className={`mt-1 h-3 w-3 shrink-0 rounded-full ${statusDot(primaryAlert.severity)}`} />
             <div>
-              <p className="text-sm font-semibold text-glass-foreground">{opsStatus.primaryIssue}</p>
-              <p className="text-xs text-muted-foreground">
-                Last ingest {formatAge(opsStatus.lastIngestAgeSeconds)} ago - {opsStatus.staleJobCount} stale running jobs
-              </p>
+              <p className="text-sm font-semibold text-glass-foreground">{primaryAlert.title}</p>
+              <p className="text-xs text-muted-foreground">{primaryAlert.detail}</p>
             </div>
           </div>
-          <Button variant="outline" size="sm" onClick={() => navigate(opsStatus.recommendedRoute)}>
-            Open recommended view
+          <Button variant="outline" size="sm" onClick={() => navigate(primaryAlert.route)}>
+            {primaryAlert.ctaLabel}
             <ArrowRight className="ml-2 h-4 w-4" />
           </Button>
         </CardContent>
@@ -240,174 +481,130 @@ export default function Dashboard() {
               <card.icon className={`h-4 w-4 ${card.tone}`} />
             </div>
             <p className={`mt-2 text-2xl font-semibold tabular-nums ${card.tone}`}>{compactNumber(card.value)}</p>
+            <p className="mt-1 truncate text-xs text-muted-foreground">{card.context}</p>
           </button>
         ))}
       </div>
 
-      <Card className="glass-card">
-        <CardHeader className="pb-3">
-          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <CardTitle className="flex items-center gap-2 text-lg font-display text-glass-foreground">
-                <Gauge className="h-5 w-5 text-primary" />
-                System Speed + Quota
-              </CardTitle>
-              <CardDescription>Supabase-local timing and quota signals. No X requests are made here.</CardDescription>
-            </div>
-            {!systemPerformance.success && (
-              <Badge variant="outline" className="border-warning/40 text-warning">Diagnostics partial</Badge>
-            )}
-          </div>
-        </CardHeader>
-        <CardContent className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-          <div className="rounded-md border border-border/60 p-3">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Send className="h-4 w-4 text-primary" />
-              Telegram p95
-            </div>
-            <p className="mt-2 text-xl font-semibold tabular-nums">
-              {formatSeconds(systemPerformance.windows.sixHours.stages.telegramEndToEnd.p95Seconds)}
-            </p>
-            <p className="text-xs text-muted-foreground">6h end-to-end</p>
-          </div>
-          <div className="rounded-md border border-border/60 p-3">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Twitter className="h-4 w-4 text-primary" />
-              X p95
-            </div>
-            <p className="mt-2 text-xl font-semibold tabular-nums">
-              {formatSeconds(systemPerformance.windows.sixHours.stages.xEndToEnd.p95Seconds)}
-            </p>
-            <p className="text-xs text-muted-foreground">6h end-to-end</p>
-          </div>
-          <div className="rounded-md border border-border/60 p-3">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Gauge className="h-4 w-4 text-primary" />
-              Score p95
-            </div>
-            <p className="mt-2 text-xl font-semibold tabular-nums">
-              {formatSeconds(systemPerformance.windows.sixHours.stages.ingestToScore.p95Seconds)}
-            </p>
-            <p className="text-xs text-muted-foreground">ingest to score</p>
-          </div>
-          <div className="rounded-md border border-border/60 p-3">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Languages className="h-4 w-4 text-primary" />
-              Translate p95
-            </div>
-            <p className="mt-2 text-xl font-semibold tabular-nums">
-              {formatSeconds(systemPerformance.windows.sixHours.stages.scoreToTranslation.p95Seconds)}
-            </p>
-            <p className="text-xs text-muted-foreground">score to translated</p>
-          </div>
-          <div className="rounded-md border border-border/60 p-3">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Clock className="h-4 w-4 text-primary" />
-              Scheduler wait
-            </div>
-            <p className={systemPerformance.queue.schedulerWaitSeconds != null && systemPerformance.queue.schedulerWaitSeconds > 60 ? 'mt-2 text-xl font-semibold tabular-nums text-warning' : 'mt-2 text-xl font-semibold tabular-nums text-glass-foreground'}>
-              {formatAge(systemPerformance.queue.schedulerWaitSeconds)}
-            </p>
-            <p className="text-xs text-muted-foreground">{compactNumber(systemPerformance.queue.pending)} pending jobs</p>
-          </div>
-          <div className="rounded-md border border-border/60 p-3">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Activity className="h-4 w-4 text-primary" />
-              Worker cron
-            </div>
-            <p className={systemPerformance.resources.workerCadenceWarning ? 'mt-2 text-xl font-semibold tabular-nums text-warning' : 'mt-2 text-xl font-semibold tabular-nums text-glass-foreground'}>
-              {systemPerformance.resources.workerCadenceSeconds ? `${systemPerformance.resources.workerCadenceSeconds}s` : 'unknown'}
-            </p>
-            <p className="text-xs text-muted-foreground">{systemPerformance.resources.workerDispatchMode}</p>
-          </div>
-          <div className="rounded-md border border-border/60 p-3">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Database className="h-4 w-4 text-primary" />
-              Database
-            </div>
-            <p className={`mt-2 text-xl font-semibold tabular-nums ${quotaTone(systemPerformance.resources.dbUsedPct)}`}>
-              {systemPerformance.resources.dbUsedPct == null ? '-' : `${systemPerformance.resources.dbUsedPct}%`}
-            </p>
-            <p className="text-xs text-muted-foreground">{formatBytes(systemPerformance.resources.dbBytes)}</p>
-          </div>
-          <div className="rounded-md border border-border/60 p-3">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <HardDrive className="h-4 w-4 text-primary" />
-              Temp media
-            </div>
-            <p className={`mt-2 text-xl font-semibold tabular-nums ${quotaTone(systemPerformance.resources.storageUsedPct)}`}>
-              {systemPerformance.resources.storageUsedPct == null ? '-' : `${systemPerformance.resources.storageUsedPct}%`}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {formatBytes(systemPerformance.resources.tempMediaBytes)} / {compactNumber(systemPerformance.resources.tempMediaObjects)} objects
-            </p>
-          </div>
-          <div className="rounded-md border border-border/60 p-3 sm:col-span-2 xl:col-span-6">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-center gap-2 text-sm">
-                <BarChart3 className="h-4 w-4 text-primary" />
-                <span>Projected cron invocations: {compactNumber(systemPerformance.resources.projectedCronInvocationsMonthly)} / {compactNumber(systemPerformance.resources.edgeMonthlyLimit)} monthly</span>
+      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(380px,0.9fr)]">
+        <Card className="glass-card">
+          <CardHeader className="pb-3">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2 text-lg font-display text-glass-foreground">
+                  <Gauge className="h-5 w-5 text-primary" />
+                  Pipeline Speed
+                </CardTitle>
+                <CardDescription>Six-hour latency and worker timing.</CardDescription>
               </div>
-              <span className={`text-sm font-semibold ${quotaTone(systemPerformance.resources.edgeCronUsedPct)}`}>
-                {systemPerformance.resources.edgeCronUsedPct == null ? 'Estimate unavailable' : `${systemPerformance.resources.edgeCronUsedPct}% of Edge quota`}
-              </span>
+              {!systemPerformance.success && (
+                <Badge variant="outline" className="border-warning/40 text-warning">Diagnostics partial</Badge>
+              )}
             </div>
-            <div className="mt-3 grid gap-2 sm:grid-cols-3">
-              {systemPerformance.queue.lanePressure.map((lane) => (
-                <div key={lane.lane} className="rounded border border-border/50 px-2 py-1.5 text-xs">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium capitalize">{lane.lane}</span>
-                    <span className="text-muted-foreground">{lane.pending} pending / {lane.running} running</span>
+          </CardHeader>
+          <CardContent className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {speedMetrics.map((metric) => (
+              <div key={metric.label} className="rounded-md border border-border/60 p-3">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <metric.icon className="h-4 w-4 text-primary" />
+                  {metric.help ? (
+                    <MetricHelp description={metric.help}>{metric.label}</MetricHelp>
+                  ) : metric.label}
+                </div>
+                <p className={cn('mt-2 text-xl font-semibold tabular-nums', metric.tone)}>{metric.value}</p>
+                <p className="truncate text-xs text-muted-foreground">{metric.note}</p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card className="glass-card">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-lg font-display text-glass-foreground">
+              <HardDrive className="h-5 w-5 text-primary" />
+              Resource Risk
+            </CardTitle>
+            <CardDescription>Quota pressure, duplicate work, and tuning counters.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="grid gap-3 sm:grid-cols-2">
+              {resourceMetrics.map((metric) => (
+                <div key={metric.label} className="rounded-md border border-border/60 p-3">
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <metric.icon className="h-4 w-4 text-primary" />
+                    {metric.help ? (
+                      <MetricHelp description={metric.help}>{metric.label}</MetricHelp>
+                    ) : metric.label}
                   </div>
-                  <p className={lane.maxQueueWaitP95Seconds != null && lane.maxQueueWaitP95Seconds > 60 ? 'mt-1 text-warning' : 'mt-1 text-muted-foreground'}>
-                    wait p95 {formatSeconds(lane.maxQueueWaitP95Seconds)}
-                  </p>
+                  <p className={cn('mt-2 text-xl font-semibold tabular-nums', metric.tone)}>{metric.value}</p>
+                  <p className="truncate text-xs text-muted-foreground">{metric.note}</p>
                 </div>
               ))}
             </div>
-            <p className="mt-3 text-xs text-muted-foreground">
-              Duplicate translate jobs: {compactNumber(systemPerformance.resources.duplicateTranslateJobs24h)} in 24h
-            </p>
-            <div className="mt-3 grid gap-2 sm:grid-cols-4">
-              <div className="rounded border border-border/50 px-2 py-1.5 text-xs">
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <ShieldCheck className="h-3.5 w-3.5 text-primary" />
-                  <span>Regional auto 24h</span>
-                </div>
-                <p className="mt-1 text-base font-semibold tabular-nums text-glass-foreground">{compactNumber(scoringTuning.regionalAuto24h)}</p>
+            <div className="rounded-md border border-border/60 p-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="text-sm font-medium text-glass-foreground">Lane pressure</p>
+                <span className={cn('text-sm font-semibold', quotaTone(systemPerformance.resources.edgeCronUsedPct))}>
+                  {systemPerformance.resources.edgeCronUsedPct == null ? 'Estimate unavailable' : `${systemPerformance.resources.edgeCronUsedPct}% of Edge quota`}
+                </span>
               </div>
-              <div className="rounded border border-border/50 px-2 py-1.5 text-xs">
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <Star className="h-3.5 w-3.5 text-primary" />
-                  <span>Global pilot review</span>
-                </div>
-                <p className="mt-1 text-base font-semibold tabular-nums text-glass-foreground">{compactNumber(scoringTuning.globalPilotReview24h)}</p>
-              </div>
-              <div className="rounded border border-border/50 px-2 py-1.5 text-xs">
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <SlidersHorizontal className="h-3.5 w-3.5 text-primary" />
-                  <span>Manual overrides</span>
-                </div>
-                <p className="mt-1 text-base font-semibold tabular-nums text-glass-foreground">{compactNumber(scoringTuning.manualScoreOverrides24h)}</p>
-              </div>
-              <div className="rounded border border-border/50 px-2 py-1.5 text-xs">
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <BarChart3 className="h-3.5 w-3.5 text-primary" />
-                  <span>Projected added/month</span>
-                </div>
-                <p className="mt-1 text-base font-semibold tabular-nums text-glass-foreground">{compactNumber(scoringTuning.projectedAddedPostsMonth)}</p>
+              <div className="grid gap-2 sm:grid-cols-3">
+                {systemPerformance.queue.lanePressure.map((lane) => (
+                  <div key={lane.lane} className="rounded border border-border/50 px-2 py-1.5 text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium capitalize">{lane.lane}</span>
+                      <span className="text-muted-foreground">{lane.pending} pending / {lane.running} running</span>
+                    </div>
+                    <p className={lane.maxQueueWaitP95Seconds != null && lane.maxQueueWaitP95Seconds > 60 ? 'mt-1 text-warning' : 'mt-1 text-muted-foreground'}>
+                      wait p95 {formatSeconds(lane.maxQueueWaitP95Seconds)}
+                    </p>
+                  </div>
+                ))}
               </div>
             </div>
-            {scoringTuning.error && <p className="mt-2 text-xs text-warning">Scoring tuning diagnostics partial: {scoringTuning.error}</p>}
-          </div>
-        </CardContent>
-      </Card>
+            <div className="rounded-md border border-border/60 p-3">
+              <p className="mb-2 text-sm font-medium text-glass-foreground">Scoring Tuning</p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="rounded border border-border/50 px-2 py-1.5 text-xs">
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <ShieldCheck className="h-3.5 w-3.5 text-primary" />
+                    <MetricHelp description="Posts auto-approved by the regional escalation policy in the last 24 hours.">Regional auto 24h</MetricHelp>
+                  </div>
+                  <p className="mt-1 text-base font-semibold tabular-nums text-glass-foreground">{compactNumber(scoringTuning.regionalAuto24h)}</p>
+                </div>
+                <div className="rounded border border-border/50 px-2 py-1.5 text-xs">
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <Star className="h-3.5 w-3.5 text-primary" />
+                    <MetricHelp description="Global stories kept in review by pilot scoring policy in the last 24 hours.">Global pilot review</MetricHelp>
+                  </div>
+                  <p className="mt-1 text-base font-semibold tabular-nums text-glass-foreground">{compactNumber(scoringTuning.globalPilotReview24h)}</p>
+                </div>
+                <div className="rounded border border-border/50 px-2 py-1.5 text-xs">
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <SlidersHorizontal className="h-3.5 w-3.5 text-primary" />
+                    <MetricHelp description="Manual scoring changes recorded in the last 24 hours.">Manual overrides</MetricHelp>
+                  </div>
+                  <p className="mt-1 text-base font-semibold tabular-nums text-glass-foreground">{compactNumber(scoringTuning.manualScoreOverrides24h)}</p>
+                </div>
+                <div className="rounded border border-border/50 px-2 py-1.5 text-xs">
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <BarChart3 className="h-3.5 w-3.5 text-primary" />
+                    <MetricHelp description="Projected monthly post lift from current scoring tuning.">Projected added/month</MetricHelp>
+                  </div>
+                  <p className="mt-1 text-base font-semibold tabular-nums text-glass-foreground">{compactNumber(scoringTuning.projectedAddedPostsMonth)}</p>
+                </div>
+              </div>
+              {scoringTuning.error && <p className="mt-2 text-xs text-warning">Scoring tuning diagnostics partial: {scoringTuning.error}</p>}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.75fr)]">
         <Card className="glass-card">
           <CardHeader className="pb-3">
             <CardTitle className="text-lg font-display text-glass-foreground">Pipeline Funnel</CardTitle>
-            <CardDescription>Local database counts only. No X requests are made from this dashboard.</CardDescription>
+            <CardDescription>Local stage counts with derived drop-off.</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -421,7 +618,7 @@ export default function Dashboard() {
                     <p className="text-lg font-semibold tabular-nums">{compactNumber(step.value)}</p>
                   </div>
                   <Progress value={step.value == null ? 0 : percent(step.value, maxPipeline)} className="mt-3 h-2" />
-                  <p className="mt-2 text-xs text-muted-foreground">{step.note}</p>
+                  <p className={cn('mt-2 text-xs', step.noteTone)}>{step.note}</p>
                 </div>
               ))}
             </div>

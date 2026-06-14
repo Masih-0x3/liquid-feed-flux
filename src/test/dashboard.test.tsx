@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import Dashboard from "@/pages/Dashboard";
 import { useDashboardData } from "@/hooks/useDashboardData";
 import { DashboardHealth } from "@/components/dashboard/DashboardHealth";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 vi.mock("@/hooks/useDashboardData", async () => {
   const actual = await vi.importActual<typeof import("@/hooks/useDashboardData")>("@/hooks/useDashboardData");
@@ -26,9 +27,11 @@ function renderDashboard() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
-        <Dashboard />
-      </MemoryRouter>
+      <TooltipProvider>
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>
+      </TooltipProvider>
     </QueryClientProvider>,
   );
 }
@@ -72,15 +75,35 @@ const dashboardData = {
     xMonthlyBudget: 3000,
     xBudgetUsedPct: 4,
   },
-  activities: [{
-    id: "a1",
-    title: "Ingested @rss-feed",
-    description: "Fresh post",
-    timestamp: new Date().toISOString(),
-    status: "pending" as const,
-    kind: "post" as const,
-    route: "/monitoring?search=1",
-  }],
+  activities: [
+    {
+      id: "a1",
+      title: "Ingested @rss-feed",
+      description: "Fresh post",
+      timestamp: new Date().toISOString(),
+      status: "pending" as const,
+      kind: "post" as const,
+      route: "/monitoring?search=1",
+    },
+    {
+      id: "a2",
+      title: "Telegram posted",
+      description: "Delivery state changed",
+      timestamp: new Date(Date.now() - 1000).toISOString(),
+      status: "success" as const,
+      kind: "delivery" as const,
+      route: "/monitoring?search=2",
+    },
+    {
+      id: "a3",
+      title: "Failed item",
+      description: "Worker failed",
+      timestamp: new Date(Date.now() - 2000).toISOString(),
+      status: "failed" as const,
+      kind: "job" as const,
+      route: "/monitoring?search=3",
+    },
+  ],
   heartbeat: {
     state: "ok" as const,
     lastPostAt: new Date().toISOString(),
@@ -258,7 +281,7 @@ describe("Dashboard", () => {
     expect(screen.getByRole("button", { name: /retry/i })).toBeTruthy();
   });
 
-  it("renders triage, funnel, and local X usage without official sync copy", () => {
+  it("renders triage, funnel, and local X usage with specific operator copy", () => {
     mockedUseDashboardData.mockReturnValue({
       data: dashboardData,
       isLoading: false,
@@ -272,16 +295,119 @@ describe("Dashboard", () => {
 
     expect(screen.getByText("Pipeline Funnel")).toBeTruthy();
     expect(screen.getByText("X Cost Guard")).toBeTruthy();
-    expect(screen.getByText("System Speed + Quota")).toBeTruthy();
+    expect(screen.getByText("Pipeline Speed")).toBeTruthy();
+    expect(screen.getByText("Resource Risk")).toBeTruthy();
     expect(screen.getByText("Needs attention")).toBeTruthy();
     expect(screen.getByText("Failed posts 24h")).toBeTruthy();
     expect(screen.getByText("Failed attempts")).toBeTruthy();
-    expect(screen.getByText(/Duplicate translate jobs: 2 in 24h/)).toBeTruthy();
+    expect(screen.getByText("Duplicate translate jobs")).toBeTruthy();
     expect(screen.getByText("Regional auto 24h")).toBeTruthy();
     expect(screen.getByText("Projected added/month")).toBeTruthy();
     expect(screen.getByText("310")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Review 1 failed job/i })).toBeTruthy();
+    expect(screen.queryByText("Open recommended view")).toBeNull();
+    expect(screen.getByText("5 not scored")).toBeTruthy();
+    expect(screen.getByText("3 not translated")).toBeTruthy();
+    expect(screen.getByText("4 awaiting Telegram")).toBeTruthy();
+    expect(screen.getByText("3 not X posted")).toBeTruthy();
 
+    expect(screen.getByText(/Supabase-local telemetry only/)).toBeTruthy();
     expect(screen.getByText(/Official X usage is not synced from Dashboard/)).toBeTruthy();
+  });
+
+  it("surfaces storage warning when no higher-priority issue is active", () => {
+    mockedUseDashboardData.mockReturnValue({
+      data: {
+        ...dashboardData,
+        opsStatus: {
+          ...dashboardData.opsStatus,
+          severity: "ok" as const,
+          primaryIssue: "Pipeline is operating normally",
+          recommendedRoute: "/monitoring",
+        },
+        pipelineCounts: {
+          ...dashboardData.pipelineCounts,
+          failedStuck: 0,
+        },
+        systemPerformance: {
+          ...dashboardData.systemPerformance,
+          resources: {
+            ...dashboardData.systemPerformance.resources,
+            storageUsedPct: 86,
+            tempMediaBytes: 860_000_000,
+          },
+        },
+      },
+      isLoading: false,
+      isError: false,
+      error: null,
+      dataUpdatedAt: Date.now(),
+      isFetching: false,
+    } as ReturnType<typeof useDashboardData>);
+
+    renderDashboard();
+
+    expect(screen.getByText("Temp media storage high")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Review storage risk/i })).toBeTruthy();
+  });
+
+  it("lets critical storage risk outrank warning-level failed jobs", () => {
+    mockedUseDashboardData.mockReturnValue({
+      data: {
+        ...dashboardData,
+        systemPerformance: {
+          ...dashboardData.systemPerformance,
+          resources: {
+            ...dashboardData.systemPerformance.resources,
+            storageUsedPct: 92,
+            tempMediaBytes: 920_000_000,
+          },
+        },
+      },
+      isLoading: false,
+      isError: false,
+      error: null,
+      dataUpdatedAt: Date.now(),
+      isFetching: false,
+    } as ReturnType<typeof useDashboardData>);
+
+    renderDashboard();
+
+    expect(screen.getByText("Temp media storage critical")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Review storage risk/i })).toBeTruthy();
+  });
+
+  it("filters recent activity by operator status", () => {
+    mockedUseDashboardData.mockReturnValue({
+      data: dashboardData,
+      isLoading: false,
+      isError: false,
+      error: null,
+      dataUpdatedAt: Date.now(),
+      isFetching: false,
+    } as ReturnType<typeof useDashboardData>);
+
+    renderDashboard();
+
+    expect(screen.getByText("Failed item")).toBeTruthy();
+    expect(screen.getByText("Ingested @rss-feed")).toBeTruthy();
+    expect(screen.getByText("Telegram posted")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Failed$/i }));
+    expect(screen.getByText("Failed item")).toBeTruthy();
+    expect(screen.queryByText("Ingested @rss-feed")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Pending$/i }));
+    expect(screen.getByText("Ingested @rss-feed")).toBeTruthy();
+    expect(screen.queryByText("Telegram posted")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Delivered$/i }));
+    expect(screen.getByText("Telegram posted")).toBeTruthy();
+    expect(screen.queryByText("Failed item")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Ingested$/i }));
+    expect(screen.getByText("Ingested @rss-feed")).toBeTruthy();
+    expect(screen.queryByText("Telegram posted")).toBeNull();
   });
 
   it("keeps live pipeline testing behind a confirmation", () => {
