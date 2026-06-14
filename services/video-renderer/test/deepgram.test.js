@@ -84,6 +84,24 @@ test("does not let existing Persian post translation bias Deepgram language atte
   assert.deepEqual(attempts.map((attempt) => attempt.language || "auto"), ["multi", "auto", "en", "fa", "he", "ar"]);
 });
 
+test("does not force Farsi from Persian or Arabic-script post copy", () => {
+  const attempts = resolveDeepgramLanguageAttempts({
+    language: "",
+    detectLanguage: true,
+    languageFallbacks: ["multi", "en", "fa", "he", "ar"],
+    contextText: [
+      "Post context:",
+      "Author: osint613",
+      "Post: لحظه‌ای که ارتش اسرائیل مرکز فرماندهی حزب‌الله را هدف قرار داد.",
+      "Existing translated post: لحظه‌ای که ارتش اسرائیل مرکز فرماندهی حزب‌الله را هدف قرار داد.",
+      "URL: https://twitter.com/Osint613/status/2066116702878761242",
+      "Visual note: No removable third-party watermark is visible.",
+    ].join("\n"),
+  });
+
+  assert.deepEqual(attempts.map((attempt) => attempt.language || "auto"), ["multi", "auto", "en", "fa", "he", "ar"]);
+});
+
 test("does not let raw OCR script alone bias Deepgram spoken-language attempts", () => {
   const attempts = resolveDeepgramLanguageAttempts({
     language: "",

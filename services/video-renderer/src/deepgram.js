@@ -203,15 +203,16 @@ function pushAttempt(attempts, language, detectLanguage) {
 
 function preferredLanguagesFromContext(contextText) {
   const text = speechHintContextText(contextText);
+  const visualText = visualContextText(contextText, { includeOcr: false });
   if (/\b(?:tv\.)?snn(?:tv)?(?:\.ir)?\b/i.test(text)) return ["fa", "multi"];
   if (/\b(?:persian|farsi)\b/i.test(text)) return ["fa", "multi"];
   if (/\barabic\b/i.test(text)) return ["ar", "multi"];
-  const persianSpecific = (text.match(/[پچژگک‌ی]/g) || []).length;
-  const arabicScript = (text.match(/[\u0600-\u06FF]/g) || []).length;
-  const hebrewScript = (text.match(/[\u0590-\u05FF]/g) || []).length;
+  const persianSpecific = (visualText.match(/[پچژگک‌ی]/g) || []).length;
+  const arabicScript = (visualText.match(/[\u0600-\u06FF]/g) || []).length;
+  const hebrewScript = (visualText.match(/[\u0590-\u05FF]/g) || []).length;
   const latinScript = (text.match(/[A-Za-z]/g) || []).length;
 
-  if (persianSpecific >= 2 || (arabicScript >= 8 && /(?:است|های|می|را|این|برای|کرد|شد)/.test(text))) return ["fa"];
+  if (persianSpecific >= 2 || (arabicScript >= 8 && /(?:است|های|می|را|این|برای|کرد|شد)/.test(visualText))) return ["fa"];
   if (hebrewScript >= 4) return ["he"];
   if (arabicScript >= 8) return ["ar"];
   if (latinScript >= 12) return ["multi"];
