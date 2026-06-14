@@ -1,9 +1,5 @@
 import { normalizeScoringPolicy } from "../_shared/scoringPolicy.ts";
-
-export type AdminActionResponse = {
-  body: unknown;
-  status?: number;
-};
+import type { AdminActionResponse, SupabaseAdminClient } from "./types.ts";
 
 type SettingsQueryBuilder = {
   select(columns: string): SettingsQueryBuilder;
@@ -13,10 +9,6 @@ type SettingsQueryBuilder = {
     value: Record<string, unknown>,
     options?: Record<string, unknown>,
   ): Promise<{ error?: unknown }>;
-};
-
-type SupabaseSettingsClient = {
-  from(table: string): unknown;
 };
 
 export const SETTINGS_ALLOWED_KEYS = [
@@ -315,7 +307,7 @@ export function shouldRestampXPostingStart(prevCfg: Record<string, unknown>, nex
 }
 
 export async function saveSettingsAdminAction(
-  supabase: SupabaseSettingsClient,
+  supabase: SupabaseAdminClient,
   body: Record<string, unknown>,
 ): Promise<AdminActionResponse> {
   const key = body.key as string | undefined;

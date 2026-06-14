@@ -42,6 +42,16 @@ import {
 } from "../_shared/mediaSelection.ts";
 import { selectSourceVideo } from "../_shared/videoRenderGate.ts";
 import {
+  bulkReprocessAdminAction,
+  cancelPendingJobsAdminAction,
+  editTranslationAdminAction,
+  getHealthAdminAction,
+  postThreadAdminAction,
+  reconcileStuckJobsAdminAction,
+  reprocessAdminAction,
+  retryStepAdminAction,
+} from "./basicActions.ts";
+import {
   normalizeVideoRenderConfigValue,
   serializeVideoRenderConfig,
 } from "../_shared/videoRenderConfig.ts";
@@ -4709,103 +4719,32 @@ serve(async (req) => {
 
       // ===== Edit translation =====
       case 'edit_translation': {
-        const { tweet_id, text_translated } = body;
-        if (!tweet_id || text_translated === undefined) {
-          return jsonResponse({ error: 'tweet_id and text_translated are required' }, 400);
-        }
-        const { error } = await supabase
-          .from('posts')
-          .update({ text_translated })
-          .eq('tweet_id', tweet_id);
-        if (error) throw error;
-        await recordFeedback(supabase, tweet_id, 'edit_translation', 0).catch(() => {});
-        return jsonResponse({ success: true, message: 'Translation updated' });
+        const result = await editTranslationAdminAction(supabase, body, recordFeedback);
+        return jsonResponse(result.body, result.status);
       }
 
       // ===== Retry step (translate/deliver/media) =====
       case 'retry_step': {
-        const { tweet_id, step } = body;
-        if (!tweet_id || !step) {
-          return jsonResponse({ error: 'tweet_id and step are required' }, 400);
-        }
-        const { data: result, error } = await supabase.rpc('retry_step', { tweet_id, step });
-        if (error) throw error;
-        if (step === 'deliver') {
-          await recordFeedback(supabase, tweet_id, 'force_deliver', 2).catch(() => {});
-          await supabase.from('posts').update({ feedback_locked: true }).eq('tweet_id', tweet_id);
-        }
-        return jsonResponse({ success: true, message: `${step} retry queued` });
+        const result = await retryStepAdminAction(supabase, body, recordFeedback);
+        return jsonResponse(result.body, result.status);
       }
 
       // ===== Reprocess (full re-run) =====
       case 'reprocess': {
-        const { tweet_id } = body;
-        if (!tweet_id) {
-          return jsonResponse({ error: 'tweet_id is required' }, 400);
-        }
-        const idempotencyKey = `reprocess:${tweet_id}`;
-        const { error } = await supabase
-          .from('jobs')
-          .upsert({
-            type: 'reprocess',
-            payload: { tweet_id },
-            status: 'pending',
-            idempotency_key: idempotencyKey,
-            next_run_at: new Date().toISOString()
-          }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
-        if (error) throw error;
-        await recordFeedback(supabase, tweet_id, 'reprocess', 0).catch(() => {});
-        return jsonResponse({ success: true, message: 'Reprocess job queued' });
+        const result = await reprocessAdminAction(supabase, body, recordFeedback);
+        return jsonResponse(result.body, result.status);
       }
 
       // ===== Cancel pending/running jobs =====
       case 'cancel_pending_jobs': {
-        const { types, include_running } = body as { types?: string[]; include_running?: boolean };
-        const statuses = include_running === false ? ['pending'] : ['pending', 'running'];
-        let query = supabase
-          .from('jobs')
-          .update({
-            status: 'failed',
-            last_error: 'Manually canceled by admin',
-            completed_at: new Date().toISOString(),
-            locked_at: null,
-            locked_by: null,
-            lease_expires_at: null,
-          })
-          .in('status', statuses);
-        if (Array.isArray(types) && types.length > 0) {
-          query = query.in('type', types);
-        }
-        const { data, error } = await query.select('id, type');
-        if (error) throw error;
-        const canceled = data?.length ?? 0;
-        const byType: Record<string, number> = {};
-        (data || []).forEach((r: { type: string }) => { byType[r.type] = (byType[r.type] || 0) + 1; });
-        return jsonResponse({ success: true, canceled, by_type: byType, message: `Canceled ${canceled} job(s)` });
+        const result = await cancelPendingJobsAdminAction(supabase, body);
+        return jsonResponse(result.body, result.status);
       }
 
       // ===== Bulk reprocess =====
       case 'bulk_reprocess': {
-        const { tweet_ids } = body;
-        if (!tweet_ids || !Array.isArray(tweet_ids) || tweet_ids.length === 0) {
-          return jsonResponse({ error: 'tweet_ids array is required' }, 400);
-        }
-        const tweetIds = [...new Set(tweet_ids.map((tid: unknown) => typeof tid === 'string' ? tid.trim() : '').filter(Boolean))];
-        const jobs = tweetIds.map((tid: string) => ({
-          type: 'reprocess',
-          payload: { tweet_id: tid },
-          status: 'pending',
-          idempotency_key: `reprocess:${tid}`,
-          next_run_at: new Date().toISOString()
-        }));
-        const { error } = await supabase.from('jobs').upsert(jobs, { onConflict: 'idempotency_key', ignoreDuplicates: true });
-        if (error) throw error;
-        return jsonResponse({
-          success: true,
-          requested: tweet_ids.length,
-          queued: tweetIds.length,
-          message: `${tweetIds.length} reprocess job(s) queued`,
-        });
+        const result = await bulkReprocessAdminAction(supabase, body);
+        return jsonResponse(result.body, result.status);
       }
 
       // ===== Bulk ignore =====
@@ -4820,36 +4759,19 @@ serve(async (req) => {
 
       // ===== Post thread =====
       case 'post_thread': {
-        const { thread_id } = body;
-        if (!thread_id) {
-          return jsonResponse({ error: 'thread_id is required' }, 400);
-        }
-        const { error } = await supabase
-          .from('deliveries')
-          .insert({ subject_type: 'thread', subject_id: thread_id, status: 'pending' });
-        if (error) throw error;
-        return jsonResponse({ success: true, message: 'Thread queued for delivery' });
+        const result = await postThreadAdminAction(supabase, body);
+        return jsonResponse(result.body, result.status);
       }
 
       // ===== System health =====
       case 'get_health': {
-        const { data, error } = await supabase.rpc('get_system_health');
-        if (error) throw error;
-        return jsonResponse({ success: true, health: data });
+        const result = await getHealthAdminAction(supabase);
+        return jsonResponse(result.body, result.status);
       }
 
       case 'reconcile_stuck_jobs': {
-        const { data, error } = await supabase.rpc('reconcile_stuck_jobs');
-        if (error) throw error;
-        await supabase.from('pipeline_events').insert({
-          subject_type: 'system',
-          subject_id: 'queue',
-          step: 'reconcile',
-          status: 'completed',
-          meta: { source: 'admin_dashboard', result: data },
-          ended_at: new Date().toISOString(),
-        });
-        return jsonResponse({ success: true, result: data });
+        const result = await reconcileStuckJobsAdminAction(supabase);
+        return jsonResponse(result.body, result.status);
       }
 
       case 'get_dashboard_summary': {
