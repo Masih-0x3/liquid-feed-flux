@@ -1073,13 +1073,13 @@ Completed slice:
 - Extracted the confirmation dialog to `src/components/monitoring/MonitoringActionDialog.tsx`.
 - Extracted the queue filter/bulk-action toolbar to `src/components/monitoring/MonitoringFilters.tsx`.
 - Extracted the summary metric cards to `src/components/monitoring/MonitoringQueueCards.tsx`.
+- Extracted the delivery timeline panel to `src/components/monitoring/MonitoringDeliveryTimeline.tsx`.
 - Added focused coverage in `src/test/monitoring-view-model.test.ts` and `src/test/monitoring-actions.test.ts`.
 
 Remaining in this phase:
 
 - Row/card renderer extraction.
 - Detail drawer extraction.
-- Delivery timeline panel extraction.
 - Optional `src/hooks/useMonitoringData.ts` cleanup is deferred to Phase 12 so fallback behavior stays isolated.
 
 Branch:
@@ -1101,6 +1101,7 @@ Turn `src/pages/Monitoring.tsx` into a page composition file instead of a combin
 - Create: `src/components/monitoring/MonitoringRow.tsx`
 - Create: `src/components/monitoring/MonitoringDetailDrawer.tsx`
 - Create: `src/components/monitoring/MonitoringActionDialog.tsx`
+- Create: `src/components/monitoring/MonitoringDeliveryTimeline.tsx`
 - Create: `src/test/monitoring-view-model.test.ts`
 - Create: `src/test/monitoring-actions.test.ts`
 - Modify: `src/pages/Monitoring.tsx`
@@ -1123,6 +1124,7 @@ rg -n "function |const .* = \\(|useMemo|useCallback|confirm|drawer|cluster|group
 - [ ] Extract row component.
 - [ ] Extract detail drawer component.
 - [x] Extract confirmation dialog component.
+- [x] Extract delivery timeline panel component.
 - [ ] Keep page-level React Query state and URL/search params in `Monitoring.tsx`.
 - [ ] After each component extraction, run the focused frontend tests.
 

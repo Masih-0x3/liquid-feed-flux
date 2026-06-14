@@ -5,7 +5,9 @@ import type {
   MonitoringFilter,
   ScoreBucket,
 } from "@/hooks/useMonitoringData";
+import type { MonitoringTone } from "@/lib/monitoringState";
 import type { ScoringV2Snapshot } from "@/lib/scoringV2Monitoring";
+import type { TimelineTone } from "@/lib/timelineDisplay";
 
 export const FILTERS: Array<{ value: MonitoringFilter; label: string }> = [
   { value: 'all', label: 'All' },
@@ -66,6 +68,14 @@ export function formatAge(seconds: number | null | undefined): string {
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}h ${minutes % 60}m`;
   return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+}
+
+export function toneClass(tone: MonitoringTone | TimelineTone) {
+  if (tone === 'good') return 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30';
+  if (tone === 'bad') return 'bg-destructive/15 text-destructive border-destructive/30';
+  if (tone === 'warn') return 'bg-amber-500/15 text-amber-500 border-amber-500/30';
+  if (tone === 'info') return 'bg-blue-500/15 text-blue-500 border-blue-500/30';
+  return 'bg-muted text-muted-foreground border-border';
 }
 
 export function shortText(entry: MonitoringEntry): string {
