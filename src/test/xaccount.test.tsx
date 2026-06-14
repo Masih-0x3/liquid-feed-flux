@@ -1,16 +1,11 @@
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import XAccountDisabled from "@/pages/XAccountDisabled";
 import { navigationItems } from "@/components/layout/navigation";
-import { useFollowerSnapshots } from "@/hooks/useFollowerData";
-
-vi.mock("@/hooks/useFollowerData", () => ({
-  useFollowerSnapshots: vi.fn(),
-}));
 
 describe("XAccountDisabled", () => {
-  it("renders disabled state without loading follower data", () => {
+  it("renders disabled state without follower controls", () => {
     render(
       <MemoryRouter initialEntries={["/x-account"]}>
         <XAccountDisabled />
@@ -19,7 +14,11 @@ describe("XAccountDisabled", () => {
 
     expect(screen.getByText("My X is paused")).toBeTruthy();
     expect(screen.getByText(/Follower and following snapshots are disabled/)).toBeTruthy();
-    expect(vi.mocked(useFollowerSnapshots)).not.toHaveBeenCalled();
+    expect(screen.getByText("Owned reads disabled")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /X automation settings/i })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Open Monitoring/i })).toBeTruthy();
+    expect(screen.queryByText(/Run snapshot/i)).toBeNull();
+    expect(screen.queryByText(/Follower Growth/i)).toBeNull();
   });
 
   it("removes My X from primary navigation", () => {

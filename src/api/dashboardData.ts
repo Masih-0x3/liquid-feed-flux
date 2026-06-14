@@ -1,5 +1,4 @@
 import { invokeAdminAction } from '@/api/adminActions';
-import { supabase } from '@/integrations/supabase/client';
 
 export interface DashboardMetrics {
   postsIngested: number;
@@ -558,22 +557,9 @@ function normalizeActivity(rpc: RpcResult): ActivityItem[] {
 }
 
 export async function fetchDashboardData() {
-  let rpc: RpcResult;
-
-  try {
-    const data = await invokeAdminAction<{ success?: boolean; error?: string; dashboard: unknown }>({ action: 'get_dashboard_summary' });
-    if (!data?.success) throw new Error(data?.error || 'Failed to load dashboard summary');
-    rpc = data.dashboard as unknown as RpcResult;
-  } catch (edgeError) {
-    // Local UI can run ahead of the deployed admin-actions function. The direct
-    // RPC is the older, read-only dashboard path and keeps the dashboard usable.
-    const { data, error } = await supabase.rpc('get_dashboard_summary');
-    if (error) {
-      const edgeMessage = edgeError instanceof Error ? edgeError.message : String(edgeError);
-      throw new Error(`Dashboard summary unavailable. Admin action failed: ${edgeMessage}; RPC fallback failed: ${error.message}`);
-    }
-    rpc = data as unknown as RpcResult;
-  }
+  const data = await invokeAdminAction<{ success?: boolean; error?: string; dashboard: unknown }>({ action: 'get_dashboard_summary' });
+  if (!data?.success) throw new Error(data?.error || 'Failed to load dashboard summary');
+  const rpc = data.dashboard as unknown as RpcResult;
 
   const metrics: DashboardMetrics = {
     postsIngested: rpc.metrics.posts_ingested,
