@@ -1,8 +1,11 @@
 import {
+  applyProfileDecision,
   computeFinalScore,
+  type EditorialProfile,
   parseScoreAxes,
   type ScoreAxes,
 } from "../_shared/scoring.ts";
+import type { ScoringPolicyResult } from "../_shared/scoringPolicy.ts";
 
 export const SCORING_AXES_SCHEMA = {
   type: "object",
@@ -82,6 +85,78 @@ export type ScoringCallOptions = {
   seed?: number | null;
   serviceTier?: string | null;
   parallelToolCalls?: boolean | null;
+};
+
+export type ScoringAuthorRule = {
+  rule: string;
+  threshold?: number | null;
+};
+
+export type BaseScoringDecisionState = {
+  deliveryDecision: string;
+  decisionReason: string | null;
+  finalScore: number | null;
+};
+
+export type ScoringFields = {
+  importanceScore: number | null;
+  importanceTags: string[] | null;
+  importanceReasoning: string | null;
+  scoreAxes: ScoreAxes | null;
+};
+
+export type ScoringDecisionLog =
+  | {
+    kind: "v2";
+    decision: string;
+    finalScore: number;
+    audienceClass: string;
+    profileId: string;
+    reason: string;
+  }
+  | {
+    kind: "legacy_profile";
+    decision: string;
+    score: number | null;
+    finalScore: number;
+    profileId: string;
+    authorHandle: string | null;
+    reason: string;
+  }
+  | {
+    kind: "legacy_threshold";
+    decision: string;
+    score: number | null;
+    threshold: number;
+    authorHandle: string | null;
+    reason: string | null;
+  };
+
+export type ScoringBaseDecisionInput = {
+  feedbackLocked: boolean;
+  postFinalScore: unknown;
+  postDeliveryDecision: unknown;
+  postDecisionReason: unknown;
+  importanceScore: number | null;
+  importanceTags: string[] | null;
+  importanceReasoning: string | null;
+  scoreAxes: ScoreAxes | null;
+  scoringPolicyActive: boolean;
+  scoringPolicyResult: ScoringPolicyResult | null;
+  filterEnabled: boolean;
+  legacyFilterEnabled: boolean;
+  scoreOnly: boolean;
+  editorialProfile: EditorialProfile | null;
+  authorHandle: string | null;
+  authorRules: Record<string, ScoringAuthorRule>;
+  defaultThreshold: number;
+  textOriginal: string;
+};
+
+export type ScoringBaseDecisionResult = {
+  decisionState: BaseScoringDecisionState;
+  scoringFields: ScoringFields;
+  logEvent: ScoringDecisionLog | null;
 };
 
 const FALLBACK_SCORING_RUBRIC = `You have two tasks. Complete both carefully.
@@ -285,5 +360,153 @@ export function resolveScoringCallOptions(
     serviceTier: config.scoringServiceTier ?? config.openaiServiceTier,
     parallelToolCalls: config.scoringParallelToolCalls ??
       config.openaiParallelToolCalls,
+  };
+}
+
+export function resolveActiveFeedbackThreshold(input: {
+  editorialProfileThreshold?: number | null;
+  authorHandle?: string | null;
+  authorRules: Record<string, ScoringAuthorRule>;
+  defaultThreshold: number;
+}): number {
+  if (typeof input.editorialProfileThreshold === "number") {
+    return input.editorialProfileThreshold;
+  }
+  const authorRule = input.authorHandle
+    ? input.authorRules[input.authorHandle]
+    : null;
+  if (authorRule?.rule === "custom_threshold" && authorRule.threshold != null) {
+    return authorRule.threshold;
+  }
+  return input.defaultThreshold;
+}
+
+export function buildScoringBaseDecisionState(
+  input: ScoringBaseDecisionInput,
+): ScoringBaseDecisionResult {
+  const scoringFields: ScoringFields = {
+    importanceScore: input.importanceScore,
+    importanceTags: input.importanceTags,
+    importanceReasoning: input.importanceReasoning,
+    scoreAxes: input.scoreAxes,
+  };
+
+  if (input.feedbackLocked) {
+    const lockedFinalScore = typeof input.postFinalScore === "number"
+      ? input.postFinalScore
+      : Number(input.postFinalScore ?? NaN) || input.importanceScore;
+    return {
+      decisionState: {
+        deliveryDecision: input.postDeliveryDecision === "skip"
+          ? "skip"
+          : "deliver",
+        decisionReason: typeof input.postDecisionReason === "string"
+          ? input.postDecisionReason
+          : "feedback_locked",
+        finalScore: lockedFinalScore,
+      },
+      scoringFields,
+      logEvent: null,
+    };
+  }
+
+  let deliveryDecision = "deliver";
+  let decisionReason: string | null = null;
+  let finalScore: number | null =
+    input.scoringPolicyActive && input.scoringPolicyResult
+      ? input.scoringPolicyResult.final_score
+      : input.scoreAxes
+      ? computeFinalScore(input.scoreAxes)
+      : input.importanceScore ?? null;
+  let logEvent: ScoringDecisionLog | null = null;
+
+  if (
+    input.filterEnabled && input.scoringPolicyActive &&
+    input.scoringPolicyResult && !input.scoreOnly
+  ) {
+    deliveryDecision = input.scoringPolicyResult.delivery_decision;
+    decisionReason = input.scoringPolicyResult.decision_reason;
+    finalScore = input.scoringPolicyResult.final_score;
+    scoringFields.importanceScore = Math.round(
+      input.scoringPolicyResult.final_score,
+    );
+    scoringFields.importanceTags = input.scoringPolicyResult.tags;
+    scoringFields.importanceReasoning =
+      input.scoringPolicyResult.audience_reason;
+    scoringFields.scoreAxes = input.scoringPolicyResult.axes as ScoreAxes;
+    logEvent = {
+      kind: "v2",
+      decision: deliveryDecision,
+      finalScore,
+      audienceClass: input.scoringPolicyResult.audience_class,
+      profileId: input.scoringPolicyResult.profile_id,
+      reason: decisionReason,
+    };
+  } else if (
+    input.legacyFilterEnabled && input.importanceScore !== null &&
+    !input.scoreOnly
+  ) {
+    if (input.editorialProfile) {
+      const result = applyProfileDecision({
+        profile: input.editorialProfile,
+        axes: input.scoreAxes,
+        legacyScore: input.importanceScore,
+        tags: input.importanceTags ?? [],
+        text: input.textOriginal,
+        authorHandle: input.authorHandle,
+      });
+      deliveryDecision = result.decision;
+      decisionReason = result.reason;
+      finalScore = result.finalScore;
+      logEvent = {
+        kind: "legacy_profile",
+        decision: deliveryDecision,
+        score: input.importanceScore,
+        finalScore,
+        profileId: input.editorialProfile.id,
+        authorHandle: input.authorHandle,
+        reason: decisionReason,
+      };
+    } else {
+      const authorRule = input.authorHandle
+        ? input.authorRules[input.authorHandle]
+        : null;
+      if (authorRule?.rule === "always_deliver") {
+        deliveryDecision = "deliver";
+        decisionReason = `author_rule:always_deliver:${input.authorHandle}`;
+      } else if (authorRule?.rule === "always_skip") {
+        deliveryDecision = "skip";
+        decisionReason = `author_rule:always_skip:${input.authorHandle}`;
+      } else {
+        const threshold = authorRule?.rule === "custom_threshold" &&
+            authorRule.threshold != null
+          ? authorRule.threshold
+          : input.defaultThreshold;
+        deliveryDecision = input.importanceScore >= threshold
+          ? "deliver"
+          : "skip";
+        decisionReason = deliveryDecision === "deliver"
+          ? `score_pass:${input.importanceScore}>=${threshold}`
+          : `below_threshold:${input.importanceScore}<${threshold}`;
+      }
+      logEvent = {
+        kind: "legacy_threshold",
+        decision: deliveryDecision,
+        score: input.importanceScore,
+        threshold: input.defaultThreshold,
+        authorHandle: input.authorHandle,
+        reason: decisionReason,
+      };
+    }
+  } else if (input.scoreOnly) {
+    decisionReason = "score_only_mode";
+  } else if (!input.legacyFilterEnabled && !input.scoringPolicyActive) {
+    decisionReason = "filter_disabled";
+  }
+
+  return {
+    decisionState: { deliveryDecision, decisionReason, finalScore },
+    scoringFields,
+    logEvent,
   };
 }

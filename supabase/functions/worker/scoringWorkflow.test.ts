@@ -2,9 +2,11 @@ import { assert, assertEquals } from "jsr:@std/assert";
 import { computeFinalScore } from "../_shared/scoring.ts";
 import {
   buildClassifierToolFunction,
+  buildScoringBaseDecisionState,
   parseClassifierToolCallArguments,
   renderScoringSystemPrompt,
   renderScoringUserMessage,
+  resolveActiveFeedbackThreshold,
   resolveScoringCallOptions,
   SCORING_AXES_SCHEMA,
 } from "./scoringWorkflow.ts";
@@ -284,4 +286,246 @@ Deno.test("resolveScoringCallOptions prefers scoring-specific settings", () => {
       parallelToolCalls: true,
     },
   );
+});
+
+Deno.test("resolveActiveFeedbackThreshold prefers profile then custom author threshold then default", () => {
+  assertEquals(
+    resolveActiveFeedbackThreshold({
+      editorialProfileThreshold: 14,
+      authorHandle: "source",
+      authorRules: { source: { rule: "custom_threshold", threshold: 9 } },
+      defaultThreshold: 12,
+    }),
+    14,
+  );
+
+  assertEquals(
+    resolveActiveFeedbackThreshold({
+      editorialProfileThreshold: null,
+      authorHandle: "source",
+      authorRules: { source: { rule: "custom_threshold", threshold: 9 } },
+      defaultThreshold: 12,
+    }),
+    9,
+  );
+
+  assertEquals(
+    resolveActiveFeedbackThreshold({
+      editorialProfileThreshold: null,
+      authorHandle: "source",
+      authorRules: { source: { rule: "always_deliver" } },
+      defaultThreshold: 12,
+    }),
+    12,
+  );
+});
+
+Deno.test("buildScoringBaseDecisionState preserves feedback-locked decisions", () => {
+  const result = buildScoringBaseDecisionState({
+    feedbackLocked: true,
+    postFinalScore: "bad",
+    postDeliveryDecision: "skip",
+    postDecisionReason: "manual_skip",
+    importanceScore: 13,
+    importanceTags: ["manual"],
+    importanceReasoning: "locked",
+    scoreAxes: null,
+    scoringPolicyActive: false,
+    scoringPolicyResult: null,
+    filterEnabled: true,
+    legacyFilterEnabled: true,
+    scoreOnly: false,
+    editorialProfile: null,
+    authorHandle: "source",
+    authorRules: {},
+    defaultThreshold: 12,
+    textOriginal: "Original",
+  });
+
+  assertEquals(result, {
+    decisionState: {
+      deliveryDecision: "skip",
+      decisionReason: "manual_skip",
+      finalScore: 13,
+    },
+    scoringFields: {
+      importanceScore: 13,
+      importanceTags: ["manual"],
+      importanceReasoning: "locked",
+      scoreAxes: null,
+    },
+    logEvent: null,
+  });
+});
+
+Deno.test("buildScoringBaseDecisionState applies scoring policy active fields", () => {
+  const scoringPolicyResult = {
+    final_score: 17.4,
+    delivery_decision: "deliver",
+    decision_reason: "direct_focus:17.4>=14",
+    tags: ["direct_focus"],
+    audience_reason: "direct audience fit",
+    axes: { focus_relevance: 9, geopolitical_weight: 8 },
+    audience_class: "direct_focus",
+    profile_id: "iran-first",
+  };
+
+  const result = buildScoringBaseDecisionState({
+    feedbackLocked: false,
+    postFinalScore: null,
+    postDeliveryDecision: null,
+    postDecisionReason: null,
+    importanceScore: 10,
+    importanceTags: ["legacy"],
+    importanceReasoning: "legacy",
+    scoreAxes: null,
+    scoringPolicyActive: true,
+    scoringPolicyResult: scoringPolicyResult as never,
+    filterEnabled: true,
+    legacyFilterEnabled: false,
+    scoreOnly: false,
+    editorialProfile: null,
+    authorHandle: "source",
+    authorRules: {},
+    defaultThreshold: 12,
+    textOriginal: "Original",
+  });
+
+  assertEquals(result.decisionState, {
+    deliveryDecision: "deliver",
+    decisionReason: "direct_focus:17.4>=14",
+    finalScore: 17.4,
+  });
+  assertEquals(result.scoringFields, {
+    importanceScore: 17,
+    importanceTags: ["direct_focus"],
+    importanceReasoning: "direct audience fit",
+    scoreAxes: scoringPolicyResult.axes as never,
+  });
+  assertEquals(result.logEvent, {
+    kind: "v2",
+    decision: "deliver",
+    finalScore: 17.4,
+    audienceClass: "direct_focus",
+    profileId: "iran-first",
+    reason: "direct_focus:17.4>=14",
+  });
+});
+
+Deno.test("buildScoringBaseDecisionState applies legacy author threshold rules", () => {
+  const custom = buildScoringBaseDecisionState({
+    feedbackLocked: false,
+    postFinalScore: null,
+    postDeliveryDecision: null,
+    postDecisionReason: null,
+    importanceScore: 10,
+    importanceTags: null,
+    importanceReasoning: null,
+    scoreAxes: null,
+    scoringPolicyActive: false,
+    scoringPolicyResult: null,
+    filterEnabled: true,
+    legacyFilterEnabled: true,
+    scoreOnly: false,
+    editorialProfile: null,
+    authorHandle: "source",
+    authorRules: { source: { rule: "custom_threshold", threshold: 11 } },
+    defaultThreshold: 12,
+    textOriginal: "Original",
+  });
+
+  assertEquals(custom.decisionState, {
+    deliveryDecision: "skip",
+    decisionReason: "below_threshold:10<11",
+    finalScore: 10,
+  });
+  assertEquals(custom.logEvent, {
+    kind: "legacy_threshold",
+    decision: "skip",
+    score: 10,
+    threshold: 12,
+    authorHandle: "source",
+    reason: "below_threshold:10<11",
+  });
+
+  const forced = buildScoringBaseDecisionState({
+    feedbackLocked: false,
+    postFinalScore: null,
+    postDeliveryDecision: null,
+    postDecisionReason: null,
+    importanceScore: 1,
+    importanceTags: null,
+    importanceReasoning: null,
+    scoreAxes: null,
+    scoringPolicyActive: false,
+    scoringPolicyResult: null,
+    filterEnabled: true,
+    legacyFilterEnabled: true,
+    scoreOnly: false,
+    editorialProfile: null,
+    authorHandle: "source",
+    authorRules: { source: { rule: "always_deliver" } },
+    defaultThreshold: 12,
+    textOriginal: "Original",
+  });
+
+  assertEquals(forced.decisionState, {
+    deliveryDecision: "deliver",
+    decisionReason: "author_rule:always_deliver:source",
+    finalScore: 1,
+  });
+});
+
+Deno.test("buildScoringBaseDecisionState records score-only and disabled filter reasons", () => {
+  const scoreOnly = buildScoringBaseDecisionState({
+    feedbackLocked: false,
+    postFinalScore: null,
+    postDeliveryDecision: null,
+    postDecisionReason: null,
+    importanceScore: 8,
+    importanceTags: null,
+    importanceReasoning: null,
+    scoreAxes: null,
+    scoringPolicyActive: false,
+    scoringPolicyResult: null,
+    filterEnabled: true,
+    legacyFilterEnabled: true,
+    scoreOnly: true,
+    editorialProfile: null,
+    authorHandle: null,
+    authorRules: {},
+    defaultThreshold: 12,
+    textOriginal: "Original",
+  });
+  assertEquals(scoreOnly.decisionState, {
+    deliveryDecision: "deliver",
+    decisionReason: "score_only_mode",
+    finalScore: 8,
+  });
+
+  const disabled = buildScoringBaseDecisionState({
+    feedbackLocked: false,
+    postFinalScore: null,
+    postDeliveryDecision: null,
+    postDecisionReason: null,
+    importanceScore: null,
+    importanceTags: null,
+    importanceReasoning: null,
+    scoreAxes: null,
+    scoringPolicyActive: false,
+    scoringPolicyResult: null,
+    filterEnabled: false,
+    legacyFilterEnabled: false,
+    scoreOnly: false,
+    editorialProfile: null,
+    authorHandle: null,
+    authorRules: {},
+    defaultThreshold: 12,
+    textOriginal: "Original",
+  });
+  assertEquals(disabled.decisionState, {
+    deliveryDecision: "deliver",
+    decisionReason: "filter_disabled",
+    finalScore: null,
+  });
 });
