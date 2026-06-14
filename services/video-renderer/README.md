@@ -10,7 +10,7 @@ Required Ubuntu packages:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y ffmpeg fontconfig fonts-noto-core python3 python3-opencv python3-numpy
+sudo apt-get install -y ffmpeg fontconfig fonts-noto-core python3 python3-opencv python3-numpy tesseract-ocr tesseract-ocr-eng tesseract-ocr-fas tesseract-ocr-ara tesseract-ocr-heb
 ```
 
 Docker installs Vazirmatn from the pinned npm package and copies the TTF files
@@ -35,6 +35,7 @@ SUBTITLE_TRANSCRIBE_MODEL=gpt-4o-transcribe-diarize
 SUBTITLE_TRANSLATE_MODEL=gpt-5.4-mini
 WATERMARK_VISION_MODEL=gpt-5.4-mini
 VISION_SPECIALIST_MODE=always
+TESSERACT_LANG=eng+fas+ara+heb
 MAX_DELOGO_REGIONS=2
 MAX_SINGLE_DELOGO_AREA_RATIO=0.10
 MAX_TOTAL_DELOGO_AREA_RATIO=0.15

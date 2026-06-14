@@ -24,6 +24,21 @@ const PLATFORM_EXTRACTORS = [
   /\b[\w.-]+\.(?:com|net|org|io|ir|co)\b/gi,
 ];
 
+export const DEFAULT_TESSERACT_LANG = "eng+fas+ara+heb";
+
+export function tesseractArgs(imagePath, outputFormat = null) {
+  const language = String(process.env.TESSERACT_LANG || DEFAULT_TESSERACT_LANG).trim() || DEFAULT_TESSERACT_LANG;
+  return [
+    imagePath,
+    "stdout",
+    "-l",
+    language,
+    "--psm",
+    "6",
+    ...(outputFormat ? [outputFormat] : []),
+  ];
+}
+
 function hasWatermarkTextMarker(value) {
   return PLATFORM_PATTERNS.some((pattern) => pattern.test(String(value ?? "")));
 }
@@ -391,7 +406,7 @@ export function extractPlatformMatches(text) {
 
 export function runOptionalOcr(imagePath) {
   return new Promise((resolve) => {
-    const child = spawn("tesseract", [imagePath, "stdout", "--psm", "6"], { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn("tesseract", tesseractArgs(imagePath), { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
@@ -449,7 +464,7 @@ function parseOcrPageDimensions(tsv) {
 
 function runOcrTsv(imagePath) {
   return new Promise((resolve) => {
-    const child = spawn("tesseract", [imagePath, "stdout", "--psm", "6", "tsv"], { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn("tesseract", tesseractArgs(imagePath, "tsv"), { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
