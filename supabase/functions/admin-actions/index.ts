@@ -94,6 +94,10 @@ import {
   runTranslationOnly,
   translatePostAdminAction,
 } from "./translationRescoreActions.ts";
+import {
+  insertAdminPipelineEvent,
+  recordFeedback,
+} from "./sideEffects.ts";
 
 const DEPLOY_SHA = Deno.env.get('DEPLOY_GIT_SHA') ?? 'unknown';
 const DEPLOY_TIME = Deno.env.get('DEPLOY_TIME') ?? new Date().toISOString();
@@ -174,91 +178,6 @@ function jsonResponse(body: unknown, status = 200) {
     status,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
-}
-
-// deno-lint-ignore no-explicit-any
-async function recordFeedback(
-  supabase: any,
-  tweetId: string,
-  feedbackAction: string,
-  polarity: number,
-  meta?: Record<string, unknown>,
-  relatedTweetId?: string | null,
-) {
-  await supabase.from('feedback_events').insert({
-    tweet_id: tweetId,
-    related_tweet_id: relatedTweetId ?? null,
-    action: feedbackAction,
-    polarity,
-    meta: meta ?? {},
-    source: 'admin_action',
-  });
-
-  if (polarity === 0 || ['not_duplicate', 'confirm_duplicate'].includes(feedbackAction)) return;
-
-  const { data: post } = await supabase
-    .from('posts')
-    .select('author_handle, importance_tags')
-    .eq('tweet_id', tweetId)
-    .maybeSingle();
-  if (!post) return;
-
-  const { data: biasRow } = await supabase
-    .from('settings')
-    .select('value')
-    .eq('key', 'learned_biases')
-    .maybeSingle();
-  const biases = (biasRow?.value ?? { author_bias: {}, tag_bias: {}, keyword_bias: {} }) as {
-    author_bias: Record<string, number>;
-    tag_bias: Record<string, number>;
-    keyword_bias: Record<string, number>;
-  };
-
-  const PER_EVENT_CLAMP = 0.5;
-  const PER_KEY_CAP = 3;
-  const clampD = (d: number) => Math.max(-PER_EVENT_CLAMP, Math.min(PER_EVENT_CLAMP, d));
-  const clampT = (t: number) => Math.max(-PER_KEY_CAP, Math.min(PER_KEY_CAP, t));
-
-  if (post.author_handle) {
-    const handle = (post.author_handle as string).toLowerCase();
-    biases.author_bias[handle] = clampT((biases.author_bias[handle] || 0) + clampD(polarity * 0.6));
-  }
-
-  const tags = Array.isArray(post.importance_tags) ? post.importance_tags as string[] : [];
-  if (tags.length > 0) {
-    const perTag = polarity * 0.2 / tags.length;
-    for (const tag of tags) {
-      const t = String(tag).toLowerCase();
-      biases.tag_bias[t] = clampT((biases.tag_bias[t] || 0) + clampD(perTag));
-    }
-  }
-
-  await supabase.from('settings').upsert({
-    key: 'learned_biases',
-    value: biases,
-    updated_at: new Date().toISOString(),
-  }, { onConflict: 'key' });
-}
-
-// deno-lint-ignore no-explicit-any
-async function insertAdminPipelineEvent(
-  supabase: any,
-  tweetId: string,
-  step: string,
-  status: string,
-  meta?: Record<string, unknown>,
-  error?: string | null,
-) {
-  await supabase.from('pipeline_events').insert({
-    subject_type: 'post',
-    subject_id: tweetId,
-    step,
-    status,
-    started_at: new Date().toISOString(),
-    ended_at: status === 'completed' || status === 'failed' || status === 'skipped' ? new Date().toISOString() : null,
-    error: error ?? null,
-    meta: { source: 'admin-actions', ...(meta ?? {}) },
-  }).then(() => null, () => null);
 }
 
 // deno-lint-ignore no-explicit-any
