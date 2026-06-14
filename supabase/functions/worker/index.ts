@@ -91,6 +91,7 @@ import {
 } from "./mediaWorkflow.ts";
 import {
   buildClassifierToolFunction,
+  parseClassifierToolCallArguments,
   renderScoringSystemPrompt,
   renderScoringUserMessage,
 } from "./scoringWorkflow.ts";
@@ -1091,15 +1092,11 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
 
       if (scoreResult.toolCall) {
         try {
-          const args = JSON.parse(scoreResult.toolCall.arguments);
-          importanceScore = Math.max(1, Math.min(20, args.importance_score || 10));
-          importanceTags = args.tags || [];
-          importanceReasoning = typeof args.reasoning === 'string' ? args.reasoning : null;
-          scoreAxes = parseScoreAxes(args.axes);
-          // If axes present and importance_score wasn't, derive it from axes
-          if (scoreAxes && (args.importance_score == null)) {
-            importanceScore = Math.round(computeFinalScore(scoreAxes));
-          }
+          const parsedScore = parseClassifierToolCallArguments(scoreResult.toolCall.arguments);
+          importanceScore = parsedScore.importanceScore;
+          importanceTags = parsedScore.importanceTags;
+          importanceReasoning = parsedScore.importanceReasoning;
+          scoreAxes = parsedScore.scoreAxes;
           console.log(JSON.stringify({ function: 'worker', action: 'scored', tweet_id: tweetId, score: importanceScore, axes: scoreAxes, tags: importanceTags, reasoning: importanceReasoning, endpoint: scoreResult.endpoint, model: scoringModel }));
           await insertPipelineEvent(supabase, 'post', tweetId, 'score', 'completed', null, new Date().toISOString(), null, {
             score: importanceScore,
@@ -1190,15 +1187,12 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
       data = result.raw;
       if (result.toolCall) {
         try {
-          const args = JSON.parse(result.toolCall.arguments);
-          translatedText = args.translated_text || '';
-          importanceScore = Math.max(1, Math.min(20, args.importance_score || 10));
-          importanceTags = args.tags || [];
-          importanceReasoning = typeof args.reasoning === 'string' ? args.reasoning : null;
-          scoreAxes = parseScoreAxes(args.axes);
-          if (scoreAxes && (args.importance_score == null)) {
-            importanceScore = Math.round(computeFinalScore(scoreAxes));
-          }
+          const parsedScore = parseClassifierToolCallArguments(result.toolCall.arguments, { includeTranslatedText: true });
+          translatedText = parsedScore.translatedText || '';
+          importanceScore = parsedScore.importanceScore;
+          importanceTags = parsedScore.importanceTags;
+          importanceReasoning = parsedScore.importanceReasoning;
+          scoreAxes = parsedScore.scoreAxes;
           console.log(JSON.stringify({ function: 'worker', action: 'scored', tweet_id: tweetId, score: importanceScore, axes: scoreAxes, tags: importanceTags, reasoning: importanceReasoning, endpoint: result.endpoint }));
           await insertPipelineEvent(supabase, 'post', tweetId, 'score', 'completed', null, new Date().toISOString(), null, {
             score: importanceScore,

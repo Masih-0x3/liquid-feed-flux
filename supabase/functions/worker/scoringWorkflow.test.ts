@@ -1,6 +1,8 @@
 import { assert, assertEquals } from "jsr:@std/assert";
+import { computeFinalScore } from "../_shared/scoring.ts";
 import {
   buildClassifierToolFunction,
+  parseClassifierToolCallArguments,
   renderScoringSystemPrompt,
   renderScoringUserMessage,
   SCORING_AXES_SCHEMA,
@@ -147,5 +149,75 @@ URL: N/A
 
 Content:
 Original content`,
+  );
+});
+
+Deno.test("parseClassifierToolCallArguments preserves legacy score clamping and tags", () => {
+  assertEquals(
+    parseClassifierToolCallArguments(
+      JSON.stringify({
+        importance_score: 25,
+        tags: ["iran", "military"],
+        reasoning: "direct high-impact signal",
+      }),
+    ),
+    {
+      importanceScore: 20,
+      importanceTags: ["iran", "military"],
+      importanceReasoning: "direct high-impact signal",
+      scoreAxes: null,
+    },
+  );
+
+  assertEquals(
+    parseClassifierToolCallArguments(JSON.stringify({ importance_score: -3 })),
+    {
+      importanceScore: 1,
+      importanceTags: [],
+      importanceReasoning: null,
+      scoreAxes: null,
+    },
+  );
+});
+
+Deno.test("parseClassifierToolCallArguments derives score from axes when missing", () => {
+  const axes = {
+    iran_relevance: 9,
+    severity: 8,
+    novelty: 7,
+    credibility: 6,
+    actionability: 5,
+    noise: 2,
+  };
+
+  assertEquals(
+    parseClassifierToolCallArguments(JSON.stringify({ axes })),
+    {
+      importanceScore: Math.round(computeFinalScore(axes)),
+      importanceTags: [],
+      importanceReasoning: null,
+      scoreAxes: axes,
+    },
+  );
+});
+
+Deno.test("parseClassifierToolCallArguments returns translated text for combined calls", () => {
+  assertEquals(
+    parseClassifierToolCallArguments(
+      JSON.stringify({
+        translated_text: "متن فارسی",
+        importance_score: 16,
+        tags: ["diplomacy"],
+        reasoning: "direct diplomacy",
+      }),
+      { includeTranslatedText: true },
+    ),
+    {
+      translatedText: "متن فارسی",
+      importanceScore: 16,
+      importanceTags: ["diplomacy"],
+      importanceReasoning: "direct diplomacy",
+      scoreAxes: null,
+    },
   );
 });

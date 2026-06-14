@@ -1,3 +1,9 @@
+import {
+  computeFinalScore,
+  parseScoreAxes,
+  type ScoreAxes,
+} from "../_shared/scoring.ts";
+
 export const SCORING_AXES_SCHEMA = {
   type: "object",
   description:
@@ -35,6 +41,14 @@ export type ScoringUserMessageInput = {
   publishedAt: string;
   hasMedia: boolean;
   url?: string | null;
+};
+
+export type ParsedClassifierToolCall = {
+  translatedText?: string;
+  importanceScore: number;
+  importanceTags: string[];
+  importanceReasoning: string | null;
+  scoreAxes: ScoreAxes | null;
 };
 
 const FALLBACK_SCORING_RUBRIC = `You have two tasks. Complete both carefully.
@@ -189,4 +203,35 @@ URL: ${input.url || "N/A"}
 
 Content:
 ${input.textOriginal}`;
+}
+
+export function parseClassifierToolCallArguments(
+  argumentsJson: string,
+  options: { includeTranslatedText?: boolean } = {},
+): ParsedClassifierToolCall {
+  const args = JSON.parse(argumentsJson) as Record<string, unknown>;
+  const scoreAxes = parseScoreAxes(args.axes);
+  let importanceScore = Math.max(
+    1,
+    Math.min(20, Number(args.importance_score || 10)),
+  );
+
+  if (scoreAxes && args.importance_score == null) {
+    importanceScore = Math.round(computeFinalScore(scoreAxes));
+  }
+
+  const parsed: ParsedClassifierToolCall = {
+    importanceScore,
+    importanceTags: (args.tags || []) as string[],
+    importanceReasoning: typeof args.reasoning === "string"
+      ? args.reasoning
+      : null,
+    scoreAxes,
+  };
+
+  if (options.includeTranslatedText) {
+    parsed.translatedText = (args.translated_text || "") as string;
+  }
+
+  return parsed;
 }
