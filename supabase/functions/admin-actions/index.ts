@@ -59,6 +59,7 @@ import {
   saveVideoRenderFeedbackAdmin,
   updateVideoRenderConfigAdmin,
 } from "./videoRenderActions.ts";
+import { getXApiSummary } from "./xApiSummary.ts";
 import { isMyXEnabled, MY_X_DISABLED_RESPONSE } from "../_shared/myXControls.ts";
 import { saveSettingsAdminAction } from "./settings.ts";
 
@@ -3531,107 +3532,6 @@ async function getMonitoringOverview(supabase: any, body: Record<string, unknown
   };
 }
 
-// deno-lint-ignore no-explicit-any
-async function getXApiSummary(supabase: any, body: Record<string, unknown>) {
-  const windowHours = Math.min(Math.max(Number(body.window_hours) || 24, 1), 720);
-  const since = new Date(Date.now() - windowHours * 60 * 60 * 1000).toISOString();
-  const { data: events, error } = await supabase
-    .from('x_api_events')
-    .select('created_at, source, source_action, endpoint, method, http_status, ok, estimated_billable_unit, request_counted, error')
-    .gte('created_at', since)
-    .order('created_at', { ascending: false })
-    .limit(5000);
-  if (error) throw error;
-
-  const byUnit: Record<string, number> = {};
-  const bySource: Record<string, number> = {};
-  let attempts = 0;
-  let counted = 0;
-  let failed = 0;
-  for (const event of events ?? []) {
-    attempts += 1;
-    if (event.request_counted !== false) counted += 1;
-    if (!event.ok) failed += 1;
-    const unit = event.estimated_billable_unit ?? 'api_request';
-    byUnit[unit] = (byUnit[unit] ?? 0) + 1;
-    bySource[event.source] = (bySource[event.source] ?? 0) + 1;
-  }
-
-  const [{ count: postedCount }, { count: mediaCount }, { data: limitsRow }] = await Promise.all([
-    supabase.from('x_deliveries').select('id', { count: 'exact', head: true }).eq('status', 'posted').gte('created_at', since),
-    supabase.from('x_deliveries').select('id', { count: 'exact', head: true }).eq('status', 'posted').gt('media_count', 0).gte('created_at', since),
-    supabase.from('settings').select('value').eq('key', 'x_rate_limits').maybeSingle(),
-  ]);
-
-  let officialUsage: Record<string, unknown> = { synced: false, reason: 'not_requested' };
-  if (body.sync_official_usage === true) {
-    const bearer = Deno.env.get('X_BEARER_TOKEN') || Deno.env.get('TWITTER_BEARER_TOKEN') || '';
-    if (!bearer) {
-      officialUsage = { synced: false, reason: 'bearer_token_missing' };
-      await recordXApiEvent(supabase, {
-        source: 'admin-actions',
-        sourceAction: 'usage_sync',
-        endpoint: '/2/usage/tweets',
-        method: 'GET',
-        requestCounted: false,
-        ok: false,
-        error: 'bearer_token_missing',
-        estimatedBillableUnit: 'official_usage_lookup',
-      });
-    } else {
-      const endpoint = 'https://api.x.com/2/usage/tweets';
-      try {
-        const resp = await fetch(endpoint, { headers: { Authorization: `Bearer ${bearer}` } });
-        const text = await resp.text();
-        let parsed: unknown;
-        try { parsed = JSON.parse(text); } catch { parsed = text; }
-        await recordAdminXApiAttempt(supabase, {
-          action: 'usage_sync',
-          endpoint,
-          method: 'GET',
-          estimatedBillableUnit: 'official_usage_lookup',
-        }, resp);
-        officialUsage = resp.ok
-          ? { synced: true, data: parsed }
-          : { synced: false, reason: `HTTP ${resp.status}`, raw: parsed };
-      } catch (e) {
-        await recordAdminXApiAttempt(supabase, {
-          action: 'usage_sync',
-          endpoint,
-          method: 'GET',
-          estimatedBillableUnit: 'official_usage_lookup',
-          error: (e as Error).message,
-        }, null);
-        officialUsage = { synced: false, reason: (e as Error).message };
-      }
-    }
-  }
-
-  const limits = (limitsRow?.value ?? {}) as Record<string, unknown>;
-  return {
-    success: true,
-    summary: {
-      window_hours: windowHours,
-      attempts,
-      counted_attempts: counted,
-      failed_attempts: failed,
-      success_rate: attempts > 0 ? Math.round(((attempts - failed) / attempts) * 1000) / 10 : 100,
-      by_unit: byUnit,
-      by_source: bySource,
-      posts_local: postedCount ?? 0,
-      media_posts_local: mediaCount ?? 0,
-      configured_budget: {
-        posts_per_hour: limits.posts_per_hour ?? null,
-        posts_per_day: limits.posts_per_day ?? null,
-        monthly_post_budget: limits.monthly_post_budget ?? null,
-        hydrations_per_day: limits.hydrations_per_day ?? null,
-      },
-      latest_events: (events ?? []).slice(0, 20),
-      official_usage: officialUsage,
-    },
-  };
-}
-
 type XDiagnosticBlocker = {
   code: string;
   label: string;
@@ -4493,7 +4393,10 @@ serve(async (req) => {
       }
 
       case 'get_x_api_summary': {
-        return jsonResponse(await getXApiSummary(supabase, body));
+        return jsonResponse(await getXApiSummary(supabase, body, {
+          recordAdminXApiAttempt,
+          recordXApiEvent,
+        }));
       }
 
       case 'get_video_render_config': {
