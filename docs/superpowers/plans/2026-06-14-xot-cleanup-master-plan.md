@@ -24,10 +24,10 @@ Main checkout preserved:
 /Users/stevmq/Finalized XOT
 ```
 
-Current implementation branch after Phase 15:
+Current implementation branch after Phase 16:
 
 ```text
-codex/xot-cleanup-30-renderer-runtime-security
+codex/xot-cleanup-31-runtime-dependency-hygiene
 ```
 
 Current safe-state rule:
@@ -73,7 +73,8 @@ origin/main
                                           └─ codex/xot-cleanup-21-monitoring-split
                                               └─ codex/xot-cleanup-22-settings-dashboard-xaccount
                                                   └─ codex/xot-cleanup-30-renderer-runtime-security
-                                                      └─ codex/xot-cleanup-40-integration
+                                                      └─ codex/xot-cleanup-31-runtime-dependency-hygiene
+                                                          └─ codex/xot-cleanup-40-integration
 ```
 
 If a phase becomes risky, create a sibling branch from the last green parent instead of continuing on the broken branch:
@@ -1545,24 +1546,37 @@ Separate dependency/runtime cleanup from spaghetti-code refactors so upgrades do
 
 - Modify: `package.json`
 - Modify: `package-lock.json`
+- Modify: `deno.lock`
 - Inspect: `.github/workflows/ci.yml`
 - Inspect: Vercel project runtime settings through available tooling if authenticated.
 - Inspect: `services/video-renderer/package.json`
 
 ## Steps
 
-- [ ] Re-run root audit.
+- [x] Re-run root audit.
 
 ```bash
 npm audit --omit=dev --audit-level=low
 npm audit --audit-level=low
 ```
 
-- [ ] Identify production dependency advisories separately from dev-only advisories.
-- [ ] Align declared Node runtime with actual deployment policy after confirming Vercel runtime.
-- [ ] Upgrade only packages required to clear meaningful production advisories.
-- [ ] Run UI and build tests after every dependency bump.
-- [ ] Do not mix dependency upgrades with worker/frontend refactors.
+- [x] Identify production dependency advisories separately from dev-only advisories.
+- [x] Align declared Node runtime with actual deployment policy after confirming Vercel runtime.
+- [x] Upgrade only packages required to clear meaningful production advisories.
+- [x] Run UI and build tests after every dependency bump.
+- [x] Do not mix dependency upgrades with worker/frontend refactors.
+
+## Implementation Notes
+
+- Initial production audit failed on `react-router`/`react-router-dom` 6.30.3 and root `ws` 8.18.3.
+- Initial full audit also reported dev/tooling advisories through the Vite/esbuild chain.
+- `react-router-dom` was kept on the v6 line and patched to 6.30.4 to avoid a router migration inside a dependency hygiene phase.
+- `ws` resolved to 8.21.0 in the root package lock.
+- Dev tooling moved from `vite` 7.3.3 to 8.0.16 and from `vitest` 3.2.4 to 4.1.8 after confirming `@vitejs/plugin-react` 5.2.0 accepts Vite 8.
+- `deno.lock` was refreshed because Supabase function checks resolve the root npm graph; it now points function validation at the same Vite/Vitest graph as `package-lock.json`.
+- Root `package.json` already declares Node `20.x` and npm `10.x`; `.github/workflows/ci.yml` uses Node 20; `services/video-renderer/package.json` also declares Node `20.x`.
+- `vercel.json` declares `npm ci` and `npm run build`; Vercel CLI remains unavailable in release-state checks, so runtime policy is represented by repo engines and CI until authenticated Vercel project settings can be inspected.
+- Local validation ran under Node 22.22.3, so `npm ci` printed the expected `EBADENGINE` warning against the repo's Node 20 policy. That warning does not change the declared CI/runtime target.
 
 ## Validation
 
@@ -1573,21 +1587,47 @@ npm run check:strict
 npm test
 npm run build
 npm audit --omit=dev --audit-level=low
+npm audit --audit-level=low
 npm --prefix services/video-renderer test
+npm run lint:functions
+npm run check:functions
+npm run test:functions
+npm run check:function-inventory
+npm run check:release-state
+git diff --check
 ```
+
+Validation result:
+
+- [x] `npm ci` passed with 0 vulnerabilities and the expected local Node 22 versus repo Node 20 engine warning.
+- [x] `npm run lint` passed with the existing Fast Refresh warnings.
+- [x] `npm run check:strict` passed.
+- [x] `npm test` passed: 19 files, 81 tests.
+- [x] Env-backed `npm run build` passed on Vite 8.0.16.
+- [x] `npm audit --omit=dev --audit-level=low` passed with 0 vulnerabilities.
+- [x] `npm audit --audit-level=low` passed with 0 vulnerabilities.
+- [x] `npm --prefix services/video-renderer test` passed: 145 tests.
+- [x] `npm run lint:functions` passed.
+- [x] `npm run check:functions` passed.
+- [x] `npm run test:functions` passed: 257 tests.
+- [x] `npm run check:function-inventory` passed.
+- [x] `npm run check:release-state` passed read-only; live hosts returned HTTP 200 and the renderer heartbeat was online.
+- [x] `git diff --check` passed.
 
 ## Commit
 
 ```bash
-git add package.json package-lock.json .github/workflows/ci.yml services/video-renderer/package.json services/video-renderer/package-lock.json
+git add package.json package-lock.json deno.lock docs/superpowers/plans/2026-06-14-xot-cleanup-master-plan.md
 git commit -m "chore: align runtime and dependency hygiene"
 ```
 
 ## Exit Criteria
 
-- [ ] Node runtime policy is explicit.
-- [ ] Production audit findings have a fix or a documented reason.
-- [ ] Dependency changes are reviewable separately.
+- [x] Node runtime policy is explicit.
+- [x] Production audit findings have a fix or a documented reason.
+- [x] Dependency changes are reviewable separately.
+
+Status: completed as dependency/runtime metadata cleanup.
 
 ---
 
