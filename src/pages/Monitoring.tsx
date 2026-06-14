@@ -23,6 +23,7 @@ import {
   Twitter,
   Wrench,
 } from "lucide-react";
+import { invokeAdminAction } from "@/api/adminActions";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -96,40 +97,36 @@ import { buildDeliverySummary, buildPipelineTimelineGroups, type TimelineTone } 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 async function adminEditTranslation(tweetId: string, text: string) {
-  const { error } = await supabase.functions.invoke('admin-actions', { body: { action: 'edit_translation', tweet_id: tweetId, text_translated: text } });
-  if (error) throw error;
+  await invokeAdminAction({ action: 'edit_translation', tweet_id: tweetId, text_translated: text });
 }
 
 async function adminRetryStep(tweetId: string, step: string) {
-  const { error } = await supabase.functions.invoke('admin-actions', { body: { action: 'retry_step', tweet_id: tweetId, step } });
-  if (error) throw error;
+  await invokeAdminAction({ action: 'retry_step', tweet_id: tweetId, step });
 }
 
 async function adminHydratePost(tweetId: string) {
-  const { data, error } = await supabase.functions.invoke('admin-actions', { body: { action: 'hydrate_post', tweet_id: tweetId } });
-  if (error) throw error;
-  if (data?.ok === false) throw new Error(data.error ?? 'Hydrate failed');
-  return data as { ok: boolean; queued?: boolean; reason?: string };
+  return invokeAdminAction<{ ok: boolean; queued?: boolean; reason?: string; error?: string }>(
+    { action: 'hydrate_post', tweet_id: tweetId },
+    { failureMessage: 'Hydrate failed' },
+  );
 }
 
 async function adminReprocess(tweetId: string) {
-  const { error } = await supabase.functions.invoke('admin-actions', { body: { action: 'reprocess', tweet_id: tweetId } });
-  if (error) throw error;
+  await invokeAdminAction({ action: 'reprocess', tweet_id: tweetId });
 }
 
 async function adminReprocessBatch(tweetIds: string[]) {
-  const { data, error } = await supabase.functions.invoke('admin-actions', {
-    body: { action: 'bulk_reprocess', tweet_ids: tweetIds },
-  });
-  if (error) throw error;
-  if (data?.success === false) throw new Error(data.error ?? 'Bulk reprocess failed');
-  return data as { ok?: boolean; success?: boolean; requested?: number; queued?: number; message?: string };
+  return invokeAdminAction<{ ok?: boolean; success?: boolean; requested?: number; queued?: number; message?: string; error?: string }>(
+    {
+      action: 'bulk_reprocess',
+      tweet_ids: tweetIds,
+    },
+    { failureMessage: 'Bulk reprocess failed' },
+  );
 }
 
 async function adminRescorePost(tweetId: string) {
-  const { data, error } = await supabase.functions.invoke('admin-actions', { body: { action: 'rescore_post', tweet_id: tweetId } });
-  if (error) throw error;
-  return data as {
+  return invokeAdminAction<{
     ok: boolean;
     score?: number;
     final_score?: number;
@@ -137,35 +134,34 @@ async function adminRescorePost(tweetId: string) {
     decision_reason?: string | null;
     reasoning?: string;
     error?: string;
-  };
+  }>({ action: 'rescore_post', tweet_id: tweetId });
 }
 
 async function adminRetryXPost(tweetId: string) {
-  const { data, error } = await supabase.functions.invoke('admin-actions', { body: { action: 'retry_x_post', tweet_id: tweetId } });
-  if (error) throw error;
-  return data as { ok: boolean; error?: string; status?: string; x_tweet_id?: string; queued?: string | false; reason?: string };
+  return invokeAdminAction<{ ok: boolean; error?: string; status?: string; x_tweet_id?: string; queued?: string | false; reason?: string }>({ action: 'retry_x_post', tweet_id: tweetId });
 }
 
 async function adminClearDup(tweetId: string, relatedTweetId: string | null) {
-  const { data, error } = await supabase.functions.invoke('admin-actions', { body: { action: 'clear_dup', tweet_id: tweetId, related_tweet_id: relatedTweetId } });
-  if (error) throw error;
-  return data as { success: boolean };
+  return invokeAdminAction<{ success: boolean }>({ action: 'clear_dup', tweet_id: tweetId, related_tweet_id: relatedTweetId });
 }
 
 async function adminTranslatePost(tweetId: string) {
-  const { data, error } = await supabase.functions.invoke('admin-actions', { body: { action: 'translate_post', tweet_id: tweetId, mode: 'translation_only' } });
-  if (error) throw error;
-  if (data?.ok === false) throw new Error(data.error ?? 'Translation failed');
-  return data as { ok: boolean; translated?: string; model?: string };
+  return invokeAdminAction<{ ok: boolean; translated?: string; model?: string; error?: string }>(
+    { action: 'translate_post', tweet_id: tweetId, mode: 'translation_only' },
+    { failureMessage: 'Translation failed' },
+  );
 }
 
 async function adminRunDedupe(tweetId: string) {
-  const { data, error } = await supabase.functions.invoke('admin-actions', {
-    body: { action: 'run_dedupe', tweet_id: tweetId, force: true, enqueue_next: true },
-  });
-  if (error) throw error;
-  if (data?.ok === false) throw new Error(data.error ?? 'Duplicate check failed');
-  return data as { ok: boolean; result?: { status?: string; reason?: string; dup_of_tweet_id?: string | null } };
+  return invokeAdminAction<{ ok: boolean; error?: string; result?: { status?: string; reason?: string; dup_of_tweet_id?: string | null } }>(
+    {
+      action: 'run_dedupe',
+      tweet_id: tweetId,
+      force: true,
+      enqueue_next: true,
+    },
+    { failureMessage: 'Duplicate check failed' },
+  );
 }
 
 type AudienceFeedback = 'too_low' | 'too_high' | 'correct_deliver' | 'correct_skip' | 'should_pass_audience' | 'should_skip' | 'wrong_relevance_class' | 'global_exception_worth_covering' | 'not_global_exception';
@@ -270,12 +266,7 @@ function scoringRuleLabel(value: string | null | undefined): string {
 }
 
 async function adminSetManualScore(tweetId: string, score: number, reason: string, reasonTag: ScoringFeedbackReasonTag, overrideDuplicate: boolean, expectedAudienceClass?: AudienceClassValue | '') {
-  const { data, error } = await supabase.functions.invoke('admin-actions', {
-    body: { action: 'set_manual_score', tweet_id: tweetId, score, reason, reason_tag: reasonTag, override_duplicate: overrideDuplicate, expected_audience_class: expectedAudienceClass || undefined },
-  });
-  if (error) throw error;
-  if (data?.ok === false) throw new Error(data.error ?? 'Manual score failed');
-  return data as {
+  return invokeAdminAction<{
     ok: boolean;
     score: number;
     threshold: number;
@@ -283,70 +274,60 @@ async function adminSetManualScore(tweetId: string, score: number, reason: strin
     translated?: boolean;
     advance?: { queued: string; reason?: string };
     translation_error?: string;
-  };
+    error?: string;
+  }>(
+    { action: 'set_manual_score', tweet_id: tweetId, score, reason, reason_tag: reasonTag, override_duplicate: overrideDuplicate, expected_audience_class: expectedAudienceClass || undefined },
+    { failureMessage: 'Manual score failed' },
+  );
 }
 
 async function adminRecordScoreFeedback(tweetId: string, feedback: AudienceFeedback, expectedAudienceClass?: AudienceClassValue | '') {
   const reasonTag = defaultReasonTag(feedback, expectedAudienceClass);
-  const { data, error } = await supabase.functions.invoke('admin-actions', {
-    body: { action: 'record_score_feedback', tweet_id: tweetId, feedback, expected_audience_class: expectedAudienceClass || undefined, reason_tag: reasonTag },
-  });
-  if (error) throw error;
-  if (data?.ok === false) throw new Error(data.error ?? 'Feedback failed');
-  return data as { ok: boolean; polarity: number };
+  return invokeAdminAction<{ ok: boolean; polarity: number; error?: string }>(
+    { action: 'record_score_feedback', tweet_id: tweetId, feedback, expected_audience_class: expectedAudienceClass || undefined, reason_tag: reasonTag },
+    { failureMessage: 'Feedback failed' },
+  );
 }
 
 async function adminEnrichmentDecision(tweetId: string, action: 'approve_enrichment' | 'reject_enrichment') {
-  const { data, error } = await supabase.functions.invoke('admin-actions', { body: { action, tweet_id: tweetId } });
-  if (error) throw error;
-  if (data?.ok === false) throw new Error(data.error ?? 'Enrichment action failed');
-  return data as { ok: boolean; message?: string };
+  return invokeAdminAction<{ ok: boolean; message?: string; error?: string }>(
+    { action, tweet_id: tweetId },
+    { failureMessage: 'Enrichment action failed' },
+  );
 }
 
 async function adminGetXPostingDiagnostic(tweetId: string) {
-  const { data, error } = await supabase.functions.invoke('admin-actions', {
-    body: { action: 'get_x_posting_diagnostics', tweet_id: tweetId },
-  });
-  if (error) throw error;
-  if (data?.success === false) throw new Error(data.error ?? 'X diagnostics unavailable');
+  const data = await invokeAdminAction<{ success?: boolean; error?: string; diagnostics?: { items?: XPostingDiagnosticItem[] } }>(
+    { action: 'get_x_posting_diagnostics', tweet_id: tweetId },
+    { failureMessage: 'X diagnostics unavailable' },
+  );
   const items = data?.diagnostics?.items as XPostingDiagnosticItem[] | undefined;
   return items?.[0] ?? null;
 }
 
 async function adminRecordEnrichmentFeedback(tweetId: string, feedback: EnrichmentFeedback) {
-  const { data, error } = await supabase.functions.invoke('admin-actions', {
-    body: { action: 'record_enrichment_feedback', tweet_id: tweetId, feedback },
-  });
-  if (error) throw error;
-  if (data?.ok === false) throw new Error(data.error ?? 'Enrichment feedback failed');
-  return data as { ok: boolean };
+  return invokeAdminAction<{ ok: boolean; error?: string }>(
+    { action: 'record_enrichment_feedback', tweet_id: tweetId, feedback },
+    { failureMessage: 'Enrichment feedback failed' },
+  );
 }
 
 async function adminSelectEnrichmentVariant(tweetId: string, variant: string) {
-  const { data, error } = await supabase.functions.invoke('admin-actions', {
-    body: { action: 'select_enrichment_variant', tweet_id: tweetId, variant },
-  });
-  if (error) throw error;
-  if (data?.ok === false) throw new Error(data.error ?? 'Variant selection failed');
-  return data as { ok: boolean; selected_variant?: string; final_x_text?: string };
+  return invokeAdminAction<{ ok: boolean; selected_variant?: string; final_x_text?: string; error?: string }>(
+    { action: 'select_enrichment_variant', tweet_id: tweetId, variant },
+    { failureMessage: 'Variant selection failed' },
+  );
 }
 
 async function adminIgnoreMonitoringItem(tweetId: string, reason = 'reviewed_and_ignored') {
-  const { data, error } = await supabase.functions.invoke('admin-actions', {
-    body: { action: 'ignore_monitoring_item', tweet_id: tweetId, reason },
-  });
-  if (error) throw error;
-  if (data?.ok === false) throw new Error(data.error ?? 'Ignore failed');
-  return data as { ok: boolean; closed?: { x_deliveries?: number; deliveries?: number; jobs?: number } };
+  return invokeAdminAction<{ ok: boolean; error?: string; closed?: { x_deliveries?: number; deliveries?: number; jobs?: number } }>(
+    { action: 'ignore_monitoring_item', tweet_id: tweetId, reason },
+    { failureMessage: 'Ignore failed' },
+  );
 }
 
 async function adminIgnoreMonitoringItems(tweetIds: string[], reason = 'reviewed_and_ignored') {
-  const { data, error } = await supabase.functions.invoke('admin-actions', {
-    body: { action: 'bulk_ignore', tweet_ids: tweetIds, reason },
-  });
-  if (error) throw error;
-  if (data?.ok === false) throw new Error(data.error ?? 'Bulk ignore failed');
-  return data as {
+  return invokeAdminAction<{
     ok?: boolean;
     requested?: number;
     found?: number;
@@ -363,7 +344,10 @@ async function adminIgnoreMonitoringItems(tweetIds: string[], reason = 'reviewed
       error?: string;
       closed?: { x_deliveries: number; deliveries: number; jobs: number };
     }>;
-  };
+  }>(
+    { action: 'bulk_ignore', tweet_ids: tweetIds, reason },
+    { failureMessage: 'Bulk ignore failed' },
+  );
 }
 
 type ConfirmAction = 'force_telegram' | 'force_x' | 'rescore' | 'reprocess' | 'hydrate' | 'clear_dup' | 'ignore' | 'close_stale_x' | 'translate' | 'run_dedupe' | 'cancel_jobs' | 'approve_enrichment' | 'reject_enrichment';
@@ -914,12 +898,17 @@ export default function Monitoring() {
     setDrawerTweetId(tweetId);
     setDrawerOpen(true);
     try {
-      const { data, error: enrichError } = await supabase.functions.invoke('admin-actions', {
-        body: { action: 'enrich_post', tweet_id: tweetId },
-      });
-      if (enrichError) throw enrichError;
+      const data = await invokeAdminAction<{
+        ok: boolean;
+        error?: string;
+        worker_dispatch?: { ok?: boolean; processed?: number; message?: string; error?: string };
+        translation_preflight?: { ok?: boolean };
+      }>(
+        { action: 'enrich_post', tweet_id: tweetId },
+        { failureMessage: 'Failed to queue enrichment' },
+      );
       if (!data?.ok) throw new Error(data?.error ?? 'Failed to queue enrichment');
-      const workerDispatch = data.worker_dispatch as { ok?: boolean; processed?: number; message?: string; error?: string } | undefined;
+      const workerDispatch = data.worker_dispatch;
       const descriptionParts = [
         data.translation_preflight?.ok ? 'Translation was generated first.' : null,
         workerDispatch?.ok === true ? `Worker started${typeof workerDispatch.processed === 'number' ? ` (${workerDispatch.processed} job${workerDispatch.processed === 1 ? '' : 's'} processed)` : ''}.` : null,
@@ -1108,16 +1097,12 @@ export default function Monitoring() {
           break;
         }
         case 'close_stale_x': {
-          const { data, error: closeError } = await supabase.functions.invoke('admin-actions', {
-            body: { action: 'summarize_stale_x_pending', older_than_hours: 24, close: true },
-          });
-          if (closeError) throw closeError;
+          const data = await invokeAdminAction<{ closed?: number }>({ action: 'summarize_stale_x_pending', older_than_hours: 24, close: true });
           toast({ title: 'Stale X pending closed', description: `${data?.closed ?? 0} row(s) marked skipped` });
           break;
         }
         case 'cancel_jobs': {
-          const { data, error: cancelError } = await supabase.functions.invoke('admin-actions', { body: { action: 'cancel_pending_jobs' } });
-          if (cancelError) throw cancelError;
+          const data = await invokeAdminAction<{ canceled?: number }>({ action: 'cancel_pending_jobs' });
           toast({ title: 'Pending jobs canceled', description: `${data?.canceled ?? 0} job(s) marked failed.` });
           break;
         }
