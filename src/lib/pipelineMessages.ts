@@ -75,6 +75,12 @@ export function formatDecisionReason(reason: string | null | undefined): Formatt
 export function formatPipelineError(raw: string | null | undefined): FormattedPipelineLine {
   if (raw == null || !String(raw).trim()) return { title: 'Unknown error' };
   const r = String(raw).trim();
+  if (/failed to get HTTP URL content/i.test(r)) {
+    return withDetail(r, 'Telegram URL fetch failed; video should use multipart upload');
+  }
+  if (/telegram_video_too_large_for_bot_api:/i.test(r)) {
+    return withDetail(r, 'Telegram video is over the 50MB Bot API upload limit');
+  }
   if (/^(media_|rate_limit|tweet )/i.test(r) || r.includes('media_required') || r.includes('missing data.id')) {
     return formatXSkipOrError(undefined, r);
   }
@@ -83,9 +89,22 @@ export function formatPipelineError(raw: string | null | undefined): FormattedPi
 
 /** X poster skip_reason and/or last_error (e.g. media_required:…, rate_limit_day). */
 export function formatXSkipOrError(skip: string | null | undefined, err: string | null | undefined): FormattedPipelineLine {
-  const raw = (err && err.trim()) || (skip && skip.trim()) || '';
+  const skipRaw = (skip && skip.trim()) || '';
+  const errRaw = (err && err.trim()) || '';
+  const raw = /^video_too_long_for_(config|x):\d+s$/i.test(skipRaw) ? skipRaw : errRaw || skipRaw;
   if (!raw) return { title: 'No details' };
 
+  const configuredDuration = raw.match(/video_too_long_for_config:(\d+)s/i);
+  if (configuredDuration) {
+    return withDetail(raw, `X skipped: video over configured 350s cap (${configuredDuration[1]}s)`);
+  }
+  const previousDuration = raw.match(/video_too_long_for_x:(\d+)s/i);
+  if (previousDuration) {
+    return withDetail(raw, `X skipped by previous duration guard (${previousDuration[1]}s)`);
+  }
+  if (/X account\/API limit blocks videos over 140s/i.test(raw)) {
+    return withDetail(raw, 'X skipped by previous duration guard');
+  }
   if (raw.startsWith('media_required:')) {
     const sub = raw.slice('media_required:'.length);
     const subHuman: Record<string, string> = {

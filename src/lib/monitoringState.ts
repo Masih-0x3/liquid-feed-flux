@@ -3,10 +3,14 @@ import { getScoringV2Snapshot } from '@/lib/scoringV2Monitoring';
 
 export type MonitoringTone = 'good' | 'warn' | 'bad' | 'muted' | 'info';
 
+function isTerminalSkip(entry: MonitoringEntry): boolean {
+  return !!entry.delivery_decision && entry.delivery_decision !== 'deliver';
+}
+
 export function monitoringStage(entry: MonitoringEntry): { label: string; tone: MonitoringTone } {
   if (entry.monitoring_state) return { label: entry.monitoring_state.stage_label, tone: entry.monitoring_state.tone };
   if (entry.translation_error || entry.delivery_error || entry.x_error) return { label: 'Failed/stuck', tone: 'bad' };
-  if (entry.dedupe_status === 'failed') return { label: 'Dedupe failed', tone: 'bad' };
+  if (entry.dedupe_status === 'failed' && !isTerminalSkip(entry)) return { label: 'Dedupe failed', tone: 'bad' };
   if (entry.dedupe_status === 'coverage_gap') return { label: 'Duplicate coverage gap', tone: 'warn' };
   if (entry.dedupe_status === 'uncertain' && entry.dup_of_tweet_id && entry.dedupe_reason?.includes('coverage_gap:')) return { label: 'Duplicate coverage gap', tone: 'warn' };
   if (entry.dedupe_status === 'uncertain') return { label: 'Uncertain duplicate', tone: 'warn' };
@@ -47,7 +51,7 @@ export function loadedMonitoringCounts(entries: MonitoringEntry[]): MonitoringOv
   };
   return {
     needs_attention: entries.filter((entry) => entry.monitoring_state?.needs_attention ?? ['bad', 'warn'].includes(monitoringStage(entry).tone)).length,
-    failed_stuck: entries.filter((entry) => entry.monitoring_state?.code === 'failed_stuck' || !!(entry.translation_error || entry.delivery_error || entry.x_error) || entry.dedupe_status === 'failed').length,
+    failed_stuck: entries.filter((entry) => entry.monitoring_state?.code === 'failed_stuck' || !!(entry.translation_error || entry.delivery_error || entry.x_error) || (entry.dedupe_status === 'failed' && !isTerminalSkip(entry))).length,
     translation_queue: entries.filter((entry) => ['queued', 'needs_translation'].includes(entry.monitoring_state?.translation_state ?? '')).length,
     needs_score: entries.filter((entry) => entry.monitoring_state?.code === 'needs_score' || (entry.final_score == null && entry.importance_score == null)).length,
     ready_to_deliver: entries.filter((entry) => entry.monitoring_state?.code === 'ready_to_deliver').length,

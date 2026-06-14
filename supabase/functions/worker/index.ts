@@ -49,6 +49,10 @@ import {
   normalizeVideoRenderConfigValue,
   type VideoRenderConfig,
 } from "../_shared/videoRenderConfig.ts";
+import {
+  isTelegramBotVideoTooLarge,
+  telegramVideoTooLargeReason,
+} from "../_shared/telegramVideoLimits.ts";
 import type { XMediaRow } from "../_shared/mediaSelection.ts";
 
 export {
@@ -104,6 +108,13 @@ class JobDeferred extends Error {
     this.name = 'JobDeferred';
     this.nextRunAt = new Date(Date.now() + delayMs).toISOString();
     this.meta = meta;
+  }
+}
+
+class NonRetryableJobError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'NonRetryableJobError';
   }
 }
 
@@ -1859,7 +1870,7 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
 
     const { data: media } = await supabase
       .from('media')
-      .select('id, kind, src_url, storage_path, ordering, downloaded_at, mime_type, file_size, duration_ms')
+      .select('id, kind, src_url, storage_path, ordering, downloaded_at, mime_type, file_size, duration_ms, width, height')
       .eq('tweet_id', tweetId)
       .order('ordering');
 
@@ -1978,8 +1989,7 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
 
       for (const video of videos) {
         addTelegramMethod('sendVideo');
-        const videoUrl = await getMediaUrl(supabase, video);
-        const msgIds = await sendTelegramMedia('sendVideo', telegramBotToken, telegramChatId, { video: videoUrl }, message);
+        const msgIds = await sendTelegramVideoFromStorage(supabase, telegramBotToken, telegramChatId, video, message);
         telegramMessageIds.push(...msgIds);
       }
 
@@ -2036,6 +2046,9 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
   } catch (error) {
     const e = jobError(error);
     console.error(JSON.stringify({ function: 'worker', action: 'deliver_error', tweet_id: tweetId, error: e.message }));
+    if (error instanceof NonRetryableJobError) {
+      throw new NonRetryableJobError(`deliver[${tweetId}]: ${e.message}`);
+    }
     throw new Error(`deliver[${tweetId}]: ${e.message}`);
   }
 }
@@ -2141,6 +2154,83 @@ supabase: any, botToken: string, chatId: string, images: Record<string, unknown>
     if (r?.ok) return r.result.map((m: Record<string, unknown>) => String(m.message_id));
   }
   throwTelegramError('sendMediaGroup', result, resp.status);
+  return [];
+}
+
+function finiteMediaNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function telegramVideoTooLargeError(bytes: number): NonRetryableJobError {
+  return new NonRetryableJobError(telegramVideoTooLargeReason(bytes));
+}
+
+function videoUploadFilename(video: Record<string, unknown>, storagePath: string, mime: string): string {
+  const existingExt = storagePath.match(/\.(mp4|mov|webm|m4v)(?:[?#].*)?$/i)?.[1]?.toLowerCase();
+  const ext = existingExt
+    ?? (mime.includes('quicktime') ? 'mov'
+      : mime.includes('webm') ? 'webm'
+      : mime.includes('x-m4v') ? 'm4v'
+      : 'mp4');
+  const base = storagePath.split('/').pop()?.replace(/\.[^.]+$/, '')
+    || (typeof video.id === 'string' && video.id ? `video_${video.id}` : 'video');
+  return `${base}.${ext}`;
+}
+
+async function fetchVideoBytes(// deno-lint-ignore no-explicit-any
+supabase: any, video: Record<string, unknown>): Promise<{ blob: Blob; filename: string }> {
+  const storagePath = video.storage_path as string | null;
+  if (!storagePath) throw new Error('telegram_video_missing_storage');
+
+  const declaredSize = finiteMediaNumber(video.file_size);
+  if (declaredSize != null && isTelegramBotVideoTooLarge(declaredSize)) {
+    throw telegramVideoTooLargeError(declaredSize);
+  }
+
+  const { data, error } = await supabase.storage.from('temp-media').download(storagePath);
+  if (error || !data) throw new Error(`telegram_video_download_failed:${storagePath}:${error?.message ?? 'no blob'}`);
+
+  const arrayBuffer = await (data as Blob).arrayBuffer();
+  if (isTelegramBotVideoTooLarge(arrayBuffer.byteLength)) {
+    throw telegramVideoTooLargeError(arrayBuffer.byteLength);
+  }
+
+  const rawMime = (video.mime_type as string | undefined) || (data as Blob).type || 'video/mp4';
+  const mime = rawMime.startsWith('video/') ? rawMime : 'video/mp4';
+  return {
+    blob: new Blob([arrayBuffer], { type: mime }),
+    filename: videoUploadFilename(video, storagePath, mime),
+  };
+}
+
+async function sendTelegramVideoFromStorage(// deno-lint-ignore no-explicit-any
+supabase: any, botToken: string, chatId: string, video: Record<string, unknown>, caption: string): Promise<string[]> {
+  const bytes = await fetchVideoBytes(supabase, video);
+  const durationMs = finiteMediaNumber(video.duration_ms);
+  const width = finiteMediaNumber(video.width);
+  const height = finiteMediaNumber(video.height);
+  const send = async (cap: string, useMarkdown: boolean): Promise<Response> => {
+    const fd = new FormData();
+    fd.append('chat_id', chatId);
+    fd.append('caption', cap);
+    if (useMarkdown) fd.append('parse_mode', 'Markdown');
+    fd.append('supports_streaming', 'true');
+    if (durationMs != null && durationMs > 0) fd.append('duration', String(Math.max(1, Math.round(durationMs / 1000))));
+    if (width != null && width > 0) fd.append('width', String(Math.round(width)));
+    if (height != null && height > 0) fd.append('height', String(Math.round(height)));
+    fd.append('video', bytes.blob, bytes.filename);
+    return await fetch(`https://api.telegram.org/bot${botToken}/sendVideo`, { method: 'POST', body: fd });
+  };
+
+  const resp = await send(caption, true);
+  const result = await resp.json();
+  if (result.ok) return [String(result.result.message_id)];
+  if (isTelegramParseError(result?.description ?? '')) {
+    const retry = await send(stripMarkdownToPlain(caption), false);
+    const r = await retry.json();
+    if (r?.ok) return [String(r.result.message_id)];
+  }
+  throwTelegramError('sendVideo', result, resp.status);
   return [];
 }
 
@@ -2410,6 +2500,7 @@ supabase: any, job: Record<string, unknown>, errorOrMessage?: Error | string) {
   const jobType = job.type as string;
   const maxAttempts = MAX_ATTEMPTS[jobType] ?? 5;
   const attempts = (job.attempts as number) ?? 0;
+  const nonRetryable = errorOrMessage instanceof NonRetryableJobError;
   let errorMsg: string;
   if (typeof errorOrMessage === 'string') {
     errorMsg = errorOrMessage.trim() || 'Unknown job failure';
@@ -2423,7 +2514,7 @@ supabase: any, job: Record<string, unknown>, errorOrMessage?: Error | string) {
     errorMsg = 'Unknown job failure (no error passed)';
   }
   
-  if (attempts >= maxAttempts) {
+  if (nonRetryable || attempts >= maxAttempts) {
     // Dead-letter the job
     try {
       await supabase.from('dead_letter_jobs').insert({
@@ -2433,7 +2524,7 @@ supabase: any, job: Record<string, unknown>, errorOrMessage?: Error | string) {
         attempts,
         last_error: errorMsg,
         result_meta: job.result_meta ?? null,
-        source: 'worker'
+        source: nonRetryable ? 'worker_non_retryable' : 'worker'
       });
     } catch (_e) {
       console.error(JSON.stringify({ function: 'worker', action: 'dead_letter_failed', job_id: job.id }));
@@ -2444,10 +2535,10 @@ supabase: any, job: Record<string, unknown>, errorOrMessage?: Error | string) {
       last_error: errorMsg,
       result_meta: {
         ...(isRecordValue(job.result_meta) ? job.result_meta as Record<string, unknown> : {}),
-        ...jobTimingMeta(job, 'failed', { error: errorMsg }),
+        ...jobTimingMeta(job, 'failed', { error: errorMsg, non_retryable: nonRetryable }),
       },
     }).eq('id', job.id);
-    console.log(JSON.stringify({ function: 'worker', action: 'job_dead_lettered', job_id: job.id, attempts }));
+    console.log(JSON.stringify({ function: 'worker', action: nonRetryable ? 'job_failed_non_retryable' : 'job_dead_lettered', job_id: job.id, attempts }));
   } else {
     // Telegram-aware backoff
     let retryAfterSeconds: number | null = null;

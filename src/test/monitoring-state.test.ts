@@ -93,6 +93,21 @@ describe("monitoring state helpers", () => {
     expect(loadedMonitoringCounts([row]).below_threshold).toBe(1);
   });
 
+  it("does not let stale dedupe failure dominate a terminal skip decision", () => {
+    const row = entry({
+      dedupe_status: "failed",
+      final_score: 2,
+      delivery_decision: "skip",
+      decision_reason: "scoring_v2_below:off_topic:2<14",
+    });
+
+    expect(monitoringStage(row).label).toBe("Skipped");
+    expect(monitoringDecisionLabel(row, "fallback")).toBe("Skipped");
+    const counts = loadedMonitoringCounts([row]);
+    expect(counts.failed_stuck).toBe(0);
+    expect(counts.needs_attention).toBe(0);
+  });
+
   it("labels unscored missing-translation rows as scoring work first", () => {
     const row = entry({});
 

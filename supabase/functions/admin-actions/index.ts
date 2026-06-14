@@ -1665,7 +1665,7 @@ function deriveMonitoringState(
   const dedupeStatus = typeof post.dedupe_status === 'string' ? post.dedupe_status : null;
   const dedupeReason = typeof post.dedupe_reason === 'string' ? post.dedupe_reason : '';
   const dedupeJobStatus = rpc?.dedupe_job_status as string | null | undefined;
-  const hasDedupeError = !!rpc?.dedupe_error || dedupeJobStatus === 'failed' || dedupeStatus === 'failed';
+  const rawDedupeError = !!rpc?.dedupe_error || dedupeJobStatus === 'failed' || dedupeStatus === 'failed';
   const duplicate = !!post.dup_of_tweet_id;
   const belowThreshold = isBelowThreshold(post, threshold);
   const skipped = !!post.delivery_decision && post.delivery_decision !== 'deliver';
@@ -1678,6 +1678,8 @@ function deriveMonitoringState(
   const needsHydration = post.delivery_decision === 'deliver' && post.is_truncated === true && !post.hydrated_at;
   const review = post.enrich_status === 'awaiting_approval' || post.score_review_status === 'needs_review';
   const passDecision = post.delivery_decision === 'deliver';
+  const terminalSkipDecision = skipped && !passDecision && !activeDedupe;
+  const hasDedupeError = rawDedupeError && !terminalSkipDecision;
   const duplicateCoverageGap = dedupeStatus === 'coverage_gap'
     || (dedupeStatus === 'uncertain' && duplicate && dedupeReason.includes('coverage_gap:'));
 

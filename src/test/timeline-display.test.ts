@@ -153,6 +153,17 @@ describe("timeline display helpers", () => {
     expect(item.errorTitle).toBe("Telegram request failed");
   });
 
+  it("explains Telegram signed-URL video fetch failures", () => {
+    const item = describePipelineEvent(event({
+      step: "deliver",
+      status: "failed",
+      error: "deliver[123]: Telegram sendVideo failed: Bad Request: failed to get HTTP URL content",
+    }));
+
+    expect(item.errorTitle).toBe("Telegram URL fetch failed; video should use multipart upload");
+    expect(item.errorDetail).toContain("failed to get HTTP URL content");
+  });
+
   it("groups repeated queue updates into one readable stage", () => {
     const groups = buildPipelineTimelineGroups([
       event({ step: "dedupe", status: "queued", started_at: "2026-05-23T14:48:00.000Z" }),
