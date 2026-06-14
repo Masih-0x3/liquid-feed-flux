@@ -1064,6 +1064,24 @@ git commit -m "refactor: centralize frontend admin action clients"
 
 # Phase 11: Monitoring Page Split
 
+Status: partially completed in branch `codex/xot-cleanup-21-monitoring-split`.
+
+Completed slice:
+
+- Extracted view-model helpers and duplicate-cluster logic to `src/lib/monitoringViewModel.ts`.
+- Extracted Monitoring admin action wrappers and confirmation copy to `src/lib/monitoringActions.ts`.
+- Extracted the confirmation dialog to `src/components/monitoring/MonitoringActionDialog.tsx`.
+- Extracted the queue filter/bulk-action toolbar to `src/components/monitoring/MonitoringFilters.tsx`.
+- Extracted the summary metric cards to `src/components/monitoring/MonitoringQueueCards.tsx`.
+- Added focused coverage in `src/test/monitoring-view-model.test.ts` and `src/test/monitoring-actions.test.ts`.
+
+Remaining in this phase:
+
+- Row/card renderer extraction.
+- Detail drawer extraction.
+- Delivery timeline panel extraction.
+- Optional `src/hooks/useMonitoringData.ts` cleanup is deferred to Phase 12 so fallback behavior stays isolated.
+
 Branch:
 
 ```text
@@ -1084,33 +1102,35 @@ Turn `src/pages/Monitoring.tsx` into a page composition file instead of a combin
 - Create: `src/components/monitoring/MonitoringDetailDrawer.tsx`
 - Create: `src/components/monitoring/MonitoringActionDialog.tsx`
 - Create: `src/test/monitoring-view-model.test.ts`
+- Create: `src/test/monitoring-actions.test.ts`
 - Modify: `src/pages/Monitoring.tsx`
 - Modify: `src/hooks/useMonitoringData.ts`
 
 ## Steps
 
-- [ ] Locate page-local pure helpers.
+- [x] Locate page-local pure helpers.
 
 ```bash
 rg -n "function |const .* = \\(|useMemo|useCallback|confirm|drawer|cluster|group|filter|action" src/pages/Monitoring.tsx
 ```
 
-- [ ] Move pure grouping/normalization helpers to `src/lib/monitoringViewModel.ts`.
-- [ ] Add tests for duplicate cluster grouping and status labels.
-- [ ] Move action title/description mapping to `src/lib/monitoringActions.ts`.
-- [ ] Extract filters toolbar component.
-- [ ] Extract queue cards component.
+- [x] Move pure grouping/normalization helpers to `src/lib/monitoringViewModel.ts`.
+- [x] Add tests for duplicate cluster grouping and action labels.
+- [x] Move action title/description mapping to `src/lib/monitoringActions.ts`.
+- [x] Move Monitoring admin action wrappers to `src/lib/monitoringActions.ts`.
+- [x] Extract filters toolbar component.
+- [x] Extract queue cards component.
 - [ ] Extract row component.
 - [ ] Extract detail drawer component.
-- [ ] Extract confirmation dialog component.
+- [x] Extract confirmation dialog component.
 - [ ] Keep page-level React Query state and URL/search params in `Monitoring.tsx`.
 - [ ] After each component extraction, run the focused frontend tests.
 
 ## Test Cases
 
 - [ ] Filtering by status returns the same row ids as before.
-- [ ] Duplicate cluster display model preserves original cluster order.
-- [ ] Action dialog title for retry/rescore/dedupe matches current text.
+- [x] Duplicate cluster display model preserves original cluster order.
+- [x] Action dialog title for retry/rescore/dedupe matches current text.
 - [ ] Empty state remains visible when no entries match filters.
 
 ## Validation
@@ -1118,7 +1138,7 @@ rg -n "function |const .* = \\(|useMemo|useCallback|confirm|drawer|cluster|group
 ```bash
 npm run lint
 npm run check:strict
-npm test -- src/test/monitoring-view-model.test.ts src/test/monitoring-state.test.ts src/test/timeline-display.test.ts
+npm test -- src/test/monitoring-view-model.test.ts src/test/monitoring-actions.test.ts src/test/monitoring-state.test.ts src/test/timeline-display.test.ts
 npm test
 npm run build
 ```
@@ -1126,16 +1146,16 @@ npm run build
 ## Commit
 
 ```bash
-git add src/pages/Monitoring.tsx src/hooks/useMonitoringData.ts src/lib/monitoringViewModel.ts src/lib/monitoringActions.ts src/components/monitoring src/test/monitoring-view-model.test.ts
-git commit -m "refactor: split monitoring page view model and components"
+git add src/pages/Monitoring.tsx src/lib/monitoringViewModel.ts src/lib/monitoringActions.ts src/components/monitoring/MonitoringActionDialog.tsx src/components/monitoring/MonitoringFilters.tsx src/components/monitoring/MonitoringQueueCards.tsx src/test/monitoring-view-model.test.ts src/test/monitoring-actions.test.ts docs/superpowers/plans/2026-06-14-xot-cleanup-master-plan.md
+git commit -m "refactor: extract monitoring view model and controls"
 ```
 
 ## Exit Criteria
 
 - [ ] `Monitoring.tsx` reads as composition and orchestration.
-- [ ] Action calls are imported from centralized API wrappers.
-- [ ] View-model logic has unit coverage.
-- [ ] Build output still succeeds.
+- [x] Action calls are imported from centralized API wrappers.
+- [x] View-model logic has unit coverage.
+- [x] Build output still succeeds.
 
 ---
 

@@ -15,7 +15,6 @@ import {
   MoreHorizontal,
   RefreshCw,
   RotateCcw,
-  Search,
   Send,
   SlidersHorizontal,
   Sparkles,
@@ -23,22 +22,11 @@ import {
   Twitter,
   Wrench,
 } from "lucide-react";
-import { invokeAdminAction } from "@/api/adminActions";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerFooter, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import {
   Dialog,
   DialogContent,
@@ -78,13 +66,15 @@ import {
   useMonitoringOverview,
   useXApiSummary,
   type DuplicateCluster,
-  type DuplicateClusterMember,
   type MonitoringEntry,
   type MonitoringFilter,
   type PipelineEvent,
   type ScoreBucket,
 } from "@/hooks/useMonitoringData";
 import { MediaThumbnails } from "@/components/monitoring/MediaThumbnails";
+import { MonitoringActionDialog } from "@/components/monitoring/MonitoringActionDialog";
+import { MonitoringFilters } from "@/components/monitoring/MonitoringFilters";
+import { MonitoringQueueCards } from "@/components/monitoring/MonitoringQueueCards";
 import { VideoRenderDetailPanel } from "@/components/video/VideoRenderDetailPanel";
 import {
   decisionScore,
@@ -92,138 +82,49 @@ import {
   formatXBadge,
 } from "@/lib/pipelineMessages";
 import { loadedMonitoringCounts, monitoringDecisionLabel, monitoringStage, type MonitoringTone } from "@/lib/monitoringState";
-import { getScoringV2Snapshot, scoringV2DecisionLabel, type ScoringV2Snapshot } from "@/lib/scoringV2Monitoring";
+import {
+  adminApproveEnrichment,
+  adminCancelPendingJobs,
+  adminClearDup,
+  adminCloseStaleXPending,
+  adminEditTranslation,
+  adminEnrichPost,
+  adminGetXPostingDiagnostic,
+  adminHydratePost,
+  adminIgnoreMonitoringItem,
+  adminIgnoreMonitoringItems,
+  adminRecordEnrichmentFeedback,
+  adminRecordScoreFeedback,
+  adminRejectEnrichment,
+  adminReprocess,
+  adminReprocessBatch,
+  adminRescorePost,
+  adminRetryStep,
+  adminRetryXPost,
+  adminRunDedupe,
+  adminSelectEnrichmentVariant,
+  adminSetManualScore,
+  adminTranslatePost,
+  type AudienceClassValue,
+  type AudienceFeedback,
+  type EnrichmentFeedback,
+  type PendingAction,
+  type PendingBulkAction,
+  type ScoringFeedbackReasonTag,
+} from "@/lib/monitoringActions";
+import {
+  FILTERS,
+  audienceClassLabel,
+  clusterMonitoringEntries,
+  formatAge,
+  formatBytes,
+  formatScoringV2Score,
+  memberScoreValue,
+  shortText,
+} from "@/lib/monitoringViewModel";
+import { getScoringV2Snapshot, scoringV2DecisionLabel } from "@/lib/scoringV2Monitoring";
 import { buildDeliverySummary, buildPipelineTimelineGroups, type TimelineTone } from "@/lib/timelineDisplay";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-
-async function adminEditTranslation(tweetId: string, text: string) {
-  await invokeAdminAction({ action: 'edit_translation', tweet_id: tweetId, text_translated: text });
-}
-
-async function adminRetryStep(tweetId: string, step: string) {
-  await invokeAdminAction({ action: 'retry_step', tweet_id: tweetId, step });
-}
-
-async function adminHydratePost(tweetId: string) {
-  return invokeAdminAction<{ ok: boolean; queued?: boolean; reason?: string; error?: string }>(
-    { action: 'hydrate_post', tweet_id: tweetId },
-    { failureMessage: 'Hydrate failed' },
-  );
-}
-
-async function adminReprocess(tweetId: string) {
-  await invokeAdminAction({ action: 'reprocess', tweet_id: tweetId });
-}
-
-async function adminReprocessBatch(tweetIds: string[]) {
-  return invokeAdminAction<{ ok?: boolean; success?: boolean; requested?: number; queued?: number; message?: string; error?: string }>(
-    {
-      action: 'bulk_reprocess',
-      tweet_ids: tweetIds,
-    },
-    { failureMessage: 'Bulk reprocess failed' },
-  );
-}
-
-async function adminRescorePost(tweetId: string) {
-  return invokeAdminAction<{
-    ok: boolean;
-    score?: number;
-    final_score?: number;
-    decision?: string;
-    decision_reason?: string | null;
-    reasoning?: string;
-    error?: string;
-  }>({ action: 'rescore_post', tweet_id: tweetId });
-}
-
-async function adminRetryXPost(tweetId: string) {
-  return invokeAdminAction<{ ok: boolean; error?: string; status?: string; x_tweet_id?: string; queued?: string | false; reason?: string }>({ action: 'retry_x_post', tweet_id: tweetId });
-}
-
-async function adminClearDup(tweetId: string, relatedTweetId: string | null) {
-  return invokeAdminAction<{ success: boolean }>({ action: 'clear_dup', tweet_id: tweetId, related_tweet_id: relatedTweetId });
-}
-
-async function adminTranslatePost(tweetId: string) {
-  return invokeAdminAction<{ ok: boolean; translated?: string; model?: string; error?: string }>(
-    { action: 'translate_post', tweet_id: tweetId, mode: 'translation_only' },
-    { failureMessage: 'Translation failed' },
-  );
-}
-
-async function adminRunDedupe(tweetId: string) {
-  return invokeAdminAction<{ ok: boolean; error?: string; result?: { status?: string; reason?: string; dup_of_tweet_id?: string | null } }>(
-    {
-      action: 'run_dedupe',
-      tweet_id: tweetId,
-      force: true,
-      enqueue_next: true,
-    },
-    { failureMessage: 'Duplicate check failed' },
-  );
-}
-
-type AudienceFeedback = 'too_low' | 'too_high' | 'correct_deliver' | 'correct_skip' | 'should_pass_audience' | 'should_skip' | 'wrong_relevance_class' | 'global_exception_worth_covering' | 'not_global_exception';
-type AudienceClassValue = 'direct_focus' | 'adjacent' | 'global_exception' | 'off_topic';
-type ScoringFeedbackReasonTag = 'regional_escalation' | 'oil_shipping' | 'leader_statement' | 'global_mega_event' | 'direct_focus' | 'adjacent_context' | 'should_skip' | 'wrong_class' | 'duplicate' | 'stale' | 'source_trust' | 'broad_global' | 'other';
-type EnrichmentFeedback = 'sounds_like_me' | 'too_soft' | 'too_ai' | 'too_newsy' | 'not_blunt_enough' | 'too_long' | 'good_clapback' | 'strong_angle' | 'too_risky' | 'too_cheesy' | 'too_aggregator' | 'needs_more_context' | 'unsafe_for_monetization';
-type XDiagnosticBlocker = { code: string; label: string; severity: 'blocker' | 'deferred' | 'note' };
-type XPostingDiagnosticItem = {
-  tweet_id: string;
-  eligible: boolean;
-  blockers: XDiagnosticBlocker[];
-  notes: XDiagnosticBlocker[];
-  score?: number | null;
-  threshold?: number;
-  decision?: string | null;
-  latest_x?: { status?: string; skip_reason?: string | null; last_error?: string | null; x_tweet_id?: string | null } | null;
-  candidate?: {
-    sql_gate_passed?: boolean;
-    reason?: string | null;
-    age_ms?: number | null;
-    dispatch_source?: string | null;
-  };
-  active_jobs?: Array<{ type?: string; status?: string; error?: string | null }>;
-  hydration?: { is_truncated?: boolean; hydrated_at?: string | null; active_hydrate_job?: boolean };
-  media?: {
-    has_media?: boolean;
-    rows?: number;
-    downloaded?: number;
-    active_media_job?: boolean;
-    selected_tier?: string;
-    selected_reason?: string | null;
-    row_details?: Array<{
-      id?: string | null;
-      kind?: string | null;
-      mime_type?: string | null;
-      file_size?: number | null;
-      downloaded?: boolean;
-      video_intent?: boolean;
-      sendable?: boolean;
-      role?: string;
-    }>;
-  };
-  enrichment?: { status?: string | null; pipeline_mode?: string; required_for_x?: boolean; approved_for_text?: boolean; text_source?: string };
-};
-
-function formatBytes(bytes: number | null | undefined): string {
-  if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes <= 0) return '-';
-  if (bytes < 1024) return `${bytes} B`;
-  const kb = bytes / 1024;
-  if (kb < 1024) return `${kb.toFixed(kb >= 10 ? 0 : 1)} KB`;
-  const mb = kb / 1024;
-  return `${mb.toFixed(mb >= 10 ? 0 : 1)} MB`;
-}
-
-function formatAge(seconds: number | null | undefined): string {
-  if (seconds == null || !Number.isFinite(seconds)) return 'unknown';
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ${minutes % 60}m`;
-  return `${Math.floor(hours / 24)}d ${hours % 24}h`;
-}
 
 const SCORING_REASON_TAGS: Array<{ value: ScoringFeedbackReasonTag; label: string }> = [
   { value: 'regional_escalation', label: 'Regional escalation' },
@@ -241,15 +142,6 @@ const SCORING_REASON_TAGS: Array<{ value: ScoringFeedbackReasonTag; label: strin
   { value: 'other', label: 'Other' },
 ];
 
-function defaultReasonTag(feedback: AudienceFeedback, expectedAudienceClass?: AudienceClassValue | ''): ScoringFeedbackReasonTag {
-  if (feedback === 'global_exception_worth_covering') return expectedAudienceClass === 'global_exception' ? 'global_mega_event' : 'broad_global';
-  if (feedback === 'not_global_exception' || feedback === 'should_skip') return 'should_skip';
-  if (feedback === 'wrong_relevance_class') return 'wrong_class';
-  if (expectedAudienceClass === 'direct_focus') return 'direct_focus';
-  if (expectedAudienceClass === 'adjacent') return 'adjacent_context';
-  return 'other';
-}
-
 function scoringReasonTagLabel(value: string | null | undefined): string {
   return SCORING_REASON_TAGS.find((tag) => tag.value === value)?.label ?? (value ? value.replaceAll('_', ' ') : 'None');
 }
@@ -265,143 +157,6 @@ function scoringRuleLabel(value: string | null | undefined): string {
   }
 }
 
-async function adminSetManualScore(tweetId: string, score: number, reason: string, reasonTag: ScoringFeedbackReasonTag, overrideDuplicate: boolean, expectedAudienceClass?: AudienceClassValue | '') {
-  return invokeAdminAction<{
-    ok: boolean;
-    score: number;
-    threshold: number;
-    decision: string;
-    translated?: boolean;
-    advance?: { queued: string; reason?: string };
-    translation_error?: string;
-    error?: string;
-  }>(
-    { action: 'set_manual_score', tweet_id: tweetId, score, reason, reason_tag: reasonTag, override_duplicate: overrideDuplicate, expected_audience_class: expectedAudienceClass || undefined },
-    { failureMessage: 'Manual score failed' },
-  );
-}
-
-async function adminRecordScoreFeedback(tweetId: string, feedback: AudienceFeedback, expectedAudienceClass?: AudienceClassValue | '') {
-  const reasonTag = defaultReasonTag(feedback, expectedAudienceClass);
-  return invokeAdminAction<{ ok: boolean; polarity: number; error?: string }>(
-    { action: 'record_score_feedback', tweet_id: tweetId, feedback, expected_audience_class: expectedAudienceClass || undefined, reason_tag: reasonTag },
-    { failureMessage: 'Feedback failed' },
-  );
-}
-
-async function adminEnrichmentDecision(tweetId: string, action: 'approve_enrichment' | 'reject_enrichment') {
-  return invokeAdminAction<{ ok: boolean; message?: string; error?: string }>(
-    { action, tweet_id: tweetId },
-    { failureMessage: 'Enrichment action failed' },
-  );
-}
-
-async function adminGetXPostingDiagnostic(tweetId: string) {
-  const data = await invokeAdminAction<{ success?: boolean; error?: string; diagnostics?: { items?: XPostingDiagnosticItem[] } }>(
-    { action: 'get_x_posting_diagnostics', tweet_id: tweetId },
-    { failureMessage: 'X diagnostics unavailable' },
-  );
-  const items = data?.diagnostics?.items as XPostingDiagnosticItem[] | undefined;
-  return items?.[0] ?? null;
-}
-
-async function adminRecordEnrichmentFeedback(tweetId: string, feedback: EnrichmentFeedback) {
-  return invokeAdminAction<{ ok: boolean; error?: string }>(
-    { action: 'record_enrichment_feedback', tweet_id: tweetId, feedback },
-    { failureMessage: 'Enrichment feedback failed' },
-  );
-}
-
-async function adminSelectEnrichmentVariant(tweetId: string, variant: string) {
-  return invokeAdminAction<{ ok: boolean; selected_variant?: string; final_x_text?: string; error?: string }>(
-    { action: 'select_enrichment_variant', tweet_id: tweetId, variant },
-    { failureMessage: 'Variant selection failed' },
-  );
-}
-
-async function adminIgnoreMonitoringItem(tweetId: string, reason = 'reviewed_and_ignored') {
-  return invokeAdminAction<{ ok: boolean; error?: string; closed?: { x_deliveries?: number; deliveries?: number; jobs?: number } }>(
-    { action: 'ignore_monitoring_item', tweet_id: tweetId, reason },
-    { failureMessage: 'Ignore failed' },
-  );
-}
-
-async function adminIgnoreMonitoringItems(tweetIds: string[], reason = 'reviewed_and_ignored') {
-  return invokeAdminAction<{
-    ok?: boolean;
-    requested?: number;
-    found?: number;
-    ignored?: number;
-    missing?: string[];
-    closed?: {
-      x_deliveries?: number;
-      deliveries?: number;
-      jobs?: number;
-    };
-    results?: Array<{
-      tweet_id: string;
-      ok: boolean;
-      error?: string;
-      closed?: { x_deliveries: number; deliveries: number; jobs: number };
-    }>;
-  }>(
-    { action: 'bulk_ignore', tweet_ids: tweetIds, reason },
-    { failureMessage: 'Bulk ignore failed' },
-  );
-}
-
-type ConfirmAction = 'force_telegram' | 'force_x' | 'rescore' | 'reprocess' | 'hydrate' | 'clear_dup' | 'ignore' | 'close_stale_x' | 'translate' | 'run_dedupe' | 'cancel_jobs' | 'approve_enrichment' | 'reject_enrichment';
-type BulkAction = 'bulk_reprocess' | 'bulk_ignore';
-
-interface PendingAction {
-  type: ConfirmAction;
-  entry?: MonitoringEntry;
-}
-
-interface PendingBulkAction {
-  type: BulkAction;
-  tweetIds: string[];
-}
-
-const FILTERS: Array<{ value: MonitoringFilter; label: string }> = [
-  { value: 'all', label: 'All' },
-  { value: 'needs_attention', label: 'Needs attention' },
-  { value: 'failed_stuck', label: 'Failed/stuck' },
-  { value: 'needs_score', label: 'Needs score' },
-  { value: 'translation_queue', label: 'Translation queue' },
-  { value: 'below_threshold', label: 'Below threshold' },
-  { value: 'manual_review', label: 'Manual review' },
-  { value: 'v2_would_post', label: 'V2 would post' },
-  { value: 'v2_would_skip', label: 'V2 would skip' },
-  { value: 'v1_post_v2_skip', label: 'V1 post / V2 skip' },
-  { value: 'v1_skip_v2_post', label: 'V1 skip / V2 post' },
-  { value: 'v2_off_topic', label: 'V2 off-topic' },
-  { value: 'v2_needs_review', label: 'V2 needs review' },
-  { value: 'v2_regional_auto', label: 'V2 regional auto' },
-  { value: 'global_pilot_review', label: 'Global pilot review' },
-  { value: 'manual_scoring_feedback', label: 'Manual scoring feedback' },
-  { value: 'duplicates', label: 'Duplicates' },
-  { value: 'coverage_gap', label: 'Coverage gaps' },
-  { value: 'possible_duplicate', label: 'Possible duplicates' },
-  { value: 'duplicate_anomalies', label: 'Duplicate anomalies' },
-  { value: 'ready_to_deliver', label: 'Ready to deliver' },
-  { value: 'telegram_pending', label: 'Telegram pending' },
-  { value: 'x_pending', label: 'X pending' },
-  { value: 'x_failed', label: 'X failed' },
-  { value: 'delivered_24h', label: 'Delivered 24h' },
-  { value: 'hydration', label: 'Hydration' },
-];
-
-const SCORE_BUCKETS: Array<{ value: ScoreBucket; label: string }> = [
-  { value: 'any', label: 'Any score' },
-  { value: 'unscored', label: 'Unscored' },
-  { value: 'lt5', label: '<5' },
-  { value: '5_9', label: '5-9.9' },
-  { value: '10_13', label: '10-13.9' },
-  { value: '14_plus', label: '14+' },
-  { value: '17_plus', label: '17+' },
-];
-
 function useDebouncedValue<T>(value: T, delayMs: number): T {
   const [debounced, setDebounced] = useState(value);
   useEffect(() => {
@@ -409,10 +164,6 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
     return () => clearTimeout(t);
   }, [value, delayMs]);
   return debounced;
-}
-
-function compactNumber(value: number | undefined): string {
-  return typeof value === 'number' ? value.toLocaleString() : '—';
 }
 
 function toneClass(tone: MonitoringTone | TimelineTone) {
@@ -436,246 +187,6 @@ function relativeTimestamp(rawTimestamp: string | null): string | null {
   const date = new Date(rawTimestamp);
   if (!Number.isFinite(date.getTime())) return null;
   return formatDistanceToNow(date, { addSuffix: true });
-}
-
-function shortText(entry: MonitoringEntry): string {
-  const text = entry.text_translated || entry.text_original || '';
-  return text.replace(/\s+/g, ' ').trim();
-}
-
-function scoreValue(entry: Pick<MonitoringEntry, 'final_score' | 'importance_score'>): number | null {
-  return entry.final_score ?? entry.importance_score ?? null;
-}
-
-function memberScoreValue(member: DuplicateClusterMember): number | null {
-  return member.final_score ?? member.importance_score ?? null;
-}
-
-function isDeliveredOrPosted(entry: MonitoringEntry): boolean {
-  return entry.is_delivered || entry.x_status === 'posted' || entry.monitoring_state?.telegram_state === 'delivered' || entry.monitoring_state?.x_state === 'posted';
-}
-
-function hasActiveDeliveryPath(entry: MonitoringEntry): boolean {
-  const code = entry.monitoring_state?.code;
-  return entry.delivery_decision === 'deliver'
-    || code === 'ready_to_deliver'
-    || code === 'telegram_pending'
-    || code === 'x_pending'
-    || code === 'hydration'
-    || entry.delivery_status === 'pending'
-    || entry.x_status === 'pending';
-}
-
-function chooseCanonicalEntry(entries: MonitoringEntry[]): MonitoringEntry {
-  return [...entries].sort((a, b) => {
-    const deliveredDelta = Number(isDeliveredOrPosted(b)) - Number(isDeliveredOrPosted(a));
-    if (deliveredDelta !== 0) return deliveredDelta;
-    const activeDelta = Number(hasActiveDeliveryPath(b)) - Number(hasActiveDeliveryPath(a));
-    if (activeDelta !== 0) return activeDelta;
-    const scoreDelta = (scoreValue(b) ?? -1) - (scoreValue(a) ?? -1);
-    if (scoreDelta !== 0) return scoreDelta;
-    return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-  })[0];
-}
-
-function duplicateMemberFromEntry(entry: MonitoringEntry, canonicalTweetId: string): DuplicateClusterMember {
-  return {
-    tweet_id: entry.tweet_id,
-    text_original: entry.text_original,
-    url: entry.url,
-    created_at: entry.created_at,
-    author_handle: entry.author_handle,
-    final_score: entry.final_score,
-    importance_score: entry.importance_score,
-    dedupe_status: entry.dedupe_status,
-    dup_of_tweet_id: entry.dup_of_tweet_id,
-    dup_similarity: entry.dup_similarity,
-    dedupe_confidence: entry.dedupe_confidence,
-    dedupe_reason: entry.dedupe_reason,
-    telegram_state: entry.monitoring_state?.telegram_state ?? entry.delivery_status ?? 'none',
-    x_state: entry.x_status ?? entry.monitoring_state?.x_state ?? 'none',
-    coverage_state: isDeliveredOrPosted(entry) ? 'delivered' : hasActiveDeliveryPath(entry) ? 'in_pipeline' : entry.dup_of_tweet_id ? 'also_duplicate' : 'not_covered',
-    is_canonical: entry.tweet_id === canonicalTweetId,
-  };
-}
-
-function duplicateMemberFromTarget(target: NonNullable<MonitoringEntry['duplicate_of']>, canonicalTweetId: string): DuplicateClusterMember {
-  return {
-    tweet_id: target.tweet_id,
-    text_original: target.text_original,
-    url: target.url,
-    created_at: target.created_at,
-    author_handle: target.author_handle,
-    final_score: target.final_score,
-    importance_score: target.importance_score,
-    dedupe_status: target.dedupe_status,
-    dup_of_tweet_id: target.dup_of_tweet_id,
-    dup_similarity: target.dup_similarity,
-    telegram_state: target.telegram_state,
-    x_state: target.x_state,
-    coverage_state: target.coverage_state,
-    is_canonical: target.tweet_id === canonicalTweetId,
-  };
-}
-
-function buildDuplicateCluster(clusterId: string, canonicalTweetId: string, members: DuplicateClusterMember[]): DuplicateCluster {
-  const uniqueMembers = [...new Map(members.map((member) => [member.tweet_id, member])).values()];
-  const counts = {
-    total: uniqueMembers.length,
-    delivered: uniqueMembers.filter((member) => member.coverage_state === 'delivered' || member.telegram_state === 'delivered' || member.telegram_state === 'posted').length,
-    x_posted: uniqueMembers.filter((member) => member.x_state === 'posted').length,
-    blocked: uniqueMembers.filter((member) => member.dedupe_status === 'duplicate' || Boolean(member.dup_of_tweet_id)).length,
-    uncertain: uniqueMembers.filter((member) => member.dedupe_status === 'uncertain').length,
-    coverage_gap: uniqueMembers.filter((member) => member.coverage_state === 'not_covered' || member.dedupe_status === 'coverage_gap').length,
-  };
-  return {
-    cluster_id: clusterId,
-    canonical_tweet_id: canonicalTweetId,
-    members: uniqueMembers.sort((a, b) => Number(Boolean(b.is_canonical)) - Number(Boolean(a.is_canonical)) || new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime()),
-    counts,
-    has_x_anomaly: counts.x_posted > 1,
-    coverage_state: counts.delivered > 0 || counts.x_posted > 0
-      ? 'covered'
-      : uniqueMembers.some((member) => member.coverage_state === 'in_pipeline')
-        ? 'in_pipeline'
-        : counts.coverage_gap > 0
-          ? 'coverage_gap'
-          : 'unknown',
-  };
-}
-
-function clusterMonitoringEntries(entries: MonitoringEntry[]): MonitoringEntry[] {
-  if (entries.some((entry) => entry.duplicate_cluster || entry.hidden_in_cluster)) {
-    return entries.filter((entry) => !entry.hidden_in_cluster);
-  }
-
-  const referencedIds = new Set(entries.map((entry) => entry.dup_of_tweet_id).filter((id): id is string => Boolean(id)));
-  const storyCounts = entries.reduce((map, entry) => {
-    if (entry.story_cluster_id) map.set(entry.story_cluster_id, (map.get(entry.story_cluster_id) ?? 0) + 1);
-    return map;
-  }, new Map<string, number>());
-  const groups = new Map<string, MonitoringEntry[]>();
-
-  for (const entry of entries) {
-    const key = entry.story_cluster_id && (storyCounts.get(entry.story_cluster_id) ?? 0) > 1
-      ? `story:${entry.story_cluster_id}`
-      : entry.dup_of_tweet_id
-        ? `root:${entry.dup_of_tweet_id}`
-        : referencedIds.has(entry.tweet_id)
-          ? `root:${entry.tweet_id}`
-          : '';
-    if (!key) continue;
-    const group = groups.get(key) ?? [];
-    group.push(entry);
-    groups.set(key, group);
-  }
-
-  const clusterByTweet = new Map<string, DuplicateCluster>();
-  const hidden = new Set<string>();
-  for (const [clusterId, group] of groups) {
-    const canonical = chooseCanonicalEntry(group);
-    const members = group.flatMap((entry) => {
-      const list = [duplicateMemberFromEntry(entry, canonical.tweet_id)];
-      if (entry.duplicate_of) list.push(duplicateMemberFromTarget(entry.duplicate_of, canonical.tweet_id));
-      return list;
-    });
-    const cluster = buildDuplicateCluster(clusterId, canonical.tweet_id, members);
-    if (cluster.counts.total < 2) continue;
-    for (const entry of group) {
-      clusterByTweet.set(entry.tweet_id, cluster);
-      if (entry.tweet_id !== canonical.tweet_id) hidden.add(entry.tweet_id);
-    }
-  }
-
-  return entries
-    .map((entry) => ({
-      ...entry,
-      duplicate_cluster: entry.duplicate_cluster ?? clusterByTweet.get(entry.tweet_id) ?? null,
-      hidden_in_cluster: entry.hidden_in_cluster ?? hidden.has(entry.tweet_id),
-    }))
-    .filter((entry) => !entry.hidden_in_cluster);
-}
-
-function audienceClassLabel(value: string | null | undefined): string {
-  switch (value) {
-    case 'direct_focus': return 'Direct focus';
-    case 'adjacent': return 'Adjacent';
-    case 'global_exception': return 'Global exception';
-    case 'off_topic': return 'Off topic';
-    default: return 'Audience n/a';
-  }
-}
-
-function formatScoringV2Score(snapshot: ScoringV2Snapshot | null): string {
-  if (!snapshot || snapshot.final_score == null) return '—';
-  const threshold = snapshot.threshold != null ? ` / ≥${snapshot.threshold}` : '';
-  return `${snapshot.final_score}${threshold}`;
-}
-
-function actionTitle(action: PendingAction | null) {
-  if (!action) return '';
-  switch (action.type) {
-    case 'force_telegram': return 'Force Telegram delivery?';
-    case 'force_x': return 'Post plain to X?';
-    case 'rescore': return 'Re-score this post?';
-    case 'reprocess': return 'Reprocess this post?';
-    case 'hydrate': return 'Hydrate this tweet?';
-    case 'clear_dup': return 'Clear duplicate status?';
-    case 'ignore': return 'Ignore and remove from queues?';
-    case 'close_stale_x': return 'Close stale X pending rows?';
-    case 'translate': return 'Get translation only?';
-    case 'run_dedupe': return 'Run duplicate check?';
-    case 'cancel_jobs': return 'Cancel all pending jobs?';
-    case 'approve_enrichment': return 'Approve enrichment for X?';
-    case 'reject_enrichment': return 'Reject enriched X draft?';
-  }
-}
-
-function bulkActionTitle(action: BulkAction, count: number) {
-  if (action === 'bulk_reprocess') return `Reprocess ${count} post(s)?`;
-  return `Ignore ${count} post(s)?`;
-}
-
-function actionDescription(action: PendingAction | null) {
-  if (!action) return '';
-  const entry = action.entry;
-  switch (action.type) {
-    case 'force_telegram':
-      return 'Queues Telegram delivery and records the override as feedback.';
-    case 'force_x': {
-      const reasons = entry?.x_cost_flags?.reasons ?? ['tweet write expected'];
-      return `Runs X preflight, queues hydration first if needed, then posts the plain translation unless an approved enrichment exists. Expected X work: ${reasons.join(', ')}.`;
-    }
-    case 'rescore':
-      return 'Runs the current scoring prompt again and may update the deliver/skip decision.';
-    case 'reprocess':
-      return 'Queues a full pipeline rerun for this post.';
-    case 'hydrate':
-      return 'Queues one X read for full tweet text unless an equivalent hydrate job is already pending.';
-    case 'clear_dup':
-      return 'Marks this pair as not duplicate and reopens the post for delivery evaluation.';
-    case 'ignore':
-      return 'Marks this post as reviewed/ignored, closes failed or pending X rows, closes failed/pending Telegram rows, and cancels failed/pending jobs without calling Telegram or X.';
-    case 'close_stale_x':
-      return 'Marks pending X delivery rows older than 24 hours as skipped. This does not retry, post, or call X.';
-    case 'translate':
-      return 'Runs Persian translation only. This does not change the score, decision, Telegram state, or X eligibility.';
-    case 'run_dedupe':
-      return 'Runs the duplicate gate now. Unique or meaningfully updated posts can continue to translation; duplicates remain blocked.';
-    case 'cancel_jobs':
-      return 'Marks pending and running jobs as failed. This does not call Telegram or X.';
-    case 'approve_enrichment':
-      return 'Marks this draft as approved for X text. It does not call Telegram or X by itself; normal X gates and budgets still apply.';
-    case 'reject_enrichment':
-      return 'Blocks this enriched draft from delivery. This does not call Telegram or X.';
-  }
-}
-
-function bulkActionDescription(action: BulkAction, count: number) {
-  if (action === 'bulk_reprocess') {
-    return 'Queues full pipeline reruns for the selected posts in one action.';
-  }
-  return 'Marks each selected post as reviewed/ignored, closes failed or pending X rows, closes failed/pending Telegram rows, and cancels pending/running/failed jobs without calling Telegram or X.';
 }
 
 export default function Monitoring() {
@@ -898,15 +409,7 @@ export default function Monitoring() {
     setDrawerTweetId(tweetId);
     setDrawerOpen(true);
     try {
-      const data = await invokeAdminAction<{
-        ok: boolean;
-        error?: string;
-        worker_dispatch?: { ok?: boolean; processed?: number; message?: string; error?: string };
-        translation_preflight?: { ok?: boolean };
-      }>(
-        { action: 'enrich_post', tweet_id: tweetId },
-        { failureMessage: 'Failed to queue enrichment' },
-      );
+      const data = await adminEnrichPost(tweetId);
       if (!data?.ok) throw new Error(data?.error ?? 'Failed to queue enrichment');
       const workerDispatch = data.worker_dispatch;
       const descriptionParts = [
@@ -1097,23 +600,23 @@ export default function Monitoring() {
           break;
         }
         case 'close_stale_x': {
-          const data = await invokeAdminAction<{ closed?: number }>({ action: 'summarize_stale_x_pending', older_than_hours: 24, close: true });
+          const data = await adminCloseStaleXPending();
           toast({ title: 'Stale X pending closed', description: `${data?.closed ?? 0} row(s) marked skipped` });
           break;
         }
         case 'cancel_jobs': {
-          const data = await invokeAdminAction<{ canceled?: number }>({ action: 'cancel_pending_jobs' });
+          const data = await adminCancelPendingJobs();
           toast({ title: 'Pending jobs canceled', description: `${data?.canceled ?? 0} job(s) marked failed.` });
           break;
         }
         case 'approve_enrichment':
           if (!entry) throw new Error('Missing post');
-          await adminEnrichmentDecision(entry.tweet_id, 'approve_enrichment');
+          await adminApproveEnrichment(entry.tweet_id);
           toast({ title: 'Enrichment approved for X', description: 'No Telegram or X post was triggered by approval.' });
           break;
         case 'reject_enrichment':
           if (!entry) throw new Error('Missing post');
-          await adminEnrichmentDecision(entry.tweet_id, 'reject_enrichment');
+          await adminRejectEnrichment(entry.tweet_id);
           toast({ title: 'Enrichment rejected' });
           break;
       }
@@ -1606,114 +1109,24 @@ export default function Monitoring() {
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-2 min-[480px]:grid-cols-3 md:grid-cols-4 xl:grid-cols-7">
-        {[
-          ['Needs attention', counts.needs_attention, 'text-amber-500'],
-          ['Failed/stuck', counts.failed_stuck, 'text-destructive'],
-          ['Translation queue', counts.translation_queue, 'text-blue-500'],
-          ['Needs score', counts.needs_score, 'text-amber-500'],
-          ['Ready to deliver', counts.ready_to_deliver, 'text-primary'],
-          ['Manual review', counts.manual_review, 'text-purple-500'],
-          ['Duplicates', counts.duplicates, 'text-muted-foreground'],
-          ['Coverage gaps', counts.coverage_gap ?? 0, 'text-amber-500'],
-          ['Possible dupes', counts.possible_duplicate ?? 0, 'text-amber-500'],
-          ['Dup anomalies', counts.duplicate_anomalies ?? 0, 'text-destructive'],
-          ['Hydration', counts.hydration, 'text-blue-500'],
-          ['X pending', counts.x_pending, 'text-amber-500'],
-          ['X failed', counts.x_failed, 'text-destructive'],
-          ['Delivered 24h', counts.delivered_24h, 'text-emerald-500'],
-        ].map(([label, value, cls]) => (
-          <Card key={label as string}>
-            <CardContent className="p-2.5 sm:p-3">
-              <p className="text-xs text-muted-foreground">{label}</p>
-              <p className={`text-xl font-semibold tabular-nums sm:text-2xl ${cls}`}>{compactNumber(value as number)}</p>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      <div className="grid gap-3 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <CardContent className="grid grid-cols-2 gap-3 p-3 sm:grid-cols-4">
-            {[
-              ['Telegram pending', counts.telegram_pending],
-              ['Below threshold', counts.below_threshold],
-              ['Stale jobs', counts.stale_jobs],
-              ['Stale X pending', counts.stale_x_pending_24h],
-              ['Regional auto', counts.v2_regional_auto],
-              ['Global pilot', counts.global_pilot_review],
-              ['Manual scoring', counts.manual_scoring_feedback],
-            ].map(([label, value]) => (
-              <div key={label as string}>
-                <p className="text-xs text-muted-foreground">{label}</p>
-                <p className="text-lg font-semibold tabular-nums">{compactNumber(value as number)}</p>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="grid grid-cols-3 gap-3 p-3">
-            <div>
-              <p className="text-xs text-muted-foreground">X attempts</p>
-              <p className="text-lg font-semibold tabular-nums">{compactNumber(xSummary?.counted_attempts)}</p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Local posts</p>
-              <p className="text-lg font-semibold tabular-nums">{compactNumber(xSummary?.posts_local ?? counts.delivered_24h)}</p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Success</p>
-              <p className="text-lg font-semibold tabular-nums">{xSummary ? `${xSummary.success_rate}%` : '—'}</p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      <MonitoringQueueCards counts={counts} xSummary={xSummary} />
 
       <Card>
-        <CardHeader className="p-3">
-          <div className="grid gap-3 xl:grid-cols-[auto_minmax(0,1fr)] xl:items-center">
-            <CardTitle className="text-base">Queue</CardTitle>
-            <div className="grid gap-2 sm:grid-cols-[minmax(18rem,1fr)_13rem_10rem] xl:justify-end">
-              <div className="relative min-w-0">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Search author, source, text, tweet ID" className="pl-9" />
-              </div>
-              <ThemedSelect value={filter} onValueChange={(value) => setFilter(value as MonitoringFilter)}>
-                <SelectTrigger className="w-full sm:w-52"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {FILTERS.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
-                </SelectContent>
-              </ThemedSelect>
-              <ThemedSelect value={scoreBucket} onValueChange={(value) => setScoreBucket(value as ScoreBucket)}>
-                <SelectTrigger className="w-full sm:w-40"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {SCORE_BUCKETS.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
-                </SelectContent>
-              </ThemedSelect>
-            </div>
-          </div>
-          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border/60 pt-3">
-            <span className="text-xs font-medium text-muted-foreground">{selectedCount} selected</span>
-            <Button size="sm" variant="outline" onClick={() => toggleSelectAllVisible(!isAllVisibleSelected)} disabled={visibleTweetIds.length === 0}>
-              {isAllVisibleSelected ? 'Deselect all visible' : 'Select all visible'}
-            </Button>
-            {selectedCount > 0 && (
-              <>
-                <Button size="sm" variant="outline" onClick={() => setPendingBulkAction({ type: 'bulk_reprocess', tweetIds: [...selectedTweetIds] })}>
-                  <RotateCcw className="w-3 h-3 mr-2" />
-                  Mass reprocess
-                </Button>
-                <Button size="sm" variant="destructive" onClick={() => setPendingBulkAction({ type: 'bulk_ignore', tweetIds: [...selectedTweetIds] })}>
-                  <Ban className="w-3 h-3 mr-2" />
-                  Mass ignore
-                </Button>
-                <Button size="sm" variant="ghost" onClick={clearSelection}>
-                  Clear selection
-                </Button>
-              </>
-            )}
-          </div>
-        </CardHeader>
+        <MonitoringFilters
+          searchTerm={searchTerm}
+          onSearchTermChange={setSearchTerm}
+          filter={filter}
+          onFilterChange={setFilter}
+          scoreBucket={scoreBucket}
+          onScoreBucketChange={setScoreBucket}
+          selectedCount={selectedCount}
+          visibleCount={visibleTweetIds.length}
+          isAllVisibleSelected={isAllVisibleSelected}
+          onToggleSelectAllVisible={() => toggleSelectAllVisible(!isAllVisibleSelected)}
+          onBulkReprocess={() => setPendingBulkAction({ type: 'bulk_reprocess', tweetIds: [...selectedTweetIds] })}
+          onBulkIgnore={() => setPendingBulkAction({ type: 'bulk_ignore', tweetIds: [...selectedTweetIds] })}
+          onClearSelection={clearSelection}
+        />
         <CardContent className="p-0">
           {isLoading ? (
             <div className="flex min-h-[360px] items-center justify-center"><Loader2 className="w-8 h-8 animate-spin" /></div>
@@ -2791,45 +2204,17 @@ export default function Monitoring() {
         </DialogContent>
       </Dialog>
 
-      <AlertDialog
-        open={!!pendingAction || !!pendingBulkAction}
-        onOpenChange={(open) => {
-          if (open) return;
+      <MonitoringActionDialog
+        pendingAction={pendingAction}
+        pendingBulkAction={pendingBulkAction}
+        actionLoading={actionLoading}
+        onCancel={() => {
           setPendingAction(null);
           setPendingBulkAction(null);
         }}
-      >
-        <AlertDialogContent className="w-[calc(100vw-1rem)] max-w-lg p-4 sm:p-6">
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {pendingAction
-                ? actionTitle(pendingAction)
-                : pendingBulkAction ? bulkActionTitle(pendingBulkAction.type, pendingBulkAction.tweetIds.length) : ''}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {pendingAction
-                ? actionDescription(pendingAction)
-                : pendingBulkAction
-                  ? bulkActionDescription(pendingBulkAction.type, pendingBulkAction.tweetIds.length)
-                  : ''}
-              {(pendingAction?.entry || pendingBulkAction) && (
-                <span className="mt-2 block rounded-md bg-muted p-3 text-xs text-foreground">
-                  {pendingAction?.entry
-                    ? `${pendingAction.entry.author_handle ? `@${pendingAction.entry.author_handle}` : pendingAction.entry.tweet_id} · ${shortText(pendingAction.entry).slice(0, 180)}`
-                    : `${pendingBulkAction?.tweetIds.length ?? 0} post IDs selected`}
-                </span>
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter className="gap-2 sm:gap-0 [&>button]:w-full sm:[&>button]:w-auto">
-            <AlertDialogCancel disabled={actionLoading}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={pendingAction ? confirmAction : confirmBulkAction} disabled={actionLoading}>
-              {actionLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
-              Confirm
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        onConfirmAction={confirmAction}
+        onConfirmBulkAction={confirmBulkAction}
+      />
     </div>
   );
 }
