@@ -1921,15 +1921,15 @@ Bring production up to date only after the cleanup is merged to `main` and verif
 
 ## Preconditions
 
-- [ ] Integration PR merged to `main`.
-- [ ] GitHub CI green on `main`.
-- [ ] Clean local `main` checkout.
-- [ ] Release runbook reviewed.
-- [ ] Rollback target identified.
+- [x] Integration PR merged to `main`.
+- [x] GitHub CI green on `main`.
+- [x] Clean local `main` checkout.
+- [x] Release runbook reviewed.
+- [x] Rollback target identified.
 
 ## Steps
 
-- [ ] Use the main checkout, not the cleanup worktree.
+- [x] Use the main checkout, not the cleanup worktree.
 
 ```bash
 cd "/Users/stevmq/Finalized XOT"
@@ -1939,19 +1939,19 @@ git pull --ff-only origin main
 git status --short --branch
 ```
 
-- [ ] Confirm local main matches remote main.
+- [x] Confirm local main matches remote main.
 
 ```bash
 test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
 ```
 
-- [ ] Run pre-release state check.
+- [x] Run pre-release state check.
 
 ```bash
 npm run check:release-state
 ```
 
-- [ ] Run full local gate from clean main.
+- [x] Run full local gate from clean main.
 
 ```bash
 npm run lint
@@ -1967,34 +1967,34 @@ npm run build
 npm --prefix services/video-renderer test
 ```
 
-- [ ] Dry-run function deploy preflight.
+- [x] Dry-run function deploy preflight.
 
 ```bash
 DEPLOY_FUNCTIONS_DRY_RUN=1 ./scripts/deploy-functions.sh
 ```
 
-- [ ] Let Vercel deploy from GitHub `main`.
-- [ ] Check Vercel production aliases:
+- [x] Let Vercel deploy from GitHub `main`.
+- [x] Check Vercel production aliases:
 
 ```bash
 curl -sSI https://xot.iraneyes.com
 curl -sSI https://xot.vercel.app
 ```
 
-- [ ] Deploy Supabase functions only from clean main if function code changed:
+- [x] Deploy Supabase functions only from clean main if function code changed:
 
 ```bash
 ./scripts/deploy-functions.sh
 ```
 
-- [ ] Do not apply migrations unless Phase 14 produced a reviewed migration action.
-- [ ] Run post-release state check:
+- [x] Do not apply migrations unless Phase 14 produced a reviewed migration action.
+- [x] Run post-release state check:
 
 ```bash
 npm run check:release-state
 ```
 
-- [ ] Perform authenticated smoke checks:
+- [x] Perform authenticated smoke checks:
   - Dashboard loads.
   - Monitoring loads.
   - Settings loads.
@@ -2005,14 +2005,55 @@ npm run check:release-state
   - renderer heartbeat is online.
   - stale running jobs query is empty.
 
-- [ ] Record release in `docs/operations/release-runbook.md`.
+- [x] Record release in `docs/operations/release-runbook.md`.
+
+## Execution Notes
+
+- PR #13 (`https://github.com/Masihhedayati/liquid-feed-flux/pull/13`) was marked ready and merged to `main` as `8f0b93db7e57bbc0b6108db12e929e220715970c`.
+- Clean `main` was refreshed in `/Users/stevmq/.config/superpowers/worktrees/Finalized-XOT/phase2-scoring-release` and matched `origin/main`.
+- GitHub CI for `main` run `27507054048` completed successfully at `8f0b93db7e57bbc0b6108db12e929e220715970c`.
+- Local validation from clean `main` passed:
+  - `npm ci`
+  - `npm run lint`
+  - `npm run check:function-inventory`
+  - `npm run lint:functions`
+  - `npm run check:functions`
+  - `npm run test:functions`
+  - `npm run check:strict`
+  - `npm test`
+  - `VITE_SUPABASE_URL=https://jzirqfzzvlbxwfzndaer.supabase.co VITE_SUPABASE_PUBLISHABLE_KEY=local-build-validation-key VITE_SUPABASE_PROJECT_ID=jzirqfzzvlbxwfzndaer npm run build`
+  - `npm --prefix services/video-renderer test`
+- `DEPLOY_FUNCTIONS_DRY_RUN=1 ./scripts/deploy-functions.sh` passed, then `./scripts/deploy-functions.sh` deployed all 10 configured functions and stamped `DEPLOY_GIT_SHA=8f0b93db7e57bbc0b6108db12e929e220715970c`.
+- Vercel production deployment `dpl_4y8m9mYj5qFggB9nX5TehuMDQHC9` was `READY`, target `production`, ref `main`, commit `8f0b93db7e57bbc0b6108db12e929e220715970c`, with aliases `xot.iraneyes.com`, `xot.vercel.app`, `xot-masihation-8914s-projects.vercel.app`, and `xot-git-main-masihation-8914s-projects.vercel.app`.
+- `curl -sSI https://xot.iraneyes.com` and `curl -sSI https://xot.vercel.app` returned `HTTP/2 200` with matching ETag `"62ee158844cdde3d9bf8593572b49ccc"` and expected security headers.
+- Post-release `npm run check:release-state` passed twice after the function deploy. The later check ran after authenticated browser smoke and confirmed:
+  - local branch matched `origin/main`;
+  - no open PRs or issues;
+  - main CI green;
+  - all 10 Supabase functions active with expected `verify_jwt` values;
+  - `DEPLOY_GIT_SHA` secret updated at `2026-06-14T17:57:28.900Z`;
+  - known migration drift still present and no migrations applied;
+  - cron jobs `invoke-worker-every-1m` and `x-poster-tick` active;
+  - queue health contained completed jobs only;
+  - stale running jobs query returned no rows;
+  - renderer `hermes-masih-1` online with `render_version=persian-subtitles-masihh-v1`, `processed=3`, `failed=0`, `last_seen_at=2026-06-14 18:25:58.825+00`;
+  - `scoring_policy` mode `active` and `video_render_config` mode `shadow`.
+- Authenticated Chrome smoke on production loaded Dashboard, Monitoring, Settings, Video Renders, and `/x-account`.
+  - Dashboard showed `Pipeline is operating normally`, `Last ingest 0m ago`, and `0 stale running jobs`.
+  - Monitoring loaded live queue rows and counts through the authenticated admin surface.
+  - Settings loaded production settings and model controls.
+  - Video Renders showed renderer `Online`, mode `shadow`, `0` queued, `0` issues, and no backlog.
+  - `/x-account` loaded the intended `My X is paused` state and did not expose follower snapshot controls.
+  - The version banner showed frontend `8f0b93d` and backend API `8f0b93db7e57bbc0b6108db12e929e220715970c`.
+- Rollback target for frontend is Vercel deployment `dpl_JEAKMGeLPRzpe3ZMTeNEAMGysHf9` at git `5d351a9db81809fac4e668c5d03f298f03647808`.
+- Function rollback target is git `5d351a9db81809fac4e668c5d03f298f03647808` via `DEPLOY_ALLOW_NON_MAIN=1 ./scripts/deploy-functions.sh`.
 
 ## Exit Criteria
 
-- [ ] Production frontend points at the merged main SHA.
-- [ ] Supabase functions are deployed from the same main SHA if changed.
-- [ ] Post-release read-only state is healthy.
-- [ ] Release ledger contains rollback target and smoke-check evidence.
+- [x] Production frontend points at the merged main SHA.
+- [x] Supabase functions are deployed from the same main SHA if changed.
+- [x] Post-release read-only state is healthy.
+- [x] Release ledger contains rollback target and smoke-check evidence.
 
 ---
 
@@ -2026,9 +2067,11 @@ Remove compatibility scaffolding only after production has run safely on the cle
 
 Wait until at least one normal production operating cycle has passed after release.
 
+Timing note: by `2026-06-14T18:25:58Z`, more than one one-minute production operating cycle had passed after the `2026-06-14T17:57:28.900Z` deploy stamp. The later post-release `npm run check:release-state` passed, with worker and x-poster cron active, no stale running jobs, and renderer heartbeat online.
+
 ## Steps
 
-- [ ] Re-run release-state check.
+- [x] Re-run release-state check.
 
 ```bash
 npm run check:release-state
@@ -2039,6 +2082,18 @@ npm run check:release-state
 - [ ] Remove unused worker helper exports.
 - [ ] Remove dead code identified by TypeScript and Deno checks.
 - [ ] Update docs to reflect the final module map.
+
+## Candidate Queue
+
+Read-only sidecar audit identified these Phase 21 candidates. Do not remove them in production without the listed verification gates:
+
+- Monitoring legacy Supabase fallback in `src/api/monitoringData.ts`: remove only after authenticated Monitoring continues to use `admin-actions` successfully and request/log evidence shows no legacy query path usage.
+- Dashboard direct RPC fallback in `src/api/dashboardData.ts`: candidate for removal after Dashboard remains healthy through `admin-actions` and `src/test/dashboard-data.test.ts` is updated.
+- Monitoring response/filter aliases in `src/api/monitoringData.ts` and `supabase/functions/admin-actions/monitoringReads.ts`: remove only after old frontend bundles have aged out and function logs show no legacy filter values.
+- Unused admin action cases in `supabase/functions/_shared/adminActionNames.ts` and `supabase/functions/admin-actions/index.ts`: strongest candidate is the backward-compatible `backfill_signatures` alias, but request logs and runbook/manual operator usage must be checked first.
+- Worker helper export surface in `supabase/functions/worker/*`: candidate for de-export cleanup only, preserving tests or moving helper coverage to public behavior.
+- Paused My X implementation in `src/pages/XAccount.tsx`, `src/api/xAccountData.ts`, `src/hooks/useFollowerData.ts`, and `src/components/x/FollowerGrowthChart.tsx`: remove only after confirming My X should stay paused.
+- Renderer compatibility re-export in `services/video-renderer/src/renderer.js`: remove only after confirming deployed renderer process/scripts do not import `loadConfigFromEnv` from `renderer.js`.
 
 ## Validation
 
