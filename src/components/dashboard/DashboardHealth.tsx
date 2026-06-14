@@ -4,7 +4,8 @@ import { Progress } from '@/components/ui/progress';
 import { Activity, AlertTriangle, Eye, RefreshCw, Loader2, Settings, Wrench, Play, RotateCcw, Clock, HardDrive } from 'lucide-react';
 import type { PipelineHealth, QueueBreakdown, SystemPerformanceSummary, XLocalUsage } from '@/hooks/useDashboardData';
 import { useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { invokeAdminAction } from '@/api/adminActions';
+import { invokeAdminRetry } from '@/api/adminRetry';
 import { useToast } from '@/hooks/use-toast';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -52,41 +53,32 @@ export function DashboardHealth({ health, queue, xUsage, systemPerformance }: Pr
     try {
       switch (action) {
         case 'retry-deliveries': {
-          const { error } = await supabase.functions.invoke('admin-retry', { body: { action: 'retry_failed_deliveries' } });
-          if (error) throw error;
+          await invokeAdminRetry({ action: 'retry_failed_deliveries' });
           toast({ title: 'Retry jobs queued', description: 'Failed delivery retry jobs were created.' });
           invalidate();
           break;
         }
         case 'reconcile-jobs': {
-          const { error } = await supabase.functions.invoke('admin-actions', { body: { action: 'reconcile_stuck_jobs' } });
-          if (error) throw error;
+          await invokeAdminAction({ action: 'reconcile_stuck_jobs' });
           toast({ title: 'Queue reconciled', description: 'Stuck jobs were checked without calling X.' });
           invalidate();
           break;
         }
         case 'close-stale-x': {
-          const { error } = await supabase.functions.invoke('admin-actions', {
-            body: { action: 'summarize_stale_x_pending', older_than_hours: 24, close: true },
-          });
-          if (error) throw error;
+          await invokeAdminAction({ action: 'summarize_stale_x_pending', older_than_hours: 24, close: true });
           toast({ title: 'Stale X rows closed', description: 'No retry or X API call was made.' });
           invalidate();
           break;
         }
         case 'media-cleanup-dry-run': {
-          const { data, error } = await supabase.functions.invoke('admin-actions', {
-            body: { action: 'dry_run_old_media_cleanup', days_old: 1 },
-          });
-          if (error) throw error;
+          const data = await invokeAdminAction<{ result?: { would_delete?: number } }>({ action: 'dry_run_old_media_cleanup', days_old: 1 });
           const wouldDelete = data?.result?.would_delete ?? 0;
           toast({ title: 'Media cleanup dry run complete', description: `${wouldDelete} old media object(s) are currently safe to clean.` });
           invalidate();
           break;
         }
         case 'test-pipeline': {
-          const { error } = await supabase.functions.invoke('admin-retry', { body: { action: 'test_webhook' } });
-          if (error) throw error;
+          await invokeAdminRetry({ action: 'test_webhook' });
           toast({ title: 'Live test sent', description: 'A production test webhook was invoked.' });
           invalidate();
           break;

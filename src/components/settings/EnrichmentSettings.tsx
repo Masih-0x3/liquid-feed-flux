@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ChevronDown, Plus, X, Sparkles, Search, PenTool, Wand2, Layout, BookOpen, Loader2, Save } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
+import { invokeAdminAction } from '@/api/adminActions';
 
 interface EnrichmentConfig {
   enabled: boolean;
@@ -242,10 +243,10 @@ export default function EnrichmentSettings() {
   async function generateVoiceProfile() {
     setGeneratingProfile(true);
     try {
-      const { data, error } = await supabase.functions.invoke('admin-actions', {
-        body: { action: 'generate_voice_profile', guide: voiceGuide.guide },
-      });
-      if (error) throw error;
+      const data = await invokeAdminAction<{ ok?: boolean; error?: string; profile?: PersonalVoiceProfile; usage?: unknown }>(
+        { action: 'generate_voice_profile', guide: voiceGuide.guide },
+        { throwOnFailure: false },
+      );
       if (data?.ok === false) throw new Error(data.error ?? 'Voice profile generation failed');
       setVoiceProfile(data.profile as PersonalVoiceProfile);
       setVoiceGuide({ guide: voiceGuide.guide, updated_at: new Date().toISOString() });

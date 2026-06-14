@@ -12,7 +12,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Sparkles, Plus, X, Copy, Trash2, Save, Loader2, RefreshCw, ChevronDown } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useSaveSettings, makeDefaultProfile, DEFAULT_AXIS_WEIGHTS, SCORE_AXIS_KEYS, type EditorialProfile, type ScoreAxisKey } from '@/hooks/useSettingsData';
-import { supabase } from '@/integrations/supabase/client';
+import { invokeAdminAction } from '@/api/adminActions';
 
 interface Props {
   profiles: EditorialProfile[];
@@ -106,10 +106,7 @@ export default function EditorialProfilesCard({ profiles: initialProfiles, activ
   const handleRescore = async () => {
     setRescoring(true);
     try {
-      const { data, error } = await supabase.functions.invoke('admin-actions', {
-        body: { action: 'rescore_recent', hours: 48, only_missing: true },
-      });
-      if (error) throw error;
+      const data = await invokeAdminAction<{ queued?: number; matched?: number; scanned?: number }>({ action: 'rescore_recent', hours: 48, only_missing: true });
       toast({
         title: 'Re-score queued',
         description: `Queued ${data?.queued ?? 0} of ${data?.matched ?? 0} posts missing axes (scanned ${data?.scanned ?? 0}).`,

@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { invokeAdminAction } from '@/api/adminActions';
 import { AlertCircle, CheckCircle2, RefreshCw, Cloud, Monitor } from 'lucide-react';
 
 interface BackendVersion {
   sha: string;
   deployed_at: string;
+  ok?: boolean;
 }
 
 const frontendSha = typeof __APP_VERSION_SHA__ !== 'undefined' ? __APP_VERSION_SHA__ : 'dev';
@@ -47,11 +48,9 @@ export function VersionBanner() {
     let cancelled = false;
     (async () => {
       try {
-        const { data, error: fnErr } = await supabase.functions.invoke('admin-actions', {
-          body: { action: 'version' },
-        });
+        const data = await invokeAdminAction<BackendVersion>({ action: 'version' }, { throwOnFailure: false });
         if (cancelled) return;
-        if (fnErr || !data?.ok) { setError(true); return; }
+        if (!data?.ok) { setError(true); return; }
         setBackend(data as BackendVersion);
       } catch {
         if (!cancelled) setError(true);

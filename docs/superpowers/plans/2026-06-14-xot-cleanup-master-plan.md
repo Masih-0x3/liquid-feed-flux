@@ -24,10 +24,10 @@ Main checkout preserved:
 /Users/stevmq/Finalized XOT
 ```
 
-Current branch at plan time:
+Current implementation branch after Phase 10:
 
 ```text
-codex/xot-cleanup-12-worker-telegram-split
+codex/xot-cleanup-20-frontend-admin-contracts
 ```
 
 Current safe-state rule:
@@ -234,7 +234,7 @@ Use parallel agents for independent review and evidence collection, not for unco
 - `src/pages/Monitoring.tsx`: final goal is page composition only.
 - `src/api/adminActions.ts`: typed client wrapper for `admin-actions`.
 - `src/api/adminRetry.ts`: typed client wrapper for `admin-retry`.
-- `src/lib/adminActionContracts.ts`: shared frontend action names and payload/result shapes.
+- `supabase/functions/_shared/adminActionNames.ts`: canonical admin action-name list shared by function and frontend code.
 - `src/lib/monitoringViewModel.ts`: grouping, display normalization, duplicate cluster view models.
 - `src/components/monitoring/*.tsx`: Monitoring toolbar, queue cards, row, drawer, and confirmation dialog.
 - `src/hooks/useMonitoringData.ts`: Monitoring data fetching only.
@@ -570,7 +570,13 @@ npm run check:release-state
 
 # Phase 6: Worker Split, Part D - Telegram Delivery Helpers
 
-Status: next active cleanup branch.
+Status: completed in cleanup branch history.
+
+Completed commit:
+
+```text
+eb19c66 refactor: extract worker telegram delivery helpers
+```
 
 Branch:
 
@@ -702,6 +708,14 @@ git commit -m "refactor: extract worker telegram delivery helpers"
 
 # Phase 7: Worker Split, Part E - X API And Hydration
 
+Status: completed in cleanup branch history.
+
+Completed commit:
+
+```text
+454ec7c refactor: extract worker x api workflow helpers
+```
+
 Branch:
 
 ```text
@@ -778,6 +792,14 @@ git commit -m "refactor: extract worker x api workflow"
 ---
 
 # Phase 8: Worker Split, Part F - Media Resolution And Media Processor Boundary
+
+Status: completed in cleanup branch history.
+
+Completed commit:
+
+```text
+47cf77a refactor: extract worker media workflow helpers
+```
 
 Branch:
 
@@ -926,6 +948,8 @@ git commit -m "refactor: extract worker translate and scoring workflows"
 
 # Phase 10: Frontend Admin Action Contracts
 
+Status: completed in branch `codex/xot-cleanup-20-frontend-admin-contracts`.
+
 Branch:
 
 ```text
@@ -938,62 +962,59 @@ Stop scattering `supabase.functions.invoke("admin-actions")` calls across pages 
 
 ## Files
 
-- Create: `src/lib/adminActionContracts.ts`
-- Create: `src/api/adminActions.ts`
+- Existing canonical contract: `supabase/functions/_shared/adminActionNames.ts`
+- Modify: `src/api/adminActions.ts`
 - Create: `src/api/adminRetry.ts`
-- Create: `src/test/admin-actions-contract.test.ts`
-- Modify: `src/pages/Monitoring.tsx`
-- Modify: `src/hooks/useVideoRenderData.ts`
-- Modify: `src/hooks/useDashboardData.ts`
-- Modify: `src/hooks/useSettingsData.ts`
+- Existing test: `src/test/admin-actions-contract.test.ts`
 - Modify: `src/components/dashboard/DashboardHealth.tsx`
+- Modify: `src/components/layout/VersionBanner.tsx`
+- Modify: `src/components/settings/EditorialProfilesCard.tsx`
+- Modify: `src/components/settings/EnrichmentSettings.tsx`
+- Modify: `src/components/settings/LearnedSignalsCard.tsx`
+- Modify: `src/components/settings/ScoringStudio.tsx`
+- Modify: `src/components/settings/StoryMemoryCard.tsx`
 - Modify: `src/components/settings/XAutomationSettings.tsx`
+- Modify: `src/components/settings/XPostingConfig.tsx`
+- Modify: `src/pages/Downloader.tsx`
 - Modify: `src/pages/Settings.tsx`
+- Modify: `src/pages/Threads.tsx`
+- Modify: `src/pages/XAccount.tsx`
 
 ## Steps
 
-- [ ] Locate all admin function invocations.
+- [x] Locate all admin function invocations.
 
 ```bash
-rg -n "functions\\.invoke\\(['\\\"]admin-actions|functions\\.invoke\\(['\\\"]admin-retry" src supabase/functions
+rg -n "functions\\.invoke\\(['\\\"]admin-actions|functions\\.invoke\\(['\\\"]admin-retry" src
 ```
 
-- [ ] Create `src/lib/adminActionContracts.ts`:
-
-```ts
-export const ADMIN_ACTION_NAMES = [
-  "get_dashboard_summary",
-  "get_monitoring_entries",
-  "get_x_status",
-  "get_video_render_queue",
-  "retry_x_post",
-] as const;
-
-export type AdminActionName = (typeof ADMIN_ACTION_NAMES)[number];
-
-export type AdminActionRequest<TPayload extends object = Record<string, unknown>> = {
-  action: AdminActionName;
-} & TPayload;
-```
-
-- [ ] Expand `ADMIN_ACTION_NAMES` to every action currently called by the frontend.
-- [ ] Create `src/api/adminActions.ts` with one invoke wrapper.
-- [ ] Create `src/api/adminRetry.ts` with one `admin-retry` wrapper.
-- [ ] Convert high-traffic callers first:
-  - Monitoring action helpers.
-  - Dashboard health actions.
-  - Video render data actions.
-  - Settings save/preview actions.
-  - X automation status action.
-- [ ] Leave backend dispatcher unchanged in this phase.
+- [x] Reuse `supabase/functions/_shared/adminActionNames.ts` as the canonical action-name list instead of creating a duplicate frontend-only list.
+- [x] Extend `src/api/adminActions.ts` with an optional `throwOnFailure: false` mode for actions that intentionally render `ok: false` inline.
+- [x] Create `src/api/adminRetry.ts` with one `admin-retry` wrapper.
+- [x] Convert direct `admin-actions` and `admin-retry` frontend invocations in:
+  - `src/components/dashboard/DashboardHealth.tsx`
+  - `src/components/layout/VersionBanner.tsx`
+  - `src/components/settings/EditorialProfilesCard.tsx`
+  - `src/components/settings/EnrichmentSettings.tsx`
+  - `src/components/settings/LearnedSignalsCard.tsx`
+  - `src/components/settings/ScoringStudio.tsx`
+  - `src/components/settings/StoryMemoryCard.tsx`
+  - `src/components/settings/XAutomationSettings.tsx`
+  - `src/components/settings/XPostingConfig.tsx`
+  - `src/pages/Downloader.tsx`
+  - `src/pages/Settings.tsx`
+  - `src/pages/Threads.tsx`
+  - `src/pages/XAccount.tsx`
+- [x] Leave backend dispatcher unchanged in this phase.
+- [x] Confirm only wrappers still call raw admin functions from `src`.
 
 ## Test
 
-Add `src/test/admin-actions-contract.test.ts`:
+Keep `src/test/admin-actions-contract.test.ts` covering the shared canonical action list:
 
 ```ts
 import { describe, expect, it } from "vitest";
-import { ADMIN_ACTION_NAMES } from "@/lib/adminActionContracts";
+import { ADMIN_ACTION_NAMES } from "../../supabase/functions/_shared/adminActionNames";
 
 describe("admin action contracts", () => {
   it("does not contain duplicate frontend action names", () => {
@@ -1012,25 +1033,32 @@ describe("admin action contracts", () => {
 ## Validation
 
 ```bash
+npm run lint:functions
+npm run check:functions
+npm run test:functions
 npm run lint
 npm run check:strict
 npm test -- src/test/admin-actions-contract.test.ts
 npm test
+npm run check:function-inventory
 npm run build
+npm run check:release-state
+git diff --check
 ```
 
 ## Commit
 
 ```bash
-git add src/lib/adminActionContracts.ts src/api/adminActions.ts src/api/adminRetry.ts src/test/admin-actions-contract.test.ts src/pages/Monitoring.tsx src/hooks/useVideoRenderData.ts src/hooks/useDashboardData.ts src/hooks/useSettingsData.ts src/components/dashboard/DashboardHealth.tsx src/components/settings/XAutomationSettings.tsx src/pages/Settings.tsx
+git add src/api/adminActions.ts src/api/adminRetry.ts src/components/dashboard/DashboardHealth.tsx src/components/layout/VersionBanner.tsx src/components/settings/EditorialProfilesCard.tsx src/components/settings/EnrichmentSettings.tsx src/components/settings/LearnedSignalsCard.tsx src/components/settings/ScoringStudio.tsx src/components/settings/StoryMemoryCard.tsx src/components/settings/XAutomationSettings.tsx src/components/settings/XPostingConfig.tsx src/pages/Downloader.tsx src/pages/Settings.tsx src/pages/Threads.tsx src/pages/XAccount.tsx docs/superpowers/plans/2026-06-14-xot-cleanup-master-plan.md
 git commit -m "refactor: centralize frontend admin action clients"
 ```
 
 ## Exit Criteria
 
-- [ ] New admin actions have one obvious frontend entrypoint.
-- [ ] Existing UI behavior is unchanged.
-- [ ] Contract tests prevent duplicate frontend action names.
+- [x] New admin actions have one obvious frontend entrypoint.
+- [x] Existing UI behavior is unchanged.
+- [x] Contract tests prevent duplicate frontend action names.
+- [x] Raw `admin-actions` and `admin-retry` frontend invocation sites are limited to `src/api/adminActions.ts` and `src/api/adminRetry.ts`.
 
 ---
 

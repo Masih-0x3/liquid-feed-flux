@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { invokeAdminAction } from '@/api/adminActions';
 import { Brain, RotateCcw, Loader2, TrendingUp, TrendingDown } from 'lucide-react';
 
 interface LearnedBiases {
@@ -110,10 +111,7 @@ export default function LearnedSignalsCard() {
   const handleReset = async () => {
     setResetting(true);
     try {
-      const { error } = await supabase.functions.invoke('admin-actions', {
-        body: { action: 'reset_learned_biases' },
-      });
-      if (error) throw error;
+      await invokeAdminAction({ action: 'reset_learned_biases' });
       toast({ title: 'Biases reset', description: 'All learned signals cleared' });
       queryClient.invalidateQueries({ queryKey: ['learned-biases'] });
       queryClient.invalidateQueries({ queryKey: ['feedback-events-recent'] });

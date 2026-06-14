@@ -16,7 +16,7 @@ import {
 } from '@/components/ui/alert-dialog';
 
 import { useToast } from '@/hooks/use-toast';
-import { supabase } from '@/integrations/supabase/client';
+import { invokeAdminRetry } from '@/api/adminRetry';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Brain, MessageSquare, Eye, Code, Sparkles, Send, Shield, Loader2, Filter, AtSign, ChevronDown, Info, Film } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -533,8 +533,7 @@ export default function Settings() {
                       <AlertDialogCancel>Cancel</AlertDialogCancel>
                       <AlertDialogAction onClick={async () => {
                         try {
-                          const { error } = await supabase.functions.invoke('admin-retry', { body: { action: 'test_webhook' } });
-                          if (error) throw error;
+                          await invokeAdminRetry({ action: 'test_webhook' });
                           toast({ title: 'Test webhook sent!', description: 'Check the Posts page for new sample content' });
                         } catch { toast({ title: 'Test failed', variant: 'destructive' }); }
                       }}>Send test</AlertDialogAction>
@@ -680,10 +679,7 @@ export default function Settings() {
                       <AlertDialogCancel>Cancel</AlertDialogCancel>
                       <AlertDialogAction onClick={async () => {
                         try {
-                          const { error } = await supabase.functions.invoke('admin-retry', {
-                            body: { action: 'test_template', post: sampleTweets[selectedSample], template: mt.template, settings: { include_source_links: mt.include_source_link, custom_hashtags: mt.custom_hashtags } },
-                          });
-                          if (error) throw error;
+                          await invokeAdminRetry({ action: 'test_template', post: sampleTweets[selectedSample], template: mt.template, settings: { include_source_links: mt.include_source_link, custom_hashtags: mt.custom_hashtags } });
                           toast({ title: 'Test message sent!', description: 'Check your Telegram channel' });
                         } catch { toast({ title: 'Test failed', variant: 'destructive' }); }
                       }}>Send message</AlertDialogAction>

@@ -14,7 +14,7 @@ import {
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
-import { supabase } from "@/integrations/supabase/client";
+import { invokeAdminAction } from "@/api/adminActions";
 import { useToast } from "@/hooks/use-toast";
 import {
   ArrowLeftRight, CalendarDays, CheckCheck, ChevronDown, ExternalLink, Loader2,
@@ -270,11 +270,10 @@ export default function XAccount() {
   const runManual = async (force = false) => {
     setRunning(true);
     try {
-      const { data, error } = await supabase.functions.invoke("admin-actions", {
-        body: { action: "run_followers_snapshot", include_following: true, force },
-      });
-      if (error) throw error;
-      const result = data as { ok?: boolean; skipped?: boolean; reason?: string; latest_age_minutes?: number; error?: string; follower_count?: number; api_calls_used?: number };
+      const result = await invokeAdminAction<{ ok?: boolean; skipped?: boolean; reason?: string; latest_age_minutes?: number; error?: string; follower_count?: number; api_calls_used?: number }>(
+        { action: "run_followers_snapshot", include_following: true, force },
+        { throwOnFailure: false },
+      );
       if (!result?.ok) throw new Error(result?.error ?? "Snapshot failed");
       if (result.skipped) {
         toast({

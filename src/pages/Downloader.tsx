@@ -15,7 +15,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
+import { invokeAdminAction } from "@/api/adminActions";
 
 type MediaType = "video" | "gif" | "image";
 
@@ -43,10 +43,10 @@ const TWEET_REGEX =
   /https?:\/\/(?:www\.)?(?:twitter\.com|x\.com|fxtwitter\.com|vxtwitter\.com)\/([a-zA-Z0-9_]+)\/status\/([0-9]+)/;
 
 async function fetchTweet(username: string, id: string): Promise<TweetInfo> {
-  const { data, error } = await supabase.functions.invoke("admin-actions", {
-    body: { action: "resolve_x_media", username, tweet_id: id },
-  });
-  if (error) throw error;
+  const data = await invokeAdminAction<{ success?: boolean; tweet?: TweetInfo; error?: string }>(
+    { action: "resolve_x_media", username, tweet_id: id },
+    { throwOnFailure: false },
+  );
   if (!data?.success || !data?.tweet) {
     throw new Error(data?.error || "Failed to fetch tweet. The post might be private, deleted, or rate-limited.");
   }

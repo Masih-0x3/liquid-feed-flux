@@ -11,7 +11,7 @@ import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { supabase } from '@/integrations/supabase/client';
+import { invokeAdminAction } from '@/api/adminActions';
 import { useSaveSettings } from '@/hooks/useSettingsData';
 import { PromptEditor } from '@/components/settings/PromptEditor';
 import { Newspaper, Save, Sparkles, Loader2, ImageIcon, Eye, RefreshCw, Hash } from 'lucide-react';
@@ -149,10 +149,7 @@ export default function XPostingConfig({ initial }: Props) {
     setDryRunLoading(true);
     setDryRunResult(null);
     try {
-      const { data, error } = await supabase.functions.invoke('admin-actions', {
-        body: { action: 'dry_run_x_post' },
-      });
-      if (error) throw error;
+      const data = await invokeAdminAction<{ results?: unknown[] }>({ action: 'dry_run_x_post' });
       setDryRunResult(data);
       toast({ title: 'Dry-run complete', description: `${data?.results?.length ?? 0} candidates evaluated.` });
     } catch (e) {

@@ -5,6 +5,7 @@ export type AdminActionBody = { action: AdminActionName } & Record<string, unkno
 
 type InvokeAdminActionOptions = {
   failureMessage?: string;
+  throwOnFailure?: boolean;
 };
 
 export async function invokeAdminAction<T>(
@@ -13,7 +14,7 @@ export async function invokeAdminAction<T>(
 ): Promise<T> {
   const { data, error } = await supabase.functions.invoke('admin-actions', { body });
   if (error) throw error;
-  if (data?.ok === false || data?.success === false) {
+  if (options.throwOnFailure !== false && (data?.ok === false || data?.success === false)) {
     throw new Error(data.error ?? options.failureMessage ?? 'Admin action failed');
   }
   return data as T;
