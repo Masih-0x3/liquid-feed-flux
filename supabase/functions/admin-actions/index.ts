@@ -2,11 +2,6 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
 import { recordXApiEvent } from "../_shared/xApiLedger.ts";
 import {
-  doesEnrichmentBlockX,
-  normalizeEnrichmentConfig,
-  type EnrichmentConfig,
-} from "../_shared/enrich.ts";
-import {
   bulkReprocessAdminAction,
   cancelPendingJobsAdminAction,
   editTranslationAdminAction,
@@ -82,7 +77,6 @@ import {
 import {
   getXPostingDiagnostics,
   hydratePostAdminAction,
-  queueHydrationJob,
   rehydrateRecentTruncatedAdminAction,
   resolveXMediaAdminAction,
   runXPostAdminAction,
@@ -98,6 +92,7 @@ import {
   insertAdminPipelineEvent,
   recordFeedback,
 } from "./sideEffects.ts";
+import { queueManualAdvance } from "./manualAdvanceActions.ts";
 
 const DEPLOY_SHA = Deno.env.get('DEPLOY_GIT_SHA') ?? 'unknown';
 const DEPLOY_TIME = Deno.env.get('DEPLOY_TIME') ?? new Date().toISOString();
@@ -186,67 +181,6 @@ async function runTranslationOnlyForAdmin(supabase: any, tweetId: string) {
     insertAdminPipelineEvent,
     recordFeedback,
   });
-}
-
-// deno-lint-ignore no-explicit-any
-async function queueManualAdvance(supabase: any, tweetId: string): Promise<{ queued: string; reason?: string }> {
-  const { data: post } = await supabase
-    .from('posts')
-    .select('tweet_id, text_translated, translated_at, is_truncated, hydrated_at, enrich_status')
-    .eq('tweet_id', tweetId)
-    .maybeSingle();
-  if (!post) return { queued: 'none', reason: 'post_not_found' };
-  if (!post.text_translated && !post.translated_at) return { queued: 'none', reason: 'translation_missing' };
-  if (post.is_truncated === true && !post.hydrated_at) {
-    const result = await queueHydrationJob(supabase, tweetId, 'manual_score', { insertAdminPipelineEvent });
-    return { queued: 'hydrate', reason: result.reason };
-  }
-
-  const { data: enrichCfgRow } = await supabase.from('settings').select('value').eq('key', 'enrichment_config').maybeSingle();
-  const enrichCfg = normalizeEnrichmentConfig((enrichCfgRow?.value ?? { enabled: false }) as Partial<EnrichmentConfig>);
-  if (doesEnrichmentBlockX(enrichCfg) && post.enrich_status !== 'approved' && post.enrich_status !== 'skipped') {
-    await supabase.from('jobs').upsert({
-      type: 'enrich',
-      payload: { tweet_id: tweetId, source: 'manual_score' },
-      status: 'pending',
-      priority: 18,
-      idempotency_key: `enrich:${tweetId}`,
-      next_run_at: new Date().toISOString(),
-      locked_at: null,
-      locked_by: null,
-      lease_expires_at: null,
-      last_error: null,
-      attempts: 0,
-    }, { onConflict: 'idempotency_key', ignoreDuplicates: false });
-    await insertAdminPipelineEvent(supabase, tweetId, 'enrich', 'queued', { source: 'manual_score' });
-    return { queued: 'enrich' };
-  }
-
-  await supabase.from('jobs').upsert({
-    type: 'deliver',
-    payload: { tweet_id: tweetId, source: 'manual_score' },
-    status: 'pending',
-    priority: 20,
-    idempotency_key: `deliver:${tweetId}`,
-    next_run_at: new Date().toISOString(),
-    locked_at: null,
-    locked_by: null,
-    lease_expires_at: null,
-    last_error: null,
-    attempts: 0,
-  }, { onConflict: 'idempotency_key', ignoreDuplicates: false });
-  const { data: pendingDel } = await supabase
-    .from('deliveries')
-    .select('id')
-    .eq('subject_type', 'post')
-    .eq('subject_id', tweetId)
-    .eq('status', 'pending')
-    .limit(1);
-  if (!pendingDel || pendingDel.length === 0) {
-    await supabase.from('deliveries').insert({ subject_type: 'post', subject_id: tweetId, status: 'pending', attempts: 0 });
-  }
-  await insertAdminPipelineEvent(supabase, tweetId, 'deliver', 'queued', { source: 'manual_score' });
-  return { queued: 'deliver' };
 }
 
 // deno-lint-ignore no-explicit-any
