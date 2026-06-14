@@ -24,6 +24,7 @@ import {
   auditDuplicateCandidatesAdminAction,
   backfillDedupeAdminAction,
   backfillSignaturesAdminAction,
+  clearDuplicateAdminAction,
   runDedupeAdminAction,
 } from "./dedupeActions.ts";
 import {
@@ -643,32 +644,10 @@ serve(async (req) => {
 
       // ===== Clear duplicate (not-a-duplicate feedback) =====
       case 'clear_dup': {
-        const { tweet_id, related_tweet_id } = body;
-        if (!tweet_id) return jsonResponse({ error: 'tweet_id is required' }, 400);
-        const { error: clrErr } = await supabase.from('posts').update({
-          dup_of_tweet_id: null,
-          dup_similarity: null,
-          dedupe_status: 'unique',
-          dedupe_method: 'none',
-          dedupe_confidence: null,
-          dedupe_reason: 'cleared_by_admin',
-          dedupe_new_facts: [],
-          dedupe_checked_at: new Date().toISOString(),
-          delivery_decision: 'deliver',
-          decision_reason: 'dup_cleared_by_admin',
-          feedback_locked: true,
-        }).eq('tweet_id', tweet_id);
-        if (clrErr) throw clrErr;
-        if (related_tweet_id) {
-          const pairA = tweet_id < related_tweet_id ? tweet_id : related_tweet_id;
-          const pairB = tweet_id < related_tweet_id ? related_tweet_id : tweet_id;
-          await supabase.from('story_pair_blocklist').upsert(
-            { tweet_a: pairA, tweet_b: pairB, reason: 'not_duplicate_admin' },
-            { onConflict: 'tweet_a,tweet_b' },
-          ).then(() => null, (e: Error) => console.warn('blocklist upsert failed', e.message));
-        }
-        await recordFeedback(supabase, tweet_id, 'not_duplicate', -2, {}, related_tweet_id).catch(() => {});
-        return jsonResponse({ success: true, message: 'Duplicate cleared and pair blocklisted' });
+        const result = await clearDuplicateAdminAction(supabase, body, {
+          recordFeedback,
+        });
+        return jsonResponse(result.body, result.status);
       }
 
       // ===== Reset learned biases =====

@@ -4,7 +4,11 @@ import {
   normalizeDuplicateGateConfig,
   runDuplicateGate,
 } from "../_shared/dedupe.ts";
-import type { SupabaseAdminClient } from "./types.ts";
+import type {
+  AdminActionResponse,
+  RecordFeedbackFn,
+  SupabaseAdminClient,
+} from "./types.ts";
 
 type QueryResult = {
   data?: unknown;
@@ -30,6 +34,12 @@ type TableQueryBuilder = PromiseLike<QueryResult> & {
 export type DedupeActionDeps = {
   runDuplicateGate?: typeof runDuplicateGate;
   now?: () => Date;
+};
+
+export type ClearDuplicateDeps = {
+  recordFeedback: RecordFeedbackFn;
+  now?: () => Date;
+  warn?: (message: string, error?: unknown) => void;
 };
 
 function table(supabase: SupabaseAdminClient, name: string): TableQueryBuilder {
@@ -236,6 +246,66 @@ export async function auditDuplicateCandidatesAdminAction(
     count: rows.length,
     proposed,
     rows,
+  };
+}
+
+export async function clearDuplicateAdminAction(
+  supabase: SupabaseAdminClient,
+  body: Record<string, unknown>,
+  deps: ClearDuplicateDeps,
+): Promise<AdminActionResponse> {
+  const tweetId = typeof body.tweet_id === "string" ? body.tweet_id : "";
+  const relatedTweetId = typeof body.related_tweet_id === "string"
+    ? body.related_tweet_id
+    : null;
+  if (!tweetId) {
+    return { body: { error: "tweet_id is required" }, status: 400 };
+  }
+
+  const { error: clearError } = await table(supabase, "posts").update({
+    dup_of_tweet_id: null,
+    dup_similarity: null,
+    dedupe_status: "unique",
+    dedupe_method: "none",
+    dedupe_confidence: null,
+    dedupe_reason: "cleared_by_admin",
+    dedupe_new_facts: [],
+    dedupe_checked_at: (deps.now?.() ?? new Date()).toISOString(),
+    delivery_decision: "deliver",
+    decision_reason: "dup_cleared_by_admin",
+    feedback_locked: true,
+  }).eq("tweet_id", tweetId);
+  if (clearError) throw clearError;
+
+  if (relatedTweetId) {
+    const pairA = tweetId < relatedTweetId ? tweetId : relatedTweetId;
+    const pairB = tweetId < relatedTweetId ? relatedTweetId : tweetId;
+    await table(supabase, "story_pair_blocklist").upsert(
+      { tweet_a: pairA, tweet_b: pairB, reason: "not_duplicate_admin" },
+      { onConflict: "tweet_a,tweet_b" },
+    ).then(
+      () => null,
+      (error: unknown) =>
+        (deps.warn ?? console.warn)(
+          "blocklist upsert failed",
+          error instanceof Error ? error.message : error,
+        ),
+    );
+  }
+
+  await deps.recordFeedback(
+    supabase,
+    tweetId,
+    "not_duplicate",
+    -2,
+    {},
+    relatedTweetId,
+  ).catch(() => {});
+  return {
+    body: {
+      success: true,
+      message: "Duplicate cleared and pair blocklisted",
+    },
   };
 }
 

@@ -3,10 +3,12 @@ import {
   auditDuplicateCandidatesAdminAction,
   backfillDedupeAdminAction,
   backfillSignaturesAdminAction,
+  clearDuplicateAdminAction,
   loadDuplicateGateConfig,
   markDedupePending,
   runDedupeAdminAction,
 } from "./dedupeActions.ts";
+import type { RecordFeedbackFn } from "./types.ts";
 import type { SupabaseAdminClient } from "./types.ts";
 
 type FakeCall = {
@@ -324,6 +326,109 @@ Deno.test("audit duplicate candidates clamps inputs and summarizes proposed stat
   });
   assertEquals(result.proposed, { duplicate: 2, coverage_gap: 1, unknown: 1 });
   assertEquals(result.count, 4);
+});
+
+Deno.test("clear duplicate validates tweet id before writing", async () => {
+  const supabase = fakeSupabase();
+  let feedbackCalls = 0;
+
+  const result = await clearDuplicateAdminAction(
+    supabase,
+    { tweet_id: "" },
+    {
+      recordFeedback: async () => {
+        feedbackCalls += 1;
+      },
+    },
+  );
+
+  assertEquals(result, {
+    body: { error: "tweet_id is required" },
+    status: 400,
+  });
+  assertEquals(supabase.calls, []);
+  assertEquals(feedbackCalls, 0);
+});
+
+Deno.test("clear duplicate clears post state, blocklists ordered pair, and records feedback", async () => {
+  const supabase = fakeSupabase();
+  const feedback: Array<Record<string, unknown>> = [];
+  const recordFeedback: RecordFeedbackFn = async (
+    _supabase,
+    tweetId,
+    feedbackAction,
+    polarity,
+    meta,
+    relatedTweetId,
+  ) => {
+    feedback.push({
+      tweetId,
+      feedbackAction,
+      polarity,
+      meta,
+      relatedTweetId,
+    });
+  };
+
+  const result = await clearDuplicateAdminAction(
+    supabase,
+    { tweet_id: "t2", related_tweet_id: "t1" },
+    {
+      now: () => new Date("2026-01-03T00:00:00.000Z"),
+      recordFeedback,
+    },
+  );
+
+  assertEquals(result.body, {
+    success: true,
+    message: "Duplicate cleared and pair blocklisted",
+  });
+  assertEquals(
+    supabase.calls.find((call) =>
+      call.op === "update" && call.table === "posts"
+    )
+      ?.value,
+    {
+      dup_of_tweet_id: null,
+      dup_similarity: null,
+      dedupe_status: "unique",
+      dedupe_method: "none",
+      dedupe_confidence: null,
+      dedupe_reason: "cleared_by_admin",
+      dedupe_new_facts: [],
+      dedupe_checked_at: "2026-01-03T00:00:00.000Z",
+      delivery_decision: "deliver",
+      decision_reason: "dup_cleared_by_admin",
+      feedback_locked: true,
+    },
+  );
+  assertEquals(
+    supabase.calls.find((call) => call.op === "eq" && call.table === "posts"),
+    {
+      table: "posts",
+      op: "eq",
+      column: "tweet_id",
+      value: "t2",
+    },
+  );
+  assertEquals(
+    supabase.calls.find((call) =>
+      call.op === "upsert" && call.table === "story_pair_blocklist"
+    ),
+    {
+      table: "story_pair_blocklist",
+      op: "upsert",
+      value: { tweet_a: "t1", tweet_b: "t2", reason: "not_duplicate_admin" },
+      args: { onConflict: "tweet_a,tweet_b" },
+    },
+  );
+  assertEquals(feedback[0], {
+    tweetId: "t2",
+    feedbackAction: "not_duplicate",
+    polarity: -2,
+    meta: {},
+    relatedTweetId: "t1",
+  });
 });
 
 Deno.test("backfill signatures keeps the legacy alias contract", async () => {
