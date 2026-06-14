@@ -707,13 +707,14 @@ async function loadVideoRenderDecision(supabase: any, tweetId: string, rendering
 // deno-lint-ignore no-explicit-any
 async function dispatchVideoRendererForTarget(supabase: any, renderId: string, tweetId: string, source: string): Promise<void> {
   const rendererUrl = (Deno.env.get('VIDEO_RENDERER_URL') ?? '').replace(/\/+$/, '');
-  const rendererToken = Deno.env.get('VIDEO_RENDERER_TOKEN') ?? '';
+  const rendererToken = (Deno.env.get('VIDEO_RENDERER_TOKEN') ?? '').trim();
   const meta = { render_id: renderId, dispatch_source: source };
 
-  if (!rendererUrl) {
+  if (!rendererUrl || !rendererToken) {
     await insertPipelineEvent(supabase, 'post', tweetId, 'video_render_dispatch', 'queued', new Date().toISOString(), null, null, {
       ...meta,
       mode: 'poller_only',
+      reason: !rendererUrl ? 'renderer_url_missing' : 'renderer_token_missing',
     });
     return;
   }

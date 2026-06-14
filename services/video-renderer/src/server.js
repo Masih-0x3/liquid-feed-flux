@@ -26,15 +26,20 @@ function readJson(req) {
   });
 }
 
+function normalizeToken(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
 function authorized(req, token) {
-  if (!token) return true;
-  return req.headers.authorization === `Bearer ${token}`;
+  const expected = normalizeToken(token);
+  if (!expected) return false;
+  return req.headers.authorization === `Bearer ${expected}`;
 }
 
 export function createRendererServer(options = {}) {
   const config = options.config || loadConfigFromEnv();
   const supabase = options.supabase || createSupabase(config);
-  const token = options.token ?? process.env.VIDEO_RENDERER_TOKEN ?? "";
+  const token = normalizeToken(options.token ?? process.env.VIDEO_RENDERER_TOKEN ?? "");
   const state = { running: 0, processed: 0, failed: 0, lastError: null };
 
   const writeHeartbeat = async (status = "online", metadata = {}) => {
