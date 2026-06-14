@@ -1,14 +1,11 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { formatDistanceToNow } from "date-fns";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   AlertCircle,
   Ban,
   Check,
-  ChevronDown,
   ChevronRight,
   Clock,
-  ExternalLink,
   Film,
   Loader2,
   MessageSquare,
@@ -54,7 +51,6 @@ import {
 import {
   Table,
   TableBody,
-  TableCell,
   TableHead,
   TableHeader,
   TableRow,
@@ -65,7 +61,6 @@ import {
   useMonitoringDataSearchWithScore,
   useMonitoringOverview,
   useXApiSummary,
-  type DuplicateCluster,
   type MonitoringEntry,
   type MonitoringFilter,
   type PipelineEvent,
@@ -73,16 +68,17 @@ import {
 } from "@/hooks/useMonitoringData";
 import { MediaThumbnails } from "@/components/monitoring/MediaThumbnails";
 import { MonitoringDeliveryTimeline } from "@/components/monitoring/MonitoringDeliveryTimeline";
+import { MonitoringDuplicateGateCard } from "@/components/monitoring/MonitoringDuplicateGateCard";
+import { MonitoringDuplicateMatch } from "@/components/monitoring/MonitoringDuplicateEvidence";
 import { MonitoringActionDialog } from "@/components/monitoring/MonitoringActionDialog";
 import { MonitoringFilters } from "@/components/monitoring/MonitoringFilters";
 import { MonitoringQueueCards } from "@/components/monitoring/MonitoringQueueCards";
+import { MonitoringMobileCard, MonitoringTableEntryRows } from "@/components/monitoring/MonitoringRow";
 import { VideoRenderDetailPanel } from "@/components/video/VideoRenderDetailPanel";
 import {
   decisionScore,
-  formatDecisionReason,
-  formatXBadge,
 } from "@/lib/pipelineMessages";
-import { loadedMonitoringCounts, monitoringDecisionLabel, monitoringStage } from "@/lib/monitoringState";
+import { loadedMonitoringCounts, monitoringStage } from "@/lib/monitoringState";
 import {
   adminApproveEnrichment,
   adminCancelPendingJobs,
@@ -120,10 +116,10 @@ import {
   formatAge,
   formatBytes,
   formatScoringV2Score,
-  memberScoreValue,
   shortText,
   toneClass,
 } from "@/lib/monitoringViewModel";
+import { duplicateCoverageClass, duplicateCoverageLabel } from "@/lib/monitoringDuplicateEvidence";
 import { getScoringV2Snapshot, scoringV2DecisionLabel } from "@/lib/scoringV2Monitoring";
 import { buildDeliverySummary, buildPipelineTimelineGroups } from "@/lib/timelineDisplay";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -654,206 +650,10 @@ export default function Monitoring() {
     }
   };
 
-  const renderXBadge = (entry: MonitoringEntry) => {
-    if (!entry.x_status) return <Badge variant="outline" className="text-muted-foreground">X: —</Badge>;
-    const { label, title } = formatXBadge(entry);
-    const cls =
-      entry.x_status === 'posted' ? 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30'
-      : entry.x_status === 'failed' ? 'bg-destructive/15 text-destructive border-destructive/30'
-      : entry.x_status === 'skipped' ? 'bg-muted text-muted-foreground border-border'
-      : 'bg-amber-500/15 text-amber-500 border-amber-500/30';
-    const badge = <Badge className={cls} title={title}>{label}</Badge>;
-    return entry.x_status === 'posted' && entry.x_tweet_id ? (
-      <a href={`https://x.com/i/status/${entry.x_tweet_id}`} target="_blank" rel="noopener noreferrer">{badge}</a>
-    ) : badge;
-  };
-
-  const renderTelegramBadge = (entry: MonitoringEntry) => (
-    <Badge variant={entry.is_delivered ? 'default' : entry.monitoring_state?.code === 'telegram_pending' ? 'secondary' : 'outline'}>
-      {entry.is_delivered ? 'Delivered' : entry.monitoring_state?.telegram_state === 'none' ? 'No row' : entry.monitoring_state?.telegram_state || entry.delivery_status || 'No row'}
-    </Badge>
-  );
-
-  const renderDedupeBadge = (entry: MonitoringEntry) => {
-    if (!entry.dedupe_status) return null;
-    const label =
-      entry.dedupe_status === 'pending' ? 'Duplicate gate pending'
-      : entry.dedupe_status === 'duplicate' ? 'Duplicate'
-      : entry.dedupe_status === 'coverage_gap' ? 'Coverage gap'
-      : entry.dedupe_status === 'related_new_info' ? 'Related: new info'
-      : entry.dedupe_status === 'uncertain' ? 'Uncertain duplicate'
-      : entry.dedupe_status === 'failed' ? 'Dedupe failed'
-      : 'Unique';
-    const cls =
-      entry.dedupe_status === 'duplicate' ? 'bg-purple-500/15 text-purple-400 border-purple-500/30'
-      : entry.dedupe_status === 'coverage_gap' ? toneClass('warn')
-      : entry.dedupe_status === 'related_new_info' || entry.dedupe_status === 'unique' ? toneClass('good')
-      : entry.dedupe_status === 'failed' ? toneClass('bad')
-      : entry.dedupe_status === 'uncertain' ? toneClass('warn')
-      : toneClass('info');
-    const title = [
-      entry.dedupe_method,
-      entry.dedupe_confidence != null ? `confidence ${entry.dedupe_confidence.toFixed(2)}` : null,
-      entry.dedupe_reason,
-    ].filter(Boolean).join(' · ');
-    return <Badge className={`${cls} text-[10px]`} title={title}>{label}</Badge>;
-  };
-
-  const duplicateCoverageLabel = (coverage?: NonNullable<MonitoringEntry['duplicate_of']>['coverage_state']) => {
-    switch (coverage) {
-      case 'delivered': return 'covered: delivered';
-      case 'in_pipeline': return 'covered: in pipeline';
-      case 'also_duplicate': return 'canonical is also duplicate';
-      case 'not_covered': return 'not covered';
-      default: return 'coverage unknown';
-    }
-  };
-
-  const duplicateCoverageClass = (coverage?: NonNullable<MonitoringEntry['duplicate_of']>['coverage_state']) => {
-    switch (coverage) {
-      case 'delivered': return toneClass('good');
-      case 'in_pipeline': return toneClass('info');
-      case 'also_duplicate':
-      case 'not_covered': return toneClass('warn');
-      default: return toneClass('muted');
-    }
-  };
-
-  const duplicateCoverageDetail = (target?: MonitoringEntry['duplicate_of']) => {
-    if (!target) return 'The matched post was not returned by the backend. Use the tweet ID to inspect it directly.';
-    switch (target.coverage_state) {
-      case 'delivered':
-        return 'Canonical item is covered. At least one delivery path already posted it.';
-      case 'in_pipeline':
-        return 'Canonical item is still active in the pipeline, so this duplicate is blocked while the original moves.';
-      case 'also_duplicate':
-        return 'Canonical item is also marked duplicate. This needs review so the story is not lost.';
-      case 'not_covered':
-        return 'Canonical item is not delivered or active. This is a coverage gap that needs review.';
-      default:
-        return 'Coverage is unknown. Inspect the matched item before trusting the duplicate decision.';
-    }
-  };
-
-  const duplicateStatusSummary = (target?: MonitoringEntry['duplicate_of']) => {
-    if (!target) return 'match not loaded';
-    const decision = target.monitoring_state?.decision_label ?? target.delivery_decision ?? 'No decision';
-    return `${decision} · Telegram ${target.telegram_state} · X ${target.x_state}`;
-  };
-
   const inspectDuplicateMatch = (tweetId: string) => {
     setFilter('all');
     setSearchTerm(tweetId);
     void openDetails(tweetId);
-  };
-
-  const renderDuplicateHint = (entry: MonitoringEntry) => {
-    if (!entry.dup_of_tweet_id) return null;
-    const target = entry.duplicate_of;
-    const label = target?.author_handle ? `@${target.author_handle}` : target?.tweet_id ? target.tweet_id.slice(-10) : entry.dup_of_tweet_id.slice(-10);
-    const bothPostedX = entry.x_status === 'posted' && target?.x_state === 'posted';
-    return (
-      <div className="mt-2 flex flex-wrap items-center gap-1.5 rounded-md border border-purple-500/20 bg-purple-500/5 px-2 py-1.5 text-[11px] text-muted-foreground">
-        <span className="font-medium text-purple-300">Duplicate of {label}</span>
-        <Badge className={`${duplicateCoverageClass(target?.coverage_state)} text-[10px]`}>
-          {duplicateCoverageLabel(target?.coverage_state)}
-        </Badge>
-        {bothPostedX && <Badge className="border-red-500/30 bg-red-500/15 text-red-300 text-[10px]">Both X posted</Badge>}
-        <span className="min-w-0 truncate">{duplicateStatusSummary(target)}</span>
-      </div>
-    );
-  };
-
-  const renderDuplicateMatch = (entry: MonitoringEntry, compact = false) => {
-    if (!entry.dup_of_tweet_id) {
-      return <span className="text-xs text-muted-foreground">—</span>;
-    }
-    const target = entry.duplicate_of;
-    const score = target ? target.final_score ?? target.importance_score : null;
-    const matchedLabel = target?.author_handle ? `@${target.author_handle}` : entry.dup_of_tweet_id.slice(-10);
-    const matchedId = target?.tweet_id ?? entry.dup_of_tweet_id;
-    const matchedAge = target?.created_at ? formatDistanceToNow(new Date(target.created_at), { addSuffix: true }) : null;
-    const bothPostedX = entry.x_status === 'posted' && target?.x_state === 'posted';
-    return (
-      <div className={`space-y-2 ${compact ? 'rounded-md border bg-muted/20 p-2 text-xs' : 'rounded-md border border-purple-500/20 bg-purple-500/5 p-2 text-xs'}`}>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="font-medium text-foreground">Duplicates {matchedLabel}</span>
-              <Badge className={`${duplicateCoverageClass(target?.coverage_state)} text-[10px]`}>
-                {duplicateCoverageLabel(target?.coverage_state)}
-              </Badge>
-              {bothPostedX && <Badge className="border-red-500/30 bg-red-500/15 text-red-300 text-[10px]">Both X posted</Badge>}
-            </div>
-            <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground" title={matchedId}>
-              {matchedId.slice(-10)}{matchedAge ? ` · ${matchedAge}` : ''}
-            </p>
-          </div>
-          <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" onClick={() => inspectDuplicateMatch(matchedId)}>
-            Inspect
-          </Button>
-        </div>
-        {target ? (
-          <>
-            <p className="line-clamp-3 text-muted-foreground">{target.text_original || '[No content]'}</p>
-            <div className="flex flex-wrap gap-x-2 gap-y-1 text-muted-foreground">
-              <span>Score {score ?? '—'}</span>
-              <span>Telegram {target.telegram_state}</span>
-              <span>X {target.x_state}</span>
-            </div>
-            <p className="text-[11px] text-muted-foreground">{duplicateCoverageDetail(target)}</p>
-            {bothPostedX && (
-              <p className="rounded-md border border-red-500/30 bg-red-500/10 p-2 text-[11px] text-red-200">
-                Anomaly: this duplicate and its matched story were both posted to X. New backend guards prevent this for future automatic posts.
-              </p>
-            )}
-            {target.url && (
-              <a href={target.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
-                Open match <ExternalLink className="w-3 h-3" />
-              </a>
-            )}
-          </>
-        ) : (
-          <p className="break-all text-muted-foreground">Matched ID {entry.dup_of_tweet_id}</p>
-        )}
-      </div>
-    );
-  };
-
-  const renderAudienceBadge = (entry: MonitoringEntry) => {
-    if (!entry.audience_class) return null;
-    const cls =
-      entry.audience_class === 'direct_focus' ? 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30'
-      : entry.audience_class === 'adjacent' ? 'bg-blue-500/15 text-blue-400 border-blue-500/30'
-      : entry.audience_class === 'global_exception' ? 'bg-violet-500/15 text-violet-400 border-violet-500/30'
-      : 'bg-muted text-muted-foreground border-border';
-    const title = [
-      entry.scoring_profile_id ? `profile ${entry.scoring_profile_id}` : null,
-      entry.audience_confidence != null ? `confidence ${entry.audience_confidence.toFixed(2)}` : null,
-      entry.global_exception_class ? `exception ${entry.global_exception_class}` : null,
-      entry.audience_reason,
-    ].filter(Boolean).join(' · ');
-    return <Badge className={`${cls} text-[10px]`} title={title}>{audienceClassLabel(entry.audience_class)}</Badge>;
-  };
-
-  const renderCostFlags = (entry: MonitoringEntry) => (
-    <div className="flex flex-wrap gap-1">
-      {entry.x_cost_flags?.hydration_expected && <Badge variant="outline" className="text-[10px]">read</Badge>}
-      {entry.x_cost_flags?.media_upload_expected && <Badge variant="outline" className="text-[10px]">media</Badge>}
-      {entry.x_cost_flags?.may_call_x && <Badge variant="outline" className="text-[10px]">write</Badge>}
-      {!entry.x_cost_flags?.reasons?.length && <span className="text-muted-foreground">—</span>}
-    </div>
-  );
-
-  const renderScore = (entry: MonitoringEntry) => {
-    const score = decisionScore(entry);
-    if (score == null) return <span className="text-muted-foreground">—</span>;
-    return (
-      <span className={score >= deliverThreshold ? 'font-semibold text-emerald-500' : 'font-semibold text-amber-500'}>
-        {Number.isInteger(score) ? score : score.toFixed(1)}
-        <span className="text-xs text-muted-foreground"> / ≥{deliverThreshold}</span>
-      </span>
-    );
   };
 
   const renderRowActions = (entry: MonitoringEntry, compact = false) => (
@@ -913,138 +713,6 @@ export default function Monitoring() {
       </DropdownMenuContent>
     </DropdownMenu>
   );
-
-  const clusterCoverageBadge = (cluster: DuplicateCluster) => {
-    const cls = cluster.has_x_anomaly
-      ? 'border-red-500/30 bg-red-500/15 text-red-300'
-      : cluster.coverage_state === 'covered'
-        ? toneClass('good')
-        : cluster.coverage_state === 'in_pipeline'
-          ? toneClass('info')
-          : cluster.coverage_state === 'coverage_gap'
-            ? toneClass('warn')
-            : toneClass('muted');
-    const label = cluster.has_x_anomaly
-      ? 'Duplicate anomaly'
-      : cluster.coverage_state === 'covered'
-        ? 'Covered'
-        : cluster.coverage_state === 'in_pipeline'
-          ? 'In pipeline'
-          : cluster.coverage_state === 'coverage_gap'
-            ? 'Coverage gap'
-            : 'Coverage unknown';
-    return <Badge className={`${cls} text-[10px]`}>{label}</Badge>;
-  };
-
-  const renderDuplicateClusterSummary = (entry: MonitoringEntry, compact = false) => {
-    const cluster = entry.duplicate_cluster;
-    if (!cluster || cluster.counts.total < 2) return renderDuplicateMatch(entry, compact);
-    const isExpanded = expandedClusters.has(cluster.cluster_id);
-    return (
-      <div className={`${compact ? 'rounded-md border bg-muted/20 p-2' : 'rounded-md border border-purple-500/20 bg-purple-500/5 p-2'} text-xs`}>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="h-7 min-w-0 px-1.5 text-xs"
-            onClick={() => toggleCluster(cluster.cluster_id)}
-          >
-            {isExpanded ? <ChevronDown className="mr-1 h-3 w-3 shrink-0" /> : <ChevronRight className="mr-1 h-3 w-3 shrink-0" />}
-            <span className="truncate">{cluster.counts.total} versions</span>
-          </Button>
-          <div className="flex flex-wrap gap-1">
-            {clusterCoverageBadge(cluster)}
-            {cluster.counts.x_posted > 0 && <Badge variant="outline" className="text-[10px]">X {cluster.counts.x_posted}</Badge>}
-            {cluster.counts.delivered > 0 && <Badge variant="outline" className="text-[10px]">TG {cluster.counts.delivered}</Badge>}
-            {cluster.counts.blocked > 0 && <Badge variant="outline" className="text-[10px]">{cluster.counts.blocked} blocked</Badge>}
-          </div>
-        </div>
-        <p className="mt-1 truncate text-[11px] text-muted-foreground">
-          Canonical {cluster.canonical_tweet_id.slice(-10)} · expand to compare duplicates
-        </p>
-      </div>
-    );
-  };
-
-  const renderDuplicateClusterPanel = (entry: MonitoringEntry) => {
-    const cluster = entry.duplicate_cluster;
-    if (!cluster || cluster.counts.total < 2 || !expandedClusters.has(cluster.cluster_id)) return null;
-    return (
-      <div className="rounded-md border border-purple-500/20 bg-purple-500/5 p-3">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <p className="text-sm font-medium">Duplicate cluster</p>
-            <p className="text-xs text-muted-foreground">
-              {cluster.counts.total} versions · {cluster.counts.delivered} Telegram covered · {cluster.counts.x_posted} X posted
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-1">
-            {clusterCoverageBadge(cluster)}
-            {cluster.has_x_anomaly && <Badge className="border-red-500/30 bg-red-500/15 text-red-300 text-[10px]">Both posted to X</Badge>}
-          </div>
-        </div>
-        <div className="grid gap-2 xl:grid-cols-2">
-          {cluster.members.map((member) => {
-            const fullEntry = entryByTweetId.get(member.tweet_id);
-            const score = memberScoreValue(member);
-            return (
-              <div key={member.tweet_id} className="rounded-md border bg-background/60 p-3 text-xs">
-                <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="font-mono text-[11px] text-muted-foreground">{member.tweet_id.slice(-10)}</span>
-                      {member.is_canonical && <Badge className="bg-primary/15 text-primary border-primary/30 text-[10px]">canonical</Badge>}
-                      {member.dedupe_status && <Badge variant="outline" className="text-[10px]">{member.dedupe_status.replaceAll('_', ' ')}</Badge>}
-                    </div>
-                    <p className="mt-1 font-medium">{member.author_handle ? `@${member.author_handle}` : 'Unknown author'}</p>
-                    {member.created_at && <p className="text-muted-foreground">{formatDistanceToNow(new Date(member.created_at), { addSuffix: true })}</p>}
-                  </div>
-                  <div className="text-right">
-                    <p className={score != null && score >= deliverThreshold ? 'font-semibold text-emerald-500' : 'font-semibold text-amber-500'}>{score == null ? '—' : Number.isInteger(score) ? score : score.toFixed(1)}</p>
-                    <p className="text-[11px] text-muted-foreground">score</p>
-                  </div>
-                </div>
-                <p className="line-clamp-3 leading-5 text-muted-foreground">{member.text_original || '[No content]'}</p>
-                <div className="mt-2 flex flex-wrap gap-1">
-                  <Badge variant="outline" className="text-[10px]">Telegram {member.telegram_state}</Badge>
-                  <Badge variant="outline" className="text-[10px]">X {member.x_state}</Badge>
-                  {member.dup_similarity != null && <Badge variant="outline" className="text-[10px]">sim {member.dup_similarity.toFixed(2)}</Badge>}
-                  {member.dedupe_confidence != null && <Badge variant="outline" className="text-[10px]">conf {member.dedupe_confidence.toFixed(2)}</Badge>}
-                </div>
-                {member.dedupe_reason && <p className="mt-2 line-clamp-2 text-[11px] text-muted-foreground">{member.dedupe_reason}</p>}
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" onClick={() => openDetails(member.tweet_id)}>
-                    Details
-                  </Button>
-                  {member.url && (
-                    <a href={member.url} target="_blank" rel="noopener noreferrer" className="inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[11px] text-primary hover:bg-muted">
-                      Source <ExternalLink className="h-3 w-3" />
-                    </a>
-                  )}
-                  {fullEntry && (
-                    <>
-                      <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" onClick={() => setPendingAction({ type: 'run_dedupe', entry: fullEntry })}>
-                        Run duplicate check
-                      </Button>
-                      <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" onClick={() => openManualScore(fullEntry)}>
-                        Manual score
-                      </Button>
-                      {fullEntry.dup_of_tweet_id && (
-                        <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" onClick={() => setPendingAction({ type: 'clear_dup', entry: fullEntry })}>
-                          Clear duplicate
-                        </Button>
-                      )}
-                    </>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    );
-  };
 
   return (
     <div className="w-full space-y-3 p-0">
@@ -1116,101 +784,24 @@ export default function Monitoring() {
           ) : (
             <>
               <div className="divide-y divide-border lg:hidden">
-                {moderationEntries.map((entry) => {
-                  const stage = monitoringStage(entry);
-                  const decision = formatDecisionReason(entry.decision_reason);
-                  const decisionLabel = monitoringDecisionLabel(entry, entry.delivery_decision ? decision.title : 'No decision');
-                  const blocker = entry.monitoring_state?.primary_blocker;
-                  const isSelected = selectedTweetIds.has(entry.tweet_id);
-                  return (
-                    <article key={entry.tweet_id} className="space-y-3 p-3 sm:p-4">
-                      <div className="flex items-start justify-between gap-2">
-                        <Checkbox
-                          checked={isSelected}
-                          onCheckedChange={(checked) => toggleSelect(entry.tweet_id, checked === true)}
-                          onClick={(event) => event.stopPropagation()}
-                          aria-label={`Select ${entry.tweet_id}`}
-                        />
-                        <div className="min-w-0 flex-1">
-                          <button onClick={() => openDetails(entry.tweet_id)} className="block w-full text-left">
-                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-                              <span className="font-mono text-[11px]">{entry.tweet_id.slice(-10)}</span>
-                              <span>{formatDistanceToNow(new Date(entry.created_at), { addSuffix: true })}</span>
-                            </div>
-                            <p className="mt-1 truncate text-sm font-medium">
-                              {entry.author_handle ? `@${entry.author_handle}` : `@${entry.account_handle}`}
-                            </p>
-                          </button>
-                          {entry.url && (
-                            <a href={entry.url} target="_blank" rel="noopener noreferrer" className="mt-1 inline-flex items-center gap-1 text-xs text-primary hover:underline">
-                              Source <ExternalLink className="w-3 h-3" />
-                            </a>
-                          )}
-                        </div>
-                        <Badge className={toneClass(stage.tone)}>{stage.label}</Badge>
-                      </div>
-
-                      <button onClick={() => openDetails(entry.tweet_id)} className="block w-full text-left text-sm leading-5 hover:text-primary">
-                        <span className="line-clamp-3">{shortText(entry) || '[No content]'}</span>
-                      </button>
-
-                      <div className="flex flex-wrap gap-1">
-                        {entry.importance_tags?.slice(0, 3).map((tag) => <Badge key={tag} variant="outline" className="text-[10px]">{tag}</Badge>)}
-                        {entry.dup_of_tweet_id && <Badge className="bg-purple-500/15 text-purple-400 border-purple-500/30 text-[10px]">dup</Badge>}
-                        {renderDedupeBadge(entry)}
-                        {renderAudienceBadge(entry)}
-                        {entry.feedback_locked && <Badge className="bg-blue-500/15 text-blue-400 border-blue-500/30 text-[10px]">locked</Badge>}
-                      </div>
-                      {entry.duplicate_cluster ? renderDuplicateClusterSummary(entry, true) : renderDuplicateHint(entry)}
-                      {renderDuplicateClusterPanel(entry)}
-
-                      <div className="grid grid-cols-2 gap-2 text-xs min-[520px]:grid-cols-4">
-                        <div className="rounded-md border bg-muted/20 p-2">
-                          <p className="text-muted-foreground">Score</p>
-                          <div className="mt-1">{renderScore(entry)}</div>
-                        </div>
-                        <div className="rounded-md border bg-muted/20 p-2">
-                          <p className="text-muted-foreground">Decision</p>
-                          <p className="mt-1 truncate font-medium" title={blocker || decision.detail || decision.title}>{decisionLabel}</p>
-                        </div>
-                        <div className="rounded-md border bg-muted/20 p-2">
-                          <p className="mb-1 text-muted-foreground">Telegram</p>
-                          {renderTelegramBadge(entry)}
-                        </div>
-                        <div className="rounded-md border bg-muted/20 p-2">
-                          <p className="mb-1 text-muted-foreground">X / cost</p>
-                          <div className="space-y-1">
-                            {renderXBadge(entry)}
-                            {renderCostFlags(entry)}
-                          </div>
-                        </div>
-                      </div>
-
-                      {(blocker || entry.decision_reason) && (
-                        <p className="rounded-md bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-                          {blocker || decision.detail || decision.title}
-                        </p>
-                      )}
-
-                      {entry.dup_of_tweet_id && !entry.duplicate_cluster && (
-                        <div>
-                          <p className="mb-1 text-xs font-medium uppercase text-muted-foreground">Duplicate match</p>
-                          {renderDuplicateMatch(entry, true)}
-                        </div>
-                      )}
-
-                      <div className="grid grid-cols-3 gap-2">
-                        <Button variant="outline" size="sm" className="h-9" onClick={() => openDetails(entry.tweet_id)}>
-                          Details
-                        </Button>
-                        <Button variant="outline" size="sm" className="h-9" onClick={() => openManualScore(entry)}>
-                          Score
-                        </Button>
-                        {renderRowActions(entry, true)}
-                      </div>
-                    </article>
-                  );
-                })}
+                {moderationEntries.map((entry) => (
+                  <MonitoringMobileCard
+                    key={entry.tweet_id}
+                    entry={entry}
+                    isSelected={selectedTweetIds.has(entry.tweet_id)}
+                    deliverThreshold={deliverThreshold}
+                    entryByTweetId={entryByTweetId}
+                    expandedClusters={expandedClusters}
+                    renderRowActions={renderRowActions}
+                    onSelectChange={toggleSelect}
+                    onOpenDetails={openDetails}
+                    onOpenManualScore={openManualScore}
+                    onToggleCluster={toggleCluster}
+                    onInspectDuplicateMatch={inspectDuplicateMatch}
+                    onRunDedupe={(targetEntry) => setPendingAction({ type: 'run_dedupe', entry: targetEntry })}
+                    onClearDuplicate={(targetEntry) => setPendingAction({ type: 'clear_dup', entry: targetEntry })}
+                  />
+                ))}
               </div>
 
               <div className="hidden overflow-hidden lg:block">
@@ -1248,83 +839,24 @@ export default function Monitoring() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                  {moderationEntries.map((entry) => {
-                    const stage = monitoringStage(entry);
-                    const decision = formatDecisionReason(entry.decision_reason);
-                    const decisionLabel = monitoringDecisionLabel(entry, entry.delivery_decision ? decision.title : 'No decision');
-                    const blocker = entry.monitoring_state?.primary_blocker;
-                    const isSelected = selectedTweetIds.has(entry.tweet_id);
-                    return (
-                      <Fragment key={entry.tweet_id}>
-                        <TableRow className="align-top">
-                          <TableCell className="px-2 py-4">
-                            <Checkbox
-                              checked={isSelected}
-                              onCheckedChange={(checked) => toggleSelect(entry.tweet_id, checked === true)}
-                              onClick={(event) => event.stopPropagation()}
-                              aria-label={`Select ${entry.tweet_id}`}
-                            />
-                          </TableCell>
-                          <TableCell className="px-3 py-4 text-xs">
-                            <div className="space-y-1">
-                              <div className="font-mono text-[11px] text-muted-foreground">{entry.tweet_id.slice(-10)}</div>
-                              <div>{formatDistanceToNow(new Date(entry.created_at), { addSuffix: true })}</div>
-                              {entry.url && (
-                                <a href={entry.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
-                                  Source <ExternalLink className="w-3 h-3" />
-                                </a>
-                              )}
-                            </div>
-                          </TableCell>
-                          <TableCell className="px-3 py-4">
-                            <div className="truncate font-medium">
-                              {entry.author_handle ? `@${entry.author_handle}` : `@${entry.account_handle}`}
-                            </div>
-                            {entry.account_handle && entry.author_handle && entry.account_handle !== entry.author_handle && (
-                              <p className="text-xs text-muted-foreground truncate">@{entry.account_handle}</p>
-                            )}
-                          </TableCell>
-                          <TableCell className="px-3 py-4">
-                            <button onClick={() => openDetails(entry.tweet_id)} className="block w-full text-left text-sm leading-5 hover:text-primary">
-                              <span className="line-clamp-2">{shortText(entry) || '[No content]'}</span>
-                            </button>
-                            <div className="mt-1 flex flex-wrap gap-1">
-                              {entry.importance_tags?.slice(0, 3).map((tag) => <Badge key={tag} variant="outline" className="text-[10px]">{tag}</Badge>)}
-                              {entry.dup_of_tweet_id && <Badge className="bg-purple-500/15 text-purple-400 border-purple-500/30 text-[10px]">dup</Badge>}
-                              {renderDedupeBadge(entry)}
-                              {renderAudienceBadge(entry)}
-                              {entry.feedback_locked && <Badge className="bg-blue-500/15 text-blue-400 border-blue-500/30 text-[10px]">locked</Badge>}
-                            </div>
-                            {!entry.duplicate_cluster && renderDuplicateHint(entry)}
-                          </TableCell>
-                          <TableCell className="px-3 py-4"><Badge className={toneClass(stage.tone)}>{stage.label}</Badge></TableCell>
-                          <TableCell className="px-3 py-4">{renderScore(entry)}</TableCell>
-                          <TableCell className="px-3 py-4">
-                            <p className="line-clamp-2 text-sm" title={blocker || decision.detail || decision.title}>{decisionLabel}</p>
-                            {(blocker || entry.decision_reason) && <p className="line-clamp-2 text-xs text-muted-foreground">{blocker || decision.title}</p>}
-                          </TableCell>
-                          <TableCell className="px-3 py-4">{renderDuplicateClusterSummary(entry)}</TableCell>
-                          <TableCell className="px-3 py-4">
-                            <div className="space-y-2">
-                              <div>{renderTelegramBadge(entry)}</div>
-                              <div>{renderXBadge(entry)}</div>
-                              <div>{renderCostFlags(entry)}</div>
-                            </div>
-                          </TableCell>
-                          <TableCell className="px-2 py-4 text-right">
-                            {renderRowActions(entry)}
-                          </TableCell>
-                        </TableRow>
-                        {entry.duplicate_cluster && expandedClusters.has(entry.duplicate_cluster.cluster_id) && (
-                          <TableRow>
-                            <TableCell colSpan={10} className="px-3 py-3">
-                              {renderDuplicateClusterPanel(entry)}
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </Fragment>
-                    );
-                  })}
+                    {moderationEntries.map((entry) => (
+                      <MonitoringTableEntryRows
+                        key={entry.tweet_id}
+                        entry={entry}
+                        isSelected={selectedTweetIds.has(entry.tweet_id)}
+                        deliverThreshold={deliverThreshold}
+                        entryByTweetId={entryByTweetId}
+                        expandedClusters={expandedClusters}
+                        renderRowActions={renderRowActions}
+                        onSelectChange={toggleSelect}
+                        onOpenDetails={openDetails}
+                        onOpenManualScore={openManualScore}
+                        onToggleCluster={toggleCluster}
+                        onInspectDuplicateMatch={inspectDuplicateMatch}
+                        onRunDedupe={(targetEntry) => setPendingAction({ type: 'run_dedupe', entry: targetEntry })}
+                        onClearDuplicate={(targetEntry) => setPendingAction({ type: 'clear_dup', entry: targetEntry })}
+                      />
+                    ))}
                 </TableBody>
               </Table>
               </div>
@@ -1370,7 +902,7 @@ export default function Monitoring() {
                               {duplicateCoverageLabel(selectedEntry.duplicate_of?.coverage_state)}
                             </Badge>
                           </div>
-                          {renderDuplicateMatch(selectedEntry)}
+                          <MonitoringDuplicateMatch entry={selectedEntry} onInspectDuplicateMatch={inspectDuplicateMatch} />
                         </div>
                       )}
                       <div className="grid gap-2 sm:grid-cols-3">
@@ -1508,96 +1040,10 @@ export default function Monitoring() {
                     </CardContent>
                   </Card>
 
-                  {(selectedEntry.dedupe_status || selectedEntry.dup_of_tweet_id) && (
-                    <Card>
-                      <CardHeader className="pb-2">
-                        <div className="flex items-center justify-between gap-2">
-                          <CardTitle className="text-sm">Duplicate Gate</CardTitle>
-                          <Button size="sm" variant="outline" onClick={() => setPendingAction({ type: 'run_dedupe', entry: selectedEntry })}>
-                            <Ban className="w-3 h-3 mr-1.5" />Run
-                          </Button>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="space-y-3 text-sm">
-                        <div className="flex flex-wrap gap-2">
-                          {renderDedupeBadge(selectedEntry)}
-                          {selectedEntry.dup_of_tweet_id && <Badge variant="outline">Duplicate of {selectedEntry.dup_of_tweet_id}</Badge>}
-                          {selectedEntry.dedupe_checked_at && <Badge variant="outline">{formatDistanceToNow(new Date(selectedEntry.dedupe_checked_at), { addSuffix: true })}</Badge>}
-                        </div>
-                        {selectedEntry.dedupe_reason && <p className="rounded-md border bg-muted/30 p-2">{selectedEntry.dedupe_reason}</p>}
-                        {selectedEntry.x_status === 'posted' && selectedEntry.duplicate_of?.x_state === 'posted' && (
-                          <p className="rounded-md border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-200">
-                            Anomaly: both this duplicate and the matched story were posted to X. This row should be treated as historical leakage; future automatic X posts are now blocked at the poster boundary.
-                          </p>
-                        )}
-                        {selectedEntry.dup_of_tweet_id && (
-                          <div className="space-y-3 rounded-md border bg-muted/20 p-3">
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <div>
-                                <p className="text-xs font-medium uppercase text-muted-foreground">Matched story</p>
-                                <p className="break-all font-mono text-xs">{selectedEntry.dup_of_tweet_id}</p>
-                              </div>
-                              <Badge className={duplicateCoverageClass(selectedEntry.duplicate_of?.coverage_state)}>
-                                {duplicateCoverageLabel(selectedEntry.duplicate_of?.coverage_state)}
-                              </Badge>
-                            </div>
-                            {selectedEntry.duplicate_of ? (
-                              <>
-                                <div className="grid gap-2 sm:grid-cols-4">
-                                  <div className="rounded-md border bg-background/50 p-2">
-                                    <p className="text-xs text-muted-foreground">Author</p>
-                                    <p className="truncate font-medium">{selectedEntry.duplicate_of.author_handle ? `@${selectedEntry.duplicate_of.author_handle}` : 'Unknown'}</p>
-                                  </div>
-                                  <div className="rounded-md border bg-background/50 p-2">
-                                    <p className="text-xs text-muted-foreground">Score</p>
-                                    <p className="font-medium">{selectedEntry.duplicate_of.final_score ?? selectedEntry.duplicate_of.importance_score ?? '—'}</p>
-                                  </div>
-                                  <div className="rounded-md border bg-background/50 p-2">
-                                    <p className="text-xs text-muted-foreground">Telegram</p>
-                                    <p className="truncate font-medium">{selectedEntry.duplicate_of.telegram_state}</p>
-                                  </div>
-                                  <div className="rounded-md border bg-background/50 p-2">
-                                    <p className="text-xs text-muted-foreground">X</p>
-                                    <p className="truncate font-medium">{selectedEntry.duplicate_of.x_state}</p>
-                                  </div>
-                                </div>
-                                <div className="rounded-md border bg-background/50 p-3">
-                                  <p className="mb-1 text-xs text-muted-foreground">Matched excerpt</p>
-                                  <p className="text-sm leading-5">{selectedEntry.duplicate_of.text_original || '[No content]'}</p>
-                                </div>
-                                <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                                  <Badge variant="outline">{selectedEntry.duplicate_of.monitoring_state?.decision_label ?? selectedEntry.duplicate_of.delivery_decision ?? 'No decision'}</Badge>
-                                  {selectedEntry.duplicate_of.decision_reason && <span className="min-w-0 break-words">{selectedEntry.duplicate_of.decision_reason}</span>}
-                                  {selectedEntry.duplicate_of.url && (
-                                    <a href={selectedEntry.duplicate_of.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
-                                      Open matched source <ExternalLink className="w-3 h-3" />
-                                    </a>
-                                  )}
-                                </div>
-                                {(selectedEntry.duplicate_of.coverage_state === 'not_covered' || selectedEntry.duplicate_of.coverage_state === 'also_duplicate') && (
-                                  <p className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-300">
-                                    This match is not delivered yet. Future duplicate checks now treat this as a coverage gap instead of silently blocking the newer item.
-                                  </p>
-                                )}
-                              </>
-                            ) : (
-                              <p className="rounded-md border bg-background/50 p-2 text-xs text-muted-foreground">
-                                The matched post is not included in this page response yet. Re-run duplicate check or refresh after the backend deploy to load its delivery coverage.
-                              </p>
-                            )}
-                          </div>
-                        )}
-                        {selectedEntry.dedupe_new_facts && selectedEntry.dedupe_new_facts.length > 0 && (
-                          <div className="rounded-md border bg-muted/30 p-2">
-                            <p className="mb-1 text-xs font-medium uppercase text-muted-foreground">New facts</p>
-                            <ul className="list-disc space-y-1 pl-4">
-                              {selectedEntry.dedupe_new_facts.map((fact) => <li key={fact}>{fact}</li>)}
-                            </ul>
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  )}
+                  <MonitoringDuplicateGateCard
+                    entry={selectedEntry}
+                    onRunDedupe={(entry) => setPendingAction({ type: 'run_dedupe', entry })}
+                  />
 
                   <Card>
                     <CardHeader className="pb-2"><CardTitle className="text-sm">Content</CardTitle></CardHeader>

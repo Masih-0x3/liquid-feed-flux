@@ -1069,17 +1069,20 @@ Status: partially completed in branch `codex/xot-cleanup-21-monitoring-split`.
 Completed slice:
 
 - Extracted view-model helpers and duplicate-cluster logic to `src/lib/monitoringViewModel.ts`.
+- Extracted duplicate evidence coverage-label helpers to `src/lib/monitoringDuplicateEvidence.ts`.
 - Extracted Monitoring admin action wrappers and confirmation copy to `src/lib/monitoringActions.ts`.
 - Extracted the confirmation dialog to `src/components/monitoring/MonitoringActionDialog.tsx`.
 - Extracted the queue filter/bulk-action toolbar to `src/components/monitoring/MonitoringFilters.tsx`.
 - Extracted the summary metric cards to `src/components/monitoring/MonitoringQueueCards.tsx`.
 - Extracted the delivery timeline panel to `src/components/monitoring/MonitoringDeliveryTimeline.tsx`.
-- Added focused coverage in `src/test/monitoring-view-model.test.ts` and `src/test/monitoring-actions.test.ts`.
+- Extracted status badges, duplicate evidence, and duplicate cluster panels to monitoring components.
+- Extracted the mobile card and desktop table row renderers to `src/components/monitoring/MonitoringRow.tsx`.
+- Extracted the Duplicate Gate drawer subpanel to `src/components/monitoring/MonitoringDuplicateGateCard.tsx`.
+- Added focused coverage in `src/test/monitoring-view-model.test.ts`, `src/test/monitoring-actions.test.ts`, and `src/test/monitoring-components.test.tsx`.
 
 Remaining in this phase:
 
-- Row/card renderer extraction.
-- Detail drawer extraction.
+- Full detail drawer extraction.
 - Optional `src/hooks/useMonitoringData.ts` cleanup is deferred to Phase 12 so fallback behavior stays isolated.
 
 Branch:
@@ -1095,15 +1098,20 @@ Turn `src/pages/Monitoring.tsx` into a page composition file instead of a combin
 ## Files
 
 - Create: `src/lib/monitoringViewModel.ts`
+- Create: `src/lib/monitoringDuplicateEvidence.ts`
 - Create: `src/lib/monitoringActions.ts`
 - Create: `src/components/monitoring/MonitoringFilters.tsx`
 - Create: `src/components/monitoring/MonitoringQueueCards.tsx`
+- Create: `src/components/monitoring/MonitoringStatusBadges.tsx`
+- Create: `src/components/monitoring/MonitoringDuplicateEvidence.tsx`
 - Create: `src/components/monitoring/MonitoringRow.tsx`
+- Create: `src/components/monitoring/MonitoringDuplicateGateCard.tsx`
 - Create: `src/components/monitoring/MonitoringDetailDrawer.tsx`
 - Create: `src/components/monitoring/MonitoringActionDialog.tsx`
 - Create: `src/components/monitoring/MonitoringDeliveryTimeline.tsx`
 - Create: `src/test/monitoring-view-model.test.ts`
 - Create: `src/test/monitoring-actions.test.ts`
+- Create: `src/test/monitoring-components.test.tsx`
 - Modify: `src/pages/Monitoring.tsx`
 - Modify: `src/hooks/useMonitoringData.ts`
 
@@ -1121,12 +1129,14 @@ rg -n "function |const .* = \\(|useMemo|useCallback|confirm|drawer|cluster|group
 - [x] Move Monitoring admin action wrappers to `src/lib/monitoringActions.ts`.
 - [x] Extract filters toolbar component.
 - [x] Extract queue cards component.
-- [ ] Extract row component.
+- [x] Extract status and duplicate evidence components.
+- [x] Extract row component.
+- [x] Extract Duplicate Gate drawer subpanel.
 - [ ] Extract detail drawer component.
 - [x] Extract confirmation dialog component.
 - [x] Extract delivery timeline panel component.
-- [ ] Keep page-level React Query state and URL/search params in `Monitoring.tsx`.
-- [ ] After each component extraction, run the focused frontend tests.
+- [x] Keep page-level React Query state and URL/search params in `Monitoring.tsx`.
+- [x] After each component extraction, run the focused frontend tests.
 
 ## Test Cases
 
@@ -1140,16 +1150,16 @@ rg -n "function |const .* = \\(|useMemo|useCallback|confirm|drawer|cluster|group
 ```bash
 npm run lint
 npm run check:strict
-npm test -- src/test/monitoring-view-model.test.ts src/test/monitoring-actions.test.ts src/test/monitoring-state.test.ts src/test/timeline-display.test.ts
+npm test -- src/test/monitoring-components.test.tsx src/test/monitoring-view-model.test.ts src/test/monitoring-actions.test.ts src/test/monitoring-state.test.ts src/test/timeline-display.test.ts
 npm test
-npm run build
+VITE_SUPABASE_URL=https://jzirqfzzvlbxwfzndaer.supabase.co VITE_SUPABASE_PUBLISHABLE_KEY=local-build-validation-key VITE_SUPABASE_PROJECT_ID=jzirqfzzvlbxwfzndaer npm run build
 ```
 
 ## Commit
 
 ```bash
-git add src/pages/Monitoring.tsx src/lib/monitoringViewModel.ts src/lib/monitoringActions.ts src/components/monitoring/MonitoringActionDialog.tsx src/components/monitoring/MonitoringFilters.tsx src/components/monitoring/MonitoringQueueCards.tsx src/test/monitoring-view-model.test.ts src/test/monitoring-actions.test.ts docs/superpowers/plans/2026-06-14-xot-cleanup-master-plan.md
-git commit -m "refactor: extract monitoring view model and controls"
+git add src/pages/Monitoring.tsx src/lib/monitoringDuplicateEvidence.ts src/components/monitoring/MonitoringStatusBadges.tsx src/components/monitoring/MonitoringDuplicateEvidence.tsx src/components/monitoring/MonitoringRow.tsx src/components/monitoring/MonitoringDuplicateGateCard.tsx src/test/monitoring-components.test.tsx docs/superpowers/plans/2026-06-14-xot-cleanup-master-plan.md
+git commit -m "refactor: extract monitoring row and duplicate panels"
 ```
 
 ## Exit Criteria
