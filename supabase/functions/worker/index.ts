@@ -97,6 +97,7 @@ import {
   resolveScoringCallOptions,
 } from "./scoringWorkflow.ts";
 import {
+  buildTranslationCallOptions,
   renderTranslationUserPrompt as renderTranslationUserPromptText,
 } from "./translateWorkflow.ts";
 
@@ -822,6 +823,8 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
       accountName,
       publishedAt,
     });
+    const buildTranslationRequest = () =>
+      buildTranslationCallOptions(config, renderTranslationUserPrompt());
 
     // ============ SPLIT PATH: score first, translate only on pass ============
     let scoringPolicyResult: ScoringPolicyResult | null = null;
@@ -976,21 +979,7 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
           console.log(JSON.stringify({ function: 'worker', action: 'translate_call_start', tweet_id: tweetId, model: config.openaiModel, reasoning_effort: config.openaiReasoningEffort, source: 'feedback_locked' }));
           const trResult = await measureTranslationCall(() => callOpenAI({
             apiKey: openaiApiKey,
-            model: config.openaiModel,
-            messages: [
-              { role: 'system', content: config.translationPrompt },
-              { role: 'user', content: renderTranslationUserPrompt() },
-            ],
-            maxOutputTokens: config.openaiMaxCompletionTokens,
-            temperature: config.openaiTemperature,
-            topP: config.openaiTopP,
-            frequencyPenalty: config.openaiFrequencyPenalty,
-            presencePenalty: config.openaiPresencePenalty,
-            reasoningEffort: config.openaiReasoningEffort,
-            verbosity: config.openaiVerbosity,
-            seed: config.openaiSeed,
-            serviceTier: config.openaiServiceTier,
-            parallelToolCalls: config.openaiParallelToolCalls,
+            ...buildTranslationRequest(),
           }));
           if (!trResult.ok) {
             throw new Error(`OpenAI translation error: ${trResult.status} ${trResult.rawText}`);
@@ -1131,21 +1120,7 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
         console.log(JSON.stringify({ function: 'worker', action: 'translate_call_start', tweet_id: tweetId, model: config.openaiModel, reasoning_effort: config.openaiReasoningEffort }));
         const trResult = await measureTranslationCall(() => callOpenAI({
           apiKey: openaiApiKey,
-          model: config.openaiModel,
-          messages: [
-            { role: 'system', content: config.translationPrompt },
-            { role: 'user', content: renderTranslationUserPrompt() },
-          ],
-          maxOutputTokens: config.openaiMaxCompletionTokens,
-          temperature: config.openaiTemperature,
-          topP: config.openaiTopP,
-          frequencyPenalty: config.openaiFrequencyPenalty,
-          presencePenalty: config.openaiPresencePenalty,
-          reasoningEffort: config.openaiReasoningEffort,
-          verbosity: config.openaiVerbosity,
-          seed: config.openaiSeed,
-          serviceTier: config.openaiServiceTier,
-          parallelToolCalls: config.openaiParallelToolCalls,
+          ...buildTranslationRequest(),
         }));
         if (!trResult.ok) {
           throw new Error(`OpenAI translation error: ${trResult.status} ${trResult.rawText}`);
@@ -1215,21 +1190,7 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
       // No filtering — simple translation
       const result = await measureTranslationCall(() => callOpenAI({
         apiKey: openaiApiKey,
-        model: config.openaiModel,
-        messages: [
-          { role: 'system', content: config.translationPrompt },
-          { role: 'user', content: renderTranslationUserPrompt() },
-        ],
-        maxOutputTokens: config.openaiMaxCompletionTokens,
-        temperature: config.openaiTemperature,
-        topP: config.openaiTopP,
-        frequencyPenalty: config.openaiFrequencyPenalty,
-        presencePenalty: config.openaiPresencePenalty,
-        reasoningEffort: config.openaiReasoningEffort,
-        verbosity: config.openaiVerbosity,
-        seed: config.openaiSeed,
-        serviceTier: config.openaiServiceTier,
-        parallelToolCalls: config.openaiParallelToolCalls,
+        ...buildTranslationRequest(),
       }));
       if (!result.ok) {
         throw new Error(`OpenAI API error: ${result.status} ${result.rawText}`);
