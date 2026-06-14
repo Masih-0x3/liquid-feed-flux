@@ -8,11 +8,6 @@ import {
   type EditorialProfile,
 } from "../_shared/scoring.ts";
 import { recordLegacyXApiUsage, recordXApiEvent } from "../_shared/xApiLedger.ts";
-import {
-  DEFAULT_DUPLICATE_GATE,
-  normalizeDuplicateGateConfig,
-  runDuplicateGate,
-} from "../_shared/dedupe.ts";
 import { duplicateXSkipReason } from "../_shared/duplicateGuard.ts";
 import {
   SCORING_POLICY_VERSION,
@@ -55,6 +50,12 @@ import {
   getEnhancedDashboardSummary,
   getSystemPerformanceSummary,
 } from "./dashboardSummaries.ts";
+import {
+  auditDuplicateCandidatesAdminAction,
+  backfillDedupeAdminAction,
+  backfillSignaturesAdminAction,
+  runDedupeAdminAction,
+} from "./dedupeActions.ts";
 import {
   getMonitoringEntries,
   getMonitoringOverview,
@@ -1710,152 +1711,6 @@ async function runScoringEval(supabase: any, body: Record<string, unknown>) {
 }
 
 // deno-lint-ignore no-explicit-any
-async function loadDuplicateGateConfig(supabase: any) {
-  const { data } = await supabase.from('settings').select('value').eq('key', 'story_memory').maybeSingle();
-  return normalizeDuplicateGateConfig(data?.value ?? DEFAULT_DUPLICATE_GATE);
-}
-
-// deno-lint-ignore no-explicit-any
-async function markDedupePending(supabase: any, tweetId: string, reason: string) {
-  await supabase
-    .from('posts')
-    .update({
-      dedupe_status: 'pending',
-      dedupe_method: null,
-      dedupe_confidence: null,
-      dedupe_reason: reason,
-      dedupe_checked_at: null,
-    })
-    .eq('tweet_id', tweetId)
-    .then(() => null, () => null);
-}
-
-// deno-lint-ignore no-explicit-any
-async function runDedupeAdminAction(supabase: any, body: Record<string, unknown>) {
-  const tweetId = typeof body.tweet_id === 'string' ? body.tweet_id.trim() : '';
-  if (!tweetId) return { ok: false, error: 'tweet_id is required' };
-  const { data: post, error } = await supabase
-    .from('posts')
-    .select('tweet_id, text_original, text_translated, author_handle, url, created_at, delivery_decision, decision_reason, feedback_locked')
-    .eq('tweet_id', tweetId)
-    .maybeSingle();
-  if (error) return { ok: false, error: error.message };
-  if (!post) return { ok: false, error: 'post not found' };
-
-  const config = await loadDuplicateGateConfig(supabase);
-  const dryRun = body.dry_run === true;
-  if (!dryRun) await markDedupePending(supabase, tweetId, 'running:admin');
-  const result = await runDuplicateGate(supabase, post, config, {
-    dryRun,
-    force: body.force === true,
-    source: 'admin_actions.run_dedupe',
-  });
-
-  if (!dryRun && body.enqueue_next === true && result.should_enqueue_translate) {
-    await supabase.from('jobs').upsert({
-      type: 'translate',
-      payload: { tweet_id: tweetId },
-      status: 'pending',
-      priority: 10,
-      idempotency_key: `translate:dedupe-admin:${tweetId}`,
-      next_run_at: new Date().toISOString(),
-    }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
-  }
-
-  return { ok: result.ok, tweet_id: tweetId, config_enabled: config.enabled, result };
-}
-
-// deno-lint-ignore no-explicit-any
-async function backfillDedupeAdminAction(supabase: any, body: Record<string, unknown>) {
-  const hours = typeof body.hours === 'number' && body.hours > 0 && body.hours <= 168 ? Math.floor(body.hours) : 48;
-  const max = typeof body.max === 'number' && body.max > 0 ? Math.min(Math.floor(body.max), 2000) : 500;
-  const dryRun = body.dry_run === true;
-  const force = body.force === true;
-  const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
-
-  let query = supabase
-    .from('posts')
-    .select('tweet_id, dedupe_checked_at')
-    .not('text_original', 'is', null)
-    .gte('created_at', since)
-    .order('created_at', { ascending: false })
-    .limit(max);
-  if (!force) query = query.is('dedupe_checked_at', null);
-
-  const { data: posts, error } = await query;
-  if (error) return { ok: false, error: error.message };
-
-  let queued = 0;
-  const stamp = Date.now();
-  for (const post of posts ?? []) {
-    const tweetId = post.tweet_id as string;
-    if (dryRun) {
-      queued += 1;
-      continue;
-    }
-    const { error: jobError } = await supabase.from('jobs').upsert({
-      type: 'dedupe',
-      payload: { tweet_id: tweetId, force, source: 'backfill' },
-      status: 'pending',
-      priority: 30,
-      idempotency_key: force ? `dedupe:backfill:${tweetId}:${stamp}` : `dedupe:backfill:${tweetId}`,
-      next_run_at: new Date().toISOString(),
-    }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
-    if (!jobError) {
-      await markDedupePending(supabase, tweetId, 'queued:backfill');
-      queued += 1;
-    }
-  }
-
-  return {
-    ok: true,
-    dry_run: dryRun,
-    force,
-    hours,
-    max,
-    scanned: posts?.length ?? 0,
-    queued,
-  };
-}
-
-// deno-lint-ignore no-explicit-any
-async function auditDuplicateCandidatesAdminAction(supabase: any, body: Record<string, unknown>) {
-  const windowHours = typeof body.window_hours === 'number' && body.window_hours > 0 && body.window_hours <= 168
-    ? Math.floor(body.window_hours)
-    : 48;
-  const candidateMinSimilarity = typeof body.candidate_min_similarity === 'number'
-    ? Math.min(Math.max(body.candidate_min_similarity, 0.5), 0.99)
-    : 0.78;
-  const limit = typeof body.limit === 'number' && body.limit > 0
-    ? Math.min(Math.floor(body.limit), 5000)
-    : 500;
-
-  const { data, error } = await supabase.rpc('audit_duplicate_candidates', {
-    window_hours: windowHours,
-    candidate_min_similarity: candidateMinSimilarity,
-    match_limit: limit,
-  });
-  if (error) return { ok: false, error: error.message };
-
-  const rows = (data ?? []) as Array<Record<string, unknown>>;
-  const proposed = rows.reduce<Record<string, number>>((acc, row) => {
-    const key = typeof row.proposed_status === 'string' ? row.proposed_status : 'unknown';
-    acc[key] = (acc[key] ?? 0) + 1;
-    return acc;
-  }, {});
-
-  return {
-    ok: true,
-    dry_run: true,
-    window_hours: windowHours,
-    candidate_min_similarity: candidateMinSimilarity,
-    count: rows.length,
-    proposed,
-    rows,
-  };
-}
-
-// deno-lint-ignore no-explicit-any
 async function summarizeStaleXPending(supabase: any, body: Record<string, unknown>) {
   const olderThanHours = Math.min(Math.max(Number(body.older_than_hours) || 24, 1), 720);
   const close = body.close === true;
@@ -2471,8 +2326,7 @@ serve(async (req) => {
 
       // ===== Backward-compatible alias for old Story Memory backfill =====
       case 'backfill_signatures': {
-        const result = await backfillDedupeAdminAction(supabase, body);
-        return jsonResponse({ ...result, alias: 'backfill_dedupe' });
+        return jsonResponse(await backfillSignaturesAdminAction(supabase, body));
       }
 
       // ===== Re-score recent posts that are missing score_axes =====
