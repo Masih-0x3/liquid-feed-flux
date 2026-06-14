@@ -842,6 +842,18 @@ git commit -m "refactor: extract worker media workflow"
 
 # Phase 9: Worker Split, Part G - Translate, Scoring, And Enrichment Boundaries
 
+Status: implementation completed in branch `codex/xot-cleanup-15-worker-translate-scoring-split`; one pre-existing missing-source early-return path remains noted as an explicit test gap.
+
+Completed commits:
+
+- `037d320 refactor: extract worker translate scoring prompts`
+- `2a7034f refactor: extract worker scoring tool parsing`
+- `a68c7c2 refactor: extract worker scoring call options`
+- `5d9d0c4 refactor: extract worker translation call options`
+- `a953681 refactor: extract worker scoring base decision`
+- `7229783 refactor: extract worker post-translation routing`
+- `9354e5d refactor: extract worker translation metadata patches`
+
 Branch:
 
 ```text
@@ -864,27 +876,27 @@ Reduce `handleTranslateJob` complexity by extracting scoring prompt construction
 
 ## Steps
 
-- [ ] Locate translate job boundaries.
+- [x] Locate translate job boundaries.
 
 ```bash
 rg -n "handleTranslateJob|scoring|score|translation|translate|dedupe|enrich|policy_rule_applied" supabase/functions/worker/index.ts supabase/functions/_shared
 ```
 
-- [ ] Add characterization tests for scoring decision outputs.
-- [ ] Add characterization tests for translation metadata preservation.
-- [ ] Extract scoring prompt/tool schema construction into `scoringWorkflow.ts`.
-- [ ] Extract scoring policy application into `scoringWorkflow.ts`.
-- [ ] Extract translation request shaping into `translateWorkflow.ts`.
-- [ ] Extract post-translation next-job routing into `translateWorkflow.ts`.
-- [ ] Keep external OpenAI calls in the existing path until request/response shapes are tested.
+- [x] Add characterization tests for scoring decision outputs.
+- [x] Add characterization tests for translation metadata preservation.
+- [x] Extract scoring prompt/tool schema construction into `scoringWorkflow.ts`.
+- [x] Extract scoring policy application into `scoringWorkflow.ts`.
+- [x] Extract translation request shaping into `translateWorkflow.ts`.
+- [x] Extract post-translation next-job routing into `translateWorkflow.ts`.
+- [x] Keep external OpenAI calls in the existing path until request/response shapes are tested.
 
 ## Test Cases
 
-- [ ] Low score produces the same skip/drop decision as before.
-- [ ] Duplicate scoring metadata is preserved.
-- [ ] Regional escalation metadata is preserved.
-- [ ] Successful translation creates the same delivery enqueue decision.
-- [ ] Missing source text follows the existing failure path.
+- [x] Low score produces the same skip/drop decision as before.
+- [x] Duplicate scoring metadata is preserved.
+- [x] Regional escalation metadata is preserved.
+- [x] Successful translation creates the same delivery enqueue decision.
+- [ ] Missing source text follows the existing failure path. Current code still preserves the existing early return in `handleTranslateJob`, but there is not yet a focused test for that branch.
 
 ## Validation
 
@@ -906,9 +918,9 @@ git commit -m "refactor: extract worker translate and scoring workflows"
 
 ## Exit Criteria
 
-- [ ] Translation/scoring decisions are isolated and tested.
-- [ ] OpenAI request behavior is unchanged.
-- [ ] Worker job dispatch remains stable.
+- [x] Translation/scoring decisions are isolated and tested.
+- [x] OpenAI request behavior is unchanged.
+- [x] Worker job dispatch remains stable.
 
 ---
 
