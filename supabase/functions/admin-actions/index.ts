@@ -52,7 +52,6 @@ import {
   updateVideoRenderConfigAdmin,
 } from "./videoRenderActions.ts";
 import { getXApiSummary } from "./xApiSummary.ts";
-import { isMyXEnabled, MY_X_DISABLED_RESPONSE } from "../_shared/myXControls.ts";
 import { saveSettingsAdminAction } from "./settings.ts";
 import {
   approveEnrichmentAdminAction,
@@ -63,6 +62,14 @@ import {
   selectEnrichmentVariantAdminAction,
   updateLatestPostEnrichment,
 } from "./enrichmentActions.ts";
+import {
+  dryRunOldMediaCleanupAdminAction,
+  getPostPipelineStatusAdminAction,
+  rescoreRecentAdminAction,
+  resetLearnedBiasesAdminAction,
+  runFollowersSnapshotAdminAction,
+  summarizeStaleXPendingAdminAction,
+} from "./maintenanceActions.ts";
 import {
   getXStatusAdminAction,
   recordAdminXApiAttempt,
@@ -669,33 +676,6 @@ async function queueManualAdvance(supabase: any, tweetId: string): Promise<{ que
 }
 
 // deno-lint-ignore no-explicit-any
-async function summarizeStaleXPending(supabase: any, body: Record<string, unknown>) {
-  const olderThanHours = Math.min(Math.max(Number(body.older_than_hours) || 24, 1), 720);
-  const close = body.close === true;
-  const cutoff = new Date(Date.now() - olderThanHours * 60 * 60 * 1000).toISOString();
-  const { data, error } = await supabase
-    .from('x_deliveries')
-    .select('id, post_id, created_at, skip_reason, last_error')
-    .eq('status', 'pending')
-    .lt('created_at', cutoff)
-    .order('created_at', { ascending: true })
-    .limit(500);
-  if (error) throw error;
-  const ids = (data ?? []).map((row: { id: string }) => row.id);
-  if (close && ids.length > 0) {
-    const { error: updErr } = await supabase
-      .from('x_deliveries')
-      .update({
-        status: 'skipped',
-        skip_reason: 'stale_pending_closed_by_admin',
-        last_error: 'Closed by admin maintenance action without retrying or posting',
-      })
-      .in('id', ids);
-    if (updErr) throw updErr;
-  }
-  return { success: true, closed: close ? ids.length : 0, matched: ids.length, rows: data ?? [], older_than_hours: olderThanHours };
-}
-
 serve(async (req) => {
   corsHeaders = makeCorsHeaders(req);
   if (req.method === 'OPTIONS') {
@@ -801,14 +781,8 @@ serve(async (req) => {
       }
 
       case 'dry_run_old_media_cleanup': {
-        const daysOld = typeof body.days_old === 'number' ? Math.max(1, Math.min(365, Math.floor(body.days_old))) : 1;
-        const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-        const { data, error } = await supabase.functions.invoke('media-processor', {
-          body: { action: 'cleanup_old_media', days_old: daysOld, dry_run: true },
-          headers: { Authorization: `Bearer ${serviceKey}` },
-        } as Record<string, unknown>);
-        if (error) throw error;
-        return jsonResponse({ success: true, dry_run: true, result: data });
+        const result = await dryRunOldMediaCleanupAdminAction(supabase, body);
+        return jsonResponse(result.body, result.status);
       }
 
       case 'get_monitoring_overview': {
@@ -891,7 +865,8 @@ serve(async (req) => {
       }
 
       case 'summarize_stale_x_pending': {
-        return jsonResponse(await summarizeStaleXPending(supabase, body));
+        const result = await summarizeStaleXPendingAdminAction(supabase, body);
+        return jsonResponse(result.body, result.status);
       }
 
       case 'hydrate_post': {
@@ -900,18 +875,8 @@ serve(async (req) => {
       }
 
       case 'get_post_pipeline_status': {
-        const tweetIds = Array.isArray(body.tweet_ids)
-          ? body.tweet_ids
-            .filter((id: unknown): id is string => typeof id === 'string' && id.trim().length > 0)
-            .map((id: string) => id.trim())
-            .slice(0, 100)
-          : [];
-        if (tweetIds.length === 0) {
-          return jsonResponse({ error: 'tweet_ids array is required' }, 400);
-        }
-        const { data, error } = await supabase.rpc('get_post_pipeline_status', { tweet_ids: tweetIds });
-        if (error) throw error;
-        return jsonResponse({ success: true, statuses: data ?? [] });
+        const result = await getPostPipelineStatusAdminAction(supabase, body);
+        return jsonResponse(result.body, result.status);
       }
 
       case 'resolve_x_media': {
@@ -966,33 +931,8 @@ serve(async (req) => {
 
       // ===== Re-score recent posts that are missing score_axes =====
       case 'rescore_recent': {
-        const hours = typeof body.hours === 'number' && body.hours > 0 && body.hours <= 168 ? body.hours : 48;
-        const onlyMissing = body.only_missing !== false; // default true
-        const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
-        let q = supabase
-          .from('posts')
-          .select('tweet_id, score_axes')
-          .gte('created_at', since)
-          .order('created_at', { ascending: false })
-          .limit(2000);
-        const { data: posts, error: fetchErr } = await q;
-        if (fetchErr) return jsonResponse({ ok: false, error: fetchErr.message }, 500);
-        const targets = (posts ?? []).filter((p) => !onlyMissing || p.score_axes == null);
-        let queued = 0;
-        const stamp = Date.now();
-        for (const p of targets) {
-          const tid = p.tweet_id as string;
-          const { error } = await supabase.from('jobs').upsert({
-            type: 'translate',
-            payload: { tweet_id: tid, force_rescore: true },
-            status: 'pending',
-            priority: 9,
-            idempotency_key: `translate:rescore:${tid}:${stamp}`,
-            next_run_at: new Date().toISOString(),
-          }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
-          if (!error) queued++;
-        }
-        return jsonResponse({ ok: true, scanned: posts?.length ?? 0, matched: targets.length, queued, hours });
+        const result = await rescoreRecentAdminAction(supabase, body);
+        return jsonResponse(result.body, result.status);
       }
 
       case 'preview_translation': {
@@ -1242,30 +1182,8 @@ serve(async (req) => {
 
       // ===== Run X followers snapshot manually =====
       case 'run_followers_snapshot': {
-        const { data: controlsRow } = await supabase.from('settings').select('value').eq('key', 'x_api_controls').maybeSingle();
-        const controls = (controlsRow?.value ?? {}) as Record<string, unknown>;
-        if (!isMyXEnabled(controls)) {
-          return jsonResponse(MY_X_DISABLED_RESPONSE);
-        }
-
-        const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
-        const svcKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-        const force = body.force === true;
-        const dryRun = body.dry_run === true;
-        const includeFollowing = body.include_following !== false;
-        try {
-          const resp = await fetch(`${supabaseUrl}/functions/v1/x-followers-snapshot`, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${svcKey}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ trigger: 'manual', force, dry_run: dryRun, include_following: includeFollowing }),
-          });
-          const text = await resp.text();
-          let parsed: unknown; try { parsed = JSON.parse(text); } catch { parsed = text; }
-          if (!resp.ok) return jsonResponse({ ok: false, error: `snapshot ${resp.status}: ${text.slice(0, 300)}`, raw: parsed }, 200);
-          return jsonResponse({ ok: true, ...(parsed as Record<string, unknown>) });
-        } catch (e) {
-          return jsonResponse({ ok: false, error: (e as Error).message }, 200);
-        }
+        const result = await runFollowersSnapshotAdminAction(supabase, body);
+        return jsonResponse(result.body, result.status);
       }
 
       // ===== Clear duplicate (not-a-duplicate feedback) =====
@@ -1300,12 +1218,8 @@ serve(async (req) => {
 
       // ===== Reset learned biases =====
       case 'reset_learned_biases': {
-        await supabase.from('settings').upsert({
-          key: 'learned_biases',
-          value: { author_bias: {}, tag_bias: {}, keyword_bias: {} },
-          updated_at: new Date().toISOString(),
-        }, { onConflict: 'key' });
-        return jsonResponse({ success: true, message: 'Learned biases reset' });
+        const result = await resetLearnedBiasesAdminAction(supabase);
+        return jsonResponse(result.body, result.status);
       }
 
       // ===== Approve enrichment and queue delivery =====
