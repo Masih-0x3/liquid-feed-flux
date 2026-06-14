@@ -129,7 +129,7 @@ function uniquePush(values, value) {
 }
 
 function keytermContextText(contextText) {
-  const text = String(contextText ?? "");
+  const text = sectionizedContextText(contextText);
   if (!/^(?:Post context|Visible OCR text|Visual note):/im.test(text)) return text;
 
   const selected = [];
@@ -144,21 +144,27 @@ function keytermContextText(contextText) {
       include = false;
       continue;
     }
-    if (include) selected.push(line);
+    if (include && !/^Existing translated post:/i.test(line)) selected.push(line);
   }
   return selected.join("\n");
 }
 
-function visualContextText(contextText) {
-  const text = String(contextText ?? "");
+function visualContextText(contextText, options = {}) {
+  const text = sectionizedContextText(contextText);
   if (!/^(?:Post context|Visible OCR text|Visual note):/im.test(text)) return "";
+  const includeOcr = options.includeOcr !== false;
 
   const selected = [];
   let include = false;
   for (const line of text.split(/\r?\n/)) {
-    if (/^(?:Visible OCR text|Visual note):/i.test(line)) {
+    if (/^Visible OCR text:/i.test(line)) {
+      include = includeOcr;
+      if (includeOcr) selected.push(line.replace(/^Visible OCR text:\s*/i, ""));
+      continue;
+    }
+    if (/^Visual note:/i.test(line)) {
       include = true;
-      selected.push(line.replace(/^(?:Visible OCR text|Visual note):\s*/i, ""));
+      selected.push(line.replace(/^Visual note:\s*/i, ""));
       continue;
     }
     if (/^Post context:/i.test(line)) {
@@ -170,6 +176,25 @@ function visualContextText(contextText) {
   return selected.join("\n");
 }
 
+function sectionizedContextText(contextText) {
+  return String(contextText ?? "")
+    .replace(/\s+(Post context:)/gi, "\n$1")
+    .replace(/\s+(Author:)/gi, "\n$1")
+    .replace(/\s+(Existing translated post:)/gi, "\n$1")
+    .replace(/\s+(Post:)/g, "\n$1")
+    .replace(/\s+(URL:)/gi, "\n$1")
+    .replace(/\s+(Visible OCR text:)/gi, "\n$1")
+    .replace(/\s+(Visual note:)/gi, "\n$1")
+    .trim();
+}
+
+function speechHintContextText(contextText) {
+  return [keytermContextText(contextText), visualContextText(contextText, { includeOcr: false })]
+    .map((value) => String(value ?? "").trim())
+    .filter(Boolean)
+    .join("\n");
+}
+
 function pushAttempt(attempts, language, detectLanguage) {
   const normalizedLanguageValue = cleanSegmentText(language);
   if (attempts.some((attempt) => attempt.language === normalizedLanguageValue)) return;
@@ -177,7 +202,7 @@ function pushAttempt(attempts, language, detectLanguage) {
 }
 
 function preferredLanguagesFromContext(contextText) {
-  const text = String(contextText ?? "");
+  const text = speechHintContextText(contextText);
   if (/\b(?:tv\.)?snn(?:tv)?(?:\.ir)?\b/i.test(text)) return ["fa", "multi"];
   if (/\b(?:persian|farsi)\b/i.test(text)) return ["fa", "multi"];
   if (/\barabic\b/i.test(text)) return ["ar", "multi"];

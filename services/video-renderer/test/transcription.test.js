@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isLikelyRepeatedFillerTranscript, isLikelyRomanizedHebrewTranscript, isWeakSpeechDetection, shouldRetryWithEnhancedAudio, transcribeAudio } from "../src/transcription.js";
+import { isLikelyContextMismatchedRepetitiveTranscript, isLikelyNonSpeechDescription, isLikelyRepeatedFillerTranscript, isLikelyRomanizedHebrewTranscript, isSparseContextMismatchedTranscript, isWeakSpeechDetection, shouldRetryWithEnhancedAudio, transcribeAudio } from "../src/transcription.js";
 import { transcribeWithEnhancedAudioRetry } from "../src/transcriptionPipeline.js";
 
 test("uses Deepgram as the default transcription provider", async () => {
@@ -60,7 +60,6 @@ test("can fall back to OpenAI transcription when explicitly enabled", async () =
 test("classifies Deepgram no-transcript responses as no usable speech", async () => {
   const result = await transcribeAudio({
     provider: "deepgram",
-    fallbackProvider: "openai",
     audioPath: "/tmp/audio.mp3",
     durationMs: 3000,
     deepgramApiKey: "dg-key",
@@ -84,6 +83,191 @@ test("classifies Deepgram no-transcript responses as no usable speech", async ()
   assert.equal(result.noUsableSpeech, true);
   assert.deepEqual(result.segments, []);
   assert.match(result.noUsableSpeechReason, /returned no timed segments/);
+});
+
+test("falls back from sparse low-information Deepgram fragments to OpenAI speech", async () => {
+  const result = await transcribeAudio({
+    provider: "deepgram",
+    fallbackProvider: "openai",
+    audioPath: "/tmp/audio.mp3",
+    durationMs: 22033,
+    deepgramApiKey: "dg-key",
+    openaiApiKey: "openai-key",
+    fetchImpl: async () => ({
+      ok: true,
+      text: async () => JSON.stringify({
+        results: {
+          channels: [{
+            detected_language: "es",
+            language_confidence: 0.42097387,
+            alternatives: [{
+              transcript: "BNI. Boon.",
+              confidence: 0.87320966,
+              words: [
+                { word: "BNI", start: 4.72, end: 5.52, confidence: 0.62 },
+                { word: "Boon", start: 13.571, end: 14.051, confidence: 0.87 },
+              ],
+            }],
+          }],
+          utterances: [
+            { start: 4.72, end: 5.52, transcript: "BNI." },
+            { start: 13.571, end: 14.051, transcript: "Boon." },
+          ],
+        },
+      }),
+    }),
+    readFileImpl: async () => Buffer.from("audio"),
+    openaiTranscribe: async () => ({
+      model: "gpt-4o-transcribe-diarize",
+      language: "he",
+      segments: [
+        { id: 1, start: 0, end: 1.8, text: "תבחן בי משאלה הנה" },
+        { id: 2, start: 1.8, end: 3.5, text: "איפה איפה היא מקרסקה?" },
+      ],
+    }),
+  });
+
+  assert.equal(result.provider, "openai");
+  assert.equal(result.fallback, true);
+  assert.match(result.fallbackReason, /weak Deepgram|low-confidence|weak/i);
+  assert.equal(result.language, "he");
+  assert.equal(result.segments.length, 2);
+});
+
+test("rejects descriptive OpenAI fallback captions instead of burning fake subtitles", async () => {
+  const result = await transcribeAudio({
+    provider: "deepgram",
+    fallbackProvider: "openai",
+    audioPath: "/tmp/audio.mp3",
+    durationMs: 15335,
+    deepgramApiKey: "dg-key",
+    openaiApiKey: "openai-key",
+    fetchImpl: async () => ({
+      ok: true,
+      text: async () => JSON.stringify({
+        results: {
+          channels: [{ detected_language: "und", alternatives: [{ transcript: "", words: [] }] }],
+          utterances: [],
+        },
+      }),
+    }),
+    readFileImpl: async () => Buffer.from("audio"),
+    openaiTranscribe: async () => ({
+      model: "whisper-1",
+      language: "en",
+      segments: [{
+        id: 1,
+        start: 0,
+        end: 11.86,
+        text: "Multiple players chanting the same word, Argentine for the victory.",
+      }],
+    }),
+  });
+
+  assert.equal(result.provider, "openai");
+  assert.equal(result.noUsableSpeech, true);
+  assert.deepEqual(result.segments, []);
+  assert.match(result.noUsableSpeechReason, /OpenAI fallback produced no usable speech/);
+  assert.equal(isLikelyNonSpeechDescription({
+    segments: [{ id: 1, start: 0, end: 11.86, text: "Multiple players chanting the same word." }],
+  }), true);
+  assert.equal(isLikelyNonSpeechDescription({
+    segments: [{ id: 1, start: 0, end: 14.36, text: "SPEAKERS CHANTING" }],
+  }), true);
+});
+
+test("rejects repetitive fallback gibberish when it does not match post context", async () => {
+  const result = await transcribeAudio({
+    provider: "deepgram",
+    fallbackProvider: "openai",
+    audioPath: "/tmp/audio.mp3",
+    durationMs: 15335,
+    deepgramApiKey: "dg-key",
+    openaiApiKey: "openai-key",
+    contextText: "Post context:\nPost: Demonstrators chanted Ghalibaf, Araghchi, resign, resign.",
+    fetchImpl: async () => ({
+      ok: true,
+      text: async () => JSON.stringify({
+        results: {
+          channels: [{ detected_language: "und", alternatives: [{ transcript: "", words: [] }] }],
+          utterances: [],
+        },
+      }),
+    }),
+    readFileImpl: async () => Buffer.from("audio"),
+    openaiTranscribe: async () => ({
+      model: "gpt-4o-transcribe-diarize",
+      language: "en",
+      segments: [
+        { id: 1, start: 0.25, end: 1.6, text: "HS, HS," },
+        { id: 2, start: 1.7, end: 3.25, text: "HS, olivar," },
+        { id: 3, start: 3.3, end: 4.7, text: "a la fin, HS," },
+        { id: 4, start: 6.3, end: 8.2, text: "olivar, a la fin," },
+      ],
+    }),
+  });
+
+  assert.equal(result.noUsableSpeech, true);
+  assert.deepEqual(result.segments, []);
+  assert.match(result.noUsableSpeechReason, /OpenAI fallback produced no usable speech/);
+  assert.equal(isLikelyContextMismatchedRepetitiveTranscript({
+    segments: [
+      { id: 1, start: 0, end: 1, text: "HS, HS, olivar, a la fin, HS, olivar, a la fin." },
+    ],
+  }, "Post: Demonstrators chanted Ghalibaf, Araghchi, resign."), true);
+  assert.equal(isLikelyContextMismatchedRepetitiveTranscript({
+    segments: [
+      { id: 1, start: 0, end: 1, text: "Araghchi, resign. Araghchi, resign. Araghchi, resign." },
+    ],
+  }, "Post: Demonstrators chanted Ghalibaf, Araghchi, resign."), false);
+});
+
+test("rejects sparse fallback phrases that do not match post context", async () => {
+  const result = await transcribeAudio({
+    provider: "deepgram",
+    fallbackProvider: "openai",
+    audioPath: "/tmp/audio.mp3",
+    durationMs: 15335,
+    deepgramApiKey: "dg-key",
+    openaiApiKey: "openai-key",
+    contextText: "Post context:\nPost: Demonstrators chanted Ghalibaf, Araghchi, resign, resign.",
+    fetchImpl: async () => ({
+      ok: true,
+      text: async () => JSON.stringify({
+        results: {
+          channels: [{ detected_language: "und", alternatives: [{ transcript: "", words: [] }] }],
+          utterances: [],
+        },
+      }),
+    }),
+    readFileImpl: async () => Buffer.from("audio"),
+    openaiTranscribe: async () => ({
+      model: "gpt-4o-transcribe-diarize",
+      language: "en",
+      segments: [{ id: 1, start: 0, end: 2.2, text: "Este é o nosso..." }],
+    }),
+  });
+
+  assert.equal(result.noUsableSpeech, true);
+  assert.deepEqual(result.segments, []);
+  assert.equal(isSparseContextMismatchedTranscript({
+    segments: [{ id: 1, start: 0, end: 2.2, text: "Este é o nosso..." }],
+  }, {
+    durationMs: 15335,
+    contextText: "Post: Demonstrators chanted Ghalibaf, Araghchi, resign.",
+  }), true);
+  assert.equal(isSparseContextMismatchedTranscript({
+    segments: [{ id: 1, start: 0, end: 4.1, text: "Et c'est pas, et c'est pas, sans arriver, à la fille." }],
+  }, {
+    durationMs: 15335,
+    contextText: "Post: Demonstrators chanted Ghalibaf, Araghchi, resign.",
+  }), true);
+  assert.equal(isSparseContextMismatchedTranscript({
+    segments: [{ id: 1, start: 0, end: 1.1, text: "uh huh" }],
+  }, {
+    durationMs: 12000,
+    contextText: "Post: Unrelated context.",
+  }), false);
 });
 
 test("enhanced audio retry fires only after empty or weak Deepgram output", async () => {

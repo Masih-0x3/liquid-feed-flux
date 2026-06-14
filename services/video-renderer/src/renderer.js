@@ -38,7 +38,7 @@ export function loadConfigFromEnv(env = process.env) {
     rendererId: env.RENDERER_ID || `renderer-${process.pid}`,
     renderVersion: env.RENDER_VERSION || DEFAULT_RENDER_VERSION,
     transcriptionProvider,
-    transcriptionFallbackProvider: env.TRANSCRIPTION_FALLBACK_PROVIDER || "",
+    transcriptionFallbackProvider: env.TRANSCRIPTION_FALLBACK_PROVIDER ?? (transcriptionProvider === "deepgram" ? "openai" : ""),
     enhancedAudioRetry: env.ENHANCED_AUDIO_RETRY !== "0",
     earlyTranscriptRescue: env.EARLY_TRANSCRIPT_RESCUE !== "0",
     earlyTranscriptMinFirstCueStartSeconds: Number(env.EARLY_TRANSCRIPT_MIN_FIRST_CUE_START_SECONDS || 8),
@@ -153,7 +153,12 @@ async function loadRenderSource(supabase, row) {
 }
 
 function compactContextText(value) {
-  return String(value ?? "").replace(/\s+/g, " ").trim().slice(0, 1600);
+  return String(value ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .join("\n")
+    .slice(0, 1600);
 }
 
 async function loadPostContextText(supabase, tweetId) {

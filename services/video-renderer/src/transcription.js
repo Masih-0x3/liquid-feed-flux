@@ -50,6 +50,71 @@ function transcriptText(transcription) {
     .join(" ");
 }
 
+function segmentSpeechSeconds(segments) {
+  return segments.reduce((sum, segment) => {
+    const start = Number(segment?.start);
+    const end = Number(segment?.end);
+    return Number.isFinite(start) && Number.isFinite(end) && end > start ? sum + (end - start) : sum;
+  }, 0);
+}
+
+export function isLikelyNonSpeechDescription(transcription) {
+  const text = cleanText(transcriptText(transcription)).toLowerCase();
+  if (!text) return false;
+  return [
+    /\b(?:multiple|several|many|crowd|people|players|protesters|demonstrators|speakers?|voices?)\b.{0,80}\b(?:chanting|cheering|shouting|yelling|screaming)\b/,
+    /\b(?:chanting|cheering|shouting|yelling|screaming)\b.{0,80}\b(?:same word|slogan|in unison)\b/,
+    /\b(?:music|sirens?|noise|explosion|gunfire|applause|laughter)\b.{0,40}\b(?:playing|continues|sounding|heard)\b/,
+    /\b(?:no speech|inaudible|unintelligible)\b/,
+  ].some((pattern) => pattern.test(text));
+}
+
+function wordTokens(value) {
+  return cleanText(value)
+    .toLowerCase()
+    .match(/\p{L}[\p{L}\p{N}'-]*/gu) ?? [];
+}
+
+export function isLikelyContextMismatchedRepetitiveTranscript(transcription, contextText = "") {
+  const tokens = wordTokens(transcriptText(transcription));
+  if (tokens.length < 6) return false;
+
+  const uniqueTokens = new Set(tokens);
+  if (uniqueTokens.size / tokens.length > 0.55) return false;
+
+  const stopwords = new Set([
+    "a", "an", "and", "are", "as", "at", "de", "el", "for", "in", "is", "la", "le", "of", "on", "or", "the", "to",
+  ]);
+  const meaningful = [...uniqueTokens].filter((token) => token.length >= 4 && !stopwords.has(token));
+  if (meaningful.length === 0) return false;
+
+  const context = cleanText(contextText).toLowerCase();
+  return !meaningful.some((token) => context.includes(token));
+}
+
+export function isSparseContextMismatchedTranscript(transcription, options = {}) {
+  const segments = Array.isArray(transcription?.segments) ? transcription.segments : [];
+  if (segments.length === 0 || segments.length > 2) return false;
+  const text = transcriptText(transcription);
+  const letters = text.match(/\p{L}/gu)?.length ?? 0;
+  const latinLetters = text.match(/[A-Za-zÀ-ÖØ-öø-ÿ]/g)?.length ?? 0;
+  if (letters === 0 || latinLetters / letters < 0.6) return false;
+  const durationSeconds = Number(options.durationMs) > 0 ? Number(options.durationMs) / 1000 : null;
+  if (durationSeconds === null || durationSeconds < 8) return false;
+
+  const speechSeconds = segmentSpeechSeconds(segments);
+  const speechCoverage = speechSeconds / durationSeconds;
+  const tokens = wordTokens(text);
+  if (speechSeconds <= 0 || speechSeconds > 5 || speechCoverage > 0.35 || tokens.length > 14) return false;
+
+  const stopwords = new Set(["a", "an", "and", "are", "as", "at", "de", "do", "e", "el", "for", "in", "is", "la", "le", "o", "of", "on", "or", "os", "the", "to"]);
+  const meaningful = [...new Set(tokens)].filter((token) => token.length >= 4 && !stopwords.has(token));
+  if (meaningful.length === 0) return false;
+
+  const context = cleanText(options.contextText).toLowerCase();
+  return !meaningful.some((token) => context.includes(token));
+}
+
 function contextSuggestsHebrewSpeech(contextText) {
   return /\b(?:hebrew|israeli|israel\s+katz|netanyahu|knesset|idf|likud|mossad|shin\s+bet)\b/i.test(String(contextText ?? ""));
 }
@@ -115,14 +180,10 @@ export function isLikelyRomanizedHebrewTranscript(transcription, options = {}) {
 
 export function isWeakSpeechDetection(transcription, options = {}) {
   const segments = Array.isArray(transcription?.segments) ? transcription.segments : [];
-  if (segments.length !== 1) return false;
+  if (segments.length === 0) return false;
 
   const durationSeconds = Number(options.durationMs) > 0 ? Number(options.durationMs) / 1000 : null;
-  const speechSeconds = segments.reduce((sum, segment) => {
-    const start = Number(segment?.start);
-    const end = Number(segment?.end);
-    return Number.isFinite(start) && Number.isFinite(end) && end > start ? sum + (end - start) : sum;
-  }, 0);
+  const speechSeconds = segmentSpeechSeconds(segments);
   const speechCoverage = durationSeconds ? speechSeconds / durationSeconds : null;
   const text = segments.map((segment) => segment?.text ?? "").join(" ");
   const words = countWords(text);
@@ -136,8 +197,20 @@ export function isWeakSpeechDetection(transcription, options = {}) {
   const uncertainLanguage = ["", "und", "multi"].includes(language) || (Number.isFinite(languageConfidence) && languageConfidence <= 0.15);
   const weakTranscriptConfidence = Number.isFinite(confidence) && confidence > 0 && confidence < 0.62;
   const weakWords = avgWordConfidence === null || avgWordConfidence < 0.55;
+  const sparseLowInformation = durationSeconds !== null &&
+    durationSeconds >= 8 &&
+    segments.length <= 3 &&
+    words > 0 &&
+    words <= 3 &&
+    speechCoverage !== null &&
+    speechCoverage <= 0.12 &&
+    (uncertainLanguage || (Number.isFinite(languageConfidence) && languageConfidence < 0.65)) &&
+    (avgWordConfidence === null || avgWordConfidence < 0.9 || (Number.isFinite(confidence) && confidence < 0.9));
 
-  return Boolean(shortSparseCue && sparseInClip && uncertainLanguage && weakTranscriptConfidence && weakWords);
+  return Boolean(
+    (shortSparseCue && sparseInClip && uncertainLanguage && weakTranscriptConfidence && weakWords) ||
+    sparseLowInformation
+  );
 }
 
 function asNoUsableSpeech(result, reason) {
@@ -218,6 +291,40 @@ async function runDeepgramTranscription({
   });
 }
 
+function weakDeepgramReason(transcription, options = {}) {
+  if (!transcription || String(transcription.provider ?? "").toLowerCase() !== "deepgram") return "";
+  if (transcription.noUsableSpeech === true) return transcription.noUsableSpeechReason || "no usable speech";
+  if (isWeakSpeechDetection(transcription, { durationMs: options.durationMs })) return "weak low-confidence speech detection";
+  if (isLikelyRepeatedFillerTranscript(transcription)) return "repeated filler transcript";
+  if (isLikelyNonSpeechDescription(transcription)) return "non-speech descriptive transcript";
+  if (isLikelyContextMismatchedRepetitiveTranscript(transcription, options.contextText)) return "repetitive transcript does not match context";
+  if (transcription.onlyWeakCandidates === true) return transcription.fallbackReason || "only weak Deepgram candidates";
+  return "";
+}
+
+async function maybeRunOpenAIFallback(options, reason) {
+  const fallbackProvider = normalizeProvider(options.fallbackProvider, "");
+  if (fallbackProvider !== "openai") return null;
+  const fallback = await runOpenAITranscription(options);
+  const rejected = !hasUsableSubtitleText(fallback.segments) ||
+    isLikelyNonSpeechDescription(fallback) ||
+    isLikelyContextMismatchedRepetitiveTranscript(fallback, options.contextText) ||
+    isSparseContextMismatchedTranscript(fallback, { contextText: options.contextText, durationMs: options.durationMs }) ||
+    isWeakSpeechDetection(fallback, { durationMs: options.durationMs });
+  if (rejected) {
+    return asNoUsableSpeech({
+      ...fallback,
+      fallback: true,
+      fallbackReason: reason,
+    }, `OpenAI fallback produced no usable speech after ${reason}`);
+  }
+  return {
+    ...fallback,
+    fallback: true,
+    fallbackReason: reason,
+  };
+}
+
 export async function transcribeAudio(options = {}) {
   const provider = normalizeProvider(options.provider, "deepgram");
   const fallbackProvider = normalizeProvider(options.fallbackProvider, "");
@@ -235,6 +342,8 @@ export async function transcribeAudio(options = {}) {
           hasUsableSubtitleText(candidate.segments) &&
           !isWeakSpeechDetection(candidate, { durationMs: options.durationMs }) &&
           !isLikelyRepeatedFillerTranscript(candidate) &&
+          !isLikelyNonSpeechDescription(candidate) &&
+          !isLikelyContextMismatchedRepetitiveTranscript(candidate, options.contextText) &&
           !isLikelyRomanizedHebrewTranscript(candidate, {
             deepgramLanguage: options.deepgramLanguage,
             deepgramLanguageFallbacks: options.deepgramLanguageFallbacks,
@@ -243,13 +352,17 @@ export async function transcribeAudio(options = {}) {
         ),
       });
     }
-    if (options.rejectWeakSpeech !== false && isWeakSpeechDetection(result, { durationMs: options.durationMs })) {
-      return asNoUsableSpeech(result, "weak low-confidence speech detection");
+    if (options.rejectWeakSpeech !== false) {
+      const reason = weakDeepgramReason(result, options);
+      if (reason) {
+        const fallback = await maybeRunOpenAIFallback(options, reason);
+        return fallback ?? asNoUsableSpeech(result, reason);
+      }
     }
     return result;
   } catch (error) {
     if (provider === "deepgram" && isNoTimedSegmentsError(error)) {
-      return {
+      const noSegmentsResult = {
         provider: "deepgram",
         model: options.deepgramModel || "nova-3",
         raw: null,
@@ -258,6 +371,8 @@ export async function transcribeAudio(options = {}) {
         noUsableSpeech: true,
         noUsableSpeechReason: error instanceof Error ? error.message : String(error),
       };
+      const fallback = await maybeRunOpenAIFallback(options, noSegmentsResult.noUsableSpeechReason);
+      return fallback ?? noSegmentsResult;
     }
     if (provider === "deepgram" && fallbackProvider === "openai") {
       const fallback = await runOpenAITranscription(options);
