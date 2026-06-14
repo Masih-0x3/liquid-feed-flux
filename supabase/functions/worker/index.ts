@@ -89,6 +89,14 @@ import {
   rmFetchFromFx,
   rmFetchFromVx,
 } from "./mediaWorkflow.ts";
+import {
+  buildClassifierToolFunction,
+  renderScoringSystemPrompt,
+  renderScoringUserMessage,
+} from "./scoringWorkflow.ts";
+import {
+  renderTranslationUserPrompt as renderTranslationUserPromptText,
+} from "./translateWorkflow.ts";
 
 export {
   SCORE_AXIS_KEYS,
@@ -778,148 +786,39 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
     const scoringServiceTier = config.scoringServiceTier ?? config.openaiServiceTier;
     const scoringParallelTools = config.scoringParallelToolCalls ?? config.openaiParallelToolCalls;
 
-    // Build shared scoring system + user messages (used by both split and combined paths)
-    const scoringGuidelines = config.contentFilter.editorial_guidelines || '';
-    const priorityTopics = config.contentFilter.priority_topics.join(', ') || 'none specified';
-    const lowPriorityTopics = config.contentFilter.low_priority_topics.join(', ') || 'none specified';
-    const guidelinesBlock = scoringGuidelines.trim()
-      ? `### Editorial Guidelines (AUTHORITATIVE — these override the default rubric when they conflict)\n---\n${scoringGuidelines}\n---`
-      : '';
-
-    const fallbackRubric = `You have two tasks. Complete both carefully.
-
-## Task 1: Translation
-{translation_prompt}
-
-## Task 2: News Importance Scoring
-You are an editorial assistant scoring news items for a curated Telegram channel focused on Iran and the Middle East.
-
-### STEP A — Assign Relevance Level (state in reasoning)
-- DIRECT (Iran gov/IRGC/nuclear/Hormuz/proxies/Israel-Iran/US-Iran war/sanctions on Iran): no cap.
-- INDIRECT (Iran is the SUBJECT of foreign discussion): cap at 16.
-- NO IRAN NEXUS (pure US/EU/China domestic): cap at 8.
-
-### STEP B — Score 1-20 (importance_score)
-- Manual calibration from production feedback: direct Iran crisis, war, diplomacy, and military-posture items should usually land in 17-19 when credible. Trump/Netanyahu/US/Pakistan leadership statements or coordination specifically about Iran are DIRECT audience-fit, not routine foreign politics. Qeshm/Hormuz, air-defense, drones, refueling tankers, US-Israel posture, IRGC/proxy threats, nuclear/escalation signals, and threats against POTUS family or senior US targets should be treated as very high impact. Pure Taiwan or unrelated domestic news with no Iran/Middle East nexus remains low.
-
-### STEP C — Score the 6 axes (axes object), each 0-10
-- iran_relevance: 8-10 if DIRECT, 4-7 if INDIRECT, 0-3 if NONE.
-- severity: how big the event itself is — strike/war > policy > analysis > routine.
-- novelty: breaking new info > update > recap/rehash.
-- credibility: official statement > named reporter > anonymous/rumor.
-- actionability: does it materially shift policy/markets/the war picture?
-- noise: INVERTED — high if spam/promo/personal/sports, low for substantive news.
-
-### Topics
-High-priority (boost 1-2): {priority_topics}
-Low-priority (reduce 1-2): {low_priority_topics}
-
-{editorial_guidelines_block}
-
-You MUST call the "classify_importance" tool with BOTH importance_score (1-20) AND axes (all 6 axes).`;
-
     const accountData = (post as Record<string, unknown>).accounts as Record<string, unknown> | null;
     const authorDisplay = authorHandle || (accountData?.handle as string) || 'unknown';
     const accountName = (accountData?.display_name as string) || '';
     const publishedAt = post.tweeted_at ? new Date(post.tweeted_at as string).toISOString() : 'unknown';
 
-    const buildUserMessage = () => `Author: @${authorDisplay}${accountName ? ` (${accountName})` : ''}
-Published: ${publishedAt}
-Has media: ${post.has_media ? 'yes' : 'no'}
-URL: ${post.url || 'N/A'}
+    const buildUserMessage = () => renderScoringUserMessage({
+      textOriginal: String(post.text_original || ''),
+      authorDisplay,
+      accountName,
+      publishedAt,
+      hasMedia: !!post.has_media,
+      url: post.url as string | null,
+    });
 
-Content:
-${post.text_original}`;
+    const buildToolFunction = (includeTranslatedText: boolean): Record<string, unknown> =>
+      buildClassifierToolFunction(config.classifierToolSchema, includeTranslatedText);
 
-    // Build classifier tool schema (with optional translated_text stripped for split mode)
-    const AXES_SCHEMA = {
-      type: 'object',
-      description: 'Six independent scoring axes (each 0-10). noise is INVERTED (high = bad).',
-      properties: {
-        iran_relevance: { type: 'integer', minimum: 0, maximum: 10 },
-        severity: { type: 'integer', minimum: 0, maximum: 10 },
-        novelty: { type: 'integer', minimum: 0, maximum: 10 },
-        credibility: { type: 'integer', minimum: 0, maximum: 10 },
-        actionability: { type: 'integer', minimum: 0, maximum: 10 },
-        noise: { type: 'integer', minimum: 0, maximum: 10 },
-      },
-      required: ['iran_relevance', 'severity', 'novelty', 'credibility', 'actionability', 'noise'],
-    };
-    const buildToolFunction = (includeTranslatedText: boolean): Record<string, unknown> => {
-      let base: Record<string, unknown>;
-      try {
-        base = config.classifierToolSchema
-          ? JSON.parse(config.classifierToolSchema)
-          : {
-              name: 'classify_importance',
-              description: 'Provide importance classification of this news item',
-              parameters: {
-                type: 'object',
-                properties: {
-                  translated_text: { type: 'string', description: 'The Persian translation of the original text' },
-                  importance_score: { type: 'integer', minimum: 1, maximum: 20 },
-                  axes: AXES_SCHEMA,
-                  tags: { type: 'array', items: { type: 'string' } },
-                  reasoning: { type: 'string', description: 'Required: state relevance level, tier, and any cap applied' },
-                },
-                required: ['translated_text', 'importance_score', 'axes', 'tags', 'reasoning'],
-              },
-            };
-      } catch (e) {
-        console.warn('Invalid classifier_tool_schema, using fallback:', (e as Error).message);
-        base = {
-          name: 'classify_importance',
-          parameters: {
-            type: 'object',
-            properties: {
-              translated_text: { type: 'string' },
-              importance_score: { type: 'integer', minimum: 1, maximum: 20 },
-              axes: AXES_SCHEMA,
-              tags: { type: 'array', items: { type: 'string' } },
-              reasoning: { type: 'string' },
-            },
-            required: ['translated_text', 'importance_score', 'axes', 'tags', 'reasoning'],
-          },
-        };
-      }
-      // Auto-inject axes into customized schemas if missing (PR1 backward-compat)
-      const params = base.parameters as Record<string, unknown>;
-      const props = { ...(params.properties as Record<string, unknown>) };
-      if (!props.axes) {
-        props.axes = AXES_SCHEMA;
-        const required = Array.from(new Set([...((params.required as string[]) || []), 'axes']));
-        base = { ...base, parameters: { ...params, properties: props, required } };
-      }
-      if (!includeTranslatedText) {
-        const p2 = base.parameters as Record<string, unknown>;
-        const props2 = { ...(p2.properties as Record<string, unknown>) };
-        delete props2.translated_text;
-        const required = ((p2.required as string[]) || []).filter((k) => k !== 'translated_text');
-        base = { ...base, parameters: { ...p2, properties: props2, required } };
-      }
-      return base;
-    };
-
-    const renderSystemPrompt = () => (config.scoringSystemPrompt ?? fallbackRubric)
-      .replace('{translation_prompt}', config.translationPrompt)
-      .replace('{priority_topics}', priorityTopics)
-      .replace('{low_priority_topics}', lowPriorityTopics)
-      .replace('{editorial_guidelines_block}', guidelinesBlock);
+    const renderSystemPrompt = () => renderScoringSystemPrompt({
+      scoringSystemPrompt: config.scoringSystemPrompt,
+      translationPrompt: config.translationPrompt,
+      priorityTopics: config.contentFilter.priority_topics,
+      lowPriorityTopics: config.contentFilter.low_priority_topics,
+      editorialGuidelines: config.contentFilter.editorial_guidelines,
+    });
 
     // Helper: render translation user prompt from template (or default)
-    const renderTranslationUserPrompt = () => {
-      const tpl = config.userPromptTemplate;
-      if (tpl && tpl.trim()) {
-        return tpl
-          .replace(/\{content\}/g, post.text_original as string)
-          .replace(/\{author\}/g, `@${authorDisplay}`)
-          .replace(/\{author_handle\}/g, `@${authorDisplay}`)
-          .replace(/\{author_name\}/g, accountName)
-          .replace(/\{published_at\}/g, publishedAt)
-          .replace(/\{published_date\}/g, publishedAt);
-      }
-      return post.text_original as string;
-    };
+    const renderTranslationUserPrompt = () => renderTranslationUserPromptText({
+      template: config.userPromptTemplate,
+      content: post.text_original as string,
+      authorDisplay,
+      accountName,
+      publishedAt,
+    });
 
     // ============ SPLIT PATH: score first, translate only on pass ============
     let scoringPolicyResult: ScoringPolicyResult | null = null;
