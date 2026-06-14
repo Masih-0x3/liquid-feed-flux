@@ -69,6 +69,21 @@ export function isLikelyNonSpeechDescription(transcription) {
   ].some((pattern) => pattern.test(text));
 }
 
+export function isLikelyGenericOutroTranscript(transcription) {
+  const text = cleanText(transcriptText(transcription))
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}' ]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return false;
+  return [
+    /^(?:thank you|thanks) for (?:watching|viewing)(?: this video)?$/,
+    /^(?:please )?(?:like and )?subscribe(?: to (?:the|our) channel)?$/,
+    /^(?:don'?t forget to )?(?:like|subscribe|share)(?: and (?:subscribe|share|like))*$/,
+    /^see you (?:next time|in the next video)$/,
+  ].some((pattern) => pattern.test(text));
+}
+
 function wordTokens(value) {
   return cleanText(value)
     .toLowerCase()
@@ -308,6 +323,7 @@ async function maybeRunOpenAIFallback(options, reason) {
   const fallback = await runOpenAITranscription(options);
   const rejected = !hasUsableSubtitleText(fallback.segments) ||
     isLikelyNonSpeechDescription(fallback) ||
+    isLikelyGenericOutroTranscript(fallback) ||
     isLikelyContextMismatchedRepetitiveTranscript(fallback, options.contextText) ||
     isSparseContextMismatchedTranscript(fallback, { contextText: options.contextText, durationMs: options.durationMs }) ||
     isWeakSpeechDetection(fallback, { durationMs: options.durationMs });
