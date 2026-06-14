@@ -25,7 +25,7 @@ const DEFAULT_RENDER_SETTINGS = {
   },
   watermark: {
     enabled: true,
-    add_only_when_modified: true,
+    apply_when: "subtitle_track",
     opacity: 0.16,
     top_right_opacity: 0.34,
     cover_opacity: 0.34,
@@ -87,7 +87,7 @@ export function normalizeRenderSettings(input = {}) {
     },
     watermark: {
       enabled: watermarkRaw.enabled !== false,
-      add_only_when_modified: watermarkRaw.add_only_when_modified !== false,
+      apply_when: oneOf(watermarkRaw.apply_when ?? watermarkRaw.applyWhen, ["subtitle_track", "modified", "always", "never"], DEFAULT_RENDER_SETTINGS.watermark.apply_when),
       opacity: clampNumber(watermarkRaw.opacity, 0.03, 0.35, DEFAULT_RENDER_SETTINGS.watermark.opacity),
       top_right_opacity: clampNumber(watermarkRaw.top_right_opacity, 0.12, 0.70, DEFAULT_RENDER_SETTINGS.watermark.top_right_opacity),
       cover_opacity: clampNumber(watermarkRaw.cover_opacity, 0.12, 0.70, DEFAULT_RENDER_SETTINGS.watermark.cover_opacity),

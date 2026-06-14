@@ -37,7 +37,7 @@ export interface VideoRenderConfigValue {
     opencv_feather: number;
   };
   watermark: {
-    apply_when: 'modified';
+    apply_when: 'subtitle_track' | 'modified' | 'always' | 'never';
     opacity: number;
     top_right_opacity: number;
     cover_opacity: number;

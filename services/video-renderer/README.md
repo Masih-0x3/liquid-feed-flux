@@ -121,7 +121,8 @@ npm --prefix services/video-renderer run preview -- /path/to/source.mp4 /tmp/xot
 
 This writes `preflight.json` and `contact-sheet.jpg`. If `OPENAI_API_KEY` is
 set and the video is not blocked by preflight, it also writes a short
-`preview.mp4` with the target-language subtitles and `X @Masihh` watermark.
+`preview.mp4`. The `X @Masihh` watermark is burned only when a subtitle track is
+added unless `PREVIEW_WATERMARK_APPLY_WHEN` is explicitly changed.
 
 Run the local golden acceptance workflow:
 

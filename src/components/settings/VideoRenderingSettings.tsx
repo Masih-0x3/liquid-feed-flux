@@ -240,6 +240,20 @@ export default function VideoRenderingSettings() {
                 </div>
               </div>
               <div className="space-y-4 rounded-md border bg-muted/20 p-4">
+                <div className="space-y-2">
+                  <Label>Apply @Masihh watermark</Label>
+                  <Select value={draft.watermark.apply_when} onValueChange={(apply_when) => setWatermark({ apply_when: apply_when as VideoRenderConfigValue['watermark']['apply_when'] })}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="subtitle_track">Only when subtitles are added</SelectItem>
+                      <SelectItem value="modified">When any video processing is applied</SelectItem>
+                      <SelectItem value="always">Always</SelectItem>
+                      <SelectItem value="never">Never</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-2">
                     <Label>Global opacity</Label>
@@ -266,7 +280,7 @@ export default function VideoRenderingSettings() {
                   <Checkbox checked={draft.watermark.cover_delogo} onCheckedChange={(checked) => setWatermark({ cover_delogo: checked === true })} />
                   Cover delogo distortion with our watermark
                 </Label>
-                <Badge variant="outline" className="w-fit">Applied only when video is modified</Badge>
+                <Badge variant="outline" className="w-fit">Default: watermark only when subtitles are added</Badge>
               </div>
             </CardContent>
           </Card>

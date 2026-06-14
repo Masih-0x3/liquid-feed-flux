@@ -1,6 +1,7 @@
 import type { VideoRenderFailurePolicy } from "./videoRenderGate.ts";
 
 export type VideoRenderMode = "disabled" | "shadow" | "enabled";
+export type VideoRenderWatermarkApplyWhen = "subtitle_track" | "modified" | "always" | "never";
 
 export interface VideoRenderConfig {
   mode: VideoRenderMode;
@@ -34,7 +35,7 @@ export interface VideoRenderConfig {
     opencvFeather: number;
   };
   watermark: {
-    applyWhen: "modified";
+    applyWhen: VideoRenderWatermarkApplyWhen;
     opacity: number;
     topRightOpacity: number;
     coverOpacity: number;
@@ -78,7 +79,7 @@ export const DEFAULT_VIDEO_RENDER_CONFIG: VideoRenderConfig = {
     opencvFeather: 0,
   },
   watermark: {
-    applyWhen: "modified",
+    applyWhen: "subtitle_track",
     opacity: 0.16,
     topRightOpacity: 0.34,
     coverOpacity: 0.34,
@@ -137,6 +138,13 @@ function failurePolicy(value: unknown): VideoRenderFailurePolicy {
   return value === "block" ? "block" : "post_original";
 }
 
+function watermarkApplyWhen(value: unknown): VideoRenderWatermarkApplyWhen {
+  const raw = typeof value === "string" ? value.trim().toLowerCase().replace(/-/g, "_") : "";
+  if (raw === "modified" || raw === "always" || raw === "never" || raw === "subtitle_track") return raw;
+  if (raw === "subtitle" || raw === "subtitles" || raw === "subtitle_added") return "subtitle_track";
+  return DEFAULT_VIDEO_RENDER_CONFIG.watermark.applyWhen;
+}
+
 export function normalizeVideoRenderConfigValue(input: unknown): VideoRenderConfig {
   const value = isRecord(input) ? input : {};
   const subtitleStyle = isRecord(value.subtitle_style) ? value.subtitle_style : {};
@@ -179,7 +187,7 @@ export function normalizeVideoRenderConfigValue(input: unknown): VideoRenderConf
       opencvFeather: integer(delogo.opencv_feather, DEFAULT_VIDEO_RENDER_CONFIG.delogo.opencvFeather, 0, 12),
     },
     watermark: {
-      applyWhen: "modified",
+      applyWhen: watermarkApplyWhen(watermark.apply_when),
       opacity: num(watermark.opacity, DEFAULT_VIDEO_RENDER_CONFIG.watermark.opacity, 0.04, 0.45),
       topRightOpacity: num(watermark.top_right_opacity, DEFAULT_VIDEO_RENDER_CONFIG.watermark.topRightOpacity, 0.08, 0.70),
       coverOpacity: num(watermark.cover_opacity, DEFAULT_VIDEO_RENDER_CONFIG.watermark.coverOpacity, 0.08, 0.70),
