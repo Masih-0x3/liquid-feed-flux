@@ -68,6 +68,7 @@ For every production release, record:
    ```bash
    DEPLOY_FUNCTIONS_DRY_RUN=1 ./scripts/deploy-functions.sh
    ```
+8. If the release changes a function auth mode, internal token path, RSS webhook auth path, or required Edge secret, review and update [`function-auth-matrix.md`](./function-auth-matrix.md) in the same branch.
 
 ## Supabase Function Deploy
 
@@ -93,6 +94,8 @@ The script refuses to deploy when:
 - A selected function is missing `verify_jwt` in `supabase/config.toml`.
 - A `verify_jwt` value is not exactly `true` or `false`.
 - A selected function is missing `supabase/functions/<name>/index.ts`.
+
+The script validates deploy shape, not full auth semantics. Use [`function-auth-matrix.md`](./function-auth-matrix.md) to review expected callers, secrets, and compatibility modes before promoting auth-sensitive function changes.
 
 Emergency overrides must be recorded in the release ledger.
 

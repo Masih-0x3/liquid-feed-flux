@@ -24,10 +24,10 @@ Main checkout preserved:
 /Users/stevmq/Finalized XOT
 ```
 
-Current implementation branch after Phase 16:
+Current implementation branch after Phase 17:
 
 ```text
-codex/xot-cleanup-31-runtime-dependency-hygiene
+codex/xot-cleanup-32-function-auth-secret-matrix
 ```
 
 Current safe-state rule:
@@ -74,7 +74,8 @@ origin/main
                                               └─ codex/xot-cleanup-22-settings-dashboard-xaccount
                                                   └─ codex/xot-cleanup-30-renderer-runtime-security
                                                       └─ codex/xot-cleanup-31-runtime-dependency-hygiene
-                                                          └─ codex/xot-cleanup-40-integration
+                                                          └─ codex/xot-cleanup-32-function-auth-secret-matrix
+                                                              └─ codex/xot-cleanup-40-integration
 ```
 
 If a phase becomes risky, create a sibling branch from the last green parent instead of continuing on the broken branch:
@@ -1654,25 +1655,25 @@ Document and tighten function auth without breaking legitimate cron, webhook, or
 
 ## Steps
 
-- [ ] Inventory function JWT settings.
+- [x] Inventory function JWT settings.
 
 ```bash
 rg -n "verify_jwt|\\[functions\\." supabase/config.toml
 ```
 
-- [ ] Inventory service-role client usage.
+- [x] Inventory service-role client usage.
 
 ```bash
 rg -n "SERVICE_ROLE|service_role|createClient<any, any>|Deno\\.env\\.get" supabase/functions
 ```
 
-- [ ] Inventory query token compatibility.
+- [x] Inventory query token compatibility.
 
 ```bash
 rg -n "query|token|RSSAPP_ALLOW_QUERY_TOKEN|WEBHOOK_SHARED_SECRET|RSSAPP_WEBHOOK_TOKEN" supabase/functions docs
 ```
 
-- [ ] Write `docs/operations/function-auth-matrix.md` with:
+- [x] Write `docs/operations/function-auth-matrix.md` with:
   - function name.
   - trigger source.
   - `verify_jwt` value.
@@ -1680,7 +1681,19 @@ rg -n "query|token|RSSAPP_ALLOW_QUERY_TOKEN|WEBHOOK_SHARED_SECRET|RSSAPP_WEBHOOK
   - caller.
   - accepted compatibility modes.
   - planned hardening step.
-- [ ] Add deploy preflight checks only if a missing check can be tested locally.
+- [x] Add deploy preflight checks only if a missing check can be tested locally.
+
+## Implementation Notes
+
+- Added `docs/operations/function-auth-matrix.md` covering all 10 configured functions.
+- Documented the three auth modes:
+  - Supabase JWT plus admin-role check for `admin-actions` and `admin-retry`.
+  - Internal Edge auth for cron/internal functions.
+  - RSS webhook auth with temporary query-token compatibility.
+- Documented the query-token removal path for RSS.app.
+- Linked the matrix from `docs/operations/runbooks.md` and `docs/operations/release-runbook.md`.
+- No `supabase/config.toml` or deploy-script change was needed in this phase because `scripts/deploy-functions.sh` already validates `verify_jwt`, function entrypoints, clean tree, and main-branch deploy shape.
+- Live Supabase secret-name refresh was attempted but blocked/interrupted by the sandbox approval path; the matrix therefore treats live secret presence as a required release-time refresh rather than a confirmed-current fact.
 
 ## Validation
 
@@ -1689,12 +1702,22 @@ npm run check:function-inventory
 npm run lint:functions
 npm run check:functions
 npm run test:functions
+DEPLOY_FUNCTIONS_DRY_RUN=1 DEPLOY_ALLOW_NON_MAIN=1 ./scripts/deploy-functions.sh
 ```
+
+Validation result:
+
+- [x] `npm run check:function-inventory` passed: 10 configured functions.
+- [x] `npm run lint:functions` passed: 95 files checked.
+- [x] `npm run check:functions` passed.
+- [x] `npm run test:functions` passed: 257 tests.
+- [x] `DEPLOY_FUNCTIONS_DRY_RUN=1 DEPLOY_ALLOW_NON_MAIN=1 ./scripts/deploy-functions.sh` passed and mapped all 10 functions to the expected deploy flags without changing production.
+- [x] `git diff --check` passed.
 
 ## Commit
 
 ```bash
-git add docs/operations/function-auth-matrix.md docs/operations/runbooks.md docs/operations/release-runbook.md supabase/config.toml scripts/deploy-functions.sh
+git add docs/operations/function-auth-matrix.md docs/operations/runbooks.md docs/operations/release-runbook.md docs/superpowers/plans/2026-06-14-xot-cleanup-master-plan.md
 git commit -m "docs: add function auth and secret matrix"
 ```
 
@@ -1707,9 +1730,11 @@ git commit -m "docs: add function auth and secret matrix"
 
 ## Exit Criteria
 
-- [ ] Every `verify_jwt=false` function has a documented reason.
-- [ ] Query-token compatibility has an explicit removal path.
-- [ ] Deploy guardrails remain strict.
+- [x] Every `verify_jwt=false` function has a documented reason.
+- [x] Query-token compatibility has an explicit removal path.
+- [x] Deploy guardrails remain strict.
+
+Status: completed as an operations documentation and release-guardrail phase.
 
 ---
 
