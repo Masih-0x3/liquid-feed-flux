@@ -24,10 +24,10 @@ Main checkout preserved:
 /Users/stevmq/Finalized XOT
 ```
 
-Current implementation branch after Phase 10:
+Current implementation branch after Phase 12:
 
 ```text
-codex/xot-cleanup-20-frontend-admin-contracts
+codex/xot-cleanup-22-monitoring-data-contracts
 ```
 
 Current safe-state rule:
@@ -1192,14 +1192,14 @@ Make schema fallback behavior explicit and testable so local UI compatibility do
 
 ## Steps
 
-- [ ] Locate fallback query branches.
+- [x] Locate fallback query branches.
 
 ```bash
 rg -n "fallback|legacy|unknown|Record<string, unknown>|missing|schema|column" src/hooks/useMonitoringData.ts src/hooks/useDashboardData.ts
 ```
 
-- [ ] Move admin-actions-first fetching to `src/api/monitoringData.ts`.
-- [ ] Move legacy query fallback to a named function:
+- [x] Move admin-actions-first fetching to `src/api/monitoringData.ts`.
+- [x] Move legacy query fallback to a named function:
 
 ```ts
 export async function fetchMonitoringEntriesWithLegacyFallback() {
@@ -1209,9 +1209,15 @@ export async function fetchMonitoringEntriesWithLegacyFallback() {
 }
 ```
 
-- [ ] Add tests that verify fallback is called only after the admin-actions path fails.
-- [ ] Add a log or returned metadata flag that says which data source was used.
-- [ ] Keep the fallback alive until production schema/type drift is fixed.
+- [x] Add tests that verify fallback is called only after the admin-actions path fails.
+- [x] Add a log or returned metadata flag that says which data source was used.
+- [x] Keep the fallback alive until production schema/type drift is fixed.
+
+## Implementation Notes
+
+- [x] `src/hooks/useMonitoringData.ts` now stays focused on React Query subscriptions and returns `dataSource` / `fallbackReason` metadata from query pages.
+- [x] `src/api/monitoringData.ts` owns monitoring entry contracts, admin-action fetching, legacy Supabase fallback queries, and schema-column retry behavior.
+- [x] `src/integrations/supabase/types.ts` was inspected; generated `posts` types include the newer monitoring columns, so the legacy fallback remains for deployed schema/function drift compatibility rather than local type gaps.
 
 ## Validation
 
@@ -1223,18 +1229,32 @@ npm test
 npm run build
 ```
 
+Completed validation:
+
+- [x] `npm run lint` passed with the existing 8 Fast Refresh warnings only.
+- [x] `npm run check:strict` passed.
+- [x] `npm test -- src/test/monitoring-data-fallbacks.test.ts src/test/monitoring-state.test.ts` passed: 2 files, 10 tests.
+- [x] `npm test` passed: 16 files, 72 tests.
+- [x] `npm run lint:functions` passed: Deno lint checked 95 files.
+- [x] `npm run check:functions` passed.
+- [x] `npm run test:functions` passed: 257 Deno tests.
+- [x] `npm run check:function-inventory` passed: 10 functions.
+- [x] Env-backed `npm run build` passed.
+- [x] `git diff --check` passed.
+- [x] `npm run check:release-state` passed read-only with live hosts 200, main CI green, active Supabase functions/cron, online renderer heartbeat, Vercel CLI unavailable, and known Supabase migration drift still present.
+
 ## Commit
 
 ```bash
-git add src/hooks/useMonitoringData.ts src/api/monitoringData.ts src/test/monitoring-data-fallbacks.test.ts
+git add src/hooks/useMonitoringData.ts src/api/monitoringData.ts src/test/monitoring-data-fallbacks.test.ts src/lib/monitoringState.ts src/lib/scoringV2Monitoring.ts docs/superpowers/plans/2026-06-14-xot-cleanup-master-plan.md
 git commit -m "refactor: isolate monitoring data fallbacks"
 ```
 
 ## Exit Criteria
 
-- [ ] Fallback compatibility is intentional and visible.
-- [ ] UI no longer hides schema drift inside page logic.
-- [ ] A later schema cleanup can remove fallback paths cleanly.
+- [x] Fallback compatibility is intentional and visible.
+- [x] UI no longer hides schema drift inside page logic.
+- [x] A later schema cleanup can remove fallback paths cleanly.
 
 ---
 

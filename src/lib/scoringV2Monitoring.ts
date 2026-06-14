@@ -1,4 +1,4 @@
-import type { MonitoringEntry, MonitoringFilter, PipelineEvent } from "@/hooks/useMonitoringData";
+import type { MonitoringEntry, MonitoringFilter, PipelineEvent } from "@/api/monitoringData";
 
 export type ScoringV2Mode = "shadow" | "active";
 export type ScoringV2Decision = "deliver" | "skip";
