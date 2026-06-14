@@ -96,7 +96,9 @@ import {
 } from "./scoringWorkflow.ts";
 import {
   buildTranslationCallOptions,
+  choosePostTranslationRoute,
   renderTranslationUserPrompt as renderTranslationUserPromptText,
+  shouldQueueHydrationAfterTranslation,
 } from "./translateWorkflow.ts";
 
 export {
@@ -1267,40 +1269,19 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
     // not yet hydrated, enqueue hydrate_tweet instead of deliver. The hydrate
     // job will re-enqueue translate on success, which will fall through to
     // deliver on the second pass (is_truncated will be false by then).
-    // NEW FLOW: If a tweet PASSED the editorial gate AND is still truncated AND
-    // not yet hydrated, enqueue hydrate_tweet instead of deliver. The hydrate
-    // job will re-enqueue translate on success, which will fall through to
-    // deliver on the second pass (is_truncated will be false by then).
     const isTruncated = (post as Record<string, unknown>).is_truncated === true;
     const alreadyHydrated = !!(post as Record<string, unknown>).hydrated_at;
     const hydrationCfg = await loadHydrationSettings(supabase);
-    const shouldHydrateNow =
-      deliveryDecision === 'deliver'
-      && isTruncated
-      && !alreadyHydrated
-      && hydrationCfg.enabled;
-
-    if (shouldHydrateNow) {
-      console.log(JSON.stringify({ function: 'worker', action: 'hydration_gated_enqueue', tweet_id: tweetId, score: importanceScore }));
-      const { error: hydrateJobError } = await supabase
-        .from('jobs')
-        .upsert({
-          type: 'hydrate_tweet',
-          payload: { tweet_id: tweetId },
-          status: 'pending',
-          priority: 15,
-          idempotency_key: `hydrate:post-translate:${tweetId}`,
-          next_run_at: new Date().toISOString()
-        }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
-      if (hydrateJobError) {
-        console.warn('Failed to create post-translate hydrate job:', hydrateJobError);
-      } else {
-        await insertPipelineEvent(supabase, 'post', tweetId, 'hydrate', 'queued', null, null, null, { source: 'post-score-gate', score: importanceScore });
-      }
-    } else if (deliveryDecision === 'deliver') {
+    const shouldHydrateNow = shouldQueueHydrationAfterTranslation({
+      deliveryDecision,
+      isTruncated,
+      alreadyHydrated,
+      hydrationEnabled: hydrationCfg.enabled,
+    });
+    let autoEnrichEnabled = false;
+    if (deliveryDecision === 'deliver' && !shouldHydrateNow) {
       // Enrichment is an optional X-draft layer. In manual-only mode the main
       // pipeline must continue with plain translation delivery.
-      let autoEnrichEnabled = false;
       try {
         const { data: enrichCfgRow } = await supabase
           .from('settings')
@@ -1310,39 +1291,53 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
         const enrichConfig = normalizeEnrichmentConfig((enrichCfgRow?.value ?? { enabled: false }) as Partial<EnrichmentConfig>);
         autoEnrichEnabled = isAutoEnrichmentEnabled(enrichConfig);
       } catch (_e) { /* default to disabled */ }
+    }
+    const postTranslationRoute = choosePostTranslationRoute({
+      tweetId,
+      deliveryDecision,
+      decisionReason,
+      importanceScore,
+      isTruncated,
+      alreadyHydrated,
+      hydrationEnabled: hydrationCfg.enabled,
+      autoEnrichEnabled,
+      duplicateBlocked: !!duplicatePatch,
+    });
 
-      if (autoEnrichEnabled) {
-        const enrichKey = `enrich:${tweetId}`;
-        const { error: enrichJobError } = await supabase
-          .from('jobs')
-          .upsert({
-            type: 'enrich',
-            payload: { tweet_id: tweetId },
-            status: 'pending',
-            priority: 18,
-            idempotency_key: enrichKey,
-            next_run_at: new Date().toISOString(),
-          }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
-        if (enrichJobError) {
-          console.warn('Failed to enqueue enrich job:', enrichJobError);
-        } else {
-          await insertPipelineEvent(supabase, 'post', tweetId, 'enrich', 'queued', null, null, null, { source: 'translate' });
-          console.log(JSON.stringify({ function: 'worker', action: 'enrich_enqueued', tweet_id: tweetId }));
-        }
-        // Enrichment v2 is shadow/review-first for X, but Telegram delivery
-        // remains translation-first and should not wait on enrichment approval.
-        await enqueuePostDeliveryAfterRenderGate(supabase, tweetId, 'translate', false);
+    if (postTranslationRoute.kind === 'hydrate') {
+      console.log(JSON.stringify({ function: 'worker', action: 'hydration_gated_enqueue', tweet_id: tweetId, score: importanceScore }));
+      const { error: hydrateJobError } = await supabase
+        .from('jobs')
+        .upsert({
+          ...postTranslationRoute.job,
+          next_run_at: new Date().toISOString()
+        }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+      if (hydrateJobError) {
+        console.warn('Failed to create post-translate hydrate job:', hydrateJobError);
       } else {
-        await enqueuePostDeliveryAfterRenderGate(supabase, tweetId, 'worker', true);
+        await insertPipelineEvent(supabase, 'post', tweetId, postTranslationRoute.event.step, postTranslationRoute.event.status, null, null, null, postTranslationRoute.event.meta);
       }
+    } else if (postTranslationRoute.kind === 'enrich_and_deliver') {
+      const { error: enrichJobError } = await supabase
+        .from('jobs')
+        .upsert({
+          ...postTranslationRoute.enrichJob,
+          next_run_at: new Date().toISOString(),
+        }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+      if (enrichJobError) {
+        console.warn('Failed to enqueue enrich job:', enrichJobError);
+      } else {
+        await insertPipelineEvent(supabase, 'post', tweetId, postTranslationRoute.enrichEvent.step, postTranslationRoute.enrichEvent.status, null, null, null, postTranslationRoute.enrichEvent.meta);
+        console.log(JSON.stringify({ function: 'worker', action: 'enrich_enqueued', tweet_id: tweetId }));
+      }
+      // Enrichment v2 is shadow/review-first for X, but Telegram delivery
+      // remains translation-first and should not wait on enrichment approval.
+      await enqueuePostDeliveryAfterRenderGate(supabase, tweetId, postTranslationRoute.delivery.source, postTranslationRoute.delivery.resetExisting);
+    } else if (postTranslationRoute.kind === 'deliver') {
+      await enqueuePostDeliveryAfterRenderGate(supabase, tweetId, postTranslationRoute.delivery.source, postTranslationRoute.delivery.resetExisting);
     } else {
       console.log(JSON.stringify({ function: 'worker', action: 'delivery_skipped', tweet_id: tweetId, score: importanceScore, decision: deliveryDecision }));
-      await insertPipelineEvent(supabase, 'post', tweetId, 'deliver', 'completed', null, nowIso, null, {
-        skipped: duplicatePatch ? 'duplicate_gate' : 'content_filter',
-        score: importanceScore,
-        decision: deliveryDecision,
-        decision_reason: decisionReason,
-      });
+      await insertPipelineEvent(supabase, 'post', tweetId, postTranslationRoute.event.step, postTranslationRoute.event.status, null, nowIso, null, postTranslationRoute.event.meta);
     }
     
     return true;

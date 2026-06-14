@@ -38,6 +38,70 @@ export type TranslationCallOptions = {
   parallelToolCalls?: boolean | null;
 };
 
+export type PostTranslationRouteInput = {
+  tweetId: string;
+  deliveryDecision: string;
+  decisionReason: string | null;
+  importanceScore: number | null;
+  isTruncated: boolean;
+  alreadyHydrated: boolean;
+  hydrationEnabled: boolean;
+  autoEnrichEnabled: boolean;
+  duplicateBlocked: boolean;
+};
+
+export type PostTranslationRoute =
+  | {
+    kind: "hydrate";
+    logAction: "hydration_gated_enqueue";
+    job: {
+      type: "hydrate_tweet";
+      payload: { tweet_id: string };
+      status: "pending";
+      priority: 15;
+      idempotency_key: string;
+    };
+    event: {
+      step: "hydrate";
+      status: "queued";
+      meta: { source: "post-score-gate"; score: number | null };
+    };
+  }
+  | {
+    kind: "enrich_and_deliver";
+    logAction: "enrich_enqueued";
+    enrichJob: {
+      type: "enrich";
+      payload: { tweet_id: string };
+      status: "pending";
+      priority: 18;
+      idempotency_key: string;
+    };
+    enrichEvent: {
+      step: "enrich";
+      status: "queued";
+      meta: { source: "translate" };
+    };
+    delivery: { source: "translate"; resetExisting: false };
+  }
+  | {
+    kind: "deliver";
+    delivery: { source: "worker"; resetExisting: true };
+  }
+  | {
+    kind: "skip";
+    event: {
+      step: "deliver";
+      status: "completed";
+      meta: {
+        skipped: "duplicate_gate" | "content_filter";
+        score: number | null;
+        decision: string;
+        decision_reason: string | null;
+      };
+    };
+  };
+
 export function renderTranslationUserPrompt(
   input: TranslationUserPromptInput,
 ): string {
@@ -75,5 +139,79 @@ export function buildTranslationCallOptions(
     seed: config.openaiSeed,
     serviceTier: config.openaiServiceTier,
     parallelToolCalls: config.openaiParallelToolCalls,
+  };
+}
+
+export function shouldQueueHydrationAfterTranslation(
+  input: Pick<
+    PostTranslationRouteInput,
+    "deliveryDecision" | "isTruncated" | "alreadyHydrated" | "hydrationEnabled"
+  >,
+): boolean {
+  return input.deliveryDecision === "deliver" && input.isTruncated &&
+    !input.alreadyHydrated && input.hydrationEnabled;
+}
+
+export function choosePostTranslationRoute(
+  input: PostTranslationRouteInput,
+): PostTranslationRoute {
+  if (shouldQueueHydrationAfterTranslation(input)) {
+    return {
+      kind: "hydrate",
+      logAction: "hydration_gated_enqueue",
+      job: {
+        type: "hydrate_tweet",
+        payload: { tweet_id: input.tweetId },
+        status: "pending",
+        priority: 15,
+        idempotency_key: `hydrate:post-translate:${input.tweetId}`,
+      },
+      event: {
+        step: "hydrate",
+        status: "queued",
+        meta: { source: "post-score-gate", score: input.importanceScore },
+      },
+    };
+  }
+
+  if (input.deliveryDecision === "deliver" && input.autoEnrichEnabled) {
+    return {
+      kind: "enrich_and_deliver",
+      logAction: "enrich_enqueued",
+      enrichJob: {
+        type: "enrich",
+        payload: { tweet_id: input.tweetId },
+        status: "pending",
+        priority: 18,
+        idempotency_key: `enrich:${input.tweetId}`,
+      },
+      enrichEvent: {
+        step: "enrich",
+        status: "queued",
+        meta: { source: "translate" },
+      },
+      delivery: { source: "translate", resetExisting: false },
+    };
+  }
+
+  if (input.deliveryDecision === "deliver") {
+    return {
+      kind: "deliver",
+      delivery: { source: "worker", resetExisting: true },
+    };
+  }
+
+  return {
+    kind: "skip",
+    event: {
+      step: "deliver",
+      status: "completed",
+      meta: {
+        skipped: input.duplicateBlocked ? "duplicate_gate" : "content_filter",
+        score: input.importanceScore,
+        decision: input.deliveryDecision,
+        decision_reason: input.decisionReason,
+      },
+    },
   };
 }
