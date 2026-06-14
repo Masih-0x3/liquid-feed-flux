@@ -137,6 +137,7 @@ URL configuration and the Edge Function `ALLOWED_CORS_ORIGIN` secret.
 | Document | Purpose |
 |----------|---------|
 | [`docs/todo_monitoring.md`](docs/todo_monitoring.md) | Pipeline architecture and monitoring |
+| [`docs/operations/release-runbook.md`](docs/operations/release-runbook.md) | Production release gate, function deploy guardrails, smoke checks, and rollback ledger |
 | [`docs/operations/runbooks.md`](docs/operations/runbooks.md) | Queue management, prompt/template management, secret rotation, incident response |
 | [`docs/operations/vercel-cutover.md`](docs/operations/vercel-cutover.md) | Vercel frontend hosting setup and Lovable exit checklist |
 | [`docs/operations/backup-restore.md`](docs/operations/backup-restore.md) | Backup and restore procedures |
