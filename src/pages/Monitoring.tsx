@@ -1580,8 +1580,8 @@ export default function Monitoring() {
   };
 
   return (
-    <div className="w-full p-0">
-      <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+    <div className="w-full space-y-3 p-0">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="min-w-0">
           <h1 className="text-2xl sm:text-3xl font-bold">Content Monitoring</h1>
           <p className="text-sm text-muted-foreground">Editorial triage for scoring, translation, delivery blockers, and X visibility</p>
@@ -1612,7 +1612,7 @@ export default function Monitoring() {
       </div>
 
       {!xPostingEnabled && (
-        <div className="mb-5 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
+        <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
           <AlertCircle className="w-4 h-4 mt-0.5 shrink-0 text-amber-500" />
           <div>
             <p className="font-medium">X posting is off</p>
@@ -1621,7 +1621,7 @@ export default function Monitoring() {
         </div>
       )}
 
-      <div className="mb-5 grid grid-cols-2 gap-2 min-[480px]:grid-cols-3 sm:gap-3 md:grid-cols-4 xl:grid-cols-6">
+      <div className="grid grid-cols-2 gap-2 min-[480px]:grid-cols-3 md:grid-cols-4 xl:grid-cols-7">
         {[
           ['Needs attention', counts.needs_attention, 'text-amber-500'],
           ['Failed/stuck', counts.failed_stuck, 'text-destructive'],
@@ -1639,7 +1639,7 @@ export default function Monitoring() {
           ['Delivered 24h', counts.delivered_24h, 'text-emerald-500'],
         ].map(([label, value, cls]) => (
           <Card key={label as string}>
-            <CardContent className="p-3">
+            <CardContent className="p-2.5 sm:p-3">
               <p className="text-xs text-muted-foreground">{label}</p>
               <p className={`text-xl font-semibold tabular-nums sm:text-2xl ${cls}`}>{compactNumber(value as number)}</p>
             </CardContent>
@@ -1647,7 +1647,7 @@ export default function Monitoring() {
         ))}
       </div>
 
-      <div className="mb-5 grid gap-3 lg:grid-cols-3">
+      <div className="grid gap-3 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardContent className="grid grid-cols-2 gap-3 p-3 sm:grid-cols-4">
             {[
@@ -1685,11 +1685,11 @@ export default function Monitoring() {
       </div>
 
       <Card>
-        <CardHeader className="pb-3">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <CardHeader className="p-3">
+          <div className="grid gap-3 xl:grid-cols-[auto_minmax(0,1fr)] xl:items-center">
             <CardTitle className="text-base">Queue</CardTitle>
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <div className="relative sm:w-80">
+            <div className="grid gap-2 sm:grid-cols-[minmax(18rem,1fr)_13rem_10rem] xl:justify-end">
+              <div className="relative min-w-0">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Search author, source, text, tweet ID" className="pl-9" />
               </div>
@@ -1706,27 +1706,27 @@ export default function Monitoring() {
                 </SelectContent>
               </ThemedSelect>
             </div>
-            <div className="flex flex-wrap items-center gap-2 pt-2">
-              <span className="text-xs font-medium text-muted-foreground">{selectedCount} selected</span>
-              <Button size="sm" variant="outline" onClick={() => toggleSelectAllVisible(!isAllVisibleSelected)} disabled={visibleTweetIds.length === 0}>
-                {isAllVisibleSelected ? 'Deselect all visible' : 'Select all visible'}
-              </Button>
-              {selectedCount > 0 && (
-                <>
-                  <Button size="sm" variant="outline" onClick={() => setPendingBulkAction({ type: 'bulk_reprocess', tweetIds: [...selectedTweetIds] })}>
-                    <RotateCcw className="w-3 h-3 mr-2" />
-                    Mass reprocess
-                  </Button>
-                  <Button size="sm" variant="destructive" onClick={() => setPendingBulkAction({ type: 'bulk_ignore', tweetIds: [...selectedTweetIds] })}>
-                    <Ban className="w-3 h-3 mr-2" />
-                    Mass ignore
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={clearSelection}>
-                    Clear selection
-                  </Button>
-                </>
-              )}
-            </div>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border/60 pt-3">
+            <span className="text-xs font-medium text-muted-foreground">{selectedCount} selected</span>
+            <Button size="sm" variant="outline" onClick={() => toggleSelectAllVisible(!isAllVisibleSelected)} disabled={visibleTweetIds.length === 0}>
+              {isAllVisibleSelected ? 'Deselect all visible' : 'Select all visible'}
+            </Button>
+            {selectedCount > 0 && (
+              <>
+                <Button size="sm" variant="outline" onClick={() => setPendingBulkAction({ type: 'bulk_reprocess', tweetIds: [...selectedTweetIds] })}>
+                  <RotateCcw className="w-3 h-3 mr-2" />
+                  Mass reprocess
+                </Button>
+                <Button size="sm" variant="destructive" onClick={() => setPendingBulkAction({ type: 'bulk_ignore', tweetIds: [...selectedTweetIds] })}>
+                  <Ban className="w-3 h-3 mr-2" />
+                  Mass ignore
+                </Button>
+                <Button size="sm" variant="ghost" onClick={clearSelection}>
+                  Clear selection
+                </Button>
+              </>
+            )}
           </div>
         </CardHeader>
         <CardContent className="p-0">
@@ -1839,16 +1839,16 @@ export default function Monitoring() {
               <div className="hidden overflow-hidden lg:block">
                 <Table className="table-fixed">
                   <colgroup>
-                    <col className="w-[4%]" />
+                    <col className="w-[3%]" />
                     <col className="w-[8%]" />
-                    <col className="w-[9%]" />
-                    <col className="w-[26%]" />
                     <col className="w-[8%]" />
+                    <col className="w-[28%]" />
                     <col className="w-[7%]" />
-                    <col className="w-[12%]" />
-                    <col className="w-[20%]" />
-                    <col className="w-[6%]" />
-                    <col className="w-[4%]" />
+                    <col className="w-[7%]" />
+                    <col className="w-[11%]" />
+                    <col className="w-[18%]" />
+                    <col className="w-[7%]" />
+                    <col className="w-[3%]" />
                   </colgroup>
                   <TableHeader>
                     <TableRow>
