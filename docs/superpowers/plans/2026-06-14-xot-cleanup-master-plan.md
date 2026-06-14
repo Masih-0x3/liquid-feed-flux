@@ -1752,29 +1752,29 @@ Combine the reviewed cleanup slices into one final integration branch for comple
 
 ## Steps
 
-- [ ] Create integration branch from the last reviewed cleanup branch.
+- [x] Create integration branch from the last reviewed cleanup branch.
 
 ```bash
 git switch <last-reviewed-cleanup-branch>
 git switch -c codex/xot-cleanup-40-integration
 ```
 
-- [ ] Rebase or merge only branches that passed their phase gate.
-- [ ] Resolve conflicts by preserving current production behavior.
-- [ ] Run Universal Validation Gate.
-- [ ] Start local dev server.
+- [x] Rebase or merge only branches that passed their phase gate.
+- [x] Resolve conflicts by preserving current production behavior.
+- [x] Run Universal Validation Gate.
+- [x] Start local dev server.
 
 ```bash
 npm run dev
 ```
 
-- [ ] Open local app in browser:
+- [x] Open local app in browser:
 
 ```text
-http://localhost:5173
+http://127.0.0.1:8080
 ```
 
-- [ ] Browser-smoke unauthenticated behavior:
+- [x] Browser-smoke unauthenticated behavior:
   - app loads.
   - login/redirect behavior is coherent.
   - no blank screen.
@@ -1786,7 +1786,24 @@ http://localhost:5173
   - XAccount loads.
   - Dashboard and Monitoring can call `admin-actions`.
   - No obvious text overlap on desktop and mobile widths.
-- [ ] Record browser coverage and any auth blockage in the branch handoff.
+- [x] Record browser coverage and any auth blockage in the branch handoff.
+
+## Execution Notes
+
+- Integration branch `codex/xot-cleanup-40-integration` was created from the reviewed Phase 17 tip. No merge conflict resolution was required because the current branch already contained the passed cleanup slices.
+- Local dev smoke used the env-backed command below so the runtime config guard could be tested separately from the actual auth surface:
+
+```bash
+env VITE_SUPABASE_URL=https://jzirqfzzvlbxwfzndaer.supabase.co VITE_SUPABASE_PUBLISHABLE_KEY=local-build-validation-key VITE_SUPABASE_PROJECT_ID=jzirqfzzvlbxwfzndaer npm run dev -- --host 127.0.0.1
+```
+
+- First browser load without Vite env rendered the expected missing-configuration guard for `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`.
+- After restarting with the local validation env and hard-reloading Chrome, `/` redirected to `/auth` and rendered the XOT Panel auth form.
+- Direct unauthenticated access to `/monitoring` redirected back to `/auth`.
+- Desktop and narrow-window GUI smoke showed the auth surface rendered without a blank screen or obvious text overlap.
+- Authenticated browser smoke was not completed in this phase because no explicit test credentials/session were used. Dashboard, Monitoring, Settings, XAccount, and authenticated `admin-actions` browser coverage remain a manual or credentialed follow-up before production promotion.
+- Playwright automation was not usable in this local session: bundled Chromium was not installed, and launching system Chrome from Playwright aborted under macOS sandbox/Crashpad permissions. GUI Chrome smoke was completed through the OS/browser surface instead.
+- The local dev server was stopped after browser validation.
 
 ## Validation
 
@@ -1804,6 +1821,32 @@ npm run check:release-state
 git status --short --branch
 ```
 
+Results:
+
+- [x] `npm run lint:functions` passed; Deno lint checked 95 files.
+- [x] `npm run check:functions` passed.
+- [x] `npm run test:functions` passed; 257 function tests.
+- [x] `npm run lint` passed with the existing eight Fast Refresh warnings in UI/auth component modules.
+- [x] `npm run check:strict` passed.
+- [x] `npm test` passed; 19 test files and 81 tests. The expected `useAuth must be used within an AuthProvider` stack traces came from the test that asserts the error path.
+- [x] `npm run check:function-inventory` passed; 10 configured Supabase functions.
+- [x] Env-backed `npm run build` passed with Vite 8.0.16.
+- [x] `npm --prefix services/video-renderer test` passed; 145 renderer tests.
+- [x] `npm run check:release-state` passed read-only.
+- [x] `git status --short --branch` was clean before this Phase 18 documentation update.
+
+Read-only release-state evidence:
+
+- GitHub default branch is `main`; latest main CI was green for `5d351a9db81809fac4e668c5d03f298f03647808`.
+- Live hosts `https://xot.iraneyes.com` and `https://xot.vercel.app` returned HTTP 200 with security headers.
+- Supabase listed 10 active functions with expected `verify_jwt` settings.
+- Supabase secret names were refreshed; required production names such as `OPENAI_API_KEY`, Telegram, Twitter/X, `WEBHOOK_SHARED_SECRET`, and deploy metadata were present. Optional compatibility/renderer names including `RSSAPP_ALLOW_QUERY_TOKEN`, `RSSAPP_WEBHOOK_TOKEN`, `VIDEO_RENDERER_URL`, `VIDEO_RENDERER_TOKEN`, and `DEEPGRAM_API_KEY` were absent.
+- Active cron jobs were present for worker, cleanup, reconcile, learned-bias rebuild, and X poster schedules.
+- Queue health showed completed jobs only, with no stale running jobs.
+- Video renderer heartbeat `hermes-masih-1` was online with `render_version=persian-subtitles-masihh-v1`.
+- Vercel CLI was unavailable, so authenticated Vercel deployment inventory was skipped.
+- Known Supabase migration drift remains; migrations must not be pushed until the local/remote history mismatch is intentionally reconciled.
+
 ## Commit
 
 ```bash
@@ -1815,10 +1858,10 @@ Only run this commit command if conflict resolutions or integration-only docs we
 
 ## Exit Criteria
 
-- [ ] All selected cleanup branches are integrated.
-- [ ] Full local validation passes.
-- [ ] Browser smoke status is recorded.
-- [ ] No production deployment has happened.
+- [x] All selected cleanup branches are integrated.
+- [x] Full local validation passes.
+- [x] Browser smoke status is recorded.
+- [x] No production deployment has happened.
 
 ---
 
