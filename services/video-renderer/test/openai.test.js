@@ -110,6 +110,31 @@ test("adds Hebrew-specific cleanup guidance for noisy military phrasing", () => 
   assert.match(text, /split across adjacent short cues/);
 });
 
+test("adds protest chant guidance for repeated names and resignation demands", () => {
+  const cleanup = buildTranscriptCleanupRequest({
+    model: "gpt-5.4-mini",
+    sourceLanguage: "en",
+    contextText: "Post context: Protesters chant at Abbas Araghchi and Mohammad Bagher Ghalibaf.",
+    segments: [{ id: 1, start: 0.48, end: 15.33, text: "Araghchi, Araghchi, Araghchi, Araghchi" }],
+  });
+  const translation = buildTranslationRequest({
+    model: "gpt-5.4-mini",
+    targetLanguage: "fa",
+    segments: [{ id: 1, start: 0.48, end: 15.33, text: "Araghchi, resign." }],
+  });
+
+  const cleanupText = JSON.stringify(cleanup);
+  assert.match(cleanupText, /protest\/crowd chants/);
+  assert.match(cleanupText, /repeated official or politician names/);
+  assert.match(cleanupText, /resign/);
+  assert.match(cleanupText, /Do not add resignation language/);
+
+  const translationText = JSON.stringify(translation);
+  assert.match(translationText, /resignation chants/);
+  assert.match(translationText, /استعفا بده/);
+  assert.match(translationText, /do not output only the repeated name/);
+});
+
 test("cleans transcript segments with strict timing validation", async () => {
   const source = [
     { id: 1, start: 0, end: 1.3, text: "What up, S ten." },

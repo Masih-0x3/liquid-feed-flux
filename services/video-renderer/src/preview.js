@@ -1,9 +1,10 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildAudioExtractCommand, buildContactSheetCommand, buildFrameSampleCommand, buildOpenCvInpaintPreviewCommand, buildPreviewClipCommand, buildWatermarkInspectionSheetCommand, probeVideo, runCommand, shouldEnableAdaptiveMask } from "./ffmpeg.js";
+import { buildAudioExtractCommand, buildContactSheetCommand, buildFrameSampleCommand, buildOpenCvInpaintPreviewCommand, buildPreviewClipCommand, buildWatermarkInspectionSheetCommand, probeVideo, runCommand } from "./ffmpeg.js";
 import { analyzeRemovableWatermarks, cleanupTranscriptSegments, detectLanguageFromTranscription, translateSegments } from "./openai.js";
 import { decidePreflightBlock, decideWatermarkOnlyBlock, delogoRegionsFromWatermarkOnly, evaluateDelogoPlan, normalizeLanguage, normalizeWatermarkOnlyDecision, recoverDelogoRegions, runOptionalOcr, runVisualPreflight, scoreWatermarkSignals, selectDelogoRegions, selectTargetLanguage, subtitlePlacementFromVision, visionFromWatermarkOnly } from "./preflight.js";
+import { resolveRenderEffects } from "./renderEffects.js";
 import { hasUsableSubtitleText, sanitizeSubtitleSegments, segmentsToAss, segmentsToSrt, splitLongSubtitleSegments } from "./subtitles.js";
 import { transcribeWithEnhancedAudioRetry } from "./transcriptionPipeline.js";
 
@@ -125,23 +126,14 @@ function previewOpenCvOptions() {
 }
 
 function resolvePreviewEffects(preflight, { hasSubtitleTrack = false } = {}) {
-  const delogoRegions = Array.isArray(preflight?.delogoRegions) ? preflight.delogoRegions : [];
-  const enableAdaptiveMask = process.env.ENABLE_ADAPTIVE_SUBTITLE_MASK === "1" && shouldEnableAdaptiveMask(preflight?.hardSubtitles?.raw);
-  const reasons = [
-    hasSubtitleTrack ? "subtitle_track" : "",
-    delogoRegions.length > 0 ? "delogo" : "",
-    enableAdaptiveMask ? "adaptive_subtitle_mask" : "",
-  ].filter(Boolean);
-  const watermarkEnabled = process.env.PREVIEW_WATERMARK_ENABLED !== "0";
-  const addOnlyWhenModified = process.env.PREVIEW_WATERMARK_ADD_ONLY_WHEN_MODIFIED !== "0";
-  const shouldWatermark = watermarkEnabled && (addOnlyWhenModified ? reasons.length > 0 : true);
-  return {
-    delogoRegions,
-    enableAdaptiveMask,
-    shouldRender: reasons.length > 0,
-    shouldWatermark,
-    reasons,
-  };
+  return resolveRenderEffects(preflight, {
+    enableAdaptiveSubtitleMask: process.env.ENABLE_ADAPTIVE_SUBTITLE_MASK === "1",
+    watermarkConfig: {
+      enabled: process.env.PREVIEW_WATERMARK_ENABLED !== "0",
+      apply_when: process.env.PREVIEW_WATERMARK_APPLY_WHEN,
+      add_only_when_modified: process.env.PREVIEW_WATERMARK_ADD_ONLY_WHEN_MODIFIED === "0" ? false : undefined,
+    },
+  }, { hasSubtitleTrack });
 }
 
 function resolvePreviewQuality(effects) {

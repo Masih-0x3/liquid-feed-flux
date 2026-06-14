@@ -193,7 +193,7 @@ VALUES (
       "opencv_feather": 0
     },
     "watermark": {
-      "apply_when": "modified",
+      "apply_when": "subtitle_track",
       "opacity": 0.16,
       "top_right_opacity": 0.34,
       "cover_opacity": 0.34,

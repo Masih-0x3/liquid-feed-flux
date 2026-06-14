@@ -3,9 +3,10 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
-import { buildAudioExtractCommand, buildContactSheetCommand, buildFrameSampleCommand, buildOpenCvInpaintRenderCommand, buildRenderCommand, buildWatermarkInspectionSheetCommand, probeVideo, runCommand, shouldEnableAdaptiveMask } from "./ffmpeg.js";
+import { buildAudioExtractCommand, buildContactSheetCommand, buildFrameSampleCommand, buildOpenCvInpaintRenderCommand, buildRenderCommand, buildWatermarkInspectionSheetCommand, probeVideo, runCommand } from "./ffmpeg.js";
 import { analyzeRemovableWatermarks, cleanupTranscriptSegments, detectLanguageFromTranscription, translateSegments } from "./openai.js";
 import { decidePreflightBlock, decideWatermarkOnlyBlock, delogoRegionsFromWatermarkOnly, evaluateDelogoPlan, normalizeLanguage, normalizeWatermarkOnlyDecision, recoverDelogoRegions, runOptionalOcr, runVisualPreflight, scoreWatermarkSignals, selectDelogoRegions, selectTargetLanguage, subtitlePlacementFromVision, visionFromWatermarkOnly } from "./preflight.js";
+import { resolveRenderEffects } from "./renderEffects.js";
 import { applyRenderSettings, loadRenderSettingsOrDefault } from "./settings.js";
 import { hasUsableSubtitleText, sanitizeSubtitleSegments, segmentsToAss, segmentsToSrt, splitLongSubtitleSegments } from "./subtitles.js";
 import { transcribeAudio } from "./transcription.js";
@@ -270,27 +271,6 @@ async function blockRender({ supabase, row, reason, preflight, metrics }) {
     tweet_id: row.tweet_id,
     preflight,
     metrics,
-  };
-}
-
-function resolveRenderEffects(preflight, config, { hasSubtitleTrack = false } = {}) {
-  const delogoRegions = Array.isArray(preflight?.delogoRegions) ? preflight.delogoRegions : [];
-  const enableAdaptiveMask = config.enableAdaptiveSubtitleMask && shouldEnableAdaptiveMask(preflight?.hardSubtitles?.raw);
-  const reasons = [
-    hasSubtitleTrack ? "subtitle_track" : "",
-    delogoRegions.length > 0 ? "delogo" : "",
-    enableAdaptiveMask ? "adaptive_subtitle_mask" : "",
-  ].filter(Boolean);
-  const watermarkConfig = config.watermarkConfig && typeof config.watermarkConfig === "object" ? config.watermarkConfig : {};
-  const watermarkEnabled = watermarkConfig.enabled !== false;
-  const addOnlyWhenModified = watermarkConfig.add_only_when_modified !== false;
-  const shouldWatermark = watermarkEnabled && (addOnlyWhenModified ? reasons.length > 0 : true);
-  return {
-    delogoRegions,
-    enableAdaptiveMask,
-    shouldRender: reasons.length > 0,
-    shouldWatermark,
-    reasons,
   };
 }
 
