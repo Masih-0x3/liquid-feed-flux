@@ -1064,7 +1064,7 @@ git commit -m "refactor: centralize frontend admin action clients"
 
 # Phase 11: Monitoring Page Split
 
-Status: partially completed in branch `codex/xot-cleanup-21-monitoring-split`.
+Status: completed in branch `codex/xot-cleanup-21-monitoring-split`.
 
 Completed slice:
 
@@ -1078,11 +1078,11 @@ Completed slice:
 - Extracted status badges, duplicate evidence, and duplicate cluster panels to monitoring components.
 - Extracted the mobile card and desktop table row renderers to `src/components/monitoring/MonitoringRow.tsx`.
 - Extracted the Duplicate Gate drawer subpanel to `src/components/monitoring/MonitoringDuplicateGateCard.tsx`.
+- Extracted the full detail drawer to `src/components/monitoring/MonitoringDetailDrawer.tsx`.
 - Added focused coverage in `src/test/monitoring-view-model.test.ts`, `src/test/monitoring-actions.test.ts`, and `src/test/monitoring-components.test.tsx`.
 
-Remaining in this phase:
+Deferred out of this phase:
 
-- Full detail drawer extraction.
 - Optional `src/hooks/useMonitoringData.ts` cleanup is deferred to Phase 12 so fallback behavior stays isolated.
 
 Branch:
@@ -1132,7 +1132,7 @@ rg -n "function |const .* = \\(|useMemo|useCallback|confirm|drawer|cluster|group
 - [x] Extract status and duplicate evidence components.
 - [x] Extract row component.
 - [x] Extract Duplicate Gate drawer subpanel.
-- [ ] Extract detail drawer component.
+- [x] Extract detail drawer component.
 - [x] Extract confirmation dialog component.
 - [x] Extract delivery timeline panel component.
 - [x] Keep page-level React Query state and URL/search params in `Monitoring.tsx`.
@@ -1158,13 +1158,13 @@ VITE_SUPABASE_URL=https://jzirqfzzvlbxwfzndaer.supabase.co VITE_SUPABASE_PUBLISH
 ## Commit
 
 ```bash
-git add src/pages/Monitoring.tsx src/lib/monitoringDuplicateEvidence.ts src/components/monitoring/MonitoringStatusBadges.tsx src/components/monitoring/MonitoringDuplicateEvidence.tsx src/components/monitoring/MonitoringRow.tsx src/components/monitoring/MonitoringDuplicateGateCard.tsx src/test/monitoring-components.test.tsx docs/superpowers/plans/2026-06-14-xot-cleanup-master-plan.md
-git commit -m "refactor: extract monitoring row and duplicate panels"
+git add src/pages/Monitoring.tsx src/components/monitoring/MonitoringDetailDrawer.tsx src/test/monitoring-components.test.tsx docs/superpowers/plans/2026-06-14-xot-cleanup-master-plan.md
+git commit -m "refactor: extract monitoring detail drawer"
 ```
 
 ## Exit Criteria
 
-- [ ] `Monitoring.tsx` reads as composition and orchestration.
+- [x] `Monitoring.tsx` reads as composition and orchestration.
 - [x] Action calls are imported from centralized API wrappers.
 - [x] View-model logic has unit coverage.
 - [x] Build output still succeeds.

@@ -7,6 +7,7 @@ import {
   MonitoringDuplicateMatch,
 } from "@/components/monitoring/MonitoringDuplicateEvidence";
 import { MonitoringDuplicateGateCard } from "@/components/monitoring/MonitoringDuplicateGateCard";
+import { MonitoringDetailDrawer } from "@/components/monitoring/MonitoringDetailDrawer";
 import {
   MonitoringAudienceBadge,
   MonitoringCostFlags,
@@ -347,5 +348,85 @@ describe("monitoring row renderers", () => {
     expect(renderRowActions).toHaveBeenCalledWith(expect.objectContaining({ tweet_id: "tweet-1" }), true);
     expect(onRunDedupe).not.toHaveBeenCalled();
     expect(onClearDuplicate).not.toHaveBeenCalled();
+  });
+});
+
+describe("monitoring detail drawer", () => {
+  it("renders drawer sections and routes primary actions through page callbacks", () => {
+    const onRequestAction = vi.fn();
+    const onGenerateEnrichment = vi.fn();
+    const onScoreFeedback = vi.fn();
+    const drawerEntry = entry({
+      final_score: 16,
+      delivery_decision: "deliver",
+      text_translated: "ترجمه",
+      scoring_version: "v2",
+      audience_class: "direct_focus",
+      audience_confidence: 0.91,
+      enrich_status: "awaiting_approval",
+      enrichment_version: "voice-v1",
+      monitoring_state: {
+        code: "ready_to_deliver",
+        stage_label: "Ready",
+        tone: "good",
+        decision_label: "Deliver",
+        primary_blocker: null,
+        translation_state: "translated",
+        telegram_state: "pending",
+        x_state: "pending",
+        needs_attention: false,
+        next_actions: ["deliver"],
+      },
+    });
+
+    render(
+      <MonitoringDetailDrawer
+        open
+        onOpenChange={vi.fn()}
+        tweetId="tweet-1"
+        entry={drawerEntry}
+        timeline={[]}
+        deliverThreshold={14}
+        xPostingEnabled
+        xDiagnostic={{
+          tweet_id: "tweet-1",
+          eligible: true,
+          blockers: [],
+          notes: [],
+          candidate: { sql_gate_passed: true, reason: "ready" },
+        }}
+        xDiagnosticLoading={false}
+        editingEntry={null}
+        editedContent=""
+        enrichingTweetIds={new Set()}
+        feedbackLoading={null}
+        onInspectDuplicateMatch={vi.fn()}
+        onRequestAction={onRequestAction}
+        onStartEditTranslation={vi.fn()}
+        onEditedContentChange={vi.fn()}
+        onSaveEdit={vi.fn()}
+        onCancelEdit={vi.fn()}
+        onGenerateEnrichment={onGenerateEnrichment}
+        onOpenManualScore={vi.fn()}
+        onScoreFeedback={onScoreFeedback}
+        onEnrichmentFeedback={vi.fn()}
+        onSelectEnrichmentVariant={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Pipeline Details")).toBeInTheDocument();
+    expect(screen.getByText("Why not on X?")).toBeInTheDocument();
+    expect(screen.getByText("Scoring")).toBeInTheDocument();
+    expect(screen.getByText("Enrichment Studio")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Generate enrichment draft" }));
+    fireEvent.click(screen.getByRole("button", { name: "Post plain to X" }));
+    fireEvent.click(screen.getByRole("button", { name: "Should skip" }));
+    fireEvent.click(screen.getByRole("button", { name: "Approve for X" }));
+
+    expect(onGenerateEnrichment).toHaveBeenCalledWith("tweet-1");
+    expect(onScoreFeedback).toHaveBeenCalledWith(drawerEntry, "should_skip", "direct_focus");
+    expect(onRequestAction).toHaveBeenCalledWith({ type: "force_x", entry: drawerEntry });
+    expect(onRequestAction).toHaveBeenCalledWith({ type: "approve_enrichment", entry: drawerEntry });
   });
 });
