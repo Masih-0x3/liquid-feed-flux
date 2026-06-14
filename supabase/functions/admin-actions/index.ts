@@ -7,7 +7,7 @@ import {
   parseScoreAxes,
   type EditorialProfile,
 } from "../_shared/scoring.ts";
-import { recordLegacyXApiUsage, recordXApiEvent } from "../_shared/xApiLedger.ts";
+import { recordXApiEvent } from "../_shared/xApiLedger.ts";
 import {
   doesEnrichmentBlockX,
   generatePersonalVoiceProfile,
@@ -57,6 +57,13 @@ import {
 import { getXApiSummary } from "./xApiSummary.ts";
 import { isMyXEnabled, MY_X_DISABLED_RESPONSE } from "../_shared/myXControls.ts";
 import { saveSettingsAdminAction } from "./settings.ts";
+import {
+  getXStatusAdminAction,
+  recordAdminXApiAttempt,
+  sendTestTweetAdminAction,
+  testHydrateTweetAdminAction,
+  verifyXCredentialsAdminAction,
+} from "./xApiActions.ts";
 import {
   backfillScoreV2,
   loadScoringModelOptions,
@@ -156,78 +163,6 @@ function jsonResponse(body: unknown, status = 200) {
     status,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
-}
-
-// ─── X API OAuth 1.0a helpers (mirrors worker/index.ts) ──────────────
-const X_TEXT_ENCODER = new TextEncoder();
-function xPercentEncode(s: string): string {
-  return encodeURIComponent(s).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
-}
-async function xHmacSha1(key: string, data: string): Promise<string> {
-  const cryptoKey = await crypto.subtle.importKey('raw', X_TEXT_ENCODER.encode(key), { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']);
-  const sig = await crypto.subtle.sign('HMAC', cryptoKey, X_TEXT_ENCODER.encode(data));
-  return btoa(String.fromCharCode(...new Uint8Array(sig)));
-}
-async function xOauthHeader(method: string, baseUrl: string, queryParams: Record<string, string>, ck: string, cs: string, at: string, ats: string): Promise<string> {
-  const oauthParams: Record<string, string> = {
-    oauth_consumer_key: ck,
-    oauth_nonce: crypto.randomUUID().replace(/-/g, ''),
-    oauth_signature_method: 'HMAC-SHA1',
-    oauth_timestamp: Math.floor(Date.now() / 1000).toString(),
-    oauth_token: at,
-    oauth_version: '1.0',
-  };
-  const allParams = { ...oauthParams, ...queryParams };
-  const paramString = Object.keys(allParams).sort().map((k) => `${xPercentEncode(k)}=${xPercentEncode(allParams[k])}`).join('&');
-  const baseString = `${method.toUpperCase()}&${xPercentEncode(baseUrl)}&${xPercentEncode(paramString)}`;
-  const signingKey = `${xPercentEncode(cs)}&${xPercentEncode(ats)}`;
-  oauthParams.oauth_signature = await xHmacSha1(signingKey, baseString);
-  return `OAuth ${Object.keys(oauthParams).sort().map((k) => `${xPercentEncode(k)}="${xPercentEncode(oauthParams[k])}"`).join(', ')}`;
-}
-function getXCreds(): { ck: string; cs: string; at: string; ats: string } | null {
-  const ck = Deno.env.get('TWITTER_CONSUMER_KEY');
-  const cs = Deno.env.get('TWITTER_CONSUMER_SECRET');
-  const at = Deno.env.get('TWITTER_ACCESS_TOKEN');
-  const ats = Deno.env.get('TWITTER_ACCESS_TOKEN_SECRET');
-  if (!ck || !cs || !at || !ats) return null;
-  return { ck, cs, at, ats };
-}
-// deno-lint-ignore no-explicit-any
-async function recordAdminXApiAttempt(
-  supabase: any,
-  input: {
-    action: string;
-    endpoint: string;
-    method?: string;
-    tweetId?: string | null;
-    userId?: string | null;
-    error?: string | null;
-    requestCounted?: boolean;
-    estimatedBillableUnit?: string | null;
-  },
-  response?: Response | null,
-  legacy?: { post?: boolean; mediaUpload?: boolean },
-) {
-  await recordXApiEvent(supabase, {
-    source: 'admin-actions',
-    sourceAction: input.action,
-    endpoint: input.endpoint,
-    method: input.method ?? 'GET',
-    tweetId: input.tweetId ?? null,
-    userId: input.userId ?? null,
-    ok: response?.ok ?? false,
-    status: response?.status ?? null,
-    error: input.error ?? (response && !response.ok ? `HTTP ${response.status}` : null),
-    requestCounted: input.requestCounted,
-    estimatedBillableUnit: input.estimatedBillableUnit ?? null,
-  }, response ?? null);
-  if (input.requestCounted !== false) {
-    await recordLegacyXApiUsage(supabase, {
-      error: input.error ?? (response && !response.ok ? `${input.action}: HTTP ${response.status}` : null),
-      post: legacy?.post,
-      mediaUpload: legacy?.mediaUpload,
-    });
-  }
 }
 
 // Inline rescore: re-runs the translation+scoring tool call against current settings
@@ -1055,138 +990,25 @@ serve(async (req) => {
 
       // ===== X API: credential status =====
       case 'get_x_status': {
-        return jsonResponse({
-          success: true,
-          status: {
-            TWITTER_CONSUMER_KEY: !!Deno.env.get('TWITTER_CONSUMER_KEY'),
-            TWITTER_CONSUMER_SECRET: !!Deno.env.get('TWITTER_CONSUMER_SECRET'),
-            TWITTER_ACCESS_TOKEN: !!Deno.env.get('TWITTER_ACCESS_TOKEN'),
-            TWITTER_ACCESS_TOKEN_SECRET: !!Deno.env.get('TWITTER_ACCESS_TOKEN_SECRET'),
-          },
-        });
+        return jsonResponse(getXStatusAdminAction());
       }
 
       // ===== X API: verify credentials =====
       case 'x_verify_credentials': {
-        const { data: controlsRow } = await supabase.from('settings').select('value').eq('key', 'x_api_controls').maybeSingle();
-        const controls = (controlsRow?.value ?? {}) as Record<string, unknown>;
-        const cacheMinutes = typeof controls.verify_cache_minutes === 'number' ? controls.verify_cache_minutes : 15;
-        const { data: cachedRow } = await supabase.from('settings').select('value').eq('key', 'x_self_id').maybeSingle();
-        const cached = (cachedRow?.value ?? {}) as Record<string, unknown>;
-        const cachedAt = typeof cached.cached_at === 'string' ? new Date(cached.cached_at).getTime() : 0;
-        const hasFreshCachedSelf = cached.id && cached.username && cachedAt > Date.now() - cacheMinutes * 60 * 1000;
-        if (hasFreshCachedSelf) {
-          return jsonResponse({
-            ok: true,
-            cached: true,
-            id: cached.id,
-            handle: cached.username,
-            name: cached.name,
-            cached_at: cached.cached_at,
-          });
-        }
-        if (!isMyXEnabled(controls)) {
-          return jsonResponse({
-            ok: false,
-            disabled: true,
-            reason: 'owned_reads_disabled',
-            error: 'Owned-read credential verification is paused to prevent X API user-read charges.',
-          }, 200);
-        }
-        const creds = getXCreds();
-        if (!creds) return jsonResponse({ ok: false, error: 'One or more TWITTER_* secrets are missing' }, 200);
-        const url = 'https://api.x.com/2/users/me';
-        try {
-          const auth = await xOauthHeader('GET', url, {}, creds.ck, creds.cs, creds.at, creds.ats);
-          const resp = await fetch(url, { headers: { Authorization: auth } });
-          const text = await resp.text();
-          let parsedBody: unknown;
-          try { parsedBody = JSON.parse(text); } catch { parsedBody = text; }
-          await recordAdminXApiAttempt(supabase, { action: 'verify_credentials', endpoint: url, method: 'GET' }, resp);
-          if (!resp.ok) return jsonResponse({ ok: false, error: `HTTP ${resp.status}: ${text.slice(0, 300)}`, raw: parsedBody });
-          const user = (parsedBody as { data?: { id?: string; username?: string; name?: string } })?.data;
-          if (user?.id) {
-            await supabase.from('settings').upsert({
-              key: 'x_self_id',
-              value: { id: user.id, username: user.username, name: user.name, cached_at: new Date().toISOString() },
-              updated_at: new Date().toISOString(),
-            }, { onConflict: 'key' });
-          }
-          return jsonResponse({ ok: true, id: user?.id, handle: user?.username, name: user?.name, raw: parsedBody });
-        } catch (e) {
-          await recordAdminXApiAttempt(supabase, { action: 'verify_credentials', endpoint: url, method: 'GET', error: (e as Error).message }, null);
-          return jsonResponse({ ok: false, error: (e as Error).message });
-        }
+        const result = await verifyXCredentialsAdminAction(supabase);
+        return jsonResponse(result.body, result.status);
       }
 
       // ===== X API: send test tweet =====
       case 'send_test_tweet': {
-        const text = typeof body.text === 'string' ? body.text.trim() : '';
-        const replyTo = typeof body.in_reply_to_tweet_id === 'string' ? body.in_reply_to_tweet_id.trim() : '';
-        if (text.length === 0 || text.length > 280) {
-          return jsonResponse({ ok: false, error: 'text must be 1-280 characters' }, 400);
-        }
-        if (replyTo && !/^\d{1,25}$/.test(replyTo)) {
-          return jsonResponse({ ok: false, error: 'in_reply_to_tweet_id must be a numeric tweet ID' }, 400);
-        }
-        const creds = getXCreds();
-        if (!creds) return jsonResponse({ ok: false, error: 'One or more TWITTER_* secrets are missing' }, 200);
-        const url = 'https://api.x.com/2/tweets';
-        const payload: Record<string, unknown> = { text };
-        if (replyTo) payload.reply = { in_reply_to_tweet_id: replyTo };
-        try {
-          // Per X docs, POST body params are NOT included in OAuth signature for /2/tweets JSON body
-          const auth = await xOauthHeader('POST', url, {}, creds.ck, creds.cs, creds.at, creds.ats);
-          const resp = await fetch(url, {
-            method: 'POST',
-            headers: { Authorization: auth, 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          });
-          const respText = await resp.text();
-          let respBody: unknown;
-          try { respBody = JSON.parse(respText); } catch { respBody = respText; }
-          await recordAdminXApiAttempt(supabase, { action: 'send_test_tweet', endpoint: url, method: 'POST' }, resp, { post: resp.ok });
-          if (!resp.ok) return jsonResponse({ ok: false, error: `HTTP ${resp.status}: ${respText.slice(0, 300)}`, response: respBody });
-          const created = (respBody as { data?: { id?: string; text?: string } })?.data;
-          return jsonResponse({ ok: true, tweet_id: created?.id, response: respBody });
-        } catch (e) {
-          await recordAdminXApiAttempt(supabase, { action: 'send_test_tweet', endpoint: url, method: 'POST', error: (e as Error).message }, null);
-          return jsonResponse({ ok: false, error: (e as Error).message });
-        }
+        const result = await sendTestTweetAdminAction(supabase, body);
+        return jsonResponse(result.body, result.status);
       }
 
       // ===== X API: test hydration (no DB write) =====
       case 'test_hydrate_tweet': {
-        const tweetId = typeof body.tweet_id === 'string' ? body.tweet_id.trim() : '';
-        if (!/^\d{1,25}$/.test(tweetId)) {
-          return jsonResponse({ ok: false, error: 'tweet_id must be a numeric tweet ID' }, 400);
-        }
-        const creds = getXCreds();
-        if (!creds) return jsonResponse({ ok: false, error: 'One or more TWITTER_* secrets are missing' }, 200);
-        const baseUrl = `https://api.x.com/2/tweets/${tweetId}`;
-        const queryParams = { 'tweet.fields': 'note_tweet,text,lang' };
-        try {
-          const auth = await xOauthHeader('GET', baseUrl, queryParams, creds.ck, creds.cs, creds.at, creds.ats);
-          const url = `${baseUrl}?${Object.entries(queryParams).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&')}`;
-          const resp = await fetch(url, { headers: { Authorization: auth } });
-          const respText = await resp.text();
-          let respBody: unknown;
-          try { respBody = JSON.parse(respText); } catch { respBody = respText; }
-          await recordAdminXApiAttempt(supabase, { action: 'test_hydrate', endpoint: baseUrl, method: 'GET', tweetId }, resp);
-          if (!resp.ok) return jsonResponse({ ok: false, error: `HTTP ${resp.status}: ${respText.slice(0, 300)}`, raw: respBody });
-          const data = (respBody as { data?: { text?: string; lang?: string; note_tweet?: { text?: string } } })?.data;
-          return jsonResponse({
-            ok: true,
-            tweet_id: tweetId,
-            text: data?.text,
-            lang: data?.lang,
-            note_tweet: data?.note_tweet?.text,
-            raw: respBody,
-          });
-        } catch (e) {
-          await recordAdminXApiAttempt(supabase, { action: 'test_hydrate', endpoint: baseUrl, method: 'GET', tweetId, error: (e as Error).message }, null);
-          return jsonResponse({ ok: false, error: (e as Error).message });
-        }
+        const result = await testHydrateTweetAdminAction(supabase, body);
+        return jsonResponse(result.body, result.status);
       }
 
       // ===== Backfill: re-hydrate recent truncated tweets matching new heuristics =====
