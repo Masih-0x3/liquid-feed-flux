@@ -24,10 +24,10 @@ Main checkout preserved:
 /Users/stevmq/Finalized XOT
 ```
 
-Current implementation branch after Phase 14:
+Current implementation branch after Phase 15:
 
 ```text
-codex/xot-cleanup-24-database-type-trust
+codex/xot-cleanup-30-renderer-runtime-security
 ```
 
 Current safe-state rule:
@@ -1448,49 +1448,84 @@ Clean renderer configuration and security behavior without disrupting current vi
 ## Files
 
 - Modify: `services/video-renderer/src/preflight.js`
-- Modify: `services/video-renderer/src/openai.js`
+- Modify: `services/video-renderer/src/renderer.js`
+- Modify: `services/video-renderer/src/server.js`
 - Create: `services/video-renderer/src/config.js`
 - Create: `services/video-renderer/test/config.test.js`
 - Create: `services/video-renderer/test/auth.test.js`
+- Modify: `services/video-renderer/test/preflight.test.js`
+- Inspect: `services/video-renderer/src/openai.js`; no change needed because it already receives explicit keys/models and does not read `process.env`.
 - Inspect: renderer service entrypoint file.
 
 ## Steps
 
-- [ ] Locate renderer auth and config reads.
+- [x] Locate renderer auth and config reads.
 
 ```bash
 rg -n "VIDEO_RENDERER_TOKEN|process\\.env|auth|authorization|preflight|OpenAI|watermark|ocr" services/video-renderer/src services/video-renderer/test
 ```
 
-- [ ] Add config loader tests:
-  - required token is present in production mode.
-  - missing token fails closed when server auth is required.
-  - local development mode remains explicit.
-- [ ] Move environment parsing to `services/video-renderer/src/config.js`.
-- [ ] Add auth middleware/helper tests.
-- [ ] Split preflight orchestration only after config/auth behavior is covered.
-- [ ] Keep one-pass ffmpeg render behavior intact.
+- [x] Add config loader tests:
+  - renderer required secrets and Deepgram dependency are enforced.
+  - delivery-safe renderer defaults are pinned.
+  - server token/port/interval/runtime parsing is separate from render config.
+- [x] Move environment parsing to `services/video-renderer/src/config.js`.
+- [x] Add auth helper tests.
+- [x] Pass OCR language and preflight workdir retention through renderer config instead of direct env reads.
+- [x] Leave preflight orchestration intact because config/auth behavior was the cleanup target for this phase.
+- [x] Keep one-pass ffmpeg render behavior intact.
+
+## Implementation Notes
+
+- [x] `services/video-renderer/src/config.js` now owns renderer env parsing, server runtime parsing, dispatch-token normalization, bearer authorization, default render version, default Tesseract language, and OpenCV script path.
+- [x] `services/video-renderer/src/server.js` now reads token, version, port, poll interval, and heartbeat interval from server runtime config.
+- [x] `services/video-renderer/src/renderer.js` re-exports `loadConfigFromEnv` for compatibility and passes configured OCR/workdir options into preflight.
+- [x] `services/video-renderer/src/preflight.js` no longer reads `process.env.TESSERACT_LANG`; default behavior remains `eng+fas+ara+heb`.
+- [x] Initial sandboxed renderer test run failed only because `server.test.js` could not bind `127.0.0.1` inside the sandbox. The same test command passed outside the sandbox with the approved `npm --prefix services/video-renderer test` prefix.
 
 ## Validation
 
 ```bash
 npm --prefix services/video-renderer test
 npm --prefix services/video-renderer audit --audit-level=low
+npm run lint
+npm run check:strict
+npm test
+npm run build
+npm run lint:functions
+npm run check:functions
+npm run test:functions
+npm run check:function-inventory
 npm run check:release-state
 ```
+
+Completed validation:
+
+- [x] `npm --prefix services/video-renderer test` passed, 145 tests.
+- [x] `npm --prefix services/video-renderer audit --audit-level=low` passed, 0 vulnerabilities.
+- [x] `npm run lint` passed with the known 8 Fast Refresh warnings.
+- [x] `npm run check:strict` passed.
+- [x] `npm test` passed, 19 files / 81 tests.
+- [x] Env-backed `npm run build` passed.
+- [x] `npm run lint:functions` passed.
+- [x] `npm run check:functions` passed.
+- [x] `npm run test:functions` passed, 257 tests.
+- [x] `npm run check:function-inventory` passed.
+- [x] `npm run check:release-state` passed read-only; live hosts returned 200, main CI is green, functions and cron are active, renderer `hermes-masih-1` is online, no stale running jobs were found, Vercel CLI remains unavailable, and known migration drift remains.
+- [x] `git diff --check` passed.
 
 ## Commit
 
 ```bash
-git add services/video-renderer/src/preflight.js services/video-renderer/src/openai.js services/video-renderer/src/config.js services/video-renderer/test/config.test.js services/video-renderer/test/auth.test.js
+git add docs/superpowers/plans/2026-06-14-xot-cleanup-master-plan.md services/video-renderer/src/config.js services/video-renderer/src/preflight.js services/video-renderer/src/renderer.js services/video-renderer/src/server.js services/video-renderer/test/auth.test.js services/video-renderer/test/config.test.js services/video-renderer/test/preflight.test.js
 git commit -m "refactor: centralize video renderer config and auth checks"
 ```
 
 ## Exit Criteria
 
-- [ ] Renderer auth is explicit and tested.
-- [ ] Config reads are not scattered across large files.
-- [ ] Video-render heartbeat remains online in read-only release-state checks.
+- [x] Renderer auth is explicit and tested.
+- [x] Config reads are not scattered across production server/renderer/preflight files.
+- [x] Video-render heartbeat remains online in read-only release-state checks.
 
 ---
 

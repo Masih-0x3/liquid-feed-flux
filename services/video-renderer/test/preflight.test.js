@@ -83,6 +83,14 @@ test("builds multilingual Tesseract args for text and TSV OCR", () => {
     "6",
     "tsv",
   ]);
+  assert.deepEqual(tesseractArgs("/tmp/frame.jpg", null, { tesseractLang: "eng" }), [
+    "/tmp/frame.jpg",
+    "stdout",
+    "-l",
+    "eng",
+    "--psm",
+    "6",
+  ]);
 });
 
 test("recovers scaled lower handle OCR boxes without matching source title text", () => {
