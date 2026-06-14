@@ -1,6 +1,8 @@
 import { assertEquals } from "jsr:@std/assert";
 import {
+  buildPostTranslationUpdatePatch,
   buildTranslationCallOptions,
+  buildTranslationResultMeta,
   choosePostTranslationRoute,
   renderTranslationUserPrompt,
   shouldQueueHydrationAfterTranslation,
@@ -112,6 +114,128 @@ Deno.test("buildTranslationCallOptions preserves nullable optional OpenAI settin
       seed: null,
       serviceTier: null,
       parallelToolCalls: null,
+    },
+  );
+});
+
+Deno.test("buildTranslationResultMeta preserves worker job result metadata", () => {
+  assertEquals(
+    buildTranslationResultMeta({
+      model: "gpt-translation",
+      scoringModel: "gpt-scoring",
+      usage: { total_tokens: 30 },
+      scoringUsage: { total_tokens: 10 },
+      translationUsage: { total_tokens: 20 },
+      scoringV2Usage: { total_tokens: 5 },
+      scoringCallMs: 111,
+      translationCallMs: 222,
+      queueWaitMs: 333,
+      claimDelayMs: 444,
+      finishedAt: "2026-01-01T00:00:00.000Z",
+      importanceScore: 16,
+      scoringVersion: "scoring-v2",
+      splitCalls: true,
+    }),
+    {
+      model: "gpt-translation",
+      scoring_model: "gpt-scoring",
+      usage: { total_tokens: 30 },
+      scoring_usage: { total_tokens: 10 },
+      translation_usage: { total_tokens: 20 },
+      scoring_v2_usage: { total_tokens: 5 },
+      scoring_call_ms: 111,
+      translation_call_ms: 222,
+      queue_wait_ms: 333,
+      claim_delay_ms: 444,
+      finished_at: "2026-01-01T00:00:00.000Z",
+      importance_score: 16,
+      scoring_version: "scoring-v2",
+      split_calls: true,
+    },
+  );
+});
+
+Deno.test("buildPostTranslationUpdatePatch preserves translation and scoring fields", () => {
+  assertEquals(
+    buildPostTranslationUpdatePatch({
+      translationSkippedByFilter: false,
+      translatedText: "Translated text",
+      nowIso: "2026-01-01T00:00:00.000Z",
+      openaiModel: "gpt-translation",
+      translationTokens: 44,
+      translationDurationMs: 555,
+      importanceScore: 17,
+      importanceTags: ["direct_focus"],
+      importanceReasoning: "important",
+      deliveryDecision: "deliver",
+      scoreAxes: { iran_relevance: 10, severity: 7 },
+      finalScore: 17.2,
+      decisionReason: "direct_focus:17.2>=14",
+      scoreBreakdown: { feedback_delta: 0.2 },
+      scoringPolicy: {
+        scoringVersion: "scoring-v2",
+        scoringProfileId: "iran-first",
+        audienceClass: "direct_focus",
+        audienceConfidence: 0.91,
+        audienceReason: "direct audience fit",
+        globalExceptionClass: null,
+        scoreReviewStatus: "approved",
+      },
+    }),
+    {
+      text_translated: "Translated text",
+      lang_original: "en",
+      translated_at: "2026-01-01T00:00:00.000Z",
+      translation_model: "gpt-translation",
+      translation_tokens: 44,
+      translation_duration_ms: 555,
+      importance_score: 17,
+      importance_tags: ["direct_focus"],
+      importance_reasoning: "important",
+      delivery_decision: "deliver",
+      score_axes: { iran_relevance: 10, severity: 7 },
+      final_score: 17.2,
+      decision_reason: "direct_focus:17.2>=14",
+      score_breakdown: { feedback_delta: 0.2 },
+      scoring_version: "scoring-v2",
+      scoring_profile_id: "iran-first",
+      audience_class: "direct_focus",
+      audience_confidence: 0.91,
+      audience_reason: "direct audience fit",
+      global_exception_class: null,
+      score_review_status: "approved",
+    },
+  );
+});
+
+Deno.test("buildPostTranslationUpdatePatch omits translation fields when skipped by filter", () => {
+  assertEquals(
+    buildPostTranslationUpdatePatch({
+      translationSkippedByFilter: true,
+      translatedText: null,
+      nowIso: "2026-01-01T00:00:00.000Z",
+      openaiModel: "gpt-translation",
+      translationTokens: null,
+      translationDurationMs: null,
+      importanceScore: 8,
+      importanceTags: null,
+      importanceReasoning: null,
+      deliveryDecision: "skip",
+      scoreAxes: null,
+      finalScore: 8,
+      decisionReason: "below_threshold:8<12",
+      scoreBreakdown: null,
+      scoringPolicy: null,
+    }),
+    {
+      importance_score: 8,
+      importance_tags: null,
+      importance_reasoning: null,
+      delivery_decision: "skip",
+      score_axes: null,
+      final_score: 8,
+      decision_reason: "below_threshold:8<12",
+      score_breakdown: null,
     },
   );
 });

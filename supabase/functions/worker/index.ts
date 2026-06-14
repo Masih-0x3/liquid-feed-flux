@@ -95,7 +95,9 @@ import {
   type ScoringDecisionLog,
 } from "./scoringWorkflow.ts";
 import {
+  buildPostTranslationUpdatePatch,
   buildTranslationCallOptions,
+  buildTranslationResultMeta,
   choosePostTranslationRoute,
   renderTranslationUserPrompt as renderTranslationUserPromptText,
   shouldQueueHydrationAfterTranslation,
@@ -1191,22 +1193,22 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
     }
 
     const nowIso = new Date().toISOString();
-    const resultMeta = {
+    const resultMeta = buildTranslationResultMeta({
       model: config.openaiModel,
-      scoring_model: scoringModel,
+      scoringModel,
       usage: data.usage ?? null,
-      scoring_usage: scoringUsage,
-      translation_usage: translationUsage,
-      scoring_v2_usage: scoringPolicyResult?.usage ?? null,
-      scoring_call_ms: scoringCallMs,
-      translation_call_ms: translationCallMs,
-      queue_wait_ms: jobTimingMeta(job, 'running').queue_wait_ms,
-      claim_delay_ms: jobTimingMeta(job, 'running').claim_delay_ms,
-      finished_at: nowIso,
-      importance_score: importanceScore,
-      scoring_version: scoringPolicyResult ? SCORING_POLICY_VERSION : null,
-      split_calls: !!(filterEnabled && config.splitCalls),
-    };
+      scoringUsage,
+      translationUsage,
+      scoringV2Usage: scoringPolicyResult?.usage ?? null,
+      scoringCallMs,
+      translationCallMs,
+      queueWaitMs: jobTimingMeta(job, 'running').queue_wait_ms,
+      claimDelayMs: jobTimingMeta(job, 'running').claim_delay_ms,
+      finishedAt: nowIso,
+      importanceScore,
+      scoringVersion: scoringPolicyResult ? SCORING_POLICY_VERSION : null,
+      splitCalls: !!(filterEnabled && config.splitCalls),
+    });
     try {
       await supabase.from('jobs').update({ result_meta: resultMeta }).eq('id', job.id);
     } catch (_e) { /* best-effort */ }
@@ -1233,33 +1235,31 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
 
     const { error: updateError } = await supabase
       .from('posts')
-      .update({
-        ...(translationSkippedByFilter ? {} : {
-          text_translated: translatedText,
-          lang_original: 'en',
-          translated_at: nowIso,
-          translation_model: config.openaiModel,
-          translation_tokens: (data?.usage as { total_tokens?: number } | undefined)?.total_tokens ?? null,
-          translation_duration_ms: job.started_at ? (Date.now() - new Date(job.started_at as string).getTime()) : null,
-        }),
-        importance_score: importanceScore,
-        importance_tags: importanceTags,
-        importance_reasoning: importanceReasoning,
-        delivery_decision: deliveryDecision,
-        score_axes: scoreAxes ?? null,
-        final_score: finalScore,
-        decision_reason: decisionReason,
-        score_breakdown: scoreBreakdown,
-        ...(scoringPolicyResult ? {
-          scoring_version: SCORING_POLICY_VERSION,
-          scoring_profile_id: scoringPolicyResult.profile_id,
-          audience_class: scoringPolicyResult.audience_class,
-          audience_confidence: scoringPolicyResult.audience_confidence,
-          audience_reason: scoringPolicyResult.audience_reason,
-          global_exception_class: scoringPolicyResult.global_exception_class,
-          score_review_status: scoringPolicyActive ? scoringPolicyResult.review_status : 'shadow',
-        } : {}),
-      })
+      .update(buildPostTranslationUpdatePatch({
+        translationSkippedByFilter,
+        translatedText,
+        nowIso,
+        openaiModel: config.openaiModel,
+        translationTokens: (data?.usage as { total_tokens?: number } | undefined)?.total_tokens ?? null,
+        translationDurationMs: job.started_at ? (Date.now() - new Date(job.started_at as string).getTime()) : null,
+        importanceScore,
+        importanceTags,
+        importanceReasoning,
+        deliveryDecision,
+        scoreAxes,
+        finalScore,
+        decisionReason,
+        scoreBreakdown,
+        scoringPolicy: scoringPolicyResult ? {
+          scoringVersion: SCORING_POLICY_VERSION,
+          scoringProfileId: scoringPolicyResult.profile_id,
+          audienceClass: scoringPolicyResult.audience_class,
+          audienceConfidence: scoringPolicyResult.audience_confidence,
+          audienceReason: scoringPolicyResult.audience_reason,
+          globalExceptionClass: scoringPolicyResult.global_exception_class,
+          scoreReviewStatus: scoringPolicyActive ? scoringPolicyResult.review_status : 'shadow',
+        } : null,
+      }))
       .eq('tweet_id', tweetId);
 
     if (updateError) throw updateError;

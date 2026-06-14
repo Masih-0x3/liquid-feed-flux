@@ -50,6 +50,51 @@ export type PostTranslationRouteInput = {
   duplicateBlocked: boolean;
 };
 
+export type TranslationResultMetaInput = {
+  model: string;
+  scoringModel: string;
+  usage: unknown;
+  scoringUsage: Record<string, unknown> | null;
+  translationUsage: Record<string, unknown> | null;
+  scoringV2Usage: unknown;
+  scoringCallMs: number | null;
+  translationCallMs: number | null;
+  queueWaitMs: unknown;
+  claimDelayMs: unknown;
+  finishedAt: string;
+  importanceScore: number | null;
+  scoringVersion: string | null;
+  splitCalls: boolean;
+};
+
+export type ScoringPolicyUpdateFields = {
+  scoringVersion: string;
+  scoringProfileId: string;
+  audienceClass: string;
+  audienceConfidence: number;
+  audienceReason: string;
+  globalExceptionClass: string | null;
+  scoreReviewStatus: string;
+};
+
+export type PostTranslationUpdatePatchInput = {
+  translationSkippedByFilter: boolean;
+  translatedText: string | null;
+  nowIso: string;
+  openaiModel: string;
+  translationTokens: number | null;
+  translationDurationMs: number | null;
+  importanceScore: number | null;
+  importanceTags: string[] | null;
+  importanceReasoning: string | null;
+  deliveryDecision: string;
+  scoreAxes: unknown;
+  finalScore: number | null;
+  decisionReason: string | null;
+  scoreBreakdown: Record<string, unknown> | null;
+  scoringPolicy: ScoringPolicyUpdateFields | null;
+};
+
 export type PostTranslationRoute =
   | {
     kind: "hydrate";
@@ -139,6 +184,61 @@ export function buildTranslationCallOptions(
     seed: config.openaiSeed,
     serviceTier: config.openaiServiceTier,
     parallelToolCalls: config.openaiParallelToolCalls,
+  };
+}
+
+export function buildTranslationResultMeta(
+  input: TranslationResultMetaInput,
+): Record<string, unknown> {
+  return {
+    model: input.model,
+    scoring_model: input.scoringModel,
+    usage: input.usage,
+    scoring_usage: input.scoringUsage,
+    translation_usage: input.translationUsage,
+    scoring_v2_usage: input.scoringV2Usage,
+    scoring_call_ms: input.scoringCallMs,
+    translation_call_ms: input.translationCallMs,
+    queue_wait_ms: input.queueWaitMs,
+    claim_delay_ms: input.claimDelayMs,
+    finished_at: input.finishedAt,
+    importance_score: input.importanceScore,
+    scoring_version: input.scoringVersion,
+    split_calls: input.splitCalls,
+  };
+}
+
+export function buildPostTranslationUpdatePatch(
+  input: PostTranslationUpdatePatchInput,
+): Record<string, unknown> {
+  return {
+    ...(input.translationSkippedByFilter ? {} : {
+      text_translated: input.translatedText,
+      lang_original: "en",
+      translated_at: input.nowIso,
+      translation_model: input.openaiModel,
+      translation_tokens: input.translationTokens,
+      translation_duration_ms: input.translationDurationMs,
+    }),
+    importance_score: input.importanceScore,
+    importance_tags: input.importanceTags,
+    importance_reasoning: input.importanceReasoning,
+    delivery_decision: input.deliveryDecision,
+    score_axes: input.scoreAxes ?? null,
+    final_score: input.finalScore,
+    decision_reason: input.decisionReason,
+    score_breakdown: input.scoreBreakdown,
+    ...(input.scoringPolicy
+      ? {
+        scoring_version: input.scoringPolicy.scoringVersion,
+        scoring_profile_id: input.scoringPolicy.scoringProfileId,
+        audience_class: input.scoringPolicy.audienceClass,
+        audience_confidence: input.scoringPolicy.audienceConfidence,
+        audience_reason: input.scoringPolicy.audienceReason,
+        global_exception_class: input.scoringPolicy.globalExceptionClass,
+        score_review_status: input.scoringPolicy.scoreReviewStatus,
+      }
+      : {}),
   };
 }
 
