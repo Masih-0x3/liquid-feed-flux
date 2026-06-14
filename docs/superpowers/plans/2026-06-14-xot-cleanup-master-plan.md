@@ -24,10 +24,10 @@ Main checkout preserved:
 /Users/stevmq/Finalized XOT
 ```
 
-Current implementation branch after Phase 13:
+Current implementation branch after Phase 14:
 
 ```text
-codex/xot-cleanup-23-settings-dashboard-xaccount
+codex/xot-cleanup-24-database-type-trust
 ```
 
 Current safe-state rule:
@@ -1369,29 +1369,37 @@ Understand migration drift and Supabase type drift before making schema changes.
 
 ## Steps
 
-- [ ] List linked migration state read-only.
+- [x] List linked migration state read-only.
 
 ```bash
 SUPABASE_TELEMETRY_DISABLED=1 npx supabase migration list --linked
 ```
 
-- [ ] Capture local migration files.
+- [x] Capture local migration files.
 
 ```bash
 find supabase/migrations -maxdepth 1 -type f | sort
 ```
 
-- [ ] Generate a schema diff read-only if linked access allows it.
+- [x] Generate a schema diff read-only if linked access allows it.
 
 ```bash
 SUPABASE_TELEMETRY_DISABLED=1 npx supabase db diff --linked --schema public
 ```
 
-- [ ] Record local-only, remote-only, and divergent migration facts in `docs/operations/database-type-trust.md`.
-- [ ] Do not apply the diff.
-- [ ] Regenerate Supabase types only after confirming the target schema is production.
-- [ ] Run strict typecheck after regenerated types.
-- [ ] Update fallback removal plan if regenerated types make compatibility branches unnecessary.
+- [x] Record local-only, remote-only, and divergent migration facts in `docs/operations/database-type-trust.md`.
+- [x] Do not apply the diff.
+- [x] Generate linked production Supabase types to `/tmp` for drift comparison only.
+- [x] Run strict typecheck without committing regenerated types.
+- [x] Update fallback removal plan based on observed type drift.
+
+## Implementation Notes
+
+- [x] Local and remote migration counts both report 96, but only 18 versions match exactly.
+- [x] There are 78 local-only and 78 remote-only migration versions, so migration count parity is not safety.
+- [x] `supabase db diff --linked --schema public` was attempted read-only and blocked because Docker was not running.
+- [x] Linked production types were generated to `/tmp/xot-linked-types.ts` for comparison only; checked-in types were not overwritten in this phase.
+- [x] Generated production types are materially newer than `src/integrations/supabase/types.ts`, including `PostgrestVersion: "14.5"`, newer `posts` scoring fields, and newer video/X/scoring tables.
 
 ## Validation
 
@@ -1402,25 +1410,26 @@ npm run build
 npm run check:release-state
 ```
 
+Completed validation:
+
+- [x] `npm run check:strict` passed.
+- [x] `npm test` passed.
+- [x] Env-backed `npm run build` passed.
+- [x] `npm run check:release-state` passed read-only.
+- [x] `git diff --check` passed.
+
 ## Commit
 
 ```bash
-git add docs/operations/database-type-trust.md src/integrations/supabase/types.ts
-git commit -m "chore: document database and supabase type trust"
-```
-
-If types are not regenerated, commit only the documentation:
-
-```bash
-git add docs/operations/database-type-trust.md
+git add docs/operations/database-type-trust.md docs/superpowers/plans/2026-06-14-xot-cleanup-master-plan.md
 git commit -m "docs: document database migration trust state"
 ```
 
 ## Exit Criteria
 
-- [ ] Migration state is understood.
-- [ ] No blind migration push has occurred.
-- [ ] Type drift has a specific remediation path.
+- [x] Migration state is understood.
+- [x] No blind migration push has occurred.
+- [x] Type drift has a specific remediation path.
 
 ---
 
