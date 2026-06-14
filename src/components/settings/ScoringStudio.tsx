@@ -19,7 +19,7 @@ import {
   type ScoringV2AxisKey,
   useSaveSettings,
 } from '@/hooks/useSettingsData';
-import { supabase } from '@/integrations/supabase/client';
+import { invokeAdminAction } from '@/api/adminActions';
 
 interface Props {
   initial?: ScoringPolicy;
@@ -168,15 +168,15 @@ export default function ScoringStudio({ initial }: Props) {
     setPreviewing(true);
     setPreviewResult(null);
     try {
-      const { data, error } = await supabase.functions.invoke('admin-actions', {
-        body: {
+      const data = await invokeAdminAction<{ ok?: boolean; error?: string; result?: Record<string, unknown> }>(
+        {
           action: 'preview_scoring_policy',
           text: previewText,
           author_handle: previewAuthor || undefined,
           profile_id: activeProfile.id,
         },
-      });
-      if (error) throw error;
+        { throwOnFailure: false },
+      );
       if (!data?.ok) throw new Error(data?.error ?? 'Preview failed');
       setPreviewResult(data.result as Record<string, unknown>);
     } catch (e) {
@@ -189,10 +189,10 @@ export default function ScoringStudio({ initial }: Props) {
   const dryRunBackfill = async () => {
     setDryRunState('checking');
     try {
-      const { data, error } = await supabase.functions.invoke('admin-actions', {
-        body: { action: 'backfill_score_v2', hours: 48, max: 100, dry_run: true },
-      });
-      if (error) throw error;
+      const data = await invokeAdminAction<{ ok?: boolean; error?: string; matched?: number }>(
+        { action: 'backfill_score_v2', hours: 48, max: 100, dry_run: true },
+        { throwOnFailure: false },
+      );
       if (!data?.ok) throw new Error(data?.error ?? 'Dry run failed');
       setDryRunState(`${data.matched ?? 0} recent posts would be queued`);
     } catch (e) {
@@ -204,10 +204,10 @@ export default function ScoringStudio({ initial }: Props) {
   const runEval = async () => {
     setDryRunState('evaluating');
     try {
-      const { data, error } = await supabase.functions.invoke('admin-actions', {
-        body: { action: 'run_scoring_eval', profile_id: activeProfile.id, limit: 10 },
-      });
-      if (error) throw error;
+      const data = await invokeAdminAction<{ ok?: boolean; error?: string; summary?: { accuracy?: number | string; correct?: number; profile_id?: string }; results?: unknown[] }>(
+        { action: 'run_scoring_eval', profile_id: activeProfile.id, limit: 10 },
+        { throwOnFailure: false },
+      );
       if (!data?.ok) throw new Error(data?.error ?? 'Evaluation failed');
       setDryRunState(`Evaluation accuracy: ${data.summary?.accuracy ?? 'n/a'}% on ${data.summary?.correct ?? 0}/${data.summary?.profile_id ? data.results?.length ?? 0 : 0} examples`);
     } catch (e) {

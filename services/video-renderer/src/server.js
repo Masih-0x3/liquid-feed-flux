@@ -1,5 +1,6 @@
 import http from "node:http";
-import { claimNextRender, claimRenderById, createSupabase, loadConfigFromEnv, processRenderRow, runPreflightForRenderId } from "./renderer.js";
+import { isAuthorizedRendererRequest, loadConfigFromEnv, loadServerRuntimeFromEnv, normalizeRendererToken } from "./config.js";
+import { claimNextRender, claimRenderById, createSupabase, processRenderRow, runPreflightForRenderId } from "./renderer.js";
 import { loadRenderSettingsOrDefault } from "./settings.js";
 
 function json(res, status, body) {
@@ -26,22 +27,18 @@ function readJson(req) {
   });
 }
 
-function authorized(req, token) {
-  if (!token) return true;
-  return req.headers.authorization === `Bearer ${token}`;
-}
-
 export function createRendererServer(options = {}) {
   const config = options.config || loadConfigFromEnv();
+  const runtime = options.runtime || loadServerRuntimeFromEnv(options.env);
   const supabase = options.supabase || createSupabase(config);
-  const token = options.token ?? process.env.VIDEO_RENDERER_TOKEN ?? "";
+  const token = normalizeRendererToken(options.token ?? runtime.token);
   const state = { running: 0, processed: 0, failed: 0, lastError: null };
 
   const writeHeartbeat = async (status = "online", metadata = {}) => {
     const payload = {
       renderer_id: config.rendererId,
       status,
-      version: process.env.npm_package_version || "0.1.0",
+      version: runtime.version,
       render_version: config.renderVersion,
       running: state.running,
       processed: state.processed,
@@ -98,7 +95,7 @@ export function createRendererServer(options = {}) {
         return json(res, 200, { ok: true, ...state });
       }
       if (req.method === "POST" && url.pathname === "/v1/render") {
-        if (!authorized(req, token)) return json(res, 401, { error: "Unauthorized" });
+        if (!isAuthorizedRendererRequest(req.headers, token)) return json(res, 401, { error: "Unauthorized" });
         const body = await readJson(req);
         const renderId = typeof body.render_id === "string" ? body.render_id : "";
         if (!renderId) return json(res, 400, { error: "render_id is required" });
@@ -106,7 +103,7 @@ export function createRendererServer(options = {}) {
         return json(res, 202, result);
       }
       if (req.method === "POST" && url.pathname === "/v1/preflight") {
-        if (!authorized(req, token)) return json(res, 401, { error: "Unauthorized" });
+        if (!isAuthorizedRendererRequest(req.headers, token)) return json(res, 401, { error: "Unauthorized" });
         const body = await readJson(req);
         const renderId = typeof body.render_id === "string" ? body.render_id : "";
         if (!renderId) return json(res, 400, { error: "render_id is required" });
@@ -152,13 +149,11 @@ export function createRendererServer(options = {}) {
 }
 
 export function startRendererServer() {
-  const port = Number(process.env.PORT || 8787);
-  const intervalMs = Math.max(1000, Number(process.env.POLL_INTERVAL_MS || 5000));
-  const heartbeatMs = Math.max(5000, Number(process.env.HEARTBEAT_INTERVAL_MS || 30000));
-  const { server, pollOnce, writeHeartbeat, writeModeHeartbeat } = createRendererServer();
-  server.listen(port, () => {
-    console.log(JSON.stringify({ service: "xot-video-renderer", action: "listening", port }));
-    writeHeartbeat("online", { action: "listening", port }).catch((error) => {
+  const runtime = loadServerRuntimeFromEnv();
+  const { server, pollOnce, writeHeartbeat, writeModeHeartbeat } = createRendererServer({ runtime });
+  server.listen(runtime.port, () => {
+    console.log(JSON.stringify({ service: "xot-video-renderer", action: "listening", port: runtime.port }));
+    writeHeartbeat("online", { action: "listening", port: runtime.port }).catch((error) => {
       console.error(JSON.stringify({ service: "xot-video-renderer", action: "heartbeat_error", error: error.message }));
     });
   });
@@ -166,11 +161,11 @@ export function startRendererServer() {
     pollOnce().catch((error) => {
       console.error(JSON.stringify({ service: "xot-video-renderer", action: "poll_error", error: error.message }));
     });
-  }, intervalMs);
+  }, runtime.pollIntervalMs);
   setInterval(() => {
     writeModeHeartbeat({ action: "interval" }).catch((error) => {
       console.error(JSON.stringify({ service: "xot-video-renderer", action: "heartbeat_error", error: error.message }));
     });
-  }, heartbeatMs);
+  }, runtime.heartbeatIntervalMs);
   return server;
 }

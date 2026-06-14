@@ -137,10 +137,14 @@ async function insertVideoRenderPipelineEvent(
 // deno-lint-ignore no-explicit-any
 async function dispatchVideoRendererForTarget(sb: any, renderId: string, tweetId: string, source: string): Promise<void> {
   const rendererUrl = (Deno.env.get('VIDEO_RENDERER_URL') ?? '').replace(/\/+$/, '');
-  const rendererToken = Deno.env.get('VIDEO_RENDERER_TOKEN') ?? '';
+  const rendererToken = (Deno.env.get('VIDEO_RENDERER_TOKEN') ?? '').trim();
   const meta = { render_id: renderId, dispatch_source: source };
-  if (!rendererUrl) {
-    await insertVideoRenderPipelineEvent(sb, tweetId, 'queued', null, { ...meta, mode: 'poller_only' });
+  if (!rendererUrl || !rendererToken) {
+    await insertVideoRenderPipelineEvent(sb, tweetId, 'queued', null, {
+      ...meta,
+      mode: 'poller_only',
+      reason: !rendererUrl ? 'renderer_url_missing' : 'renderer_token_missing',
+    });
     return;
   }
   const controller = new AbortController();

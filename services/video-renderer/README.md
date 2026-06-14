@@ -51,6 +51,11 @@ OPENCV_INPAINT_CLOSE_ITERATIONS=1
 OPENCV_INPAINT_FEATHER=0
 ```
 
+`VIDEO_RENDERER_TOKEN` is required for HTTP dispatch routes such as
+`POST /v1/render` and `POST /v1/preflight`. When it is missing or blank, those
+routes return `401` and Edge callers should leave the row for poller-only
+processing instead of making an unauthenticated request.
+
 The transcription path is Deepgram-first. The renderer extracts normal mono
 16 kHz audio and sends that to Deepgram. Only when Deepgram returns no timed
 segments or weak rejected speech does `ENHANCED_AUDIO_RETRY=1` create a second,

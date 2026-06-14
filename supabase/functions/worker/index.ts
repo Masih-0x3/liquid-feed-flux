@@ -8,14 +8,8 @@ import {
   type ScoreAxisKey,
   type ScoreAxes,
   parseScoreAxes,
-  computeFinalScore,
-  type EditorialProfile,
-  type ProfileDecisionInput,
-  type ProfileDecisionResult,
-  applyProfileDecision,
 } from "../_shared/scoring.ts";
 import { requireInternalAuth, serviceRoleBearerHeader } from "../_shared/internalAuth.ts";
-import { recordLegacyXApiUsage, recordXApiEvent } from "../_shared/xApiLedger.ts";
 import {
   DEFAULT_DUPLICATE_GATE,
   normalizeDuplicateGateConfig,
@@ -39,21 +33,75 @@ import {
   selectAutochainJobTypes,
   shouldAutochain,
 } from "../_shared/workerAutochain.ts";
-import {
-  applyRenderedVideoPreference,
-  decideVideoRenderGate,
-  type VideoRenderGateDecision,
-  type VideoRenderRow,
-} from "../_shared/videoRenderGate.ts";
-import {
-  normalizeVideoRenderConfigValue,
-  type VideoRenderConfig,
-} from "../_shared/videoRenderConfig.ts";
-import {
-  isTelegramBotVideoTooLarge,
-  telegramVideoTooLargeReason,
-} from "../_shared/telegramVideoLimits.ts";
+import { applyRenderedVideoPreference } from "../_shared/videoRenderGate.ts";
 import type { XMediaRow } from "../_shared/mediaSelection.ts";
+import {
+  extractHandleFromUrl,
+  extractMediaFromText,
+  extractNumericTweetId,
+  formatMessageWithTemplate,
+  hashUrl,
+  isTelegramParseError,
+  jobError,
+  jobLane,
+  jobTimingMeta,
+  maxBatchSizeForJobTypes,
+  stripMarkdownToPlain,
+} from "./workerUtils.ts";
+import {
+  handleJobFailure,
+  insertPipelineEvent,
+  mergeJobResultMeta,
+  NonRetryableJobError,
+  recordPipelineEvent,
+} from "./jobLifecycle.ts";
+import {
+  enqueuePostDeliveryAfterRenderGate as enqueuePostDeliveryAfterRenderGateCore,
+  markVideoRenderPosted,
+  prepareVideoRenderGate,
+  VIDEO_RENDER_DEFER_MS,
+} from "./videoRenderWorkflow.ts";
+import {
+  computeAdaptiveSpacing,
+  getMediaUrl,
+  sendTelegramMedia,
+  sendTelegramPhotoFromStorage,
+  sendTelegramPhotoGroupFromStorage,
+  sendTelegramVideoFromStorage,
+  throwTelegramError,
+} from "./telegramDelivery.ts";
+import {
+  countDailyHydrationsUsed,
+  getTwitterCreds,
+  hydrateOauthHeader,
+  hydratePercentEncode,
+  loadHydrationSettings,
+  recordXApiCall,
+} from "./xApiWorkflow.ts";
+import {
+  buildResolvedMediaRows,
+  buildResolveMediaDownloadJob,
+  rmFetchFromFx,
+  rmFetchFromVx,
+} from "./mediaWorkflow.ts";
+import {
+  buildClassifierToolFunction,
+  buildScoringBaseDecisionState,
+  parseClassifierToolCallArguments,
+  renderScoringSystemPrompt,
+  renderScoringUserMessage,
+  resolveActiveFeedbackThreshold,
+  resolveScoringCallOptions,
+  type ScoringDecisionLog,
+} from "./scoringWorkflow.ts";
+import {
+  buildPostTranslationUpdatePatch,
+  buildTranslationCallOptions,
+  buildTranslationResultMeta,
+  choosePostTranslationRoute,
+  renderTranslationUserPrompt as renderTranslationUserPromptText,
+  shouldQueueHydrationAfterTranslation,
+} from "./translateWorkflow.ts";
 
 export {
   SCORE_AXIS_KEYS,
@@ -75,12 +123,6 @@ const corsHeaders = {
 const SETTINGS_CACHE_MS = 45_000;
 // deno-lint-ignore no-explicit-any
 let configCache: { expiresAt: number; value: any } | null = null;
-
-const FAST_LANE_TYPES = new Set(['dedupe', 'resolve_media', 'download_media', 'hydrate_tweet', 'compute_signature']);
-const MODEL_LANE_TYPES = new Set(['translate', 'enrich']);
-const DELIVERY_LANE_TYPES = new Set(['deliver']);
-const VIDEO_RENDER_VERSION = 'persian-subtitles-masihh-v1';
-const VIDEO_RENDER_DEFER_MS = 30_000;
 
 // deno-lint-ignore no-explicit-any
 async function loadScoringCalibrationExamples(supabase: any, profileId: string): Promise<ScoringPolicyCalibrationExample[]> {
@@ -111,25 +153,6 @@ class JobDeferred extends Error {
   }
 }
 
-class NonRetryableJobError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'NonRetryableJobError';
-  }
-}
-
-function jobLane(type: string): 'fast' | 'model' | 'delivery' {
-  if (FAST_LANE_TYPES.has(type)) return 'fast';
-  if (MODEL_LANE_TYPES.has(type)) return 'model';
-  if (DELIVERY_LANE_TYPES.has(type)) return 'delivery';
-  return 'fast';
-}
-
-function maxBatchSizeForJobTypes(jobTypes: string[] | null): number {
-  if (jobTypes && jobTypes.length > 0 && jobTypes.every((type) => jobLane(type) === 'fast')) return 40;
-  return 20;
-}
-
 type EdgeRuntimeWithWaitUntil = { waitUntil?: (promise: Promise<unknown>) => void };
 
 function scheduleBackground(promise: Promise<unknown>): boolean {
@@ -143,12 +166,6 @@ function scheduleBackground(promise: Promise<unknown>): boolean {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function hashUrl(url: string): Promise<string> {
-  const data = new TextEncoder().encode(url);
-  const digest = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 // Load config from settings table with fallback defaults
@@ -659,271 +676,10 @@ serve(async (req) => {
 });
 
 // deno-lint-ignore no-explicit-any
-async function loadVideoRenderConfig(supabase: any): Promise<VideoRenderConfig> {
-  try {
-    const { data } = await supabase
-      .from('settings')
-      .select('value')
-      .eq('key', 'video_render_config')
-      .maybeSingle();
-    return normalizeVideoRenderConfigValue(data?.value);
-  } catch (_e) {
-    return normalizeVideoRenderConfigValue({ render_version: VIDEO_RENDER_VERSION });
-  }
-}
-
-// deno-lint-ignore no-explicit-any
-async function loadVideoRenderDecision(supabase: any, tweetId: string, renderingEnabled = true): Promise<{
-  decision: VideoRenderGateDecision;
-  mediaRows: XMediaRow[];
-}> {
-  const [mediaRes, renderRes] = await Promise.all([
-    supabase
-      .from('media')
-      .select('id, storage_path, downloaded_at, mime_type, file_size, kind, duration_ms, src_url, ordering')
-      .eq('tweet_id', tweetId)
-      .order('ordering', { ascending: true }),
-    supabase
-      .from('video_renders')
-      .select('id, tweet_id, source_media_id, status, failure_policy, output_storage_path, output_mime_type, output_file_size, duration_ms, width, height, render_version, error, block_reason, source_language, target_language, preflight, created_at, updated_at')
-      .eq('tweet_id', tweetId)
-      .order('updated_at', { ascending: false }),
-  ]);
-  if (mediaRes.error) throw mediaRes.error;
-  if (renderRes.error) throw renderRes.error;
-  const mediaRows = (mediaRes.data ?? []) as XMediaRow[];
-  const renderRows = (renderRes.data ?? []) as VideoRenderRow[];
-  return {
-    mediaRows,
-    decision: decideVideoRenderGate({
-      tweetId,
-      mediaRows,
-      renderRows,
-      renderingEnabled,
-    }),
-  };
-}
-
-// deno-lint-ignore no-explicit-any
-async function dispatchVideoRendererForTarget(supabase: any, renderId: string, tweetId: string, source: string): Promise<void> {
-  const rendererUrl = (Deno.env.get('VIDEO_RENDERER_URL') ?? '').replace(/\/+$/, '');
-  const rendererToken = Deno.env.get('VIDEO_RENDERER_TOKEN') ?? '';
-  const meta = { render_id: renderId, dispatch_source: source };
-
-  if (!rendererUrl) {
-    await insertPipelineEvent(supabase, 'post', tweetId, 'video_render_dispatch', 'queued', new Date().toISOString(), null, null, {
-      ...meta,
-      mode: 'poller_only',
-    });
-    return;
-  }
-
-  await insertPipelineEvent(supabase, 'post', tweetId, 'video_render_dispatch', 'queued', new Date().toISOString(), null, null, meta);
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 3500);
-  const invokePromise = fetch(`${rendererUrl}/v1/render`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(rendererToken ? { Authorization: `Bearer ${rendererToken}` } : {}),
-    },
-    body: JSON.stringify({ render_id: renderId, tweet_id: tweetId, source }),
-    signal: controller.signal,
-  }).then(async (resp) => {
-    if (!resp.ok) {
-      const text = await resp.text().catch(() => '');
-      await insertPipelineEvent(supabase, 'post', tweetId, 'video_render_dispatch', 'failed', null, new Date().toISOString(), `renderer ${resp.status}: ${text.slice(0, 300)}`, meta);
-    }
-  }).catch((error: unknown) => insertPipelineEvent(
-    supabase,
-    'post',
-    tweetId,
-    'video_render_dispatch',
-    'failed',
-    null,
-    new Date().toISOString(),
-    error instanceof Error ? error.message : String(error),
-    meta,
-  )).finally(() => clearTimeout(timeout));
-
-  if (!scheduleBackground(invokePromise)) {
-    await Promise.race([invokePromise, sleep(1200)]);
-  }
-}
-
-// deno-lint-ignore no-explicit-any
-async function prepareVideoRenderGate(supabase: any, tweetId: string, source: string): Promise<{
-  ready: boolean;
-  blocked: boolean;
-  blockReason?: string;
-  decision: VideoRenderGateDecision;
-  mediaRows: XMediaRow[];
-}> {
-  const cfg = await loadVideoRenderConfig(supabase);
-  const { decision, mediaRows } = await loadVideoRenderDecision(supabase, tweetId, cfg.mode !== 'disabled');
-
-  if (cfg.mode === 'disabled') {
-    return { ready: true, blocked: false, decision, mediaRows };
-  }
-
-  if (decision.action === 'enqueue_render') {
-    if (!decision.media.id) throw new Error(`video_render_source_missing_id:${tweetId}`);
-    const { data: renderId, error } = await supabase.rpc('enqueue_video_render', {
-      p_tweet_id: tweetId,
-      p_source_media_id: decision.media.id,
-      p_render_version: cfg.renderVersion,
-      p_failure_policy: cfg.failurePolicy,
-    });
-    if (error) throw error;
-    if (renderId) await dispatchVideoRendererForTarget(supabase, String(renderId), tweetId, source);
-    if (cfg.mode === 'shadow') {
-      await insertPipelineEvent(supabase, 'post', tweetId, 'video_render', 'queued', null, null, null, {
-        source,
-        shadow: true,
-        render_id: renderId,
-        reason: decision.reason,
-      });
-      return { ready: true, blocked: false, decision, mediaRows };
-    }
-    return { ready: false, blocked: false, decision, mediaRows };
-  }
-
-  if (decision.action === 'wait_media') {
-    await supabase.from('jobs').upsert({
-      type: 'download_media',
-      payload: { tweet_id: tweetId, source: 'video_render_gate' },
-      status: 'pending',
-      priority: 12,
-      idempotency_key: `download_media:video_render:${tweetId}`,
-      next_run_at: new Date().toISOString(),
-      locked_at: null,
-      locked_by: null,
-      lease_expires_at: null,
-      last_error: null,
-      attempts: 0,
-    }, { onConflict: 'idempotency_key', ignoreDuplicates: false });
-    await insertPipelineEvent(supabase, 'post', tweetId, 'video_render', 'queued', null, null, null, {
-      source,
-      shadow: cfg.mode === 'shadow',
-      reason: decision.reason,
-      waiting_for: 'source_media_download',
-    });
-    if (cfg.mode === 'shadow') return { ready: true, blocked: false, decision, mediaRows };
-    return { ready: false, blocked: false, decision, mediaRows };
-  }
-
-  if (decision.action === 'wait_render') {
-    await insertPipelineEvent(supabase, 'post', tweetId, 'video_render', 'running', null, null, null, {
-      source,
-      shadow: cfg.mode === 'shadow',
-      render_id: decision.render.id,
-      reason: decision.reason,
-    });
-    if (cfg.mode === 'shadow') return { ready: true, blocked: false, decision, mediaRows };
-    return { ready: false, blocked: false, decision, mediaRows };
-  }
-
-  if (decision.action === 'block') {
-    await insertPipelineEvent(supabase, 'post', tweetId, 'video_render', 'blocked', null, new Date().toISOString(), decision.reason, {
-      source,
-      shadow: cfg.mode === 'shadow',
-      render_id: decision.render.id,
-      reason: decision.reason,
-    });
-    if (cfg.mode === 'shadow') return { ready: true, blocked: false, decision, mediaRows };
-    return { ready: false, blocked: true, blockReason: decision.reason, decision, mediaRows };
-  }
-
-  if (cfg.mode === 'shadow') return { ready: true, blocked: false, decision, mediaRows };
-  return { ready: true, blocked: false, decision, mediaRows };
-}
-
-// deno-lint-ignore no-explicit-any
-async function enqueueDeliverJob(supabase: any, tweetId: string, source: string, resetExisting = true, delayMs = 0) {
-  const idempotencyKey = `deliver:${tweetId}`;
-  const nextRunAt = new Date(Date.now() + Math.max(0, delayMs)).toISOString();
-  const { error: deliveryJobError } = await supabase
-    .from('jobs')
-    .upsert({
-      type: 'deliver',
-      payload: { tweet_id: tweetId },
-      status: 'pending',
-      priority: 20,
-      idempotency_key: idempotencyKey,
-      next_run_at: nextRunAt,
-      locked_at: null,
-      locked_by: null,
-      lease_expires_at: null,
-      last_error: null,
-      attempts: 0,
-    }, { onConflict: 'idempotency_key', ignoreDuplicates: !resetExisting });
-  if (deliveryJobError) {
-    console.warn(`${source}: failed to enqueue deliver:`, deliveryJobError.message);
-    return false;
-  }
-
-  await insertPipelineEvent(supabase, 'post', tweetId, 'deliver', 'queued', null, null, null, { source, next_run_at: nextRunAt });
-  try {
-    const { data: existingDel } = await supabase
-      .from('deliveries')
-      .select('id')
-      .eq('subject_type', 'post')
-      .eq('subject_id', tweetId)
-      .eq('status', 'pending')
-      .limit(1);
-    if (!existingDel || existingDel.length === 0) {
-      await supabase.from('deliveries').insert({
-        subject_type: 'post', subject_id: tweetId, status: 'pending', attempts: 0
-      });
-    }
-  } catch (_e) { /* best-effort */ }
-  return true;
-}
-
-// deno-lint-ignore no-explicit-any
 async function enqueuePostDeliveryAfterRenderGate(supabase: any, tweetId: string, source = 'worker', resetExisting = true) {
-  const gate = await prepareVideoRenderGate(supabase, tweetId, source);
-  if (gate.blocked) {
-    await insertPipelineEvent(supabase, 'post', tweetId, 'deliver', 'completed', null, new Date().toISOString(), null, {
-      skipped: 'video_render_blocked',
-      reason: gate.blockReason,
-      gate_action: gate.decision.action,
-      source,
-    });
-    console.log(JSON.stringify({
-      function: 'worker',
-      action: 'delivery_skipped_video_render_blocked',
-      tweet_id: tweetId,
-      source,
-      reason: gate.blockReason,
-    }));
-    return;
-  }
-  const delayMs = gate.ready ? 0 : VIDEO_RENDER_DEFER_MS;
-  const queued = await enqueueDeliverJob(supabase, tweetId, source, resetExisting, delayMs);
-  if (queued && gate.ready) {
-    await dispatchXPosterForTarget(supabase, tweetId, source);
-  }
-  if (!gate.ready) {
-    console.log(JSON.stringify({
-      function: 'worker',
-      action: 'delivery_waiting_video_render',
-      tweet_id: tweetId,
-      source,
-      gate_action: gate.decision.action,
-    }));
-  }
-}
-
-// deno-lint-ignore no-explicit-any
-async function markVideoRenderPosted(supabase: any, tweetId: string): Promise<void> {
-  const cfg = await loadVideoRenderConfig(supabase);
-  try {
-    await supabase.rpc('mark_video_render_posted', {
-      p_tweet_id: tweetId,
-      p_retention_hours: cfg.retentionHours,
-    });
-  } catch (_e) { /* best-effort */ }
+  return enqueuePostDeliveryAfterRenderGateCore(supabase, tweetId, source, resetExisting, {
+    dispatchXPosterForTarget,
+  });
 }
 
 async function handleTranslateJob(job: Record<string, unknown>, // deno-lint-ignore no-explicit-any
@@ -1024,159 +780,53 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
       });
     }
 
-    // Resolve scoring params (fall back to translation values if not set)
-    const scoringModel = config.scoringModel ?? config.openaiModel;
-    const scoringTemperature = config.scoringTemperature ?? config.openaiTemperature;
-    const scoringMaxTokens = config.scoringMaxCompletionTokens ?? config.openaiMaxCompletionTokens;
-    const scoringTopP = config.scoringTopP ?? config.openaiTopP;
-    const scoringReasoningEffort = config.scoringReasoningEffort ?? config.openaiReasoningEffort;
-    const scoringVerbosity = config.scoringVerbosity ?? config.openaiVerbosity;
-    const scoringSeed = config.scoringSeed ?? config.openaiSeed;
-    const scoringServiceTier = config.scoringServiceTier ?? config.openaiServiceTier;
-    const scoringParallelTools = config.scoringParallelToolCalls ?? config.openaiParallelToolCalls;
-
-    // Build shared scoring system + user messages (used by both split and combined paths)
-    const scoringGuidelines = config.contentFilter.editorial_guidelines || '';
-    const priorityTopics = config.contentFilter.priority_topics.join(', ') || 'none specified';
-    const lowPriorityTopics = config.contentFilter.low_priority_topics.join(', ') || 'none specified';
-    const guidelinesBlock = scoringGuidelines.trim()
-      ? `### Editorial Guidelines (AUTHORITATIVE — these override the default rubric when they conflict)\n---\n${scoringGuidelines}\n---`
-      : '';
-
-    const fallbackRubric = `You have two tasks. Complete both carefully.
-
-## Task 1: Translation
-{translation_prompt}
-
-## Task 2: News Importance Scoring
-You are an editorial assistant scoring news items for a curated Telegram channel focused on Iran and the Middle East.
-
-### STEP A — Assign Relevance Level (state in reasoning)
-- DIRECT (Iran gov/IRGC/nuclear/Hormuz/proxies/Israel-Iran/US-Iran war/sanctions on Iran): no cap.
-- INDIRECT (Iran is the SUBJECT of foreign discussion): cap at 16.
-- NO IRAN NEXUS (pure US/EU/China domestic): cap at 8.
-
-### STEP B — Score 1-20 (importance_score)
-- Manual calibration from production feedback: direct Iran crisis, war, diplomacy, and military-posture items should usually land in 17-19 when credible. Trump/Netanyahu/US/Pakistan leadership statements or coordination specifically about Iran are DIRECT audience-fit, not routine foreign politics. Qeshm/Hormuz, air-defense, drones, refueling tankers, US-Israel posture, IRGC/proxy threats, nuclear/escalation signals, and threats against POTUS family or senior US targets should be treated as very high impact. Pure Taiwan or unrelated domestic news with no Iran/Middle East nexus remains low.
-
-### STEP C — Score the 6 axes (axes object), each 0-10
-- iran_relevance: 8-10 if DIRECT, 4-7 if INDIRECT, 0-3 if NONE.
-- severity: how big the event itself is — strike/war > policy > analysis > routine.
-- novelty: breaking new info > update > recap/rehash.
-- credibility: official statement > named reporter > anonymous/rumor.
-- actionability: does it materially shift policy/markets/the war picture?
-- noise: INVERTED — high if spam/promo/personal/sports, low for substantive news.
-
-### Topics
-High-priority (boost 1-2): {priority_topics}
-Low-priority (reduce 1-2): {low_priority_topics}
-
-{editorial_guidelines_block}
-
-You MUST call the "classify_importance" tool with BOTH importance_score (1-20) AND axes (all 6 axes).`;
+    const {
+      model: scoringModel,
+      temperature: scoringTemperature,
+      maxOutputTokens: scoringMaxTokens,
+      topP: scoringTopP,
+      reasoningEffort: scoringReasoningEffort,
+      verbosity: scoringVerbosity,
+      seed: scoringSeed,
+      serviceTier: scoringServiceTier,
+      parallelToolCalls: scoringParallelTools,
+    } = resolveScoringCallOptions(config);
 
     const accountData = (post as Record<string, unknown>).accounts as Record<string, unknown> | null;
     const authorDisplay = authorHandle || (accountData?.handle as string) || 'unknown';
     const accountName = (accountData?.display_name as string) || '';
     const publishedAt = post.tweeted_at ? new Date(post.tweeted_at as string).toISOString() : 'unknown';
 
-    const buildUserMessage = () => `Author: @${authorDisplay}${accountName ? ` (${accountName})` : ''}
-Published: ${publishedAt}
-Has media: ${post.has_media ? 'yes' : 'no'}
-URL: ${post.url || 'N/A'}
+    const buildUserMessage = () => renderScoringUserMessage({
+      textOriginal: String(post.text_original || ''),
+      authorDisplay,
+      accountName,
+      publishedAt,
+      hasMedia: !!post.has_media,
+      url: post.url as string | null,
+    });
 
-Content:
-${post.text_original}`;
+    const buildToolFunction = (includeTranslatedText: boolean): Record<string, unknown> =>
+      buildClassifierToolFunction(config.classifierToolSchema, includeTranslatedText);
 
-    // Build classifier tool schema (with optional translated_text stripped for split mode)
-    const AXES_SCHEMA = {
-      type: 'object',
-      description: 'Six independent scoring axes (each 0-10). noise is INVERTED (high = bad).',
-      properties: {
-        iran_relevance: { type: 'integer', minimum: 0, maximum: 10 },
-        severity: { type: 'integer', minimum: 0, maximum: 10 },
-        novelty: { type: 'integer', minimum: 0, maximum: 10 },
-        credibility: { type: 'integer', minimum: 0, maximum: 10 },
-        actionability: { type: 'integer', minimum: 0, maximum: 10 },
-        noise: { type: 'integer', minimum: 0, maximum: 10 },
-      },
-      required: ['iran_relevance', 'severity', 'novelty', 'credibility', 'actionability', 'noise'],
-    };
-    const buildToolFunction = (includeTranslatedText: boolean): Record<string, unknown> => {
-      let base: Record<string, unknown>;
-      try {
-        base = config.classifierToolSchema
-          ? JSON.parse(config.classifierToolSchema)
-          : {
-              name: 'classify_importance',
-              description: 'Provide importance classification of this news item',
-              parameters: {
-                type: 'object',
-                properties: {
-                  translated_text: { type: 'string', description: 'The Persian translation of the original text' },
-                  importance_score: { type: 'integer', minimum: 1, maximum: 20 },
-                  axes: AXES_SCHEMA,
-                  tags: { type: 'array', items: { type: 'string' } },
-                  reasoning: { type: 'string', description: 'Required: state relevance level, tier, and any cap applied' },
-                },
-                required: ['translated_text', 'importance_score', 'axes', 'tags', 'reasoning'],
-              },
-            };
-      } catch (e) {
-        console.warn('Invalid classifier_tool_schema, using fallback:', (e as Error).message);
-        base = {
-          name: 'classify_importance',
-          parameters: {
-            type: 'object',
-            properties: {
-              translated_text: { type: 'string' },
-              importance_score: { type: 'integer', minimum: 1, maximum: 20 },
-              axes: AXES_SCHEMA,
-              tags: { type: 'array', items: { type: 'string' } },
-              reasoning: { type: 'string' },
-            },
-            required: ['translated_text', 'importance_score', 'axes', 'tags', 'reasoning'],
-          },
-        };
-      }
-      // Auto-inject axes into customized schemas if missing (PR1 backward-compat)
-      const params = base.parameters as Record<string, unknown>;
-      const props = { ...(params.properties as Record<string, unknown>) };
-      if (!props.axes) {
-        props.axes = AXES_SCHEMA;
-        const required = Array.from(new Set([...((params.required as string[]) || []), 'axes']));
-        base = { ...base, parameters: { ...params, properties: props, required } };
-      }
-      if (!includeTranslatedText) {
-        const p2 = base.parameters as Record<string, unknown>;
-        const props2 = { ...(p2.properties as Record<string, unknown>) };
-        delete props2.translated_text;
-        const required = ((p2.required as string[]) || []).filter((k) => k !== 'translated_text');
-        base = { ...base, parameters: { ...p2, properties: props2, required } };
-      }
-      return base;
-    };
-
-    const renderSystemPrompt = () => (config.scoringSystemPrompt ?? fallbackRubric)
-      .replace('{translation_prompt}', config.translationPrompt)
-      .replace('{priority_topics}', priorityTopics)
-      .replace('{low_priority_topics}', lowPriorityTopics)
-      .replace('{editorial_guidelines_block}', guidelinesBlock);
+    const renderSystemPrompt = () => renderScoringSystemPrompt({
+      scoringSystemPrompt: config.scoringSystemPrompt,
+      translationPrompt: config.translationPrompt,
+      priorityTopics: config.contentFilter.priority_topics,
+      lowPriorityTopics: config.contentFilter.low_priority_topics,
+      editorialGuidelines: config.contentFilter.editorial_guidelines,
+    });
 
     // Helper: render translation user prompt from template (or default)
-    const renderTranslationUserPrompt = () => {
-      const tpl = config.userPromptTemplate;
-      if (tpl && tpl.trim()) {
-        return tpl
-          .replace(/\{content\}/g, post.text_original as string)
-          .replace(/\{author\}/g, `@${authorDisplay}`)
-          .replace(/\{author_handle\}/g, `@${authorDisplay}`)
-          .replace(/\{author_name\}/g, accountName)
-          .replace(/\{published_at\}/g, publishedAt)
-          .replace(/\{published_date\}/g, publishedAt);
-      }
-      return post.text_original as string;
-    };
+    const renderTranslationUserPrompt = () => renderTranslationUserPromptText({
+      template: config.userPromptTemplate,
+      content: post.text_original as string,
+      authorDisplay,
+      accountName,
+      publishedAt,
+    });
+    const buildTranslationRequest = () =>
+      buildTranslationCallOptions(config, renderTranslationUserPrompt());
 
     // ============ SPLIT PATH: score first, translate only on pass ============
     let scoringPolicyResult: ScoringPolicyResult | null = null;
@@ -1184,90 +834,62 @@ ${post.text_original}`;
     const scoringPolicyActive = scoringPolicyEnabled && (config.scoringPolicy?.mode === 'active' || forceScoringV2);
     let splitDecisionState: FeedbackBiasResult | null = null;
 
-    const activeFeedbackThreshold = () => {
-      if (typeof config.editorialProfile?.threshold === 'number') return config.editorialProfile.threshold;
-      const authorRule = authorHandle ? config.contentFilter.author_rules[authorHandle] : null;
-      if (authorRule?.rule === 'custom_threshold' && authorRule.threshold != null) {
-        return authorRule.threshold;
-      }
-      return config.contentFilter.default_threshold;
-    };
+    const activeFeedbackThreshold = () => resolveActiveFeedbackThreshold({
+      editorialProfileThreshold: config.editorialProfile?.threshold,
+      authorHandle,
+      authorRules: config.contentFilter.author_rules,
+      defaultThreshold: config.contentFilter.default_threshold,
+    });
 
-    const buildBaseDecisionState = (): Omit<FeedbackBiasResult, 'scoreBreakdown'> => {
-      if (feedbackLocked) {
-        const lockedFinalScore = typeof post.final_score === 'number'
-          ? post.final_score
-          : Number(post.final_score ?? NaN) || importanceScore;
-        return {
-          deliveryDecision: post.delivery_decision === 'skip' ? 'skip' : 'deliver',
-          decisionReason: typeof post.decision_reason === 'string' ? post.decision_reason : 'feedback_locked',
-          finalScore: lockedFinalScore,
-        };
-      }
-      let deliveryDecision = 'deliver';
-      let decisionReason: string | null = null;
-      let finalScore: number | null = scoringPolicyActive && scoringPolicyResult
-        ? scoringPolicyResult.final_score
-        : scoreAxes ? computeFinalScore(scoreAxes) : (importanceScore ?? null);
-
-      if (filterEnabled && scoringPolicyActive && scoringPolicyResult && !scoreOnly) {
-        deliveryDecision = scoringPolicyResult.delivery_decision;
-        decisionReason = scoringPolicyResult.decision_reason;
-        finalScore = scoringPolicyResult.final_score;
-        importanceScore = Math.round(scoringPolicyResult.final_score);
-        importanceTags = scoringPolicyResult.tags;
-        importanceReasoning = scoringPolicyResult.audience_reason;
-        scoreAxes = scoringPolicyResult.axes as ScoreAxes;
+    const logBaseDecision = (logEvent: ScoringDecisionLog | null) => {
+      if (!logEvent) return;
+      if (logEvent.kind === 'v2') {
         console.log(JSON.stringify({
           function: 'worker',
           action: 'filter_decision_v2',
           tweet_id: tweetId,
-          decision: deliveryDecision,
-          final_score: finalScore,
-          audience_class: scoringPolicyResult.audience_class,
-          profile: scoringPolicyResult.profile_id,
-          reason: decisionReason,
+          decision: logEvent.decision,
+          final_score: logEvent.finalScore,
+          audience_class: logEvent.audienceClass,
+          profile: logEvent.profileId,
+          reason: logEvent.reason,
         }));
-      } else if (legacyFilterEnabled && importanceScore !== null && !scoreOnly) {
-        if (config.editorialProfile) {
-          const r = applyProfileDecision({
-            profile: config.editorialProfile,
-            axes: scoreAxes,
-            legacyScore: importanceScore,
-            tags: importanceTags,
-            text: String(post.text_original || ''),
-            authorHandle,
-          });
-          deliveryDecision = r.decision;
-          decisionReason = r.reason;
-          finalScore = r.finalScore;
-          console.log(JSON.stringify({ function: 'worker', action: 'filter_decision', tweet_id: tweetId, decision: deliveryDecision, score: importanceScore, final_score: finalScore, profile: config.editorialProfile.id, author: authorHandle, reason: decisionReason }));
-        } else {
-          const authorRule = authorHandle ? config.contentFilter.author_rules[authorHandle] : null;
-          if (authorRule?.rule === 'always_deliver') {
-            deliveryDecision = 'deliver';
-            decisionReason = `author_rule:always_deliver:${authorHandle}`;
-          } else if (authorRule?.rule === 'always_skip') {
-            deliveryDecision = 'skip';
-            decisionReason = `author_rule:always_skip:${authorHandle}`;
-          } else {
-            const threshold = authorRule?.rule === 'custom_threshold' && authorRule.threshold != null
-              ? authorRule.threshold
-              : config.contentFilter.default_threshold;
-            deliveryDecision = importanceScore >= threshold ? 'deliver' : 'skip';
-            decisionReason = deliveryDecision === 'deliver'
-              ? `score_pass:${importanceScore}>=${threshold}`
-              : `below_threshold:${importanceScore}<${threshold}`;
-          }
-          console.log(JSON.stringify({ function: 'worker', action: 'filter_decision', tweet_id: tweetId, decision: deliveryDecision, score: importanceScore, threshold: config.contentFilter.default_threshold, author: authorHandle, reason: decisionReason }));
-        }
-      } else if (scoreOnly) {
-        decisionReason = 'score_only_mode';
-      } else if (!legacyFilterEnabled && !scoringPolicyActive) {
-        decisionReason = 'filter_disabled';
+        return;
       }
+      if (logEvent.kind === 'legacy_profile') {
+        console.log(JSON.stringify({ function: 'worker', action: 'filter_decision', tweet_id: tweetId, decision: logEvent.decision, score: logEvent.score, final_score: logEvent.finalScore, profile: logEvent.profileId, author: logEvent.authorHandle, reason: logEvent.reason }));
+        return;
+      }
+      console.log(JSON.stringify({ function: 'worker', action: 'filter_decision', tweet_id: tweetId, decision: logEvent.decision, score: logEvent.score, threshold: logEvent.threshold, author: logEvent.authorHandle, reason: logEvent.reason }));
+    };
 
-      return { deliveryDecision, decisionReason, finalScore };
+    const buildBaseDecisionState = (): Omit<FeedbackBiasResult, 'scoreBreakdown'> => {
+      const result = buildScoringBaseDecisionState({
+        feedbackLocked,
+        postFinalScore: post.final_score,
+        postDeliveryDecision: post.delivery_decision,
+        postDecisionReason: post.decision_reason,
+        importanceScore,
+        importanceTags,
+        importanceReasoning,
+        scoreAxes,
+        scoringPolicyActive,
+        scoringPolicyResult,
+        filterEnabled,
+        legacyFilterEnabled,
+        scoreOnly,
+        editorialProfile: config.editorialProfile,
+        authorHandle,
+        authorRules: config.contentFilter.author_rules,
+        defaultThreshold: config.contentFilter.default_threshold,
+        textOriginal: String(post.text_original || ''),
+      });
+      importanceScore = result.scoringFields.importanceScore;
+      importanceTags = result.scoringFields.importanceTags;
+      importanceReasoning = result.scoringFields.importanceReasoning;
+      scoreAxes = result.scoringFields.scoreAxes;
+      logBaseDecision(result.logEvent);
+      return result.decisionState;
     };
 
     const applyFeedbackBiasToDecision = async (
@@ -1331,21 +953,7 @@ ${post.text_original}`;
           console.log(JSON.stringify({ function: 'worker', action: 'translate_call_start', tweet_id: tweetId, model: config.openaiModel, reasoning_effort: config.openaiReasoningEffort, source: 'feedback_locked' }));
           const trResult = await measureTranslationCall(() => callOpenAI({
             apiKey: openaiApiKey,
-            model: config.openaiModel,
-            messages: [
-              { role: 'system', content: config.translationPrompt },
-              { role: 'user', content: renderTranslationUserPrompt() },
-            ],
-            maxOutputTokens: config.openaiMaxCompletionTokens,
-            temperature: config.openaiTemperature,
-            topP: config.openaiTopP,
-            frequencyPenalty: config.openaiFrequencyPenalty,
-            presencePenalty: config.openaiPresencePenalty,
-            reasoningEffort: config.openaiReasoningEffort,
-            verbosity: config.openaiVerbosity,
-            seed: config.openaiSeed,
-            serviceTier: config.openaiServiceTier,
-            parallelToolCalls: config.openaiParallelToolCalls,
+            ...buildTranslationRequest(),
           }));
           if (!trResult.ok) {
             throw new Error(`OpenAI translation error: ${trResult.status} ${trResult.rawText}`);
@@ -1449,15 +1057,11 @@ ${post.text_original}`;
 
       if (scoreResult.toolCall) {
         try {
-          const args = JSON.parse(scoreResult.toolCall.arguments);
-          importanceScore = Math.max(1, Math.min(20, args.importance_score || 10));
-          importanceTags = args.tags || [];
-          importanceReasoning = typeof args.reasoning === 'string' ? args.reasoning : null;
-          scoreAxes = parseScoreAxes(args.axes);
-          // If axes present and importance_score wasn't, derive it from axes
-          if (scoreAxes && (args.importance_score == null)) {
-            importanceScore = Math.round(computeFinalScore(scoreAxes));
-          }
+          const parsedScore = parseClassifierToolCallArguments(scoreResult.toolCall.arguments);
+          importanceScore = parsedScore.importanceScore;
+          importanceTags = parsedScore.importanceTags;
+          importanceReasoning = parsedScore.importanceReasoning;
+          scoreAxes = parsedScore.scoreAxes;
           console.log(JSON.stringify({ function: 'worker', action: 'scored', tweet_id: tweetId, score: importanceScore, axes: scoreAxes, tags: importanceTags, reasoning: importanceReasoning, endpoint: scoreResult.endpoint, model: scoringModel }));
           await insertPipelineEvent(supabase, 'post', tweetId, 'score', 'completed', null, new Date().toISOString(), null, {
             score: importanceScore,
@@ -1490,21 +1094,7 @@ ${post.text_original}`;
         console.log(JSON.stringify({ function: 'worker', action: 'translate_call_start', tweet_id: tweetId, model: config.openaiModel, reasoning_effort: config.openaiReasoningEffort }));
         const trResult = await measureTranslationCall(() => callOpenAI({
           apiKey: openaiApiKey,
-          model: config.openaiModel,
-          messages: [
-            { role: 'system', content: config.translationPrompt },
-            { role: 'user', content: renderTranslationUserPrompt() },
-          ],
-          maxOutputTokens: config.openaiMaxCompletionTokens,
-          temperature: config.openaiTemperature,
-          topP: config.openaiTopP,
-          frequencyPenalty: config.openaiFrequencyPenalty,
-          presencePenalty: config.openaiPresencePenalty,
-          reasoningEffort: config.openaiReasoningEffort,
-          verbosity: config.openaiVerbosity,
-          seed: config.openaiSeed,
-          serviceTier: config.openaiServiceTier,
-          parallelToolCalls: config.openaiParallelToolCalls,
+          ...buildTranslationRequest(),
         }));
         if (!trResult.ok) {
           throw new Error(`OpenAI translation error: ${trResult.status} ${trResult.rawText}`);
@@ -1548,15 +1138,12 @@ ${post.text_original}`;
       data = result.raw;
       if (result.toolCall) {
         try {
-          const args = JSON.parse(result.toolCall.arguments);
-          translatedText = args.translated_text || '';
-          importanceScore = Math.max(1, Math.min(20, args.importance_score || 10));
-          importanceTags = args.tags || [];
-          importanceReasoning = typeof args.reasoning === 'string' ? args.reasoning : null;
-          scoreAxes = parseScoreAxes(args.axes);
-          if (scoreAxes && (args.importance_score == null)) {
-            importanceScore = Math.round(computeFinalScore(scoreAxes));
-          }
+          const parsedScore = parseClassifierToolCallArguments(result.toolCall.arguments, { includeTranslatedText: true });
+          translatedText = parsedScore.translatedText || '';
+          importanceScore = parsedScore.importanceScore;
+          importanceTags = parsedScore.importanceTags;
+          importanceReasoning = parsedScore.importanceReasoning;
+          scoreAxes = parsedScore.scoreAxes;
           console.log(JSON.stringify({ function: 'worker', action: 'scored', tweet_id: tweetId, score: importanceScore, axes: scoreAxes, tags: importanceTags, reasoning: importanceReasoning, endpoint: result.endpoint }));
           await insertPipelineEvent(supabase, 'post', tweetId, 'score', 'completed', null, new Date().toISOString(), null, {
             score: importanceScore,
@@ -1577,21 +1164,7 @@ ${post.text_original}`;
       // No filtering — simple translation
       const result = await measureTranslationCall(() => callOpenAI({
         apiKey: openaiApiKey,
-        model: config.openaiModel,
-        messages: [
-          { role: 'system', content: config.translationPrompt },
-          { role: 'user', content: renderTranslationUserPrompt() },
-        ],
-        maxOutputTokens: config.openaiMaxCompletionTokens,
-        temperature: config.openaiTemperature,
-        topP: config.openaiTopP,
-        frequencyPenalty: config.openaiFrequencyPenalty,
-        presencePenalty: config.openaiPresencePenalty,
-        reasoningEffort: config.openaiReasoningEffort,
-        verbosity: config.openaiVerbosity,
-        seed: config.openaiSeed,
-        serviceTier: config.openaiServiceTier,
-        parallelToolCalls: config.openaiParallelToolCalls,
+        ...buildTranslationRequest(),
       }));
       if (!result.ok) {
         throw new Error(`OpenAI API error: ${result.status} ${result.rawText}`);
@@ -1620,22 +1193,22 @@ ${post.text_original}`;
     }
 
     const nowIso = new Date().toISOString();
-    const resultMeta = {
+    const resultMeta = buildTranslationResultMeta({
       model: config.openaiModel,
-      scoring_model: scoringModel,
+      scoringModel,
       usage: data.usage ?? null,
-      scoring_usage: scoringUsage,
-      translation_usage: translationUsage,
-      scoring_v2_usage: scoringPolicyResult?.usage ?? null,
-      scoring_call_ms: scoringCallMs,
-      translation_call_ms: translationCallMs,
-      queue_wait_ms: jobTimingMeta(job, 'running').queue_wait_ms,
-      claim_delay_ms: jobTimingMeta(job, 'running').claim_delay_ms,
-      finished_at: nowIso,
-      importance_score: importanceScore,
-      scoring_version: scoringPolicyResult ? SCORING_POLICY_VERSION : null,
-      split_calls: !!(filterEnabled && config.splitCalls),
-    };
+      scoringUsage,
+      translationUsage,
+      scoringV2Usage: scoringPolicyResult?.usage ?? null,
+      scoringCallMs,
+      translationCallMs,
+      queueWaitMs: jobTimingMeta(job, 'running').queue_wait_ms,
+      claimDelayMs: jobTimingMeta(job, 'running').claim_delay_ms,
+      finishedAt: nowIso,
+      importanceScore,
+      scoringVersion: scoringPolicyResult ? SCORING_POLICY_VERSION : null,
+      splitCalls: !!(filterEnabled && config.splitCalls),
+    });
     try {
       await supabase.from('jobs').update({ result_meta: resultMeta }).eq('id', job.id);
     } catch (_e) { /* best-effort */ }
@@ -1662,33 +1235,31 @@ ${post.text_original}`;
 
     const { error: updateError } = await supabase
       .from('posts')
-      .update({
-        ...(translationSkippedByFilter ? {} : {
-          text_translated: translatedText,
-          lang_original: 'en',
-          translated_at: nowIso,
-          translation_model: config.openaiModel,
-          translation_tokens: (data?.usage as { total_tokens?: number } | undefined)?.total_tokens ?? null,
-          translation_duration_ms: job.started_at ? (Date.now() - new Date(job.started_at as string).getTime()) : null,
-        }),
-        importance_score: importanceScore,
-        importance_tags: importanceTags,
-        importance_reasoning: importanceReasoning,
-        delivery_decision: deliveryDecision,
-        score_axes: scoreAxes ?? null,
-        final_score: finalScore,
-        decision_reason: decisionReason,
-        score_breakdown: scoreBreakdown,
-        ...(scoringPolicyResult ? {
-          scoring_version: SCORING_POLICY_VERSION,
-          scoring_profile_id: scoringPolicyResult.profile_id,
-          audience_class: scoringPolicyResult.audience_class,
-          audience_confidence: scoringPolicyResult.audience_confidence,
-          audience_reason: scoringPolicyResult.audience_reason,
-          global_exception_class: scoringPolicyResult.global_exception_class,
-          score_review_status: scoringPolicyActive ? scoringPolicyResult.review_status : 'shadow',
-        } : {}),
-      })
+      .update(buildPostTranslationUpdatePatch({
+        translationSkippedByFilter,
+        translatedText,
+        nowIso,
+        openaiModel: config.openaiModel,
+        translationTokens: (data?.usage as { total_tokens?: number } | undefined)?.total_tokens ?? null,
+        translationDurationMs: job.started_at ? (Date.now() - new Date(job.started_at as string).getTime()) : null,
+        importanceScore,
+        importanceTags,
+        importanceReasoning,
+        deliveryDecision,
+        scoreAxes,
+        finalScore,
+        decisionReason,
+        scoreBreakdown,
+        scoringPolicy: scoringPolicyResult ? {
+          scoringVersion: SCORING_POLICY_VERSION,
+          scoringProfileId: scoringPolicyResult.profile_id,
+          audienceClass: scoringPolicyResult.audience_class,
+          audienceConfidence: scoringPolicyResult.audience_confidence,
+          audienceReason: scoringPolicyResult.audience_reason,
+          globalExceptionClass: scoringPolicyResult.global_exception_class,
+          scoreReviewStatus: scoringPolicyActive ? scoringPolicyResult.review_status : 'shadow',
+        } : null,
+      }))
       .eq('tweet_id', tweetId);
 
     if (updateError) throw updateError;
@@ -1698,40 +1269,19 @@ ${post.text_original}`;
     // not yet hydrated, enqueue hydrate_tweet instead of deliver. The hydrate
     // job will re-enqueue translate on success, which will fall through to
     // deliver on the second pass (is_truncated will be false by then).
-    // NEW FLOW: If a tweet PASSED the editorial gate AND is still truncated AND
-    // not yet hydrated, enqueue hydrate_tweet instead of deliver. The hydrate
-    // job will re-enqueue translate on success, which will fall through to
-    // deliver on the second pass (is_truncated will be false by then).
     const isTruncated = (post as Record<string, unknown>).is_truncated === true;
     const alreadyHydrated = !!(post as Record<string, unknown>).hydrated_at;
     const hydrationCfg = await loadHydrationSettings(supabase);
-    const shouldHydrateNow =
-      deliveryDecision === 'deliver'
-      && isTruncated
-      && !alreadyHydrated
-      && hydrationCfg.enabled;
-
-    if (shouldHydrateNow) {
-      console.log(JSON.stringify({ function: 'worker', action: 'hydration_gated_enqueue', tweet_id: tweetId, score: importanceScore }));
-      const { error: hydrateJobError } = await supabase
-        .from('jobs')
-        .upsert({
-          type: 'hydrate_tweet',
-          payload: { tweet_id: tweetId },
-          status: 'pending',
-          priority: 15,
-          idempotency_key: `hydrate:post-translate:${tweetId}`,
-          next_run_at: new Date().toISOString()
-        }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
-      if (hydrateJobError) {
-        console.warn('Failed to create post-translate hydrate job:', hydrateJobError);
-      } else {
-        await insertPipelineEvent(supabase, 'post', tweetId, 'hydrate', 'queued', null, null, null, { source: 'post-score-gate', score: importanceScore });
-      }
-    } else if (deliveryDecision === 'deliver') {
+    const shouldHydrateNow = shouldQueueHydrationAfterTranslation({
+      deliveryDecision,
+      isTruncated,
+      alreadyHydrated,
+      hydrationEnabled: hydrationCfg.enabled,
+    });
+    let autoEnrichEnabled = false;
+    if (deliveryDecision === 'deliver' && !shouldHydrateNow) {
       // Enrichment is an optional X-draft layer. In manual-only mode the main
       // pipeline must continue with plain translation delivery.
-      let autoEnrichEnabled = false;
       try {
         const { data: enrichCfgRow } = await supabase
           .from('settings')
@@ -1741,39 +1291,53 @@ ${post.text_original}`;
         const enrichConfig = normalizeEnrichmentConfig((enrichCfgRow?.value ?? { enabled: false }) as Partial<EnrichmentConfig>);
         autoEnrichEnabled = isAutoEnrichmentEnabled(enrichConfig);
       } catch (_e) { /* default to disabled */ }
+    }
+    const postTranslationRoute = choosePostTranslationRoute({
+      tweetId,
+      deliveryDecision,
+      decisionReason,
+      importanceScore,
+      isTruncated,
+      alreadyHydrated,
+      hydrationEnabled: hydrationCfg.enabled,
+      autoEnrichEnabled,
+      duplicateBlocked: !!duplicatePatch,
+    });
 
-      if (autoEnrichEnabled) {
-        const enrichKey = `enrich:${tweetId}`;
-        const { error: enrichJobError } = await supabase
-          .from('jobs')
-          .upsert({
-            type: 'enrich',
-            payload: { tweet_id: tweetId },
-            status: 'pending',
-            priority: 18,
-            idempotency_key: enrichKey,
-            next_run_at: new Date().toISOString(),
-          }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
-        if (enrichJobError) {
-          console.warn('Failed to enqueue enrich job:', enrichJobError);
-        } else {
-          await insertPipelineEvent(supabase, 'post', tweetId, 'enrich', 'queued', null, null, null, { source: 'translate' });
-          console.log(JSON.stringify({ function: 'worker', action: 'enrich_enqueued', tweet_id: tweetId }));
-        }
-        // Enrichment v2 is shadow/review-first for X, but Telegram delivery
-        // remains translation-first and should not wait on enrichment approval.
-        await enqueuePostDeliveryAfterRenderGate(supabase, tweetId, 'translate', false);
+    if (postTranslationRoute.kind === 'hydrate') {
+      console.log(JSON.stringify({ function: 'worker', action: 'hydration_gated_enqueue', tweet_id: tweetId, score: importanceScore }));
+      const { error: hydrateJobError } = await supabase
+        .from('jobs')
+        .upsert({
+          ...postTranslationRoute.job,
+          next_run_at: new Date().toISOString()
+        }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+      if (hydrateJobError) {
+        console.warn('Failed to create post-translate hydrate job:', hydrateJobError);
       } else {
-        await enqueuePostDeliveryAfterRenderGate(supabase, tweetId, 'worker', true);
+        await insertPipelineEvent(supabase, 'post', tweetId, postTranslationRoute.event.step, postTranslationRoute.event.status, null, null, null, postTranslationRoute.event.meta);
       }
+    } else if (postTranslationRoute.kind === 'enrich_and_deliver') {
+      const { error: enrichJobError } = await supabase
+        .from('jobs')
+        .upsert({
+          ...postTranslationRoute.enrichJob,
+          next_run_at: new Date().toISOString(),
+        }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+      if (enrichJobError) {
+        console.warn('Failed to enqueue enrich job:', enrichJobError);
+      } else {
+        await insertPipelineEvent(supabase, 'post', tweetId, postTranslationRoute.enrichEvent.step, postTranslationRoute.enrichEvent.status, null, null, null, postTranslationRoute.enrichEvent.meta);
+        console.log(JSON.stringify({ function: 'worker', action: 'enrich_enqueued', tweet_id: tweetId }));
+      }
+      // Enrichment v2 is shadow/review-first for X, but Telegram delivery
+      // remains translation-first and should not wait on enrichment approval.
+      await enqueuePostDeliveryAfterRenderGate(supabase, tweetId, postTranslationRoute.delivery.source, postTranslationRoute.delivery.resetExisting);
+    } else if (postTranslationRoute.kind === 'deliver') {
+      await enqueuePostDeliveryAfterRenderGate(supabase, tweetId, postTranslationRoute.delivery.source, postTranslationRoute.delivery.resetExisting);
     } else {
       console.log(JSON.stringify({ function: 'worker', action: 'delivery_skipped', tweet_id: tweetId, score: importanceScore, decision: deliveryDecision }));
-      await insertPipelineEvent(supabase, 'post', tweetId, 'deliver', 'completed', null, nowIso, null, {
-        skipped: duplicatePatch ? 'duplicate_gate' : 'content_filter',
-        score: importanceScore,
-        decision: deliveryDecision,
-        decision_reason: decisionReason,
-      });
+      await insertPipelineEvent(supabase, 'post', tweetId, postTranslationRoute.event.step, postTranslationRoute.event.status, null, nowIso, null, postTranslationRoute.event.meta);
     }
     
     return true;
@@ -2053,218 +1617,6 @@ supabase: any, config: Awaited<ReturnType<typeof loadConfig>>): Promise<boolean>
   }
 }
 
-// Download image bytes from temp-media bucket so we can multipart-upload them
-// to Telegram. Telegram renders inline photos when given real bytes with a
-// proper filename + image/* content-type; passing only a signed URL sometimes
-// causes Telegram to fall back to "document" rendering.
-async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let nextIndex = 0;
-  const workerCount = Math.max(1, Math.min(limit, items.length));
-  await Promise.all(Array.from({ length: workerCount }, async () => {
-    while (nextIndex < items.length) {
-      const index = nextIndex++;
-      results[index] = await fn(items[index], index);
-    }
-  }));
-  return results;
-}
-
-async function fetchImageBytes(// deno-lint-ignore no-explicit-any
-supabase: any, image: Record<string, unknown>): Promise<{ blob: Blob; filename: string } | null> {
-  const storagePath = image.storage_path as string | null;
-  if (!storagePath) return null;
-  try {
-    const { data, error } = await supabase.storage.from('temp-media').download(storagePath);
-    if (error || !data) return null;
-    const mime = (image.mime_type as string | undefined) || (data as Blob).type || 'image/jpeg';
-    const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : mime.includes('gif') ? 'gif' : 'jpg';
-    const base = storagePath.split('/').pop()?.replace(/\.[^.]+$/, '') || `photo_${image.id}`;
-    const blob = new Blob([await (data as Blob).arrayBuffer()], { type: mime.startsWith('image/') ? mime : 'image/jpeg' });
-    return { blob, filename: `${base}.${ext}` };
-  } catch (_e) {
-    return null;
-  }
-}
-
-async function sendTelegramPhotoFromStorage(// deno-lint-ignore no-explicit-any
-supabase: any, botToken: string, chatId: string, image: Record<string, unknown>, caption: string): Promise<string[]> {
-  const bytes = await fetchImageBytes(supabase, image);
-  if (!bytes) {
-    // Fallback to URL-based send if bytes unavailable
-    const imageUrl = await getMediaUrl(supabase, image);
-    return await sendTelegramMedia('sendPhoto', botToken, chatId, { photo: imageUrl }, caption);
-  }
-  const send = async (cap: string, useMarkdown: boolean): Promise<Response> => {
-    const fd = new FormData();
-    fd.append('chat_id', chatId);
-    fd.append('caption', cap);
-    if (useMarkdown) fd.append('parse_mode', 'Markdown');
-    fd.append('photo', bytes.blob, bytes.filename);
-    return await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, { method: 'POST', body: fd });
-  };
-  const resp = await send(caption, true);
-  const result = await resp.json();
-  if (result.ok) return [String(result.result.message_id)];
-  if (isTelegramParseError(result?.description ?? '')) {
-    const retry = await send(stripMarkdownToPlain(caption), false);
-    const r = await retry.json();
-    if (r?.ok) return [String(r.result.message_id)];
-  }
-  throwTelegramError('sendPhoto', result, resp.status);
-  return [];
-}
-
-async function sendTelegramPhotoGroupFromStorage(// deno-lint-ignore no-explicit-any
-supabase: any, botToken: string, chatId: string, images: Record<string, unknown>[], caption: string): Promise<string[]> {
-  const loaded = await mapLimit(images, 3, async (image, i) => {
-    const bytes = await fetchImageBytes(supabase, image);
-    if (bytes) {
-      const attachName = `photo${i}`;
-      const m: Record<string, unknown> = { type: 'photo', media: `attach://${attachName}` };
-      if (i === 0) { m.caption = caption; m.parse_mode = 'Markdown'; }
-      return { attachment: { ...bytes, attachName }, media: m };
-    } else {
-      const url = await getMediaUrl(supabase, image);
-      const m: Record<string, unknown> = { type: 'photo', media: url };
-      if (i === 0) { m.caption = caption; m.parse_mode = 'Markdown'; }
-      return { attachment: null, media: m };
-    }
-  });
-  const attachments = loaded.map((item) => item.attachment).filter(Boolean) as { blob: Blob; filename: string; attachName: string }[];
-  const mediaArr = loaded.map((item) => item.media);
-  const build = (mArr: Record<string, unknown>[]): FormData => {
-    const fd = new FormData();
-    fd.append('chat_id', chatId);
-    fd.append('media', JSON.stringify(mArr));
-    for (const a of attachments) fd.append(a.attachName, a.blob, a.filename);
-    return fd;
-  };
-  const resp = await fetch(`https://api.telegram.org/bot${botToken}/sendMediaGroup`, { method: 'POST', body: build(mediaArr) });
-  const result = await resp.json();
-  if (result.ok) return result.result.map((m: Record<string, unknown>) => String(m.message_id));
-  if (isTelegramParseError(result?.description ?? '')) {
-    const retryArr = mediaArr.map((m, idx) => {
-      const out: Record<string, unknown> = { type: m.type, media: m.media };
-      if (idx === 0 && m.caption) out.caption = stripMarkdownToPlain(String(m.caption));
-      return out;
-    });
-    const retryResp = await fetch(`https://api.telegram.org/bot${botToken}/sendMediaGroup`, { method: 'POST', body: build(retryArr) });
-    const r = await retryResp.json();
-    if (r?.ok) return r.result.map((m: Record<string, unknown>) => String(m.message_id));
-  }
-  throwTelegramError('sendMediaGroup', result, resp.status);
-  return [];
-}
-
-function finiteMediaNumber(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
-}
-
-function telegramVideoTooLargeError(bytes: number): NonRetryableJobError {
-  return new NonRetryableJobError(telegramVideoTooLargeReason(bytes));
-}
-
-function videoUploadFilename(video: Record<string, unknown>, storagePath: string, mime: string): string {
-  const existingExt = storagePath.match(/\.(mp4|mov|webm|m4v)(?:[?#].*)?$/i)?.[1]?.toLowerCase();
-  const ext = existingExt
-    ?? (mime.includes('quicktime') ? 'mov'
-      : mime.includes('webm') ? 'webm'
-      : mime.includes('x-m4v') ? 'm4v'
-      : 'mp4');
-  const base = storagePath.split('/').pop()?.replace(/\.[^.]+$/, '')
-    || (typeof video.id === 'string' && video.id ? `video_${video.id}` : 'video');
-  return `${base}.${ext}`;
-}
-
-async function fetchVideoBytes(// deno-lint-ignore no-explicit-any
-supabase: any, video: Record<string, unknown>): Promise<{ blob: Blob; filename: string }> {
-  const storagePath = video.storage_path as string | null;
-  if (!storagePath) throw new Error('telegram_video_missing_storage');
-
-  const declaredSize = finiteMediaNumber(video.file_size);
-  if (declaredSize != null && isTelegramBotVideoTooLarge(declaredSize)) {
-    throw telegramVideoTooLargeError(declaredSize);
-  }
-
-  const { data, error } = await supabase.storage.from('temp-media').download(storagePath);
-  if (error || !data) throw new Error(`telegram_video_download_failed:${storagePath}:${error?.message ?? 'no blob'}`);
-
-  const arrayBuffer = await (data as Blob).arrayBuffer();
-  if (isTelegramBotVideoTooLarge(arrayBuffer.byteLength)) {
-    throw telegramVideoTooLargeError(arrayBuffer.byteLength);
-  }
-
-  const rawMime = (video.mime_type as string | undefined) || (data as Blob).type || 'video/mp4';
-  const mime = rawMime.startsWith('video/') ? rawMime : 'video/mp4';
-  return {
-    blob: new Blob([arrayBuffer], { type: mime }),
-    filename: videoUploadFilename(video, storagePath, mime),
-  };
-}
-
-async function sendTelegramVideoFromStorage(// deno-lint-ignore no-explicit-any
-supabase: any, botToken: string, chatId: string, video: Record<string, unknown>, caption: string): Promise<string[]> {
-  const bytes = await fetchVideoBytes(supabase, video);
-  const durationMs = finiteMediaNumber(video.duration_ms);
-  const width = finiteMediaNumber(video.width);
-  const height = finiteMediaNumber(video.height);
-  const send = async (cap: string, useMarkdown: boolean): Promise<Response> => {
-    const fd = new FormData();
-    fd.append('chat_id', chatId);
-    fd.append('caption', cap);
-    if (useMarkdown) fd.append('parse_mode', 'Markdown');
-    fd.append('supports_streaming', 'true');
-    if (durationMs != null && durationMs > 0) fd.append('duration', String(Math.max(1, Math.round(durationMs / 1000))));
-    if (width != null && width > 0) fd.append('width', String(Math.round(width)));
-    if (height != null && height > 0) fd.append('height', String(Math.round(height)));
-    fd.append('video', bytes.blob, bytes.filename);
-    return await fetch(`https://api.telegram.org/bot${botToken}/sendVideo`, { method: 'POST', body: fd });
-  };
-
-  const resp = await send(caption, true);
-  const result = await resp.json();
-  if (result.ok) return [String(result.result.message_id)];
-  if (isTelegramParseError(result?.description ?? '')) {
-    const retry = await send(stripMarkdownToPlain(caption), false);
-    const r = await retry.json();
-    if (r?.ok) return [String(r.result.message_id)];
-  }
-  throwTelegramError('sendVideo', result, resp.status);
-  return [];
-}
-
-// Helper to send a single Telegram media message with parse error retry
-async function sendTelegramMedia(method: string, botToken: string, chatId: string, mediaPayload: Record<string, string>, caption: string): Promise<string[]> {
-  const body = { chat_id: chatId, ...mediaPayload, caption, parse_mode: 'Markdown' };
-  const response = await fetch(`https://api.telegram.org/bot${botToken}/${method}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
-  });
-  const result = await response.json();
-  if (result.ok) return [String(result.result.message_id)];
-
-  if (isTelegramParseError(result?.description ?? '')) {
-    const retryBody = { chat_id: chatId, ...mediaPayload, caption: stripMarkdownToPlain(caption) };
-    const retryResp = await fetch(`https://api.telegram.org/bot${botToken}/${method}`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(retryBody)
-    });
-    const retryRes = await retryResp.json();
-    if (retryRes?.ok) return [String(retryRes.result.message_id)];
-  }
-
-  throwTelegramError(method, result, response.status);
-  return []; // unreachable
-}
-
-function throwTelegramError(method: string, result: Record<string, unknown>, statusCode: number): never {
-  const description = String(result?.description ?? '');
-  const retryAfter = extractTelegramRetryAfter(result, description, statusCode);
-  if (retryAfter != null) {
-    throw new TelegramRateLimitError(`Telegram ${method} failed: ${description}`, retryAfter);
-  }
-  throw new Error(`Telegram ${method} failed: ${description}`);
-}
-
 // ─── handleEnrichJob: 5-agent editorial pipeline ────────────────────────────
 // deno-lint-ignore no-explicit-any
 async function handleEnrichJob(job: Record<string, unknown>, supabase: any): Promise<boolean> {
@@ -2472,136 +1824,6 @@ async function enqueueDeliverAfterEnrich(supabase: any, tweetId: string, source 
   await enqueuePostDeliveryAfterRenderGate(supabase, tweetId, source, resetExisting);
 }
 
-// Retry policy with dead-lettering
-const MAX_ATTEMPTS: Record<string, number> = {
-  translate: 5,
-  deliver: 8,
-  download_media: 3,
-  moderate: 3,
-  reprocess: 3,
-  hydrate_tweet: 3,
-  resolve_media: 4,
-  enrich: 3,
-};
-
-/** Normalize any thrown/failure value to `Error` for `last_error` + dead-letter rows. */
-function jobError(reason: unknown): Error {
-  if (reason instanceof Error) return reason;
-  if (typeof reason === 'string' && reason.trim()) return new Error(reason.trim());
-  try {
-    const s = JSON.stringify(reason);
-    if (s && s !== '{}') return new Error(s);
-  } catch { /* fall through */ }
-  return new Error(String(reason ?? 'unknown_error'));
-}
-
-async function handleJobFailure(// deno-lint-ignore no-explicit-any
-supabase: any, job: Record<string, unknown>, errorOrMessage?: Error | string) {
-  const jobType = job.type as string;
-  const maxAttempts = MAX_ATTEMPTS[jobType] ?? 5;
-  const attempts = (job.attempts as number) ?? 0;
-  const nonRetryable = errorOrMessage instanceof NonRetryableJobError;
-  let errorMsg: string;
-  if (typeof errorOrMessage === 'string') {
-    errorMsg = errorOrMessage.trim() || 'Unknown job failure';
-  } else if (errorOrMessage instanceof Error) {
-    errorMsg = (errorOrMessage.message && errorOrMessage.message.trim())
-      ? errorOrMessage.message.trim()
-      : (errorOrMessage.name || 'Error');
-  } else if (errorOrMessage != null) {
-    errorMsg = String(errorOrMessage);
-  } else {
-    errorMsg = 'Unknown job failure (no error passed)';
-  }
-  
-  if (nonRetryable || attempts >= maxAttempts) {
-    // Dead-letter the job
-    try {
-      await supabase.from('dead_letter_jobs').insert({
-        original_job_id: job.id as string,
-        type: jobType,
-        payload: job.payload,
-        attempts,
-        last_error: errorMsg,
-        result_meta: job.result_meta ?? null,
-        source: nonRetryable ? 'worker_non_retryable' : 'worker'
-      });
-    } catch (_e) {
-      console.error(JSON.stringify({ function: 'worker', action: 'dead_letter_failed', job_id: job.id }));
-    }
-
-    await supabase.from('jobs').update({
-      status: 'failed',
-      last_error: errorMsg,
-      result_meta: {
-        ...(isRecordValue(job.result_meta) ? job.result_meta as Record<string, unknown> : {}),
-        ...jobTimingMeta(job, 'failed', { error: errorMsg, non_retryable: nonRetryable }),
-      },
-    }).eq('id', job.id);
-    console.log(JSON.stringify({ function: 'worker', action: nonRetryable ? 'job_failed_non_retryable' : 'job_dead_lettered', job_id: job.id, attempts }));
-  } else {
-    // Telegram-aware backoff
-    let retryAfterSeconds: number | null = null;
-    if (errorOrMessage && typeof errorOrMessage === 'object' && 'retryAfterSeconds' in errorOrMessage) {
-      retryAfterSeconds = Math.max(1, Math.floor((errorOrMessage as TelegramRateLimitError).retryAfterSeconds));
-    } else {
-      retryAfterSeconds = parseRetryAfterFromMessage(errorMsg);
-    }
-
-    let nextRunAt: Date;
-    if (retryAfterSeconds != null) {
-      const jitter = Math.floor(retryAfterSeconds * (Math.random() * 0.2));
-      nextRunAt = new Date(Date.now() + (retryAfterSeconds + jitter) * 1000);
-    } else {
-      // Exponential backoff: 30s, 60s, 120s, 240s, 480s, ...
-      const baseDelaySec = 30;
-      const delaySec = baseDelaySec * Math.pow(2, attempts);
-      const jitterSec = Math.floor(delaySec * Math.random() * 0.2);
-      nextRunAt = new Date(Date.now() + (delaySec + jitterSec) * 1000);
-    }
-
-    await supabase.from('jobs').update({
-      status: 'pending', last_error: errorMsg, next_run_at: nextRunAt.toISOString(),
-      locked_at: null, locked_by: null, lease_expires_at: null,
-      result_meta: {
-        ...(isRecordValue(job.result_meta) ? job.result_meta as Record<string, unknown> : {}),
-        ...jobTimingMeta(job, 'failed', { error: errorMsg, retry_after_seconds: retryAfterSeconds }),
-        rescheduled_for: nextRunAt.toISOString(),
-      },
-    }).eq('id', job.id);
-  }
-}
-
-function formatMessageWithTemplate(post: Record<string, unknown>, account: Record<string, unknown> | null, messageTemplate: Record<string, unknown>): string {
-  const placeholders: Record<string, string> = {
-    '{translated_text}': String(post.text_translated || post.text_original || ''),
-    '{original_text}': String(post.text_original || ''),
-    '{author_handle}': String(account?.handle || ''),
-    '{author_name}': String(account?.display_name || ''),
-    '{source_link}': messageTemplate.include_source_link && post.url ? 
-      `[${messageTemplate.source_link_text || 'View original'}](${post.url})` : '',
-    '{published_date}': post.tweeted_at ? new Date(post.tweeted_at as string).toLocaleDateString('fa-IR') : '',
-    '{published_time}': post.tweeted_at ? new Date(post.tweeted_at as string).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }) : '',
-    '{hashtags}': String(messageTemplate.custom_hashtags || ''),
-    '{media_info}': post.has_media ? '📸 تصویر' : ''
-  };
-
-  return Object.entries(placeholders).reduce((template, [key, value]) => {
-    return template.replace(new RegExp(key.replace(/[{}]/g, '\\$&'), 'g'), value);
-  }, String(messageTemplate.template || '{translated_text}'));
-}
-
-async function getMediaUrl(// deno-lint-ignore no-explicit-any
-supabase: any, media: Record<string, unknown>): Promise<string> {
-  if (media.storage_path) {
-    try {
-      const { data } = await supabase.storage.from('temp-media').createSignedUrl(media.storage_path as string, 3600);
-      if (data?.signedUrl) return data.signedUrl;
-    } catch (_e) { /* fallback */ }
-  }
-  return media.src_url as string;
-}
-
 async function handleDownloadMediaJob(job: Record<string, unknown>, // deno-lint-ignore no-explicit-any
 supabase: any): Promise<boolean> {
   const payload = job.payload as Record<string, unknown>;
@@ -2684,138 +1906,6 @@ supabase: any): Promise<boolean> {
   }
 }
 
-function extractMediaFromText(text: string): Array<{type: string, url: string, width?: number, height?: number, duration?: number}> {
-  const mediaItems: Array<{type: string, url: string, width?: number, height?: number, duration?: number}> = [];
-  if (!text) return mediaItems;
-  
-  const directMediaRegex = /https?:\/\/pbs\.twimg\.com\/[^\s]+\.(jpg|jpeg|png|gif|webp|mp4|mov)/gi;
-  const directMatches = text.match(directMediaRegex);
-  if (directMatches) {
-    for (const match of directMatches) {
-      const isVideo = /\.(mp4|mov)$/i.test(match);
-      mediaItems.push({ type: isVideo ? 'video' : 'image', url: match });
-    }
-  }
-  return mediaItems;
-}
-
-// Pipeline events helpers
-function isRecordValue(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function timestampMs(value: unknown): number | null {
-  if (typeof value !== 'string' || !value) return null;
-  const time = new Date(value).getTime();
-  return Number.isFinite(time) ? time : null;
-}
-
-function nonNegativeMs(value: number | null): number | null {
-  if (value == null || !Number.isFinite(value)) return null;
-  return Math.max(0, Math.round(value));
-}
-
-function jobTimingMeta(
-  job: Record<string, unknown>,
-  state: 'queued' | 'running' | 'completed' | 'failed',
-  extra: Record<string, unknown> = {},
-): Record<string, unknown> {
-  const nowMs = Date.now();
-  const createdMs = timestampMs(job.created_at);
-  const nextRunMs = timestampMs(job.next_run_at);
-  const startedMs = timestampMs(job.locked_at) ?? timestampMs(job.started_at) ?? (state === 'running' ? nowMs : null);
-  const queueReferenceMs = state === 'running' ? nowMs : startedMs ?? nowMs;
-  const retryAfterSeconds = typeof extra.error === 'string' ? parseRetryAfterFromMessage(extra.error) : null;
-  return {
-    job_id: job.id ?? null,
-    job_type: job.type ?? null,
-    lane: jobLane(String(job.type ?? 'unknown')),
-    attempts: job.attempts ?? null,
-    priority: job.priority ?? null,
-    queue_wait_ms: nonNegativeMs(createdMs == null ? null : queueReferenceMs - createdMs),
-    claim_delay_ms: nonNegativeMs(nextRunMs == null ? null : queueReferenceMs - nextRunMs),
-    worker_run_ms: state === 'running' || state === 'queued' ? null : nonNegativeMs(startedMs == null ? null : nowMs - startedMs),
-    retry_after_seconds: retryAfterSeconds,
-    ...extra,
-  };
-}
-
-async function mergeJobResultMeta(// deno-lint-ignore no-explicit-any
-supabase: any, job: Record<string, unknown>, meta: Record<string, unknown>): Promise<void> {
-  if (!job.id) return;
-  try {
-    const { data } = await supabase
-      .from('jobs')
-      .select('result_meta')
-      .eq('id', job.id)
-      .maybeSingle();
-    const current = isRecordValue(data?.result_meta)
-      ? data.result_meta as Record<string, unknown>
-      : isRecordValue(job.result_meta)
-        ? job.result_meta as Record<string, unknown>
-        : {};
-    await supabase
-      .from('jobs')
-      .update({ result_meta: { ...current, ...meta } })
-      .eq('id', job.id);
-  } catch (_e) { /* best-effort */ }
-}
-
-async function recordPipelineEvent(// deno-lint-ignore no-explicit-any
-supabase: any, job: Record<string, unknown>, state: 'queued' | 'running' | 'completed' | 'failed', error?: string, meta: Record<string, unknown> = {}) {
-  try {
-    const payload = job.payload as Record<string, unknown> | null;
-    const subjectType = (payload?.subject_type as string) ?? 'post';
-    const subjectId = (payload?.tweet_id as string) ?? (payload?.subject_id as string) ?? null;
-    if (!subjectId) return;
-    const step = normalizeStep(job.type as string);
-    const now = new Date().toISOString();
-    const startedAt = state === 'queued'
-      ? null
-      : state === 'running'
-      ? now
-      : (typeof job.locked_at === 'string' ? job.locked_at : typeof job.started_at === 'string' ? job.started_at : null);
-    const endedAt = state === 'running' || state === 'queued' ? null : now;
-    await insertPipelineEvent(
-      supabase,
-      subjectType,
-      subjectId,
-      step,
-      state,
-      startedAt,
-      endedAt,
-      error,
-      jobTimingMeta(job, state, { ...meta, ...(error ? { error } : {}) }),
-    );
-  } catch (_e) { /* best-effort */ }
-}
-
-function normalizeStep(type: string): string {
-  switch (type) {
-    case 'translate': return 'translate';
-    case 'deliver': return 'deliver';
-    case 'download_media': return 'media';
-    case 'moderate': return 'moderate';
-    case 'hydrate_tweet': return 'hydrate';
-    case 'resolve_media': return 'resolve_media';
-    default: return type;
-  }
-}
-
-async function insertPipelineEvent(
-  // deno-lint-ignore no-explicit-any
-supabase: any, subjectType: string, subjectId: string,
-  step: string, status: string, startedAt?: string | null, endedAt?: string | null,
-  error?: string | null, meta?: Record<string, unknown> | null
-) {
-  try {
-    await supabase.from('pipeline_events').insert({
-      subject_type: subjectType, subject_id: subjectId, step, status,
-      started_at: startedAt ?? null, ended_at: endedAt ?? null, error: error ?? null, meta: meta ?? null
-    });
-  } catch (_e) { /* best-effort */ }
-}
-
 async function dispatchXPosterForTarget(// deno-lint-ignore no-explicit-any
 supabase: any, tweetId: string, source: string): Promise<void> {
   const meta = {
@@ -2852,177 +1942,9 @@ supabase: any, tweetId: string, source: string): Promise<void> {
   }
 }
 
-// Telegram helpers
-class TelegramRateLimitError extends Error {
-  retryAfterSeconds: number;
-  constructor(message: string, retryAfterSeconds: number) {
-    super(message);
-    this.name = 'TelegramRateLimitError';
-    this.retryAfterSeconds = retryAfterSeconds;
-  }
-}
-
-function extractTelegramRetryAfter(result: Record<string, unknown>, description: string, statusCode: number): number | null {
-  try {
-    if (statusCode === 429) {
-      const params = result?.parameters as Record<string, unknown> | undefined;
-      const apiParam = params?.retry_after;
-      if (typeof apiParam === 'number' && isFinite(apiParam)) return Math.max(1, Math.floor(apiParam));
-    }
-    return parseRetryAfterFromMessage(description);
-  } catch (_e) { return null; }
-}
-
-function parseRetryAfterFromMessage(message: string): number | null {
-  if (!message) return null;
-  const m = message.match(/retry\s+after\s+(\d+)/i);
-  if (m && m[1]) { const n = parseInt(m[1], 10); return isFinite(n) ? Math.max(1, n) : null; }
-  return null;
-}
-
-function isTelegramParseError(description: string): boolean {
-  if (!description) return false;
-  return /can't parse entities/i.test(description) || /parse_mode/i.test(description);
-}
-
-function stripMarkdownToPlain(text: string): string {
-  if (!text) return text;
-  return text.replace(/[\\*_`\[\]()~>#+=|{}.!-]/g, ' ').replace(/\s{2,}/g, ' ').trim();
-}
-
-async function computeAdaptiveSpacing(// deno-lint-ignore no-explicit-any
-supabase: any): Promise<number> {
-  try {
-    const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
-    const { count } = await supabase
-      .from('pipeline_events')
-      .select('id', { count: 'exact', head: true })
-      .eq('step', 'deliver').eq('status', 'failed')
-      .gte('started_at', twoMinutesAgo)
-      .ilike('error', '%Too Many Requests%');
-    if ((count ?? 0) === 0) return 800;
-  } catch (_e) { /* fallback */ }
-  return 1500;
-}
-
 // deno-lint-ignore no-explicit-any
 async function getChatIdForJob(_job: Record<string, unknown>, _supabase: any): Promise<string | null> {
   try { return Deno.env.get('TELEGRAM_CHAT_ID') || null; } catch (_e) { return null; }
-}
-
-// ─────────────────────────────────────────────────────────────────────
-// Tweet hydration via X API v2 (for truncated tweets)
-// ─────────────────────────────────────────────────────────────────────
-
-const HYDRATE_TEXT_ENCODER = new TextEncoder();
-
-function hydratePercentEncode(s: string): string {
-  return encodeURIComponent(s).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
-}
-
-async function hydrateHmacSha1(key: string, data: string): Promise<string> {
-  const cryptoKey = await crypto.subtle.importKey("raw", HYDRATE_TEXT_ENCODER.encode(key), { name: "HMAC", hash: "SHA-1" }, false, ["sign"]);
-  const sig = await crypto.subtle.sign("HMAC", cryptoKey, HYDRATE_TEXT_ENCODER.encode(data));
-  return btoa(String.fromCharCode(...new Uint8Array(sig)));
-}
-
-async function hydrateOauthHeader(
-  method: string,
-  baseUrl: string,
-  queryParams: Record<string, string>,
-  consumerKey: string,
-  consumerSecret: string,
-  accessToken: string,
-  tokenSecret: string,
-): Promise<string> {
-  const oauthParams: Record<string, string> = {
-    oauth_consumer_key: consumerKey,
-    oauth_nonce: crypto.randomUUID().replace(/-/g, ""),
-    oauth_signature_method: "HMAC-SHA1",
-    oauth_timestamp: Math.floor(Date.now() / 1000).toString(),
-    oauth_token: accessToken,
-    oauth_version: "1.0",
-  };
-  const allParams = { ...oauthParams, ...queryParams };
-  const paramString = Object.keys(allParams).sort()
-    .map((k) => `${hydratePercentEncode(k)}=${hydratePercentEncode(allParams[k])}`).join("&");
-  const baseString = `${method.toUpperCase()}&${hydratePercentEncode(baseUrl)}&${hydratePercentEncode(paramString)}`;
-  const signingKey = `${hydratePercentEncode(consumerSecret)}&${hydratePercentEncode(tokenSecret)}`;
-  oauthParams.oauth_signature = await hydrateHmacSha1(signingKey, baseString);
-  return `OAuth ${Object.keys(oauthParams).sort()
-    .map((k) => `${hydratePercentEncode(k)}="${hydratePercentEncode(oauthParams[k])}"`).join(", ")}`;
-}
-
-// Reads Twitter creds strictly from environment secrets.
-async function getTwitterCreds(// deno-lint-ignore no-explicit-any
-_supabase: any): Promise<{ ck: string; cs: string; at: string; ats: string } | null> {
-  const ck = Deno.env.get("TWITTER_CONSUMER_KEY") || "";
-  const cs = Deno.env.get("TWITTER_CONSUMER_SECRET") || "";
-  const at = Deno.env.get("TWITTER_ACCESS_TOKEN") || "";
-  const ats = Deno.env.get("TWITTER_ACCESS_TOKEN_SECRET") || "";
-  if (!ck || !cs || !at || !ats) return null;
-  return { ck, cs, at, ats };
-}
-
-// Best-effort increment of x_api_usage settings counter (rolling 24h).
-async function recordXApiCall(// deno-lint-ignore no-explicit-any
-supabase: any, errorMsg?: string | null, response?: Response | null, tweetId?: string | null): Promise<void> {
-  const requestCounted = errorMsg !== 'no_creds';
-  await recordXApiEvent(supabase, {
-    source: 'worker',
-    sourceAction: 'hydrate_tweet',
-    endpoint: tweetId ? `/2/tweets/${tweetId}` : '/2/tweets/:id',
-    method: 'GET',
-    tweetId,
-    ok: response?.ok ?? false,
-    status: response?.status ?? null,
-    error: errorMsg ?? (response && !response.ok ? `HTTP ${response.status}` : null),
-    requestCounted,
-    estimatedBillableUnit: 'post_read',
-  }, response ?? null);
-  if (requestCounted) {
-    await recordLegacyXApiUsage(supabase, { error: errorMsg ?? (response && !response.ok ? `hydrate: HTTP ${response.status}` : null) });
-  }
-}
-
-// Load hydration toggle + daily budget from settings.
-// - twitter_hydration.enabled (default true): master kill switch
-// - x_rate_limits.hydrations_per_day (default 100): max X reads per 24h for hydration
-async function loadHydrationSettings(// deno-lint-ignore no-explicit-any
-supabase: any): Promise<{ enabled: boolean; daily_budget: number }> {
-  let enabled = true;
-  let daily_budget = 100;
-  try {
-    const { data: th } = await supabase.from('settings').select('value').eq('key', 'twitter_hydration').maybeSingle();
-    if (th?.value && typeof th.value === 'object') {
-      const v = th.value as Record<string, unknown>;
-      if (v.enabled === false) enabled = false;
-    }
-  } catch { /* keep default */ }
-  try {
-    const { data: rl } = await supabase.from('settings').select('value').eq('key', 'x_rate_limits').maybeSingle();
-    if (rl?.value && typeof rl.value === 'object') {
-      const v = rl.value as Record<string, unknown>;
-      const n = Number(v.hydrations_per_day);
-      if (Number.isFinite(n) && n > 0) daily_budget = Math.floor(n);
-    }
-  } catch { /* keep default */ }
-  return { enabled, daily_budget };
-}
-
-// Count hydration X API calls in the last 24h. We use posts.hydrated_at with
-// hydration_source='x_api' (the only source that consumed an actual X read).
-async function countDailyHydrationsUsed(// deno-lint-ignore no-explicit-any
-supabase: any): Promise<number> {
-  try {
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const { count } = await supabase
-      .from('posts')
-      .select('tweet_id', { count: 'exact', head: true })
-      .eq('hydration_source', 'x_api')
-      .gte('hydrated_at', since);
-    return Number(count || 0);
-  } catch { return 0; }
 }
 
 async function queueTranslateAfterHydrate(// deno-lint-ignore no-explicit-any
@@ -3127,22 +2049,6 @@ supabase: any, tweetId: string): Promise<void> {
       meta: { source: 'hydrate' },
     });
   } catch { /* best-effort */ }
-}
-
-// Extract numeric tweet id from RSS guid/url. Twitter tweet IDs are 18-19 digit numbers.
-function extractNumericTweetId(rawTweetId: string, url?: string | null): string | null {
-  const candidates: string[] = [rawTweetId];
-  if (url) candidates.push(url);
-  for (const c of candidates) {
-    if (!c) continue;
-    // /status/123456789 — most reliable
-    const m1 = c.match(/status\/(\d{5,25})/);
-    if (m1) return m1[1];
-    // raw long digit string
-    const m2 = c.match(/(?:^|[^0-9])(\d{15,25})(?:$|[^0-9])/);
-    if (m2) return m2[1];
-  }
-  return null;
 }
 
 async function handleHydrateTweetJob(job: Record<string, unknown>, // deno-lint-ignore no-explicit-any
@@ -3373,115 +2279,6 @@ async function maybeEnqueueResolveMedia(// deno-lint-ignore no-explicit-any
   }
 }
 
-// ───────────────────────────────────────────────────────────────────────────
-// resolve_media: zero-X-API video/media discovery via public proxies.
-// Mirrors the client-side Downloader page logic so we don't burn quota.
-// ───────────────────────────────────────────────────────────────────────────
-
-type ResolvedVariant = { url: string; bitrate?: number; content_type?: string };
-type ResolvedMediaRow = {
-  kind: 'video' | 'image' | 'gif';
-  url: string;
-  width?: number;
-  height?: number;
-  duration_ms?: number;
-};
-
-function rmUpgradeImageUrl(url: string): string {
-  try {
-    const u = new URL(url);
-    if (u.hostname.endsWith('twimg.com')) {
-      u.searchParams.set('name', 'orig');
-      return u.toString();
-    }
-  } catch { /* noop */ }
-  return url;
-}
-
-function rmPickBestVariant(variants: ResolvedVariant[]): ResolvedVariant | undefined {
-  const mp4s = variants.filter((v) => (v.content_type ?? '').includes('mp4') || v.url.includes('.mp4'));
-  const pool = mp4s.length ? mp4s : variants;
-  return [...pool].sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0))[0];
-}
-
-async function rmFetchFromFx(handle: string, id: string): Promise<ResolvedMediaRow[] | null> {
-  try {
-    const res = await fetch(`https://api.fxtwitter.com/${handle}/status/${id}`);
-    if (!res.ok) return null;
-    const json = await res.json() as Record<string, unknown>;
-    const t = (json?.tweet ?? {}) as Record<string, unknown>;
-    const media = (t.media ?? {}) as Record<string, unknown>;
-    const out: ResolvedMediaRow[] = [];
-
-    const videos = (media.videos as Array<Record<string, unknown>> | undefined) ?? [];
-    for (const v of videos) {
-      const variants = (v.variants as ResolvedVariant[] | undefined) ?? [];
-      let url = (v.url as string) || '';
-      if (variants.length) {
-        const best = rmPickBestVariant(variants);
-        if (best?.url) url = best.url;
-      }
-      if (!url) continue;
-      // fxtwitter returns `duration` in SECONDS (often fractional, e.g. 5.9).
-      // Our media.duration_ms column is INTEGER → must convert + round.
-      const rawDur = v.duration as number | undefined;
-      const durMs = typeof rawDur === 'number' && isFinite(rawDur)
-        ? Math.round(rawDur * 1000) : null;
-      out.push({
-        kind: (v.type as string) === 'gif' ? 'gif' : 'video',
-        url,
-        width: v.width as number | undefined,
-        height: v.height as number | undefined,
-        duration_ms: durMs ?? undefined,
-      });
-    }
-
-    const photos = (media.photos as Array<Record<string, unknown>> | undefined) ?? [];
-    for (const p of photos) {
-      const url = p.url as string | undefined;
-      if (!url) continue;
-      out.push({
-        kind: 'image',
-        url: rmUpgradeImageUrl(url),
-        width: p.width as number | undefined,
-        height: p.height as number | undefined,
-      });
-    }
-    return out.length ? out : null;
-  } catch (e) {
-    console.warn('resolve_media: fxtwitter failed', (e as Error).message);
-    return null;
-  }
-}
-
-async function rmFetchFromVx(handle: string, id: string): Promise<ResolvedMediaRow[] | null> {
-  try {
-    const res = await fetch(`https://api.vxtwitter.com/${handle}/status/${id}`);
-    if (!res.ok) return null;
-    const json = await res.json() as Record<string, unknown>;
-    const extended = (json.media_extended as Array<Record<string, unknown>> | undefined) ?? [];
-    const out: ResolvedMediaRow[] = [];
-    for (const m of extended) {
-      const type = String(m.type || '');
-      const url = m.url as string | undefined;
-      if (!url) continue;
-      if (type === 'video' || type === 'gif') {
-        out.push({
-          kind: type === 'gif' ? 'gif' : 'video',
-          url,
-          duration_ms: m.duration_millis as number | undefined,
-        });
-      } else if (type === 'image') {
-        out.push({ kind: 'image', url: rmUpgradeImageUrl(url) });
-      }
-    }
-    return out.length ? out : null;
-  } catch (e) {
-    console.warn('resolve_media: vxtwitter failed', (e as Error).message);
-    return null;
-  }
-}
-
 async function handleResolveMediaJob(job: Record<string, unknown>, // deno-lint-ignore no-explicit-any
 supabase: any): Promise<boolean> {
   const payload = (job.payload || {}) as Record<string, unknown>;
@@ -3535,20 +2332,7 @@ supabase: any): Promise<boolean> {
   // attached, and download_media (which filters `storage_path IS NULL`)
   // would skip the row — causing x-poster to upload the thumbnail bytes as
   // the "video" and Telegram to send it as a document.
-  const rows = await Promise.all(resolved.map(async (m, index) => ({
-    tweet_id: tweetId,
-    kind: m.kind,
-    src_url: m.url,
-    src_url_hash: await hashUrl(m.url),
-    width: m.width != null ? Math.round(m.width) : null,
-    height: m.height != null ? Math.round(m.height) : null,
-    duration_ms: m.duration_ms != null ? Math.round(m.duration_ms) : null,
-    ordering: index,
-    storage_path: null,
-    downloaded_at: null,
-    file_size: null,
-    mime_type: null,
-  })));
+  const rows = await buildResolvedMediaRows(tweetId, resolved);
 
   const { error: insErr } = await supabase.from('media').upsert(rows, { onConflict: 'tweet_id,ordering' });
   if (insErr) {
@@ -3576,14 +2360,7 @@ supabase: any): Promise<boolean> {
   // completed job from an earlier resolve attempt and (with
   // ignoreDuplicates) get silently dropped — leaving freshly-resolved rows
   // with storage_path=null and causing text-only posts.
-  const dlKey = `download_media:resolve:${tweetId}:${Date.now()}`;
-  const { error: dlErr } = await supabase.from('jobs').insert({
-    type: 'download_media',
-    payload: { tweet_id: tweetId },
-    status: 'pending',
-    idempotency_key: dlKey,
-    next_run_at: new Date().toISOString(),
-  });
+  const { error: dlErr } = await supabase.from('jobs').insert(buildResolveMediaDownloadJob(tweetId));
   if (dlErr) console.warn('resolve_media: failed to enqueue download_media', dlErr.message);
 
   await insertPipelineEvent(supabase, 'post', tweetId, 'resolve_media', 'completed',
@@ -3591,10 +2368,4 @@ supabase: any): Promise<boolean> {
 
   console.log(`resolve_media: ${tweetId} resolved ${rows.length} item(s) via ${source}`);
   return true;
-}
-
-function extractHandleFromUrl(url: string | null | undefined): string | null {
-  if (!url) return null;
-  const m = url.match(/(?:twitter\.com|x\.com)\/([A-Za-z0-9_]+)\/status\//i);
-  return m ? m[1] : null;
 }

@@ -11,7 +11,7 @@ import { Separator } from '@/components/ui/separator';
 import { Layers, Plus, X, Save, Loader2 } from 'lucide-react';
 import { useSaveSettings } from '@/hooks/useSettingsData';
 import { useToast } from '@/hooks/use-toast';
-import { supabase } from '@/integrations/supabase/client';
+import { invokeAdminAction } from '@/api/adminActions';
 
 export interface StoryMemoryConfig {
   enabled: boolean;
@@ -65,10 +65,7 @@ export default function StoryMemoryCard({ initial }: Props) {
   const handleBackfill = async () => {
     setBackfilling(true);
     try {
-      const { data, error } = await supabase.functions.invoke('admin-actions', {
-        body: { action: 'backfill_dedupe', hours: 24, max: 500 },
-      });
-      if (error) throw error;
+      const data = await invokeAdminAction<{ queued?: number; scanned?: number }>({ action: 'backfill_dedupe', hours: 24, max: 500 });
       toast({ title: 'Backfill queued', description: `Queued ${data?.queued ?? 0} duplicate checks over ${data?.scanned ?? 0} posts.` });
     } catch (e) {
       toast({ title: 'Backfill failed', description: (e as Error).message, variant: 'destructive' });

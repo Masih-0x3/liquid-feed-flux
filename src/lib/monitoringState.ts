@@ -1,4 +1,4 @@
-import type { MonitoringEntry, MonitoringOverview } from '@/hooks/useMonitoringData';
+import type { MonitoringEntry, MonitoringOverview } from '@/api/monitoringData';
 import { getScoringV2Snapshot } from '@/lib/scoringV2Monitoring';
 
 export type MonitoringTone = 'good' | 'warn' | 'bad' | 'muted' | 'info';

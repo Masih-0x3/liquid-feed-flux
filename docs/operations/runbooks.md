@@ -45,6 +45,8 @@ Changes take effect on next translation/delivery (existing posts unaffected).
 
 `WEBHOOK_SHARED_SECRET` and matching Vault/cron tokens secure internal invokes. Validation uses the Postgres RPC `verify_webhook_internal_token` (migration `20260513180000_verify_webhook_internal_token.sql`).
 
+Function-by-function auth mode, caller, required secret, and hardening details are tracked in [`function-auth-matrix.md`](./function-auth-matrix.md). Update that matrix before changing any `verify_jwt` flag, internal token behavior, RSS webhook token behavior, or function caller path.
+
 1. **Vault / cron token** must match the Edge secret `WEBHOOK_SHARED_SECRET`. If you rotate the secret in Supabase Dashboard, update the Vault value used by `pg_net` / `net.http_post` jobs as well.
 2. After changing that secret, **redeploy** the Edge functions that enforce internal auth so they pick up the new env (or wait for the next deploy pipeline).
 3. **Post-deploy check:** Supabase → Edge Functions → `worker` → Logs. For the **latest deployment version**, cron `POST` requests should return **200**. Persistent **401** on the latest version means the secret or RPC path is still misaligned.

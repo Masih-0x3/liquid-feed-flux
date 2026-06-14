@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { supabase } from '@/integrations/supabase/client';
+import { invokeAdminAction } from '@/api/adminActions';
 import { useToast } from '@/hooks/use-toast';
 import { Link2, Eye, Send, Loader2, MessageSquare } from 'lucide-react';
 
@@ -73,10 +74,7 @@ export default function Threads() {
 
   const handlePostThread = async (threadId: string) => {
     try {
-      const { error } = await supabase.functions.invoke('admin-actions', {
-        body: { action: 'post_thread', thread_id: threadId },
-      });
-      if (error) throw error;
+      await invokeAdminAction({ action: 'post_thread', thread_id: threadId });
       toast({ title: 'Thread queued for delivery' });
     } catch {
       toast({ title: 'Error posting thread', variant: 'destructive' });

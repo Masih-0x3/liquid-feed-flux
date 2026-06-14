@@ -12,7 +12,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { useToast } from '@/hooks/use-toast';
-import { supabase } from '@/integrations/supabase/client';
+import { invokeAdminAction } from '@/api/adminActions';
 import { useSaveSettings } from '@/hooks/useSettingsData';
 import { Key, Shield, CheckCircle2, XCircle, Send, Sparkles, Loader2, AtSign, AlertTriangle, ExternalLink } from 'lucide-react';
 import XPostingConfig, { type XPostingConfigValue } from '@/components/settings/XPostingConfig';
@@ -77,8 +77,7 @@ export default function XAutomationSettings({ twitterHydration, xApiUsage, xPost
   const refreshStatus = useCallback(async () => {
     setStatusLoading(true);
     try {
-      const { data, error } = await supabase.functions.invoke('admin-actions', { body: { action: 'get_x_status' } });
-      if (error) throw error;
+      const data = await invokeAdminAction<{ status?: Record<string, boolean> }>({ action: 'get_x_status' });
       setStatusMap(data?.status ?? {});
     } catch (e) {
       toast({ title: 'Could not load credential status', description: (e as Error).message, variant: 'destructive' });
@@ -99,8 +98,10 @@ export default function XAutomationSettings({ twitterHydration, xApiUsage, xPost
     setVerifyLoading(true);
     setVerifyResult(null);
     try {
-      const { data, error } = await supabase.functions.invoke('admin-actions', { body: { action: 'x_verify_credentials' } });
-      if (error) throw error;
+      const data = await invokeAdminAction<{ ok: boolean; handle?: string; id?: string; error?: string }>(
+        { action: 'x_verify_credentials' },
+        { throwOnFailure: false },
+      );
       setVerifyResult(data);
       toast({ title: data?.ok ? 'Connection OK' : 'Connection failed', description: data?.handle ? `Authenticated as @${data.handle}` : data?.error, variant: data?.ok ? 'default' : 'destructive' });
     } catch (e) {
@@ -124,10 +125,10 @@ export default function XAutomationSettings({ twitterHydration, xApiUsage, xPost
     setSendLoading(true);
     setTweetResult(null);
     try {
-      const { data, error } = await supabase.functions.invoke('admin-actions', {
-        body: { action: 'send_test_tweet', text: tweetText.trim(), in_reply_to_tweet_id: replyTo.trim() || undefined },
-      });
-      if (error) throw error;
+      const data = await invokeAdminAction<{ ok: boolean; tweet_id?: string; response?: unknown; error?: string }>(
+        { action: 'send_test_tweet', text: tweetText.trim(), in_reply_to_tweet_id: replyTo.trim() || undefined },
+        { throwOnFailure: false },
+      );
       setTweetResult(data);
       setLastSendAt(Date.now());
       toast({ title: data?.ok ? 'Tweet posted' : 'Tweet failed', description: data?.tweet_id ? `ID: ${data.tweet_id}` : data?.error, variant: data?.ok ? 'default' : 'destructive' });
@@ -148,10 +149,10 @@ export default function XAutomationSettings({ twitterHydration, xApiUsage, xPost
     setHydrateLoading(true);
     setHydrateResult(null);
     try {
-      const { data, error } = await supabase.functions.invoke('admin-actions', {
-        body: { action: 'test_hydrate_tweet', tweet_id: hydrateId.trim() },
-      });
-      if (error) throw error;
+      const data = await invokeAdminAction<{ ok: boolean; text?: string; note_tweet?: string; lang?: string; raw?: unknown; error?: string }>(
+        { action: 'test_hydrate_tweet', tweet_id: hydrateId.trim() },
+        { throwOnFailure: false },
+      );
       setHydrateResult(data);
       toast({ title: data?.ok ? 'Hydration OK' : 'Hydration failed', description: data?.note_tweet ? 'note_tweet field returned' : data?.error });
     } catch (e) {
@@ -167,10 +168,10 @@ export default function XAutomationSettings({ twitterHydration, xApiUsage, xPost
     setBackfillLoading(true);
     setBackfillResult(null);
     try {
-      const { data, error } = await supabase.functions.invoke('admin-actions', {
-        body: { action: 'rehydrate_recent_truncated', hours: 24, dry_run: dryRun, force: false },
-      });
-      if (error) throw error;
+      const data = await invokeAdminAction<{ ok: boolean; dry_run?: boolean; scanned?: number; matched?: number; queued?: number; skipped_existing?: number; excluded_by_gate?: number; max?: number; hours?: number; error?: string }>(
+        { action: 'rehydrate_recent_truncated', hours: 24, dry_run: dryRun, force: false },
+        { throwOnFailure: false },
+      );
       setBackfillResult(data);
       toast({
         title: data?.ok ? (dryRun ? 'Backfill estimate ready' : 'Backfill queued') : 'Backfill failed',

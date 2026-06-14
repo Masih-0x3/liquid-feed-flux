@@ -1,7 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import WebSocket from "ws";
 import { buildAudioExtractCommand, buildContactSheetCommand, buildFrameSampleCommand, buildOpenCvInpaintRenderCommand, buildRenderCommand, buildWatermarkInspectionSheetCommand, probeVideo, runCommand } from "./ffmpeg.js";
 import { analyzeRemovableWatermarks, cleanupTranscriptSegments, detectLanguageFromTranscription, translateSegments } from "./openai.js";
@@ -12,89 +11,7 @@ import { hasUsableSubtitleText, sanitizeSubtitleSegments, segmentsToAss, segment
 import { transcribeAudio } from "./transcription.js";
 import { transcribeWithEnhancedAudioRetry } from "./transcriptionPipeline.js";
 
-const DEFAULT_RENDER_VERSION = "persian-subtitles-masihh-v1";
-const DEFAULT_OPENCV_SCRIPT = join(dirname(fileURLToPath(import.meta.url)), "../scripts/opencv_inpaint_pipe.py");
-
-function parseCsv(value, fallback = []) {
-  const raw = String(value ?? "").trim();
-  if (!raw) return fallback;
-  return raw.split(",").map((item) => item.trim()).filter(Boolean);
-}
-
-export function loadConfigFromEnv(env = process.env) {
-  const required = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "OPENAI_API_KEY"];
-  for (const key of required) {
-    if (!env[key]) throw new Error(`${key} is required`);
-  }
-  const transcriptionProvider = env.TRANSCRIPTION_PROVIDER || "deepgram";
-  if (transcriptionProvider === "deepgram" && !env.DEEPGRAM_API_KEY) {
-    throw new Error("DEEPGRAM_API_KEY is required when TRANSCRIPTION_PROVIDER=deepgram");
-  }
-  return {
-    supabaseUrl: env.SUPABASE_URL,
-    supabaseServiceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY,
-    openaiApiKey: env.OPENAI_API_KEY,
-    workDir: env.WORK_DIR || "/tmp/xot-video-renderer",
-    rendererId: env.RENDERER_ID || `renderer-${process.pid}`,
-    renderVersion: env.RENDER_VERSION || DEFAULT_RENDER_VERSION,
-    transcriptionProvider,
-    transcriptionFallbackProvider: env.TRANSCRIPTION_FALLBACK_PROVIDER || "",
-    enhancedAudioRetry: env.ENHANCED_AUDIO_RETRY !== "0",
-    earlyTranscriptRescue: env.EARLY_TRANSCRIPT_RESCUE !== "0",
-    earlyTranscriptMinFirstCueStartSeconds: Number(env.EARLY_TRANSCRIPT_MIN_FIRST_CUE_START_SECONDS || 8),
-    earlyTranscriptWindowSeconds: Number(env.EARLY_TRANSCRIPT_WINDOW_SECONDS || 14),
-    deepgramApiKey: env.DEEPGRAM_API_KEY || "",
-    deepgramModel: env.DEEPGRAM_MODEL || "nova-3",
-    deepgramLanguage: env.DEEPGRAM_LANGUAGE || "",
-    deepgramLanguageFallbacks: parseCsv(env.DEEPGRAM_LANGUAGE_FALLBACKS, ["multi", "en", "fa", "he", "ar"]),
-    deepgramDetectLanguage: env.DEEPGRAM_DETECT_LANGUAGE !== "0",
-    transcriptionModel: env.SUBTITLE_TRANSCRIBE_MODEL || "gpt-4o-transcribe-diarize",
-    fallbackTranscriptionModel: env.SUBTITLE_FALLBACK_TRANSCRIBE_MODEL || "whisper-1",
-    cleanupModel: env.SUBTITLE_CLEANUP_MODEL || env.SUBTITLE_TRANSLATE_MODEL || "gpt-5.4-mini",
-    enableTranscriptCleanup: env.ENABLE_TRANSCRIPT_CLEANUP !== "0",
-    translationModel: env.SUBTITLE_TRANSLATE_MODEL || "gpt-5.4-mini",
-    visionModel: env.WATERMARK_VISION_MODEL || env.SUBTITLE_TRANSLATE_MODEL || "gpt-5.4-mini",
-    watermarkVisionTemperature: Number(env.WATERMARK_VISION_TEMPERATURE ?? 0),
-    watermarkVisionTopP: env.WATERMARK_VISION_TOP_P ? Number(env.WATERMARK_VISION_TOP_P) : null,
-    watermarkVisionMaxOutputTokens: Number(env.WATERMARK_VISION_MAX_OUTPUT_TOKENS || 1200),
-    watermarkVisionFrameWidth: Number(env.WATERMARK_VISION_FRAME_WIDTH || 1440),
-    watermarkVisionImageDetail: env.WATERMARK_VISION_IMAGE_DETAIL || "high",
-    watermarkInspectionTileWidth: Number(env.WATERMARK_INSPECTION_TILE_WIDTH || 720),
-    watermarkInspectionTileHeight: Number(env.WATERMARK_INSPECTION_TILE_HEIGHT || 360),
-    enableWatermarkVisualRecovery: env.ENABLE_WATERMARK_VISUAL_RECOVERY !== "0",
-    enableVisionPreflight: env.ENABLE_OPENAI_VISION_PREFLIGHT !== "0",
-    visionSpecialistMode: env.VISION_SPECIALIST_MODE || "always",
-    includeContactSheetInVision: env.INCLUDE_CONTACT_SHEET_IN_VISION === "1",
-    enableAdaptiveSubtitleMask: env.ENABLE_ADAPTIVE_SUBTITLE_MASK === "1",
-    watermarkBlockThreshold: Number(env.WATERMARK_BLOCK_THRESHOLD || 0.85),
-    watermarkUncertainThreshold: Number(env.WATERMARK_UNCERTAIN_THRESHOLD || 0.60),
-    blockUncertainWatermarks: env.BLOCK_UNCERTAIN_WATERMARKS !== "0",
-    maxDelogoRegions: Number(env.MAX_DELOGO_REGIONS || 2),
-    maxSingleDelogoAreaRatio: Number(env.MAX_SINGLE_DELOGO_AREA_RATIO || 0.10),
-    maxTotalDelogoAreaRatio: Number(env.MAX_TOTAL_DELOGO_AREA_RATIO || 0.15),
-    minWatermarkOnlyConfidence: Number(env.MIN_WATERMARK_ONLY_CONFIDENCE || 0.85),
-    watermarkBoxPadRatio: Number(env.WATERMARK_BOX_PAD_RATIO || 0),
-    watermarkBoxHorizontalDilation: Number(env.WATERMARK_BOX_HORIZONTAL_DILATION || 0),
-    watermarkBoxVerticalDilation: Number(env.WATERMARK_BOX_VERTICAL_DILATION || 0),
-    crf: Number(env.OUTPUT_CRF || 20),
-    preset: env.OUTPUT_PRESET || "fast",
-    delogoCrf: Number(env.DELOGO_OUTPUT_CRF || env.OUTPUT_CRF || 18),
-    delogoPreset: env.DELOGO_OUTPUT_PRESET || env.OUTPUT_PRESET || "fast",
-    delogoEngine: env.DELOGO_ENGINE || "opencv",
-    opencvPython: env.OPENCV_PYTHON || "python3",
-    opencvScript: env.OPENCV_INPAINT_SCRIPT || DEFAULT_OPENCV_SCRIPT,
-    opencvMode: env.OPENCV_INPAINT_MODE || "hybrid",
-    opencvAlgorithm: env.OPENCV_INPAINT_ALGORITHM || "telea",
-    opencvRadius: Number(env.OPENCV_INPAINT_RADIUS || 2),
-    opencvKernel: Number(env.OPENCV_INPAINT_KERNEL || 7),
-    opencvDilateIterations: Number(env.OPENCV_INPAINT_DILATE_ITERATIONS || 2),
-    opencvCloseIterations: Number(env.OPENCV_INPAINT_CLOSE_ITERATIONS || 1),
-    opencvFeather: Number(env.OPENCV_INPAINT_FEATHER || 0),
-    threads: Number(env.FFMPEG_THREADS || 3),
-    fontsDir: env.FONTS_DIR || "/usr/share/fonts",
-    bucket: env.MEDIA_BUCKET || "temp-media",
-  };
-}
+export { loadConfigFromEnv } from "./config.js";
 
 export function createSupabase(config) {
   return createClient(config.supabaseUrl, config.supabaseServiceRoleKey, {
@@ -436,7 +353,9 @@ async function maybeRunVisionPreflight({ inputPath, workingDir, config, prefligh
     tileWidth: config.watermarkInspectionTileWidth,
     tileHeight: config.watermarkInspectionTileHeight,
   }), { label: `vision_inspection_${frame.seekSeconds}` }))));
-  const ocr = await measure(metrics, "local_ocr", () => runOptionalOcr(contactSheetPath));
+  const ocr = await measure(metrics, "local_ocr", () => runOptionalOcr(contactSheetPath, {
+    tesseractLang: config.tesseractLang,
+  }));
   let watermarkOnly = null;
   let vision = null;
   if (config.enableVisionPreflight) {
@@ -469,6 +388,7 @@ async function maybeRunVisionPreflight({ inputPath, workingDir, config, prefligh
     dimensions: { width: metrics.width, height: metrics.height },
     existingRegions: [],
     allowVisualRecovery: config.enableWatermarkVisualRecovery,
+    tesseractLang: config.tesseractLang,
   }));
   const requireLocalDelogoCoordinates = shouldRequireLocalDelogoCoordinates(watermarkOnly, vision);
   const delogoRegions = selectDelogoRegions({
@@ -846,7 +766,7 @@ export async function runPreflightForRenderId({ supabase, renderId, config }) {
     };
     return { ok: true, render_id: renderId, tweet_id: row.tweet_id, preflight, metrics };
   } finally {
-    if (process.env.KEEP_PREFLIGHT_WORKDIR !== "1") {
+    if (!runtimeConfig.keepPreflightWorkdir) {
       await rm(workingDir, { recursive: true, force: true }).catch(() => null);
     }
   }

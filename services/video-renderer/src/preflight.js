@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { DEFAULT_TESSERACT_LANG, normalizeTesseractLang } from "./config.js";
 import { detectCaptionBand, detectWatermarkOverlay } from "./ffmpeg.js";
 
 const PLATFORM_PATTERNS = [
@@ -24,10 +25,10 @@ const PLATFORM_EXTRACTORS = [
   /\b[\w.-]+\.(?:com|net|org|io|ir|co)\b/gi,
 ];
 
-export const DEFAULT_TESSERACT_LANG = "eng+fas+ara+heb";
+export { DEFAULT_TESSERACT_LANG } from "./config.js";
 
-export function tesseractArgs(imagePath, outputFormat = null) {
-  const language = String(process.env.TESSERACT_LANG || DEFAULT_TESSERACT_LANG).trim() || DEFAULT_TESSERACT_LANG;
+export function tesseractArgs(imagePath, outputFormat = null, options = {}) {
+  const language = normalizeTesseractLang(options.tesseractLang);
   return [
     imagePath,
     "stdout",
@@ -404,9 +405,9 @@ export function extractPlatformMatches(text) {
   return [...new Set(found)];
 }
 
-export function runOptionalOcr(imagePath) {
+export function runOptionalOcr(imagePath, options = {}) {
   return new Promise((resolve) => {
-    const child = spawn("tesseract", tesseractArgs(imagePath), { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn("tesseract", tesseractArgs(imagePath, null, options), { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
@@ -462,9 +463,9 @@ function parseOcrPageDimensions(tsv) {
   return null;
 }
 
-function runOcrTsv(imagePath) {
+function runOcrTsv(imagePath, options = {}) {
   return new Promise((resolve) => {
-    const child = spawn("tesseract", tesseractArgs(imagePath, "tsv"), { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn("tesseract", tesseractArgs(imagePath, "tsv", options), { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
@@ -1278,7 +1279,7 @@ export function detectTextLikeRecoveryRegions(bytes, dimensions = {}, vision = {
     .slice(0, 3);
 }
 
-export async function recoverDelogoRegions({ framePaths = [], vision = null, dimensions = {}, existingRegions = [], allowVisualRecovery = false } = {}) {
+export async function recoverDelogoRegions({ framePaths = [], vision = null, dimensions = {}, existingRegions = [], allowVisualRecovery = false, tesseractLang = DEFAULT_TESSERACT_LANG } = {}) {
   const hints = delogoHintsFromVision(vision);
   const result = {
     attempted: false,
@@ -1295,7 +1296,7 @@ export async function recoverDelogoRegions({ framePaths = [], vision = null, dim
   const framePath = framePaths[0];
   if (!framePath) return { ...result, reason: "no_frame" };
 
-  const ocr = await runOcrTsv(framePath);
+  const ocr = await runOcrTsv(framePath, { tesseractLang });
   let ocrRegions = [];
   if (ocr.available) {
     ocrRegions = recoverDelogoRegionsFromOcrWords(ocr.words, hints, { width, height }, vision, ocr.dimensions);

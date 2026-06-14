@@ -20,6 +20,7 @@
     "test:functions": "npx --yes deno task test:functions",
     "check:vite-env": "node scripts/check-vite-env.mjs",
     "check:function-inventory": "node scripts/check-function-inventory.mjs",
+    "check:release-state": "bash scripts/check-release-state.sh",
     "check:strict": "tsc --noEmit -p tsconfig.strict.json",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -105,7 +106,7 @@
     "tailwindcss": "^3.4.17",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.38.0",
-    "vite": "^7.3.3",
-    "vitest": "^3.2.4"
+    "vite": "^8.0.16",
+    "vitest": "^4.1.8"
   }
 }
