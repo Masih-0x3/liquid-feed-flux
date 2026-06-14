@@ -49,6 +49,7 @@ import { isMyXEnabled, MY_X_DISABLED_RESPONSE } from "../_shared/myXControls.ts"
 
 const DEPLOY_SHA = Deno.env.get('DEPLOY_GIT_SHA') ?? 'unknown';
 const DEPLOY_TIME = Deno.env.get('DEPLOY_TIME') ?? new Date().toISOString();
+const DEFAULT_STORAGE_LIMIT_BYTES = 100_000_000_000;
 
 function makeCorsHeaders(req?: Request): Record<string, string> {
   const configuredOrigins = (Deno.env.get('ALLOWED_CORS_ORIGIN') ?? '')
@@ -1664,7 +1665,7 @@ function deriveMonitoringState(
   const dedupeStatus = typeof post.dedupe_status === 'string' ? post.dedupe_status : null;
   const dedupeReason = typeof post.dedupe_reason === 'string' ? post.dedupe_reason : '';
   const dedupeJobStatus = rpc?.dedupe_job_status as string | null | undefined;
-  const hasDedupeError = !!rpc?.dedupe_error || dedupeJobStatus === 'failed' || dedupeStatus === 'failed';
+  const rawDedupeError = !!rpc?.dedupe_error || dedupeJobStatus === 'failed' || dedupeStatus === 'failed';
   const duplicate = !!post.dup_of_tweet_id;
   const belowThreshold = isBelowThreshold(post, threshold);
   const skipped = !!post.delivery_decision && post.delivery_decision !== 'deliver';
@@ -1677,6 +1678,8 @@ function deriveMonitoringState(
   const needsHydration = post.delivery_decision === 'deliver' && post.is_truncated === true && !post.hydrated_at;
   const review = post.enrich_status === 'awaiting_approval' || post.score_review_status === 'needs_review';
   const passDecision = post.delivery_decision === 'deliver';
+  const terminalSkipDecision = skipped && !passDecision && !activeDedupe;
+  const hasDedupeError = rawDedupeError && !terminalSkipDecision;
   const duplicateCoverageGap = dedupeStatus === 'coverage_gap'
     || (dedupeStatus === 'uncertain' && duplicate && dedupeReason.includes('coverage_gap:'));
 
@@ -3117,7 +3120,7 @@ function normalizeResourceUsage(raw: unknown): Record<string, unknown> {
   const dbBytes = num(value.db_bytes);
   const dbLimit = num(value.db_limit_bytes, 500_000_000);
   const storageBytes = num(value.temp_media_bytes);
-  const storageLimit = num(value.storage_limit_bytes, 1_000_000_000);
+  const storageLimit = num(value.storage_limit_bytes, DEFAULT_STORAGE_LIMIT_BYTES);
   const edgeLimit = num(value.edge_monthly_limit, 500_000);
   const cronJobs = Array.isArray(value.cron_jobs) ? value.cron_jobs as Array<Record<string, unknown>> : [];
   const projectedCronMonthly = cronJobs.reduce((sum, job) => sum + (job.active === false ? 0 : estimateMonthlyRuns(job.schedule)), 0);

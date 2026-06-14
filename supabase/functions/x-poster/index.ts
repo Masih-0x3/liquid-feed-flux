@@ -11,7 +11,8 @@ import { allowCompletedEnrichmentForPosting, doesEnrichmentBlockX, normalizeEnri
 import { duplicateXSkipReason } from '../_shared/duplicateGuard.ts';
 import { assertFinalDuplicateState, normalizeDuplicateGateConfig, type FinalDuplicateAssertionResult } from '../_shared/dedupe.ts';
 import {
-  MAX_STANDARD_VIDEO_DURATION_MS,
+  MAX_ATTEMPTED_VIDEO_DURATION_MS,
+  isOverAttemptedVideoDuration,
   selectMediaTier,
   type XMediaRow,
 } from '../_shared/mediaSelection.ts';
@@ -910,9 +911,9 @@ Deno.serve(async (req) => {
     if (sel.tier !== 'text' && !dryRun) {
       if (sel.tier === 'video') {
         const durationMs = sel.items[0]?.duration_ms ?? null;
-        if (typeof durationMs === 'number' && durationMs > MAX_STANDARD_VIDEO_DURATION_MS) {
+        if (isOverAttemptedVideoDuration(durationMs)) {
           const seconds = Math.round(durationMs / 1000);
-          const reason = `video_too_long_for_x:${seconds}s`;
+          const reason = `video_too_long_for_config:${seconds}s`;
           const { error: skipErr } = await sb.from('x_deliveries').insert({
             post_id: tweetId,
             status: 'skipped',
@@ -920,7 +921,7 @@ Deno.serve(async (req) => {
             media_bytes: 0,
             media_kind: 'video',
             skip_reason: reason,
-            last_error: `X account/API limit blocks videos over ${MAX_STANDARD_VIDEO_DURATION_MS / 1000}s`,
+            last_error: `configured video duration cap is ${MAX_ATTEMPTED_VIDEO_DURATION_MS / 1000}s`,
             attempts: 0,
           });
           if (skipErr) console.error('[x-poster] x_deliveries insert skipped failed (video duration)', { tweetId, err: skipErr.message });

@@ -1,6 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Activity, AlertTriangle, Eye, RefreshCw, Loader2, Settings, Wrench, Play, RotateCcw, Clock } from 'lucide-react';
+import { Progress } from '@/components/ui/progress';
+import { Activity, AlertTriangle, Eye, RefreshCw, Loader2, Settings, Wrench, Play, RotateCcw, Clock, HardDrive } from 'lucide-react';
 import type { PipelineHealth, QueueBreakdown, SystemPerformanceSummary, XLocalUsage } from '@/hooks/useDashboardData';
 import { useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
@@ -18,6 +19,20 @@ interface Props {
   queue: QueueBreakdown;
   xUsage: XLocalUsage;
   systemPerformance?: SystemPerformanceSummary;
+}
+
+function formatBytes(bytes: number | null | undefined): string {
+  if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes <= 0) return '0 MB';
+  const mb = bytes / 1_000_000;
+  if (mb < 1000) return `${Math.round(mb)} MB`;
+  return `${(mb / 1000).toFixed(2)} GB`;
+}
+
+function storageTone(value: number | null | undefined): string {
+  if (value == null) return 'text-muted-foreground';
+  if (value >= 90) return 'text-destructive';
+  if (value >= 85) return 'text-warning';
+  return 'text-success';
 }
 
 export function DashboardHealth({ health, queue, xUsage, systemPerformance }: Props) {
@@ -89,6 +104,8 @@ export function DashboardHealth({ health, queue, xUsage, systemPerformance }: Pr
     { label: 'Ready to deliver', icon: Activity, route: '/monitoring?filter=ready_to_deliver' },
     { label: 'X automation', icon: Settings, route: '/settings#x-automation' },
   ];
+  const storage = systemPerformance?.resources;
+  const storagePct = storage?.storageUsedPct ?? null;
 
   return (
     <div className="space-y-4">
@@ -139,6 +156,49 @@ export function DashboardHealth({ health, queue, xUsage, systemPerformance }: Pr
           </div>
         </CardContent>
       </Card>
+
+      {storage && (
+        <Card className="glass-card">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base font-display text-glass-foreground flex items-center">
+              <HardDrive className="w-4 h-4 mr-2 text-primary" />
+              Media Storage
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-muted-foreground">Temp-media usage</span>
+                <span className={`font-semibold ${storageTone(storagePct)}`}>
+                  {storagePct == null ? 'Unknown' : `${storagePct}%`}
+                </span>
+              </div>
+              <Progress value={storagePct == null ? 0 : Math.min(100, storagePct)} className="mt-2 h-2" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <p className="text-xs text-muted-foreground">Used</p>
+                <p className="font-semibold text-glass-foreground">{formatBytes(storage.tempMediaBytes)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Allowance</p>
+                <p className="font-semibold text-glass-foreground">{formatBytes(storage.storageLimitBytes)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Objects</p>
+                <p className="font-semibold text-glass-foreground">{storage.tempMediaObjects.toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Cleanup cron</p>
+                <p className="font-semibold text-glass-foreground">Every 6h</p>
+              </div>
+            </div>
+            <div className="rounded-md border border-border/60 bg-muted/20 p-3 text-xs text-muted-foreground">
+              This check reads the Supabase temp-media bucket. Use the dry-run below to estimate old media cleanup without deleting objects.
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card className="glass-card">
         <CardHeader className="pb-3">

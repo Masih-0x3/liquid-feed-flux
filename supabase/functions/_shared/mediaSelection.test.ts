@@ -2,7 +2,9 @@ import { assertEquals } from "jsr:@std/assert";
 import {
   filterSendableIngestMedia,
   hasVideoIntent,
+  isOverAttemptedVideoDuration,
   isLikelyVideoThumbnailUrl,
+  MAX_ATTEMPTED_VIDEO_DURATION_MS,
   selectMediaTier,
 } from "./mediaSelection.ts";
 
@@ -72,7 +74,7 @@ Deno.test("valid downloaded video obeys allow_video config", () => {
   });
 });
 
-Deno.test("native X video under documented upload size limit is sendable", () => {
+Deno.test("native X video under upload size limit is sendable through the configured duration cap", () => {
   const row = {
     kind: "video",
     src_url: "https://video.twimg.com/amplify_video/abc/vid/avc1/1280x720/video.mp4",
@@ -80,13 +82,17 @@ Deno.test("native X video under documented upload size limit is sendable", () =>
     downloaded_at: "2026-05-17T00:00:00Z",
     mime_type: "video/mp4",
     file_size: 450 * 1024 * 1024,
-    duration_ms: 139_500,
+    duration_ms: 349_500,
   };
 
   assertEquals(selectMediaTier([row], { allowVideo: true }), {
     tier: "video",
     items: [row],
   });
+  assertEquals(MAX_ATTEMPTED_VIDEO_DURATION_MS, 350_000);
+  assertEquals(isOverAttemptedVideoDuration(202_000), false);
+  assertEquals(isOverAttemptedVideoDuration(350_000), false);
+  assertEquals(isOverAttemptedVideoDuration(351_000), true);
 });
 
 Deno.test("video-intent rows prevent thumbnail fallback when mixed with images", () => {

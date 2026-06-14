@@ -157,7 +157,11 @@ function describeError(step: string, raw: string | null | undefined): { title: s
   if (!raw) return { title: null, detail: null };
   const normalizedStep = step.toLowerCase();
   if (normalizedStep === "deliver" || normalizedStep.includes("telegram")) {
-    return { title: "Telegram request failed", detail: raw };
+    const formatted = formatPipelineError(raw);
+    if (formatted.title === (formatted.detail ?? raw)) {
+      return { title: "Telegram request failed", detail: raw };
+    }
+    return { title: formatted.title, detail: formatted.detail ?? raw };
   }
   const formatted = formatPipelineError(raw);
   return { title: formatted.title, detail: formatted.detail ?? raw };
