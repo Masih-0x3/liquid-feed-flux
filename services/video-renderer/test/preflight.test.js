@@ -23,6 +23,7 @@ import {
   selectDelogoRegions,
   selectTargetLanguage,
   subtitlePlacementFromVision,
+  tesseractArgs,
   visionFromWatermarkOnly,
 } from "../src/preflight.js";
 
@@ -62,6 +63,26 @@ test("parses OCR TSV word boxes", () => {
     confidence: 83.5,
     text: "@source",
   }]);
+});
+
+test("builds multilingual Tesseract args for text and TSV OCR", () => {
+  assert.deepEqual(tesseractArgs("/tmp/frame.jpg"), [
+    "/tmp/frame.jpg",
+    "stdout",
+    "-l",
+    "eng+fas+ara+heb",
+    "--psm",
+    "6",
+  ]);
+  assert.deepEqual(tesseractArgs("/tmp/frame.jpg", "tsv"), [
+    "/tmp/frame.jpg",
+    "stdout",
+    "-l",
+    "eng+fas+ara+heb",
+    "--psm",
+    "6",
+    "tsv",
+  ]);
 });
 
 test("recovers scaled lower handle OCR boxes without matching source title text", () => {

@@ -15,6 +15,11 @@ RUN apt-get update \
     python3 \
     python3-numpy \
     python3-opencv \
+    tesseract-ocr \
+    tesseract-ocr-ara \
+    tesseract-ocr-eng \
+    tesseract-ocr-fas \
+    tesseract-ocr-heb \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
