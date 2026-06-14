@@ -131,7 +131,8 @@ test("adds protest chant guidance for repeated names and resignation demands", (
 
   const translationText = JSON.stringify(translation);
   assert.match(translationText, /resignation chants/);
-  assert.match(translationText, /استعفا بده/);
+  assert.match(translationText, /عراقچی، استعفا/);
+  assert.match(translationText, /narrow videos stay readable/);
   assert.match(translationText, /do not output only the repeated name/);
 });
 

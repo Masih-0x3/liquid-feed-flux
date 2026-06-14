@@ -326,7 +326,7 @@ export function buildTranslationRequest({ model, segments, targetLanguage = "fa"
               normalizedTarget === "fa" ? "For Persian output, translate English slogans semantically instead of transliterating them; render \"Free Palestine\" as \"فلسطین آزاد\" or \"فلسطین را آزاد کنید\", never \"فری فلسطین\"." : "",
               normalizedTarget === "fa" ? "For a cue like \"Can we get a Free Palestine?\", prefer a natural subtitle such as \"یه «فلسطین آزاد» می‌گی؟\" over a literal phrasing like \"می‌تونیم یه فلسطین آزاد داشته باشیم؟\"." : "",
               normalizedTarget === "fa" ? "For an English cue like \"Give me one Free Palestine\", treat \"give me one\" as asking someone to say or chant the slogan; prefer \"یه «فلسطین آزاد» بگو\" over \"بده\"." : "",
-              normalizedTarget === "fa" ? "For resignation chants like \"Araghchi, resign\" or \"Ghalibaf, resign\", use natural Persian chant wording such as \"عراقچی، استعفا بده\"; do not output only the repeated name." : "",
+              normalizedTarget === "fa" ? "For resignation chants like \"Araghchi, resign\" or \"Ghalibaf, resign\", use short natural Persian chant wording such as \"عراقچی، استعفا\". For repeated chants like \"Araghchi, resign, resign\", prefer \"عراقچی، استعفا، استعفا\" over longer phrases like \"استعفا بده\" so narrow videos stay readable; do not output only the repeated name." : "",
               normalizedTarget === "fa" ? "Do not invent greetings such as \"سلام\"; translate \"what up\" or \"what's up\" as \"چه خبر\" or \"چطوری\" only when that greeting is actually in the source cue." : "",
               "Do not add source-language text.",
             ].filter(Boolean).join(" "),
