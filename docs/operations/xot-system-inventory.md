@@ -191,7 +191,8 @@ Targeted shared webhook secret rotation refresh:
 - `public.verify_webhook_internal_token` returned `true` for the regenerated value, and a `db-cleanup` dry-run using the regenerated `x-internal-token` returned HTTP `200`.
 - After the secret rotation, remote function versions were `webhooks-rssapp` `227`, `worker` `258`, `admin-retry` `181`, `db-cleanup` `153`, `media-processor` `192`, `media-cleanup` `189`, `admin-actions` `180`, `x-poster` `129`, `x-followers-snapshot` `103`, and `digest-compiler` `109`.
 - Post-rotation `npm run check:release-state` passed with all cron jobs active, no stale running jobs, and renderer `hermes-masih-1` online at `2026-06-15 20:12:36.689+00`.
-- Remaining RSS.app manual work: remove the stale query token from the webhook URL, regenerate the exposed RSS.app signing secret, update `RSSAPP_SIGNING_SECRET`, send another signed no-query test, and wait for the zero-hit compatibility quiet window before deleting query-token code.
+- RSS.app manual cleanup completed on 2026-06-15: the stale query token was removed from the webhook URL, the exposed RSS.app signing secret was regenerated, `RSSAPP_SIGNING_SECRET` was updated at `2026-06-15T20:31:26.118Z`, and a regenerated-secret signed no-query RSS.app test returned HTTP `200`.
+- Remaining RSS.app work: wait for the zero-hit compatibility quiet window before deleting query-token code.
 
 Advisor highlights:
 
