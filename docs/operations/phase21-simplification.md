@@ -85,6 +85,7 @@ Response aliases still intentionally emitted for compatibility are `needs_action
 - Production frontend was refreshed at `2026-06-15T04:05:59Z`; main CI run `27523244015` passed; post-deploy `npm run check:release-state` passed with no stale running jobs and renderer heartbeat online.
 - PR #22 added temporary compatibility usage telemetry, applied migration `20260615043000`, deployed `admin-actions` `161`, `db-cleanup` `134`, `digest-compiler` `90`, `media-cleanup` `170`, `media-processor` `173`, `webhooks-rssapp` `207`, `worker` `237`, `x-followers-snapshot` `84`, and `x-poster` `110`, and stamped `DEPLOY_GIT_SHA=ccd06079eae7e454ffd372dce94f71940c64e560`.
 - Production frontend was refreshed at `2026-06-15T04:54:52Z`; main CI run `27524704871` passed; post-deploy `npm run check:release-state` passed; initial `public.compatibility_usage_events` read returned zero rows.
+- Follow-up telemetry at `2026-06-15T05:09:40Z` recorded `2` `rss_query_token` hits for `/webhooks-rssapp` with `legacy_value=query:token`, confirming RSS.app query-token compatibility is still actively used and must not be removed yet.
 - The worker fallback cron now includes `reprocess`; the manually queued reprocess batch drained to `50` completed jobs in the 24-hour queue check.
 - Live `translation_prompt.max_completion_tokens` and `translation_prompt.scoring.max_completion_tokens` were normalized from `50000` to `8000`. `reasoning_effort=high` remains a deliberate product-quality/cost tradeoff to tune separately.
 

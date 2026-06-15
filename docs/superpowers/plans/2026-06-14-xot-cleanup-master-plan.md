@@ -2149,7 +2149,7 @@ Removal remains blocked until the relevant feature rows are absent across a norm
 - `admin_action_alias`: proves `backfill_signatures` is unused.
 - `rss_query_token`: proves RSS.app no longer sends webhook auth in the URL.
 
-Initial post-deploy read after `ccd06079eae7e454ffd372dce94f71940c64e560` returned zero rows; that only proves no legacy hit had arrived immediately after deploy, not that the paths are unused across a normal production window.
+Initial post-deploy read after `ccd06079eae7e454ffd372dce94f71940c64e560` returned zero rows. Follow-up telemetry at `2026-06-15T05:09:40Z` recorded `2` `rss_query_token` hits for `/webhooks-rssapp` with `legacy_value=query:token`, confirming RSS.app query-token compatibility is still actively used and must not be removed yet.
 
 ## Validation
 
