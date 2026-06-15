@@ -27,7 +27,7 @@ Main checkout preserved for user work:
 Current verified main release anchor:
 
 ```text
-70d5733a5604a535e1d44be1224a10033121d102
+64a6ed61d7194dcab808651f2f10de7bcf19e72a
 ```
 
 Release notes:
@@ -39,6 +39,8 @@ Release notes:
 - PR #16 added OpenAI cost guardrails, merged at `c4076d3055c8e9d509387131a8d0d8ddf18666ec`, applied migration `20260615005500`, and deployed `admin-actions` plus `worker`.
 - PR #19 fixed degraded Dashboard Edge Function failures, merged at `c6ba0ba46f3e45f888c23fd95cdd8cbf4b9cb1b1`, deployed `admin-actions` version `158`, and stamped `DEPLOY_GIT_SHA=c6ba0ba46f3e45f888c23fd95cdd8cbf4b9cb1b1`.
 - PR #20 removed the safe worker export-surface slice, merged at `70d5733a5604a535e1d44be1224a10033121d102`, deployed `worker` version `235`, and stamped `DEPLOY_GIT_SHA=70d5733a5604a535e1d44be1224a10033121d102`.
+- PR #22 added temporary compatibility usage telemetry, merged at `ccd06079eae7e454ffd372dce94f71940c64e560`, applied migration `20260615043000`, and stamped `DEPLOY_GIT_SHA=ccd06079eae7e454ffd372dce94f71940c64e560`.
+- PR #25 removed the safe worker helper export-surface slice, merged at `64a6ed61d7194dcab808651f2f10de7bcf19e72a`, deployed all 10 Edge Functions, and stamped `DEPLOY_GIT_SHA=64a6ed61d7194dcab808651f2f10de7bcf19e72a`.
 
 Current safe-state rule:
 
@@ -2104,6 +2106,8 @@ Worker export cleanup timing note: after PR #20, production was promoted again a
 
 Compatibility telemetry timing note: after PR #22, production was promoted again at `ccd06079eae7e454ffd372dce94f71940c64e560`. Migration `20260615043000` was applied and repaired into the remote migration ledger, main CI run `27524704871` passed, live hosts refreshed at `2026-06-15T04:54:52Z`, and `npm run check:release-state` passed. Deployed Edge Function versions were `admin-actions` `161`, `db-cleanup` `134`, `digest-compiler` `90`, `media-cleanup` `170`, `media-processor` `173`, `webhooks-rssapp` `207`, `worker` `237`, `x-followers-snapshot` `84`, and `x-poster` `110`.
 
+Worker helper export cleanup timing note: after PR #25, production was promoted again at `64a6ed61d7194dcab808651f2f10de7bcf19e72a`. Main CI run `27529812922` passed, live hosts refreshed at `2026-06-15T07:10:05Z`, all 10 Edge Functions were deployed, `DEPLOY_GIT_SHA` was stamped to `64a6ed61d7194dcab808651f2f10de7bcf19e72a`, and `npm run check:release-state` passed. Deployed Edge Function versions were `admin-actions` `163`, `admin-retry` `164`, `db-cleanup` `136`, `digest-compiler` `92`, `media-cleanup` `172`, `media-processor` `175`, `webhooks-rssapp` `209`, `worker` `239`, `x-followers-snapshot` `86`, and `x-poster` `112`. Authenticated `admin-actions` `get_dashboard_summary` returned HTTP `200`, `success=true`, and a dashboard payload after deployment.
+
 ## Steps
 
 - [x] Re-run release-state check.
@@ -2115,7 +2119,7 @@ npm run check:release-state
 - [x] Remove frontend schema fallbacks that are no longer used.
 - [ ] Remove unused admin action wrappers. Deferred: `backfill_signatures` is local-code unused by the current frontend, but removal needs telemetry showing no external/manual calls. PR #22 added temporary `admin_action_alias` rows for this gate.
 - [x] Remove unused worker entrypoint re-exports and file-local lifecycle constants.
-- [ ] Remove remaining worker helper exports. Deferred: the remaining export surface is mostly test/public-module surface and should be handled with behavior-level Deno tests, not as a blind export removal.
+- [ ] Remove remaining worker helper exports. Partially complete: PR #25 removed the safe file-local/test-only helper export slice. Residual exports are production imports or public module boundaries and should only be removed after the importer is moved or behavior-level Deno tests cover the split.
 - [x] Remove dead code identified by TypeScript and Deno checks.
 - [x] Update docs to reflect the final module map.
 
@@ -2127,7 +2131,7 @@ Read-only sidecar audit identified these Phase 21 candidates. Do not remove them
 - Dashboard direct RPC fallback in `src/api/dashboardData.ts`: removed in PR #15 after Dashboard remained healthy through `admin-actions` and `src/test/dashboard-data.test.ts` was updated. PR #19 later kept `admin-actions` as the single Dashboard boundary by adding backend degraded handling for base `public.get_dashboard_summary()` failures and client-side Edge Function error-body extraction.
 - Monitoring response/filter aliases in `src/api/monitoringData.ts` and `supabase/functions/admin-actions/monitoringReads.ts`: remove only after old frontend bundles have aged out and temporary `monitoring_filter_alias` telemetry shows no legacy filter values across a normal operator window.
 - Unused admin action cases in `supabase/functions/_shared/adminActionNames.ts` and `supabase/functions/admin-actions/index.ts`: strongest candidate is the backward-compatible `backfill_signatures` alias, but temporary `admin_action_alias` telemetry and runbook/manual operator usage must be checked first.
-- Worker helper export surface in `supabase/functions/worker/*`: the unused `worker/index.ts` scoring re-export block and `MAX_ATTEMPTS` lifecycle export are safe de-export cleanup. Remaining helper exports should be removed only when preserving tests or moving helper coverage to public behavior.
+- Worker helper export surface in `supabase/functions/worker/*`: the unused `worker/index.ts` scoring re-export block and `MAX_ATTEMPTS` lifecycle export were removed in PR #20. PR #25 removed the safe file-local/test-only helper export slice. Remaining helper exports should be removed only when their production importer is moved or public behavior tests cover the split.
 - Paused My X implementation in `src/pages/XAccount.tsx`, `src/api/xAccountData.ts`, `src/hooks/useFollowerData.ts`, and `src/components/x/FollowerGrowthChart.tsx`: removed in PR #15; `/x-account` remains routed to `src/pages/XAccountDisabled.tsx`.
 - Renderer compatibility re-export in `services/video-renderer/src/renderer.js`: removed in PR #15 after confirming active imports use `services/video-renderer/src/config.js`.
 - RSS query-token compatibility in `supabase/functions/_shared/internalAuth.ts`: production Edge logs show query-token webhook calls still happen, so do not remove it until RSS.app is moved to header auth and temporary `rss_query_token` telemetry shows zero hits.
@@ -2160,6 +2164,8 @@ Removal remains blocked until the relevant feature rows are absent across a norm
 
 Initial post-deploy read after `ccd06079eae7e454ffd372dce94f71940c64e560` returned zero rows. Follow-up telemetry at `2026-06-15T05:09:40Z` recorded `2` `rss_query_token` hits for `/webhooks-rssapp` with `legacy_value=query:token`, confirming RSS.app query-token compatibility is still actively used and must not be removed yet.
 
+Post-PR #25 dashboard check: a user-visible "Dashboard failed to load / Edge Function returned a non-2xx status code" report was investigated read-only first. Direct unauthenticated `admin-actions` checks returned expected `401`s, local execution of the dashboard summary module against live Supabase returned a dashboard payload, and post-deploy authenticated `admin-actions` `get_dashboard_summary` returned HTTP `200`, `success=true`, and a dashboard payload. No Dashboard code/config hotfix was needed for this incident.
+
 ## Validation
 
 ```bash
@@ -2185,7 +2191,7 @@ git commit -m "chore: remove obsolete cleanup compatibility paths"
 - [x] Safe compatibility scaffolding is gone.
 - [ ] All compatibility scaffolding is gone. Deferred candidates: monitoring aliases, `backfill_signatures`, remaining worker helper export cleanup, RSS query-token compatibility, and `recordLegacyXApiUsage`.
 - [x] Docs match the actual code for completed removals.
-- [x] Local and read-only live checks pass for completed removals and the later `ccd06079eae7e454ffd372dce94f71940c64e560` release.
+- [x] Local and read-only live checks pass for completed removals and the later `64a6ed61d7194dcab808651f2f10de7bcf19e72a` release.
 
 ---
 
@@ -2230,7 +2236,7 @@ Close the production gaps discovered after the cleanup release: Dashboard option
 
 ## Remaining Notes
 
-- Authenticated Dashboard browser verification still requires an active admin browser session/JWT; Codex has verified the unauthenticated `admin-actions` gateway path and production bundle refresh, but not a live admin Dashboard session after PR #19.
+- Authenticated Dashboard Edge Function verification passed after PR #25 using an active admin browser session; visual browser-page JavaScript verification remains blocked locally because Chrome has "Allow JavaScript from Apple Events" disabled.
 - `translation_prompt.reasoning_effort` remains `high`; this is a product-quality/cost tradeoff and should be tuned deliberately rather than changed as cleanup.
 
 ---

@@ -95,12 +95,14 @@ Response aliases still intentionally emitted for compatibility are `needs_action
 - PR #16 added OpenAI quota/cost guardrails, applied migration `20260615005500`, deployed `admin-actions` version `156`, deployed `worker` version `232`, and stamped `DEPLOY_GIT_SHA=c4076d3055c8e9d509387131a8d0d8ddf18666ec`.
 - PR #19 hardened Dashboard base-summary degradation, deployed `admin-actions` version `158`, and stamped `DEPLOY_GIT_SHA=c6ba0ba46f3e45f888c23fd95cdd8cbf4b9cb1b1`.
 - Production frontend was refreshed at `2026-06-15T03:45:48Z`; main CI run `27522692966` passed; unauthenticated `admin-actions` sanity returned the expected `401`.
-- Authenticated Dashboard browser verification still requires an active admin browser session/JWT after PR #19.
+- Authenticated Dashboard Edge Function verification later passed after PR #25 with an active admin browser session; visual browser-page JavaScript verification remains blocked locally because Chrome has "Allow JavaScript from Apple Events" disabled.
 - PR #20 removed the safe worker export-surface slice, deployed `worker` version `235`, and stamped `DEPLOY_GIT_SHA=70d5733a5604a535e1d44be1224a10033121d102`.
 - Production frontend was refreshed at `2026-06-15T04:05:59Z`; main CI run `27523244015` passed; post-deploy `npm run check:release-state` passed with no stale running jobs and renderer heartbeat online.
 - PR #22 added temporary compatibility usage telemetry, applied migration `20260615043000`, deployed `admin-actions` `161`, `db-cleanup` `134`, `digest-compiler` `90`, `media-cleanup` `170`, `media-processor` `173`, `webhooks-rssapp` `207`, `worker` `237`, `x-followers-snapshot` `84`, and `x-poster` `110`, and stamped `DEPLOY_GIT_SHA=ccd06079eae7e454ffd372dce94f71940c64e560`.
 - Production frontend was refreshed at `2026-06-15T04:54:52Z`; main CI run `27524704871` passed; post-deploy `npm run check:release-state` passed; initial `public.compatibility_usage_events` read returned zero rows.
 - Follow-up telemetry at `2026-06-15T05:09:40Z` recorded `2` `rss_query_token` hits for `/webhooks-rssapp` with `legacy_value=query:token`, confirming RSS.app query-token compatibility is still actively used and must not be removed yet.
+- PR #25 removed the safe worker helper export-surface slice, deployed all 10 Edge Functions from `64a6ed61d7194dcab808651f2f10de7bcf19e72a`, and stamped `DEPLOY_GIT_SHA=64a6ed61d7194dcab808651f2f10de7bcf19e72a`.
+- Production frontend was refreshed at `2026-06-15T07:10:05Z`; main CI run `27529812922` passed; post-deploy `npm run check:release-state` passed; authenticated `get_dashboard_summary` returned HTTP `200`, `success=true`, and a dashboard payload.
 - The worker fallback cron now includes `reprocess`; the manually queued reprocess batch drained to `50` completed jobs in the 24-hour queue check.
 - Live `translation_prompt.max_completion_tokens` and `translation_prompt.scoring.max_completion_tokens` were normalized from `50000` to `8000`. `reasoning_effort=high` remains a deliberate product-quality/cost tradeoff to tune separately.
 

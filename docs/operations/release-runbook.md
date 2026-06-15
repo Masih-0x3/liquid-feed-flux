@@ -195,6 +195,28 @@ Secret/config rollback:
 
 Add new entries at the top.
 
+### 2026-06-15 - PR #25 Worker helper export cleanup
+
+```text
+Date: 2026-06-15
+Operator: Codex
+Git SHA: 64a6ed61d7194dcab808651f2f10de7bcf19e72a
+GitHub PR: https://github.com/Masihhedayati/liquid-feed-flux/pull/25
+CI run: https://github.com/Masihhedayati/liquid-feed-flux/actions/runs/27529812922
+Vercel deployment: not available from local CLI; production hosts refreshed from main and returned HTTP 200
+Vercel aliases: https://xot.iraneyes.com, https://xot.vercel.app
+Supabase project ref: jzirqfzzvlbxwfzndaer
+Migration head before: unchanged; no migrations in PR #25
+Migration head after: unchanged; no migrations applied; latest shared local/remote migration remained 20260615043000
+Function versions before: not captured immediately before deploy in this ledger branch; last documented all-function release was PR #22 at admin-actions 161, db-cleanup 134, digest-compiler 90, media-cleanup 170, media-processor 173, webhooks-rssapp 207, worker 237, x-followers-snapshot 84, and x-poster 110
+Function versions after: webhooks-rssapp 209, worker 239, admin-retry 164, db-cleanup 136, media-processor 175, media-cleanup 172, admin-actions 163, x-poster 112, x-followers-snapshot 86, digest-compiler 92
+DEPLOY_GIT_SHA: deploy script stamped 64a6ed61d7194dcab808651f2f10de7bcf19e72a; Supabase secret timestamp 2026-06-15T07:08:51.737Z
+Renderer heartbeat: hermes-masih-1 online, version 0.1.0, render_version persian-subtitles-masihh-v1, processed 1, failed 0, last_seen_at 2026-06-15 07:10:24.637+00
+Smoke checks: post-release npm run check:release-state passed; GitHub main CI passed; xot.iraneyes.com and xot.vercel.app returned HTTP 200 with app shell last-modified 2026-06-15T07:10:05Z and asset /assets/index-1w4T30nf.js; authenticated admin-actions get_dashboard_summary returned HTTP 200 with success=true and a dashboard payload after deployment
+Rollback target: previous main release git 681b46cf1d3e07c843a9953928c8ef8b532567a1; functions rollback by checking out that SHA and running DEPLOY_ALLOW_NON_MAIN=1 ./scripts/deploy-functions.sh after confirming the desired prior function versions
+Notes: PR #25 is a no-migration cleanup slice that reduces worker helper export surface without changing behavior. The user-reported Dashboard "Edge Function returned a non-2xx status code" did not reproduce in the authenticated post-deploy Edge Function check. Chrome Apple Events JavaScript is disabled locally, so the authenticated check used the existing Chrome admin session token without printing token material rather than executing browser-page JavaScript.
+```
+
 ### 2026-06-14 - PR #13 XOT cleanup integration
 
 ```text
