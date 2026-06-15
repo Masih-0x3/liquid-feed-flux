@@ -18,7 +18,7 @@ type ExtractedMediaItem = {
   duration?: number;
 };
 
-export type ResolvedVariant = {
+type ResolvedVariant = {
   url: string;
   bitrate?: number;
   content_type?: string;

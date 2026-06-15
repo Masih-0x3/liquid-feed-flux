@@ -15,7 +15,7 @@ type HydrationSettings = {
   daily_budget: number;
 };
 
-export type HydratedTweetPatch = {
+type HydratedTweetPatch = {
   fullText: string;
   updatePayload: Record<string, unknown>;
 };

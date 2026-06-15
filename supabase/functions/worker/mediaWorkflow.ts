@@ -1,6 +1,5 @@
 import {
   hashUrl,
-  type ResolvedVariant,
   rmPickBestVariant,
   rmUpgradeImageUrl,
 } from "./workerUtils.ts";
@@ -33,6 +32,12 @@ type FetchFn = (
   init?: RequestInit,
 ) => Promise<Response>;
 
+type FxTwitterVariant = {
+  url: string;
+  bitrate?: number;
+  content_type?: string;
+};
+
 export async function rmFetchFromFx(
   handle: string,
   id: string,
@@ -51,7 +56,7 @@ export async function rmFetchFromFx(
     const videos =
       (media.videos as Array<Record<string, unknown>> | undefined) ?? [];
     for (const v of videos) {
-      const variants = (v.variants as ResolvedVariant[] | undefined) ?? [];
+      const variants = (v.variants as FxTwitterVariant[] | undefined) ?? [];
       let url = (v.url as string) || "";
       if (variants.length) {
         const best = rmPickBestVariant(variants);

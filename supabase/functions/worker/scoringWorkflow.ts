@@ -105,7 +105,7 @@ type ScoringFields = {
   scoreAxes: ScoreAxes | null;
 };
 
-export type ScoringDecisionLog =
+type ScoringDecisionLog =
   | {
     kind: "v2";
     decision: string;
