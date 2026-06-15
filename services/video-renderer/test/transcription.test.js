@@ -301,6 +301,42 @@ test("rejects generic OpenAI outro captions after Deepgram finds no speech", asy
   assert.match(result.noUsableSpeechReason, /OpenAI fallback produced no usable speech/);
 });
 
+test("rejects sparse mixed-script OpenAI fallback after Deepgram finds no speech", async () => {
+  const result = await transcribeAudio({
+    provider: "deepgram",
+    fallbackProvider: "openai",
+    audioPath: "/tmp/audio.mp3",
+    durationMs: 88345,
+    deepgramApiKey: "dg-key",
+    openaiApiKey: "openai-key",
+    contextText: "Post context:\nPost: convoy driving on a road near a town.",
+    fetchImpl: async () => ({
+      ok: true,
+      text: async () => JSON.stringify({
+        results: {
+          channels: [{ detected_language: "und", alternatives: [{ transcript: "", words: [] }] }],
+          utterances: [],
+        },
+      }),
+    }),
+    readFileImpl: async () => Buffer.from("audio"),
+    openaiTranscribe: async () => ({
+      model: "whisper-1",
+      language: "nynorsk",
+      segments: [
+        { id: 1, start: 0, end: 14, text: "Продолжение следует..." },
+        { id: 2, start: 30, end: 34, text: "OLD COMPTON STREET" },
+        { id: 3, start: 60, end: 65, text: "عالی هستند." },
+      ],
+    }),
+  });
+
+  assert.equal(result.provider, "openai");
+  assert.equal(result.noUsableSpeech, true);
+  assert.deepEqual(result.segments, []);
+  assert.match(result.noUsableSpeechReason, /OpenAI fallback produced no usable speech/);
+});
+
 test("enhanced audio retry fires only after empty or weak Deepgram output", async () => {
   assert.equal(shouldRetryWithEnhancedAudio({
     provider: "deepgram",
