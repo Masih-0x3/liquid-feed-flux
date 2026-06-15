@@ -118,18 +118,6 @@ import {
   shouldQueueHydrationAfterTranslation,
 } from "./translateWorkflow.ts";
 
-export {
-  applyProfileDecision,
-  computeFinalScore,
-  type EditorialProfile,
-  parseScoreAxes,
-  type ProfileDecisionInput,
-  type ProfileDecisionResult,
-  SCORE_AXIS_KEYS,
-  type ScoreAxes,
-  type ScoreAxisKey,
-} from "../_shared/scoring.ts";
-
 const corsHeaders = {
   "Access-Control-Allow-Origin": Deno.env.get("ALLOWED_CORS_ORIGIN") ??
     "https://liquid-feed-flux.lovable.app",
