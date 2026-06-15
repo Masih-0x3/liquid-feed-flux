@@ -67,10 +67,10 @@ Deno.test("recordCompatibilityUsage swallows insert failures", async () => {
         };
       },
     }, {
-      source: "admin-actions",
-      feature: "admin_action_alias",
-      legacyValue: "backfill_signatures",
-      canonicalValue: "backfill_dedupe",
+      source: "webhooks-rssapp",
+      feature: "rss_query_token",
+      legacyValue: "query:token",
+      canonicalValue: "header:x-webhook-token",
     });
     await recordCompatibilityUsage({
       from() {
@@ -81,10 +81,10 @@ Deno.test("recordCompatibilityUsage swallows insert failures", async () => {
         };
       },
     }, {
-      source: "admin-actions",
-      feature: "monitoring_filter_alias",
-      legacyValue: "needs-action",
-      canonicalValue: "needs_attention",
+      source: "webhooks-rssapp",
+      feature: "rss_query_token",
+      legacyValue: "query:token",
+      canonicalValue: "header:x-webhook-token",
     });
   } finally {
     console.warn = originalWarn;

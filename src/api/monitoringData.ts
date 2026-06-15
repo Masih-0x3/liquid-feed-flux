@@ -251,15 +251,6 @@ export interface MonitoringOverview {
     manual_scoring_feedback: number;
     stale_jobs: number;
     stale_x_pending_24h: number;
-    needs_action?: number;
-    failed?: number;
-    waiting_translation?: number;
-    delivery_pending?: number;
-    awaiting_review?: number;
-    duplicate_skipped?: number;
-    hydration_backlog?: number;
-    posted_24h?: number;
-    ready_to_publish?: number;
   };
 }
 

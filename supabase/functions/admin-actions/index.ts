@@ -18,7 +18,6 @@ import {
 import {
   auditDuplicateCandidatesAdminAction,
   backfillDedupeAdminAction,
-  backfillSignaturesAdminAction,
   clearDuplicateAdminAction,
   runDedupeAdminAction,
 } from "./dedupeActions.ts";
@@ -298,9 +297,7 @@ serve(async (req) => {
       }
 
       case 'get_monitoring_entries': {
-        return jsonResponse(await getMonitoringEntries(supabase, body, {
-          actorId: authResult.userId,
-        }));
+        return jsonResponse(await getMonitoringEntries(supabase, body));
       }
 
       case 'get_x_api_summary': {
@@ -432,13 +429,6 @@ serve(async (req) => {
       case 'rehydrate_recent_truncated': {
         const result = await rehydrateRecentTruncatedAdminAction(supabase, body);
         return jsonResponse(result.body, result.status);
-      }
-
-      // ===== Backward-compatible alias for old Story Memory backfill =====
-      case 'backfill_signatures': {
-        return jsonResponse(await backfillSignaturesAdminAction(supabase, body, {
-          actorId: authResult.userId,
-        }));
       }
 
       // ===== Re-score recent posts that are missing score_axes =====
