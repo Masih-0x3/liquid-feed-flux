@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
 import { requireInternalAuth } from "../_shared/internalAuth.ts";
-import { recordLegacyXApiUsage, recordXApiEvent } from "../_shared/xApiLedger.ts";
+import { recordXApiEvent } from "../_shared/xApiLedger.ts";
 import { isMyXEnabled, MY_X_DISABLED_RESPONSE } from "../_shared/myXControls.ts";
 
 const corsHeaders = {
@@ -61,7 +61,6 @@ async function getSelfId(supabase: any, creds: { ck: string; cs: string; at: str
     endpoint: url,
     method: 'GET',
   }, resp);
-  await recordLegacyXApiUsage(supabase, { error: resp.ok ? null : `users/me HTTP ${resp.status}` });
   if (!resp.ok) throw new Error(`users/me failed: HTTP ${resp.status}: ${text.slice(0, 300)}`);
   const parsed = JSON.parse(text) as { data?: { id?: string; username?: string; name?: string } };
   const id = parsed.data?.id;
@@ -104,7 +103,6 @@ async function fetchUserPage(supabase: any, userId: string, endpoint: 'followers
     userId,
     error: resp.ok ? null : `${endpoint} HTTP ${resp.status}`,
   }, resp);
-  await recordLegacyXApiUsage(supabase, { error: resp.ok ? null : `${endpoint} HTTP ${resp.status}` });
   if (!resp.ok) return { users: [], nextToken: null, status: resp.status, errorText: text.slice(0, 500) };
 
   const parsed = JSON.parse(text) as { data?: FollowerUser[]; meta?: { next_token?: string } };

@@ -1,5 +1,4 @@
 import {
-  recordLegacyXApiUsage,
   recordXApiEvent,
 } from "../_shared/xApiLedger.ts";
 import { isMyXEnabled } from "../_shared/myXControls.ts";
@@ -144,7 +143,6 @@ export async function recordAdminXApiAttempt(
     estimatedBillableUnit?: string | null;
   },
   response?: Response | null,
-  legacy?: { post?: boolean; mediaUpload?: boolean },
 ) {
   await recordXApiEvent(supabase, {
     source: "admin-actions",
@@ -160,16 +158,6 @@ export async function recordAdminXApiAttempt(
     requestCounted: input.requestCounted,
     estimatedBillableUnit: input.estimatedBillableUnit ?? null,
   }, response ?? null);
-  if (input.requestCounted !== false) {
-    await recordLegacyXApiUsage(supabase, {
-      error: input.error ??
-        (response && !response.ok
-          ? `${input.action}: HTTP ${response.status}`
-          : null),
-      post: legacy?.post,
-      mediaUpload: legacy?.mediaUpload,
-    });
-  }
 }
 
 export function getXStatusAdminAction(
@@ -379,7 +367,6 @@ export async function sendTestTweetAdminAction(
         method: "POST",
       },
       resp,
-      { post: resp.ok },
     );
     if (!resp.ok) {
       return {

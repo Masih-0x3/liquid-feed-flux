@@ -26,7 +26,6 @@ function fakeSupabase(config: FakeConfig = {}) {
   const settings = {
     x_api_controls: { my_x_enabled: true, verify_cache_minutes: 15 },
     x_self_id: {},
-    x_api_usage: {},
     ...(config.settings ?? {}),
   };
   const client: SupabaseAdminClient & { calls: FakeCall[] } = {
@@ -185,7 +184,7 @@ Deno.test("verify credentials respects disabled owned reads without secrets or f
   assertEquals(calls.fetches, []);
 });
 
-Deno.test("verify credentials fetches, caches self, and records x api usage", async () => {
+Deno.test("verify credentials fetches, caches self, and records x api event", async () => {
   const supabase = fakeSupabase();
   const { deps: actionDeps, calls } = deps({
     data: { id: "u1", username: "masih", name: "Masih" },

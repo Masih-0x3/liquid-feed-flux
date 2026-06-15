@@ -1,5 +1,4 @@
 import {
-  recordLegacyXApiUsage,
   recordXApiEvent,
 } from "../_shared/xApiLedger.ts";
 
@@ -97,7 +96,7 @@ export async function getTwitterCreds(
   return { ck, cs, at, ats };
 }
 
-// Best-effort increment of x_api_usage settings counter (rolling 24h).
+// Record hydration X API attempts in the canonical x_api_events ledger.
 export async function recordXApiCall(
   // deno-lint-ignore no-explicit-any
   supabase: any,
@@ -123,12 +122,6 @@ export async function recordXApiCall(
     },
     response ?? null,
   );
-  if (requestCounted) {
-    await recordLegacyXApiUsage(supabase, {
-      error: errorMsg ??
-        (response && !response.ok ? `hydrate: HTTP ${response.status}` : null),
-    });
-  }
 }
 
 // Load hydration toggle + daily budget from settings.
