@@ -1,5 +1,6 @@
 import { assertEquals } from "jsr:@std/assert";
 import {
+  checkedDashboardRowsQuery,
   cronCadenceSeconds,
   durationSeconds,
   estimateMonthlyRuns,
@@ -10,6 +11,7 @@ import {
   summarizeDurations,
   summarizeLanePressure,
   summarizeOpenAiUsageJobs,
+  withDashboardFallback,
 } from "./dashboardSummaries.ts";
 
 Deno.test("dashboard queue helpers classify lanes and summarize pressure", () => {
@@ -188,6 +190,28 @@ Deno.test("dashboard OpenAI usage helper summarizes token metadata and quota fai
       retry_attempts: 4,
     },
   );
+});
+
+Deno.test("dashboard fallback helper converts optional query errors to safe rows", async () => {
+  const errors: unknown[] = [];
+  const originalError = console.error;
+  console.error = (...args: unknown[]) => {
+    errors.push(args);
+  };
+  try {
+    const rows = await withDashboardFallback(
+      "activity",
+      checkedDashboardRowsQuery(Promise.resolve({
+        data: null,
+        error: { message: "schema cache reload required" },
+      })),
+      { data: [], error: null },
+    );
+    assertEquals(rows, { data: [], error: null });
+    assertEquals(errors.length, 1);
+  } finally {
+    console.error = originalError;
+  }
 });
 
 Deno.test("latestXDeliveriesByPost keeps the newest row per post", () => {
