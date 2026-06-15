@@ -117,6 +117,8 @@ Response aliases removed from `get_monitoring_overview` were `needs_action`, `fa
 - Follow-up telemetry at `2026-06-15T10:49:04Z` recorded `40` `rss_query_token` hits for `/webhooks-rssapp` with `legacy_value=query:token`, confirming RSS.app query-token compatibility is still actively used and must not be removed yet.
 - PR #30 removed the zero-telemetry Monitoring/admin compatibility aliases, deployed all 10 Edge Functions from `9d60e9052056f5a0e2e0794579701a97e7e8cb5e`, and stamped `DEPLOY_GIT_SHA=9d60e9052056f5a0e2e0794579701a97e7e8cb5e`.
 - Production frontend was refreshed at `2026-06-15T11:24:33Z`; main CI run `27543209019` passed; post-deploy `npm run check:release-state` passed; post-deploy telemetry recorded only `45` `rss_query_token` hits and no `monitoring_filter_alias` or `admin_action_alias` rows.
+- PR #32 removed the final safe worker type-only export surface, deployed all 10 Edge Functions from `412127679bd158de342eabc64a4d4dd7c74cc4e2`, and stamped `DEPLOY_GIT_SHA=412127679bd158de342eabc64a4d4dd7c74cc4e2`.
+- Production frontend was refreshed at `2026-06-15T11:56:20Z`; main CI run `27544386658` passed; post-deploy `npm run check:release-state` passed with no stale running jobs and renderer heartbeat online.
 - The worker fallback cron now includes `reprocess`; the manually queued reprocess batch drained to `50` completed jobs in the 24-hour queue check.
 - Live `translation_prompt.max_completion_tokens` and `translation_prompt.scoring.max_completion_tokens` were normalized from `50000` to `8000`. `reasoning_effort=high` remains a deliberate product-quality/cost tradeoff to tune separately.
 

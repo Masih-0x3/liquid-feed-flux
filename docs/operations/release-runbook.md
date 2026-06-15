@@ -195,6 +195,28 @@ Secret/config rollback:
 
 Add new entries at the top.
 
+### 2026-06-15 - PR #32 Worker type export surface cleanup
+
+```text
+Date: 2026-06-15
+Operator: Codex
+Git SHA: 412127679bd158de342eabc64a4d4dd7c74cc4e2
+GitHub PR: https://github.com/Masihhedayati/liquid-feed-flux/pull/32
+CI run: https://github.com/Masihhedayati/liquid-feed-flux/actions/runs/27544386658
+Vercel deployment: not available from local CLI; production hosts refreshed from main and returned HTTP 200
+Vercel aliases: https://xot.iraneyes.com, https://xot.vercel.app
+Supabase project ref: jzirqfzzvlbxwfzndaer
+Migration head before: unchanged; no migrations in PR #32
+Migration head after: unchanged; no migrations applied; latest shared local/remote migration remained 20260615043000
+Supabase function versions before deploy: webhooks-rssapp 213, worker 243, admin-retry 168, db-cleanup 140, media-processor 179, media-cleanup 176, admin-actions 167, x-poster 116, x-followers-snapshot 90, digest-compiler 96
+Supabase function versions after deploy: webhooks-rssapp 215, worker 245, admin-retry 170, db-cleanup 142, media-processor 181, media-cleanup 178, admin-actions 169, x-poster 118, x-followers-snapshot 92, digest-compiler 98
+DEPLOY_GIT_SHA: deploy script stamped 412127679bd158de342eabc64a4d4dd7c74cc4e2; Supabase secret timestamp 2026-06-15T11:56:06.720Z
+Renderer heartbeat: hermes-masih-1 online, version 0.1.0, render_version persian-subtitles-masihh-v1, processed 4, failed 0, last_seen_at 2026-06-15 11:56:39.156+00
+Smoke checks: post-release npm run check:release-state passed; GitHub main CI passed; xot.iraneyes.com and xot.vercel.app returned HTTP 200 with app shell last-modified 2026-06-15T11:56:20Z and etag "c0b18005e0b668f26d84f38843212aec"; no stale running jobs; renderer heartbeat online
+Rollback target: 9d60e9052056f5a0e2e0794579701a97e7e8cb5e
+Notes: PR #32 made the final safe worker type-only export surface private: HydratedTweetPatch, ScoringDecisionLog, and ResolvedVariant. Runtime exports were not removed; a read-only sidecar audit found no unused exported runtime helpers left in supabase/functions/worker/*. RSS query-token compatibility and recordLegacyXApiUsage remain deferred because they still have production relevance.
+```
+
 ### 2026-06-15 - PR #30 Compatibility alias removal
 
 ```text
