@@ -15,6 +15,11 @@ type HydrationSettings = {
   daily_budget: number;
 };
 
+export type HydratedTweetPatch = {
+  fullText: string;
+  updatePayload: Record<string, unknown>;
+};
+
 const HYDRATE_TEXT_ENCODER = new TextEncoder();
 
 export function hydratePercentEncode(s: string): string {
@@ -178,4 +183,30 @@ export async function countDailyHydrationsUsed(
   } catch {
     return 0;
   }
+}
+
+export function buildHydratedTweetPatch(
+  json: Record<string, unknown>,
+  nowIso = new Date().toISOString(),
+): HydratedTweetPatch | null {
+  const data = (json.data || {}) as Record<string, unknown>;
+  const noteTweet = (data.note_tweet || {}) as Record<string, unknown>;
+  const fullText = (noteTweet.text as string) || (data.text as string) || "";
+  const lang = (data.lang as string) || null;
+
+  if (!fullText) return null;
+
+  const updatePayload: Record<string, unknown> = {
+    text_original: fullText,
+    hydrated_at: nowIso,
+    hydration_source: "x_api",
+    is_truncated: false,
+    // Invalidate stale truncated translations so downstream delivery gates
+    // cannot use old text before post-hydrate translation completes.
+    translated_at: null,
+    text_translated: null,
+  };
+  if (lang) updatePayload.lang_original = lang;
+
+  return { fullText, updatePayload };
 }

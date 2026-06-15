@@ -1,5 +1,6 @@
 import { assert, assertEquals, assertMatch } from "jsr:@std/assert";
 import {
+  buildHydratedTweetPatch,
   countDailyHydrationsUsed,
   hydrateOauthHeader,
   hydratePercentEncode,
@@ -168,4 +169,52 @@ Deno.test("countDailyHydrationsUsed returns zero when the count query fails", as
   const supabase = createCountSupabase({ throws: true });
 
   assertEquals(await countDailyHydrationsUsed(supabase), 0);
+});
+
+Deno.test("buildHydratedTweetPatch prefers note tweet text and preserves hydration fields", () => {
+  const patch = buildHydratedTweetPatch({
+    data: {
+      text: "truncated",
+      note_tweet: { text: "full note tweet text" },
+      lang: "fa",
+    },
+  }, "2026-01-02T03:04:05.000Z");
+
+  assertEquals(patch, {
+    fullText: "full note tweet text",
+    updatePayload: {
+      text_original: "full note tweet text",
+      hydrated_at: "2026-01-02T03:04:05.000Z",
+      hydration_source: "x_api",
+      is_truncated: false,
+      translated_at: null,
+      text_translated: null,
+      lang_original: "fa",
+    },
+  });
+});
+
+Deno.test("buildHydratedTweetPatch falls back to regular text and omits empty lang", () => {
+  const patch = buildHydratedTweetPatch({
+    data: {
+      text: "regular tweet text",
+      lang: "",
+    },
+  }, "2026-01-02T03:04:05.000Z");
+
+  assertEquals(patch, {
+    fullText: "regular tweet text",
+    updatePayload: {
+      text_original: "regular tweet text",
+      hydrated_at: "2026-01-02T03:04:05.000Z",
+      hydration_source: "x_api",
+      is_truncated: false,
+      translated_at: null,
+      text_translated: null,
+    },
+  });
+});
+
+Deno.test("buildHydratedTweetPatch returns null for empty X API text", () => {
+  assertEquals(buildHydratedTweetPatch({ data: {} }), null);
 });

@@ -296,8 +296,31 @@ export function extractHandleFromUrl(
   url: string | null | undefined,
 ): string | null {
   if (!url) return null;
-  const match = url.match(
-    /(?:twitter\.com|x\.com)\/([A-Za-z0-9_]+)\/status\//i,
-  );
-  return match ? match[1] : null;
+  try {
+    const parsed = new URL(url);
+    if (
+      !/(^|\.)twitter\.com$/i.test(parsed.hostname) &&
+      !/(^|\.)x\.com$/i.test(parsed.hostname)
+    ) {
+      return null;
+    }
+    const [handle, nextSegment] = parsed.pathname.split("/").filter(Boolean);
+    if (!handle || !/^[A-Za-z0-9_]+$/.test(handle)) return null;
+    if (!nextSegment) {
+      const reservedPaths = new Set([
+        "compose",
+        "explore",
+        "home",
+        "messages",
+        "notifications",
+        "search",
+        "settings",
+      ]);
+      return reservedPaths.has(handle.toLowerCase()) ? null : handle;
+    }
+    if (nextSegment.toLowerCase() === "status") return handle;
+  } catch {
+    // Invalid URLs do not provide a usable handle.
+  }
+  return null;
 }
