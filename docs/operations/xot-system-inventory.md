@@ -166,6 +166,7 @@ Secret names observed:
 Secrets not observed in Supabase Edge secret names:
 
 - `RSSAPP_ALLOW_QUERY_TOKEN`
+- `RSSAPP_SIGNING_SECRET`
 - `RSSAPP_WEBHOOK_TOKEN`
 - `VIDEO_RENDERER_URL`
 - `VIDEO_RENDERER_TOKEN`

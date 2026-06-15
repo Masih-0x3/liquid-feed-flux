@@ -75,7 +75,7 @@ PR #22 added `public.compatibility_usage_events` and best-effort Edge Function w
 
 The table is service-role-only and intentionally stores no request body, auth token, or query string. Migration `20260615043000` was applied and repaired into the remote migration ledger, then shared-auth Edge Functions were deployed from `ccd06079eae7e454ffd372dce94f71940c64e560`.
 
-Follow-up telemetry at `2026-06-15T10:56:03Z` showed only `rss_query_token` activity: `41` hits for `/webhooks-rssapp` with `legacy_value=query:token`. No `monitoring_filter_alias` or `admin_action_alias` rows were present, so the Monitoring aliases and `backfill_signatures` alias were removed on branch `codex/xot-remove-unused-compat-aliases`. RSS query-token compatibility stays deferred until RSS.app is migrated to header auth and telemetry shows zero hits across a normal operator window.
+Follow-up telemetry at `2026-06-15T10:56:03Z` showed only `rss_query_token` activity: `41` hits for `/webhooks-rssapp` with `legacy_value=query:token`. No `monitoring_filter_alias` or `admin_action_alias` rows were present, so the Monitoring aliases and `backfill_signatures` alias were removed on branch `codex/xot-remove-unused-compat-aliases`. RSS query-token compatibility stays deferred until RSS.app is migrated to signed webhook auth or header-token fallback and telemetry shows zero hits across a normal operator window.
 
 Use this query during the observation window:
 
