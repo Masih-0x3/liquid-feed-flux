@@ -239,6 +239,28 @@ Rollback target: 412127679bd158de342eabc64a4d4dd7c74cc4e2
 Notes: PR #34 moved Settings and X Automation usage displays off legacy settings.x_api_usage and onto get_x_api_summary. The summary now exposes posts_last_hour, latest_event_at, and latest_error from canonical x_api_events and x_deliveries data. recordLegacyXApiUsage writers remain intentionally deferred until the bridge has had a live observation window and read-only checks confirm no runtime or UI dependency remains.
 ```
 
+### 2026-06-15 - PR #38 Renderer OpenAI subtitle helper split
+
+```text
+Date: 2026-06-15
+Operator: Codex
+Git SHA: b914ef0a61ddbf6f2d42e309be8c45d273ec163d
+GitHub PR: https://github.com/Masihhedayati/liquid-feed-flux/pull/38
+CI run: https://github.com/Masihhedayati/liquid-feed-flux/actions/runs/27556849631
+Vercel deployment: production hosts refreshed from main and returned HTTP 200
+Vercel aliases: https://xot.iraneyes.com, https://xot.vercel.app
+Supabase project ref: jzirqfzzvlbxwfzndaer
+Migration head before: unchanged; no migrations in PR #38
+Migration head after: unchanged; no migrations applied; latest shared local/remote migration remained 20260615043000
+Supabase function versions before deploy: unchanged from PR #36 release; webhooks-rssapp 219, worker 249, admin-retry 174, db-cleanup 146, media-processor 185, media-cleanup 182, admin-actions 173, x-poster 122, x-followers-snapshot 96, digest-compiler 102
+Supabase function versions after deploy: no Supabase deploy for PR #38; versions remained webhooks-rssapp 219, worker 249, admin-retry 174, db-cleanup 146, media-processor 185, media-cleanup 182, admin-actions 173, x-poster 122, x-followers-snapshot 96, digest-compiler 102
+DEPLOY_GIT_SHA: unchanged at 7f3dab452eaccecd5a275def6b29127998df958d; Supabase functions were not redeployed for this renderer/docs cleanup
+Renderer heartbeat: hermes-masih-1 online, version 0.1.0, render_version persian-subtitles-masihh-v1, processed 0, failed 0, last_seen_at 2026-06-15 15:24:57.142+00
+Smoke checks: post-merge npm run check:release-state passed; GitHub main CI passed; xot.iraneyes.com and xot.vercel.app returned HTTP 200 with app shell last-modified 2026-06-15T15:24:39Z and etag "879609f18b1d67d0c8b3bad286165c71"; no stale running jobs; renderer heartbeat online
+Rollback target: previous main before PR #38 was 29cc200fbc64141dd5441fb7d972272f1434c2c2; functions rollback not needed because no Supabase function deployment occurred
+Notes: PR #38 split OpenAI subtitle cleanup, translation, repair, and Responses API subtitle parsing into services/video-renderer/src/openaiSubtitles.js while keeping services/video-renderer/src/openai.js as the stable public facade. It also refreshed the cleanup plan and Phase 21 status so PR #32 and PR #36 are recorded as completed while RSS query-token compatibility remains deferred.
+```
+
 ### 2026-06-15 - PR #32 Worker type export surface cleanup
 
 ```text
