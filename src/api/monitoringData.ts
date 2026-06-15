@@ -262,8 +262,11 @@ export interface XApiSummary {
   success_rate: number;
   by_unit: Record<string, number>;
   by_source: Record<string, number>;
+  posts_last_hour: number;
   posts_local: number;
   media_posts_local: number;
+  latest_event_at: string | null;
+  latest_error: string | null;
   configured_budget: {
     posts_per_hour: number | null;
     posts_per_day: number | null;

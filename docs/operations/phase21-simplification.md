@@ -29,7 +29,8 @@ This branch removes compatibility code only after the PR #13 release was live, a
 
 These items still need request-log evidence, follow-up refactoring, or a product decision before removal:
 
-- RSS query-token compatibility and `recordLegacyXApiUsage`; both still have documented production relevance.
+- RSS query-token compatibility still has documented production relevance.
+- `recordLegacyXApiUsage` writers remain temporarily while production runs on the canonical `x_api_events`/`x_deliveries` Settings UI. Branch `codex/xot-xapi-summary-ui-cache-cleanup` moves Settings off `settings.x_api_usage`; remove the writers only after that release is live and read-only checks confirm no remaining runtime/UI dependency.
 
 ### Worker Helper Export Cleanup Slice
 

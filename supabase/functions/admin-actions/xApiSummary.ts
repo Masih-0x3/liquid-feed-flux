@@ -68,6 +68,7 @@ export async function getXApiSummary(
 ) {
   const windowHours = Math.min(Math.max(Number(body.window_hours) || 24, 1), 720);
   const since = new Date(Date.now() - windowHours * 60 * 60 * 1000).toISOString();
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
   const { data: events, error } = await table(supabase, "x_api_events")
     .select("created_at, source, source_action, endpoint, method, http_status, ok, estimated_billable_unit, request_counted, error")
     .gte("created_at", since)
@@ -76,6 +77,12 @@ export async function getXApiSummary(
   if (error) throw error;
 
   const eventRows = (events ?? []) as Array<Record<string, unknown>>;
+  const latestEvent = eventRows[0] ?? null;
+  const latestErrorEvent = eventRows.find((event) =>
+    typeof event.error === "string" && event.error.trim().length > 0
+  );
+  const latestEventAt = typeof latestEvent?.created_at === "string" ? latestEvent.created_at : null;
+  const latestError = typeof latestErrorEvent?.error === "string" ? latestErrorEvent.error : null;
   const byUnit: Record<string, number> = {};
   const bySource: Record<string, number> = {};
   let attempts = 0;
@@ -91,7 +98,11 @@ export async function getXApiSummary(
     bySource[source] = (bySource[source] ?? 0) + 1;
   }
 
-  const [{ count: postedCount }, { count: mediaCount }, { data: limitsRow }] = await Promise.all([
+  const [{ count: postedLastHour }, { count: postedCount }, { count: mediaCount }, { data: limitsRow }] = await Promise.all([
+    table(supabase, "x_deliveries")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "posted")
+      .gte("created_at", oneHourAgo),
     table(supabase, "x_deliveries")
       .select("id", { count: "exact", head: true })
       .eq("status", "posted")
@@ -164,8 +175,11 @@ export async function getXApiSummary(
       success_rate: attempts > 0 ? Math.round(((attempts - failed) / attempts) * 1000) / 10 : 100,
       by_unit: byUnit,
       by_source: bySource,
+      posts_last_hour: readNumber(postedLastHour, 0),
       posts_local: readNumber(postedCount, 0),
       media_posts_local: readNumber(mediaCount, 0),
+      latest_event_at: latestEventAt,
+      latest_error: latestError,
       configured_budget: {
         posts_per_hour: limits.posts_per_hour ?? null,
         posts_per_day: limits.posts_per_day ?? null,

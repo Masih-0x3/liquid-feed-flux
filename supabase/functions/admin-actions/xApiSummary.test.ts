@@ -17,30 +17,36 @@ type FakeCall = {
 
 function fakeSupabase() {
   const calls: FakeCall[] = [];
+  let deliveryQueryCount = 0;
   const client: SupabaseAdminClient & { calls: FakeCall[] } = {
     calls,
     from(tableName: string) {
       const state = {
         tableName,
         hasMediaFilter: false,
+        deliveryQueryNumber: tableName === "x_deliveries" ? ++deliveryQueryCount : 0,
       };
       const resolve = () => {
         if (state.tableName === "x_api_events") {
           return {
             data: [
               {
+                created_at: "2026-06-15T11:00:00.000Z",
                 source: "worker",
                 ok: true,
                 estimated_billable_unit: "post_write",
                 request_counted: true,
               },
               {
+                created_at: "2026-06-15T10:55:00.000Z",
                 source: "admin-actions",
                 ok: false,
                 estimated_billable_unit: "official_usage_lookup",
                 request_counted: false,
+                error: "HTTP 429",
               },
               {
+                created_at: "2026-06-15T10:45:00.000Z",
                 source: "worker",
                 ok: true,
                 estimated_billable_unit: null,
@@ -49,6 +55,7 @@ function fakeSupabase() {
           };
         }
         if (state.tableName === "x_deliveries") {
+          if (state.deliveryQueryNumber === 1) return { count: 1 };
           return { count: state.hasMediaFilter ? 2 : 5 };
         }
         if (state.tableName === "settings") {
@@ -141,8 +148,11 @@ Deno.test("x api summary counts local events, deliveries, and configured budgets
     worker: 2,
     "admin-actions": 1,
   });
+  assertEquals(result.summary.posts_last_hour, 1);
   assertEquals(result.summary.posts_local, 5);
   assertEquals(result.summary.media_posts_local, 2);
+  assertEquals(result.summary.latest_event_at, "2026-06-15T11:00:00.000Z");
+  assertEquals(result.summary.latest_error, "HTTP 429");
   assertEquals(result.summary.configured_budget, {
     posts_per_hour: 10,
     posts_per_day: 50,

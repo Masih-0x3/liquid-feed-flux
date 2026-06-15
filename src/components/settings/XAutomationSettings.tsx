@@ -22,7 +22,6 @@ import { useXApiSummary } from '@/hooks/useMonitoringData';
 
 interface Props {
   twitterHydration?: { enabled?: boolean; max_attempts?: number };
-  xApiUsage?: { total?: number; calls_24h?: string[]; last_call_at?: string | null; last_error?: string | null; posts_24h?: string[]; media_uploads_24h?: string[] };
   xPostingConfig?: Partial<XPostingConfigValue>;
   xRateLimits?: Partial<XRateLimitsValue>;
   xApiControls?: { my_x_enabled?: boolean };
@@ -37,7 +36,7 @@ const SECRET_KEYS = [
 
 const DEFAULT_TEST_TWEET = 'Test tweet from automation pipeline ✅ — please ignore.';
 
-export default function XAutomationSettings({ twitterHydration, xApiUsage, xPostingConfig, xRateLimits, xApiControls }: Props) {
+export default function XAutomationSettings({ twitterHydration, xPostingConfig, xRateLimits, xApiControls }: Props) {
   const { data: monthlyCount } = useXMonthlyPostsCount();
   const { data: xApiSummary, refetch: refetchXApiSummary, isFetching: xApiSummaryFetching } = useXApiSummary(24);
   const { toast } = useToast();
@@ -61,12 +60,7 @@ export default function XAutomationSettings({ twitterHydration, xApiUsage, xPost
   const [backfillLoading, setBackfillLoading] = useState(false);
   const [backfillResult, setBackfillResult] = useState<{ ok: boolean; dry_run?: boolean; scanned?: number; matched?: number; queued?: number; skipped_existing?: number; excluded_by_gate?: number; max?: number; hours?: number; error?: string } | null>(null);
 
-  const legacyCalls24h = Array.isArray(xApiUsage?.calls_24h)
-    ? xApiUsage!.calls_24h!.filter((ts) => {
-        try { return new Date(ts).getTime() > Date.now() - 24 * 60 * 60 * 1000; } catch { return false; }
-      }).length
-    : 0;
-  const calls24h = xApiSummary?.counted_attempts ?? legacyCalls24h;
+  const calls24h = xApiSummary?.counted_attempts ?? 0;
   const projectedMonthly = calls24h * 30;
   const configuredMonthlyBudget = xRateLimits?.monthly_post_budget ?? xApiSummary?.configured_budget?.monthly_post_budget ?? 0;
   const overBudget = configuredMonthlyBudget > 0 && projectedMonthly > configuredMonthlyBudget;
@@ -279,8 +273,8 @@ export default function XAutomationSettings({ twitterHydration, xApiUsage, xPost
             </div>
             <div className="p-3 bg-muted/30 rounded-lg">
               <p className="text-xs text-muted-foreground">Local posts (24h)</p>
-              <p className="text-2xl font-bold text-glass-foreground">{xApiSummary?.posts_local ?? xApiUsage?.posts_24h?.length ?? 0}</p>
-              {xApiUsage?.last_call_at && <p className="text-xs text-muted-foreground mt-1">Last: {new Date(xApiUsage.last_call_at).toLocaleString()}</p>}
+              <p className="text-2xl font-bold text-glass-foreground">{xApiSummary?.posts_local ?? 0}</p>
+              {xApiSummary?.latest_event_at && <p className="text-xs text-muted-foreground mt-1">Last: {new Date(xApiSummary.latest_event_at).toLocaleString()}</p>}
             </div>
             <div className={`p-3 rounded-lg ${overBudget ? 'bg-destructive/10 border border-destructive/30' : 'bg-muted/30'}`}>
               <p className="text-xs text-muted-foreground">Latest local estimate</p>
@@ -298,7 +292,7 @@ export default function XAutomationSettings({ twitterHydration, xApiUsage, xPost
             </div>
           )}
 
-          {xApiUsage?.last_error && <p className="text-xs text-destructive">Last error: {String(xApiUsage.last_error)}</p>}
+          {xApiSummary?.latest_error && <p className="text-xs text-destructive">Last error: {String(xApiSummary.latest_error)}</p>}
 
           <Separator />
 
@@ -456,7 +450,7 @@ export default function XAutomationSettings({ twitterHydration, xApiUsage, xPost
             </div>
           )}
           <Separator />
-          <p className="text-xs text-muted-foreground">Networked verification, hydration, media upload, and post attempts are recorded in the local usage ledger. Missing credentials are not counted as X API calls.</p>
+          <p className="text-xs text-muted-foreground">Networked verification, hydration, media upload, and post attempts are recorded in the X API event ledger. Missing credentials are not counted as X API calls.</p>
         </CardContent>
       </Card>
 
@@ -466,7 +460,6 @@ export default function XAutomationSettings({ twitterHydration, xApiUsage, xPost
       {/* 6. Rate Limits & Quotas */}
       <XRateLimits
         initial={xRateLimits}
-        usage={{ posts_24h: xApiUsage?.posts_24h, media_uploads_24h: xApiUsage?.media_uploads_24h }}
         monthlyPostsCount={monthlyCount ?? 0}
       />
     </div>
