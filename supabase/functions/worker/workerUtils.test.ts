@@ -18,7 +18,6 @@ import {
   rmPickBestVariant,
   rmUpgradeImageUrl,
   stripMarkdownToPlain,
-  timestampMs,
   videoUploadFilename,
 } from "./workerUtils.ts";
 
@@ -116,12 +115,30 @@ Deno.test("job timing metadata computes queue, claim, and run durations", () => 
   assertEquals(meta.worker_run_ms, 20_000);
   assertEquals(meta.retry_after_seconds, 7);
   assertEquals(meta.lane, "delivery");
+
+  const invalidTiming = jobTimingMeta(
+    {
+      id: "job2",
+      type: "translate",
+      attempts: 1,
+      priority: 10,
+      created_at: "bad",
+      next_run_at: "also-bad",
+      locked_at: "still-bad",
+    },
+    "completed",
+    {},
+    Date.parse("2026-01-01T00:00:30.000Z"),
+  );
+
+  assertEquals(invalidTiming.queue_wait_ms, null);
+  assertEquals(invalidTiming.claim_delay_ms, null);
+  assertEquals(invalidTiming.worker_run_ms, null);
 });
 
 Deno.test("pipeline and telegram parsing helpers normalize edge cases", () => {
   assertEquals(isRecordValue({ a: 1 }), true);
   assertEquals(isRecordValue([]), false);
-  assertEquals(timestampMs("bad"), null);
   assertEquals(normalizeStep("download_media"), "media");
   assertEquals(normalizeStep("custom"), "custom");
   assertEquals(parseRetryAfterFromMessage("retry after 42"), 42);

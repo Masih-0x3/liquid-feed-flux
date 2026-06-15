@@ -10,14 +10,14 @@ import {
 import type { XMediaRow } from "../_shared/mediaSelection.ts";
 import { insertPipelineEvent } from "./jobLifecycle.ts";
 
-export const VIDEO_RENDER_VERSION = "persian-subtitles-masihh-v1";
+const VIDEO_RENDER_VERSION = "persian-subtitles-masihh-v1";
 export const VIDEO_RENDER_DEFER_MS = 30_000;
 
 type EdgeRuntimeWithWaitUntil = {
   waitUntil?: (promise: Promise<unknown>) => void;
 };
 
-export type DispatchVideoRendererForTarget = (
+type DispatchVideoRendererForTarget = (
   // deno-lint-ignore no-explicit-any
   supabase: any,
   renderId: string,
@@ -25,14 +25,14 @@ export type DispatchVideoRendererForTarget = (
   source: string,
 ) => Promise<void>;
 
-export type DispatchXPosterForTarget = (
+type DispatchXPosterForTarget = (
   // deno-lint-ignore no-explicit-any
   supabase: any,
   tweetId: string,
   source: string,
 ) => Promise<void>;
 
-export type VideoRenderWorkflowDeps = {
+type VideoRenderWorkflowDeps = {
   dispatchVideoRendererForTarget?: DispatchVideoRendererForTarget;
   dispatchXPosterForTarget?: DispatchXPosterForTarget;
 };
@@ -52,7 +52,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 // deno-lint-ignore no-explicit-any
-export async function loadVideoRenderConfig(
+async function loadVideoRenderConfig(
   supabase: any,
 ): Promise<VideoRenderConfig> {
   try {
@@ -70,7 +70,7 @@ export async function loadVideoRenderConfig(
 }
 
 // deno-lint-ignore no-explicit-any
-export async function loadVideoRenderDecision(
+async function loadVideoRenderDecision(
   supabase: any,
   tweetId: string,
   renderingEnabled = true,
@@ -110,7 +110,7 @@ export async function loadVideoRenderDecision(
 }
 
 // deno-lint-ignore no-explicit-any
-export async function dispatchVideoRendererForTarget(
+async function dispatchVideoRendererForTarget(
   supabase: any,
   renderId: string,
   tweetId: string,
@@ -359,7 +359,7 @@ export async function prepareVideoRenderGate(
 }
 
 // deno-lint-ignore no-explicit-any
-export async function enqueueDeliverJob(
+async function enqueueDeliverJob(
   supabase: any,
   tweetId: string,
   source: string,

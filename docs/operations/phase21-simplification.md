@@ -29,8 +29,23 @@ These items still need request-log evidence or a product decision before removal
 
 - Old Monitoring response/filter aliases in `src/api/monitoringData.ts` and `supabase/functions/admin-actions/monitoringReads.ts`.
 - Unused admin-action names such as `backfill_signatures`, after checking admin-actions request logs and runbooks. Local code already uses canonical `backfill_dedupe`; `backfill_signatures` only forwards to it, but successful admin action names are not currently recorded in an app table, and this Supabase CLI does not expose function request logs.
-- Remaining worker helper export cleanup in `supabase/functions/worker/*`; this is mostly test export surface and should be done with focused Deno tests or behavior-level replacement coverage.
+- Remaining worker helper export review in `supabase/functions/worker/*` after the safe file-local/test-only slice; keep production imports exported unless a later refactor removes the importer.
 - RSS query-token compatibility and `recordLegacyXApiUsage`; both still have documented production relevance.
+
+### Worker Helper Export Cleanup Slice
+
+Branch `codex/xot-worker-helper-export-cleanup` removes the remaining safe worker helper export surface that was file-local or test-only:
+
+- Made file-local worker utility types and timing helpers private: `JobLane`, `ExtractedMediaItem`, `timestampMs`, and `nonNegativeMs`. Kept `ResolvedVariant` exported because `mediaWorkflow.ts` imports it.
+- Made `TelegramRateLimitError` private and changed the focused Telegram test to assert the thrown error shape instead of importing the class.
+- Made video-render workflow internals private: `VIDEO_RENDER_VERSION`, dispatch dependency types, config/decision loaders, renderer dispatch helper, and deliver-job enqueue helper. Kept `VIDEO_RENDER_DEFER_MS` exported because `worker/index.ts` imports it.
+- Made media and X API implementation types private and deleted the unused `ResolvedMediaSource` alias.
+- Made scoring/translation implementation types and `SCORING_AXES_SCHEMA` private. Kept `ScoringDecisionLog` exported because `worker/index.ts` imports it.
+
+Focused validation for this slice:
+
+- `npx deno test supabase/functions/worker/workerUtils.test.ts supabase/functions/worker/telegramDelivery.test.ts supabase/functions/worker/scoringWorkflow.test.ts supabase/functions/worker/videoRenderWorkflow.test.ts supabase/functions/worker/mediaWorkflow.test.ts supabase/functions/worker/xApiWorkflow.test.ts supabase/functions/worker/translateWorkflow.test.ts`
+- `npx deno check supabase/functions/worker/index.ts supabase/functions/worker/workerUtils.ts supabase/functions/worker/telegramDelivery.ts supabase/functions/worker/scoringWorkflow.ts supabase/functions/worker/videoRenderWorkflow.ts supabase/functions/worker/mediaWorkflow.ts supabase/functions/worker/xApiWorkflow.ts supabase/functions/worker/translateWorkflow.ts`
 
 ### Temporary Compatibility Telemetry
 

@@ -8,9 +8,9 @@ const FAST_LANE_TYPES = new Set([
 const MODEL_LANE_TYPES = new Set(["translate", "enrich"]);
 const DELIVERY_LANE_TYPES = new Set(["deliver"]);
 
-export type JobLane = "fast" | "model" | "delivery";
+type JobLane = "fast" | "model" | "delivery";
 
-export type ExtractedMediaItem = {
+type ExtractedMediaItem = {
   type: string;
   url: string;
   width?: number;
@@ -146,13 +146,13 @@ export function isRecordValue(
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export function timestampMs(value: unknown): number | null {
+function timestampMs(value: unknown): number | null {
   if (typeof value !== "string" || !value) return null;
   const time = new Date(value).getTime();
   return Number.isFinite(time) ? time : null;
 }
 
-export function nonNegativeMs(value: number | null): number | null {
+function nonNegativeMs(value: number | null): number | null {
   if (value == null || !Number.isFinite(value)) return null;
   return Math.max(0, Math.round(value));
 }

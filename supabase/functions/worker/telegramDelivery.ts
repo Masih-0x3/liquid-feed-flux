@@ -11,7 +11,7 @@ import {
   videoUploadFilename,
 } from "./workerUtils.ts";
 
-export class TelegramRateLimitError extends Error {
+class TelegramRateLimitError extends Error {
   retryAfterSeconds: number;
 
   constructor(message: string, retryAfterSeconds: number) {

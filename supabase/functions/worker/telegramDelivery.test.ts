@@ -6,7 +6,6 @@ import {
   getMediaUrl,
   sendTelegramMedia,
   sendTelegramVideoFromStorage,
-  TelegramRateLimitError,
 } from "./telegramDelivery.ts";
 
 type FetchCall = {
@@ -187,8 +186,12 @@ Deno.test("sendTelegramMedia throws TelegramRateLimitError with retry-after", as
       thrown = error;
     }
 
-    assert(thrown instanceof TelegramRateLimitError);
-    assertEquals((thrown as TelegramRateLimitError).retryAfterSeconds, 9);
+    assert(thrown instanceof Error);
+    assertEquals((thrown as Error).name, "TelegramRateLimitError");
+    assertEquals(
+      (thrown as { retryAfterSeconds?: number }).retryAfterSeconds,
+      9,
+    );
   });
 });
 

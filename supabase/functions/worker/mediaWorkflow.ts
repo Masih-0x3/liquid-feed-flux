@@ -5,7 +5,7 @@ import {
   rmUpgradeImageUrl,
 } from "./workerUtils.ts";
 
-export type ResolvedMediaRow = {
+type ResolvedMediaRow = {
   kind: "video" | "image" | "gif";
   url: string;
   width?: number;
@@ -13,9 +13,7 @@ export type ResolvedMediaRow = {
   duration_ms?: number;
 };
 
-export type ResolvedMediaSource = "fxtwitter" | "vxtwitter";
-
-export type MediaUpsertRow = {
+type MediaUpsertRow = {
   tweet_id: string;
   kind: ResolvedMediaRow["kind"];
   src_url: string;
