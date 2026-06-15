@@ -1,5 +1,6 @@
-import { assertEquals } from "jsr:@std/assert";
+import { assertEquals, assertThrows } from "jsr:@std/assert";
 import {
+  assertOriginalTextForTranslation,
   buildPostTranslationUpdatePatch,
   buildTranslationCallOptions,
   buildTranslationResultMeta,
@@ -116,6 +117,23 @@ Deno.test("buildTranslationCallOptions preserves nullable optional OpenAI settin
       parallelToolCalls: null,
     },
   );
+});
+
+Deno.test("assertOriginalTextForTranslation preserves the missing-source failure path", () => {
+  assertThrows(
+    () => assertOriginalTextForTranslation(null),
+    Error,
+    "No original text to translate",
+  );
+  assertThrows(
+    () => assertOriginalTextForTranslation(""),
+    Error,
+    "No original text to translate",
+  );
+});
+
+Deno.test("assertOriginalTextForTranslation accepts existing source text", () => {
+  assertOriginalTextForTranslation("Original content");
 });
 
 Deno.test("buildTranslationResultMeta preserves worker job result metadata", () => {

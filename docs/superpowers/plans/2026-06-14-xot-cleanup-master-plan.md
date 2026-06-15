@@ -930,7 +930,7 @@ git commit -m "refactor: extract worker media workflow"
 
 # Phase 9: Worker Split, Part G - Translate, Scoring, And Enrichment Boundaries
 
-Status: implementation completed in branch `codex/xot-cleanup-15-worker-translate-scoring-split`; one pre-existing missing-source early-return path remains noted as an explicit test gap.
+Status: completed in branch history. Follow-up branch `codex/xot-worker-missing-source-translation-test` closed the pre-existing missing-source test gap.
 
 Completed commits:
 
@@ -984,7 +984,7 @@ rg -n "handleTranslateJob|scoring|score|translation|translate|dedupe|enrich|poli
 - [x] Duplicate scoring metadata is preserved.
 - [x] Regional escalation metadata is preserved.
 - [x] Successful translation creates the same delivery enqueue decision.
-- [ ] Missing source text follows the existing failure path. Current code still preserves the existing early return in `handleTranslateJob`, but there is not yet a focused test for that branch.
+- [x] Missing source text follows the existing failure path. Follow-up branch `codex/xot-worker-missing-source-translation-test` added focused coverage for the `No original text to translate` guard used by `handleTranslateJob`.
 
 ## Validation
 
@@ -996,6 +996,22 @@ npm run lint:functions
 npm run check:functions
 npm run test:functions
 ```
+
+Follow-up validation for the missing-source coverage:
+
+- [x] `npx deno fmt supabase/functions/worker/index.ts supabase/functions/worker/translateWorkflow.ts supabase/functions/worker/translateWorkflow.test.ts` passed.
+- [x] `npx deno check supabase/functions/worker/index.ts supabase/functions/worker/translateWorkflow.ts supabase/functions/worker/translateWorkflow.test.ts` passed.
+- [x] `npx deno test supabase/functions/worker/translateWorkflow.test.ts` passed with 15 tests.
+- [x] `npm run lint:functions` passed.
+- [x] `npm run check:functions` passed.
+- [x] `npm run test:functions` passed with 276 Deno tests.
+- [x] `npm run check:function-inventory` passed.
+- [x] `npm run lint` passed with the known 8 Fast Refresh warnings and 0 errors.
+- [x] `npm run check:strict` passed.
+- [x] `npm test` passed with 19 files and 80 tests; the expected `useAuth` error-path stack printed.
+- [x] Env-backed `npm run build` passed.
+- [x] `git diff --check` passed.
+- [x] `npm run check:release-state` passed read-only; main CI was green, live hosts returned HTTP 200, Supabase functions and cron were active, no stale running jobs were found, and renderer `hermes-masih-1` was online.
 
 ## Commit
 
