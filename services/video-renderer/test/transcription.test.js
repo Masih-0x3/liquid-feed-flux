@@ -3,6 +3,23 @@ import test from "node:test";
 import { isLikelyContextMismatchedRepetitiveTranscript, isLikelyNonSpeechDescription, isLikelyRepeatedFillerTranscript, isLikelyRomanizedHebrewTranscript, isSparseContextMismatchedTranscript, isWeakSpeechDetection, shouldRetryWithEnhancedAudio, transcribeAudio } from "../src/transcription.js";
 import { transcribeWithEnhancedAudioRetry } from "../src/transcriptionPipeline.js";
 
+function weakDeepgramNoiseResponse() {
+  return {
+    results: {
+      channels: [{
+        detected_language: "multi",
+        language_confidence: 0,
+        alternatives: [{
+          transcript: "noise",
+          confidence: 0.28,
+          words: [{ word: "noise", start: 0.4, end: 0.9, confidence: 0.28 }],
+        }],
+      }],
+      utterances: [{ start: 0.4, end: 0.9, transcript: "noise" }],
+    },
+  };
+}
+
 test("uses Deepgram as the default transcription provider", async () => {
   const calls = [];
   const result = await transcribeAudio({
@@ -144,12 +161,7 @@ test("rejects descriptive OpenAI fallback captions instead of burning fake subti
     openaiApiKey: "openai-key",
     fetchImpl: async () => ({
       ok: true,
-      text: async () => JSON.stringify({
-        results: {
-          channels: [{ detected_language: "und", alternatives: [{ transcript: "", words: [] }] }],
-          utterances: [],
-        },
-      }),
+      text: async () => JSON.stringify(weakDeepgramNoiseResponse()),
     }),
     readFileImpl: async () => Buffer.from("audio"),
     openaiTranscribe: async () => ({
@@ -187,12 +199,7 @@ test("rejects repetitive fallback gibberish when it does not match post context"
     contextText: "Post context:\nPost: Demonstrators chanted Ghalibaf, Araghchi, resign, resign.",
     fetchImpl: async () => ({
       ok: true,
-      text: async () => JSON.stringify({
-        results: {
-          channels: [{ detected_language: "und", alternatives: [{ transcript: "", words: [] }] }],
-          utterances: [],
-        },
-      }),
+      text: async () => JSON.stringify(weakDeepgramNoiseResponse()),
     }),
     readFileImpl: async () => Buffer.from("audio"),
     openaiTranscribe: async () => ({
@@ -233,12 +240,7 @@ test("rejects sparse fallback phrases that do not match post context", async () 
     contextText: "Post context:\nPost: Demonstrators chanted Ghalibaf, Araghchi, resign, resign.",
     fetchImpl: async () => ({
       ok: true,
-      text: async () => JSON.stringify({
-        results: {
-          channels: [{ detected_language: "und", alternatives: [{ transcript: "", words: [] }] }],
-          utterances: [],
-        },
-      }),
+      text: async () => JSON.stringify(weakDeepgramNoiseResponse()),
     }),
     readFileImpl: async () => Buffer.from("audio"),
     openaiTranscribe: async () => ({
@@ -281,12 +283,7 @@ test("rejects generic OpenAI outro captions after Deepgram finds no speech", asy
     contextText: "Post context:\nPost: Security camera footage from Gaza.",
     fetchImpl: async () => ({
       ok: true,
-      text: async () => JSON.stringify({
-        results: {
-          channels: [{ detected_language: "und", alternatives: [{ transcript: "", words: [] }] }],
-          utterances: [],
-        },
-      }),
+      text: async () => JSON.stringify(weakDeepgramNoiseResponse()),
     }),
     readFileImpl: async () => Buffer.from("audio"),
     openaiTranscribe: async () => ({
@@ -301,7 +298,7 @@ test("rejects generic OpenAI outro captions after Deepgram finds no speech", asy
   assert.match(result.noUsableSpeechReason, /OpenAI fallback produced no usable speech/);
 });
 
-test("rejects sparse mixed-script OpenAI fallback after Deepgram finds no speech", async () => {
+test("does not invoke OpenAI fallback after Deepgram finds no timed speech", async () => {
   const result = await transcribeAudio({
     provider: "deepgram",
     fallbackProvider: "openai",
@@ -320,21 +317,15 @@ test("rejects sparse mixed-script OpenAI fallback after Deepgram finds no speech
       }),
     }),
     readFileImpl: async () => Buffer.from("audio"),
-    openaiTranscribe: async () => ({
-      model: "whisper-1",
-      language: "nynorsk",
-      segments: [
-        { id: 1, start: 0, end: 14, text: "Продолжение следует..." },
-        { id: 2, start: 30, end: 34, text: "OLD COMPTON STREET" },
-        { id: 3, start: 60, end: 65, text: "عالی هستند." },
-      ],
-    }),
+    openaiTranscribe: async () => {
+      throw new Error("OpenAI fallback should not run after Deepgram finds no timed speech");
+    },
   });
 
-  assert.equal(result.provider, "openai");
+  assert.equal(result.provider, "deepgram");
   assert.equal(result.noUsableSpeech, true);
   assert.deepEqual(result.segments, []);
-  assert.match(result.noUsableSpeechReason, /OpenAI fallback produced no usable speech/);
+  assert.match(result.noUsableSpeechReason, /returned no timed segments/);
 });
 
 test("enhanced audio retry fires only after empty or weak Deepgram output", async () => {

@@ -58,16 +58,6 @@ function segmentSpeechSeconds(segments) {
   }, 0);
 }
 
-function scriptFamilies(text) {
-  const value = String(text ?? "");
-  const families = new Set();
-  if (/[A-Za-zÀ-ÖØ-öø-ÿ]/.test(value)) families.add("latin");
-  if (/[\u0400-\u04FF]/.test(value)) families.add("cyrillic");
-  if (/[\u0600-\u06FF]/.test(value)) families.add("arabic");
-  if (/[\u0590-\u05FF]/.test(value)) families.add("hebrew");
-  return families;
-}
-
 function isDeepgramNoTimedSegmentsReason(reason) {
   return /deepgram transcription returned no timed segments|returned no timed segments/i.test(String(reason ?? ""));
 }
@@ -195,30 +185,6 @@ export function isLikelyRepeatedFillerTranscript(transcription) {
   const dominant = [...counts.entries()].find(([, count]) => count === maxCount)?.[0] ?? "";
   const fillerTokens = new Set(["هی", "هه", "ها", "heh", "hehe", "haha", "ha", "huh"]);
   return maxCount >= 4 && maxCount / tokens.length >= 0.75 && fillerTokens.has(dominant);
-}
-
-function isLowEvidenceOpenAIFallbackAfterNoSpeech(transcription, options = {}) {
-  if (!isDeepgramNoTimedSegmentsReason(options.fallbackReason)) return false;
-  if (String(transcription?.provider ?? "").toLowerCase() !== "openai") return false;
-
-  const segments = Array.isArray(transcription?.segments) ? transcription.segments : [];
-  if (segments.length === 0) return false;
-  const durationSeconds = Number(options.durationMs) > 0 ? Number(options.durationMs) / 1000 : null;
-  if (durationSeconds !== null && durationSeconds < 8) return false;
-
-  const text = transcriptText(transcription);
-  const tokens = wordTokens(text);
-  const speechSeconds = segmentSpeechSeconds(segments);
-  const speechCoverage = durationSeconds ? speechSeconds / durationSeconds : null;
-  const language = String(transcription?.language ?? "").toLowerCase();
-  const knownSpeechLanguage = ["en", "ar", "fa", "he"].includes(language);
-  const families = scriptFamilies(text);
-  const sparse = segments.length <= 3 && tokens.length <= 16 && (speechCoverage === null || speechCoverage <= 0.45);
-
-  return Boolean(
-    (families.size >= 2 && sparse) ||
-    (!knownSpeechLanguage && sparse)
-  );
 }
 
 export function isLikelyRomanizedHebrewTranscript(transcription, options = {}) {
@@ -358,13 +324,13 @@ function weakDeepgramReason(transcription, options = {}) {
 async function maybeRunOpenAIFallback(options, reason) {
   const fallbackProvider = normalizeProvider(options.fallbackProvider, "");
   if (fallbackProvider !== "openai") return null;
+  if (isDeepgramNoTimedSegmentsReason(reason)) return null;
   const fallback = await runOpenAITranscription(options);
   const rejected = !hasUsableSubtitleText(fallback.segments) ||
     isLikelyNonSpeechDescription(fallback) ||
     isLikelyGenericOutroTranscript(fallback) ||
     isLikelyContextMismatchedRepetitiveTranscript(fallback, options.contextText) ||
     isSparseContextMismatchedTranscript(fallback, { contextText: options.contextText, durationMs: options.durationMs }) ||
-    isLowEvidenceOpenAIFallbackAfterNoSpeech(fallback, { fallbackReason: reason, durationMs: options.durationMs }) ||
     isWeakSpeechDetection(fallback, { durationMs: options.durationMs });
   if (rejected) {
     return asNoUsableSpeech({
