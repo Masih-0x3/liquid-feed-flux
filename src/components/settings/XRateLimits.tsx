@@ -27,10 +27,6 @@ const DEFAULTS: XRateLimitsValue = {
 
 interface Props {
   initial?: Partial<XRateLimitsValue>;
-  usage?: {
-    posts_24h?: string[];
-    media_uploads_24h?: string[];
-  };
   monthlyPostsCount?: number;
 }
 
@@ -40,21 +36,17 @@ function pctColor(pct: number) {
   return 'text-success';
 }
 
-export default function XRateLimits({ initial, usage, monthlyPostsCount = 0 }: Props) {
+export default function XRateLimits({ initial, monthlyPostsCount = 0 }: Props) {
   const save = useSaveSettings();
   const { data: xApiSummary } = useXApiSummary(24);
   const [cfg, setCfg] = useState<XRateLimitsValue>({ ...DEFAULTS, ...(initial ?? {}) });
 
   useEffect(() => { setCfg({ ...DEFAULTS, ...(initial ?? {}) }); }, [initial]);
 
-  const now = Date.now();
-  const posts24h = (usage?.posts_24h ?? []).filter((ts) => { try { return new Date(ts).getTime() > now - 86400000; } catch { return false; } });
-  const posts1h = posts24h.filter((ts) => new Date(ts).getTime() > now - 3600000);
-  const mediaUp24h = (usage?.media_uploads_24h ?? []).filter((ts) => { try { return new Date(ts).getTime() > now - 86400000; } catch { return false; } });
-
-  const hourPct = Math.min(100, (posts1h.length / Math.max(1, cfg.posts_per_hour)) * 100);
-  const localPosts24h = xApiSummary?.posts_local ?? posts24h.length;
-  const localMedia24h = xApiSummary?.media_posts_local ?? mediaUp24h.length;
+  const localPosts1h = xApiSummary?.posts_last_hour ?? 0;
+  const hourPct = Math.min(100, (localPosts1h / Math.max(1, cfg.posts_per_hour)) * 100);
+  const localPosts24h = xApiSummary?.posts_local ?? 0;
+  const localMedia24h = xApiSummary?.media_posts_local ?? 0;
   const localAttempts24h = xApiSummary?.counted_attempts ?? 0;
   const dayPct = Math.min(100, (localPosts24h / Math.max(1, cfg.posts_per_day)) * 100);
   const monthPct = Math.min(100, (monthlyPostsCount / Math.max(1, cfg.monthly_post_budget)) * 100);
@@ -91,7 +83,7 @@ export default function XRateLimits({ initial, usage, monthlyPostsCount = 0 }: P
             <p className="text-sm font-medium text-glass-foreground">Live usage</p>
             <Badge variant="outline" className="text-xs">rolling windows</Badge>
           </div>
-          <Row label="Last hour" current={posts1h.length} limit={cfg.posts_per_hour} pct={hourPct} />
+          <Row label="Last hour" current={localPosts1h} limit={cfg.posts_per_hour} pct={hourPct} />
           <Row label="Last 24h" current={localPosts24h} limit={cfg.posts_per_day} pct={dayPct} />
           <Row label="Last 30 days" current={monthlyPostsCount} limit={cfg.monthly_post_budget} pct={monthPct} />
           <Row label="Media posts (24h)" current={localMedia24h} limit={cfg.media_uploads_per_day} pct={mediaPct} />

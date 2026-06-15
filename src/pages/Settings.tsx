@@ -757,7 +757,6 @@ export default function Settings() {
           <Suspense fallback={<SettingsPanelFallback />}>
             <XAutomationSettings
               twitterHydration={settings?.twitter_hydration as { enabled?: boolean; max_attempts?: number } | undefined}
-              xApiUsage={settings?.x_api_usage as { total?: number; calls_24h?: string[]; last_call_at?: string | null; last_error?: string | null; posts_24h?: string[]; media_uploads_24h?: string[] } | undefined}
               xPostingConfig={settings?.x_posting_config as Record<string, unknown> | undefined}
               xRateLimits={settings?.x_rate_limits as Record<string, unknown> | undefined}
               xApiControls={settings?.x_api_controls as { my_x_enabled?: boolean } | undefined}
