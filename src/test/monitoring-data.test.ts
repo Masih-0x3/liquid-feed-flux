@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchMonitoringEntries, sanitizeMonitoringSearch } from "@/api/monitoringData";
 import { invokeAdminAction } from "@/api/adminActions";
+import { FILTERS } from "@/lib/monitoringViewModel";
 
 vi.mock("@/api/adminActions", () => ({
   invokeAdminAction: vi.fn(),
@@ -40,6 +41,30 @@ describe("monitoring data API", () => {
       search: "admin search",
       score_bucket: "any",
       cursor: 0,
+      limit: 50,
+    });
+  });
+
+  it.each(FILTERS.map((filter) => filter.value))("forwards %s filtering to admin-actions", async (filter) => {
+    invokeAdminActionMock.mockResolvedValueOnce({
+      success: true,
+      entries: [],
+      next_cursor: null,
+    });
+
+    await fetchMonitoringEntries({
+      pageParam: 25,
+      filter,
+      search: "",
+      scoreBucket: "any",
+    });
+
+    expect(invokeAdminActionMock).toHaveBeenCalledWith({
+      action: "get_monitoring_entries",
+      filter,
+      search: undefined,
+      score_bucket: "any",
+      cursor: 25,
       limit: 50,
     });
   });

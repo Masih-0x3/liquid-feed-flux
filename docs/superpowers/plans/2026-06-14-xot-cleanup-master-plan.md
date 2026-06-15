@@ -1165,7 +1165,7 @@ git commit -m "refactor: centralize frontend admin action clients"
 
 # Phase 11: Monitoring Page Split
 
-Status: completed in branch `codex/xot-cleanup-21-monitoring-split`.
+Status: completed in branch `codex/xot-cleanup-21-monitoring-split`. Follow-up branch `codex/xot-monitoring-filter-empty-state-tests` closed the remaining status-filter row-id and empty-state coverage gaps.
 
 Completed slice:
 
@@ -1241,10 +1241,10 @@ rg -n "function |const .* = \\(|useMemo|useCallback|confirm|drawer|cluster|group
 
 ## Test Cases
 
-- [ ] Filtering by status returns the same row ids as before.
+- [x] Filtering by status returns the same row ids as before.
 - [x] Duplicate cluster display model preserves original cluster order.
 - [x] Action dialog title for retry/rescore/dedupe matches current text.
-- [ ] Empty state remains visible when no entries match filters.
+- [x] Empty state remains visible when no entries match filters.
 
 ## Validation
 
@@ -1255,6 +1255,21 @@ npm test -- src/test/monitoring-components.test.tsx src/test/monitoring-view-mod
 npm test
 VITE_SUPABASE_URL=https://jzirqfzzvlbxwfzndaer.supabase.co VITE_SUPABASE_PUBLISHABLE_KEY=local-build-validation-key VITE_SUPABASE_PROJECT_ID=jzirqfzzvlbxwfzndaer npm run build
 ```
+
+Follow-up validation for the Monitoring filter and empty-state coverage:
+
+- [x] `npx deno fmt supabase/functions/admin-actions/monitoringReads.test.ts` passed.
+- [x] `npm test -- src/test/monitoring-data.test.ts src/test/monitoring-page.test.tsx src/test/monitoring-components.test.tsx` passed with 3 files and 37 tests.
+- [x] `npx deno test supabase/functions/admin-actions/monitoringReads.test.ts` passed with 7 tests.
+- [x] `npm run lint` passed with the known 8 Fast Refresh warnings and 0 errors.
+- [x] `npm run check:strict` passed.
+- [x] `npm run lint:functions` passed; Deno lint checked 101 files.
+- [x] `npm run check:functions` passed.
+- [x] `npm test` passed with 20 files and 107 tests; the expected `useAuth` error-path stack printed.
+- [x] `npm run test:functions` passed with 278 Deno tests.
+- [x] `npm run check:function-inventory` passed.
+- [x] Env-backed `npm run build` passed.
+- [x] `npm run check:release-state` passed read-only; main CI was green, live hosts returned HTTP 200, Supabase functions and cron were active, no stale running jobs were found, renderer `hermes-masih-1` was online, and compatibility telemetry still showed active `rss_query_token` usage.
 
 ## Commit
 
@@ -2402,7 +2417,6 @@ git commit -m "chore: remove obsolete cleanup compatibility paths"
 
 Current completion-audit follow-ups that are not safe to mark done without more work:
 
-- Phase 11 still has two narrow frontend test gaps: status filter row-id parity is backend-owned after `get_monitoring_entries`, and the Monitoring empty state exists in UI but lacks focused test coverage.
 - Phase 21 remains blocked by live RSS query-token traffic until RSS.app is moved to header auth and the quiet-window gate above reports zero hits.
 
 ---
