@@ -1,20 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchDashboardData } from "@/api/dashboardData";
 import { invokeAdminAction } from "@/api/adminActions";
-import { supabase } from "@/integrations/supabase/client";
-
-const mocks = vi.hoisted(() => ({
-  rpc: vi.fn(),
-}));
 
 vi.mock("@/api/adminActions", () => ({
   invokeAdminAction: vi.fn(),
-}));
-
-vi.mock("@/integrations/supabase/client", () => ({
-  supabase: {
-    rpc: mocks.rpc,
-  },
 }));
 
 function rpcSummary(overrides: Record<string, unknown> = {}) {
@@ -53,11 +42,9 @@ function rpcSummary(overrides: Record<string, unknown> = {}) {
 
 describe("dashboard data API", () => {
   const invokeAdminActionMock = vi.mocked(invokeAdminAction);
-  const supabaseMock = vi.mocked(supabase);
 
   beforeEach(() => {
     invokeAdminActionMock.mockReset();
-    mocks.rpc.mockReset();
   });
 
   it("uses admin-actions and normalizes dashboard rows", async () => {
@@ -98,25 +85,12 @@ describe("dashboard data API", () => {
       route: "/monitoring?search=tweet-1",
       status: "pending",
     });
-    expect(supabaseMock.rpc).not.toHaveBeenCalled();
+    expect(invokeAdminActionMock).toHaveBeenCalledWith({ action: "get_dashboard_summary" });
   });
 
-  it("falls back to the read-only RPC when the admin-action path fails", async () => {
-    invokeAdminActionMock.mockRejectedValueOnce(new Error("edge function behind"));
-    mocks.rpc.mockResolvedValueOnce({ data: rpcSummary(), error: null });
+  it("surfaces admin-action failures instead of falling back to direct RPC", async () => {
+    invokeAdminActionMock.mockResolvedValueOnce({ success: false, error: "edge function unavailable" });
 
-    const result = await fetchDashboardData();
-
-    expect(result.metrics.postsIngested).toBe(5);
-    expect(supabaseMock.rpc).toHaveBeenCalledWith("get_dashboard_summary");
-  });
-
-  it("includes both failure reasons when admin-action and RPC fallback fail", async () => {
-    invokeAdminActionMock.mockRejectedValueOnce(new Error("edge function behind"));
-    mocks.rpc.mockResolvedValueOnce({ data: null, error: { message: "rpc unavailable" } });
-
-    await expect(fetchDashboardData()).rejects.toThrow(
-      "Dashboard summary unavailable. Admin action failed: edge function behind; RPC fallback failed: rpc unavailable",
-    );
+    await expect(fetchDashboardData()).rejects.toThrow("edge function unavailable");
   });
 });

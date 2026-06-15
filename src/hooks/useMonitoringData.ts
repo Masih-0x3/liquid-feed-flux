@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useCallback } from 'react';
 import {
-  fetchMonitoringEntriesWithLegacyFallback,
+  fetchMonitoringEntries,
   sanitizeMonitoringSearch,
   type MonitoringFilter,
   type MonitoringOverview,
@@ -38,7 +38,7 @@ export function useMonitoringDataSearchWithScore(filter: MonitoringFilter = 'all
 
   const query = useInfiniteQuery({
     queryKey: ['monitoring', filter, sanitizeMonitoringSearch(search), scoreBucket],
-    queryFn: (ctx) => fetchMonitoringEntriesWithLegacyFallback({
+    queryFn: (ctx) => fetchMonitoringEntries({
       pageParam: ctx.pageParam,
       filter,
       search,
@@ -78,7 +78,6 @@ export function useMonitoringDataSearchWithScore(filter: MonitoringFilter = 'all
     ...query,
     entries: query.data?.pages.flatMap(p => p.entries) ?? [],
     dataSource: query.data?.pages[0]?.source ?? null,
-    fallbackReason: query.data?.pages.find((page) => page.fallbackReason)?.fallbackReason ?? null,
   };
 }
 

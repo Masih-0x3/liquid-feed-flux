@@ -11,8 +11,6 @@ import { hasUsableSubtitleText, sanitizeSubtitleSegments, segmentsToAss, segment
 import { transcribeAudio } from "./transcription.js";
 import { transcribeWithEnhancedAudioRetry } from "./transcriptionPipeline.js";
 
-export { loadConfigFromEnv } from "./config.js";
-
 export function createSupabase(config) {
   return createClient(config.supabaseUrl, config.supabaseServiceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
