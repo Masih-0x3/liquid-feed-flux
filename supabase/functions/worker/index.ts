@@ -108,7 +108,6 @@ import {
   renderScoringUserMessage,
   resolveActiveFeedbackThreshold,
   resolveScoringCallOptions,
-  type ScoringDecisionLog,
 } from "./scoringWorkflow.ts";
 import {
   buildPostTranslationUpdatePatch,
@@ -127,6 +126,9 @@ const corsHeaders = {
 };
 
 const SETTINGS_CACHE_MS = 45_000;
+type ScoringDecisionLog = NonNullable<
+  ReturnType<typeof buildScoringBaseDecisionState>["logEvent"]
+>;
 // deno-lint-ignore no-explicit-any
 let configCache: { expiresAt: number; value: any } | null = null;
 

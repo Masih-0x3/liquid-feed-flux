@@ -29,7 +29,6 @@ This branch removes compatibility code only after the PR #13 release was live, a
 
 These items still need request-log evidence, follow-up refactoring, or a product decision before removal:
 
-- Remaining worker helper export review in `supabase/functions/worker/*` after the safe file-local/test-only slice; keep production imports exported unless a later refactor removes the importer.
 - RSS query-token compatibility and `recordLegacyXApiUsage`; both still have documented production relevance.
 
 ### Worker Helper Export Cleanup Slice
@@ -41,6 +40,13 @@ Branch `codex/xot-worker-helper-export-cleanup` removes the remaining safe worke
 - Made video-render workflow internals private: `VIDEO_RENDER_VERSION`, dispatch dependency types, config/decision loaders, renderer dispatch helper, and deliver-job enqueue helper. Kept `VIDEO_RENDER_DEFER_MS` exported because `worker/index.ts` imports it.
 - Made media and X API implementation types private and deleted the unused `ResolvedMediaSource` alias.
 - Made scoring/translation implementation types and `SCORING_AXES_SCHEMA` private. Kept `ScoringDecisionLog` exported because `worker/index.ts` imports it.
+
+Follow-up branch `codex/xot-cleanup-21-worker-type-export-surface` removes the final safe type-only worker export surface without changing runtime behavior:
+
+- Made `HydratedTweetPatch` private in `supabase/functions/worker/xApiWorkflow.ts`; it is only the return type of `buildHydratedTweetPatch()`.
+- Made `ScoringDecisionLog` private in `supabase/functions/worker/scoringWorkflow.ts`; `worker/index.ts` now derives its local log-event type from `buildScoringBaseDecisionState()`.
+- Made `ResolvedVariant` private in `supabase/functions/worker/workerUtils.ts`; `mediaWorkflow.ts` now uses a local structural `FxTwitterVariant` type when passing variants to `rmPickBestVariant()`.
+- A read-only sidecar audit found no unused exported runtime helpers left in `supabase/functions/worker/*`; remaining runtime exports are production imports or public module boundaries.
 
 Focused validation for this slice:
 
