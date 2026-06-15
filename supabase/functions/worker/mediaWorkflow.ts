@@ -166,3 +166,13 @@ export function buildResolveMediaDownloadJob(
     next_run_at: new Date(nowMs).toISOString(),
   };
 }
+
+export function buildMediaProcessorDownloadInvokeOptions(
+  tweetId: string,
+  headers: Record<string, string>,
+): Record<string, unknown> {
+  return {
+    body: { action: "download_media", tweet_id: tweetId },
+    headers,
+  };
+}

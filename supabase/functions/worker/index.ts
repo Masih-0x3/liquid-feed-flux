@@ -95,6 +95,7 @@ import {
   recordXApiCall,
 } from "./xApiWorkflow.ts";
 import {
+  buildMediaProcessorDownloadInvokeOptions,
   buildResolvedMediaRows,
   buildResolveMediaDownloadJob,
   rmFetchFromFx,
@@ -2797,10 +2798,13 @@ async function handleDownloadMediaJob(
       new Date(started).toISOString(),
     );
 
-    const { data, error } = await supabase.functions.invoke("media-processor", {
-      body: { action: "download_media", tweet_id: tweetId },
-      headers: serviceRoleBearerHeader(),
-    } as Record<string, unknown>);
+    const { data, error } = await supabase.functions.invoke(
+      "media-processor",
+      buildMediaProcessorDownloadInvokeOptions(
+        tweetId,
+        serviceRoleBearerHeader(),
+      ),
+    );
 
     if (error) throw new Error(`Media processor error: ${error.message}`);
     await insertPipelineEvent(
