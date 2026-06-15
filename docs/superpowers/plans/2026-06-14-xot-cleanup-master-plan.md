@@ -2100,7 +2100,8 @@ npm run check:release-state
 
 - [x] Remove frontend schema fallbacks that are no longer used.
 - [ ] Remove unused admin action wrappers. Deferred: `backfill_signatures` is local-code unused by the current frontend, but the available Supabase CLI does not expose function request logs, and the repo has no admin-action request telemetry table to prove absence of external/manual calls.
-- [ ] Remove unused worker helper exports. Deferred: the remaining export surface is mostly test/public-module surface and should be handled as a focused worker-only cleanup with Deno tests, not as a blind export removal.
+- [x] Remove unused worker entrypoint re-exports and file-local lifecycle constants.
+- [ ] Remove remaining worker helper exports. Deferred: the remaining export surface is mostly test/public-module surface and should be handled with behavior-level Deno tests, not as a blind export removal.
 - [x] Remove dead code identified by TypeScript and Deno checks.
 - [x] Update docs to reflect the final module map.
 
@@ -2112,7 +2113,7 @@ Read-only sidecar audit identified these Phase 21 candidates. Do not remove them
 - Dashboard direct RPC fallback in `src/api/dashboardData.ts`: removed in PR #15 after Dashboard remained healthy through `admin-actions` and `src/test/dashboard-data.test.ts` was updated. PR #19 later kept `admin-actions` as the single Dashboard boundary by adding backend degraded handling for base `public.get_dashboard_summary()` failures and client-side Edge Function error-body extraction.
 - Monitoring response/filter aliases in `src/api/monitoringData.ts` and `supabase/functions/admin-actions/monitoringReads.ts`: remove only after old frontend bundles have aged out and function logs show no legacy filter values.
 - Unused admin action cases in `supabase/functions/_shared/adminActionNames.ts` and `supabase/functions/admin-actions/index.ts`: strongest candidate is the backward-compatible `backfill_signatures` alias, but request logs and runbook/manual operator usage must be checked first.
-- Worker helper export surface in `supabase/functions/worker/*`: candidate for de-export cleanup only, preserving tests or moving helper coverage to public behavior.
+- Worker helper export surface in `supabase/functions/worker/*`: the unused `worker/index.ts` scoring re-export block and `MAX_ATTEMPTS` lifecycle export are safe de-export cleanup. Remaining helper exports should be removed only when preserving tests or moving helper coverage to public behavior.
 - Paused My X implementation in `src/pages/XAccount.tsx`, `src/api/xAccountData.ts`, `src/hooks/useFollowerData.ts`, and `src/components/x/FollowerGrowthChart.tsx`: removed in PR #15; `/x-account` remains routed to `src/pages/XAccountDisabled.tsx`.
 - Renderer compatibility re-export in `services/video-renderer/src/renderer.js`: removed in PR #15 after confirming active imports use `services/video-renderer/src/config.js`.
 
@@ -2139,7 +2140,7 @@ git commit -m "chore: remove obsolete cleanup compatibility paths"
 ## Exit Criteria
 
 - [x] Safe compatibility scaffolding is gone.
-- [ ] All compatibility scaffolding is gone. Deferred candidates: monitoring aliases, `backfill_signatures`, worker helper export cleanup, RSS query-token compatibility, and `recordLegacyXApiUsage`.
+- [ ] All compatibility scaffolding is gone. Deferred candidates: monitoring aliases, `backfill_signatures`, remaining worker helper export cleanup, RSS query-token compatibility, and `recordLegacyXApiUsage`.
 - [x] Docs match the actual code for completed removals.
 - [x] Local and read-only live checks pass for completed removals and the later `c6ba0ba46f3e45f888c23fd95cdd8cbf4b9cb1b1` release.
 

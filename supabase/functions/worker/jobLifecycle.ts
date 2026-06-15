@@ -13,7 +13,7 @@ export class NonRetryableJobError extends Error {
   }
 }
 
-export const MAX_ATTEMPTS: Record<string, number> = {
+const MAX_ATTEMPTS: Record<string, number> = {
   translate: 5,
   deliver: 8,
   download_media: 3,

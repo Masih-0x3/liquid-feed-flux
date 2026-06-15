@@ -19,6 +19,9 @@ This branch removes compatibility code only after the PR #13 release was live, a
 - PR #19 later preserved that boundary by making `admin-actions` return a degraded critical Dashboard when the base `public.get_dashboard_summary()` RPC fails, instead of restoring a frontend direct-RPC fallback.
 - Removed the Monitoring direct Supabase legacy query fallback from `src/api/monitoringData.ts`.
 - Removed the compatibility `loadConfigFromEnv` re-export from `services/video-renderer/src/renderer.js`; callers import config from `services/video-renderer/src/config.js`.
+- Removed unused worker export surface that had no local importers:
+  - the scoring re-export block from `supabase/functions/worker/index.ts`
+  - the `MAX_ATTEMPTS` export from `supabase/functions/worker/jobLifecycle.ts`
 
 ## Deferred
 
@@ -26,7 +29,7 @@ These items still need request-log evidence or a product decision before removal
 
 - Old Monitoring response/filter aliases in `src/api/monitoringData.ts` and `supabase/functions/admin-actions/monitoringReads.ts`.
 - Unused admin-action names such as `backfill_signatures`, after checking admin-actions request logs and runbooks. Local code already uses canonical `backfill_dedupe`; `backfill_signatures` only forwards to it, but successful admin action names are not currently recorded in an app table, and this Supabase CLI does not expose function request logs.
-- Worker helper export cleanup in `supabase/functions/worker/*`; this is mostly test export surface and should be done with focused Deno tests.
+- Remaining worker helper export cleanup in `supabase/functions/worker/*`; this is mostly test export surface and should be done with focused Deno tests or behavior-level replacement coverage.
 - RSS query-token compatibility and `recordLegacyXApiUsage`; both still have documented production relevance.
 
 ### Monitoring Alias Removal Gate
