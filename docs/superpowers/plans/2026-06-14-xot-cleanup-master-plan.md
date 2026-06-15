@@ -12,31 +12,40 @@
 
 ## Current Anchor
 
-Repo root for this plan:
+Original cleanup worktree for the phase stack:
 
 ```text
 /Users/stevmq/.config/superpowers/worktrees/Finalized-XOT/xot-cleanup
 ```
 
-Main checkout preserved:
+Main checkout preserved for user work:
 
 ```text
 /Users/stevmq/Finalized XOT
 ```
 
-Current implementation branch after Phase 17:
+Current verified main release anchor:
 
 ```text
-codex/xot-cleanup-32-function-auth-secret-matrix
+c6ba0ba46f3e45f888c23fd95cdd8cbf4b9cb1b1
 ```
+
+Release notes:
+
+- PR #13 merged the integration branch and was promoted to production at `8f0b93db7e57bbc0b6108db12e929e220715970c`.
+- PR #14 recorded the cleanup release ledger.
+- PR #15 removed the first safe Phase 21 compatibility paths.
+- PR #17 hotfixed Dashboard optional-summary fallback failures and deployed `admin-actions`.
+- PR #16 added OpenAI cost guardrails, merged at `c4076d3055c8e9d509387131a8d0d8ddf18666ec`, applied migration `20260615005500`, and deployed `admin-actions` plus `worker`.
+- PR #19 fixed degraded Dashboard Edge Function failures, merged at `c6ba0ba46f3e45f888c23fd95cdd8cbf4b9cb1b1`, deployed `admin-actions` version `158`, and stamped `DEPLOY_GIT_SHA=c6ba0ba46f3e45f888c23fd95cdd8cbf4b9cb1b1`.
 
 Current safe-state rule:
 
 ```text
 No cleanup branch deploys to production.
 No direct push to main.
-No Supabase migration push while migration drift remains unresolved.
-Production checks during cleanup are read-only.
+No broad Supabase db push while historical migration drift remains unresolved.
+Production checks during cleanup are read-only unless a reviewed main hotfix/release explicitly requires a targeted deploy or targeted SQL apply.
 ```
 
 ## Non-Negotiable Guardrails
@@ -1175,6 +1184,8 @@ git commit -m "refactor: extract monitoring detail drawer"
 
 # Phase 12: Monitoring Data Fallback Repair
 
+Status: completed, then partially superseded by Phase 21.
+
 Branch:
 
 ```text
@@ -1220,6 +1231,7 @@ export async function fetchMonitoringEntriesWithLegacyFallback() {
 - [x] `src/hooks/useMonitoringData.ts` now stays focused on React Query subscriptions and returns `dataSource` / `fallbackReason` metadata from query pages.
 - [x] `src/api/monitoringData.ts` owns monitoring entry contracts, admin-action fetching, legacy Supabase fallback queries, and schema-column retry behavior.
 - [x] `src/integrations/supabase/types.ts` was inspected; generated `posts` types include the newer monitoring columns, so the legacy fallback remains for deployed schema/function drift compatibility rather than local type gaps.
+- [x] Phase 21 later removed the direct Supabase legacy query fallback after the cleaned release was live and authenticated Monitoring smoke passed.
 
 ## Validation
 
@@ -1261,6 +1273,8 @@ git commit -m "refactor: isolate monitoring data fallbacks"
 ---
 
 # Phase 13: Settings, Dashboard, And XAccount Split
+
+Status: completed, then partially superseded by Phase 21.
 
 Branch:
 
@@ -1309,6 +1323,7 @@ rg -n "from\\(['\\\"]settings|\\.update\\(|\\.insert\\(|\\.upsert\\(|admin-actio
 - [x] `src/components/settings/EnrichmentSettings.tsx` now loads special enrichment setting rows through `fetchSettingsRows` and saves `enrichment_config`, `voice_samples`, and `voice_guide` through the shared `save_settings` admin-action path.
 - [x] `src/hooks/useDashboardData.ts` now owns only query/subscription glue and re-exports contracts from `src/api/dashboardData.ts`.
 - [x] `src/pages/XAccount.tsx` now calls `runFollowersSnapshot` from `src/api/xAccountData.ts` instead of embedding the admin-action payload in the page.
+- [x] Phase 21 later removed the paused follower-management implementation and kept `/x-account` on the intended disabled surface.
 
 ## Validation
 
@@ -2059,6 +2074,8 @@ npm run check:release-state
 
 # Phase 21: Post-Cleanup Simplification
 
+Status: partially completed and promoted. Safe removals are live on `main`; remaining candidates are deferred because their removal still needs request-log evidence, operator decision, or focused export-surface work.
+
 ## Objective
 
 Remove compatibility scaffolding only after production has run safely on the cleaned code.
@@ -2069,6 +2086,10 @@ Wait until at least one normal production operating cycle has passed after relea
 
 Timing note: by `2026-06-14T18:25:58Z`, more than one one-minute production operating cycle had passed after the `2026-06-14T17:57:28.900Z` deploy stamp. The later post-release `npm run check:release-state` passed, with worker and x-poster cron active, no stale running jobs, and renderer heartbeat online.
 
+Follow-up timing note: after PR #16, production was promoted again at `c4076d3055c8e9d509387131a8d0d8ddf18666ec`. Post-deploy `npm run check:release-state` passed, `admin-actions` was live at version `156`, `worker` was live at version `232`, migration `20260615005500` was recorded as applied, and the worker cron body included `reprocess`.
+
+Dashboard incident follow-up timing note: after PR #19, production was promoted again at `c6ba0ba46f3e45f888c23fd95cdd8cbf4b9cb1b1`. `admin-actions` was live at version `158`, `DEPLOY_GIT_SHA` was stamped to `c6ba0ba46f3e45f888c23fd95cdd8cbf4b9cb1b1`, main CI run `27522692966` passed, and the production frontend refreshed at `2026-06-15T03:45:48Z`.
+
 ## Steps
 
 - [x] Re-run release-state check.
@@ -2077,23 +2098,23 @@ Timing note: by `2026-06-14T18:25:58Z`, more than one one-minute production oper
 npm run check:release-state
 ```
 
-- [ ] Remove frontend schema fallbacks that are no longer used.
-- [ ] Remove unused admin action wrappers.
-- [ ] Remove unused worker helper exports.
-- [ ] Remove dead code identified by TypeScript and Deno checks.
-- [ ] Update docs to reflect the final module map.
+- [x] Remove frontend schema fallbacks that are no longer used.
+- [ ] Remove unused admin action wrappers. Deferred: `backfill_signatures` is local-code unused by the current frontend, but the available Supabase CLI does not expose function request logs, and the repo has no admin-action request telemetry table to prove absence of external/manual calls.
+- [ ] Remove unused worker helper exports. Deferred: the remaining export surface is mostly test/public-module surface and should be handled as a focused worker-only cleanup with Deno tests, not as a blind export removal.
+- [x] Remove dead code identified by TypeScript and Deno checks.
+- [x] Update docs to reflect the final module map.
 
 ## Candidate Queue
 
 Read-only sidecar audit identified these Phase 21 candidates. Do not remove them in production without the listed verification gates:
 
-- Monitoring legacy Supabase fallback in `src/api/monitoringData.ts`: remove only after authenticated Monitoring continues to use `admin-actions` successfully and request/log evidence shows no legacy query path usage.
-- Dashboard direct RPC fallback in `src/api/dashboardData.ts`: candidate for removal after Dashboard remains healthy through `admin-actions` and `src/test/dashboard-data.test.ts` is updated.
+- Monitoring legacy Supabase fallback in `src/api/monitoringData.ts`: removed in PR #15 after authenticated Monitoring smoke and release-state checks.
+- Dashboard direct RPC fallback in `src/api/dashboardData.ts`: removed in PR #15 after Dashboard remained healthy through `admin-actions` and `src/test/dashboard-data.test.ts` was updated. PR #19 later kept `admin-actions` as the single Dashboard boundary by adding backend degraded handling for base `public.get_dashboard_summary()` failures and client-side Edge Function error-body extraction.
 - Monitoring response/filter aliases in `src/api/monitoringData.ts` and `supabase/functions/admin-actions/monitoringReads.ts`: remove only after old frontend bundles have aged out and function logs show no legacy filter values.
 - Unused admin action cases in `supabase/functions/_shared/adminActionNames.ts` and `supabase/functions/admin-actions/index.ts`: strongest candidate is the backward-compatible `backfill_signatures` alias, but request logs and runbook/manual operator usage must be checked first.
 - Worker helper export surface in `supabase/functions/worker/*`: candidate for de-export cleanup only, preserving tests or moving helper coverage to public behavior.
-- Paused My X implementation in `src/pages/XAccount.tsx`, `src/api/xAccountData.ts`, `src/hooks/useFollowerData.ts`, and `src/components/x/FollowerGrowthChart.tsx`: remove only after confirming My X should stay paused.
-- Renderer compatibility re-export in `services/video-renderer/src/renderer.js`: remove only after confirming deployed renderer process/scripts do not import `loadConfigFromEnv` from `renderer.js`.
+- Paused My X implementation in `src/pages/XAccount.tsx`, `src/api/xAccountData.ts`, `src/hooks/useFollowerData.ts`, and `src/components/x/FollowerGrowthChart.tsx`: removed in PR #15; `/x-account` remains routed to `src/pages/XAccountDisabled.tsx`.
+- Renderer compatibility re-export in `services/video-renderer/src/renderer.js`: removed in PR #15 after confirming active imports use `services/video-renderer/src/config.js`.
 
 ## Validation
 
@@ -2117,9 +2138,56 @@ git commit -m "chore: remove obsolete cleanup compatibility paths"
 
 ## Exit Criteria
 
-- [ ] Compatibility scaffolding is gone.
-- [ ] Docs match the actual code.
-- [ ] Local and read-only live checks pass.
+- [x] Safe compatibility scaffolding is gone.
+- [ ] All compatibility scaffolding is gone. Deferred candidates: monitoring aliases, `backfill_signatures`, worker helper export cleanup, RSS query-token compatibility, and `recordLegacyXApiUsage`.
+- [x] Docs match the actual code for completed removals.
+- [x] Local and read-only live checks pass for completed removals and the later `c6ba0ba46f3e45f888c23fd95cdd8cbf4b9cb1b1` release.
+
+---
+
+# Post-Phase 21: OpenAI Quota And Dashboard Degraded Edge Failure Follow-Up
+
+Status: completed and promoted through reviewed `main`.
+
+## Objective
+
+Close the production gaps discovered after the cleanup release: Dashboard optional summary reads and the base dashboard summary RPC could still fail the whole page, and OpenAI quota exhaustion caused repeated expensive retries.
+
+## Completed Scope
+
+- PR #17 hardened Dashboard optional summary sections with `withDashboardFallback` so optional PostgREST/RPC reads fail closed instead of returning an Edge Function 500.
+- PR #19 hardened the Dashboard base summary path so `admin-actions` logs `base_summary` failures and returns a degraded critical dashboard instead of a 500 when `public.get_dashboard_summary()` fails.
+- PR #19 also made `src/api/adminActions.ts` extract Edge Function response bodies from `FunctionsHttpError.context`, producing actionable client errors such as `Edge Function 401: ...`.
+- PR #16 added OpenAI cost controls:
+  - `supabase/functions/_shared/providerErrors.ts` classifies insufficient-quota errors as non-retryable.
+  - Worker job failure handling dead-letters quota exhaustion instead of retrying all attempts.
+  - `supabase/functions/_shared/openaiCostControls.ts` clamps live `max_completion_tokens` settings at `8000`.
+  - Settings validation rejects runaway OpenAI completion-token caps.
+  - Dashboard surfaces OpenAI usage from completed job metadata.
+- Migration `20260615005500_include_reprocess_in_worker_cron.sql` added `reprocess` to the worker fallback cron body.
+- Live `translation_prompt.max_completion_tokens` and `translation_prompt.scoring.max_completion_tokens` were normalized from `50000` to `8000`.
+
+## Evidence
+
+- PR #16 merged at `c4076d3055c8e9d509387131a8d0d8ddf18666ec`.
+- GitHub CI for `main` run `27521288800` succeeded.
+- Vercel deployment completed for PR #16 before merge.
+- `admin-actions` deployed at version `156`, `worker` deployed at version `232`.
+- `DEPLOY_GIT_SHA` was stamped to `c4076d3055c8e9d509387131a8d0d8ddf18666ec`.
+- `npm run check:release-state` passed after deploy.
+- Production cron `invoke-worker-every-1m` now includes `job_types:["reprocess","dedupe","resolve_media","download_media","hydrate_tweet","translate","deliver"]`.
+- Manual reprocess recovery drained from pending to `50` completed reprocess jobs in the 24-hour queue check.
+- PR #19 merged at `c6ba0ba46f3e45f888c23fd95cdd8cbf4b9cb1b1`.
+- GitHub CI for `main` run `27522692966` succeeded.
+- `admin-actions` deployed at version `158`.
+- `DEPLOY_GIT_SHA` was stamped to `c6ba0ba46f3e45f888c23fd95cdd8cbf4b9cb1b1`.
+- Production frontend returned HTTP 200 and served the refreshed app shell last modified at `2026-06-15T03:45:48Z`.
+- Unauthenticated `admin-actions` sanity returned the expected `401` gateway response.
+
+## Remaining Notes
+
+- Authenticated Dashboard browser verification still requires an active admin browser session/JWT; Codex has verified the unauthenticated `admin-actions` gateway path and production bundle refresh, but not a live admin Dashboard session after PR #19.
+- `translation_prompt.reasoning_effort` remains `high`; this is a product-quality/cost tradeoff and should be tuned deliberately rather than changed as cleanup.
 
 ---
 
