@@ -195,6 +195,28 @@ Secret/config rollback:
 
 Add new entries at the top.
 
+### 2026-06-15 - PR #28 Hydration helper cleanup
+
+```text
+Date: 2026-06-15
+Operator: Codex
+Git SHA: f8ebcaa41dcd8ac38bc2586a242c37f91fbdb5fc
+GitHub PR: https://github.com/Masihhedayati/liquid-feed-flux/pull/28
+CI run: https://github.com/Masihhedayati/liquid-feed-flux/actions/runs/27540030183
+Vercel deployment: not available from local CLI; production hosts refreshed from main and returned HTTP 200
+Vercel aliases: https://xot.iraneyes.com, https://xot.vercel.app
+Supabase project ref: jzirqfzzvlbxwfzndaer
+Migration head before: unchanged; no migrations in PR #28
+Migration head after: unchanged; no migrations applied; latest shared local/remote migration remained 20260615043000
+Function versions before: webhooks-rssapp 209, worker 239, admin-retry 164, db-cleanup 136, media-processor 175, media-cleanup 172, admin-actions 163, x-poster 112, x-followers-snapshot 86, digest-compiler 92
+Function versions after: webhooks-rssapp 211, worker 241, admin-retry 166, db-cleanup 138, media-processor 177, media-cleanup 174, admin-actions 165, x-poster 114, x-followers-snapshot 88, digest-compiler 94
+DEPLOY_GIT_SHA: deploy script stamped f8ebcaa41dcd8ac38bc2586a242c37f91fbdb5fc; Supabase secret timestamp 2026-06-15T10:29:37.033Z
+Renderer heartbeat: hermes-masih-1 online, version 0.1.0, render_version persian-subtitles-masihh-v1, processed 4, failed 0, last_seen_at 2026-06-15 10:48:33.039+00
+Smoke checks: post-release npm run check:release-state passed; GitHub main CI passed; xot.iraneyes.com and xot.vercel.app returned HTTP 200 with app shell last-modified 2026-06-15T10:28:38Z and asset /assets/index-Bf2i4Zlv.js; authenticated Chrome Dashboard loaded from https://xot.iraneyes.com/; a fresh admin-actions POST returned HTTP 200 on version 165 after Dashboard refresh
+Rollback target: previous deployed function source git 64a6ed61d7194dcab808651f2f10de7bcf19e72a; previous main before PR #28 was 2c4055d18b399ddb6bbb9e91e29e84b5a43f545c; functions rollback by checking out the desired SHA and running DEPLOY_ALLOW_NON_MAIN=1 ./scripts/deploy-functions.sh after confirming target versions
+Notes: PR #28 extracted hydration success patch shaping from worker/index.ts into xApiWorkflow.ts, added focused tests for X API patching and URL parsing, and tightened X profile handle parsing without changing delivery behavior. PR #27 was a docs/status-only Telegram helper verification branch and did not require a Supabase deploy. RSS query-token telemetry remained active at 40 hits, last seen 2026-06-15 10:49:04.630314+00, so RSS query-token compatibility remains blocked from removal.
+```
+
 ### 2026-06-15 - PR #25 Worker helper export cleanup
 
 ```text

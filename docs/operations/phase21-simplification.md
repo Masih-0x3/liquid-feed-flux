@@ -103,6 +103,10 @@ Response aliases still intentionally emitted for compatibility are `needs_action
 - Follow-up telemetry at `2026-06-15T05:09:40Z` recorded `2` `rss_query_token` hits for `/webhooks-rssapp` with `legacy_value=query:token`, confirming RSS.app query-token compatibility is still actively used and must not be removed yet.
 - PR #25 removed the safe worker helper export-surface slice, deployed all 10 Edge Functions from `64a6ed61d7194dcab808651f2f10de7bcf19e72a`, and stamped `DEPLOY_GIT_SHA=64a6ed61d7194dcab808651f2f10de7bcf19e72a`.
 - Production frontend was refreshed at `2026-06-15T07:10:05Z`; main CI run `27529812922` passed; post-deploy `npm run check:release-state` passed; authenticated `get_dashboard_summary` returned HTTP `200`, `success=true`, and a dashboard payload.
+- PR #27 marked the Telegram helper cleanup status verified; it was documentation/status-only and did not require a Supabase deploy.
+- PR #28 extracted hydration success patch shaping into `xApiWorkflow.ts`, tightened X/Twitter URL handle parsing, deployed all 10 Edge Functions from `f8ebcaa41dcd8ac38bc2586a242c37f91fbdb5fc`, and stamped `DEPLOY_GIT_SHA=f8ebcaa41dcd8ac38bc2586a242c37f91fbdb5fc`.
+- Production frontend was refreshed at `2026-06-15T10:28:38Z`; main CI run `27540030183` passed; post-deploy `npm run check:release-state` passed; authenticated Chrome Dashboard loaded at `https://xot.iraneyes.com/` and a fresh `admin-actions` request returned HTTP `200`.
+- Follow-up telemetry at `2026-06-15T10:49:04Z` recorded `40` `rss_query_token` hits for `/webhooks-rssapp` with `legacy_value=query:token`, confirming RSS.app query-token compatibility is still actively used and must not be removed yet.
 - The worker fallback cron now includes `reprocess`; the manually queued reprocess batch drained to `50` completed jobs in the 24-hour queue check.
 - Live `translation_prompt.max_completion_tokens` and `translation_prompt.scoring.max_completion_tokens` were normalized from `50000` to `8000`. `reasoning_effort=high` remains a deliberate product-quality/cost tradeoff to tune separately.
 
