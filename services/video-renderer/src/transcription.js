@@ -62,6 +62,12 @@ function isDeepgramNoTimedSegmentsReason(reason) {
   return /deepgram transcription returned no timed segments|returned no timed segments/i.test(String(reason ?? ""));
 }
 
+function isDeepgramContentQualityReason(reason) {
+  const value = String(reason ?? "");
+  return isDeepgramNoTimedSegmentsReason(value) ||
+    /weak low-confidence speech detection|repeated filler transcript|non-speech descriptive transcript|repetitive transcript does not match context|only weak deepgram candidates/i.test(value);
+}
+
 export function isLikelyNonSpeechDescription(transcription) {
   const text = cleanText(transcriptText(transcription)).toLowerCase();
   if (!text) return false;
@@ -324,7 +330,7 @@ function weakDeepgramReason(transcription, options = {}) {
 async function maybeRunOpenAIFallback(options, reason) {
   const fallbackProvider = normalizeProvider(options.fallbackProvider, "");
   if (fallbackProvider !== "openai") return null;
-  if (isDeepgramNoTimedSegmentsReason(reason)) return null;
+  if (isDeepgramContentQualityReason(reason)) return null;
   const fallback = await runOpenAITranscription(options);
   const rejected = !hasUsableSubtitleText(fallback.segments) ||
     isLikelyNonSpeechDescription(fallback) ||
@@ -396,12 +402,15 @@ export async function transcribeAudio(options = {}) {
       return fallback ?? noSegmentsResult;
     }
     if (provider === "deepgram" && fallbackProvider === "openai") {
-      const fallback = await runOpenAITranscription(options);
-      return {
-        ...fallback,
-        fallback: true,
-        fallbackReason: error instanceof Error ? error.message : String(error),
-      };
+      const reason = error instanceof Error ? error.message : String(error);
+      const fallback = await maybeRunOpenAIFallback(options, reason);
+      return fallback ?? asNoUsableSpeech({
+        provider: "deepgram",
+        model: options.deepgramModel || "nova-3",
+        raw: null,
+        segments: [],
+        language: "und",
+      }, reason);
     }
     throw error;
   }

@@ -102,7 +102,8 @@ test("classifies Deepgram no-transcript responses as no usable speech", async ()
   assert.match(result.noUsableSpeechReason, /returned no timed segments/);
 });
 
-test("falls back from sparse low-information Deepgram fragments to OpenAI speech", async () => {
+test("does not fall back from sparse low-information Deepgram fragments to OpenAI speech", async () => {
+  let openaiCalled = false;
   const result = await transcribeAudio({
     provider: "deepgram",
     fallbackProvider: "openai",
@@ -134,21 +135,25 @@ test("falls back from sparse low-information Deepgram fragments to OpenAI speech
       }),
     }),
     readFileImpl: async () => Buffer.from("audio"),
-    openaiTranscribe: async () => ({
-      model: "gpt-4o-transcribe-diarize",
-      language: "he",
-      segments: [
-        { id: 1, start: 0, end: 1.8, text: "תבחן בי משאלה הנה" },
-        { id: 2, start: 1.8, end: 3.5, text: "איפה איפה היא מקרסקה?" },
-      ],
-    }),
+    openaiTranscribe: async () => {
+      openaiCalled = true;
+      return {
+        model: "gpt-4o-transcribe-diarize",
+        language: "he",
+        segments: [
+          { id: 1, start: 0, end: 1.8, text: "תבחן בי משאלה הנה" },
+          { id: 2, start: 1.8, end: 3.5, text: "איפה איפה היא מקרסקה?" },
+        ],
+      };
+    },
   });
 
-  assert.equal(result.provider, "openai");
-  assert.equal(result.fallback, true);
-  assert.match(result.fallbackReason, /weak Deepgram|low-confidence|weak/i);
-  assert.equal(result.language, "he");
-  assert.equal(result.segments.length, 2);
+  assert.equal(openaiCalled, false);
+  assert.equal(result.provider, "deepgram");
+  assert.equal(result.noUsableSpeech, true);
+  assert.deepEqual(result.segments, []);
+  assert.match(result.noUsableSpeechReason, /weak low-confidence/);
+  assert.equal(result.rejectedSegments.length, 2);
 });
 
 test("rejects descriptive OpenAI fallback captions instead of burning fake subtitles", async () => {
@@ -159,10 +164,7 @@ test("rejects descriptive OpenAI fallback captions instead of burning fake subti
     durationMs: 15335,
     deepgramApiKey: "dg-key",
     openaiApiKey: "openai-key",
-    fetchImpl: async () => ({
-      ok: true,
-      text: async () => JSON.stringify(weakDeepgramNoiseResponse()),
-    }),
+    fetchImpl: async () => ({ ok: false, status: 503, text: async () => "temporary outage" }),
     readFileImpl: async () => Buffer.from("audio"),
     openaiTranscribe: async () => ({
       model: "whisper-1",
@@ -197,10 +199,7 @@ test("rejects repetitive fallback gibberish when it does not match post context"
     deepgramApiKey: "dg-key",
     openaiApiKey: "openai-key",
     contextText: "Post context:\nPost: Demonstrators chanted Ghalibaf, Araghchi, resign, resign.",
-    fetchImpl: async () => ({
-      ok: true,
-      text: async () => JSON.stringify(weakDeepgramNoiseResponse()),
-    }),
+    fetchImpl: async () => ({ ok: false, status: 503, text: async () => "temporary outage" }),
     readFileImpl: async () => Buffer.from("audio"),
     openaiTranscribe: async () => ({
       model: "gpt-4o-transcribe-diarize",
@@ -238,10 +237,7 @@ test("rejects sparse fallback phrases that do not match post context", async () 
     deepgramApiKey: "dg-key",
     openaiApiKey: "openai-key",
     contextText: "Post context:\nPost: Demonstrators chanted Ghalibaf, Araghchi, resign, resign.",
-    fetchImpl: async () => ({
-      ok: true,
-      text: async () => JSON.stringify(weakDeepgramNoiseResponse()),
-    }),
+    fetchImpl: async () => ({ ok: false, status: 503, text: async () => "temporary outage" }),
     readFileImpl: async () => Buffer.from("audio"),
     openaiTranscribe: async () => ({
       model: "gpt-4o-transcribe-diarize",
@@ -272,7 +268,7 @@ test("rejects sparse fallback phrases that do not match post context", async () 
   }), false);
 });
 
-test("rejects generic OpenAI outro captions after Deepgram finds no speech", async () => {
+test("rejects generic OpenAI outro captions after Deepgram API failure", async () => {
   const result = await transcribeAudio({
     provider: "deepgram",
     fallbackProvider: "openai",
@@ -281,10 +277,7 @@ test("rejects generic OpenAI outro captions after Deepgram finds no speech", asy
     deepgramApiKey: "dg-key",
     openaiApiKey: "openai-key",
     contextText: "Post context:\nPost: Security camera footage from Gaza.",
-    fetchImpl: async () => ({
-      ok: true,
-      text: async () => JSON.stringify(weakDeepgramNoiseResponse()),
-    }),
+    fetchImpl: async () => ({ ok: false, status: 503, text: async () => "temporary outage" }),
     readFileImpl: async () => Buffer.from("audio"),
     openaiTranscribe: async () => ({
       model: "whisper-1",
