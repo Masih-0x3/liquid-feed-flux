@@ -195,6 +195,28 @@ Secret/config rollback:
 
 Add new entries at the top.
 
+### 2026-06-15 - PR #36 Legacy X API usage writer removal
+
+```text
+Date: 2026-06-15
+Operator: Codex
+Git SHA: 7f3dab452eaccecd5a275def6b29127998df958d
+GitHub PR: https://github.com/Masihhedayati/liquid-feed-flux/pull/36
+CI run: https://github.com/Masihhedayati/liquid-feed-flux/actions/runs/27555124925
+Vercel deployment: not available from local CLI; production hosts refreshed from main and returned HTTP 200
+Vercel aliases: https://xot.iraneyes.com, https://xot.vercel.app
+Supabase project ref: jzirqfzzvlbxwfzndaer
+Migration head before: unchanged; no migrations in PR #36
+Migration head after: unchanged; no migrations applied; latest shared local/remote migration remained 20260615043000
+Supabase function versions before deploy: webhooks-rssapp 217, worker 247, admin-retry 172, db-cleanup 144, media-processor 183, media-cleanup 180, admin-actions 171, x-poster 120, x-followers-snapshot 94, digest-compiler 100
+Supabase function versions after deploy: webhooks-rssapp 219, worker 249, admin-retry 174, db-cleanup 146, media-processor 185, media-cleanup 182, admin-actions 173, x-poster 122, x-followers-snapshot 96, digest-compiler 102
+DEPLOY_GIT_SHA: deploy script stamped 7f3dab452eaccecd5a275def6b29127998df958d; Supabase secret timestamp 2026-06-15T14:58:36.989Z
+Renderer heartbeat: hermes-masih-1 online, version 0.1.0, render_version persian-subtitles-masihh-v1, processed 8, failed 0, last_seen_at 2026-06-15 14:59:02.145+00
+Smoke checks: post-release npm run check:release-state passed; GitHub main CI passed; xot.iraneyes.com and xot.vercel.app returned HTTP 200 with app shell last-modified 2026-06-15T14:57:26Z and etag "b539a3b261ad5447d77aae51673920d8"; no stale running jobs; renderer heartbeat online
+Rollback target: ad29a4d5623cef204521e116ffc5aadaf46ff7fe
+Notes: PR #36 removed the obsolete recordLegacyXApiUsage settings.x_api_usage cache writer from X posting, worker hydration, follower snapshots, and admin X API actions while preserving canonical x_api_events writes. RSS query-token compatibility remains active and deferred until RSS.app moves to header auth and telemetry is quiet.
+```
+
 ### 2026-06-15 - PR #34 X API summary UI bridge
 
 ```text
