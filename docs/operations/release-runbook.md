@@ -195,6 +195,28 @@ Secret/config rollback:
 
 Add new entries at the top.
 
+### 2026-06-15 - PR #40 Renderer OpenAI vision helper split
+
+```text
+Date: 2026-06-15
+Operator: Codex
+Git SHA: 5a4238c51f8d49a0a1efe3724fe7cfde68c410a0
+GitHub PR: https://github.com/Masihhedayati/liquid-feed-flux/pull/40
+CI run: https://github.com/Masihhedayati/liquid-feed-flux/actions/runs/27557982250
+Vercel deployment: production hosts refreshed from main and returned HTTP 200
+Vercel aliases: https://xot.iraneyes.com, https://xot.vercel.app
+Supabase project ref: jzirqfzzvlbxwfzndaer
+Migration head before: unchanged; no migrations in PR #40
+Migration head after: unchanged; no migrations applied; latest shared local/remote migration remained 20260615043000
+Supabase function versions before deploy: unchanged from PR #36 release; webhooks-rssapp 219, worker 249, admin-retry 174, db-cleanup 146, media-processor 185, media-cleanup 182, admin-actions 173, x-poster 122, x-followers-snapshot 96, digest-compiler 102
+Supabase function versions after deploy: no Supabase deploy for PR #40; versions remained webhooks-rssapp 219, worker 249, admin-retry 174, db-cleanup 146, media-processor 185, media-cleanup 182, admin-actions 173, x-poster 122, x-followers-snapshot 96, digest-compiler 102
+DEPLOY_GIT_SHA: unchanged at 7f3dab452eaccecd5a275def6b29127998df958d; Supabase functions were not redeployed for this renderer/docs cleanup
+Renderer heartbeat: hermes-masih-1 online, version 0.1.0, render_version persian-subtitles-masihh-v1, processed 1, failed 0, last_seen_at 2026-06-15 15:42:12.397+00
+Smoke checks: post-merge npm run check:release-state passed; GitHub main CI passed; xot.iraneyes.com and xot.vercel.app returned HTTP 200 with app shell last-modified 2026-06-15T15:43:36Z and etag "e34aa19358a2657acbec4305dc44e7ae"; no stale running jobs; renderer heartbeat online
+Rollback target: previous main before PR #40 was d044433fd8f788637c630313545fa6aea7b73b25; functions rollback not needed because no Supabase function deployment occurred
+Notes: PR #40 split OpenAI vision/watermark request builders, Responses API parsing, specialist-vision merging, and vision API-call helpers into services/video-renderer/src/openaiVision.js while keeping services/video-renderer/src/openai.js as the stable public facade. It added mocked API-call tests for analyzeRemovableWatermarks and analyzeWatermarkContactSheet and fixed the uncovered extractOutputText scope regression from the prior subtitle split. RSS query-token compatibility remains deferred.
+```
+
 ### 2026-06-15 - PR #36 Legacy X API usage writer removal
 
 ```text
