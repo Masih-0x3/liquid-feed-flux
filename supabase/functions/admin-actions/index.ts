@@ -298,7 +298,9 @@ serve(async (req) => {
       }
 
       case 'get_monitoring_entries': {
-        return jsonResponse(await getMonitoringEntries(supabase, body));
+        return jsonResponse(await getMonitoringEntries(supabase, body, {
+          actorId: authResult.userId,
+        }));
       }
 
       case 'get_x_api_summary': {
@@ -434,7 +436,9 @@ serve(async (req) => {
 
       // ===== Backward-compatible alias for old Story Memory backfill =====
       case 'backfill_signatures': {
-        return jsonResponse(await backfillSignaturesAdminAction(supabase, body));
+        return jsonResponse(await backfillSignaturesAdminAction(supabase, body, {
+          actorId: authResult.userId,
+        }));
       }
 
       // ===== Re-score recent posts that are missing score_axes =====

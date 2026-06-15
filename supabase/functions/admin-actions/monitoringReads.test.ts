@@ -6,6 +6,7 @@ import {
   getMonitoringEntries,
   matchesMonitoringFilter,
   normalizeMonitoringFilter,
+  resolveMonitoringFilter,
   sanitizeSearchTerm,
 } from "./monitoringReads.ts";
 
@@ -137,6 +138,16 @@ Deno.test("monitoring filter aliases and search sanitization are stable", () => 
   assertEquals(normalizeMonitoringFilter("posted_24h"), "delivered_24h");
   assertEquals(normalizeMonitoringFilter("unknown"), "all");
   assertEquals(sanitizeSearchTerm("  bad%,_( query )  "), "bad query ");
+  assertEquals(resolveMonitoringFilter("needs-action"), {
+    filter: "needs_attention",
+    legacyValue: "needs-action",
+    aliasKey: "needs_action",
+  });
+  assertEquals(resolveMonitoringFilter("ready_to_deliver"), {
+    filter: "ready_to_deliver",
+    legacyValue: null,
+    aliasKey: null,
+  });
 });
 
 Deno.test("monitoring state handles terminal skips and duplicate coverage gaps", () => {
@@ -221,4 +232,26 @@ Deno.test("getMonitoringEntries falls back when optional monitoring columns are 
   assertEquals(result.entries.length, 1);
   assertEquals(postSelects.some((columns) => columns.includes("enrichment_version")), true);
   assertEquals(postSelects.some((columns) => !columns.includes("enrichment_version") && columns.includes("scoring_version")), true);
+});
+
+Deno.test("getMonitoringEntries records legacy filter alias telemetry", async () => {
+  const supabase = fakeMonitoringSupabase();
+  const events: unknown[] = [];
+
+  await getMonitoringEntries(supabase, { filter: "needs-action", limit: 10 }, {
+    actorId: "admin-1",
+    recordCompatibilityUsage: async (_supabase, event) => {
+      events.push(event);
+    },
+  });
+
+  assertEquals(events, [{
+    source: "admin-actions",
+    feature: "monitoring_filter_alias",
+    legacyValue: "needs-action",
+    canonicalValue: "needs_attention",
+    action: "get_monitoring_entries",
+    actorId: "admin-1",
+    metadata: { alias_key: "needs_action" },
+  }]);
 });
