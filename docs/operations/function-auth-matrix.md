@@ -62,6 +62,13 @@ Live secret values are never recorded here. Secret-name presence can drift, so r
 5. Set `RSSAPP_ALLOW_QUERY_TOKEN=false`.
 6. Remove `?token=...`, `?webhook_token=...`, or `?rssapp_token=...` from the RSS.app webhook URL.
 7. Rotate the old query-token secret after confirming no `Webhook query token accepted` log lines remain on the latest deployment.
+8. Before removing query-token support from `supabase/functions/_shared/internalAuth.ts`, run the enforced release-state quiet-window gate:
+
+```bash
+CHECK_COMPATIBILITY_QUIET=1 COMPATIBILITY_QUIET_HOURS=24 npm run check:release-state
+```
+
+The gate must report zero `rss_query_token` hits. Normal `npm run check:release-state` reports compatibility telemetry without failing, so the enforced mode is the removal proof.
 
 If RSS.app still cannot send custom headers, keep query-token compatibility enabled, use a long random token, rotate it after any exported/shared logs, and treat any URL-bearing log as sensitive.
 

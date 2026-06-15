@@ -2247,7 +2247,7 @@ npm run check:release-state
 
 # Phase 21: Post-Cleanup Simplification
 
-Status: partially completed and promoted. Safe removals are live on `main`; remaining candidates are deferred because their removal still needs request-log evidence, operator decision, or focused export-surface work.
+Status: partially completed and promoted. Safe removals are live on `main`; remaining candidates are deferred because their removal still needs request-log evidence, operator decision, or focused test/export-surface work.
 
 ## Objective
 
@@ -2331,6 +2331,23 @@ The historical removal gates were:
 
 Initial post-deploy read after `ccd06079eae7e454ffd372dce94f71940c64e560` returned zero rows. Follow-up telemetry at `2026-06-15T05:09:40Z` recorded `2` `rss_query_token` hits for `/webhooks-rssapp` with `legacy_value=query:token`. Later telemetry at `2026-06-15T10:49:04Z` recorded `40` `rss_query_token` hits for the same path. A refreshed query at `2026-06-15T10:56:03Z` recorded `41` `rss_query_token` hits and no `monitoring_filter_alias` or `admin_action_alias` rows. Monitoring aliases and `backfill_signatures` were therefore removed. Post-deploy telemetry after `9d60e9052056f5a0e2e0794579701a97e7e8cb5e` recorded `45` `rss_query_token` hits and still no Monitoring/admin alias rows. RSS.app query-token compatibility is still actively used and must not be removed yet.
 
+Refreshed telemetry on `2026-06-15` after main reached `359d5503efa35457d8cf6af032feaedcf183b625` still showed active RSS query-token traffic: total `rss_query_token` hits reached `99`, the latest observed timestamp was `2026-06-15 17:39:41.885028+00`, and the enforced 24-hour quiet-window gate failed with `99` hits. Supabase secret-name inventory did not list `RSSAPP_ALLOW_QUERY_TOKEN`, so query-token compatibility remains enabled by default. Branch `codex/xot-rss-compatibility-gate` adds release-state telemetry reporting and the optional quiet-window gate below to make the final removal proof explicit.
+
+Use this release-state gate before deleting `readRssWebhookToken` query-param compatibility or treating `RSSAPP_ALLOW_QUERY_TOKEN=false` as the permanent production setting:
+
+```bash
+CHECK_COMPATIBILITY_QUIET=1 COMPATIBILITY_QUIET_HOURS=24 npm run check:release-state
+```
+
+Expected before removal:
+
+```text
+rss_query_token hits in last 24h: 0
+Compatibility quiet-window gate passed.
+```
+
+If it reports any hits, RSS.app is still sending the token in the URL and the compatibility path must stay.
+
 Post-PR #25 dashboard check: a user-visible "Dashboard failed to load / Edge Function returned a non-2xx status code" report was investigated read-only first. Direct unauthenticated `admin-actions` checks returned expected `401`s, local execution of the dashboard summary module against live Supabase returned a dashboard payload, and post-deploy authenticated `admin-actions` `get_dashboard_summary` returned HTTP `200`, `success=true`, and a dashboard payload. No Dashboard code/config hotfix was needed for this incident.
 
 Post-PR #28 dashboard check: the same user-visible Dashboard failure was checked again after the `f8ebcaa41dcd8ac38bc2586a242c37f91fbdb5fc` deploy. The canonical Dashboard route is `https://xot.iraneyes.com/`; `/dashboard` intentionally renders the app 404. Authenticated Chrome loaded the Dashboard successfully, UI refresh kept the page healthy, Supabase Edge Function logs showed a fresh `admin-actions` POST returning HTTP `200` on version `165`, and `npm run check:release-state` passed. No Dashboard code/config hotfix was needed for this incident.
@@ -2361,6 +2378,12 @@ git commit -m "chore: remove obsolete cleanup compatibility paths"
 - [ ] All compatibility scaffolding is gone. Remaining deferred candidate: RSS query-token compatibility, which remains active until RSS.app moves to header auth and telemetry is quiet.
 - [x] Docs match the actual code for completed removals.
 - [x] Local and read-only live checks pass for completed removals and the later `f8ebcaa41dcd8ac38bc2586a242c37f91fbdb5fc` release.
+
+Current completion-audit follow-ups that are not safe to mark done without more work:
+
+- Phase 8 still has one narrow cleanup candidate: the actual `media-processor` invoke body remains inline in `supabase/functions/worker/index.ts`; the resolve/download job payload is tested in `mediaWorkflow.test.ts`, but the invoke payload itself needs extraction or an explicit waiver.
+- Phase 11 still has two narrow frontend test gaps: status filter row-id parity is backend-owned after `get_monitoring_entries`, and the Monitoring empty state exists in UI but lacks focused test coverage.
+- Phase 21 remains blocked by live RSS query-token traffic until RSS.app is moved to header auth and the quiet-window gate above reports zero hits.
 
 ---
 
