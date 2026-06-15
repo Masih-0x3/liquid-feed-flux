@@ -24,13 +24,14 @@ This branch removes compatibility code only after the PR #13 release was live, a
 - Removed unused worker export surface that had no local importers:
   - the scoring re-export block from `supabase/functions/worker/index.ts`
   - the `MAX_ATTEMPTS` export from `supabase/functions/worker/jobLifecycle.ts`
+- Removed the final safe worker type-only export surface in PR #32.
+- Removed the obsolete `recordLegacyXApiUsage` writer and stale frontend `x_api_usage` default in PR #36 after PR #34 moved Settings and X Automation usage displays to `get_x_api_summary`.
 
 ## Deferred
 
 These items still need request-log evidence, follow-up refactoring, or a product decision before removal:
 
 - RSS query-token compatibility still has documented production relevance.
-- `recordLegacyXApiUsage` writer cleanup is handled by branch `codex/xot-remove-legacy-xapi-usage-writer` after PR #34 moved Settings off `settings.x_api_usage` and live frontend bundle checks confirmed no remaining UI dependency.
 
 ### Worker Helper Export Cleanup Slice
 
@@ -42,7 +43,7 @@ Branch `codex/xot-worker-helper-export-cleanup` removes the remaining safe worke
 - Made media and X API implementation types private and deleted the unused `ResolvedMediaSource` alias.
 - Made scoring/translation implementation types and `SCORING_AXES_SCHEMA` private. Kept `ScoringDecisionLog` exported because `worker/index.ts` imports it.
 
-Follow-up branch `codex/xot-cleanup-21-worker-type-export-surface` removes the final safe type-only worker export surface without changing runtime behavior:
+Follow-up branch `codex/xot-cleanup-21-worker-type-export-surface` removed the final safe type-only worker export surface without changing runtime behavior:
 
 - Made `HydratedTweetPatch` private in `supabase/functions/worker/xApiWorkflow.ts`; it is only the return type of `buildHydratedTweetPatch()`.
 - Made `ScoringDecisionLog` private in `supabase/functions/worker/scoringWorkflow.ts`; `worker/index.ts` now derives its local log-event type from `buildScoringBaseDecisionState()`.
@@ -56,7 +57,7 @@ Focused validation for this slice:
 
 ### Legacy X API Usage Writer Cleanup Slice
 
-Branch `codex/xot-remove-legacy-xapi-usage-writer` removes the obsolete `settings.x_api_usage` cache writer after PR #34 moved Settings and X Automation usage displays to `get_x_api_summary`:
+Branch `codex/xot-remove-legacy-xapi-usage-writer` removed the obsolete `settings.x_api_usage` cache writer after PR #34 moved Settings and X Automation usage displays to `get_x_api_summary`:
 
 - Removed `recordLegacyXApiUsage` from `supabase/functions/_shared/xApiLedger.ts`.
 - Removed legacy cache writes from X posting, worker hydration, follower snapshot, and admin X API actions while keeping canonical `recordXApiEvent` writes intact.
