@@ -27,7 +27,7 @@ Main checkout preserved for user work:
 Current main documentation anchor:
 
 ```text
-29cc200fbc64141dd5441fb7d972272f1434c2c2
+bf12a9b6da34cbfbf397acddb9b822ba2714e447
 ```
 
 Last deployed code release anchor:
@@ -55,6 +55,8 @@ Release notes:
 - PR #36 removed the obsolete `recordLegacyXApiUsage` writer and stale frontend default, then deployed all 10 Edge Functions and stamped `DEPLOY_GIT_SHA=7f3dab452eaccecd5a275def6b29127998df958d`.
 - PR #37 recorded the PR #36 release ledger; it was documentation-only and did not require a Supabase deploy.
 - PR #47 extracted the remaining worker media-processor invoke payload helper, merged at `cfaf4207535d20ca6113a24ef21a84ec959c2265`, deployed `worker` version `253`, and stamped `DEPLOY_GIT_SHA=cfaf4207535d20ca6113a24ef21a84ec959c2265`.
+- PR #48 recorded the PR #47 release ledger; it was documentation-only and did not require a Supabase deploy.
+- PR #49 added Monitoring filter and empty-state regression coverage; it was test/documentation-only and did not require a Supabase deploy.
 
 Current safe-state rule:
 
@@ -377,7 +379,7 @@ Identify the confusing, high-risk, large-file knots before refactoring.
 
 # Phase 2: Admin Actions Split
 
-Status: completed in cleanup branch history.
+Status: completed in cleanup branch history and closure-verified on `codex/xot-phase2-admin-actions-audit`.
 
 ## Objective
 
@@ -397,27 +399,36 @@ Additional completed admin action split commits exist in this branch stack for v
 
 ## Required Review Steps
 
-- [ ] Confirm `supabase/functions/admin-actions/index.ts` remains the only HTTP entrypoint.
-- [ ] Confirm auth and CORS behavior did not move into action modules.
-- [ ] Confirm each extracted module exports action handlers only.
-- [ ] Confirm every original action string is still handled.
-- [ ] Confirm response shapes remain backward compatible for current frontend callers.
-- [ ] Add an action registry test if not already present.
+- [x] Confirm `supabase/functions/admin-actions/index.ts` remains the only HTTP entrypoint.
+- [x] Confirm auth and CORS behavior did not move into action modules.
+- [x] Confirm extracted modules do not create secondary HTTP entrypoints or own admin/CORS boundaries. Existing modules may export testable pure helpers, shared types, and internal dependency hooks where current tests and cross-module orchestration already rely on them.
+- [x] Confirm every canonical action string is still handled.
+- [x] Confirm response shapes remain backward compatible for current frontend callers through direct Deno action tests, frontend API tests, and frontend wrapper pass-through coverage for the Monitoring consumers.
+- [x] Add or extend an action registry test.
 
-## Action Registry Test Shape
+## Action Registry Test
 
-Create or extend a Deno test that asserts all exported action names are unique and dispatchable:
+Implemented in `src/test/admin-actions-contract.test.ts` rather than by importing `admin-actions/index.ts` directly, because importing the Edge Function entrypoint would start the HTTP server. The test now asserts:
 
-```ts
-Deno.test("admin action registry has unique names", () => {
-  const names = Object.keys(adminActionHandlers);
-  const unique = new Set(names);
-  assertEquals(unique.size, names.length);
-  assert(names.includes("get_dashboard_summary"));
-  assert(names.includes("get_video_render_queue"));
-  assert(names.includes("retry_x_post"));
-});
+- `ADMIN_ACTION_NAMES` contains no duplicates.
+- Backend `switch (action)` cases contain no duplicates.
+- The canonical action list and backend switch remain aligned.
+- Static frontend `admin-actions` literals are present in the canonical list.
+- Only `supabase/functions/admin-actions/index.ts` owns `serve(...)`, CORS headers, and admin-role checks.
+
+Focused closure evidence:
+
+```text
+npm test -- src/test/admin-actions-contract.test.ts
+Test Files  1 passed (1)
+Tests       5 passed (5)
+
+npm test -- src/test/monitoring-actions.test.ts
+Test Files  1 passed (1)
+Tests       8 passed (8)
 ```
+
+Response-shape closure is anchored by the direct Deno action tests for backend response construction and frontend API tests for client error handling. The focused Monitoring wrapper tests add pass-through coverage for the consumer-facing fields used after `hydrate_post`, `bulk_reprocess`, `rescore_post`, `retry_x_post`, `clear_dup`, `translate_post`, `run_dedupe`, manual scoring `advance`, score feedback, ignore/bulk-ignore `closed/results`, enrichment `worker_dispatch/translation_preflight`, stale-X close, and cancel-jobs actions.
 
 ## Validation
 
@@ -432,10 +443,10 @@ npm run build
 
 ## Exit Criteria
 
-- [ ] Dispatcher is primarily routing and authentication.
-- [ ] Action modules are organized by domain.
-- [ ] Frontend action names still work.
-- [ ] No production deployment has occurred from the cleanup branch.
+- [x] Dispatcher is primarily routing and authentication. `src/test/admin-actions-contract.test.ts` now verifies that `supabase/functions/admin-actions/index.ts` is the sole `serve(...)`, CORS, and admin-role boundary.
+- [x] Action modules are organized by domain. The split modules cover settings, dashboard summaries, monitoring reads/mutations, dedupe, scoring, translation/rescore, enrichment, maintenance, X API, X posting, video render, side effects, and manual advance behavior.
+- [x] Frontend action names still work. `src/test/admin-actions-contract.test.ts` verifies canonical frontend/backend action-name alignment, and `src/test/monitoring-actions.test.ts` covers high-risk Monitoring wrapper payloads plus consumer-facing response pass-through.
+- [x] No production deployment has occurred from this cleanup branch. Phase 2 closure is test/documentation-only and remains on `codex/xot-phase2-admin-actions-audit`; production promotion remains reserved for reviewed `main`.
 
 ---
 
