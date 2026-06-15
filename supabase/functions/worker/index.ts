@@ -110,6 +110,7 @@ import {
   resolveScoringCallOptions,
 } from "./scoringWorkflow.ts";
 import {
+  assertOriginalTextForTranslation,
   buildPostTranslationUpdatePatch,
   buildTranslationCallOptions,
   buildTranslationResultMeta,
@@ -999,9 +1000,7 @@ async function handleTranslateJob(
       throw new Error(`Post not found: ${tweetId}`);
     }
 
-    if (!post.text_original) {
-      throw new Error("No original text to translate");
-    }
+    assertOriginalTextForTranslation(post.text_original);
 
     const initialDuplicatePatch = duplicateDecisionPatch(
       post as {

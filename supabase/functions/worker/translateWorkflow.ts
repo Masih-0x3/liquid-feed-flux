@@ -187,6 +187,14 @@ export function buildTranslationCallOptions(
   };
 }
 
+export function assertOriginalTextForTranslation(
+  textOriginal: unknown,
+): asserts textOriginal is string {
+  if (!textOriginal) {
+    throw new Error("No original text to translate");
+  }
+}
+
 export function buildTranslationResultMeta(
   input: TranslationResultMetaInput,
 ): Record<string, unknown> {
