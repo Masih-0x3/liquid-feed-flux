@@ -1,6 +1,6 @@
 # XOT Function Auth And Secret Matrix
 
-Last updated: 2026-06-14
+Last updated: 2026-06-15
 
 This matrix documents the current local function auth contract before any `verify_jwt` or secret behavior is changed. It is based on:
 
@@ -19,7 +19,7 @@ Live secret values are never recorded here. Secret-name presence can drift, so r
 | --- | --- | --- | --- |
 | Supabase JWT plus admin role | `admin-actions`, `admin-retry` | Browser/user `Authorization: Bearer <jwt>` validated by Supabase Auth, then `profiles.role = admin` | These functions also create service-role clients after the user is proven admin. |
 | Internal Edge auth | `worker`, `db-cleanup`, `media-processor`, `media-cleanup`, `x-poster`, `x-followers-snapshot`, `digest-compiler` | `x-internal-token` matching `WEBHOOK_SHARED_SECRET`, `Authorization: Bearer <SUPABASE_SERVICE_ROLE_KEY>`, or `x-internal-token` accepted by `verify_webhook_internal_token` | This is why these functions can use `verify_jwt=false` without becoming intentionally public. Cron callers should use `public._cron_internal_headers()`. |
-| RSS webhook auth | `webhooks-rssapp` | `x-webhook-token`, `x-rssapp-token`, or temporary query-token compatibility | Query tokens are accepted only while `RSSAPP_ALLOW_QUERY_TOKEN` is not set to a false-like value. Prefer header auth whenever RSS.app supports it. |
+| RSS webhook auth | `webhooks-rssapp` | `RSSApp-Signature` signed webhook, `x-webhook-token`, `x-rssapp-token`, or temporary query-token compatibility | Signed RSS.app webhooks are preferred. Query tokens are accepted only while `RSSAPP_ALLOW_QUERY_TOKEN` is not set to a false-like value. |
 
 ## Common Runtime Secrets
 
@@ -29,6 +29,7 @@ Live secret values are never recorded here. Secret-name presence can drift, so r
 | `SUPABASE_SERVICE_ROLE_KEY` | Service-role DB access and internal Edge invocation | All service-role functions; also admin functions after user/admin validation |
 | `SUPABASE_ANON_KEY` | Supabase Auth user validation | `admin-actions`, `admin-retry` |
 | `WEBHOOK_SHARED_SECRET` | Internal cron/Edge token and fallback RSS token | Internal-auth functions, cron callers, RSS fallback |
+| `RSSAPP_SIGNING_SECRET` or `RSSAPP_WEBHOOK_SECRET` | RSS.app signed-webhook HMAC secret | `webhooks-rssapp` |
 | `RSSAPP_WEBHOOK_TOKEN` or `RSSAPP_TOKEN` | RSS-specific webhook token override | `webhooks-rssapp` |
 | `RSSAPP_ALLOW_QUERY_TOKEN` | Temporary RSS query-token compatibility flag | `webhooks-rssapp` |
 | `OPENAI_API_KEY` | Translation, scoring, enrichment, dedupe, digest generation | `worker`, selected `admin-actions`, `digest-compiler` |
@@ -42,7 +43,7 @@ Live secret values are never recorded here. Secret-name presence can drift, so r
 
 | Function | `verify_jwt` | Trigger source and caller | In-code gate | Required secret contract | Accepted compatibility modes | Planned hardening |
 | --- | --- | --- | --- | --- | --- | --- |
-| `webhooks-rssapp` | `false` | External RSS.app webhook; background dispatch to `worker` with service-role bearer | `requireRssWebhookAuth` | `SUPABASE_SERVICE_ROLE_KEY`; one of `WEBHOOK_SHARED_SECRET`, `RSSAPP_WEBHOOK_TOKEN`, `RSSAPP_TOKEN`, or Vault-backed `WEBHOOK_SHARED_SECRET` RPC match | Header tokens preferred; query params `token`, `webhook_token`, or `rssapp_token` are temporary RSS.app compatibility | Move RSS.app to header auth if supported, then set `RSSAPP_ALLOW_QUERY_TOKEN=false`, rotate the old query token, and keep `verify_jwt=false` only because RSS.app is not a Supabase JWT caller. |
+| `webhooks-rssapp` | `false` | External RSS.app webhook; background dispatch to `worker` with service-role bearer | `requireRssWebhookAuth` | `SUPABASE_SERVICE_ROLE_KEY`; preferred `RSSAPP_SIGNING_SECRET` / `RSSAPP_WEBHOOK_SECRET`; fallback one of `WEBHOOK_SHARED_SECRET`, `RSSAPP_WEBHOOK_TOKEN`, `RSSAPP_TOKEN`, or Vault-backed `WEBHOOK_SHARED_SECRET` RPC match | Signed `RSSApp-Signature` requests preferred; header tokens accepted; query params `token`, `webhook_token`, or `rssapp_token` are temporary RSS.app compatibility | Enable RSS.app webhook signing, set the matching Supabase signing secret, then set `RSSAPP_ALLOW_QUERY_TOKEN=false`, rotate the old query token, and keep `verify_jwt=false` only because RSS.app is not a Supabase JWT caller. |
 | `worker` | `false` | `pg_cron` worker schedule; DB immediate trigger paths; webhook dispatch; internal service-role invokes | `requireInternalAuth` | `SUPABASE_SERVICE_ROLE_KEY`; `WEBHOOK_SHARED_SECRET` or Vault token for cron; route-dependent `OPENAI_API_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TWITTER_*`, optional `VIDEO_RENDERER_URL` and `VIDEO_RENDERER_TOKEN` | Service-role bearer from internal Edge invokes; `x-internal-token` from cron | Keep cron calls on `public._cron_internal_headers()`. Do not enable JWT until all non-user callers have an equivalent authenticated path. Track missing renderer secrets separately from worker auth. |
 | `admin-retry` | `true` | Authenticated admin UI/manual retry paths | Supabase JWT validation plus `profiles.role = admin` | `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`; `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` for Telegram retry/preview paths | None | Keep `verify_jwt=true`; consider folding remaining retry-only behavior into `admin-actions` once action boundaries are stable. |
 | `db-cleanup` | `false` | Daily cleanup cron and internal dry-run/manual calls | `requireInternalAuth` | `SUPABASE_SERVICE_ROLE_KEY`; `WEBHOOK_SHARED_SECRET` or Vault token for cron | Service-role bearer; `x-internal-token` | Keep `verify_jwt=false` for cron. Confirm active cron uses `public._cron_internal_headers()` before rotating `WEBHOOK_SHARED_SECRET`. |
@@ -55,14 +56,13 @@ Live secret values are never recorded here. Secret-name presence can drift, so r
 
 ## Query-Token Removal Path
 
-1. Confirm whether RSS.app supports custom outgoing headers on the configured webhook.
-2. If supported, rotate the current webhook secret and configure RSS.app to send `x-rssapp-token` or `x-webhook-token`.
-3. Set the matching value in Supabase Edge Function Secrets as `RSSAPP_WEBHOOK_TOKEN` or `WEBHOOK_SHARED_SECRET`.
-4. Send an RSS.app webhook test and confirm `webhooks-rssapp` returns `200`.
-5. Set `RSSAPP_ALLOW_QUERY_TOKEN=false`.
-6. Remove `?token=...`, `?webhook_token=...`, or `?rssapp_token=...` from the RSS.app webhook URL.
-7. Rotate the old query-token secret after confirming no `Webhook query token accepted` log lines remain on the latest deployment.
-8. Before removing query-token support from `supabase/functions/_shared/internalAuth.ts`, run the enforced release-state quiet-window gate:
+1. Enable RSS.app webhook signing on the configured webhook. RSS.app sends `RSSApp-Signature: t=<unix seconds>,v1=<hex hmac>` where `v1` signs `${t}.${raw_body}` with HMAC-SHA256.
+2. Save the one-time RSS.app signing secret in Supabase Edge Function Secrets as `RSSAPP_SIGNING_SECRET`.
+3. Deploy `webhooks-rssapp` and send an RSS.app webhook test; the latest deployment should return `200` with no `rss_query_token` compatibility event.
+4. Set `RSSAPP_ALLOW_QUERY_TOKEN=false`.
+5. Remove `?token=...`, `?webhook_token=...`, or `?rssapp_token=...` from the RSS.app webhook URL.
+6. Rotate the old query-token secret after confirming no `Webhook query token accepted` log lines remain on the latest deployment.
+7. Before removing query-token support from `supabase/functions/_shared/internalAuth.ts`, run the enforced release-state quiet-window gate:
 
 ```bash
 CHECK_COMPATIBILITY_QUIET=1 COMPATIBILITY_QUIET_HOURS=24 npm run check:release-state
@@ -70,7 +70,7 @@ CHECK_COMPATIBILITY_QUIET=1 COMPATIBILITY_QUIET_HOURS=24 npm run check:release-s
 
 The gate must report zero `rss_query_token` hits. Normal `npm run check:release-state` reports compatibility telemetry without failing, so the enforced mode is the removal proof.
 
-If RSS.app still cannot send custom headers, keep query-token compatibility enabled, use a long random token, rotate it after any exported/shared logs, and treat any URL-bearing log as sensitive.
+If signing is unavailable on the configured RSS.app account, use custom headers as the fallback: configure `x-rssapp-token` or `x-webhook-token`, set the matching `RSSAPP_WEBHOOK_TOKEN`, and follow the same quiet-window gate before deleting query-token code. If neither signing nor custom headers is available, keep query-token compatibility enabled, use a long random token, rotate it after any exported/shared logs, and treat any URL-bearing log as sensitive.
 
 ## Deploy Guardrails
 

@@ -31,7 +31,7 @@ Tool limitation: Codegraph refused to index this cleanup worktree because it is 
 | SM-08 | P2 | Renderer | Renderer and preview pipelines duplicate helpers and carry a large env/config surface. | Extract shared renderer config and preflight orchestration. |
 | SM-09 | P1 | Renderer auth | Renderer HTTP auth is fail-open when `VIDEO_RENDERER_TOKEN` is missing, and that secret is not observed in Supabase Edge secrets. | Add a fail-closed server-auth guard and tests before broader renderer cleanup. |
 | SM-10 | P2 | Runtime/deps | Repo declares Node 20.x while observed Vercel runtime is Node 24.x; root audit is already failing. | Align runtime and dependency policy in a separate phase. |
-| SM-11 | P2 | Function auth/security | Several functions intentionally run with `verify_jwt=false`; webhook query-token compatibility still exists. | Keep function-by-function auth matrix and phase out query tokens. |
+| SM-11 | P2 | Function auth/security | Several functions intentionally run with `verify_jwt=false`; webhook query-token compatibility still exists. | Keep function-by-function auth matrix and phase out query tokens after signed RSS.app webhook cutover. |
 
 ## File Size Hotspots
 
@@ -456,7 +456,7 @@ Evidence:
 - `supabase/config.toml` has `verify_jwt=true` for `admin-retry` and `admin-actions`.
 - `supabase/functions/_shared/internalAuth.ts:44` through `supabase/functions/_shared/internalAuth.ts:70` still supports RSS query tokens for compatibility.
 - `supabase/functions/_shared/internalAuth.ts:64` through `supabase/functions/_shared/internalAuth.ts:67` defaults query-token allowance to enabled unless explicitly disabled.
-- Missing edge secret names include `RSSAPP_ALLOW_QUERY_TOKEN`, `RSSAPP_WEBHOOK_TOKEN`, `VIDEO_RENDERER_URL`, `VIDEO_RENDERER_TOKEN`, and `DEEPGRAM_API_KEY` at `docs/operations/xot-system-inventory.md:166` through `docs/operations/xot-system-inventory.md:172`.
+- Missing edge secret names include `RSSAPP_ALLOW_QUERY_TOKEN`, `RSSAPP_SIGNING_SECRET`, `RSSAPP_WEBHOOK_TOKEN`, `VIDEO_RENDERER_URL`, `VIDEO_RENDERER_TOKEN`, and `DEEPGRAM_API_KEY` at `docs/operations/xot-system-inventory.md:166` through `docs/operations/xot-system-inventory.md:173`.
 
 Risk:
 
@@ -473,7 +473,7 @@ Cleanup plan:
    - required secrets
    - caller functions or cron jobs
    - whether browser calls are expected
-3. Phase out RSS query-token auth only after RSS.app is moved to headers.
+3. Phase out RSS query-token auth only after RSS.app is moved to signed webhook auth or header-token fallback.
 
 Validation:
 

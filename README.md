@@ -93,8 +93,9 @@ values fail the build instead of producing a blank browser screen.
 | `TELEGRAM_BOT_TOKEN` | Telegram Bot API authentication |
 | `TELEGRAM_CHAT_ID` | Target Telegram channel |
 | `WEBHOOK_SHARED_SECRET` | Internal function-to-function auth (must match Vault/cron token; see [runbooks](docs/operations/runbooks.md#internal-cron-and-edge-auth)) |
-| `RSSAPP_WEBHOOK_TOKEN` | Optional dedicated RSS.app webhook token; accepted in `x-webhook-token`, `x-rssapp-token`, or temporary query-token compatibility |
-| `RSSAPP_ALLOW_QUERY_TOKEN` | Set to `false` after RSS.app is moved to header auth so query-string webhook tokens are rejected |
+| `RSSAPP_SIGNING_SECRET` | Preferred RSS.app signed-webhook secret; verifies `RSSApp-Signature` HMAC requests |
+| `RSSAPP_WEBHOOK_TOKEN` | Optional legacy/dedicated RSS.app webhook token; accepted in `x-webhook-token`, `x-rssapp-token`, or temporary query-token compatibility |
+| `RSSAPP_ALLOW_QUERY_TOKEN` | Set to `false` after RSS.app is moved to signed webhook or header auth so query-string webhook tokens are rejected |
 
 ## Scripts
 

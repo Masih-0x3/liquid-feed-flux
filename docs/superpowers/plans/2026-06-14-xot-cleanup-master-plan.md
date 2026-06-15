@@ -2348,7 +2348,7 @@ Read-only sidecar audit identified these Phase 21 candidates. Do not remove them
 - Paused My X implementation in `src/pages/XAccount.tsx`, `src/api/xAccountData.ts`, `src/hooks/useFollowerData.ts`, and `src/components/x/FollowerGrowthChart.tsx`: removed in PR #15; `/x-account` remains routed to `src/pages/XAccountDisabled.tsx`.
 - Renderer compatibility re-export in `services/video-renderer/src/renderer.js`: removed in PR #15 after confirming active imports use `services/video-renderer/src/config.js`.
 - `recordLegacyXApiUsage` in `supabase/functions/_shared/xApiLedger.ts`: PR #34 moved Settings usage displays from `settings.x_api_usage` arrays to `get_x_api_summary`, backed by `x_api_events` and `x_deliveries`. PR #36 removed the obsolete writers after read-only code checks and a live frontend bundle check found no remaining runtime/UI dependency.
-- RSS query-token compatibility in `supabase/functions/_shared/internalAuth.ts`: production Edge logs show query-token webhook calls still happen, so do not remove it until RSS.app is moved to header auth and temporary `rss_query_token` telemetry shows zero hits.
+- RSS query-token compatibility in `supabase/functions/_shared/internalAuth.ts`: production Edge logs show query-token webhook calls still happen, so do not remove it until RSS.app is moved to signed webhook auth or header-token fallback and temporary `rss_query_token` telemetry shows zero hits.
 
 ## Temporary Compatibility Telemetry
 
@@ -2379,6 +2379,8 @@ The historical removal gates were:
 Initial post-deploy read after `ccd06079eae7e454ffd372dce94f71940c64e560` returned zero rows. Follow-up telemetry at `2026-06-15T05:09:40Z` recorded `2` `rss_query_token` hits for `/webhooks-rssapp` with `legacy_value=query:token`. Later telemetry at `2026-06-15T10:49:04Z` recorded `40` `rss_query_token` hits for the same path. A refreshed query at `2026-06-15T10:56:03Z` recorded `41` `rss_query_token` hits and no `monitoring_filter_alias` or `admin_action_alias` rows. Monitoring aliases and `backfill_signatures` were therefore removed. Post-deploy telemetry after `9d60e9052056f5a0e2e0794579701a97e7e8cb5e` recorded `45` `rss_query_token` hits and still no Monitoring/admin alias rows. RSS.app query-token compatibility is still actively used and must not be removed yet.
 
 Refreshed telemetry on `2026-06-15` after main reached `359d5503efa35457d8cf6af032feaedcf183b625` still showed active RSS query-token traffic: total `rss_query_token` hits reached `99`, the latest observed timestamp was `2026-06-15 17:39:41.885028+00`, and the enforced 24-hour quiet-window gate failed with `99` hits. Supabase secret-name inventory did not list `RSSAPP_ALLOW_QUERY_TOKEN`, so query-token compatibility remains enabled by default. Branch `codex/xot-rss-compatibility-gate` adds release-state telemetry reporting and the optional quiet-window gate below to make the final removal proof explicit.
+
+On `2026-06-15`, the live RSS.app webhook URL was confirmed to still use `?token=...`; the token value is intentionally not recorded. Current RSS.app docs now describe signed webhooks with `RSSApp-Signature: t=<unix seconds>,v1=<hex hmac>`, where `v1` signs `${t}.${raw_body}` with HMAC-SHA256. Branch `codex/xot-rssapp-signature-auth` adds additive signed-webhook verification while preserving the existing query-token compatibility path. Production cutover still requires enabling signing in RSS.app, storing the one-time secret as `RSSAPP_SIGNING_SECRET`, deploying the updated `webhooks-rssapp` function, confirming a signed webhook test, then disabling query-token compatibility.
 
 Use this release-state gate before deleting `readRssWebhookToken` query-param compatibility or treating `RSSAPP_ALLOW_QUERY_TOKEN=false` as the permanent production setting:
 
@@ -2422,13 +2424,13 @@ git commit -m "chore: remove obsolete cleanup compatibility paths"
 ## Exit Criteria
 
 - [x] Safe compatibility scaffolding is gone.
-- [ ] All compatibility scaffolding is gone. Remaining deferred candidate: RSS query-token compatibility, which remains active until RSS.app moves to header auth and telemetry is quiet.
+- [ ] All compatibility scaffolding is gone. Remaining deferred candidate: RSS query-token compatibility, which remains active until RSS.app moves to signed webhook auth or header-token fallback and telemetry is quiet.
 - [x] Docs match the actual code for completed removals.
 - [x] Local and read-only live checks pass for completed removals and the later `f8ebcaa41dcd8ac38bc2586a242c37f91fbdb5fc` release.
 
 Current completion-audit follow-ups that are not safe to mark done without more work:
 
-- Phase 21 remains blocked by live RSS query-token traffic until RSS.app is moved to header auth and the quiet-window gate above reports zero hits.
+- Phase 21 remains blocked by live RSS query-token traffic until RSS.app is moved to signed webhook auth or header-token fallback and the quiet-window gate above reports zero hits.
 
 ---
 

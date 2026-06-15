@@ -280,7 +280,7 @@ DEPLOY_GIT_SHA: deploy script stamped 7f3dab452eaccecd5a275def6b29127998df958d; 
 Renderer heartbeat: hermes-masih-1 online, version 0.1.0, render_version persian-subtitles-masihh-v1, processed 8, failed 0, last_seen_at 2026-06-15 14:59:02.145+00
 Smoke checks: post-release npm run check:release-state passed; GitHub main CI passed; xot.iraneyes.com and xot.vercel.app returned HTTP 200 with app shell last-modified 2026-06-15T14:57:26Z and etag "b539a3b261ad5447d77aae51673920d8"; no stale running jobs; renderer heartbeat online
 Rollback target: ad29a4d5623cef204521e116ffc5aadaf46ff7fe
-Notes: PR #36 removed the obsolete recordLegacyXApiUsage settings.x_api_usage cache writer from X posting, worker hydration, follower snapshots, and admin X API actions while preserving canonical x_api_events writes. RSS query-token compatibility remains active and deferred until RSS.app moves to header auth and telemetry is quiet.
+Notes: PR #36 removed the obsolete recordLegacyXApiUsage settings.x_api_usage cache writer from X posting, worker hydration, follower snapshots, and admin X API actions while preserving canonical x_api_events writes. RSS query-token compatibility remains active and deferred until RSS.app moves to signed webhook auth or header-token fallback and telemetry is quiet.
 ```
 
 ### 2026-06-15 - PR #34 X API summary UI bridge
@@ -368,7 +368,7 @@ DEPLOY_GIT_SHA: deploy script stamped 9d60e9052056f5a0e2e0794579701a97e7e8cb5e; 
 Renderer heartbeat: hermes-masih-1 online, version 0.1.0, render_version persian-subtitles-masihh-v1, processed 4, failed 0, last_seen_at 2026-06-15 11:33:23.805+00
 Smoke checks: post-release npm run check:release-state passed; GitHub main CI passed; xot.iraneyes.com and xot.vercel.app returned HTTP 200 with app shell last-modified 2026-06-15T11:24:33Z and etag "fbd07f5009611db875f3bcd57eb4a736"; no stale running jobs; renderer heartbeat online
 Rollback target: f8ebcaa41dcd8ac38bc2586a242c37f91fbdb5fc
-Notes: PR #30 removed the zero-telemetry Monitoring filter/response aliases and the deprecated backfill_signatures admin-action alias. Post-deploy compatibility telemetry showed only rss_query_token activity at 45 hits, last seen 2026-06-15 11:19:59.760532+00; no monitoring_filter_alias or admin_action_alias rows were present. RSS query-token compatibility remains blocked from removal until RSS.app is migrated to header auth and telemetry is quiet across a normal operating window.
+Notes: PR #30 removed the zero-telemetry Monitoring filter/response aliases and the deprecated backfill_signatures admin-action alias. Post-deploy compatibility telemetry showed only rss_query_token activity at 45 hits, last seen 2026-06-15 11:19:59.760532+00; no monitoring_filter_alias or admin_action_alias rows were present. RSS query-token compatibility remains blocked from removal until RSS.app is migrated to signed webhook auth or header-token fallback and telemetry is quiet across a normal operating window.
 ```
 
 ### 2026-06-15 - PR #28 Hydration helper cleanup
