@@ -195,6 +195,31 @@ Secret/config rollback:
 
 Add new entries at the top.
 
+### 2026-06-15 - PR #51 RSS.app signed-webhook auth
+
+```text
+Date: 2026-06-15
+Operator: Codex
+Git SHA: 257c69f047971683c22ca57df4cf137c8d89a8c7
+GitHub PR: https://github.com/Masihhedayati/liquid-feed-flux/pull/51
+CI run: https://github.com/Masihhedayati/liquid-feed-flux/actions/runs/27572258920
+Vercel deployment: production hosts refreshed from main and returned HTTP 200
+Vercel aliases: https://xot.iraneyes.com, https://xot.vercel.app
+Supabase project ref: jzirqfzzvlbxwfzndaer
+Migration head before: unchanged; no migrations in PR #51
+Migration head after: unchanged; no migrations applied; latest shared local/remote migration remained 20260615043000
+Supabase function versions before deploy: webhooks-rssapp 221, worker 253, admin-retry 176, db-cleanup 148, media-processor 187, media-cleanup 184, admin-actions 175, x-poster 124, x-followers-snapshot 98, digest-compiler 104
+Supabase function versions after deploy: webhooks-rssapp deployed from main and moved to 223; setting DEPLOY_GIT_SHA refreshed function runtime versions to worker 254, admin-retry 177, db-cleanup 149, media-processor 188, media-cleanup 185, admin-actions 176, x-poster 125, x-followers-snapshot 99, digest-compiler 105
+Supabase function versions after RSS signing secret cutover: webhooks-rssapp 226, worker 257, admin-retry 180, db-cleanup 152, media-processor 191, media-cleanup 188, admin-actions 179, x-poster 128, x-followers-snapshot 102, digest-compiler 108
+DEPLOY_GIT_SHA: deploy script stamped 257c69f047971683c22ca57df4cf137c8d89a8c7; Supabase secret timestamp 2026-06-15T19:54:23.043Z
+RSS signing cutover: RSS.app signing was enabled after deploy; `RSSAPP_SIGNING_SECRET` was set in Supabase Edge Function Secrets at 2026-06-15T19:57:46.571Z; `RSSAPP_ALLOW_QUERY_TOKEN=false` was set at 2026-06-15T19:58:19.779Z
+RSS signing smoke: a signed HMAC request without any query token returned HTTP 200; an unsigned query-token-only request returned HTTP 401 with the expected auth error
+Renderer heartbeat: hermes-masih-1 online, version 0.1.0, render_version persian-subtitles-masihh-v1, processed 9, failed 0, last_seen_at 2026-06-15 19:59:12.12+00
+Smoke checks: post-deploy npm run check:release-state passed; GitHub main CI passed; xot.iraneyes.com and xot.vercel.app returned HTTP 200 with app shell last-modified 2026-06-15T19:54:31Z and etag "2b9dc964e7bf01ec906ab97b7026c063"; no stale running jobs; renderer heartbeat online
+Rollback target: previous main before PR #51 was 2e515cd4b68eddaa3abddbad63c9dfdf1311602e; function rollback target for webhooks-rssapp is the prior deployed main SHA cfaf4207535d20ca6113a24ef21a84ec959c2265 if reverting signed-webhook auth behavior is required
+Notes: PR #51 added additive RSS.app `RSSApp-Signature` verification for webhooks-rssapp while preserving query-token compatibility. Compatibility telemetry after cutover still showed accepted `rss_query_token` traffic inside the 24-hour observation window: 118 hits, latest 2026-06-15 19:55:11.9163+00. Query-token-only requests are now rejected, but code removal remains blocked until the old query token is removed from the RSS.app URL, the exposed query and signing secrets are rotated, and the quiet-window gate reports zero hits.
+```
+
 ### 2026-06-15 - PR #44 Worker missing-source translation test gap
 
 ```text

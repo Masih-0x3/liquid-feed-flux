@@ -1,6 +1,7 @@
 # XOT System Inventory
 
 Checked at: 2026-06-14T08:29:26Z
+Targeted RSS signing refresh: 2026-06-15T19:59:12Z
 
 This inventory is read-only. It records what is currently local, in GitHub, in Vercel, and in Supabase before the cleanup work begins.
 
@@ -154,6 +155,8 @@ Secret names observed:
 - `DEPLOY_GIT_SHA`
 - `LOVABLE_API_KEY`
 - `OPENAI_API_KEY`
+- `RSSAPP_ALLOW_QUERY_TOKEN` (observed in the 2026-06-15 RSS signing refresh)
+- `RSSAPP_SIGNING_SECRET` (observed in the 2026-06-15 RSS signing refresh)
 - Supabase-managed keys
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_CHAT_ID`
@@ -165,12 +168,19 @@ Secret names observed:
 
 Secrets not observed in Supabase Edge secret names:
 
-- `RSSAPP_ALLOW_QUERY_TOKEN`
-- `RSSAPP_SIGNING_SECRET`
 - `RSSAPP_WEBHOOK_TOKEN`
 - `VIDEO_RENDERER_URL`
 - `VIDEO_RENDERER_TOKEN`
 - `DEEPGRAM_API_KEY`
+
+Targeted RSS signing refresh:
+
+- PR #51 deployed `webhooks-rssapp` signed-webhook verification from `257c69f047971683c22ca57df4cf137c8d89a8c7`.
+- `RSSAPP_SIGNING_SECRET` was stored in Supabase Edge Function Secrets at `2026-06-15T19:57:46.571Z`.
+- `RSSAPP_ALLOW_QUERY_TOKEN=false` was stored in Supabase Edge Function Secrets at `2026-06-15T19:58:19.779Z`.
+- After the secret updates, remote function versions were `webhooks-rssapp` `226`, `worker` `257`, `admin-retry` `180`, `db-cleanup` `152`, `media-processor` `191`, `media-cleanup` `188`, `admin-actions` `179`, `x-poster` `128`, `x-followers-snapshot` `102`, and `digest-compiler` `108`.
+- A signed RSS.app-style request without a query token returned HTTP `200`; an unsigned query-token-only request returned HTTP `401`.
+- Compatibility telemetry still showed `118` accepted `rss_query_token` hits inside the 24-hour observation window, latest `2026-06-15 19:55:11.9163+00`; query-token code removal remains gated on removing/rotating the exposed URL token and a zero-hit quiet window.
 
 Advisor highlights:
 
