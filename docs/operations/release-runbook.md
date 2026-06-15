@@ -195,6 +195,28 @@ Secret/config rollback:
 
 Add new entries at the top.
 
+### 2026-06-15 - PR #34 X API summary UI bridge
+
+```text
+Date: 2026-06-15
+Operator: Codex
+Git SHA: ad29a4d5623cef204521e116ffc5aadaf46ff7fe
+GitHub PR: https://github.com/Masihhedayati/liquid-feed-flux/pull/34
+CI run: https://github.com/Masihhedayati/liquid-feed-flux/actions/runs/27545705292
+Vercel deployment: not available from local CLI; production hosts refreshed from main and returned HTTP 200
+Vercel aliases: https://xot.iraneyes.com, https://xot.vercel.app
+Supabase project ref: jzirqfzzvlbxwfzndaer
+Migration head before: unchanged; no migrations in PR #34
+Migration head after: unchanged; no migrations applied; latest shared local/remote migration remained 20260615043000
+Supabase function versions before deploy: webhooks-rssapp 215, worker 245, admin-retry 170, db-cleanup 142, media-processor 181, media-cleanup 178, admin-actions 169, x-poster 118, x-followers-snapshot 92, digest-compiler 98
+Supabase function versions after deploy: webhooks-rssapp 217, worker 247, admin-retry 172, db-cleanup 144, media-processor 183, media-cleanup 180, admin-actions 171, x-poster 120, x-followers-snapshot 94, digest-compiler 100
+DEPLOY_GIT_SHA: deploy script stamped ad29a4d5623cef204521e116ffc5aadaf46ff7fe; Supabase secret timestamp 2026-06-15T12:20:48.782Z
+Renderer heartbeat: hermes-masih-1 online, version 0.1.0, render_version persian-subtitles-masihh-v1, processed 4, failed 0, last_seen_at 2026-06-15 12:21:19.778+00
+Smoke checks: post-release npm run check:release-state passed; GitHub main CI passed; xot.iraneyes.com and xot.vercel.app returned HTTP 200 with app shell last-modified 2026-06-15T12:20:59Z and etag "65dd3981c136a14ef7f3f2af0808c084"; no stale running jobs; renderer heartbeat online
+Rollback target: 412127679bd158de342eabc64a4d4dd7c74cc4e2
+Notes: PR #34 moved Settings and X Automation usage displays off legacy settings.x_api_usage and onto get_x_api_summary. The summary now exposes posts_last_hour, latest_event_at, and latest_error from canonical x_api_events and x_deliveries data. recordLegacyXApiUsage writers remain intentionally deferred until the bridge has had a live observation window and read-only checks confirm no runtime or UI dependency remains.
+```
+
 ### 2026-06-15 - PR #32 Worker type export surface cleanup
 
 ```text
