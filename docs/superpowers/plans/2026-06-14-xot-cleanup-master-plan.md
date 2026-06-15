@@ -2093,6 +2093,8 @@ Dashboard incident follow-up timing note: after PR #19, production was promoted 
 
 Worker export cleanup timing note: after PR #20, production was promoted again at `70d5733a5604a535e1d44be1224a10033121d102`. `worker` was live at version `235`, main CI run `27523244015` passed, live hosts refreshed at `2026-06-15T04:05:59Z`, and `npm run check:release-state` passed with no stale running jobs and renderer heartbeat online.
 
+Compatibility telemetry timing note: after PR #22, production was promoted again at `ccd06079eae7e454ffd372dce94f71940c64e560`. Migration `20260615043000` was applied and repaired into the remote migration ledger, main CI run `27524704871` passed, live hosts refreshed at `2026-06-15T04:54:52Z`, and `npm run check:release-state` passed. Deployed Edge Function versions were `admin-actions` `161`, `db-cleanup` `134`, `digest-compiler` `90`, `media-cleanup` `170`, `media-processor` `173`, `webhooks-rssapp` `207`, `worker` `237`, `x-followers-snapshot` `84`, and `x-poster` `110`.
+
 ## Steps
 
 - [x] Re-run release-state check.
@@ -2102,7 +2104,7 @@ npm run check:release-state
 ```
 
 - [x] Remove frontend schema fallbacks that are no longer used.
-- [ ] Remove unused admin action wrappers. Deferred: `backfill_signatures` is local-code unused by the current frontend, but removal needs telemetry showing no external/manual calls. The `codex/xot-compat-usage-telemetry` branch adds temporary `admin_action_alias` rows for this gate.
+- [ ] Remove unused admin action wrappers. Deferred: `backfill_signatures` is local-code unused by the current frontend, but removal needs telemetry showing no external/manual calls. PR #22 added temporary `admin_action_alias` rows for this gate.
 - [x] Remove unused worker entrypoint re-exports and file-local lifecycle constants.
 - [ ] Remove remaining worker helper exports. Deferred: the remaining export surface is mostly test/public-module surface and should be handled with behavior-level Deno tests, not as a blind export removal.
 - [x] Remove dead code identified by TypeScript and Deno checks.
@@ -2123,9 +2125,9 @@ Read-only sidecar audit identified these Phase 21 candidates. Do not remove them
 
 ## Temporary Compatibility Telemetry
 
-Branch `codex/xot-compat-usage-telemetry` adds an additive, service-role-only `public.compatibility_usage_events` table plus best-effort writes from `admin-actions` and `webhooks-rssapp` compatibility paths. It records only source, feature, legacy/canonical labels, action, actor id, method, path, and bounded metadata; it does not store request bodies, auth tokens, or query strings.
+PR #22 adds an additive, service-role-only `public.compatibility_usage_events` table plus best-effort writes from `admin-actions` and `webhooks-rssapp` compatibility paths. It records only source, feature, legacy/canonical labels, action, actor id, method, path, and bounded metadata; it does not store request bodies, auth tokens, or query strings.
 
-Use this read-only query after the migration and functions are deployed:
+Use this read-only query during the observation window:
 
 ```sql
 select
@@ -2146,6 +2148,8 @@ Removal remains blocked until the relevant feature rows are absent across a norm
 - `monitoring_filter_alias`: proves old Monitoring filter aliases are unused.
 - `admin_action_alias`: proves `backfill_signatures` is unused.
 - `rss_query_token`: proves RSS.app no longer sends webhook auth in the URL.
+
+Initial post-deploy read after `ccd06079eae7e454ffd372dce94f71940c64e560` returned zero rows; that only proves no legacy hit had arrived immediately after deploy, not that the paths are unused across a normal production window.
 
 ## Validation
 
@@ -2172,7 +2176,7 @@ git commit -m "chore: remove obsolete cleanup compatibility paths"
 - [x] Safe compatibility scaffolding is gone.
 - [ ] All compatibility scaffolding is gone. Deferred candidates: monitoring aliases, `backfill_signatures`, remaining worker helper export cleanup, RSS query-token compatibility, and `recordLegacyXApiUsage`.
 - [x] Docs match the actual code for completed removals.
-- [x] Local and read-only live checks pass for completed removals and the later `70d5733a5604a535e1d44be1224a10033121d102` release.
+- [x] Local and read-only live checks pass for completed removals and the later `ccd06079eae7e454ffd372dce94f71940c64e560` release.
 
 ---
 
