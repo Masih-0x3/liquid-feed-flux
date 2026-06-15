@@ -2102,7 +2102,7 @@ npm run check:release-state
 ```
 
 - [x] Remove frontend schema fallbacks that are no longer used.
-- [ ] Remove unused admin action wrappers. Deferred: `backfill_signatures` is local-code unused by the current frontend, but the available Supabase CLI does not expose function request logs, and the repo has no admin-action request telemetry table to prove absence of external/manual calls.
+- [ ] Remove unused admin action wrappers. Deferred: `backfill_signatures` is local-code unused by the current frontend, but removal needs telemetry showing no external/manual calls. The `codex/xot-compat-usage-telemetry` branch adds temporary `admin_action_alias` rows for this gate.
 - [x] Remove unused worker entrypoint re-exports and file-local lifecycle constants.
 - [ ] Remove remaining worker helper exports. Deferred: the remaining export surface is mostly test/public-module surface and should be handled with behavior-level Deno tests, not as a blind export removal.
 - [x] Remove dead code identified by TypeScript and Deno checks.
@@ -2114,11 +2114,38 @@ Read-only sidecar audit identified these Phase 21 candidates. Do not remove them
 
 - Monitoring legacy Supabase fallback in `src/api/monitoringData.ts`: removed in PR #15 after authenticated Monitoring smoke and release-state checks.
 - Dashboard direct RPC fallback in `src/api/dashboardData.ts`: removed in PR #15 after Dashboard remained healthy through `admin-actions` and `src/test/dashboard-data.test.ts` was updated. PR #19 later kept `admin-actions` as the single Dashboard boundary by adding backend degraded handling for base `public.get_dashboard_summary()` failures and client-side Edge Function error-body extraction.
-- Monitoring response/filter aliases in `src/api/monitoringData.ts` and `supabase/functions/admin-actions/monitoringReads.ts`: remove only after old frontend bundles have aged out and function logs show no legacy filter values.
-- Unused admin action cases in `supabase/functions/_shared/adminActionNames.ts` and `supabase/functions/admin-actions/index.ts`: strongest candidate is the backward-compatible `backfill_signatures` alias, but request logs and runbook/manual operator usage must be checked first.
+- Monitoring response/filter aliases in `src/api/monitoringData.ts` and `supabase/functions/admin-actions/monitoringReads.ts`: remove only after old frontend bundles have aged out and temporary `monitoring_filter_alias` telemetry shows no legacy filter values across a normal operator window.
+- Unused admin action cases in `supabase/functions/_shared/adminActionNames.ts` and `supabase/functions/admin-actions/index.ts`: strongest candidate is the backward-compatible `backfill_signatures` alias, but temporary `admin_action_alias` telemetry and runbook/manual operator usage must be checked first.
 - Worker helper export surface in `supabase/functions/worker/*`: the unused `worker/index.ts` scoring re-export block and `MAX_ATTEMPTS` lifecycle export are safe de-export cleanup. Remaining helper exports should be removed only when preserving tests or moving helper coverage to public behavior.
 - Paused My X implementation in `src/pages/XAccount.tsx`, `src/api/xAccountData.ts`, `src/hooks/useFollowerData.ts`, and `src/components/x/FollowerGrowthChart.tsx`: removed in PR #15; `/x-account` remains routed to `src/pages/XAccountDisabled.tsx`.
 - Renderer compatibility re-export in `services/video-renderer/src/renderer.js`: removed in PR #15 after confirming active imports use `services/video-renderer/src/config.js`.
+- RSS query-token compatibility in `supabase/functions/_shared/internalAuth.ts`: production Edge logs show query-token webhook calls still happen, so do not remove it until RSS.app is moved to header auth and temporary `rss_query_token` telemetry shows zero hits.
+
+## Temporary Compatibility Telemetry
+
+Branch `codex/xot-compat-usage-telemetry` adds an additive, service-role-only `public.compatibility_usage_events` table plus best-effort writes from `admin-actions` and `webhooks-rssapp` compatibility paths. It records only source, feature, legacy/canonical labels, action, actor id, method, path, and bounded metadata; it does not store request bodies, auth tokens, or query strings.
+
+Use this read-only query after the migration and functions are deployed:
+
+```sql
+select
+  feature,
+  legacy_value,
+  canonical_value,
+  action,
+  request_path,
+  count(*)::int as hits,
+  max(created_at) as last_seen_at
+from public.compatibility_usage_events
+group by 1, 2, 3, 4, 5
+order by last_seen_at desc;
+```
+
+Removal remains blocked until the relevant feature rows are absent across a normal production/operator window:
+
+- `monitoring_filter_alias`: proves old Monitoring filter aliases are unused.
+- `admin_action_alias`: proves `backfill_signatures` is unused.
+- `rss_query_token`: proves RSS.app no longer sends webhook auth in the URL.
 
 ## Validation
 

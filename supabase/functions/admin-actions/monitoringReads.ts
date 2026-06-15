@@ -1,5 +1,9 @@
 import { loadActiveThreshold } from "./activeThreshold.ts";
 import {
+  type CompatibilityUsageEvent,
+  recordCompatibilityUsage,
+} from "../_shared/compatibilityTelemetry.ts";
+import {
   getPayloadTweetId,
   isFailedJobActionable,
   isMissingSchemaError,
@@ -39,6 +43,16 @@ export type MonitoringFilter =
 export type MonitoringScoreBucket = 'any' | 'unscored' | 'lt5' | '5_9' | '10_13' | '14_plus' | '17_plus';
 
 type MonitoringTone = 'good' | 'warn' | 'bad' | 'muted' | 'info';
+
+type RecordCompatibilityUsageFn = (
+  supabase: unknown,
+  event: CompatibilityUsageEvent,
+) => Promise<void>;
+
+type MonitoringReadDeps = {
+  actorId?: string | null;
+  recordCompatibilityUsage?: RecordCompatibilityUsageFn;
+};
 
 export interface MonitoringState {
   code: string;
@@ -143,7 +157,23 @@ const MONITORING_POST_SELECT = [...MONITORING_BASE_POST_COLUMNS, ...MONITORING_E
 const MONITORING_POST_SELECT_NO_ENRICHMENT_V2 = [...MONITORING_BASE_POST_COLUMNS, ...MONITORING_SCORING_V2_COLUMNS].join(', ');
 const MONITORING_POST_SELECT_NO_SCORING_V2 = MONITORING_BASE_POST_COLUMNS.join(', ');
 
-export function normalizeMonitoringFilter(v: unknown): MonitoringFilter {
+const MONITORING_FILTER_ALIASES: Record<string, MonitoringFilter> = {
+  needs_action: 'needs_attention',
+  failed: 'failed_stuck',
+  awaiting_review: 'manual_review',
+  hydration_backlog: 'hydration',
+  posted_24h: 'delivered_24h',
+  recently_delivered: 'delivered_24h',
+  ready_to_publish: 'ready_to_deliver',
+  needs_translation: 'translation_queue',
+  delivery_pending: 'translation_queue',
+};
+
+export function resolveMonitoringFilter(v: unknown): {
+  filter: MonitoringFilter;
+  legacyValue: string | null;
+  aliasKey: string | null;
+} {
   const raw = typeof v === 'string' ? v.replaceAll('-', '_') : 'all';
   const allowed: MonitoringFilter[] = [
     'all', 'needs_attention', 'failed_stuck', 'needs_score', 'translation_queue',
@@ -154,14 +184,23 @@ export function normalizeMonitoringFilter(v: unknown): MonitoringFilter {
     'possible_duplicate', 'duplicate_anomalies', 'ready_to_deliver',
     'telegram_pending', 'x_pending', 'x_failed', 'delivered_24h', 'hydration',
   ];
-  if (raw === 'needs_action') return 'needs_attention';
-  if (raw === 'failed') return 'failed_stuck';
-  if (raw === 'awaiting_review') return 'manual_review';
-  if (raw === 'hydration_backlog') return 'hydration';
-  if (raw === 'posted_24h' || raw === 'recently_delivered') return 'delivered_24h';
-  if (raw === 'ready_to_publish') return 'ready_to_deliver';
-  if (raw === 'needs_translation' || raw === 'delivery_pending') return 'translation_queue';
-  return allowed.includes(raw as MonitoringFilter) ? raw as MonitoringFilter : 'all';
+  const alias = MONITORING_FILTER_ALIASES[raw];
+  if (alias) {
+    return {
+      filter: alias,
+      legacyValue: typeof v === 'string' ? v.slice(0, 120) : raw,
+      aliasKey: raw,
+    };
+  }
+  return {
+    filter: allowed.includes(raw as MonitoringFilter) ? raw as MonitoringFilter : 'all',
+    legacyValue: null,
+    aliasKey: null,
+  };
+}
+
+export function normalizeMonitoringFilter(v: unknown): MonitoringFilter {
+  return resolveMonitoringFilter(v).filter;
 }
 
 export function normalizeMonitoringScoreBucket(v: unknown): MonitoringScoreBucket {
@@ -1022,14 +1061,30 @@ export function matchesMonitoringFilter(entry: Record<string, unknown>, filter: 
 }
 
 // deno-lint-ignore no-explicit-any
-export async function getMonitoringEntries(supabase: any, body: Record<string, unknown>) {
-  const filter = normalizeMonitoringFilter(body.filter);
+export async function getMonitoringEntries(
+  supabase: any,
+  body: Record<string, unknown>,
+  deps: MonitoringReadDeps = {},
+) {
+  const resolvedFilter = resolveMonitoringFilter(body.filter);
+  const filter = resolvedFilter.filter;
   const scoreBucket = normalizeMonitoringScoreBucket(body.score_bucket);
   const search = sanitizeSearchTerm(body.search);
   const limit = Math.min(Math.max(Number(body.limit) || 50, 1), 100);
   const cursor = Math.max(Number(body.cursor) || 0, 0);
   const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const threshold = await loadActiveThreshold(supabase);
+  if (resolvedFilter.legacyValue) {
+    await (deps.recordCompatibilityUsage ?? recordCompatibilityUsage)(supabase, {
+      source: 'admin-actions',
+      feature: 'monitoring_filter_alias',
+      legacyValue: resolvedFilter.legacyValue,
+      canonicalValue: filter,
+      action: 'get_monitoring_entries',
+      actorId: deps.actorId,
+      metadata: { alias_key: resolvedFilter.aliasKey },
+    });
+  }
 
   let idOrder: string[] | null = null;
   if (filter === 'failed_stuck') idOrder = await getTweetIdsFromFailedJobs(supabase, limit, cursor);

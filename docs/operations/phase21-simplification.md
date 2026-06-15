@@ -32,6 +32,32 @@ These items still need request-log evidence or a product decision before removal
 - Remaining worker helper export cleanup in `supabase/functions/worker/*`; this is mostly test export surface and should be done with focused Deno tests or behavior-level replacement coverage.
 - RSS query-token compatibility and `recordLegacyXApiUsage`; both still have documented production relevance.
 
+### Temporary Compatibility Telemetry
+
+The `codex/xot-compat-usage-telemetry` branch adds `public.compatibility_usage_events` and best-effort Edge Function writes for the deferred compatibility paths that logs cannot prove:
+
+- `monitoring_filter_alias` when `get_monitoring_entries` receives a legacy filter alias.
+- `admin_action_alias` when the `backfill_signatures` alias forwards to `backfill_dedupe`.
+- `rss_query_token` when RSS webhook auth succeeds through a query token instead of `x-webhook-token`.
+
+The table is service-role-only and intentionally stores no request body, auth token, or query string. Removal of these compatibility paths stays deferred until the telemetry table shows zero usage across a normal operator window and RSS.app is migrated to header auth.
+
+Use this query after the telemetry branch has been migrated and deployed:
+
+```sql
+select
+  feature,
+  legacy_value,
+  canonical_value,
+  action,
+  request_path,
+  count(*)::int as hits,
+  max(created_at) as last_seen_at
+from public.compatibility_usage_events
+group by 1, 2, 3, 4, 5
+order by last_seen_at desc;
+```
+
 ### Monitoring Alias Removal Gate
 
 Current frontend code uses canonical Monitoring filters, but the backend still accepts old filter aliases for aged-out frontend bundles and bookmarked URLs.
@@ -46,7 +72,7 @@ Do not remove these aliases until authenticated production browser evidence and 
 - `ready_to_publish` -> `ready_to_deliver`
 - `needs_translation` / `delivery_pending` -> `translation_queue`
 
-Response aliases still intentionally emitted for compatibility are `needs_action`, `failed`, `waiting_translation`, `delivery_pending`, `awaiting_review`, `duplicate_skipped`, `hydration_backlog`, `posted_24h`, and `ready_to_publish`. Existing successful requests do not log raw filters, so if Supabase logs cannot prove zero legacy use, add temporary legacy-filter-hit telemetry before removing the aliases.
+Response aliases still intentionally emitted for compatibility are `needs_action`, `failed`, `waiting_translation`, `delivery_pending`, `awaiting_review`, `duplicate_skipped`, `hydration_backlog`, `posted_24h`, and `ready_to_publish`. Existing successful requests do not log raw filters, so the temporary `monitoring_filter_alias` telemetry must show zero usage before removing backend filter aliases.
 
 ## Follow-Up Release Notes
 
