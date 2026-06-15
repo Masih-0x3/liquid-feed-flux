@@ -159,9 +159,17 @@ Deno.test("tweet id and media resolver helpers parse known URL shapes", () => {
     "1234567890123456789",
   );
   assertEquals(
+    extractNumericTweetId(
+      "guid",
+      "https://twitter.com/source/status/2234567890123456789",
+    ),
+    "2234567890123456789",
+  );
+  assertEquals(
     extractNumericTweetId("abc 123456789012345678 xyz"),
     "123456789012345678",
   );
+  assertEquals(extractNumericTweetId("guid", "not a url"), null);
   assertEquals(
     rmUpgradeImageUrl(
       "https://pbs.twimg.com/media/a.jpg?format=jpg&name=small",
@@ -180,6 +188,8 @@ Deno.test("tweet id and media resolver helpers parse known URL shapes", () => {
     extractHandleFromUrl("https://twitter.com/source/status/123"),
     "source",
   );
+  assertEquals(extractHandleFromUrl("https://x.com/source"), "source");
+  assertEquals(extractHandleFromUrl("https://x.com/home"), null);
   assert(
     extractHandleFromUrl("https://example.com/source/status/123") === null,
   );

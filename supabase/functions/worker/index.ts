@@ -86,6 +86,7 @@ import {
   throwTelegramError,
 } from "./telegramDelivery.ts";
 import {
+  buildHydratedTweetPatch,
   countDailyHydrationsUsed,
   getTwitterCreds,
   hydrateOauthHeader,
@@ -3344,12 +3345,8 @@ async function handleHydrateTweetJob(
     );
   }
 
-  const data = (json.data || {}) as Record<string, unknown>;
-  const noteTweet = (data.note_tweet || {}) as Record<string, unknown>;
-  const fullText = (noteTweet.text as string) || (data.text as string) || "";
-  const lang = (data.lang as string) || null;
-
-  if (!fullText) {
+  const hydratedPatch = buildHydratedTweetPatch(json);
+  if (!hydratedPatch) {
     console.warn("hydrate_tweet: empty text from X API, falling back", tweetId);
     await supabase.from("posts").update({
       hydrated_at: new Date().toISOString(),
@@ -3359,19 +3356,7 @@ async function handleHydrateTweetJob(
     return true;
   }
 
-  const updatePayload: Record<string, unknown> = {
-    text_original: fullText,
-    hydrated_at: new Date().toISOString(),
-    hydration_source: "x_api",
-    is_truncated: false,
-    // CRITICAL: invalidate the stale truncated translation so downstream
-    // delivery gates (x-poster, telegram) won't pick up the old text before
-    // the post-hydrate re-translation completes.
-    translated_at: null,
-    text_translated: null,
-  };
-  if (lang) updatePayload.lang_original = lang;
-
+  const { fullText, updatePayload } = hydratedPatch;
   const { error: updErr } = await supabase.from("posts").update(updatePayload)
     .eq("tweet_id", tweetId);
   if (updErr) {

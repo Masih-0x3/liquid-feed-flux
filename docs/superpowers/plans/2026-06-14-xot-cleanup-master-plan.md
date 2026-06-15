@@ -783,26 +783,26 @@ Extract X/Twitter hydration and URL/media variant parsing from `worker/index.ts`
 
 ## Steps
 
-- [ ] Locate hydration entrypoints.
+- [x] Locate hydration entrypoints.
 
 ```bash
 rg -n "hydrate|x api|twitter|tweet|rssapp|rmPickBestVariant|extractNumericTweetId|extractHandleFromUrl" supabase/functions/worker/index.ts supabase/functions/worker/workerUtils.ts
 ```
 
-- [ ] Write focused tests for pure parsing helpers before moving handler code.
-- [ ] Move pure parsing helpers into `xApiWorkflow.ts` if they are not already in `workerUtils.ts`.
-- [ ] Move hydration metadata shaping into `xApiWorkflow.ts`.
-- [ ] Keep job dispatch in `worker/index.ts`.
-- [ ] Keep service-role Supabase client creation in `worker/index.ts` unless the extracted handler has a clear dependency interface.
+- [x] Write focused tests for pure parsing helpers before moving handler code.
+- [x] Keep pure parsing helpers in `workerUtils.ts` where they are already shared by hydration and media resolution.
+- [x] Move hydration success patch shaping into `xApiWorkflow.ts`.
+- [x] Keep job dispatch in `worker/index.ts`.
+- [x] Keep service-role Supabase client creation in `worker/index.ts` unless the extracted handler has a clear dependency interface.
 
 ## Test Cases
 
-- [ ] Numeric tweet id extracted from canonical X URL.
-- [ ] Numeric tweet id extracted from Twitter URL.
-- [ ] Invalid URLs return null instead of throwing.
-- [ ] X handle extraction handles profile URL and status URL.
-- [ ] RM variant selector picks highest useful quality.
-- [ ] Hydration metadata merge preserves existing metadata keys.
+- [x] Numeric tweet id extracted from canonical X URL.
+- [x] Numeric tweet id extracted from Twitter URL.
+- [x] Invalid URLs return null instead of throwing.
+- [x] X handle extraction handles profile URL and status URL.
+- [x] RM variant selector picks highest useful quality.
+- [x] Hydration success patch preserves required fields and invalidates stale translations.
 
 ## Validation
 
@@ -824,9 +824,23 @@ git commit -m "refactor: extract worker x api workflow"
 
 ## Exit Criteria
 
-- [ ] Hydration helper logic can be reviewed without opening the whole worker.
-- [ ] No X posting behavior changes are included in this phase.
-- [ ] Full local gate passes.
+- [x] Hydration helper logic can be reviewed without opening the whole worker.
+- [x] No X posting behavior changes are included in this phase.
+- [x] Full local gate passes.
+
+Current verification for the hydration helper slice:
+
+- `npx deno fmt supabase/functions/worker/workerUtils.ts supabase/functions/worker/workerUtils.test.ts supabase/functions/worker/index.ts supabase/functions/worker/xApiWorkflow.ts supabase/functions/worker/xApiWorkflow.test.ts`
+- `npx deno check supabase/functions/worker/index.ts supabase/functions/worker/xApiWorkflow.ts supabase/functions/worker/xApiWorkflow.test.ts supabase/functions/worker/workerUtils.ts supabase/functions/worker/workerUtils.test.ts`
+- `npx deno test supabase/functions/worker/xApiWorkflow.test.ts supabase/functions/worker/workerUtils.test.ts`
+- `npm run lint:functions`
+- `npm run check:functions`
+- `npm run test:functions`
+- `npm run check:function-inventory`
+- `npm run lint`
+- `npm run check:strict`
+- `npm test`
+- `VITE_SUPABASE_URL=https://jzirqfzzvlbxwfzndaer.supabase.co VITE_SUPABASE_PUBLISHABLE_KEY=local-build-validation-key VITE_SUPABASE_PROJECT_ID=jzirqfzzvlbxwfzndaer npm run build`
 
 ---
 
