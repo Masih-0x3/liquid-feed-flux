@@ -33,7 +33,7 @@ Current main documentation anchor:
 Last deployed code release anchor:
 
 ```text
-7f3dab452eaccecd5a275def6b29127998df958d
+cfaf4207535d20ca6113a24ef21a84ec959c2265
 ```
 
 Release notes:
@@ -54,6 +54,7 @@ Release notes:
 - PR #34 moved Settings and X Automation usage displays from `settings.x_api_usage` to `get_x_api_summary`, then deployed all 10 Edge Functions and stamped `DEPLOY_GIT_SHA=ad29a4d5623cef204521e116ffc5aadaf46ff7fe`.
 - PR #36 removed the obsolete `recordLegacyXApiUsage` writer and stale frontend default, then deployed all 10 Edge Functions and stamped `DEPLOY_GIT_SHA=7f3dab452eaccecd5a275def6b29127998df958d`.
 - PR #37 recorded the PR #36 release ledger; it was documentation-only and did not require a Supabase deploy.
+- PR #47 extracted the remaining worker media-processor invoke payload helper, merged at `cfaf4207535d20ca6113a24ef21a84ec959c2265`, deployed `worker` version `253`, and stamped `DEPLOY_GIT_SHA=cfaf4207535d20ca6113a24ef21a84ec959c2265`.
 
 Current safe-state rule:
 
@@ -2291,6 +2292,8 @@ Hydration helper cleanup timing note: PR #27 was documentation/status-only and r
 
 Compatibility alias removal timing note: after PR #30, production was promoted again at `9d60e9052056f5a0e2e0794579701a97e7e8cb5e`. Main CI run `27543209019` passed, live hosts refreshed at `2026-06-15T11:24:33Z`, all 10 Edge Functions were deployed, `DEPLOY_GIT_SHA` was stamped to `9d60e9052056f5a0e2e0794579701a97e7e8cb5e`, and `npm run check:release-state` passed. Deployed Edge Function versions were `admin-actions` `167`, `admin-retry` `168`, `db-cleanup` `140`, `digest-compiler` `96`, `media-cleanup` `176`, `media-processor` `179`, `webhooks-rssapp` `213`, `worker` `243`, `x-followers-snapshot` `90`, and `x-poster` `116`. Post-deploy compatibility telemetry showed only `rss_query_token` activity at `45` hits, with no `monitoring_filter_alias` or `admin_action_alias` rows.
 
+Media processor payload helper timing note: after PR #47, production was promoted again at `cfaf4207535d20ca6113a24ef21a84ec959c2265`. `worker` was deployed from clean `main` as version `253`, `DEPLOY_GIT_SHA` was stamped to `cfaf4207535d20ca6113a24ef21a84ec959c2265`, main CI run `27566102873` passed after rerunning a transient `esm.sh` 522 failure, live hosts refreshed at `2026-06-15T18:04:28Z`, and post-deploy `npm run check:release-state` passed with no stale running jobs and renderer `hermes-masih-1` online. Compatibility telemetry still showed active `rss_query_token` usage at `102` hits, latest `2026-06-15 18:00:42.471314+00`, so RSS query-token compatibility remains blocked from removal.
+
 ## Steps
 
 - [x] Re-run release-state check.
@@ -2399,7 +2402,6 @@ git commit -m "chore: remove obsolete cleanup compatibility paths"
 
 Current completion-audit follow-ups that are not safe to mark done without more work:
 
-- Phase 8 still has one narrow cleanup candidate: the actual `media-processor` invoke body remains inline in `supabase/functions/worker/index.ts`; the resolve/download job payload is tested in `mediaWorkflow.test.ts`, but the invoke payload itself needs extraction or an explicit waiver.
 - Phase 11 still has two narrow frontend test gaps: status filter row-id parity is backend-owned after `get_monitoring_entries`, and the Monitoring empty state exists in UI but lacks focused test coverage.
 - Phase 21 remains blocked by live RSS query-token traffic until RSS.app is moved to header auth and the quiet-window gate above reports zero hits.
 
