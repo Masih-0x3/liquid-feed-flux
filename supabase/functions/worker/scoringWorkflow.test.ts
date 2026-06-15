@@ -8,7 +8,6 @@ import {
   renderScoringUserMessage,
   resolveActiveFeedbackThreshold,
   resolveScoringCallOptions,
-  SCORING_AXES_SCHEMA,
 } from "./scoringWorkflow.ts";
 
 function toolParts(tool: Record<string, unknown>) {
@@ -20,6 +19,28 @@ function toolParts(tool: Record<string, unknown>) {
   };
 }
 
+const expectedAxesSchema = {
+  type: "object",
+  description:
+    "Six independent scoring axes (each 0-10). noise is INVERTED (high = bad).",
+  properties: {
+    iran_relevance: { type: "integer", minimum: 0, maximum: 10 },
+    severity: { type: "integer", minimum: 0, maximum: 10 },
+    novelty: { type: "integer", minimum: 0, maximum: 10 },
+    credibility: { type: "integer", minimum: 0, maximum: 10 },
+    actionability: { type: "integer", minimum: 0, maximum: 10 },
+    noise: { type: "integer", minimum: 0, maximum: 10 },
+  },
+  required: [
+    "iran_relevance",
+    "severity",
+    "novelty",
+    "credibility",
+    "actionability",
+    "noise",
+  ],
+};
+
 Deno.test("buildClassifierToolFunction builds fallback schema with translated text", () => {
   const tool = buildClassifierToolFunction(null, true);
   const { properties, required } = toolParts(tool);
@@ -29,7 +50,7 @@ Deno.test("buildClassifierToolFunction builds fallback schema with translated te
     type: "string",
     description: "The Persian translation of the original text",
   });
-  assertEquals(properties.axes, SCORING_AXES_SCHEMA);
+  assertEquals(properties.axes, expectedAxesSchema);
   assertEquals(required, [
     "translated_text",
     "importance_score",
@@ -44,7 +65,7 @@ Deno.test("buildClassifierToolFunction strips translated text for split scoring 
   const { properties, required } = toolParts(tool);
 
   assertEquals(properties.translated_text, undefined);
-  assertEquals(properties.axes, SCORING_AXES_SCHEMA);
+  assertEquals(properties.axes, expectedAxesSchema);
   assertEquals(required, ["importance_score", "axes", "tags", "reasoning"]);
 });
 
@@ -67,7 +88,7 @@ Deno.test("buildClassifierToolFunction injects axes into custom schemas before s
 
   assertEquals(tool.name, "custom_classifier");
   assertEquals(properties.translated_text, undefined);
-  assertEquals(properties.axes, SCORING_AXES_SCHEMA);
+  assertEquals(properties.axes, expectedAxesSchema);
   assertEquals(required, ["importance_score", "axes"]);
 });
 
@@ -77,7 +98,7 @@ Deno.test("buildClassifierToolFunction falls back when custom schema is invalid 
 
   assertEquals(tool.name, "classify_importance");
   assertEquals(properties.translated_text, undefined);
-  assertEquals(properties.axes, SCORING_AXES_SCHEMA);
+  assertEquals(properties.axes, expectedAxesSchema);
   assertEquals(required, ["importance_score", "axes", "tags", "reasoning"]);
 });
 

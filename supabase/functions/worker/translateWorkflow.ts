@@ -1,6 +1,6 @@
 import type { ChatMessage } from "../_shared/openai.ts";
 
-export type TranslationUserPromptInput = {
+type TranslationUserPromptInput = {
   template?: string | null;
   content: string;
   authorDisplay: string;
@@ -8,7 +8,7 @@ export type TranslationUserPromptInput = {
   publishedAt: string;
 };
 
-export type TranslationCallConfig = {
+type TranslationCallConfig = {
   translationPrompt: string;
   openaiModel: string;
   openaiMaxCompletionTokens?: number | null;
@@ -23,7 +23,7 @@ export type TranslationCallConfig = {
   openaiParallelToolCalls?: boolean | null;
 };
 
-export type TranslationCallOptions = {
+type TranslationCallOptions = {
   model: string;
   messages: ChatMessage[];
   maxOutputTokens?: number | null;
@@ -38,7 +38,7 @@ export type TranslationCallOptions = {
   parallelToolCalls?: boolean | null;
 };
 
-export type PostTranslationRouteInput = {
+type PostTranslationRouteInput = {
   tweetId: string;
   deliveryDecision: string;
   decisionReason: string | null;
@@ -50,7 +50,7 @@ export type PostTranslationRouteInput = {
   duplicateBlocked: boolean;
 };
 
-export type TranslationResultMetaInput = {
+type TranslationResultMetaInput = {
   model: string;
   scoringModel: string;
   usage: unknown;
@@ -67,7 +67,7 @@ export type TranslationResultMetaInput = {
   splitCalls: boolean;
 };
 
-export type ScoringPolicyUpdateFields = {
+type ScoringPolicyUpdateFields = {
   scoringVersion: string;
   scoringProfileId: string;
   audienceClass: string;
@@ -77,7 +77,7 @@ export type ScoringPolicyUpdateFields = {
   scoreReviewStatus: string;
 };
 
-export type PostTranslationUpdatePatchInput = {
+type PostTranslationUpdatePatchInput = {
   translationSkippedByFilter: boolean;
   translatedText: string | null;
   nowIso: string;
@@ -95,7 +95,7 @@ export type PostTranslationUpdatePatchInput = {
   scoringPolicy: ScoringPolicyUpdateFields | null;
 };
 
-export type PostTranslationRoute =
+type PostTranslationRoute =
   | {
     kind: "hydrate";
     logAction: "hydration_gated_enqueue";

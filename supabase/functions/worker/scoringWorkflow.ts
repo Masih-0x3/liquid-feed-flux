@@ -7,7 +7,7 @@ import {
 } from "../_shared/scoring.ts";
 import type { ScoringPolicyResult } from "../_shared/scoringPolicy.ts";
 
-export const SCORING_AXES_SCHEMA = {
+const SCORING_AXES_SCHEMA = {
   type: "object",
   description:
     "Six independent scoring axes (each 0-10). noise is INVERTED (high = bad).",
@@ -29,7 +29,7 @@ export const SCORING_AXES_SCHEMA = {
   ],
 } as const;
 
-export type ScoringSystemPromptInput = {
+type ScoringSystemPromptInput = {
   scoringSystemPrompt?: string | null;
   translationPrompt: string;
   priorityTopics: string[];
@@ -37,7 +37,7 @@ export type ScoringSystemPromptInput = {
   editorialGuidelines?: string | null;
 };
 
-export type ScoringUserMessageInput = {
+type ScoringUserMessageInput = {
   textOriginal: string;
   authorDisplay: string;
   accountName?: string | null;
@@ -46,7 +46,7 @@ export type ScoringUserMessageInput = {
   url?: string | null;
 };
 
-export type ParsedClassifierToolCall = {
+type ParsedClassifierToolCall = {
   translatedText?: string;
   importanceScore: number;
   importanceTags: string[];
@@ -54,7 +54,7 @@ export type ParsedClassifierToolCall = {
   scoreAxes: ScoreAxes | null;
 };
 
-export type ScoringCallConfig = {
+type ScoringCallConfig = {
   scoringModel?: string | null;
   openaiModel: string;
   scoringTemperature?: number | null;
@@ -75,7 +75,7 @@ export type ScoringCallConfig = {
   openaiParallelToolCalls?: boolean | null;
 };
 
-export type ScoringCallOptions = {
+type ScoringCallOptions = {
   model: string;
   temperature?: number | null;
   maxOutputTokens?: number | null;
@@ -87,18 +87,18 @@ export type ScoringCallOptions = {
   parallelToolCalls?: boolean | null;
 };
 
-export type ScoringAuthorRule = {
+type ScoringAuthorRule = {
   rule: string;
   threshold?: number | null;
 };
 
-export type BaseScoringDecisionState = {
+type BaseScoringDecisionState = {
   deliveryDecision: string;
   decisionReason: string | null;
   finalScore: number | null;
 };
 
-export type ScoringFields = {
+type ScoringFields = {
   importanceScore: number | null;
   importanceTags: string[] | null;
   importanceReasoning: string | null;
@@ -132,7 +132,7 @@ export type ScoringDecisionLog =
     reason: string | null;
   };
 
-export type ScoringBaseDecisionInput = {
+type ScoringBaseDecisionInput = {
   feedbackLocked: boolean;
   postFinalScore: unknown;
   postDeliveryDecision: unknown;
@@ -153,7 +153,7 @@ export type ScoringBaseDecisionInput = {
   textOriginal: string;
 };
 
-export type ScoringBaseDecisionResult = {
+type ScoringBaseDecisionResult = {
   decisionState: BaseScoringDecisionState;
   scoringFields: ScoringFields;
   logEvent: ScoringDecisionLog | null;

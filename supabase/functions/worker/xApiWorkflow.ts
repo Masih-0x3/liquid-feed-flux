@@ -3,14 +3,14 @@ import {
   recordXApiEvent,
 } from "../_shared/xApiLedger.ts";
 
-export type TwitterCreds = {
+type TwitterCreds = {
   ck: string;
   cs: string;
   at: string;
   ats: string;
 };
 
-export type HydrationSettings = {
+type HydrationSettings = {
   enabled: boolean;
   daily_budget: number;
 };

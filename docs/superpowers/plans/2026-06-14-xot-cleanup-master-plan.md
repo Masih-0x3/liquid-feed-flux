@@ -661,7 +661,7 @@ export {
 };
 ```
 
-- [ ] Export `TelegramRateLimitError` for focused tests.
+- [x] Keep `TelegramRateLimitError` file-local and assert thrown error shape in focused tests.
 - [ ] Update `worker/index.ts` imports:
 
 ```ts
@@ -679,12 +679,21 @@ import {
 - [ ] Remove now-unused imports from `worker/index.ts`.
 - [ ] Remove the moved helper bodies from `worker/index.ts`.
 
+## Worker Helper Export Cleanup Follow-Up
+
+Branch `codex/xot-worker-helper-export-cleanup` completes the safe export-surface follow-up from this phase:
+
+- File-localized worker utility types and timing helpers that had no external production importer.
+- File-localized `TelegramRateLimitError`, video-render workflow internals, media/X API implementation types, scoring implementation types, translation implementation types, and `SCORING_AXES_SCHEMA`.
+- Deleted the unused `ResolvedMediaSource` alias.
+- Kept exports that are still required by production imports, including `ResolvedVariant`, `VIDEO_RENDER_DEFER_MS`, `ScoringDecisionLog`, and the helper functions imported by `worker/index.ts`.
+
 ## Tests To Add
 
 - [ ] `getMediaUrl` returns signed storage URL when signing succeeds.
 - [ ] `getMediaUrl` falls back to `src_url` when signing fails.
 - [ ] `sendTelegramMedia` retries Markdown parse errors with stripped plain text.
-- [ ] `sendTelegramMedia` throws `TelegramRateLimitError` with `retryAfterSeconds` on Telegram `retry_after`.
+- [x] `sendTelegramMedia` throws `TelegramRateLimitError` with `retryAfterSeconds` on Telegram `retry_after`.
 - [ ] `sendTelegramVideoFromStorage` throws `NonRetryableJobError` when declared video size exceeds Telegram bot limit.
 - [ ] `computeAdaptiveSpacing` returns expected spacing for zero, low, medium, and high recent rate-limit counts.
 
