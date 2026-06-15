@@ -9,8 +9,51 @@ import {
 
 const DEFAULT_STORAGE_LIMIT_BYTES = 100_000_000_000;
 
+type DashboardRowsResult = {
+  data: Array<Record<string, unknown>> | null;
+  error: unknown | null;
+};
+
 export function num(value: unknown, fallback = 0): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object" && "message" in error) {
+    return String((error as { message?: unknown }).message);
+  }
+  return String(error);
+}
+
+function logDashboardFallback(section: string, error: unknown) {
+  console.error("[admin-actions] dashboard section failed", {
+    section,
+    error: errorMessage(error),
+  });
+}
+
+export async function withDashboardFallback<T>(
+  section: string,
+  value: Promise<T>,
+  fallback: T | ((error: unknown) => T),
+): Promise<T> {
+  try {
+    return await value;
+  } catch (error) {
+    logDashboardFallback(section, error);
+    return typeof fallback === "function" ? (fallback as (error: unknown) => T)(error) : fallback;
+  }
+}
+
+export async function checkedDashboardRowsQuery(value: Promise<DashboardRowsResult>): Promise<DashboardRowsResult> {
+  const result = await value;
+  if (result.error) throw result.error;
+  return result;
+}
+
+function emptyDashboardRowsResult(): DashboardRowsResult {
+  return { data: [], error: null };
 }
 
 function intervalAgeSeconds(timestamp: unknown): number | null {
@@ -669,14 +712,45 @@ export async function getEnhancedDashboardSummary(supabase: any) {
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const staleCutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
 
-  const dedupeAvailable = await hasDedupePostColumns(supabase);
+  const dedupeAvailable = await withDashboardFallback("dedupe_columns", hasDedupePostColumns(supabase), false);
   const [posts, deliveriesRes, xDeliveriesRes, queueBreakdown, xLocalUsage, activity, systemPerformance, scoringTuning] = await Promise.all([
-    loadDashboardPosts(supabase, since, dedupeAvailable),
-    supabase.from("deliveries").select("subject_id, status, posted_at, created_at").eq("subject_type", "post").gte("created_at", since).limit(10000),
-    supabase.from("x_deliveries").select("post_id, status, posted_at, created_at").gte("created_at", since).order("created_at", { ascending: false }).limit(10000),
-    loadDashboardQueueBreakdown(supabase, since, staleCutoff),
-    loadDashboardXLocalUsage(supabase, dashboard, since),
-    loadDashboardActivity(supabase),
+    withDashboardFallback("posts", loadDashboardPosts(supabase, since, dedupeAvailable), [] as Array<Record<string, unknown>>),
+    withDashboardFallback(
+      "telegram_deliveries",
+      checkedDashboardRowsQuery(supabase.from("deliveries").select("subject_id, status, posted_at, created_at").eq("subject_type", "post").gte("created_at", since).limit(10000)),
+      emptyDashboardRowsResult(),
+    ),
+    withDashboardFallback(
+      "x_deliveries",
+      checkedDashboardRowsQuery(supabase.from("x_deliveries").select("post_id, status, posted_at, created_at").gte("created_at", since).order("created_at", { ascending: false }).limit(10000)),
+      emptyDashboardRowsResult(),
+    ),
+    withDashboardFallback("queue_breakdown", loadDashboardQueueBreakdown(supabase, since, staleCutoff), {
+      pending: num(health.queue_size),
+      running: num(health.queue_running),
+      failed_24h: 0,
+      resolved_failed_24h: 0,
+      stale_running: 0,
+      oldest_pending_age_seconds: null,
+      by_type: [],
+    }),
+    withDashboardFallback("x_local_usage", loadDashboardXLocalUsage(supabase, dashboard, since), (error) => ({
+      available: false,
+      error: errorMessage(error),
+      source: "dashboard_fallback",
+      attempts_24h: num(metrics.x_api_calls_24h),
+      counted_attempts_24h: num(metrics.x_api_calls_24h),
+      failed_attempts_24h: num(metrics.x_failed_24h),
+      posts_24h: num(metrics.x_posts_24h),
+      failed_posts_24h: num(metrics.x_failed_24h),
+      media_uploads_24h: num(metrics.x_media_uploads_24h),
+      hydrations_24h: num(metrics.posts_hydrated_24h),
+      monthly_posts: num(health.x_monthly_posts),
+      monthly_budget: num(health.x_monthly_budget, 2500),
+      budget_used_pct: num(health.x_budget_used_pct),
+      official_usage_synced: false,
+    })),
+    withDashboardFallback("activity", loadDashboardActivity(supabase), [] as Array<Record<string, unknown>>),
     getSystemPerformanceSummary(supabase).catch((error) => ({
       success: false,
       error: error instanceof Error ? error.message : String(error),
@@ -691,8 +765,6 @@ export async function getEnhancedDashboardSummary(supabase: any) {
       projected_added_posts_month: 0,
     })),
   ]);
-  if (deliveriesRes.error) throw deliveriesRes.error;
-  if (xDeliveriesRes.error) throw xDeliveriesRes.error;
 
   const telegramPosted = new Set((deliveriesRes.data ?? []).filter((row: Record<string, unknown>) => row.status === "posted").map((row: Record<string, unknown>) => row.subject_id));
   const xByTweet = new Map<string, Record<string, unknown>>();
