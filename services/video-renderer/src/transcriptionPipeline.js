@@ -12,6 +12,10 @@ function firstCueStart(transcription) {
   return starts.length ? Math.min(...starts) : null;
 }
 
+function isDeepgramNoTimedSegmentsReason(reason) {
+  return /deepgram transcription returned no timed segments|returned no timed segments/i.test(String(reason ?? ""));
+}
+
 function normalizedLanguage(value) {
   const raw = String(value ?? "").trim().toLowerCase();
   if (!raw) return "";
@@ -132,7 +136,11 @@ export async function transcribeWithEnhancedAudioRetry({
 
   const retryReason = first.noUsableSpeechReason ?? first.fallbackReason ?? "weak Deepgram speech detection";
   await runEnhancedAudioExtract(buildEnhancedAudioExtractCommand(inputPath, enhancedAudioPath));
-  const retry = await runTranscription({ ...transcriptionOptions, audioPath: enhancedAudioPath }, "transcription_enhanced");
+  const retryOptions = { ...transcriptionOptions, audioPath: enhancedAudioPath };
+  if (isDeepgramNoTimedSegmentsReason(retryReason)) {
+    retryOptions.fallbackProvider = "";
+  }
+  const retry = await runTranscription(retryOptions, "transcription_enhanced");
   const enhanced = markEnhancedAudioRetry(retry, retryReason);
   return rescueEarlyTranscriptGap({
     inputPath,

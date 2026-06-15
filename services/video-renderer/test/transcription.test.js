@@ -375,6 +375,37 @@ test("enhanced audio retry fires only after empty or weak Deepgram output", asyn
   assert.deepEqual(result.segments, [{ id: 1, start: 12.4, end: 13.44, text: "How are" }]);
 });
 
+test("enhanced audio retry after no timed speech does not reuse OpenAI fallback", async () => {
+  const calls = [];
+  const result = await transcribeWithEnhancedAudioRetry({
+    inputPath: "/tmp/source.mp4",
+    audioPath: "/tmp/audio.mp3",
+    enhancedAudioPath: "/tmp/audio.enhanced.mp3",
+    runEnhancedAudioExtract: async () => {},
+    runTranscription: async (options, label) => {
+      calls.push({ label, fallbackProvider: options.fallbackProvider });
+      return {
+        provider: "deepgram",
+        model: "nova-3",
+        noUsableSpeech: true,
+        noUsableSpeechReason: "Deepgram transcription returned no timed segments",
+        segments: [],
+      };
+    },
+    transcriptionOptions: {
+      provider: "deepgram",
+      fallbackProvider: "openai",
+    },
+  });
+
+  assert.deepEqual(calls, [
+    { label: "transcription", fallbackProvider: "openai" },
+    { label: "transcription_enhanced", fallbackProvider: "" },
+  ]);
+  assert.equal(result.noUsableSpeech, true);
+  assert.deepEqual(result.segments, []);
+});
+
 test("early transcript rescue prepends missed opening speech before a late first cue", async () => {
   const extracted = [];
   const calls = [];
