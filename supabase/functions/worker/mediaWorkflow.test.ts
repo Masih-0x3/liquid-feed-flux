@@ -1,5 +1,6 @@
 import { assertEquals } from "jsr:@std/assert";
 import {
+  buildMediaProcessorDownloadInvokeOptions,
   buildResolvedMediaRows,
   buildResolveMediaDownloadJob,
   rmFetchFromFx,
@@ -169,4 +170,16 @@ Deno.test("buildResolveMediaDownloadJob keeps per-invocation idempotency key", (
     idempotency_key: "download_media:resolve:tweet-1:1767225600000",
     next_run_at: "2026-01-01T00:00:00.000Z",
   });
+});
+
+Deno.test("buildMediaProcessorDownloadInvokeOptions preserves media processor handoff payload", () => {
+  const headers = { Authorization: "Bearer service-role" };
+
+  assertEquals(
+    buildMediaProcessorDownloadInvokeOptions("tweet-1", headers),
+    {
+      body: { action: "download_media", tweet_id: "tweet-1" },
+      headers,
+    },
+  );
 });

@@ -859,7 +859,7 @@ Current verification for the hydration helper slice:
 
 # Phase 8: Worker Split, Part F - Media Resolution And Media Processor Boundary
 
-Status: completed in cleanup branch history.
+Status: completed in cleanup branch history. Follow-up branch `codex/xot-media-processor-payload-helper` closed the remaining media-processor invoke payload extraction gap.
 
 Completed commit:
 
@@ -887,20 +887,22 @@ Extract worker-side media resolution and media-processor handoff logic while pre
 
 ## Steps
 
-- [ ] Locate media-related worker code.
+- [x] Locate media-related worker code.
 
 ```bash
 rg -n "download_media|resolve_media|media-processor|getMediaUrl|storage_path|rendered_media|media_url|src_url" supabase/functions/worker supabase/functions/media-processor supabase/functions/_shared
 ```
 
-- [ ] Write tests for media source selection:
+- [x] Write tests for media source selection:
   - rendered media preferred when delivery requires rendered video.
   - original media used when render config does not require rendered video.
   - invalid storage metadata does not throw.
   - missing media produces a non-retryable or retryable result matching existing behavior.
-- [ ] Extract media source selection into `mediaWorkflow.ts`.
-- [ ] Extract media-processor invoke payload construction into `mediaWorkflow.ts`.
-- [ ] Keep actual job dispatch and job state writes in `worker/index.ts` during this phase.
+- [x] Extract media source selection into `mediaWorkflow.ts`.
+- [x] Extract media-processor invoke payload construction into `mediaWorkflow.ts`.
+- [x] Keep actual job dispatch and job state writes in `worker/index.ts` during this phase.
+
+Implementation note: the original media split extracted resolve/download job payload construction into `mediaWorkflow.ts`. Follow-up branch `codex/xot-media-processor-payload-helper` extracted the remaining `media-processor` invoke options into `buildMediaProcessorDownloadInvokeOptions`, while keeping the actual `supabase.functions.invoke("media-processor", ...)` call and job lifecycle handling in `worker/index.ts`.
 
 ## Validation
 
@@ -913,6 +915,22 @@ npm run check:functions
 npm run test:functions
 ```
 
+Follow-up validation for the media-processor invoke payload helper:
+
+- [x] `npx deno fmt supabase/functions/worker/index.ts supabase/functions/worker/mediaWorkflow.ts supabase/functions/worker/mediaWorkflow.test.ts` passed.
+- [x] `npx deno check supabase/functions/worker/index.ts supabase/functions/worker/mediaWorkflow.ts supabase/functions/worker/mediaWorkflow.test.ts` passed.
+- [x] `npx deno test supabase/functions/worker/mediaWorkflow.test.ts` passed with 5 tests.
+- [x] `npm run lint:functions` passed; Deno lint checked 101 files.
+- [x] `npm run check:functions` passed.
+- [x] `npm run test:functions` passed with 277 Deno tests.
+- [x] `npm run check:function-inventory` passed.
+- [x] `npm run lint` passed with the known 8 Fast Refresh warnings and 0 errors.
+- [x] `npm run check:strict` passed.
+- [x] `npm test` passed with 19 files and 80 tests; the expected `useAuth` error-path stack printed.
+- [x] Env-backed `npm run build` passed.
+- [x] `git diff --check` passed.
+- [x] `npm run check:release-state` passed read-only; current main CI was green, live hosts returned HTTP 200, Supabase functions and cron were active, no stale running jobs were found, renderer `hermes-masih-1` was online, and compatibility telemetry still showed active `rss_query_token` usage.
+
 ## Commit
 
 ```bash
@@ -922,9 +940,9 @@ git commit -m "refactor: extract worker media workflow"
 
 ## Exit Criteria
 
-- [ ] Media selection logic is isolated.
-- [ ] Download handoff payloads are tested.
-- [ ] Delivery and video-render gates still pass full worker tests.
+- [x] Media selection logic is isolated.
+- [x] Download handoff payloads are tested.
+- [x] Delivery and video-render gates still pass full worker tests.
 
 ---
 
