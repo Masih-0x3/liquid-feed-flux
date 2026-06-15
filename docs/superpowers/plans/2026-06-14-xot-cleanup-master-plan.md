@@ -27,7 +27,7 @@ Main checkout preserved for user work:
 Current verified main release anchor:
 
 ```text
-c4076d3055c8e9d509387131a8d0d8ddf18666ec
+c6ba0ba46f3e45f888c23fd95cdd8cbf4b9cb1b1
 ```
 
 Release notes:
@@ -37,6 +37,7 @@ Release notes:
 - PR #15 removed the first safe Phase 21 compatibility paths.
 - PR #17 hotfixed Dashboard optional-summary fallback failures and deployed `admin-actions`.
 - PR #16 added OpenAI cost guardrails, merged at `c4076d3055c8e9d509387131a8d0d8ddf18666ec`, applied migration `20260615005500`, and deployed `admin-actions` plus `worker`.
+- PR #19 fixed degraded Dashboard Edge Function failures, merged at `c6ba0ba46f3e45f888c23fd95cdd8cbf4b9cb1b1`, deployed `admin-actions` version `158`, and stamped `DEPLOY_GIT_SHA=c6ba0ba46f3e45f888c23fd95cdd8cbf4b9cb1b1`.
 
 Current safe-state rule:
 
@@ -2087,6 +2088,8 @@ Timing note: by `2026-06-14T18:25:58Z`, more than one one-minute production oper
 
 Follow-up timing note: after PR #16, production was promoted again at `c4076d3055c8e9d509387131a8d0d8ddf18666ec`. Post-deploy `npm run check:release-state` passed, `admin-actions` was live at version `156`, `worker` was live at version `232`, migration `20260615005500` was recorded as applied, and the worker cron body included `reprocess`.
 
+Dashboard incident follow-up timing note: after PR #19, production was promoted again at `c6ba0ba46f3e45f888c23fd95cdd8cbf4b9cb1b1`. `admin-actions` was live at version `158`, `DEPLOY_GIT_SHA` was stamped to `c6ba0ba46f3e45f888c23fd95cdd8cbf4b9cb1b1`, main CI run `27522692966` passed, and the production frontend refreshed at `2026-06-15T03:45:48Z`.
+
 ## Steps
 
 - [x] Re-run release-state check.
@@ -2106,7 +2109,7 @@ npm run check:release-state
 Read-only sidecar audit identified these Phase 21 candidates. Do not remove them in production without the listed verification gates:
 
 - Monitoring legacy Supabase fallback in `src/api/monitoringData.ts`: removed in PR #15 after authenticated Monitoring smoke and release-state checks.
-- Dashboard direct RPC fallback in `src/api/dashboardData.ts`: removed in PR #15 after Dashboard remained healthy through `admin-actions` and `src/test/dashboard-data.test.ts` was updated.
+- Dashboard direct RPC fallback in `src/api/dashboardData.ts`: removed in PR #15 after Dashboard remained healthy through `admin-actions` and `src/test/dashboard-data.test.ts` was updated. PR #19 later kept `admin-actions` as the single Dashboard boundary by adding backend degraded handling for base `public.get_dashboard_summary()` failures and client-side Edge Function error-body extraction.
 - Monitoring response/filter aliases in `src/api/monitoringData.ts` and `supabase/functions/admin-actions/monitoringReads.ts`: remove only after old frontend bundles have aged out and function logs show no legacy filter values.
 - Unused admin action cases in `supabase/functions/_shared/adminActionNames.ts` and `supabase/functions/admin-actions/index.ts`: strongest candidate is the backward-compatible `backfill_signatures` alias, but request logs and runbook/manual operator usage must be checked first.
 - Worker helper export surface in `supabase/functions/worker/*`: candidate for de-export cleanup only, preserving tests or moving helper coverage to public behavior.
@@ -2138,21 +2141,23 @@ git commit -m "chore: remove obsolete cleanup compatibility paths"
 - [x] Safe compatibility scaffolding is gone.
 - [ ] All compatibility scaffolding is gone. Deferred candidates: monitoring aliases, `backfill_signatures`, worker helper export cleanup, RSS query-token compatibility, and `recordLegacyXApiUsage`.
 - [x] Docs match the actual code for completed removals.
-- [x] Local and read-only live checks pass for completed removals and the later `c4076d3055c8e9d509387131a8d0d8ddf18666ec` release.
+- [x] Local and read-only live checks pass for completed removals and the later `c6ba0ba46f3e45f888c23fd95cdd8cbf4b9cb1b1` release.
 
 ---
 
-# Post-Phase 21: OpenAI Quota And Dashboard Stability Follow-Up
+# Post-Phase 21: OpenAI Quota And Dashboard Degraded Edge Failure Follow-Up
 
 Status: completed and promoted through reviewed `main`.
 
 ## Objective
 
-Close the production gap discovered after the cleanup release: Dashboard optional summary reads could still fail the whole page, and OpenAI quota exhaustion caused repeated expensive retries.
+Close the production gaps discovered after the cleanup release: Dashboard optional summary reads and the base dashboard summary RPC could still fail the whole page, and OpenAI quota exhaustion caused repeated expensive retries.
 
 ## Completed Scope
 
 - PR #17 hardened Dashboard optional summary sections with `withDashboardFallback` so optional PostgREST/RPC reads fail closed instead of returning an Edge Function 500.
+- PR #19 hardened the Dashboard base summary path so `admin-actions` logs `base_summary` failures and returns a degraded critical dashboard instead of a 500 when `public.get_dashboard_summary()` fails.
+- PR #19 also made `src/api/adminActions.ts` extract Edge Function response bodies from `FunctionsHttpError.context`, producing actionable client errors such as `Edge Function 401: ...`.
 - PR #16 added OpenAI cost controls:
   - `supabase/functions/_shared/providerErrors.ts` classifies insufficient-quota errors as non-retryable.
   - Worker job failure handling dead-letters quota exhaustion instead of retrying all attempts.
@@ -2172,10 +2177,16 @@ Close the production gap discovered after the cleanup release: Dashboard optiona
 - `npm run check:release-state` passed after deploy.
 - Production cron `invoke-worker-every-1m` now includes `job_types:["reprocess","dedupe","resolve_media","download_media","hydrate_tweet","translate","deliver"]`.
 - Manual reprocess recovery drained from pending to `50` completed reprocess jobs in the 24-hour queue check.
+- PR #19 merged at `c6ba0ba46f3e45f888c23fd95cdd8cbf4b9cb1b1`.
+- GitHub CI for `main` run `27522692966` succeeded.
+- `admin-actions` deployed at version `158`.
+- `DEPLOY_GIT_SHA` was stamped to `c6ba0ba46f3e45f888c23fd95cdd8cbf4b9cb1b1`.
+- Production frontend returned HTTP 200 and served the refreshed app shell last modified at `2026-06-15T03:45:48Z`.
+- Unauthenticated `admin-actions` sanity returned the expected `401` gateway response.
 
 ## Remaining Notes
 
-- Authenticated Dashboard browser verification still requires an active admin browser session/JWT; unauthenticated `admin-actions` sanity returned the expected `401`.
+- Authenticated Dashboard browser verification still requires an active admin browser session/JWT; Codex has verified the unauthenticated `admin-actions` gateway path and production bundle refresh, but not a live admin Dashboard session after PR #19.
 - `translation_prompt.reasoning_effort` remains `high`; this is a product-quality/cost tradeoff and should be tuned deliberately rather than changed as cleanup.
 
 ---

@@ -16,6 +16,7 @@ This branch removes compatibility code only after the PR #13 release was live, a
   - `src/test/x-account-data.test.ts`
 - Kept the active `/x-account` route on `src/pages/XAccountDisabled.tsx`.
 - Removed the Dashboard direct `get_dashboard_summary` RPC fallback from `src/api/dashboardData.ts`.
+- PR #19 later preserved that boundary by making `admin-actions` return a degraded critical Dashboard when the base `public.get_dashboard_summary()` RPC fails, instead of restoring a frontend direct-RPC fallback.
 - Removed the Monitoring direct Supabase legacy query fallback from `src/api/monitoringData.ts`.
 - Removed the compatibility `loadConfigFromEnv` re-export from `services/video-renderer/src/renderer.js`; callers import config from `services/video-renderer/src/config.js`.
 
@@ -48,6 +49,9 @@ Response aliases still intentionally emitted for compatibility are `needs_action
 
 - PR #17 hardened Dashboard optional summary fallbacks after an `admin-actions` non-2xx incident.
 - PR #16 added OpenAI quota/cost guardrails, applied migration `20260615005500`, deployed `admin-actions` version `156`, deployed `worker` version `232`, and stamped `DEPLOY_GIT_SHA=c4076d3055c8e9d509387131a8d0d8ddf18666ec`.
+- PR #19 hardened Dashboard base-summary degradation, deployed `admin-actions` version `158`, and stamped `DEPLOY_GIT_SHA=c6ba0ba46f3e45f888c23fd95cdd8cbf4b9cb1b1`.
+- Production frontend was refreshed at `2026-06-15T03:45:48Z`; main CI run `27522692966` passed; unauthenticated `admin-actions` sanity returned the expected `401`.
+- Authenticated Dashboard browser verification still requires an active admin browser session/JWT after PR #19.
 - The worker fallback cron now includes `reprocess`; the manually queued reprocess batch drained to `50` completed jobs in the 24-hour queue check.
 - Live `translation_prompt.max_completion_tokens` and `translation_prompt.scoring.max_completion_tokens` were normalized from `50000` to `8000`. `reasoning_effort=high` remains a deliberate product-quality/cost tradeoff to tune separately.
 
