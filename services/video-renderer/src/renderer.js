@@ -78,6 +78,9 @@ export function loadConfigFromEnv(env = process.env) {
     watermarkBoxVerticalDilation: Number(env.WATERMARK_BOX_VERTICAL_DILATION || 0),
     crf: Number(env.OUTPUT_CRF || 20),
     preset: env.OUTPUT_PRESET || "fast",
+    maxOutputBytes: Number(env.MAX_OUTPUT_BYTES || 49_000_000),
+    outputRetryCrfStep: Number(env.OUTPUT_SIZE_RETRY_CRF_STEP || 4),
+    maxOutputRetryCrf: Number(env.MAX_OUTPUT_RETRY_CRF || 30),
     delogoCrf: Number(env.DELOGO_OUTPUT_CRF || env.OUTPUT_CRF || 18),
     delogoPreset: env.DELOGO_OUTPUT_PRESET || env.OUTPUT_PRESET || "fast",
     delogoEngine: env.DELOGO_ENGINE || "opencv",
@@ -303,6 +306,28 @@ function resolveRenderQuality(effects, config) {
   };
 }
 
+export function outputQualityAttempts(baseQuality, config) {
+  const baseCrf = Math.round(Number(baseQuality?.crf));
+  const maxCrf = Math.round(Number(config?.maxOutputRetryCrf));
+  const step = Math.max(1, Math.round(Number(config?.outputRetryCrfStep) || 4));
+  const preset = baseQuality?.preset || config?.preset || "fast";
+  const attempts = [];
+  const seen = new Set();
+  const push = (crf) => {
+    if (!Number.isFinite(crf)) return;
+    const normalized = Math.max(0, Math.round(crf));
+    if (seen.has(normalized)) return;
+    seen.add(normalized);
+    attempts.push({ crf: normalized, preset });
+  };
+  push(baseCrf);
+  if (Number.isFinite(baseCrf) && Number.isFinite(maxCrf) && maxCrf > baseCrf) {
+    for (let crf = baseCrf + step; crf < maxCrf; crf += step) push(crf);
+    push(maxCrf);
+  }
+  return attempts.length ? attempts : [{ crf: 23, preset }];
+}
+
 async function renderAndComplete({
   supabase,
   row,
@@ -340,58 +365,79 @@ async function renderAndComplete({
   let outputBytes = null;
   let outputStoragePath = null;
   if (effects.shouldRender) {
-    const quality = resolveRenderQuality(effects, config);
+    const baseQuality = resolveRenderQuality(effects, config);
+    const qualityAttempts = outputQualityAttempts(baseQuality, config);
     const useOpenCvDelogo = effects.delogoRegions.length > 0 && config.delogoEngine === "opencv";
-    metrics.encode_quality = quality;
+    metrics.max_output_bytes = config.maxOutputBytes;
     metrics.delogo_engine = effects.delogoRegions.length > 0 ? config.delogoEngine : "none";
-    const renderCommand = useOpenCvDelogo ? buildOpenCvInpaintRenderCommand({
-      inputPath,
-      assPath,
-      outputPath,
-      width: probe.width || source.width || 1080,
-      height: probe.height || source.height || 1920,
-      fps: probeFrameRate(probe),
-      enableWatermark: effects.shouldWatermark,
-      enableAdaptiveMask: effects.enableAdaptiveMask,
-      delogoRegions: effects.delogoRegions,
-      subtitlePlacement: preflight.subtitlePlacement,
-      protectedRegions: watermarkProtectedRegions(preflight),
-      subtitleStyleConfig: config.subtitleStyleConfig,
-      watermarkConfig: config.watermarkConfig,
-      crf: quality.crf,
-      preset: quality.preset,
-      threads: config.threads,
-      fontsDir: config.fontsDir,
-      opencvPython: config.opencvPython,
-      opencvScript: config.opencvScript,
-      opencvMode: config.opencvMode,
-      opencvAlgorithm: config.opencvAlgorithm,
-      opencvRadius: config.opencvRadius,
-      opencvKernel: config.opencvKernel,
-      opencvDilateIterations: config.opencvDilateIterations,
-      opencvCloseIterations: config.opencvCloseIterations,
-      opencvFeather: config.opencvFeather,
-    }) : buildRenderCommand({
-      inputPath,
-      assPath,
-      outputPath,
-      width: probe.width || source.width || 1080,
-      height: probe.height || source.height || 1920,
-      enableWatermark: effects.shouldWatermark,
-      enableAdaptiveMask: effects.enableAdaptiveMask,
-      delogoRegions: effects.delogoRegions,
-      subtitlePlacement: preflight.subtitlePlacement,
-      protectedRegions: watermarkProtectedRegions(preflight),
-      subtitleStyleConfig: config.subtitleStyleConfig,
-      watermarkConfig: config.watermarkConfig,
-      crf: quality.crf,
-      preset: quality.preset,
-      threads: config.threads,
-      fontsDir: config.fontsDir,
-    });
-    await measure(metrics, "encode", () => runCommand(renderCommand, { label: useOpenCvDelogo ? "opencv_render" : "render" }));
-
-    outputBytes = await readFile(outputPath);
+    const encodeAttempts = [];
+    for (let index = 0; index < qualityAttempts.length; index += 1) {
+      const quality = qualityAttempts[index];
+      metrics.encode_quality = quality;
+      const renderCommand = useOpenCvDelogo ? buildOpenCvInpaintRenderCommand({
+        inputPath,
+        assPath,
+        outputPath,
+        width: probe.width || source.width || 1080,
+        height: probe.height || source.height || 1920,
+        fps: probeFrameRate(probe),
+        enableWatermark: effects.shouldWatermark,
+        enableAdaptiveMask: effects.enableAdaptiveMask,
+        delogoRegions: effects.delogoRegions,
+        subtitlePlacement: preflight.subtitlePlacement,
+        protectedRegions: watermarkProtectedRegions(preflight),
+        subtitleStyleConfig: config.subtitleStyleConfig,
+        watermarkConfig: config.watermarkConfig,
+        crf: quality.crf,
+        preset: quality.preset,
+        threads: config.threads,
+        fontsDir: config.fontsDir,
+        opencvPython: config.opencvPython,
+        opencvScript: config.opencvScript,
+        opencvMode: config.opencvMode,
+        opencvAlgorithm: config.opencvAlgorithm,
+        opencvRadius: config.opencvRadius,
+        opencvKernel: config.opencvKernel,
+        opencvDilateIterations: config.opencvDilateIterations,
+        opencvCloseIterations: config.opencvCloseIterations,
+        opencvFeather: config.opencvFeather,
+      }) : buildRenderCommand({
+        inputPath,
+        assPath,
+        outputPath,
+        width: probe.width || source.width || 1080,
+        height: probe.height || source.height || 1920,
+        enableWatermark: effects.shouldWatermark,
+        enableAdaptiveMask: effects.enableAdaptiveMask,
+        delogoRegions: effects.delogoRegions,
+        subtitlePlacement: preflight.subtitlePlacement,
+        protectedRegions: watermarkProtectedRegions(preflight),
+        subtitleStyleConfig: config.subtitleStyleConfig,
+        watermarkConfig: config.watermarkConfig,
+        crf: quality.crf,
+        preset: quality.preset,
+        threads: config.threads,
+        fontsDir: config.fontsDir,
+      });
+      const label = `${useOpenCvDelogo ? "opencv_render" : "render"}_crf_${quality.crf}`;
+      const startedEncode = Date.now();
+      await runCommand(renderCommand, { label });
+      outputBytes = await readFile(outputPath);
+      const attempt = {
+        crf: quality.crf,
+        preset: quality.preset,
+        bytes: outputBytes.byteLength,
+        ms: Date.now() - startedEncode,
+      };
+      encodeAttempts.push(attempt);
+      metrics.encode_attempts = encodeAttempts;
+      metrics.encode_ms = (metrics.encode_ms || 0) + attempt.ms;
+      metrics.output_file_size = outputBytes.byteLength;
+      if (!config.maxOutputBytes || outputBytes.byteLength <= config.maxOutputBytes || index === qualityAttempts.length - 1) break;
+    }
+    if (config.maxOutputBytes && outputBytes?.byteLength > config.maxOutputBytes) {
+      throw new Error(`rendered output ${outputBytes.byteLength} bytes exceeds max output bytes ${config.maxOutputBytes}`);
+    }
     outputStoragePath = processedPathFor(row, config.renderVersion);
     await measure(metrics, "upload", async () => {
       const { error } = await supabase.storage.from(config.bucket).upload(outputStoragePath, outputBytes, {
