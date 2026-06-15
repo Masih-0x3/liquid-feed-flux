@@ -30,7 +30,7 @@ This branch removes compatibility code only after the PR #13 release was live, a
 These items still need request-log evidence, follow-up refactoring, or a product decision before removal:
 
 - RSS query-token compatibility still has documented production relevance.
-- `recordLegacyXApiUsage` writers remain temporarily while production runs on the canonical `x_api_events`/`x_deliveries` Settings UI. Branch `codex/xot-xapi-summary-ui-cache-cleanup` moves Settings off `settings.x_api_usage`; remove the writers only after that release is live and read-only checks confirm no remaining runtime/UI dependency.
+- `recordLegacyXApiUsage` writers remain temporarily while production runs on the canonical `x_api_events`/`x_deliveries` Settings UI. PR #34 moved Settings off `settings.x_api_usage`; remove the writers only after that release has a live observation window and read-only checks confirm no remaining runtime/UI dependency.
 
 ### Worker Helper Export Cleanup Slice
 
@@ -120,6 +120,8 @@ Response aliases removed from `get_monitoring_overview` were `needs_action`, `fa
 - Production frontend was refreshed at `2026-06-15T11:24:33Z`; main CI run `27543209019` passed; post-deploy `npm run check:release-state` passed; post-deploy telemetry recorded only `45` `rss_query_token` hits and no `monitoring_filter_alias` or `admin_action_alias` rows.
 - PR #32 removed the final safe worker type-only export surface, deployed all 10 Edge Functions from `412127679bd158de342eabc64a4d4dd7c74cc4e2`, and stamped `DEPLOY_GIT_SHA=412127679bd158de342eabc64a4d4dd7c74cc4e2`.
 - Production frontend was refreshed at `2026-06-15T11:56:20Z`; main CI run `27544386658` passed; post-deploy `npm run check:release-state` passed with no stale running jobs and renderer heartbeat online.
+- PR #34 moved Settings and X Automation usage displays from legacy `settings.x_api_usage` to the canonical `get_x_api_summary` response, deployed all 10 Edge Functions from `ad29a4d5623cef204521e116ffc5aadaf46ff7fe`, and stamped `DEPLOY_GIT_SHA=ad29a4d5623cef204521e116ffc5aadaf46ff7fe`.
+- Production frontend was refreshed at `2026-06-15T12:20:59Z`; main CI run `27545705292` passed; post-deploy `npm run check:release-state` passed with no stale running jobs and renderer heartbeat online.
 - The worker fallback cron now includes `reprocess`; the manually queued reprocess batch drained to `50` completed jobs in the 24-hour queue check.
 - Live `translation_prompt.max_completion_tokens` and `translation_prompt.scoring.max_completion_tokens` were normalized from `50000` to `8000`. `reasoning_effort=high` remains a deliberate product-quality/cost tradeoff to tune separately.
 
