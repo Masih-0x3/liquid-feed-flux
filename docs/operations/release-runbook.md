@@ -195,6 +195,30 @@ Secret/config rollback:
 
 Add new entries at the top.
 
+### 2026-06-15 - Shared webhook secret rotation after RSS URL-token exposure
+
+```text
+Date: 2026-06-15
+Operator: Codex
+Git SHA: c990c2a4e92f603bb99573df34ca0c7da1095116
+GitHub PR: documentation follow-up pending at time of rotation
+CI run: https://github.com/Masihhedayati/liquid-feed-flux/actions/runs/27573079602
+Vercel deployment: no code deploy; production hosts remained HTTP 200 from merge commit c990c2a4e92f603bb99573df34ca0c7da1095116
+Vercel aliases: https://xot.iraneyes.com, https://xot.vercel.app
+Supabase project ref: jzirqfzzvlbxwfzndaer
+Migration head before: unchanged; latest shared local/remote migration remained 20260615043000
+Migration head after: unchanged; no migrations applied
+Supabase function versions before secret rotation: webhooks-rssapp 226, worker 257, admin-retry 180, db-cleanup 152, media-processor 191, media-cleanup 188, admin-actions 179, x-poster 128, x-followers-snapshot 102, digest-compiler 108
+Supabase function versions after secret rotation: webhooks-rssapp 227, worker 258, admin-retry 181, db-cleanup 153, media-processor 192, media-cleanup 189, admin-actions 180, x-poster 129, x-followers-snapshot 103, digest-compiler 109
+DEPLOY_GIT_SHA: unchanged at 257c69f047971683c22ca57df4cf137c8d89a8c7; this was a secret rotation, not a function code deploy
+Secret rotation: `WEBHOOK_SHARED_SECRET` was regenerated, stored in Supabase Edge Function Secrets at 2026-06-15T20:11:55.332Z, and the matching Vault `WEBHOOK_SHARED_SECRET` value used by cron was updated through `vault.update_secret`
+Secret verification: `public.verify_webhook_internal_token` returned true for the new generated value, and `db-cleanup` dry-run with the new `x-internal-token` returned HTTP 200
+Renderer heartbeat: hermes-masih-1 online, version 0.1.0, render_version persian-subtitles-masihh-v1, processed 9, failed 0, last_seen_at 2026-06-15 20:12:36.689+00
+Smoke checks: post-rotation npm run check:release-state passed; main CI run 27573079602 passed; xot.iraneyes.com and xot.vercel.app returned HTTP 200 with app shell last-modified 2026-06-15T20:08:24Z and etag "e63c9d5f81f6c1f998761692f6ccd615"; all cron jobs active; no stale running jobs; renderer heartbeat online
+Rollback target: do not restore the exposed prior secret unless production is down and no safer option exists. If rollback is needed, generate another shared secret and keep Supabase Edge Function Secret plus Vault `WEBHOOK_SHARED_SECRET` aligned.
+Notes: The old RSS.app URL token was treated as exposed shared internal credential because production had no `RSSAPP_WEBHOOK_TOKEN`/`RSSAPP_TOKEN` secret and `webhooks-rssapp` falls back to `WEBHOOK_SHARED_SECRET`. Query-token-only RSS requests already return HTTP 401 because `RSSAPP_ALLOW_QUERY_TOKEN=false`. Remaining manual RSS.app work: remove the stale query token from the RSS.app webhook URL, regenerate the RSS.app signing secret that appeared in chat/screenshot, store the regenerated value in `RSSAPP_SIGNING_SECRET`, and then wait for a zero-hit compatibility quiet window before deleting query-token code.
+```
+
 ### 2026-06-15 - PR #51 RSS.app signed-webhook auth
 
 ```text

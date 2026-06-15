@@ -2,6 +2,7 @@
 
 Checked at: 2026-06-14T08:29:26Z
 Targeted RSS signing refresh: 2026-06-15T19:59:12Z
+Targeted shared webhook secret rotation refresh: 2026-06-15T20:12:36Z
 
 This inventory is read-only. It records what is currently local, in GitHub, in Vercel, and in Supabase before the cleanup work begins.
 
@@ -164,7 +165,7 @@ Secret names observed:
 - `TWITTER_ACCESS_TOKEN_SECRET`
 - `TWITTER_CONSUMER_KEY`
 - `TWITTER_CONSUMER_SECRET`
-- `WEBHOOK_SHARED_SECRET`
+- `WEBHOOK_SHARED_SECRET` (rotated in the 2026-06-15 shared webhook secret refresh)
 
 Secrets not observed in Supabase Edge secret names:
 
@@ -181,6 +182,16 @@ Targeted RSS signing refresh:
 - After the secret updates, remote function versions were `webhooks-rssapp` `226`, `worker` `257`, `admin-retry` `180`, `db-cleanup` `152`, `media-processor` `191`, `media-cleanup` `188`, `admin-actions` `179`, `x-poster` `128`, `x-followers-snapshot` `102`, and `digest-compiler` `108`.
 - A signed RSS.app-style request without a query token returned HTTP `200`; an unsigned query-token-only request returned HTTP `401`.
 - Compatibility telemetry still showed `118` accepted `rss_query_token` hits inside the 24-hour observation window, latest `2026-06-15 19:55:11.9163+00`; query-token code removal remains gated on removing/rotating the exposed URL token and a zero-hit quiet window.
+
+Targeted shared webhook secret rotation refresh:
+
+- The old RSS.app URL token was treated as an exposed shared credential because no `RSSAPP_WEBHOOK_TOKEN` or `RSSAPP_TOKEN` secret was observed and `webhooks-rssapp` falls back to `WEBHOOK_SHARED_SECRET`.
+- `WEBHOOK_SHARED_SECRET` was regenerated and stored in Supabase Edge Function Secrets at `2026-06-15T20:11:55.332Z`.
+- The matching Vault `WEBHOOK_SHARED_SECRET` value used by cron was updated with `vault.update_secret`.
+- `public.verify_webhook_internal_token` returned `true` for the regenerated value, and a `db-cleanup` dry-run using the regenerated `x-internal-token` returned HTTP `200`.
+- After the secret rotation, remote function versions were `webhooks-rssapp` `227`, `worker` `258`, `admin-retry` `181`, `db-cleanup` `153`, `media-processor` `192`, `media-cleanup` `189`, `admin-actions` `180`, `x-poster` `129`, `x-followers-snapshot` `103`, and `digest-compiler` `109`.
+- Post-rotation `npm run check:release-state` passed with all cron jobs active, no stale running jobs, and renderer `hermes-masih-1` online at `2026-06-15 20:12:36.689+00`.
+- Remaining RSS.app manual work: remove the stale query token from the webhook URL, regenerate the exposed RSS.app signing secret, update `RSSAPP_SIGNING_SECRET`, send another signed no-query test, and wait for the zero-hit compatibility quiet window before deleting query-token code.
 
 Advisor highlights:
 
