@@ -27,7 +27,7 @@ Main checkout preserved for user work:
 Current verified main release anchor:
 
 ```text
-64a6ed61d7194dcab808651f2f10de7bcf19e72a
+f8ebcaa41dcd8ac38bc2586a242c37f91fbdb5fc
 ```
 
 Release notes:
@@ -41,6 +41,8 @@ Release notes:
 - PR #20 removed the safe worker export-surface slice, merged at `70d5733a5604a535e1d44be1224a10033121d102`, deployed `worker` version `235`, and stamped `DEPLOY_GIT_SHA=70d5733a5604a535e1d44be1224a10033121d102`.
 - PR #22 added temporary compatibility usage telemetry, merged at `ccd06079eae7e454ffd372dce94f71940c64e560`, applied migration `20260615043000`, and stamped `DEPLOY_GIT_SHA=ccd06079eae7e454ffd372dce94f71940c64e560`.
 - PR #25 removed the safe worker helper export-surface slice, merged at `64a6ed61d7194dcab808651f2f10de7bcf19e72a`, deployed all 10 Edge Functions, and stamped `DEPLOY_GIT_SHA=64a6ed61d7194dcab808651f2f10de7bcf19e72a`.
+- PR #27 marked Telegram helper cleanup status verified; it was documentation/status-only and did not require a Supabase deploy.
+- PR #28 extracted hydration success patch shaping into `xApiWorkflow.ts`, tightened X/Twitter URL handle parsing, merged at `f8ebcaa41dcd8ac38bc2586a242c37f91fbdb5fc`, deployed all 10 Edge Functions, and stamped `DEPLOY_GIT_SHA=f8ebcaa41dcd8ac38bc2586a242c37f91fbdb5fc`.
 
 Current safe-state rule:
 
@@ -2138,6 +2140,8 @@ Compatibility telemetry timing note: after PR #22, production was promoted again
 
 Worker helper export cleanup timing note: after PR #25, production was promoted again at `64a6ed61d7194dcab808651f2f10de7bcf19e72a`. Main CI run `27529812922` passed, live hosts refreshed at `2026-06-15T07:10:05Z`, all 10 Edge Functions were deployed, `DEPLOY_GIT_SHA` was stamped to `64a6ed61d7194dcab808651f2f10de7bcf19e72a`, and `npm run check:release-state` passed. Deployed Edge Function versions were `admin-actions` `163`, `admin-retry` `164`, `db-cleanup` `136`, `digest-compiler` `92`, `media-cleanup` `172`, `media-processor` `175`, `webhooks-rssapp` `209`, `worker` `239`, `x-followers-snapshot` `86`, and `x-poster` `112`. Authenticated `admin-actions` `get_dashboard_summary` returned HTTP `200`, `success=true`, and a dashboard payload after deployment.
 
+Hydration helper cleanup timing note: PR #27 was documentation/status-only and required no production deploy. After PR #28, production was promoted again at `f8ebcaa41dcd8ac38bc2586a242c37f91fbdb5fc`. Main CI run `27540030183` passed, live hosts refreshed at `2026-06-15T10:28:38Z`, all 10 Edge Functions were deployed, `DEPLOY_GIT_SHA` was stamped to `f8ebcaa41dcd8ac38bc2586a242c37f91fbdb5fc`, and `npm run check:release-state` passed. Deployed Edge Function versions were `admin-actions` `165`, `admin-retry` `166`, `db-cleanup` `138`, `digest-compiler` `94`, `media-cleanup` `174`, `media-processor` `177`, `webhooks-rssapp` `211`, `worker` `241`, `x-followers-snapshot` `88`, and `x-poster` `114`. Authenticated Chrome Dashboard loaded at `https://xot.iraneyes.com/`, and a fresh `admin-actions` POST returned HTTP `200` on version `165` after Dashboard refresh.
+
 ## Steps
 
 - [x] Re-run release-state check.
@@ -2192,9 +2196,11 @@ Removal remains blocked until the relevant feature rows are absent across a norm
 - `admin_action_alias`: proves `backfill_signatures` is unused.
 - `rss_query_token`: proves RSS.app no longer sends webhook auth in the URL.
 
-Initial post-deploy read after `ccd06079eae7e454ffd372dce94f71940c64e560` returned zero rows. Follow-up telemetry at `2026-06-15T05:09:40Z` recorded `2` `rss_query_token` hits for `/webhooks-rssapp` with `legacy_value=query:token`, confirming RSS.app query-token compatibility is still actively used and must not be removed yet.
+Initial post-deploy read after `ccd06079eae7e454ffd372dce94f71940c64e560` returned zero rows. Follow-up telemetry at `2026-06-15T05:09:40Z` recorded `2` `rss_query_token` hits for `/webhooks-rssapp` with `legacy_value=query:token`. Later telemetry at `2026-06-15T10:49:04Z` recorded `40` `rss_query_token` hits for the same path, confirming RSS.app query-token compatibility is still actively used and must not be removed yet.
 
 Post-PR #25 dashboard check: a user-visible "Dashboard failed to load / Edge Function returned a non-2xx status code" report was investigated read-only first. Direct unauthenticated `admin-actions` checks returned expected `401`s, local execution of the dashboard summary module against live Supabase returned a dashboard payload, and post-deploy authenticated `admin-actions` `get_dashboard_summary` returned HTTP `200`, `success=true`, and a dashboard payload. No Dashboard code/config hotfix was needed for this incident.
+
+Post-PR #28 dashboard check: the same user-visible Dashboard failure was checked again after the `f8ebcaa41dcd8ac38bc2586a242c37f91fbdb5fc` deploy. The canonical Dashboard route is `https://xot.iraneyes.com/`; `/dashboard` intentionally renders the app 404. Authenticated Chrome loaded the Dashboard successfully, UI refresh kept the page healthy, Supabase Edge Function logs showed a fresh `admin-actions` POST returning HTTP `200` on version `165`, and `npm run check:release-state` passed. No Dashboard code/config hotfix was needed for this incident.
 
 ## Validation
 
@@ -2221,7 +2227,7 @@ git commit -m "chore: remove obsolete cleanup compatibility paths"
 - [x] Safe compatibility scaffolding is gone.
 - [ ] All compatibility scaffolding is gone. Deferred candidates: monitoring aliases, `backfill_signatures`, remaining worker helper export cleanup, RSS query-token compatibility, and `recordLegacyXApiUsage`.
 - [x] Docs match the actual code for completed removals.
-- [x] Local and read-only live checks pass for completed removals and the later `64a6ed61d7194dcab808651f2f10de7bcf19e72a` release.
+- [x] Local and read-only live checks pass for completed removals and the later `f8ebcaa41dcd8ac38bc2586a242c37f91fbdb5fc` release.
 
 ---
 
