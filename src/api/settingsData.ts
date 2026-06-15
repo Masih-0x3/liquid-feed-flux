@@ -394,17 +394,6 @@ const defaults = {
     enabled: true,
     max_attempts: 3,
   },
-  x_api_usage: {
-    total: 0,
-    calls_24h: [] as string[],
-    last_call_at: null as string | null,
-    last_error: null as string | null,
-    posts_24h: [] as string[],
-    posts_total: 0,
-    media_uploads_24h: [] as string[],
-    media_bytes_24h: 0,
-    last_post_error: null as string | null,
-  },
   x_api_controls: {
     my_x_enabled: false,
     verify_cache_minutes: 15,

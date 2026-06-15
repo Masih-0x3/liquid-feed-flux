@@ -2171,7 +2171,7 @@ Read-only sidecar audit identified these Phase 21 candidates. Do not remove them
 - Worker helper export surface in `supabase/functions/worker/*`: the unused `worker/index.ts` scoring re-export block and `MAX_ATTEMPTS` lifecycle export were removed in PR #20. PR #25 removed the safe file-local/test-only helper export slice. Branch `codex/xot-cleanup-21-worker-type-export-surface` removes the final safe type-only export surface. A read-only sidecar audit found no unused exported runtime helpers left; remaining runtime exports should stay until their production importer is moved or public behavior tests cover the split.
 - Paused My X implementation in `src/pages/XAccount.tsx`, `src/api/xAccountData.ts`, `src/hooks/useFollowerData.ts`, and `src/components/x/FollowerGrowthChart.tsx`: removed in PR #15; `/x-account` remains routed to `src/pages/XAccountDisabled.tsx`.
 - Renderer compatibility re-export in `services/video-renderer/src/renderer.js`: removed in PR #15 after confirming active imports use `services/video-renderer/src/config.js`.
-- `recordLegacyXApiUsage` in `supabase/functions/_shared/xApiLedger.ts`: branch `codex/xot-xapi-summary-ui-cache-cleanup` moves Settings usage displays from `settings.x_api_usage` arrays to `get_x_api_summary`, backed by `x_api_events` and `x_deliveries`. Do not remove the legacy writers until that release is live and follow-up searches/read-only checks confirm no remaining runtime/UI dependency.
+- `recordLegacyXApiUsage` in `supabase/functions/_shared/xApiLedger.ts`: branch `codex/xot-xapi-summary-ui-cache-cleanup` moved Settings usage displays from `settings.x_api_usage` arrays to `get_x_api_summary`, backed by `x_api_events` and `x_deliveries`. Follow-up branch `codex/xot-remove-legacy-xapi-usage-writer` removes the obsolete writers after read-only code checks and a live frontend bundle check found no remaining runtime/UI dependency.
 - RSS query-token compatibility in `supabase/functions/_shared/internalAuth.ts`: production Edge logs show query-token webhook calls still happen, so do not remove it until RSS.app is moved to header auth and temporary `rss_query_token` telemetry shows zero hits.
 
 ## Temporary Compatibility Telemetry
@@ -2229,7 +2229,7 @@ git commit -m "chore: remove obsolete cleanup compatibility paths"
 ## Exit Criteria
 
 - [x] Safe compatibility scaffolding is gone.
-- [ ] All compatibility scaffolding is gone. Deferred candidates: RSS query-token compatibility and `recordLegacyXApiUsage` writer cleanup after the Settings UI cache-dependency removal is live.
+- [ ] All compatibility scaffolding is gone. Deferred candidate after branch `codex/xot-remove-legacy-xapi-usage-writer`: RSS query-token compatibility, which remains active until RSS.app moves to header auth and telemetry is quiet.
 - [x] Docs match the actual code for completed removals.
 - [x] Local and read-only live checks pass for completed removals and the later `f8ebcaa41dcd8ac38bc2586a242c37f91fbdb5fc` release.
 

@@ -5,7 +5,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1';
 import { requireInternalAuth } from '../_shared/internalAuth.ts';
-import { recordLegacyXApiUsage, recordXApiEvent } from '../_shared/xApiLedger.ts';
+import { recordXApiEvent } from '../_shared/xApiLedger.ts';
 import { buildXPostText, isEnrichmentBlockingXPost, pickHashtags } from '../_shared/xPostText.ts';
 import { allowCompletedEnrichmentForPosting, doesEnrichmentBlockX, normalizeEnrichmentConfig } from '../_shared/enrich.ts';
 import { duplicateXSkipReason } from '../_shared/duplicateGuard.ts';
@@ -300,7 +300,6 @@ async function uploadImage(
     error: resp.ok ? null : `media upload ${resp.status}`,
     estimatedBillableUnit: 'media_upload',
   }, resp);
-  await recordLegacyXApiUsage(sb, { error: resp.ok ? null : `media upload ${resp.status}`, mediaUpload: resp.ok });
   if (!resp.ok) throw new Error(`media upload ${resp.status}: ${text.slice(0, 300)} (mime=${mime})`);
   const json = JSON.parse(text);
   return String(json.media_id_string || json.media_id);
@@ -335,7 +334,6 @@ async function uploadVideoChunked(
     error: initResp.ok ? null : `video INIT ${initResp.status}`,
     estimatedBillableUnit: 'media_upload',
   }, initResp);
-  await recordLegacyXApiUsage(sb, { error: initResp.ok ? null : `video INIT ${initResp.status}`, mediaUpload: initResp.ok });
   if (!initResp.ok) throw new Error(`video INIT ${initResp.status}: ${initText.slice(0, 300)}`);
   const initJson = JSON.parse(initText);
   const mediaId = String(initJson.media_id_string || initJson.media_id);
@@ -368,7 +366,6 @@ async function uploadVideoChunked(
       estimatedBillableUnit: 'media_upload',
       metadata: { segment },
     }, appendResp);
-    await recordLegacyXApiUsage(sb, { error: appendResp.ok ? null : `video APPEND ${appendResp.status}` });
     if (!appendResp.ok) throw new Error(`video APPEND seg=${segment} ${appendResp.status}: ${appendText.slice(0, 300)}`);
     segment += 1;
   }
@@ -391,7 +388,6 @@ async function uploadVideoChunked(
     error: finResp.ok ? null : `video FINALIZE ${finResp.status}`,
     estimatedBillableUnit: 'media_upload',
   }, finResp);
-  await recordLegacyXApiUsage(sb, { error: finResp.ok ? null : `video FINALIZE ${finResp.status}` });
   if (!finResp.ok) throw new Error(`video FINALIZE ${finResp.status}: ${finText.slice(0, 300)}`);
   const finJson = JSON.parse(finText);
 
@@ -422,7 +418,6 @@ async function uploadVideoChunked(
       error: statusResp.ok ? null : `video STATUS ${statusResp.status}`,
       estimatedBillableUnit: 'media_upload',
     }, statusResp);
-    await recordLegacyXApiUsage(sb, { error: statusResp.ok ? null : `video STATUS ${statusResp.status}` });
     if (!statusResp.ok) throw new Error(`video STATUS ${statusResp.status}: ${statusText.slice(0, 300)}`);
     const statusJson = JSON.parse(statusText);
     processing = statusJson.processing_info;
@@ -458,7 +453,6 @@ async function postTweet(
     estimatedBillableUnit: 'post_write',
     metadata: { media_count: mediaIds.length },
   }, resp);
-  await recordLegacyXApiUsage(sb, { error: resp.ok ? null : `tweet ${resp.status}`, post: resp.ok });
   if (!resp.ok) {
     const err = new Error(`tweet ${resp.status}: ${text2.slice(0, 400)}`);
     (err as { status?: number }).status = resp.status;

@@ -30,7 +30,7 @@ This branch removes compatibility code only after the PR #13 release was live, a
 These items still need request-log evidence, follow-up refactoring, or a product decision before removal:
 
 - RSS query-token compatibility still has documented production relevance.
-- `recordLegacyXApiUsage` writers remain temporarily while production runs on the canonical `x_api_events`/`x_deliveries` Settings UI. PR #34 moved Settings off `settings.x_api_usage`; remove the writers only after that release has a live observation window and read-only checks confirm no remaining runtime/UI dependency.
+- `recordLegacyXApiUsage` writer cleanup is handled by branch `codex/xot-remove-legacy-xapi-usage-writer` after PR #34 moved Settings off `settings.x_api_usage` and live frontend bundle checks confirmed no remaining UI dependency.
 
 ### Worker Helper Export Cleanup Slice
 
@@ -53,6 +53,16 @@ Focused validation for this slice:
 
 - `npx deno test supabase/functions/worker/workerUtils.test.ts supabase/functions/worker/telegramDelivery.test.ts supabase/functions/worker/scoringWorkflow.test.ts supabase/functions/worker/videoRenderWorkflow.test.ts supabase/functions/worker/mediaWorkflow.test.ts supabase/functions/worker/xApiWorkflow.test.ts supabase/functions/worker/translateWorkflow.test.ts`
 - `npx deno check supabase/functions/worker/index.ts supabase/functions/worker/workerUtils.ts supabase/functions/worker/telegramDelivery.ts supabase/functions/worker/scoringWorkflow.ts supabase/functions/worker/videoRenderWorkflow.ts supabase/functions/worker/mediaWorkflow.ts supabase/functions/worker/xApiWorkflow.ts supabase/functions/worker/translateWorkflow.ts`
+
+### Legacy X API Usage Writer Cleanup Slice
+
+Branch `codex/xot-remove-legacy-xapi-usage-writer` removes the obsolete `settings.x_api_usage` cache writer after PR #34 moved Settings and X Automation usage displays to `get_x_api_summary`:
+
+- Removed `recordLegacyXApiUsage` from `supabase/functions/_shared/xApiLedger.ts`.
+- Removed legacy cache writes from X posting, worker hydration, follower snapshot, and admin X API actions while keeping canonical `recordXApiEvent` writes intact.
+- Removed the stale `x_api_usage` frontend default shape and test fixture entry.
+- Kept historical migration references untouched.
+- Live frontend bundle check against `https://xot.iraneyes.com/assets/index-BEOz4znd.js` found no `x_api_usage`, `xApiUsage`, `calls_24h`, `posts_24h`, or `media_uploads_24h` strings before the branch was committed.
 
 ### Temporary Compatibility Telemetry
 
