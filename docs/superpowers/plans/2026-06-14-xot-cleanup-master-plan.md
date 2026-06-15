@@ -24,10 +24,16 @@ Main checkout preserved for user work:
 /Users/stevmq/Finalized XOT
 ```
 
-Current verified main release anchor:
+Current main documentation anchor:
 
 ```text
-9d60e9052056f5a0e2e0794579701a97e7e8cb5e
+29cc200fbc64141dd5441fb7d972272f1434c2c2
+```
+
+Last deployed code release anchor:
+
+```text
+7f3dab452eaccecd5a275def6b29127998df958d
 ```
 
 Release notes:
@@ -44,6 +50,10 @@ Release notes:
 - PR #27 marked Telegram helper cleanup status verified; it was documentation/status-only and did not require a Supabase deploy.
 - PR #28 extracted hydration success patch shaping into `xApiWorkflow.ts`, tightened X/Twitter URL handle parsing, merged at `f8ebcaa41dcd8ac38bc2586a242c37f91fbdb5fc`, deployed all 10 Edge Functions, and stamped `DEPLOY_GIT_SHA=f8ebcaa41dcd8ac38bc2586a242c37f91fbdb5fc`.
 - PR #30 removed zero-telemetry Monitoring/admin compatibility aliases, merged at `9d60e9052056f5a0e2e0794579701a97e7e8cb5e`, deployed all 10 Edge Functions, and stamped `DEPLOY_GIT_SHA=9d60e9052056f5a0e2e0794579701a97e7e8cb5e`.
+- PR #32 removed the final safe worker type-only export surface and was promoted to production at `412127679bd158de342eabc64a4d4dd7c74cc4e2`.
+- PR #34 moved Settings and X Automation usage displays from `settings.x_api_usage` to `get_x_api_summary`, then deployed all 10 Edge Functions and stamped `DEPLOY_GIT_SHA=ad29a4d5623cef204521e116ffc5aadaf46ff7fe`.
+- PR #36 removed the obsolete `recordLegacyXApiUsage` writer and stale frontend default, then deployed all 10 Edge Functions and stamped `DEPLOY_GIT_SHA=7f3dab452eaccecd5a275def6b29127998df958d`.
+- PR #37 recorded the PR #36 release ledger; it was documentation-only and did not require a Supabase deploy.
 
 Current safe-state rule:
 
@@ -1589,6 +1599,34 @@ git commit -m "refactor: centralize video renderer config and auth checks"
 - [x] Config reads are not scattered across production server/renderer/preflight files.
 - [x] Video-render heartbeat remains online in read-only release-state checks.
 
+## Follow-Up Renderer OpenAI Subtitle Split
+
+Branch:
+
+```text
+codex/xot-renderer-openai-subtitle-split
+```
+
+Objective: reduce `services/video-renderer/src/openai.js` by extracting subtitle cleanup, translation, translation repair, and OpenAI Responses API subtitle parsing into `services/video-renderer/src/openaiSubtitles.js` while keeping `openai.js` as the stable public import boundary for renderer and preview code.
+
+Scope:
+
+- [x] Move `buildTranscriptCleanupRequest`, `buildTranslationRequest`, `buildTranslationRepairRequest`, `cleanupTranscriptSegments`, and `translateSegments` into `openaiSubtitles.js`.
+- [x] Move subtitle response parsing helpers and language normalization needed by transcription-language detection into `openaiSubtitles.js`.
+- [x] Re-export the moved public functions from `openai.js` so current import sites remain unchanged.
+- [x] Keep vision request/parsing code in `openai.js` for a later, separate slice.
+- [x] Do not change renderer runtime behavior or production deployment state.
+
+Validation:
+
+- [x] `node --test services/video-renderer/test/openai.test.js` passed.
+- [x] `npm --prefix services/video-renderer test` passed after installing renderer dependencies in the isolated worktree.
+- [x] `npm run lint` passed with the known 8 Fast Refresh warnings.
+- [x] `npm run check:strict` passed.
+- [x] `npm test` passed with the expected `useAuth` error-path stack from `src/test/auth.test.tsx`.
+- [x] Env-backed `npm run build` passed.
+- [x] `git diff --check` passed.
+
 ---
 
 # Phase 16: Runtime And Dependency Hygiene
@@ -2156,7 +2194,8 @@ npm run check:release-state
 - [x] Remove frontend schema fallbacks that are no longer used.
 - [x] Remove unused admin action wrappers. `backfill_signatures` was removed after temporary telemetry showed no `admin_action_alias` rows across the observed production window; operators should use `backfill_dedupe`.
 - [x] Remove unused worker entrypoint re-exports and file-local lifecycle constants.
-- [x] Remove remaining safe worker helper/type exports. PR #25 removed the safe file-local/test-only helper export slice. Branch `codex/xot-cleanup-21-worker-type-export-surface` removes the final safe type-only worker export surface; a read-only sidecar audit found no unused exported runtime helpers left in `supabase/functions/worker/*`.
+- [x] Remove remaining safe worker helper/type exports. PR #25 removed the safe file-local/test-only helper export slice. PR #32 removed the final safe type-only worker export surface; a read-only sidecar audit found no unused exported runtime helpers left in `supabase/functions/worker/*`.
+- [x] Remove the obsolete `recordLegacyXApiUsage` writer after PR #34 moved live usage displays to `get_x_api_summary`; PR #36 removed the writer and stale frontend default.
 - [x] Remove dead code identified by TypeScript and Deno checks.
 - [x] Update docs to reflect the final module map.
 
@@ -2168,10 +2207,10 @@ Read-only sidecar audit identified these Phase 21 candidates. Do not remove them
 - Dashboard direct RPC fallback in `src/api/dashboardData.ts`: removed in PR #15 after Dashboard remained healthy through `admin-actions` and `src/test/dashboard-data.test.ts` was updated. PR #19 later kept `admin-actions` as the single Dashboard boundary by adding backend degraded handling for base `public.get_dashboard_summary()` failures and client-side Edge Function error-body extraction.
 - Monitoring response/filter aliases in `src/api/monitoringData.ts` and `supabase/functions/admin-actions/monitoringReads.ts`: removed after old frontend bundles aged out and temporary `monitoring_filter_alias` telemetry showed no legacy filter values across the observed production window.
 - Unused admin action cases in `supabase/functions/_shared/adminActionNames.ts` and `supabase/functions/admin-actions/index.ts`: `backfill_signatures` was removed after temporary `admin_action_alias` telemetry showed no external/manual use.
-- Worker helper export surface in `supabase/functions/worker/*`: the unused `worker/index.ts` scoring re-export block and `MAX_ATTEMPTS` lifecycle export were removed in PR #20. PR #25 removed the safe file-local/test-only helper export slice. Branch `codex/xot-cleanup-21-worker-type-export-surface` removes the final safe type-only export surface. A read-only sidecar audit found no unused exported runtime helpers left; remaining runtime exports should stay until their production importer is moved or public behavior tests cover the split.
+- Worker helper export surface in `supabase/functions/worker/*`: the unused `worker/index.ts` scoring re-export block and `MAX_ATTEMPTS` lifecycle export were removed in PR #20. PR #25 removed the safe file-local/test-only helper export slice. PR #32 removed the final safe type-only export surface. A read-only sidecar audit found no unused exported runtime helpers left; remaining runtime exports should stay until their production importer is moved or public behavior tests cover the split.
 - Paused My X implementation in `src/pages/XAccount.tsx`, `src/api/xAccountData.ts`, `src/hooks/useFollowerData.ts`, and `src/components/x/FollowerGrowthChart.tsx`: removed in PR #15; `/x-account` remains routed to `src/pages/XAccountDisabled.tsx`.
 - Renderer compatibility re-export in `services/video-renderer/src/renderer.js`: removed in PR #15 after confirming active imports use `services/video-renderer/src/config.js`.
-- `recordLegacyXApiUsage` in `supabase/functions/_shared/xApiLedger.ts`: branch `codex/xot-xapi-summary-ui-cache-cleanup` moved Settings usage displays from `settings.x_api_usage` arrays to `get_x_api_summary`, backed by `x_api_events` and `x_deliveries`. Follow-up branch `codex/xot-remove-legacy-xapi-usage-writer` removes the obsolete writers after read-only code checks and a live frontend bundle check found no remaining runtime/UI dependency.
+- `recordLegacyXApiUsage` in `supabase/functions/_shared/xApiLedger.ts`: PR #34 moved Settings usage displays from `settings.x_api_usage` arrays to `get_x_api_summary`, backed by `x_api_events` and `x_deliveries`. PR #36 removed the obsolete writers after read-only code checks and a live frontend bundle check found no remaining runtime/UI dependency.
 - RSS query-token compatibility in `supabase/functions/_shared/internalAuth.ts`: production Edge logs show query-token webhook calls still happen, so do not remove it until RSS.app is moved to header auth and temporary `rss_query_token` telemetry shows zero hits.
 
 ## Temporary Compatibility Telemetry
@@ -2229,7 +2268,7 @@ git commit -m "chore: remove obsolete cleanup compatibility paths"
 ## Exit Criteria
 
 - [x] Safe compatibility scaffolding is gone.
-- [ ] All compatibility scaffolding is gone. Deferred candidate after branch `codex/xot-remove-legacy-xapi-usage-writer`: RSS query-token compatibility, which remains active until RSS.app moves to header auth and telemetry is quiet.
+- [ ] All compatibility scaffolding is gone. Remaining deferred candidate: RSS query-token compatibility, which remains active until RSS.app moves to header auth and telemetry is quiet.
 - [x] Docs match the actual code for completed removals.
 - [x] Local and read-only live checks pass for completed removals and the later `f8ebcaa41dcd8ac38bc2586a242c37f91fbdb5fc` release.
 
