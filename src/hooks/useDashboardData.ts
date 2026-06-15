@@ -8,6 +8,7 @@ export type {
   DashboardMetrics,
   DashboardSeverity,
   IngestHeartbeat,
+  OpenAIUsage,
   OpsStatus,
   PipelineCounts,
   PipelineHealth,

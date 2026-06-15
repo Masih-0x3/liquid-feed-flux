@@ -40,6 +40,33 @@ const VideoRenderingSettings = lazy(() => import('@/components/settings/VideoRen
 
 const SETTINGS_TAB_IDS = ['translation', 'filter', 'messages', 'telegram', 'x-automation', 'video-rendering', 'enrichment'] as const;
 type SettingsTabId = (typeof SETTINGS_TAB_IDS)[number];
+const OPENAI_MAX_COMPLETION_TOKENS_LIMIT = 8000;
+
+function completionTokenMax(modelLimit: number | undefined, fallback: number): number {
+  return Math.min(modelLimit ?? fallback, OPENAI_MAX_COMPLETION_TOKENS_LIMIT);
+}
+
+function clampOpenAiCompletionTokens(value: number | null | undefined, fallback: number): number {
+  const candidate = typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : fallback;
+  return Math.max(1, Math.min(OPENAI_MAX_COMPLETION_TOKENS_LIMIT, candidate));
+}
+
+function parseOpenAiCompletionTokens(value: string, fallback: number): number {
+  return clampOpenAiCompletionTokens(Number.parseInt(value, 10), fallback);
+}
+
+function prepareTranslationSettingsForSave(settings: TranslationSettings): TranslationSettings {
+  return {
+    ...settings,
+    max_completion_tokens: clampOpenAiCompletionTokens(settings.max_completion_tokens, 1000),
+    scoring: settings.scoring
+      ? {
+          ...settings.scoring,
+          max_completion_tokens: clampOpenAiCompletionTokens(settings.scoring.max_completion_tokens, 2000),
+        }
+      : settings.scoring,
+  };
+}
 
 function tabIdFromHash(hash: string): SettingsTabId | null {
   const id = hash.replace(/^#/, '');
@@ -114,6 +141,8 @@ export default function Settings() {
   if (!ts || !tgs || !mt) return null;
 
   const selectedModel = openaiModels.find(m => m.id === ts.model);
+  const cappedTranslationMaxTokens = clampOpenAiCompletionTokens(ts.max_completion_tokens, 1000);
+  const saveTranslationPrompt = () => saveMutation.mutate({ key: 'translation_prompt', value: prepareTranslationSettingsForSave(ts) });
 
   const getPlaceholderValue = (key: string, tweet: Record<string, unknown>) => {
     const accounts = tweet?.accounts as Record<string, unknown> | undefined;
@@ -207,7 +236,7 @@ export default function Settings() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>{selectedModel?.useMaxCompletionTokens ? 'Max Completion Tokens' : 'Max Tokens'}</Label>
-                  <Input type="number" min="1" max={selectedModel?.maxTokens || 4096} value={ts.max_completion_tokens} onChange={(e) => setTranslationSettings({ ...ts, max_completion_tokens: parseInt(e.target.value) || 1000 })} className="glass-input" />
+                  <Input type="number" min="1" max={completionTokenMax(selectedModel?.maxTokens, 4096)} value={cappedTranslationMaxTokens} onChange={(e) => setTranslationSettings({ ...ts, max_completion_tokens: parseOpenAiCompletionTokens(e.target.value, 1000) })} className="glass-input" />
                 </div>
                 {selectedModel?.supportsTemperature && (
                   <div className="space-y-2">
@@ -313,7 +342,7 @@ export default function Settings() {
                     )}
                   </div>
                   <div className="flex justify-end">
-                    <Button size="sm" variant="outline" onClick={() => saveMutation.mutate({ key: 'translation_prompt', value: ts })} disabled={saveMutation.isPending}>
+                    <Button size="sm" variant="outline" onClick={saveTranslationPrompt} disabled={saveMutation.isPending}>
                       Save model parameters
                     </Button>
                   </div>
@@ -327,6 +356,7 @@ export default function Settings() {
             const scoring = ts.scoring ?? {};
             const scoringModelId = scoring.model ?? ts.model;
             const scoringModel = openaiModels.find(m => m.id === scoringModelId);
+            const cappedScoringMaxTokens = clampOpenAiCompletionTokens(scoring.max_completion_tokens, 2000);
             const updateScoring = (patch: Partial<NonNullable<TranslationSettings['scoring']>>) => {
               setTranslationSettings({ ...ts, scoring: { ...scoring, ...patch } });
             };
@@ -373,7 +403,7 @@ export default function Settings() {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label>Max Completion Tokens</Label>
-                      <Input type="number" min={1} max={scoringModel?.maxTokens || 16000} value={scoring.max_completion_tokens ?? 4000} onChange={(e) => updateScoring({ max_completion_tokens: parseInt(e.target.value) || 4000 })} className="glass-input" />
+                      <Input type="number" min={1} max={completionTokenMax(scoringModel?.maxTokens, 16000)} value={cappedScoringMaxTokens} onChange={(e) => updateScoring({ max_completion_tokens: parseOpenAiCompletionTokens(e.target.value, 2000) })} className="glass-input" />
                     </div>
                     {scoringModel?.supportsTemperature && (
                       <div className="space-y-2">
@@ -384,7 +414,7 @@ export default function Settings() {
                     {scoringModel?.supportsReasoningEffort && (
                       <div className="space-y-2">
                         <Label>Reasoning effort</Label>
-                        <Select value={scoring.reasoning_effort ?? 'high'} onValueChange={(v) => updateScoring({ reasoning_effort: v as 'minimal' | 'low' | 'medium' | 'high' })}>
+                        <Select value={scoring.reasoning_effort ?? 'low'} onValueChange={(v) => updateScoring({ reasoning_effort: v as 'minimal' | 'low' | 'medium' | 'high' })}>
                           <SelectTrigger className="glass-input"><SelectValue /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="minimal">Minimal</SelectItem>
@@ -438,13 +468,13 @@ export default function Settings() {
 
                   <div className="flex justify-end gap-2">
                     <Button size="sm" variant="ghost" onClick={() => updateScoring({
-                      model: ts.model, temperature: ts.temperature, max_completion_tokens: ts.max_completion_tokens,
+                      model: ts.model, temperature: ts.temperature, max_completion_tokens: cappedTranslationMaxTokens,
                       top_p: ts.top_p, reasoning_effort: ts.reasoning_effort, verbosity: ts.verbosity,
                       seed: ts.seed, service_tier: ts.service_tier, parallel_tool_calls: ts.parallel_tool_calls,
                     })}>
                       Copy from translation
                     </Button>
-                    <Button size="sm" variant="outline" onClick={() => saveMutation.mutate({ key: 'translation_prompt', value: ts })} disabled={saveMutation.isPending}>
+                    <Button size="sm" variant="outline" onClick={saveTranslationPrompt} disabled={saveMutation.isPending}>
                       Save scoring parameters
                     </Button>
                   </div>
@@ -513,7 +543,7 @@ export default function Settings() {
                 </div>
               )}
               <div className="flex flex-col gap-3 sm:flex-row">
-                <Button onClick={() => saveMutation.mutate({ key: 'translation_prompt', value: ts })} disabled={saveMutation.isPending} className="bg-gradient-primary hover:opacity-90 text-white w-full sm:flex-1">
+                <Button onClick={saveTranslationPrompt} disabled={saveMutation.isPending} className="bg-gradient-primary hover:opacity-90 text-white w-full sm:flex-1">
                   Save Translation Settings
                 </Button>
                 <AlertDialog>

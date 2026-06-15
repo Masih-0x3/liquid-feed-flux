@@ -4,6 +4,7 @@ import {
   cancelPendingJobsAdminAction,
   editTranslationAdminAction,
   reconcileStuckJobsAdminAction,
+  reprocessAdminAction,
   retryStepAdminAction,
 } from "./basicActions.ts";
 import type { RecordFeedbackFn, SupabaseAdminClient } from "./types.ts";
@@ -19,17 +20,26 @@ type FakeCall = {
   columns?: string;
 };
 
-function fakeSupabase(selectRows: Array<Record<string, unknown>> = [], rpcData: unknown = { ok: true }) {
+function fakeSupabase(
+  selectRows: Array<Record<string, unknown>> = [],
+  rpcData: unknown = { ok: true },
+) {
   const calls: FakeCall[] = [];
   const client: SupabaseAdminClient & { calls: FakeCall[] } = {
     calls,
     from(tableName: string) {
       const builder = {
         then<TResult1 = { error?: unknown }, TResult2 = never>(
-          onfulfilled?: ((value: { error?: unknown }) => TResult1 | PromiseLike<TResult1>) | null,
-          _onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+          onfulfilled?:
+            | ((value: { error?: unknown }) => TResult1 | PromiseLike<TResult1>)
+            | null,
+          _onrejected?:
+            | ((reason: unknown) => TResult2 | PromiseLike<TResult2>)
+            | null,
         ): PromiseLike<TResult1 | TResult2> {
-          return Promise.resolve({}).then(onfulfilled ?? ((value) => value as TResult1));
+          return Promise.resolve({}).then(
+            onfulfilled ?? ((value) => value as TResult1),
+          );
         },
         update(value: Record<string, unknown>) {
           calls.push({ op: "update", table: tableName, value });
@@ -39,7 +49,10 @@ function fakeSupabase(selectRows: Array<Record<string, unknown>> = [], rpcData: 
           calls.push({ op: "insert", table: tableName, value });
           return Promise.resolve({});
         },
-        upsert(value: Record<string, unknown> | Array<Record<string, unknown>>, options?: Record<string, unknown>) {
+        upsert(
+          value: Record<string, unknown> | Array<Record<string, unknown>>,
+          options?: Record<string, unknown>,
+        ) {
           calls.push({ op: "upsert", table: tableName, value, args: options });
           return Promise.resolve({});
         },
@@ -68,31 +81,94 @@ function fakeSupabase(selectRows: Array<Record<string, unknown>> = [], rpcData: 
 
 Deno.test("edit translation validates required fields before updating posts", async () => {
   const feedback: RecordFeedbackFn = async () => {};
-  const result = await editTranslationAdminAction(fakeSupabase(), { tweet_id: "1" }, feedback);
-  assertEquals(result, { body: { error: "tweet_id and text_translated are required" }, status: 400 });
+  const result = await editTranslationAdminAction(fakeSupabase(), {
+    tweet_id: "1",
+  }, feedback);
+  assertEquals(result, {
+    body: { error: "tweet_id and text_translated are required" },
+    status: 400,
+  });
 });
 
 Deno.test("retry deliver records force feedback and locks the post", async () => {
   const supabase = fakeSupabase();
   const feedbackCalls: Array<Record<string, unknown>> = [];
-  const feedback: RecordFeedbackFn = async (_supabase, tweetId, feedbackAction, polarity) => {
+  const feedback: RecordFeedbackFn = async (
+    _supabase,
+    tweetId,
+    feedbackAction,
+    polarity,
+  ) => {
     feedbackCalls.push({ tweetId, feedbackAction, polarity });
   };
 
-  const result = await retryStepAdminAction(supabase, { tweet_id: "t1", step: "deliver" }, feedback);
+  const result = await retryStepAdminAction(supabase, {
+    tweet_id: "t1",
+    step: "deliver",
+  }, feedback);
 
   assertEquals(result.body, { success: true, message: "deliver retry queued" });
   assertEquals(supabase.calls.filter((call) => call.op === "rpc"), [
-    { op: "rpc", name: "retry_step", args: { tweet_id: "t1", step: "deliver" } },
+    {
+      op: "rpc",
+      name: "retry_step",
+      args: { tweet_id: "t1", step: "deliver" },
+    },
   ]);
-  assertEquals(feedbackCalls, [{ tweetId: "t1", feedbackAction: "force_deliver", polarity: 2 }]);
-  assertEquals(supabase.calls.some((call) => call.op === "update" && call.table === "posts"), true);
+  assertEquals(feedbackCalls, [{
+    tweetId: "t1",
+    feedbackAction: "force_deliver",
+    polarity: 2,
+  }]);
+  assertEquals(
+    supabase.calls.some((call) =>
+      call.op === "update" && call.table === "posts"
+    ),
+    true,
+  );
+});
+
+Deno.test("reprocess queues operator-priority jobs", async () => {
+  const supabase = fakeSupabase();
+  const feedbackCalls: Array<
+    { tweetId: string; feedbackAction: string; polarity?: number }
+  > = [];
+  const feedback: RecordFeedbackFn = (
+    _client,
+    tweetId,
+    feedbackAction,
+    polarity,
+  ) => {
+    feedbackCalls.push({ tweetId, feedbackAction, polarity });
+    return Promise.resolve();
+  };
+
+  const result = await reprocessAdminAction(
+    supabase,
+    { tweet_id: "t1" },
+    feedback,
+  );
+  const upsert = supabase.calls.find((call) =>
+    call.op === "upsert" && call.table === "jobs"
+  );
+
+  assertEquals(result.body, { success: true, message: "Reprocess job queued" });
+  assertEquals((upsert?.value as Record<string, unknown>).priority, 20);
+  assertEquals(feedbackCalls, [{
+    tweetId: "t1",
+    feedbackAction: "reprocess",
+    polarity: 0,
+  }]);
 });
 
 Deno.test("bulk reprocess trims and de-duplicates tweet ids", async () => {
   const supabase = fakeSupabase();
-  const result = await bulkReprocessAdminAction(supabase, { tweet_ids: [" a ", "a", "", 7, "b"] });
-  const upsert = supabase.calls.find((call) => call.op === "upsert" && call.table === "jobs");
+  const result = await bulkReprocessAdminAction(supabase, {
+    tweet_ids: [" a ", "a", "", 7, "b"],
+  });
+  const upsert = supabase.calls.find((call) =>
+    call.op === "upsert" && call.table === "jobs"
+  );
 
   assertEquals(result.body, {
     success: true,
@@ -100,12 +176,28 @@ Deno.test("bulk reprocess trims and de-duplicates tweet ids", async () => {
     queued: 2,
     message: "2 reprocess job(s) queued",
   });
-  assertEquals((upsert?.value as Array<Record<string, unknown>>).map((job) => job.idempotency_key), ["reprocess:a", "reprocess:b"]);
+  assertEquals(
+    (upsert?.value as Array<Record<string, unknown>>).map((job) =>
+      job.idempotency_key
+    ),
+    ["reprocess:a", "reprocess:b"],
+  );
+  assertEquals(
+    (upsert?.value as Array<Record<string, unknown>>).map((job) =>
+      job.priority
+    ),
+    [20, 20],
+  );
 });
 
 Deno.test("cancel pending jobs summarizes canceled rows by type", async () => {
-  const supabase = fakeSupabase([{ type: "translate" }, { type: "translate" }, { type: "deliver" }]);
-  const result = await cancelPendingJobsAdminAction(supabase, { include_running: false, types: ["translate"] });
+  const supabase = fakeSupabase([{ type: "translate" }, { type: "translate" }, {
+    type: "deliver",
+  }]);
+  const result = await cancelPendingJobsAdminAction(supabase, {
+    include_running: false,
+    types: ["translate"],
+  });
 
   assertEquals(result.body, {
     success: true,
@@ -122,7 +214,9 @@ Deno.test("cancel pending jobs summarizes canceled rows by type", async () => {
 Deno.test("reconcile stuck jobs records an admin pipeline event", async () => {
   const supabase = fakeSupabase([], { reconciled: 2 });
   const result = await reconcileStuckJobsAdminAction(supabase);
-  const insert = supabase.calls.find((call) => call.op === "insert" && call.table === "pipeline_events");
+  const insert = supabase.calls.find((call) =>
+    call.op === "insert" && call.table === "pipeline_events"
+  );
 
   assertEquals(result.body, { success: true, result: { reconciled: 2 } });
   assertEquals((insert?.value as Record<string, unknown>).meta, {

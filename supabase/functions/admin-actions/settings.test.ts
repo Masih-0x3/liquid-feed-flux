@@ -5,22 +5,88 @@ import {
 } from "./settings.ts";
 
 Deno.test("settings validator rejects invalid shapes without touching storage", () => {
-  assertEquals(validateSettingsValue("message_template", null), 'Value for "message_template" must be a JSON object');
-  assertEquals(validateSettingsValue("message_template", { template: 123 }), "message_template.template must be a string");
-  assertEquals(validateSettingsValue("x_posting_config", { enabled: "yes" }), "x_posting_config.enabled must be a boolean");
-  assertEquals(validateSettingsValue("x_api_controls", { my_x_enabled: "true" }), "x_api_controls.my_x_enabled must be a boolean");
+  assertEquals(
+    validateSettingsValue("message_template", null),
+    'Value for "message_template" must be a JSON object',
+  );
+  assertEquals(
+    validateSettingsValue("message_template", { template: 123 }),
+    "message_template.template must be a string",
+  );
+  assertEquals(
+    validateSettingsValue("x_posting_config", { enabled: "yes" }),
+    "x_posting_config.enabled must be a boolean",
+  );
+  assertEquals(
+    validateSettingsValue("x_api_controls", { my_x_enabled: "true" }),
+    "x_api_controls.my_x_enabled must be a boolean",
+  );
 });
 
 Deno.test("settings validator accepts minimal known setting payloads", () => {
-  assertEquals(validateSettingsValue("message_template", { template: "Post: {{text}}" }), null);
-  assertEquals(validateSettingsValue("x_posting_config", { enabled: true, min_score: 14, require_media: false }), null);
-  assertEquals(validateSettingsValue("enrichment_config", { enabled: true, pipeline_mode: "shadow_review" }), null);
+  assertEquals(
+    validateSettingsValue("message_template", { template: "Post: {{text}}" }),
+    null,
+  );
+  assertEquals(
+    validateSettingsValue("x_posting_config", {
+      enabled: true,
+      min_score: 14,
+      require_media: false,
+    }),
+    null,
+  );
+  assertEquals(
+    validateSettingsValue("enrichment_config", {
+      enabled: true,
+      pipeline_mode: "shadow_review",
+    }),
+    null,
+  );
+  assertEquals(
+    validateSettingsValue("translation_prompt", {
+      model: "gpt-5.4-mini",
+      max_completion_tokens: 4_000,
+      scoring: { max_completion_tokens: 4_000 },
+    }),
+    null,
+  );
+});
+
+Deno.test("settings validator rejects runaway OpenAI output token caps", () => {
+  assertEquals(
+    validateSettingsValue("translation_prompt", {
+      max_completion_tokens: 50_000,
+    }),
+    "translation_prompt.max_completion_tokens must be 1-8000",
+  );
+  assertEquals(
+    validateSettingsValue("translation_prompt", {
+      scoring: { max_completion_tokens: 50_000 },
+    }),
+    "scoring.max_completion_tokens must be 1-8000",
+  );
 });
 
 Deno.test("x posting config restamps when saved changes expand eligibility", () => {
-  assertEquals(shouldRestampXPostingStart({ enabled: false }, { enabled: true }), true);
-  assertEquals(shouldRestampXPostingStart({ enabled: true, min_score: 15 }, { enabled: true, min_score: 12 }), true);
-  assertEquals(shouldRestampXPostingStart({ enabled: true, require_media: true }, { enabled: true, require_media: false }), true);
+  assertEquals(
+    shouldRestampXPostingStart({ enabled: false }, { enabled: true }),
+    true,
+  );
+  assertEquals(
+    shouldRestampXPostingStart({ enabled: true, min_score: 15 }, {
+      enabled: true,
+      min_score: 12,
+    }),
+    true,
+  );
+  assertEquals(
+    shouldRestampXPostingStart({ enabled: true, require_media: true }, {
+      enabled: true,
+      require_media: false,
+    }),
+    true,
+  );
   assertEquals(
     shouldRestampXPostingStart(
       { enabled: true, post_only_decision_deliver: true },
@@ -38,5 +104,11 @@ Deno.test("x posting config does not restamp when user supplies an explicit new 
     ),
     false,
   );
-  assertEquals(shouldRestampXPostingStart({ enabled: true, min_score: 12 }, { enabled: true, min_score: 14 }), false);
+  assertEquals(
+    shouldRestampXPostingStart({ enabled: true, min_score: 12 }, {
+      enabled: true,
+      min_score: 14,
+    }),
+    false,
+  );
 });

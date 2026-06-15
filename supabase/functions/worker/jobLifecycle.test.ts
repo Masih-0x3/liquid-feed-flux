@@ -168,6 +168,43 @@ Deno.test("handleJobFailure dead-letters non-retryable failures immediately", as
   const resultMeta = update.result_meta as Record<string, unknown>;
   assertEquals(update.status, "failed");
   assertEquals(resultMeta.non_retryable, true);
+  assertEquals(resultMeta.non_retryable_reason, "explicit_non_retryable");
+});
+
+Deno.test("handleJobFailure dead-letters OpenAI quota exhaustion immediately", async () => {
+  const supabase = createFakeSupabase();
+
+  await withMutedConsole(async () => {
+    await handleJobFailure(
+      supabase,
+      {
+        id: "job-quota",
+        type: "translate",
+        attempts: 0,
+        payload: { tweet_id: "tweet-quota" },
+      },
+      new Error(
+        'OpenAI translation error: 429 {"error":{"code":"insufficient_quota","message":"You exceeded your current quota, please check your plan and billing details."}}',
+      ),
+    );
+  });
+
+  const deadLetter = findCall(supabase.calls, "dead_letter_jobs", "insert")
+    .payload as Record<string, unknown>;
+  assertEquals(deadLetter.source, "worker_non_retryable");
+  assertEquals(
+    deadLetter.last_error,
+    'OpenAI translation error: 429 {"error":{"code":"insufficient_quota","message":"You exceeded your current quota, please check your plan and billing details."}}',
+  );
+
+  const update = findCall(supabase.calls, "jobs", "update").payload as Record<
+    string,
+    unknown
+  >;
+  const resultMeta = update.result_meta as Record<string, unknown>;
+  assertEquals(update.status, "failed");
+  assertEquals(resultMeta.non_retryable, true);
+  assertEquals(resultMeta.non_retryable_reason, "provider_quota_exhausted");
 });
 
 Deno.test("handleJobFailure reschedules retryable jobs with Telegram retry-after", async () => {

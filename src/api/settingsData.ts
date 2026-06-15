@@ -306,8 +306,8 @@ export const openaiModels: OpenAIModel[] = [
   { id: 'gpt-5.4-nano', name: 'GPT-5.4 Nano', description: 'Cheapest GPT-5.4 — high-volume tasks, 400K context. $0.20/$1.25 per MTok',  supports: ['text', 'vision'], maxTokens: 400000,  useMaxCompletionTokens: true, supportsTemperature: false, supportsTopP: false, supportsPenalties: false, supportsReasoningEffort: true,  supportsVerbosity: true,  supportsSeed: true, supportsServiceTier: true, supportsParallelToolCalls: true, tier: 'latest' },
   // Reasoning specialists
   { id: 'o4-mini', name: 'o4-mini', description: 'Fast reasoning model — strong on code & logic', supports: ['text', 'code', 'vision'], maxTokens: 200000, useMaxCompletionTokens: true, supportsTemperature: false, supportsTopP: false, supportsPenalties: false, supportsReasoningEffort: true, supportsVerbosity: false, supportsSeed: true, supportsServiceTier: true, supportsParallelToolCalls: true, tier: 'reasoning' },
-  // Legacy fallback (only the one currently used by the worker)
-  { id: 'gpt-4o-mini', name: 'GPT-4o Mini', description: 'Legacy — current worker default, cheap & fast', supports: ['text', 'vision'], maxTokens: 16384, useMaxCompletionTokens: false, supportsTemperature: true, supportsTopP: true, supportsPenalties: true, supportsReasoningEffort: false, supportsVerbosity: false, supportsSeed: true, supportsServiceTier: false, supportsParallelToolCalls: true, tier: 'legacy' },
+  // Legacy fallback
+  { id: 'gpt-4o-mini', name: 'GPT-4o Mini', description: 'Legacy cheap fallback for high-volume text tasks', supports: ['text', 'vision'], maxTokens: 16384, useMaxCompletionTokens: false, supportsTemperature: true, supportsTopP: true, supportsPenalties: true, supportsReasoningEffort: false, supportsVerbosity: false, supportsSeed: true, supportsServiceTier: false, supportsParallelToolCalls: true, tier: 'legacy' },
 ];
 
 
@@ -348,9 +348,9 @@ const defaults = {
     split_calls: true,
     scoring: {
       model: 'gpt-5.4-mini',
-      reasoning_effort: 'high' as ReasoningEffort,
+      reasoning_effort: 'low' as ReasoningEffort,
       verbosity: 'low' as Verbosity,
-      max_completion_tokens: 4000,
+      max_completion_tokens: 2000,
       seed: null,
       service_tier: 'auto' as ServiceTier,
       parallel_tool_calls: true,

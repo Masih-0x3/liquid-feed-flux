@@ -4,6 +4,7 @@ import {
   normalizeStep,
   parseRetryAfterFromMessage,
 } from "./workerUtils.ts";
+import { isProviderQuotaExhaustedError } from "../_shared/providerErrors.ts";
 
 export class NonRetryableJobError extends Error {
   constructor(message: string) {
@@ -32,7 +33,6 @@ export async function handleJobFailure(
   const jobType = job.type as string;
   const maxAttempts = MAX_ATTEMPTS[jobType] ?? 5;
   const attempts = (job.attempts as number) ?? 0;
-  const nonRetryable = errorOrMessage instanceof NonRetryableJobError;
   let errorMsg: string;
   if (typeof errorOrMessage === "string") {
     errorMsg = errorOrMessage.trim() || "Unknown job failure";
@@ -45,6 +45,12 @@ export async function handleJobFailure(
   } else {
     errorMsg = "Unknown job failure (no error passed)";
   }
+  const nonRetryableReason = errorOrMessage instanceof NonRetryableJobError
+    ? "explicit_non_retryable"
+    : isProviderQuotaExhaustedError(errorMsg)
+    ? "provider_quota_exhausted"
+    : null;
+  const nonRetryable = nonRetryableReason !== null;
 
   if (nonRetryable || attempts >= maxAttempts) {
     // Dead-letter the job
@@ -76,6 +82,7 @@ export async function handleJobFailure(
         ...jobTimingMeta(job, "failed", {
           error: errorMsg,
           non_retryable: nonRetryable,
+          non_retryable_reason: nonRetryableReason,
         }),
       },
     }).eq("id", job.id);
