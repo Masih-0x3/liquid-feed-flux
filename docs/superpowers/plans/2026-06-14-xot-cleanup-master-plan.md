@@ -1664,6 +1664,43 @@ Validation:
 - [x] `git diff --check` passed.
 - [x] `npm run check:release-state` passed read-only; live hosts returned HTTP 200, current main CI was green, Supabase functions/cron were active, no stale running jobs were found, and renderer `hermes-masih-1` was online.
 
+## Follow-Up Renderer OpenAI Transcription Split
+
+Branch:
+
+```text
+codex/xot-renderer-openai-transcription-split
+```
+
+Objective: finish the OpenAI API-family split by extracting OpenAI transcription upload, timed segment normalization, language detection, and fallback transcription logic into `services/video-renderer/src/openaiTranscription.js` while keeping `services/video-renderer/src/openai.js` as the stable public facade.
+
+Scope:
+
+- [x] Move `detectLanguageFromTranscription` and `transcribeAudio` into `openaiTranscription.js`.
+- [x] Move transcription-only private helpers and constants: multipart upload, upload size cap, timed segment normalization, and transcription API base URL.
+- [x] Re-export the moved transcription functions from `openai.js` so renderer, preview, and transcription pipeline imports remain unchanged.
+- [x] Keep subtitle and vision re-exports in `openai.js`.
+- [x] Add mocked `transcribeAudio` facade coverage through `../src/openai.js`.
+- [x] Do not change renderer production deployment state.
+
+Validation:
+
+- [x] `node --test services/video-renderer/test/openai.test.js` passed with 20 tests.
+- [x] Subagent review confirmed the facade export contract, the transcription-only extraction scope, and the current lack of import cycles.
+- [x] `npm --prefix services/video-renderer test` passed with 148 renderer tests.
+- [x] `npm run lint` passed with the known 8 Fast Refresh warnings and 0 errors.
+- [x] `npm run check:strict` passed.
+- [x] `npm run check:function-inventory` passed.
+- [x] `npm run lint:functions` passed.
+- [x] `npm run check:functions` passed.
+- [x] `npm run test:functions` passed with 274 Deno tests.
+- [x] `npm --prefix services/video-renderer audit --audit-level=low` passed with 0 vulnerabilities.
+- [x] `npm audit --audit-level=low` passed with 0 vulnerabilities.
+- [x] `npm test` passed with 19 files and 80 tests; the expected `useAuth` error-path stack printed.
+- [x] Env-backed `npm run build` passed.
+- [x] `git diff --check` passed.
+- [x] `npm run check:release-state` passed read-only; main and origin/main stayed at `1b58569`, live hosts returned HTTP 200, Supabase functions and cron were active, no stale running jobs were found, and renderer `hermes-masih-1` was online.
+
 ---
 
 # Phase 16: Runtime And Dependency Hygiene

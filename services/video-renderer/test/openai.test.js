@@ -16,6 +16,7 @@ import {
   parseRemovableWatermarkResult,
   parseVisionWatermarkResult,
   shouldRunSpecialistVisionChecks,
+  transcribeAudio,
   translateSegments,
 } from "../src/openai.js";
 
@@ -31,6 +32,45 @@ test("detects Persian and Hebrew from transcription metadata or script", () => {
       }],
     },
   }), "en");
+});
+
+test("transcribes audio through the stable OpenAI facade", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "xot-openai-transcription-"));
+  const audioPath = join(dir, "audio.mp3");
+  const oldFetch = globalThis.fetch;
+
+  await writeFile(audioPath, Buffer.from("audio"));
+  globalThis.fetch = async (url, init) => {
+    assert.equal(url, "https://api.openai.com/v1/audio/transcriptions");
+    assert.equal(init.method, "POST");
+    assert.equal(init.headers.Authorization, "Bearer openai-key");
+    assert.equal(init.body.get("model"), "gpt-4o-transcribe-diarize");
+    assert.equal(init.body.get("response_format"), "diarized_json");
+    assert.equal(init.body.get("chunking_strategy"), "auto");
+    assert.equal(init.body.get("file").name, "audio.mp3");
+    return {
+      ok: true,
+      text: async () => JSON.stringify({
+        language: "en",
+        segments: [{ start: 0, end: 1.4, text: "Free Palestine" }],
+      }),
+    };
+  };
+
+  try {
+    const result = await transcribeAudio({
+      apiKey: "openai-key",
+      audioPath,
+      model: "gpt-4o-transcribe-diarize",
+    });
+
+    assert.equal(result.model, "gpt-4o-transcribe-diarize");
+    assert.equal(result.language, "en");
+    assert.deepEqual(result.segments, [{ id: 1, start: 0, end: 1.4, text: "Free Palestine" }]);
+  } finally {
+    globalThis.fetch = oldFetch;
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("builds target-language-specific translation prompts", () => {
