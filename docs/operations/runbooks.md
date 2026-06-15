@@ -66,6 +66,14 @@ Safe migration path:
 5. Set `RSSAPP_ALLOW_QUERY_TOKEN=false` in Supabase Edge Function Secrets to reject future query-token requests.
 6. Rotate away from the old query token. Query-string compatibility should remain enabled only until the RSS.app configuration has been moved.
 
+Before deleting query-token support from code, prove the compatibility path is quiet with the release-state gate:
+
+```bash
+CHECK_COMPATIBILITY_QUIET=1 COMPATIBILITY_QUIET_HOURS=24 npm run check:release-state
+```
+
+That command must report zero `rss_query_token` hits in the quiet window. Normal `npm run check:release-state` remains informational and reports compatibility telemetry without failing the release-state check.
+
 If RSS.app does not expose header auth, keep `RSSAPP_ALLOW_QUERY_TOKEN=true`, use a long random token in the URL, and rotate the token after any incident or log export. The webhook remains idempotent by `tweet_id`, so retries should not redeliver existing posts.
 
 ---
