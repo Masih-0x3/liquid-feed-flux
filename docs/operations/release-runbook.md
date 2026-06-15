@@ -195,6 +195,28 @@ Secret/config rollback:
 
 Add new entries at the top.
 
+### 2026-06-15 - PR #44 Worker missing-source translation test gap
+
+```text
+Date: 2026-06-15
+Operator: Codex
+Git SHA: cd2f965f6ed0f034fc75a74590875fb54528e1d7
+GitHub PR: https://github.com/Masihhedayati/liquid-feed-flux/pull/44
+CI run: https://github.com/Masihhedayati/liquid-feed-flux/actions/runs/27563144220
+Vercel deployment: production hosts refreshed from main and returned HTTP 200
+Vercel aliases: https://xot.iraneyes.com, https://xot.vercel.app
+Supabase project ref: jzirqfzzvlbxwfzndaer
+Migration head before: unchanged; no migrations in PR #44
+Migration head after: unchanged; no migrations applied; latest shared local/remote migration remained 20260615043000
+Supabase function versions before deploy: webhooks-rssapp 219, worker 249, admin-retry 174, db-cleanup 146, media-processor 185, media-cleanup 182, admin-actions 173, x-poster 122, x-followers-snapshot 96, digest-compiler 102
+Supabase function versions after deploy: worker deployed from main and moved to 251; setting DEPLOY_GIT_SHA refreshed function runtime versions to webhooks-rssapp 220, admin-retry 175, db-cleanup 147, media-processor 186, media-cleanup 183, admin-actions 174, x-poster 123, x-followers-snapshot 97, digest-compiler 103
+DEPLOY_GIT_SHA: deploy script stamped cd2f965f6ed0f034fc75a74590875fb54528e1d7; Supabase secret timestamp 2026-06-15T17:12:06.857Z. Direct vault value recheck was attempted but blocked by vault column mismatch, npm DNS, and unauthenticated local Supabase CLI.
+Renderer heartbeat: hermes-masih-1 online, version 0.1.0, render_version persian-subtitles-masihh-v1, processed 5, failed 0, last_seen_at 2026-06-15 17:12:38.757+00
+Smoke checks: post-deploy npm run check:release-state passed; GitHub main CI passed; xot.iraneyes.com and xot.vercel.app returned HTTP 200 with app shell last-modified 2026-06-15T17:12:21Z and etag "fd0d78fb34f856514c496235d845f3fe"; no stale running jobs; renderer heartbeat online
+Rollback target: previous main before PR #44 was 1098efc34b3b881d5446765e587e1d8c4ae2c00a; function rollback target for worker is the prior deployed main SHA 7f3dab452eaccecd5a275def6b29127998df958d if reverting deployed worker behavior is required
+Notes: PR #44 closed the Phase 9 missing-source characterization gap by adding a focused assertion helper used by handleTranslateJob and tests for the existing No original text to translate failure path. Worker was deployed from clean main after merge so production function code stayed aligned with GitHub main.
+```
+
 ### 2026-06-15 - PR #42 Renderer OpenAI transcription helper split
 
 ```text
