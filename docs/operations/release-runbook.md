@@ -216,7 +216,25 @@ Secret verification: `public.verify_webhook_internal_token` returned true for th
 Renderer heartbeat: hermes-masih-1 online, version 0.1.0, render_version persian-subtitles-masihh-v1, processed 9, failed 0, last_seen_at 2026-06-15 20:12:36.689+00
 Smoke checks: post-rotation npm run check:release-state passed; main CI run 27573079602 passed; xot.iraneyes.com and xot.vercel.app returned HTTP 200 with app shell last-modified 2026-06-15T20:08:24Z and etag "e63c9d5f81f6c1f998761692f6ccd615"; all cron jobs active; no stale running jobs; renderer heartbeat online
 Rollback target: do not restore the exposed prior secret unless production is down and no safer option exists. If rollback is needed, generate another shared secret and keep Supabase Edge Function Secret plus Vault `WEBHOOK_SHARED_SECRET` aligned.
-Notes: The old RSS.app URL token was treated as exposed shared internal credential because production had no `RSSAPP_WEBHOOK_TOKEN`/`RSSAPP_TOKEN` secret and `webhooks-rssapp` falls back to `WEBHOOK_SHARED_SECRET`. Query-token-only RSS requests already return HTTP 401 because `RSSAPP_ALLOW_QUERY_TOKEN=false`. Remaining manual RSS.app work: remove the stale query token from the RSS.app webhook URL, regenerate the RSS.app signing secret that appeared in chat/screenshot, store the regenerated value in `RSSAPP_SIGNING_SECRET`, and then wait for a zero-hit compatibility quiet window before deleting query-token code.
+Notes: The old RSS.app URL token was treated as exposed shared internal credential because production had no `RSSAPP_WEBHOOK_TOKEN`/`RSSAPP_TOKEN` secret and `webhooks-rssapp` falls back to `WEBHOOK_SHARED_SECRET`. Query-token-only RSS requests already return HTTP 401 because `RSSAPP_ALLOW_QUERY_TOKEN=false`. The remaining manual RSS.app work was completed later on 2026-06-15: the stale URL query string was removed, the RSS.app signing secret was regenerated, the regenerated value was stored in `RSSAPP_SIGNING_SECRET`, and a signed no-query RSS.app test returned HTTP 200. Query-token code deletion still requires a zero-hit compatibility quiet window.
+```
+
+### 2026-06-15 - RSS.app URL cleanup and signing-secret regeneration
+
+```text
+Branch: codex/xot-rssapp-final-cutover-ledger
+Vercel aliases: https://xot.iraneyes.com, https://xot.vercel.app
+Supabase project ref: jzirqfzzvlbxwfzndaer
+Production code SHA: a8c23f3d4c9b77cad397460f661e55c2401000b3
+RSS.app URL status: webhook URL saved without query parameters
+RSS.app signing status: signing enabled and signing secret regenerated
+Supabase secret update: RSSAPP_SIGNING_SECRET updated at 2026-06-15T20:31:26.118Z
+RSS.app smoke: regenerated-secret signed no-query test returned HTTP 200 in 420 ms
+Supabase function versions after secret update: webhooks-rssapp 228, worker 259, admin-retry 182, db-cleanup 154, media-processor 193, media-cleanup 190, admin-actions 181, x-poster 130, x-followers-snapshot 104, digest-compiler 110
+Compatibility telemetry: still only the earlier 118 accepted rss_query_token rows, latest 2026-06-15 19:55:11.9163+00; no post-cleanup query-token hit was observed
+Smoke checks: npm run check:release-state passed; xot.iraneyes.com and xot.vercel.app returned HTTP 200; all cron jobs active; no stale running jobs; renderer heartbeat online
+Remaining gate: CHECK_COMPATIBILITY_QUIET=1 COMPATIBILITY_QUIET_HOURS=24 npm run check:release-state must report zero rss_query_token hits before deleting query-token compatibility code
+Rollback target: do not restore the exposed prior RSS.app signing secret. If RSS.app delivery fails, regenerate another RSS.app signing secret, update RSSAPP_SIGNING_SECRET, and retest signed no-query delivery.
 ```
 
 ### 2026-06-15 - PR #51 RSS.app signed-webhook auth

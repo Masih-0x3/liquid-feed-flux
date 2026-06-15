@@ -58,6 +58,9 @@ Release notes:
 - PR #48 recorded the PR #47 release ledger; it was documentation-only and did not require a Supabase deploy.
 - PR #49 added Monitoring filter and empty-state regression coverage; it was test/documentation-only and did not require a Supabase deploy.
 - PR #51 added RSS.app signed-webhook auth, merged at `257c69f047971683c22ca57df4cf137c8d89a8c7`, deployed `webhooks-rssapp`, stamped `DEPLOY_GIT_SHA=257c69f047971683c22ca57df4cf137c8d89a8c7`, then enabled RSS signing and set `RSSAPP_ALLOW_QUERY_TOKEN=false` after a signed no-query smoke returned HTTP 200.
+- PR #52 recorded the RSS signing cutover; it was documentation-only and did not require a Supabase deploy.
+- PR #53 recorded the shared webhook secret rotation; it was documentation-only and did not require a Supabase deploy.
+- Live RSS.app cleanup removed the stale query string from the configured webhook URL, regenerated the exposed RSS.app signing secret, stored the regenerated value in `RSSAPP_SIGNING_SECRET`, and confirmed another RSS.app signed no-query test returned HTTP 200. Query-token code removal remains gated only on the zero-hit quiet-window proof.
 
 Current safe-state rule:
 
@@ -2325,6 +2328,8 @@ RSS signed-webhook cutover timing note: after PR #51, production was promoted ag
 
 Shared webhook secret rotation timing note: after the old RSS.app URL token was exposed, it was treated as the shared internal `WEBHOOK_SHARED_SECRET` because no RSS-specific token secret was observed. On `2026-06-15T20:11:55Z`, `WEBHOOK_SHARED_SECRET` was regenerated in Supabase Edge Function Secrets and the matching Vault value used by cron was updated. `public.verify_webhook_internal_token` returned true for the regenerated value, a `db-cleanup` dry-run with the regenerated `x-internal-token` returned HTTP 200, and post-rotation `npm run check:release-state` passed. Function versions after rotation were `webhooks-rssapp` `227`, `worker` `258`, `admin-retry` `181`, `db-cleanup` `153`, `media-processor` `192`, `media-cleanup` `189`, `admin-actions` `180`, `x-poster` `129`, `x-followers-snapshot` `103`, and `digest-compiler` `109`.
 
+RSS.app URL and signing-secret finalization timing note: on `2026-06-15`, the authenticated RSS.app Webhooks UI showed the configured URL without any query string. The RSS.app signing secret was regenerated and the one-time value was stored in Supabase Edge Function Secrets as `RSSAPP_SIGNING_SECRET` at `2026-06-15T20:31:26.118Z`. RSS.app then sent a signed no-query test to `webhooks-rssapp`; the UI reported `Test delivered · 200 · just now` with `420 ms`, and the Webhook History row recorded a new manual test at `2:31 PM` local time. The follow-up release-state check passed, `webhooks-rssapp` advanced to version `228`, live hosts returned HTTP 200, and compatibility telemetry still showed only the earlier `118` accepted `rss_query_token` rows with latest `2026-06-15 19:55:11.9163+00`. Query-token compatibility code must stay until the enforced quiet-window gate reports zero hits.
+
 ## Steps
 
 - [x] Re-run release-state check.
@@ -2353,7 +2358,7 @@ Read-only sidecar audit identified these Phase 21 candidates. Do not remove them
 - Paused My X implementation in `src/pages/XAccount.tsx`, `src/api/xAccountData.ts`, `src/hooks/useFollowerData.ts`, and `src/components/x/FollowerGrowthChart.tsx`: removed in PR #15; `/x-account` remains routed to `src/pages/XAccountDisabled.tsx`.
 - Renderer compatibility re-export in `services/video-renderer/src/renderer.js`: removed in PR #15 after confirming active imports use `services/video-renderer/src/config.js`.
 - `recordLegacyXApiUsage` in `supabase/functions/_shared/xApiLedger.ts`: PR #34 moved Settings usage displays from `settings.x_api_usage` arrays to `get_x_api_summary`, backed by `x_api_events` and `x_deliveries`. PR #36 removed the obsolete writers after read-only code checks and a live frontend bundle check found no remaining runtime/UI dependency.
-- RSS query-token compatibility in `supabase/functions/_shared/internalAuth.ts`: PR #51 moved production to signed RSS.app webhook auth and `RSSAPP_ALLOW_QUERY_TOKEN=false`, so query-token-only requests are rejected. The old URL-token/shared-secret path has been rotated. Do not remove the compatibility code until the stale query string is removed from the RSS.app URL, the exposed RSS.app signing secret is regenerated and stored in Supabase, and temporary `rss_query_token` telemetry shows zero hits across the quiet-window gate.
+- RSS query-token compatibility in `supabase/functions/_shared/internalAuth.ts`: PR #51 moved production to signed RSS.app webhook auth and `RSSAPP_ALLOW_QUERY_TOKEN=false`, so query-token-only requests are rejected. The old URL-token/shared-secret path has been rotated, the stale RSS.app URL query string has been removed, and the exposed RSS.app signing secret has been regenerated and stored in Supabase. Do not remove the compatibility code until temporary `rss_query_token` telemetry shows zero hits across the quiet-window gate.
 
 ## Temporary Compatibility Telemetry
 
@@ -2429,13 +2434,13 @@ git commit -m "chore: remove obsolete cleanup compatibility paths"
 ## Exit Criteria
 
 - [x] Safe compatibility scaffolding is gone.
-- [ ] All compatibility scaffolding is gone. Remaining deferred candidate: RSS query-token compatibility, which is disabled in production but retained in code until the stale RSS.app URL query string is removed, the exposed RSS.app signing secret is regenerated, and telemetry is quiet.
+- [ ] All compatibility scaffolding is gone. Remaining deferred candidate: RSS query-token compatibility, which is disabled in production but retained in code until telemetry is quiet across the enforced observation window.
 - [x] Docs match the actual code for completed removals.
 - [x] Local and read-only live checks pass for completed removals and the later `f8ebcaa41dcd8ac38bc2586a242c37f91fbdb5fc` release.
 
 Current completion-audit follow-ups that are not safe to mark done without more work:
 
-- Phase 21 remains blocked by RSS query-token compatibility code until the stale RSS.app URL query string is removed, the exposed RSS.app signing secret is regenerated, and the quiet-window gate above reports zero hits.
+- Phase 21 remains blocked by RSS query-token compatibility code until the quiet-window gate above reports zero hits.
 
 ---
 

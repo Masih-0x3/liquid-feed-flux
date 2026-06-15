@@ -56,14 +56,14 @@ Live secret values are never recorded here. Secret-name presence can drift, so r
 
 ## Query-Token Removal Path
 
-Production status as of 2026-06-15T20:12Z: steps 1-4 below are complete. A signed webhook request without a query token returned HTTP 200, and an unsigned query-token-only request returned HTTP 401. The exposed old URL-token path was treated as shared `WEBHOOK_SHARED_SECRET`; that Edge secret and the matching Vault value were rotated and verified at 2026-06-15T20:11:55Z. Removing the stale query string from RSS.app, regenerating the RSS.app signing secret, and the quiet-window gate remain open before query-token code can be deleted.
+Production status as of 2026-06-15T20:34Z: steps 1-6 below are complete. A signed webhook request without a query token returned HTTP 200, and an unsigned query-token-only request returned HTTP 401. The exposed old URL-token path was treated as shared `WEBHOOK_SHARED_SECRET`; that Edge secret and the matching Vault value were rotated and verified at 2026-06-15T20:11:55Z. The stale query string was removed from the RSS.app webhook URL, the exposed RSS.app signing secret was regenerated, the regenerated value was stored in Supabase as `RSSAPP_SIGNING_SECRET` at 2026-06-15T20:31:26.118Z, and a regenerated-secret RSS.app signed no-query test returned HTTP 200. Only the quiet-window gate remains open before query-token code can be deleted.
 
 1. Enable RSS.app webhook signing on the configured webhook. RSS.app sends `RSSApp-Signature: t=<unix seconds>,v1=<hex hmac>` where `v1` signs `${t}.${raw_body}` with HMAC-SHA256.
 2. Save the one-time RSS.app signing secret in Supabase Edge Function Secrets as `RSSAPP_SIGNING_SECRET`.
 3. Deploy `webhooks-rssapp` and send an RSS.app webhook test; the latest deployment should return `200` with no `rss_query_token` compatibility event.
 4. Set `RSSAPP_ALLOW_QUERY_TOKEN=false`.
 5. Remove `?token=...`, `?webhook_token=...`, or `?rssapp_token=...` from the RSS.app webhook URL.
-6. Rotate the exposed old query-token secret and regenerate the RSS.app signing secret if it has appeared in chat, screenshots, logs, or docs. The old URL-token/shared-secret path was rotated on 2026-06-15; the RSS.app signing secret still needs regeneration in RSS.app and an updated `RSSAPP_SIGNING_SECRET` value in Supabase before the next signed test.
+6. Rotate the exposed old query-token secret and regenerate the RSS.app signing secret if it has appeared in chat, screenshots, logs, or docs. The old URL-token/shared-secret path was rotated on 2026-06-15, and the RSS.app signing secret was regenerated and stored in Supabase before the regenerated signed test.
 7. Before removing query-token support from `supabase/functions/_shared/internalAuth.ts`, run the enforced release-state quiet-window gate:
 
 ```bash
