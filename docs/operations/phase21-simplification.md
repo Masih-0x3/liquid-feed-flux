@@ -132,6 +132,8 @@ Response aliases removed from `get_monitoring_overview` were `needs_action`, `fa
 - Production frontend was refreshed at `2026-06-15T11:56:20Z`; main CI run `27544386658` passed; post-deploy `npm run check:release-state` passed with no stale running jobs and renderer heartbeat online.
 - PR #34 moved Settings and X Automation usage displays from legacy `settings.x_api_usage` to the canonical `get_x_api_summary` response, deployed all 10 Edge Functions from `ad29a4d5623cef204521e116ffc5aadaf46ff7fe`, and stamped `DEPLOY_GIT_SHA=ad29a4d5623cef204521e116ffc5aadaf46ff7fe`.
 - Production frontend was refreshed at `2026-06-15T12:20:59Z`; main CI run `27545705292` passed; post-deploy `npm run check:release-state` passed with no stale running jobs and renderer heartbeat online.
+- PR #36 removed the obsolete `recordLegacyXApiUsage` writer and stale frontend `x_api_usage` default, deployed all 10 Edge Functions from `7f3dab452eaccecd5a275def6b29127998df958d`, and stamped `DEPLOY_GIT_SHA=7f3dab452eaccecd5a275def6b29127998df958d`.
+- Production frontend was refreshed at `2026-06-15T14:57:26Z`; main CI run `27555124925` passed; post-deploy `npm run check:release-state` passed with no stale running jobs and renderer heartbeat online.
 - The worker fallback cron now includes `reprocess`; the manually queued reprocess batch drained to `50` completed jobs in the 24-hour queue check.
 - Live `translation_prompt.max_completion_tokens` and `translation_prompt.scoring.max_completion_tokens` were normalized from `50000` to `8000`. `reasoning_effort=high` remains a deliberate product-quality/cost tradeoff to tune separately.
 
