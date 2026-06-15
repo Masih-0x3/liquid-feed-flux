@@ -34,15 +34,15 @@ These items still need request-log evidence or a product decision before removal
 
 ### Temporary Compatibility Telemetry
 
-The `codex/xot-compat-usage-telemetry` branch adds `public.compatibility_usage_events` and best-effort Edge Function writes for the deferred compatibility paths that logs cannot prove:
+PR #22 added `public.compatibility_usage_events` and best-effort Edge Function writes for the deferred compatibility paths that logs cannot prove:
 
 - `monitoring_filter_alias` when `get_monitoring_entries` receives a legacy filter alias.
 - `admin_action_alias` when the `backfill_signatures` alias forwards to `backfill_dedupe`.
 - `rss_query_token` when RSS webhook auth succeeds through a query token instead of `x-webhook-token`.
 
-The table is service-role-only and intentionally stores no request body, auth token, or query string. Removal of these compatibility paths stays deferred until the telemetry table shows zero usage across a normal operator window and RSS.app is migrated to header auth.
+The table is service-role-only and intentionally stores no request body, auth token, or query string. Migration `20260615043000` was applied and repaired into the remote migration ledger, then shared-auth Edge Functions were deployed from `ccd06079eae7e454ffd372dce94f71940c64e560`. Removal of these compatibility paths stays deferred until the telemetry table shows zero usage across a normal operator window and RSS.app is migrated to header auth.
 
-Use this query after the telemetry branch has been migrated and deployed:
+Use this query during the observation window:
 
 ```sql
 select
@@ -83,6 +83,8 @@ Response aliases still intentionally emitted for compatibility are `needs_action
 - Authenticated Dashboard browser verification still requires an active admin browser session/JWT after PR #19.
 - PR #20 removed the safe worker export-surface slice, deployed `worker` version `235`, and stamped `DEPLOY_GIT_SHA=70d5733a5604a535e1d44be1224a10033121d102`.
 - Production frontend was refreshed at `2026-06-15T04:05:59Z`; main CI run `27523244015` passed; post-deploy `npm run check:release-state` passed with no stale running jobs and renderer heartbeat online.
+- PR #22 added temporary compatibility usage telemetry, applied migration `20260615043000`, deployed `admin-actions` `161`, `db-cleanup` `134`, `digest-compiler` `90`, `media-cleanup` `170`, `media-processor` `173`, `webhooks-rssapp` `207`, `worker` `237`, `x-followers-snapshot` `84`, and `x-poster` `110`, and stamped `DEPLOY_GIT_SHA=ccd06079eae7e454ffd372dce94f71940c64e560`.
+- Production frontend was refreshed at `2026-06-15T04:54:52Z`; main CI run `27524704871` passed; post-deploy `npm run check:release-state` passed; initial `public.compatibility_usage_events` read returned zero rows.
 - The worker fallback cron now includes `reprocess`; the manually queued reprocess batch drained to `50` completed jobs in the 24-hour queue check.
 - Live `translation_prompt.max_completion_tokens` and `translation_prompt.scoring.max_completion_tokens` were normalized from `50000` to `8000`. `reasoning_effort=high` remains a deliberate product-quality/cost tradeoff to tune separately.
 
