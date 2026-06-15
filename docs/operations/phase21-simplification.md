@@ -55,6 +55,8 @@ Response aliases still intentionally emitted for compatibility are `needs_action
 - PR #19 hardened Dashboard base-summary degradation, deployed `admin-actions` version `158`, and stamped `DEPLOY_GIT_SHA=c6ba0ba46f3e45f888c23fd95cdd8cbf4b9cb1b1`.
 - Production frontend was refreshed at `2026-06-15T03:45:48Z`; main CI run `27522692966` passed; unauthenticated `admin-actions` sanity returned the expected `401`.
 - Authenticated Dashboard browser verification still requires an active admin browser session/JWT after PR #19.
+- PR #20 removed the safe worker export-surface slice, deployed `worker` version `235`, and stamped `DEPLOY_GIT_SHA=70d5733a5604a535e1d44be1224a10033121d102`.
+- Production frontend was refreshed at `2026-06-15T04:05:59Z`; main CI run `27523244015` passed; post-deploy `npm run check:release-state` passed with no stale running jobs and renderer heartbeat online.
 - The worker fallback cron now includes `reprocess`; the manually queued reprocess batch drained to `50` completed jobs in the 24-hour queue check.
 - Live `translation_prompt.max_completion_tokens` and `translation_prompt.scoring.max_completion_tokens` were normalized from `50000` to `8000`. `reasoning_effort=high` remains a deliberate product-quality/cost tradeoff to tune separately.
 

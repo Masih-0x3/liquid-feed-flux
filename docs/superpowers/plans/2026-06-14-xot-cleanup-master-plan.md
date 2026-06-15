@@ -27,7 +27,7 @@ Main checkout preserved for user work:
 Current verified main release anchor:
 
 ```text
-c6ba0ba46f3e45f888c23fd95cdd8cbf4b9cb1b1
+70d5733a5604a535e1d44be1224a10033121d102
 ```
 
 Release notes:
@@ -38,6 +38,7 @@ Release notes:
 - PR #17 hotfixed Dashboard optional-summary fallback failures and deployed `admin-actions`.
 - PR #16 added OpenAI cost guardrails, merged at `c4076d3055c8e9d509387131a8d0d8ddf18666ec`, applied migration `20260615005500`, and deployed `admin-actions` plus `worker`.
 - PR #19 fixed degraded Dashboard Edge Function failures, merged at `c6ba0ba46f3e45f888c23fd95cdd8cbf4b9cb1b1`, deployed `admin-actions` version `158`, and stamped `DEPLOY_GIT_SHA=c6ba0ba46f3e45f888c23fd95cdd8cbf4b9cb1b1`.
+- PR #20 removed the safe worker export-surface slice, merged at `70d5733a5604a535e1d44be1224a10033121d102`, deployed `worker` version `235`, and stamped `DEPLOY_GIT_SHA=70d5733a5604a535e1d44be1224a10033121d102`.
 
 Current safe-state rule:
 
@@ -2090,6 +2091,8 @@ Follow-up timing note: after PR #16, production was promoted again at `c4076d305
 
 Dashboard incident follow-up timing note: after PR #19, production was promoted again at `c6ba0ba46f3e45f888c23fd95cdd8cbf4b9cb1b1`. `admin-actions` was live at version `158`, `DEPLOY_GIT_SHA` was stamped to `c6ba0ba46f3e45f888c23fd95cdd8cbf4b9cb1b1`, main CI run `27522692966` passed, and the production frontend refreshed at `2026-06-15T03:45:48Z`.
 
+Worker export cleanup timing note: after PR #20, production was promoted again at `70d5733a5604a535e1d44be1224a10033121d102`. `worker` was live at version `235`, main CI run `27523244015` passed, live hosts refreshed at `2026-06-15T04:05:59Z`, and `npm run check:release-state` passed with no stale running jobs and renderer heartbeat online.
+
 ## Steps
 
 - [x] Re-run release-state check.
@@ -2142,7 +2145,7 @@ git commit -m "chore: remove obsolete cleanup compatibility paths"
 - [x] Safe compatibility scaffolding is gone.
 - [ ] All compatibility scaffolding is gone. Deferred candidates: monitoring aliases, `backfill_signatures`, remaining worker helper export cleanup, RSS query-token compatibility, and `recordLegacyXApiUsage`.
 - [x] Docs match the actual code for completed removals.
-- [x] Local and read-only live checks pass for completed removals and the later `c6ba0ba46f3e45f888c23fd95cdd8cbf4b9cb1b1` release.
+- [x] Local and read-only live checks pass for completed removals and the later `70d5733a5604a535e1d44be1224a10033121d102` release.
 
 ---
 
