@@ -2151,7 +2151,7 @@ npm run check:release-state
 ```
 
 - [x] Remove frontend schema fallbacks that are no longer used.
-- [ ] Remove unused admin action wrappers. Deferred: `backfill_signatures` is local-code unused by the current frontend, but removal needs telemetry showing no external/manual calls. PR #22 added temporary `admin_action_alias` rows for this gate.
+- [x] Remove unused admin action wrappers. `backfill_signatures` was removed after temporary telemetry showed no `admin_action_alias` rows across the observed production window; operators should use `backfill_dedupe`.
 - [x] Remove unused worker entrypoint re-exports and file-local lifecycle constants.
 - [ ] Remove remaining worker helper exports. Partially complete: PR #25 removed the safe file-local/test-only helper export slice and current Telegram helper behavior tests cover the extracted delivery boundary. Residual exports are production imports or public module boundaries and should only be removed after the importer is moved or behavior-level Deno tests cover the split.
 - [x] Remove dead code identified by TypeScript and Deno checks.
@@ -2163,8 +2163,8 @@ Read-only sidecar audit identified these Phase 21 candidates. Do not remove them
 
 - Monitoring legacy Supabase fallback in `src/api/monitoringData.ts`: removed in PR #15 after authenticated Monitoring smoke and release-state checks.
 - Dashboard direct RPC fallback in `src/api/dashboardData.ts`: removed in PR #15 after Dashboard remained healthy through `admin-actions` and `src/test/dashboard-data.test.ts` was updated. PR #19 later kept `admin-actions` as the single Dashboard boundary by adding backend degraded handling for base `public.get_dashboard_summary()` failures and client-side Edge Function error-body extraction.
-- Monitoring response/filter aliases in `src/api/monitoringData.ts` and `supabase/functions/admin-actions/monitoringReads.ts`: remove only after old frontend bundles have aged out and temporary `monitoring_filter_alias` telemetry shows no legacy filter values across a normal operator window.
-- Unused admin action cases in `supabase/functions/_shared/adminActionNames.ts` and `supabase/functions/admin-actions/index.ts`: strongest candidate is the backward-compatible `backfill_signatures` alias, but temporary `admin_action_alias` telemetry and runbook/manual operator usage must be checked first.
+- Monitoring response/filter aliases in `src/api/monitoringData.ts` and `supabase/functions/admin-actions/monitoringReads.ts`: removed after old frontend bundles aged out and temporary `monitoring_filter_alias` telemetry showed no legacy filter values across the observed production window.
+- Unused admin action cases in `supabase/functions/_shared/adminActionNames.ts` and `supabase/functions/admin-actions/index.ts`: `backfill_signatures` was removed after temporary `admin_action_alias` telemetry showed no external/manual use.
 - Worker helper export surface in `supabase/functions/worker/*`: the unused `worker/index.ts` scoring re-export block and `MAX_ATTEMPTS` lifecycle export were removed in PR #20. PR #25 removed the safe file-local/test-only helper export slice. Remaining helper exports should be removed only when their production importer is moved or public behavior tests cover the split.
 - Paused My X implementation in `src/pages/XAccount.tsx`, `src/api/xAccountData.ts`, `src/hooks/useFollowerData.ts`, and `src/components/x/FollowerGrowthChart.tsx`: removed in PR #15; `/x-account` remains routed to `src/pages/XAccountDisabled.tsx`.
 - Renderer compatibility re-export in `services/video-renderer/src/renderer.js`: removed in PR #15 after confirming active imports use `services/video-renderer/src/config.js`.
@@ -2190,13 +2190,13 @@ group by 1, 2, 3, 4, 5
 order by last_seen_at desc;
 ```
 
-Removal remains blocked until the relevant feature rows are absent across a normal production/operator window:
+The historical removal gates were:
 
-- `monitoring_filter_alias`: proves old Monitoring filter aliases are unused.
-- `admin_action_alias`: proves `backfill_signatures` is unused.
+- `monitoring_filter_alias`: proved old Monitoring filter aliases were unused before their removal.
+- `admin_action_alias`: proved `backfill_signatures` was unused before its removal.
 - `rss_query_token`: proves RSS.app no longer sends webhook auth in the URL.
 
-Initial post-deploy read after `ccd06079eae7e454ffd372dce94f71940c64e560` returned zero rows. Follow-up telemetry at `2026-06-15T05:09:40Z` recorded `2` `rss_query_token` hits for `/webhooks-rssapp` with `legacy_value=query:token`. Later telemetry at `2026-06-15T10:49:04Z` recorded `40` `rss_query_token` hits for the same path, confirming RSS.app query-token compatibility is still actively used and must not be removed yet.
+Initial post-deploy read after `ccd06079eae7e454ffd372dce94f71940c64e560` returned zero rows. Follow-up telemetry at `2026-06-15T05:09:40Z` recorded `2` `rss_query_token` hits for `/webhooks-rssapp` with `legacy_value=query:token`. Later telemetry at `2026-06-15T10:49:04Z` recorded `40` `rss_query_token` hits for the same path. A refreshed query at `2026-06-15T10:56:03Z` recorded `41` `rss_query_token` hits and no `monitoring_filter_alias` or `admin_action_alias` rows. Monitoring aliases and `backfill_signatures` were therefore removed; RSS.app query-token compatibility is still actively used and must not be removed yet.
 
 Post-PR #25 dashboard check: a user-visible "Dashboard failed to load / Edge Function returned a non-2xx status code" report was investigated read-only first. Direct unauthenticated `admin-actions` checks returned expected `401`s, local execution of the dashboard summary module against live Supabase returned a dashboard payload, and post-deploy authenticated `admin-actions` `get_dashboard_summary` returned HTTP `200`, `success=true`, and a dashboard payload. No Dashboard code/config hotfix was needed for this incident.
 
@@ -2225,7 +2225,7 @@ git commit -m "chore: remove obsolete cleanup compatibility paths"
 ## Exit Criteria
 
 - [x] Safe compatibility scaffolding is gone.
-- [ ] All compatibility scaffolding is gone. Deferred candidates: monitoring aliases, `backfill_signatures`, remaining worker helper export cleanup, RSS query-token compatibility, and `recordLegacyXApiUsage`.
+- [ ] All compatibility scaffolding is gone. Deferred candidates: remaining worker helper export cleanup, RSS query-token compatibility, and `recordLegacyXApiUsage`.
 - [x] Docs match the actual code for completed removals.
 - [x] Local and read-only live checks pass for completed removals and the later `f8ebcaa41dcd8ac38bc2586a242c37f91fbdb5fc` release.
 

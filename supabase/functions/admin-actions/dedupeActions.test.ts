@@ -2,7 +2,6 @@ import { assertEquals } from "jsr:@std/assert";
 import {
   auditDuplicateCandidatesAdminAction,
   backfillDedupeAdminAction,
-  backfillSignaturesAdminAction,
   clearDuplicateAdminAction,
   loadDuplicateGateConfig,
   markDedupePending,
@@ -429,29 +428,4 @@ Deno.test("clear duplicate clears post state, blocklists ordered pair, and recor
     meta: {},
     relatedTweetId: "t1",
   });
-});
-
-Deno.test("backfill signatures keeps the legacy alias contract", async () => {
-  const supabase = fakeSupabase({ posts: [] });
-  const events: unknown[] = [];
-
-  const result = await backfillSignaturesAdminAction(supabase, {
-    dry_run: true,
-  }, {
-    actorId: "admin-1",
-    recordCompatibilityUsage: async (_supabase, event) => {
-      events.push(event);
-    },
-  });
-
-  assertEquals(result.alias, "backfill_dedupe");
-  assertEquals(result.ok, true);
-  assertEquals(events, [{
-    source: "admin-actions",
-    feature: "admin_action_alias",
-    legacyValue: "backfill_signatures",
-    canonicalValue: "backfill_dedupe",
-    action: "backfill_signatures",
-    actorId: "admin-1",
-  }]);
 });

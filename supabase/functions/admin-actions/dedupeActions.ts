@@ -4,10 +4,6 @@ import {
   normalizeDuplicateGateConfig,
   runDuplicateGate,
 } from "../_shared/dedupe.ts";
-import {
-  type CompatibilityUsageEvent,
-  recordCompatibilityUsage,
-} from "../_shared/compatibilityTelemetry.ts";
 import type {
   AdminActionResponse,
   RecordFeedbackFn,
@@ -38,11 +34,6 @@ type TableQueryBuilder = PromiseLike<QueryResult> & {
 export type DedupeActionDeps = {
   runDuplicateGate?: typeof runDuplicateGate;
   now?: () => Date;
-  actorId?: string | null;
-  recordCompatibilityUsage?: (
-    supabase: SupabaseAdminClient,
-    event: CompatibilityUsageEvent,
-  ) => Promise<void>;
 };
 
 export type ClearDuplicateDeps = {
@@ -316,21 +307,4 @@ export async function clearDuplicateAdminAction(
       message: "Duplicate cleared and pair blocklisted",
     },
   };
-}
-
-export async function backfillSignaturesAdminAction(
-  supabase: SupabaseAdminClient,
-  body: Record<string, unknown>,
-  deps: DedupeActionDeps = {},
-) {
-  await (deps.recordCompatibilityUsage ?? recordCompatibilityUsage)(supabase, {
-    source: "admin-actions",
-    feature: "admin_action_alias",
-    legacyValue: "backfill_signatures",
-    canonicalValue: "backfill_dedupe",
-    action: "backfill_signatures",
-    actorId: deps.actorId,
-  });
-  const result = await backfillDedupeAdminAction(supabase, body, deps);
-  return { ...result, alias: "backfill_dedupe" };
 }

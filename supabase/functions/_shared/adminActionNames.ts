@@ -43,7 +43,6 @@ export const ADMIN_ACTION_NAMES = [
   'send_test_tweet',
   'test_hydrate_tweet',
   'rehydrate_recent_truncated',
-  'backfill_signatures',
   'rescore_recent',
   'preview_translation',
   'rescore_post',

@@ -18,6 +18,8 @@ This branch removes compatibility code only after the PR #13 release was live, a
 - Removed the Dashboard direct `get_dashboard_summary` RPC fallback from `src/api/dashboardData.ts`.
 - PR #19 later preserved that boundary by making `admin-actions` return a degraded critical Dashboard when the base `public.get_dashboard_summary()` RPC fails, instead of restoring a frontend direct-RPC fallback.
 - Removed the Monitoring direct Supabase legacy query fallback from `src/api/monitoringData.ts`.
+- Removed the Monitoring filter/response aliases after temporary telemetry showed no `monitoring_filter_alias` rows across the observed production window.
+- Removed the `backfill_signatures` admin-action alias after temporary telemetry showed no `admin_action_alias` rows across the observed production window. Operators should use `backfill_dedupe`.
 - Removed the compatibility `loadConfigFromEnv` re-export from `services/video-renderer/src/renderer.js`; callers import config from `services/video-renderer/src/config.js`.
 - Removed unused worker export surface that had no local importers:
   - the scoring re-export block from `supabase/functions/worker/index.ts`
@@ -25,10 +27,8 @@ This branch removes compatibility code only after the PR #13 release was live, a
 
 ## Deferred
 
-These items still need request-log evidence or a product decision before removal:
+These items still need request-log evidence, follow-up refactoring, or a product decision before removal:
 
-- Old Monitoring response/filter aliases in `src/api/monitoringData.ts` and `supabase/functions/admin-actions/monitoringReads.ts`.
-- Unused admin-action names such as `backfill_signatures`, after checking admin-actions request logs and runbooks. Local code already uses canonical `backfill_dedupe`; `backfill_signatures` only forwards to it, but successful admin action names are not currently recorded in an app table, and this Supabase CLI does not expose function request logs.
 - Remaining worker helper export review in `supabase/functions/worker/*` after the safe file-local/test-only slice; keep production imports exported unless a later refactor removes the importer.
 - RSS query-token compatibility and `recordLegacyXApiUsage`; both still have documented production relevance.
 
@@ -49,13 +49,15 @@ Focused validation for this slice:
 
 ### Temporary Compatibility Telemetry
 
-PR #22 added `public.compatibility_usage_events` and best-effort Edge Function writes for the deferred compatibility paths that logs cannot prove:
+PR #22 added `public.compatibility_usage_events` and best-effort Edge Function writes for compatibility paths that logs could not prove at the time:
 
 - `monitoring_filter_alias` when `get_monitoring_entries` receives a legacy filter alias.
 - `admin_action_alias` when the `backfill_signatures` alias forwards to `backfill_dedupe`.
 - `rss_query_token` when RSS webhook auth succeeds through a query token instead of `x-webhook-token`.
 
-The table is service-role-only and intentionally stores no request body, auth token, or query string. Migration `20260615043000` was applied and repaired into the remote migration ledger, then shared-auth Edge Functions were deployed from `ccd06079eae7e454ffd372dce94f71940c64e560`. Removal of these compatibility paths stays deferred until the telemetry table shows zero usage across a normal operator window and RSS.app is migrated to header auth.
+The table is service-role-only and intentionally stores no request body, auth token, or query string. Migration `20260615043000` was applied and repaired into the remote migration ledger, then shared-auth Edge Functions were deployed from `ccd06079eae7e454ffd372dce94f71940c64e560`.
+
+Follow-up telemetry at `2026-06-15T10:56:03Z` showed only `rss_query_token` activity: `41` hits for `/webhooks-rssapp` with `legacy_value=query:token`. No `monitoring_filter_alias` or `admin_action_alias` rows were present, so the Monitoring aliases and `backfill_signatures` alias were removed on branch `codex/xot-remove-unused-compat-aliases`. RSS query-token compatibility stays deferred until RSS.app is migrated to header auth and telemetry shows zero hits across a normal operator window.
 
 Use this query during the observation window:
 
@@ -75,9 +77,9 @@ order by last_seen_at desc;
 
 ### Monitoring Alias Removal Gate
 
-Current frontend code uses canonical Monitoring filters, but the backend still accepts old filter aliases for aged-out frontend bundles and bookmarked URLs.
+Current frontend code uses canonical Monitoring filters. The backend previously accepted old filter aliases for aged-out frontend bundles and bookmarked URLs.
 
-Do not remove these aliases until authenticated production browser evidence and request/log evidence show zero legacy use across a normal operator window:
+The following aliases were removed after authenticated production checks and zero-use telemetry:
 
 - `needs_action` / `needs-action` -> `needs_attention`
 - `failed` -> `failed_stuck`
@@ -87,7 +89,7 @@ Do not remove these aliases until authenticated production browser evidence and 
 - `ready_to_publish` -> `ready_to_deliver`
 - `needs_translation` / `delivery_pending` -> `translation_queue`
 
-Response aliases still intentionally emitted for compatibility are `needs_action`, `failed`, `waiting_translation`, `delivery_pending`, `awaiting_review`, `duplicate_skipped`, `hydration_backlog`, `posted_24h`, and `ready_to_publish`. Existing successful requests do not log raw filters, so the temporary `monitoring_filter_alias` telemetry must show zero usage before removing backend filter aliases.
+Response aliases removed from `get_monitoring_overview` were `needs_action`, `failed`, `waiting_translation`, `delivery_pending`, `awaiting_review`, `duplicate_skipped`, `hydration_backlog`, `posted_24h`, and `ready_to_publish`.
 
 ## Follow-Up Release Notes
 
