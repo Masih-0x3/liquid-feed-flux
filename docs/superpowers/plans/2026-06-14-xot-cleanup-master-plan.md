@@ -625,13 +625,13 @@ Extract Telegram send/media helpers from `worker/index.ts` while keeping `handle
 
 ## Implementation Steps
 
-- [ ] Confirm current worker helper boundaries.
+- [x] Confirm current worker helper boundaries.
 
 ```bash
 rg -n "function (mapLimit|fetchImageBytes|sendTelegramPhotoFromStorage|sendTelegramPhotoGroupFromStorage|telegramVideoTooLargeError|fetchVideoBytes|sendTelegramVideoFromStorage|sendTelegramMedia|throwTelegramError|getMediaUrl|computeAdaptiveSpacing)|class TelegramRateLimitError" supabase/functions/worker/index.ts
 ```
 
-- [ ] Create `supabase/functions/worker/telegramDelivery.ts` with imports:
+- [x] Create `supabase/functions/worker/telegramDelivery.ts` with imports:
 
 ```ts
 import {
@@ -648,8 +648,8 @@ import {
 } from "./workerUtils.ts";
 ```
 
-- [ ] Move helper bodies verbatim first.
-- [ ] Export only what `worker/index.ts` needs:
+- [x] Move helper bodies verbatim first.
+- [x] Export only what `worker/index.ts` needs:
 
 ```ts
 export {
@@ -664,7 +664,7 @@ export {
 ```
 
 - [x] Keep `TelegramRateLimitError` file-local and assert thrown error shape in focused tests.
-- [ ] Update `worker/index.ts` imports:
+- [x] Update `worker/index.ts` imports:
 
 ```ts
 import {
@@ -678,8 +678,8 @@ import {
 } from "./telegramDelivery.ts";
 ```
 
-- [ ] Remove now-unused imports from `worker/index.ts`.
-- [ ] Remove the moved helper bodies from `worker/index.ts`.
+- [x] Remove now-unused imports from `worker/index.ts`.
+- [x] Remove the moved helper bodies from `worker/index.ts`.
 
 ## Worker Helper Export Cleanup Follow-Up
 
@@ -690,14 +690,16 @@ Branch `codex/xot-worker-helper-export-cleanup` completes the safe export-surfac
 - Deleted the unused `ResolvedMediaSource` alias.
 - Kept exports that are still required by production imports, including `ResolvedVariant`, `VIDEO_RENDER_DEFER_MS`, `ScoringDecisionLog`, and the helper functions imported by `worker/index.ts`.
 
+Status refresh: current `main` has the Telegram delivery helpers extracted into `supabase/functions/worker/telegramDelivery.ts`, `worker/index.ts` imports the public helper boundary from that module, and `supabase/functions/worker/telegramDelivery.test.ts` covers the helper behaviors listed below.
+
 ## Tests To Add
 
-- [ ] `getMediaUrl` returns signed storage URL when signing succeeds.
-- [ ] `getMediaUrl` falls back to `src_url` when signing fails.
-- [ ] `sendTelegramMedia` retries Markdown parse errors with stripped plain text.
+- [x] `getMediaUrl` returns signed storage URL when signing succeeds.
+- [x] `getMediaUrl` falls back to `src_url` when signing fails.
+- [x] `sendTelegramMedia` retries Markdown parse errors with stripped plain text.
 - [x] `sendTelegramMedia` throws `TelegramRateLimitError` with `retryAfterSeconds` on Telegram `retry_after`.
-- [ ] `sendTelegramVideoFromStorage` throws `NonRetryableJobError` when declared video size exceeds Telegram bot limit.
-- [ ] `computeAdaptiveSpacing` returns expected spacing for zero, low, medium, and high recent rate-limit counts.
+- [x] `sendTelegramVideoFromStorage` throws `NonRetryableJobError` when declared video size exceeds Telegram bot limit.
+- [x] `computeAdaptiveSpacing` preserves current zero-or-fallback behavior for no recent rate-limit failures, recent rate-limit failures, and query failure.
 
 ## Focused Validation
 
@@ -722,10 +724,24 @@ git commit -m "refactor: extract worker telegram delivery helpers"
 
 ## Exit Criteria
 
-- [ ] Telegram helpers are unit-tested outside `worker/index.ts`.
-- [ ] `handleDeliverJob` behavior is unchanged.
-- [ ] Rate-limit handling still reaches job failure retry logic.
-- [ ] Full local gate passes.
+- [x] Telegram helpers are unit-tested outside `worker/index.ts`.
+- [x] `handleDeliverJob` behavior is unchanged.
+- [x] Rate-limit handling still reaches job failure retry logic.
+- [x] Full local gate passes.
+
+Current verification for the Telegram helper status refresh:
+
+- `npx deno test supabase/functions/worker/telegramDelivery.test.ts`
+- `npx deno check supabase/functions/worker/index.ts supabase/functions/worker/telegramDelivery.ts supabase/functions/worker/telegramDelivery.test.ts supabase/functions/worker/jobLifecycle.ts supabase/functions/worker/workerUtils.ts`
+- `npm run lint:functions`
+- `npm run check:functions`
+- `npm run test:functions`
+- `npm run check:function-inventory`
+- `npm run lint`
+- `npm run check:strict`
+- `npm test`
+- `VITE_SUPABASE_URL=https://jzirqfzzvlbxwfzndaer.supabase.co VITE_SUPABASE_PUBLISHABLE_KEY=local-build-validation-key VITE_SUPABASE_PROJECT_ID=jzirqfzzvlbxwfzndaer npm run build`
+- `git diff --check`
 
 ---
 
@@ -2119,7 +2135,7 @@ npm run check:release-state
 - [x] Remove frontend schema fallbacks that are no longer used.
 - [ ] Remove unused admin action wrappers. Deferred: `backfill_signatures` is local-code unused by the current frontend, but removal needs telemetry showing no external/manual calls. PR #22 added temporary `admin_action_alias` rows for this gate.
 - [x] Remove unused worker entrypoint re-exports and file-local lifecycle constants.
-- [ ] Remove remaining worker helper exports. Partially complete: PR #25 removed the safe file-local/test-only helper export slice. Residual exports are production imports or public module boundaries and should only be removed after the importer is moved or behavior-level Deno tests cover the split.
+- [ ] Remove remaining worker helper exports. Partially complete: PR #25 removed the safe file-local/test-only helper export slice and current Telegram helper behavior tests cover the extracted delivery boundary. Residual exports are production imports or public module boundaries and should only be removed after the importer is moved or behavior-level Deno tests cover the split.
 - [x] Remove dead code identified by TypeScript and Deno checks.
 - [x] Update docs to reflect the final module map.
 
