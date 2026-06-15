@@ -60,6 +60,46 @@ function emptyDashboardRowsResult(): DashboardRowsResult {
   return { data: [], error: null };
 }
 
+function degradedDashboardBase(error: unknown): Record<string, unknown> {
+  return {
+    metrics: {
+      posts_ingested: 0,
+      posts_translated: 0,
+      posts_delivered: 0,
+      failed_jobs: 0,
+      posts_truncated_24h: 0,
+      posts_hydrated_24h: 0,
+      x_api_calls_24h: 0,
+      x_posts_24h: 0,
+      x_failed_24h: 0,
+      x_skipped_no_media_24h: 0,
+      x_media_uploads_24h: 0,
+    },
+    health: {
+      success_rate: 0,
+      avg_latency: 0,
+      active_feeds: 0,
+      queue_size: 0,
+      queue_running: 0,
+      queue_stale_running_30m: 0,
+      is_online: false,
+      x_success_rate: 0,
+      x_monthly_posts: 0,
+      x_monthly_budget: 2500,
+      x_budget_used_pct: 0,
+    },
+    recent_posts: [],
+    ingest_heartbeat: {
+      state: "critical",
+      last_post_at: null,
+      age_seconds: null,
+      warn_minutes: 120,
+      critical_minutes: 360,
+    },
+    dashboard_error: errorMessage(error),
+  };
+}
+
 function intervalAgeSeconds(timestamp: unknown): number | null {
   if (typeof timestamp !== "string") return null;
   const ms = Date.now() - new Date(timestamp).getTime();
@@ -1070,12 +1110,12 @@ async function loadScoringTuningSummary(supabase: any) {
 
 export async function getEnhancedDashboardSummary(supabase: any) {
   const { data: base, error } = await supabase.rpc("get_dashboard_summary");
-  if (error) throw error;
+  if (error) logDashboardFallback("base_summary", error);
 
-  const dashboard = (base && typeof base === "object" ? base : {}) as Record<
-    string,
-    unknown
-  >;
+  const dashboard =
+    (base && typeof base === "object"
+      ? base
+      : degradedDashboardBase(error)) as Record<string, unknown>;
   const metrics =
     (dashboard.metrics && typeof dashboard.metrics === "object"
       ? dashboard.metrics
@@ -1258,10 +1298,14 @@ export async function getEnhancedDashboardSummary(supabase: any) {
     xLocalUsage.budget_used_pct,
     num(health.x_budget_used_pct),
   );
-  let severity: "ok" | "warning" | "critical" = "ok";
-  let primaryIssue = "Pipeline is operating normally";
+  let severity: "ok" | "warning" | "critical" = error ? "critical" : "ok";
+  let primaryIssue = error
+    ? "Dashboard base summary is degraded"
+    : "Pipeline is operating normally";
   let recommendedRoute = "/monitoring";
-  if (queueBreakdown.stale_running > 0) {
+  if (error) {
+    recommendedRoute = "/monitoring";
+  } else if (queueBreakdown.stale_running > 0) {
     severity = "critical";
     primaryIssue = `${queueBreakdown.stale_running} stale running job${
       queueBreakdown.stale_running === 1 ? "" : "s"

@@ -4,6 +4,7 @@ import {
   cronCadenceSeconds,
   durationSeconds,
   estimateMonthlyRuns,
+  getEnhancedDashboardSummary,
   latestXDeliveriesByPost,
   normalizeResourceUsage,
   percentUsed,
@@ -209,6 +210,73 @@ Deno.test("dashboard fallback helper converts optional query errors to safe rows
     );
     assertEquals(rows, { data: [], error: null });
     assertEquals(errors.length, 1);
+  } finally {
+    console.error = originalError;
+  }
+});
+
+Deno.test("dashboard summary degrades instead of throwing when the base RPC fails", async () => {
+  const errors: unknown[] = [];
+  const originalError = console.error;
+  console.error = (...args: unknown[]) => {
+    errors.push(args);
+  };
+
+  const emptyQuery = () => {
+    const query = {
+      select: () => query,
+      eq: () => query,
+      gte: () => query,
+      in: () => query,
+      order: () => query,
+      limit: () => query,
+      maybeSingle: () => Promise.resolve({ data: null, error: null }),
+      then: (
+        resolve: (value: { data: unknown[]; error: null }) => unknown,
+        reject?: (reason: unknown) => unknown,
+      ) => Promise.resolve({ data: [], error: null }).then(resolve, reject),
+    };
+    return query;
+  };
+
+  const supabase = {
+    rpc: (name: string) =>
+      Promise.resolve(
+        name === "get_dashboard_summary"
+          ? { data: null, error: { message: "base RPC unavailable" } }
+          : { data: null, error: null },
+      ),
+    from: () => emptyQuery(),
+  };
+
+  try {
+    const dashboard = await getEnhancedDashboardSummary(supabase) as Record<
+      string,
+      unknown
+    >;
+
+    assertEquals(dashboard.dashboard_error, "base RPC unavailable");
+    assertEquals(dashboard.ops_status, {
+      severity: "critical",
+      primary_issue: "Dashboard base summary is degraded",
+      recommended_route: "/monitoring",
+      last_ingest_age_seconds: null,
+      stale_job_count: 0,
+    });
+    assertEquals(dashboard.metrics, {
+      posts_ingested: 0,
+      posts_translated: 0,
+      posts_delivered: 0,
+      failed_jobs: 0,
+      posts_truncated_24h: 0,
+      posts_hydrated_24h: 0,
+      x_api_calls_24h: 0,
+      x_posts_24h: 0,
+      x_failed_24h: 0,
+      x_skipped_no_media_24h: 0,
+      x_media_uploads_24h: 0,
+    });
+    assertEquals(errors.length > 0, true);
   } finally {
     console.error = originalError;
   }
