@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import {
+  analyzeRemovableWatermarks,
+  analyzeWatermarkContactSheet,
   buildRemovableWatermarkRequest,
   buildTranscriptCleanupRequest,
   buildTranslationRepairRequest,
@@ -426,6 +431,132 @@ test("protects official source marks misclassified as removable watermarks", () 
   assert.equal(parsed.mustKeep[0].text, "GPO");
   assert.equal(parsed.mustKeep[0].type, "source_context");
   assert.equal(parsed.shouldBlock, false);
+});
+
+test("analyzes removable watermarks through the stable OpenAI facade", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "xot-openai-vision-"));
+  const framePath = join(dir, "frame.jpg");
+  const inspectionPath = join(dir, "inspection.jpg");
+  const oldFetch = globalThis.fetch;
+  const calls = [];
+
+  await writeFile(framePath, Buffer.from("frame"));
+  await writeFile(inspectionPath, Buffer.from("inspection"));
+  globalThis.fetch = async (_url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push(body);
+    assert.equal(body.model, "gpt-5.4-mini");
+    assert.equal(body.text.format.name, "removable_watermark_detection");
+    return {
+      ok: true,
+      text: async () => JSON.stringify({
+        output_text: JSON.stringify({
+          decision: "render",
+          confidence: 0.94,
+          reason: "no third-party watermark",
+          removable_watermarks: [],
+          must_keep: [],
+        }),
+      }),
+    };
+  };
+
+  try {
+    const result = await analyzeRemovableWatermarks({
+      apiKey: "openai-key",
+      model: "gpt-5.4-mini",
+      framePath,
+      inspectionPaths: [inspectionPath],
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(result.decision, "render");
+    assert.equal(result.confidence, 0.94);
+    assert.deepEqual(result.removableWatermarks, []);
+  } finally {
+    globalThis.fetch = oldFetch;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("analyzes vision contact sheets through nested Responses output content", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "xot-openai-preflight-"));
+  const framePath = join(dir, "frame.jpg");
+  const sheetPath = join(dir, "sheet.jpg");
+  const oldFetch = globalThis.fetch;
+
+  await writeFile(framePath, Buffer.from("frame"));
+  await writeFile(sheetPath, Buffer.from("sheet"));
+  globalThis.fetch = async (_url, init) => {
+    const body = JSON.parse(init.body);
+    assert.equal(body.model, "gpt-5.4-mini");
+    assert.equal(body.text.format.name, "video_overlay_preflight");
+    assert.equal(body.input[0].content.filter((part) => part.type === "input_image").length, 2);
+    return {
+      ok: true,
+      text: async () => JSON.stringify({
+        output: [{
+          content: [{
+            text: JSON.stringify({
+              has_watermark: false,
+              confidence: 0.91,
+              should_block: false,
+              block_reason: "",
+              needs_specialist_review: false,
+              overlays: [],
+              existing_subtitles: {
+                detected: false,
+                confidence: 0,
+                type: "none",
+                action: "keep",
+                box: { x: 0, y: 0, w: 0, h: 0 },
+                reason: "",
+              },
+              lower_text_region: {
+                detected: false,
+                confidence: 0,
+                type: "none",
+                action: "keep",
+                box: { x: 0, y: 0, w: 0, h: 0 },
+                reason: "",
+              },
+              recommended_subtitle_zone: {
+                placement: "bottom",
+                y: 0.78,
+                max_width: 0.86,
+                bottom_margin: 0.08,
+                confidence: 0.9,
+                reason: "clear lower frame",
+              },
+              render_decision: {
+                action: "render",
+                confidence: 0.9,
+                reason: "no blocking overlay",
+              },
+            }),
+          }],
+        }],
+      }),
+    };
+  };
+
+  try {
+    const result = await analyzeWatermarkContactSheet({
+      apiKey: "openai-key",
+      model: "gpt-5.4-mini",
+      imagePath: sheetPath,
+      framePaths: [framePath],
+      specialistMode: "off",
+      includeContactSheet: true,
+    });
+
+    assert.equal(result.hasWatermark, false);
+    assert.equal(result.renderDecision.action, "render");
+    assert.deepEqual(result.specialistChecks, []);
+  } finally {
+    globalThis.fetch = oldFetch;
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("keeps Telegram channel logo text removable without a literal handle marker", () => {
