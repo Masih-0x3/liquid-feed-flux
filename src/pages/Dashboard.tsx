@@ -12,6 +12,7 @@ import {
   CheckCircle,
   Clock,
   Database,
+  DollarSign,
   Gauge,
   HardDrive,
   Info,
@@ -32,6 +33,7 @@ import {
 import {
   useDashboardData,
   type DashboardSeverity,
+  type OpenAIUsage,
   type PipelineCounts,
   type SystemPerformanceSummary,
 } from '@/hooks/useDashboardData';
@@ -183,6 +185,23 @@ const EMPTY_SCORING_TUNING = {
   error: null as string | null,
 };
 
+const EMPTY_OPENAI_USAGE: OpenAIUsage = {
+  available: false,
+  error: null,
+  windowHours: 24,
+  measuredJobs: 0,
+  translateJobs: 0,
+  totalTokens: 0,
+  inputTokens: 0,
+  outputTokens: 0,
+  scoringTokens: 0,
+  adjudicationTokens: 0,
+  translationTokens: 0,
+  reasoningTokens: 0,
+  quotaFailedJobs: 0,
+  retryAttempts: 0,
+};
+
 export default function Dashboard() {
   const { data, isLoading, isError, error, dataUpdatedAt, isFetching } = useDashboardData();
   const queryClient = useQueryClient();
@@ -243,6 +262,7 @@ export default function Dashboard() {
   }
 
   const { metrics, health, activities, heartbeat, opsStatus, pipelineCounts, queueBreakdown, xLocalUsage, systemPerformance } = data;
+  const openAiUsage = data.openAiUsage ?? EMPTY_OPENAI_USAGE;
   const requestedTab = searchParams.get('tab');
   const activeTab = DASHBOARD_TAB_IDS.includes(requestedTab as DashboardTabId) ? requestedTab as DashboardTabId : 'activity';
   const setDashboardTab = (value: string) => {
@@ -402,6 +422,13 @@ export default function Dashboard() {
       note: systemPerformance.resources.workerDispatchMode,
       tone: systemPerformance.resources.workerCadenceWarning ? 'text-warning' : 'text-glass-foreground',
     },
+  ];
+
+  const openAiTokenMetrics = [
+    ['Total tokens', openAiUsage.totalTokens],
+    ['Output tokens', openAiUsage.outputTokens],
+    ['Reasoning tokens', openAiUsage.reasoningTokens],
+    ['Quota failures', openAiUsage.quotaFailedJobs],
   ];
 
   const resourceMetrics = [
@@ -739,7 +766,41 @@ export default function Dashboard() {
                 </div>
               </CardContent>
             </Card>
-            <IngestHeartbeatAlert heartbeat={heartbeat} />
+            <div className="space-y-4">
+              <IngestHeartbeatAlert heartbeat={heartbeat} />
+              <Card className="glass-card">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-lg font-display text-glass-foreground">
+                    <DollarSign className="h-4 w-4 text-primary" />
+                    OpenAI Usage
+                  </CardTitle>
+                  <CardDescription>Last {openAiUsage.windowHours}h from completed job metadata</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {openAiUsage.available ? (
+                    <>
+                      <div className="grid grid-cols-2 gap-2">
+                        {openAiTokenMetrics.map(([label, value]) => (
+                          <div key={label as string} className="rounded-md border border-border/60 p-3">
+                            <p className="text-xs text-muted-foreground">{label}</p>
+                            <p className={(label === 'Quota failures' && (value as number) > 0) ? 'text-lg font-semibold text-destructive tabular-nums' : 'text-lg font-semibold tabular-nums'}>
+                              {compactNumber(value as number)}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="rounded-md border border-border/60 bg-muted/20 p-3 text-xs text-muted-foreground">
+                        {compactNumber(openAiUsage.measuredJobs)} measured jobs - {compactNumber(openAiUsage.retryAttempts)} retry attempts
+                      </div>
+                    </>
+                  ) : (
+                    <div className="rounded-md border border-border/60 p-3 text-sm text-muted-foreground">
+                      OpenAI usage unavailable{openAiUsage.error ? `: ${openAiUsage.error}` : '.'}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
           </div>
         </TabsContent>
 

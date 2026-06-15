@@ -94,6 +94,23 @@ export interface XLocalUsage {
   officialUsageSynced: boolean;
 }
 
+export interface OpenAIUsage {
+  available: boolean;
+  error: string | null;
+  windowHours: number;
+  measuredJobs: number;
+  translateJobs: number;
+  totalTokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  scoringTokens: number;
+  adjudicationTokens: number;
+  translationTokens: number;
+  reasoningTokens: number;
+  quotaFailedJobs: number;
+  retryAttempts: number;
+}
+
 export interface IngestHeartbeat {
   state: 'ok' | 'warning' | 'critical';
   lastPostAt: string | null;
@@ -269,6 +286,7 @@ interface RpcResult {
     byType?: Array<Record<string, unknown>>;
   };
   x_local_usage?: Record<string, unknown>;
+  openai_usage?: Record<string, unknown>;
   system_performance?: Record<string, unknown>;
   scoring_tuning?: Record<string, unknown>;
   activity?: Array<Record<string, unknown>>;
@@ -532,6 +550,25 @@ function normalizeXLocalUsage(input: RpcResult['x_local_usage'], metrics: Dashbo
   };
 }
 
+function normalizeOpenAIUsage(input: RpcResult['openai_usage']): OpenAIUsage {
+  return {
+    available: input?.available === true,
+    error: typeof input?.error === 'string' ? input.error : null,
+    windowHours: asNumber(input?.window_hours, 24),
+    measuredJobs: asNumber(input?.measured_jobs),
+    translateJobs: asNumber(input?.translate_jobs),
+    totalTokens: asNumber(input?.total_tokens),
+    inputTokens: asNumber(input?.input_tokens),
+    outputTokens: asNumber(input?.output_tokens),
+    scoringTokens: asNumber(input?.scoring_tokens),
+    adjudicationTokens: asNumber(input?.adjudication_tokens),
+    translationTokens: asNumber(input?.translation_tokens),
+    reasoningTokens: asNumber(input?.reasoning_tokens),
+    quotaFailedJobs: asNumber(input?.quota_failed_jobs),
+    retryAttempts: asNumber(input?.retry_attempts),
+  };
+}
+
 function normalizeActivity(rpc: RpcResult): ActivityItem[] {
   if (Array.isArray(rpc.activity) && rpc.activity.length > 0) {
     return rpc.activity.map((item, index) => ({
@@ -604,9 +641,10 @@ export async function fetchDashboardData() {
   const pipelineCounts = normalizePipelineCounts(rpc.pipeline_counts, metrics, health);
   const queueBreakdown = normalizeQueueBreakdown(rpc.queue_breakdown, metrics, health);
   const xLocalUsage = normalizeXLocalUsage(rpc.x_local_usage, metrics, health);
+  const openAiUsage = normalizeOpenAIUsage(rpc.openai_usage);
   const systemPerformance = normalizeSystemPerformance(rpc.system_performance);
   const scoringTuning = normalizeScoringTuning(rpc.scoring_tuning);
   const activities = normalizeActivity(rpc);
 
-  return { metrics, health, activities, heartbeat, opsStatus, pipelineCounts, queueBreakdown, xLocalUsage, systemPerformance, scoringTuning };
+  return { metrics, health, activities, heartbeat, opsStatus, pipelineCounts, queueBreakdown, xLocalUsage, openAiUsage, systemPerformance, scoringTuning };
 }

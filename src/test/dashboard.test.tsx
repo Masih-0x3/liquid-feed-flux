@@ -169,6 +169,22 @@ const dashboardData = {
     budgetUsedPct: 4,
     officialUsageSynced: false,
   },
+  openAiUsage: {
+    available: true,
+    error: null,
+    windowHours: 24,
+    measuredJobs: 5,
+    translateJobs: 4,
+    totalTokens: 12_345,
+    inputTokens: 9_000,
+    outputTokens: 3_345,
+    scoringTokens: 1_234,
+    adjudicationTokens: 200,
+    translationTokens: 1_911,
+    reasoningTokens: 800,
+    quotaFailedJobs: 1,
+    retryAttempts: 2,
+  },
   systemPerformance: {
     success: true,
     error: null,
@@ -313,6 +329,24 @@ describe("Dashboard", () => {
 
     expect(screen.getByText(/Supabase-local telemetry only/)).toBeTruthy();
     expect(screen.getByText(/Official X usage is not synced from Dashboard/)).toBeTruthy();
+  });
+
+  it("shows local OpenAI usage from completed job metadata on the pipeline tab", () => {
+    mockedUseDashboardData.mockReturnValue({
+      data: dashboardData,
+      isLoading: false,
+      isError: false,
+      error: null,
+      dataUpdatedAt: Date.now(),
+      isFetching: false,
+    } as ReturnType<typeof useDashboardData>);
+
+    renderDashboard(["/?tab=pipeline"]);
+
+    expect(screen.getByText("OpenAI Usage")).toBeTruthy();
+    expect(screen.getByText("Last 24h from completed job metadata")).toBeTruthy();
+    expect(screen.getByText("12,345")).toBeTruthy();
+    expect(screen.getByText(/5 measured jobs - 2 retry attempts/)).toBeTruthy();
   });
 
   it("surfaces storage warning when no higher-priority issue is active", () => {
