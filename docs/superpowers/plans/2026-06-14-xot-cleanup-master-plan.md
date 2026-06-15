@@ -27,7 +27,7 @@ Main checkout preserved for user work:
 Current main documentation anchor:
 
 ```text
-257c69f047971683c22ca57df4cf137c8d89a8c7
+e4501c0d75221112094f3ff2f529e5d4a63be385
 ```
 
 Last deployed code release anchor:
@@ -60,6 +60,7 @@ Release notes:
 - PR #51 added RSS.app signed-webhook auth, merged at `257c69f047971683c22ca57df4cf137c8d89a8c7`, deployed `webhooks-rssapp`, stamped `DEPLOY_GIT_SHA=257c69f047971683c22ca57df4cf137c8d89a8c7`, then enabled RSS signing and set `RSSAPP_ALLOW_QUERY_TOKEN=false` after a signed no-query smoke returned HTTP 200.
 - PR #52 recorded the RSS signing cutover; it was documentation-only and did not require a Supabase deploy.
 - PR #53 recorded the shared webhook secret rotation; it was documentation-only and did not require a Supabase deploy.
+- PR #54 recorded the RSS.app final cutover ledger; it was documentation-only and did not require a Supabase deploy.
 - Live RSS.app cleanup removed the stale query string from the configured webhook URL, regenerated the exposed RSS.app signing secret, stored the regenerated value in `RSSAPP_SIGNING_SECRET`, and confirmed another RSS.app signed no-query test returned HTTP 200. Query-token code removal remains gated only on the zero-hit quiet-window proof.
 
 Current safe-state rule:
@@ -2390,7 +2391,7 @@ Initial post-deploy read after `ccd06079eae7e454ffd372dce94f71940c64e560` return
 
 Refreshed telemetry on `2026-06-15` after main reached `359d5503efa35457d8cf6af032feaedcf183b625` still showed active RSS query-token traffic: total `rss_query_token` hits reached `99`, the latest observed timestamp was `2026-06-15 17:39:41.885028+00`, and the enforced 24-hour quiet-window gate failed with `99` hits. Supabase secret-name inventory did not list `RSSAPP_ALLOW_QUERY_TOKEN`, so query-token compatibility remains enabled by default. Branch `codex/xot-rss-compatibility-gate` adds release-state telemetry reporting and the optional quiet-window gate below to make the final removal proof explicit.
 
-On `2026-06-15`, the live RSS.app webhook URL was confirmed to still use `?token=...`; the token value is intentionally not recorded. Current RSS.app docs describe signed webhooks with `RSSApp-Signature: t=<unix seconds>,v1=<hex hmac>`, where `v1` signs `${t}.${raw_body}` with HMAC-SHA256. PR #51 on branch `codex/xot-rssapp-signature-auth` deployed additive signed-webhook verification while preserving the existing query-token compatibility path. After deploy, RSS.app signing was activated, `RSSAPP_SIGNING_SECRET` was stored in Supabase, and `RSSAPP_ALLOW_QUERY_TOKEN=false` was set. A signed request without a query token returned HTTP 200, and an unsigned query-token-only request returned HTTP 401. The old URL-token/shared-secret path was rotated at `2026-06-15T20:11:55Z`. The RSS.app URL still needs the stale query token removed, the exposed RSS.app signing secret should be regenerated and stored in Supabase, and the final code removal still requires a zero-hit quiet window.
+On `2026-06-15`, the live RSS.app webhook URL was confirmed to still use `?token=...`; the token value is intentionally not recorded. Current RSS.app docs describe signed webhooks with `RSSApp-Signature: t=<unix seconds>,v1=<hex hmac>`, where `v1` signs `${t}.${raw_body}` with HMAC-SHA256. PR #51 on branch `codex/xot-rssapp-signature-auth` deployed additive signed-webhook verification while preserving the existing query-token compatibility path. After deploy, RSS.app signing was activated, `RSSAPP_SIGNING_SECRET` was stored in Supabase, and `RSSAPP_ALLOW_QUERY_TOKEN=false` was set. A signed request without a query token returned HTTP 200, and an unsigned query-token-only request returned HTTP 401. The old URL-token/shared-secret path was rotated at `2026-06-15T20:11:55Z`. The stale RSS.app URL query string was later removed, the exposed RSS.app signing secret was regenerated and stored in Supabase, and the regenerated signed no-query RSS.app test returned HTTP 200. A refreshed enforced quiet-window check at `2026-06-15T21:04Z` still reported `118` `rss_query_token` hits inside the last 24 hours, latest `2026-06-15 19:55:11.9163+00`, while a targeted post-finalization query since `2026-06-15T20:31:26.118Z` reported `0` new query-token hits. The final code removal still requires a zero-hit quiet window.
 
 Use this release-state gate before deleting `readRssWebhookToken` query-param compatibility:
 
