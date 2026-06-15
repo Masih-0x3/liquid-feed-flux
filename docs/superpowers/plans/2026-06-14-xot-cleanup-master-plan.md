@@ -27,7 +27,7 @@ Main checkout preserved for user work:
 Current verified main release anchor:
 
 ```text
-f8ebcaa41dcd8ac38bc2586a242c37f91fbdb5fc
+9d60e9052056f5a0e2e0794579701a97e7e8cb5e
 ```
 
 Release notes:
@@ -43,6 +43,7 @@ Release notes:
 - PR #25 removed the safe worker helper export-surface slice, merged at `64a6ed61d7194dcab808651f2f10de7bcf19e72a`, deployed all 10 Edge Functions, and stamped `DEPLOY_GIT_SHA=64a6ed61d7194dcab808651f2f10de7bcf19e72a`.
 - PR #27 marked Telegram helper cleanup status verified; it was documentation/status-only and did not require a Supabase deploy.
 - PR #28 extracted hydration success patch shaping into `xApiWorkflow.ts`, tightened X/Twitter URL handle parsing, merged at `f8ebcaa41dcd8ac38bc2586a242c37f91fbdb5fc`, deployed all 10 Edge Functions, and stamped `DEPLOY_GIT_SHA=f8ebcaa41dcd8ac38bc2586a242c37f91fbdb5fc`.
+- PR #30 removed zero-telemetry Monitoring/admin compatibility aliases, merged at `9d60e9052056f5a0e2e0794579701a97e7e8cb5e`, deployed all 10 Edge Functions, and stamped `DEPLOY_GIT_SHA=9d60e9052056f5a0e2e0794579701a97e7e8cb5e`.
 
 Current safe-state rule:
 
@@ -2142,6 +2143,8 @@ Worker helper export cleanup timing note: after PR #25, production was promoted 
 
 Hydration helper cleanup timing note: PR #27 was documentation/status-only and required no production deploy. After PR #28, production was promoted again at `f8ebcaa41dcd8ac38bc2586a242c37f91fbdb5fc`. Main CI run `27540030183` passed, live hosts refreshed at `2026-06-15T10:28:38Z`, all 10 Edge Functions were deployed, `DEPLOY_GIT_SHA` was stamped to `f8ebcaa41dcd8ac38bc2586a242c37f91fbdb5fc`, and `npm run check:release-state` passed. Deployed Edge Function versions were `admin-actions` `165`, `admin-retry` `166`, `db-cleanup` `138`, `digest-compiler` `94`, `media-cleanup` `174`, `media-processor` `177`, `webhooks-rssapp` `211`, `worker` `241`, `x-followers-snapshot` `88`, and `x-poster` `114`. Authenticated Chrome Dashboard loaded at `https://xot.iraneyes.com/`, and a fresh `admin-actions` POST returned HTTP `200` on version `165` after Dashboard refresh.
 
+Compatibility alias removal timing note: after PR #30, production was promoted again at `9d60e9052056f5a0e2e0794579701a97e7e8cb5e`. Main CI run `27543209019` passed, live hosts refreshed at `2026-06-15T11:24:33Z`, all 10 Edge Functions were deployed, `DEPLOY_GIT_SHA` was stamped to `9d60e9052056f5a0e2e0794579701a97e7e8cb5e`, and `npm run check:release-state` passed. Deployed Edge Function versions were `admin-actions` `167`, `admin-retry` `168`, `db-cleanup` `140`, `digest-compiler` `96`, `media-cleanup` `176`, `media-processor` `179`, `webhooks-rssapp` `213`, `worker` `243`, `x-followers-snapshot` `90`, and `x-poster` `116`. Post-deploy compatibility telemetry showed only `rss_query_token` activity at `45` hits, with no `monitoring_filter_alias` or `admin_action_alias` rows.
+
 ## Steps
 
 - [x] Re-run release-state check.
@@ -2196,7 +2199,7 @@ The historical removal gates were:
 - `admin_action_alias`: proved `backfill_signatures` was unused before its removal.
 - `rss_query_token`: proves RSS.app no longer sends webhook auth in the URL.
 
-Initial post-deploy read after `ccd06079eae7e454ffd372dce94f71940c64e560` returned zero rows. Follow-up telemetry at `2026-06-15T05:09:40Z` recorded `2` `rss_query_token` hits for `/webhooks-rssapp` with `legacy_value=query:token`. Later telemetry at `2026-06-15T10:49:04Z` recorded `40` `rss_query_token` hits for the same path. A refreshed query at `2026-06-15T10:56:03Z` recorded `41` `rss_query_token` hits and no `monitoring_filter_alias` or `admin_action_alias` rows. Monitoring aliases and `backfill_signatures` were therefore removed; RSS.app query-token compatibility is still actively used and must not be removed yet.
+Initial post-deploy read after `ccd06079eae7e454ffd372dce94f71940c64e560` returned zero rows. Follow-up telemetry at `2026-06-15T05:09:40Z` recorded `2` `rss_query_token` hits for `/webhooks-rssapp` with `legacy_value=query:token`. Later telemetry at `2026-06-15T10:49:04Z` recorded `40` `rss_query_token` hits for the same path. A refreshed query at `2026-06-15T10:56:03Z` recorded `41` `rss_query_token` hits and no `monitoring_filter_alias` or `admin_action_alias` rows. Monitoring aliases and `backfill_signatures` were therefore removed. Post-deploy telemetry after `9d60e9052056f5a0e2e0794579701a97e7e8cb5e` recorded `45` `rss_query_token` hits and still no Monitoring/admin alias rows. RSS.app query-token compatibility is still actively used and must not be removed yet.
 
 Post-PR #25 dashboard check: a user-visible "Dashboard failed to load / Edge Function returned a non-2xx status code" report was investigated read-only first. Direct unauthenticated `admin-actions` checks returned expected `401`s, local execution of the dashboard summary module against live Supabase returned a dashboard payload, and post-deploy authenticated `admin-actions` `get_dashboard_summary` returned HTTP `200`, `success=true`, and a dashboard payload. No Dashboard code/config hotfix was needed for this incident.
 
