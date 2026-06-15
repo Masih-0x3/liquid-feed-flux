@@ -1627,6 +1627,43 @@ Validation:
 - [x] Env-backed `npm run build` passed.
 - [x] `git diff --check` passed.
 
+## Follow-Up Renderer OpenAI Vision Split
+
+Branch:
+
+```text
+codex/xot-renderer-openai-vision-split
+```
+
+Objective: reduce `services/video-renderer/src/openai.js` further by extracting OpenAI vision/watermark request building, Responses API parsing, specialist-vision merging, and vision API-call helpers into `services/video-renderer/src/openaiVision.js` while keeping `openai.js` as the stable public import boundary for renderer and preview code.
+
+Scope:
+
+- [x] Move `buildVisionPreflightRequest`, `buildRemovableWatermarkRequest`, `parseVisionWatermarkResult`, `parseRemovableWatermarkResult`, `shouldRunSpecialistVisionChecks`, `analyzeWatermarkContactSheet`, and `analyzeRemovableWatermarks` into `openaiVision.js`.
+- [x] Re-export the moved public vision functions from `openai.js` so current import sites remain unchanged.
+- [x] Keep transcription and subtitle facade behavior in `openai.js`.
+- [x] Add mocked API-call coverage for `analyzeRemovableWatermarks` and `analyzeWatermarkContactSheet`, including nested Responses output parsing.
+- [x] Fix the uncovered vision API-call path where `extractOutputText` was referenced after the subtitle split but was no longer in scope.
+- [x] Do not change renderer production deployment state.
+
+Validation:
+
+- [x] Pre-change runtime reproduction for `analyzeRemovableWatermarks` failed with `ReferenceError: extractOutputText is not defined`.
+- [x] `node --test services/video-renderer/test/openai.test.js` passed with 19 tests after the split.
+- [x] `npm --prefix services/video-renderer ci` installed renderer dependencies after the isolated worktree lacked `services/video-renderer/node_modules/ws`; it printed the known local Node 22 versus renderer Node 20 engine warning.
+- [x] `npm --prefix services/video-renderer test` passed with 147 tests after installing renderer dependencies.
+- [x] `npm run lint` passed with the known 8 Fast Refresh warnings.
+- [x] `npm run check:strict` passed.
+- [x] `npm run check:function-inventory` passed.
+- [x] `npm run lint:functions` passed.
+- [x] `npm run check:functions` passed.
+- [x] `npm run test:functions` passed with 274 Deno tests.
+- [x] `npm --prefix services/video-renderer audit --audit-level=low` passed with 0 vulnerabilities.
+- [x] `npm test` passed with 19 files and 80 tests; the expected `useAuth` error-path stack printed.
+- [x] Env-backed `npm run build` passed.
+- [x] `git diff --check` passed.
+- [x] `npm run check:release-state` passed read-only; live hosts returned HTTP 200, current main CI was green, Supabase functions/cron were active, no stale running jobs were found, and renderer `hermes-masih-1` was online.
+
 ---
 
 # Phase 16: Runtime And Dependency Hygiene
