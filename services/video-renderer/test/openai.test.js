@@ -166,6 +166,31 @@ test("cleans transcript segments with strict timing validation", async () => {
   assert.deepEqual(result.segments, cleaned);
 });
 
+test("times out stuck OpenAI response requests", async () => {
+  const previousTimeout = process.env.OPENAI_REQUEST_TIMEOUT_MS;
+  process.env.OPENAI_REQUEST_TIMEOUT_MS = "5";
+  try {
+    await assert.rejects(
+      cleanupTranscriptSegments({
+        apiKey: "openai-key",
+        model: "gpt-5.4-mini",
+        sourceLanguage: "en",
+        segments: [{ id: 1, start: 0, end: 1, text: "hello" }],
+        fetchImpl: async (_url, init) => new Promise((_resolve, reject) => {
+          init.signal.addEventListener("abort", () => reject(new Error("aborted")));
+        }),
+      }),
+      /OpenAI transcript cleanup timed out after 5ms/,
+    );
+  } finally {
+    if (previousTimeout === undefined) {
+      delete process.env.OPENAI_REQUEST_TIMEOUT_MS;
+    } else {
+      process.env.OPENAI_REQUEST_TIMEOUT_MS = previousTimeout;
+    }
+  }
+});
+
 test("repairs translated segments when the first translation has an empty cue", async () => {
   const source = [
     { id: 1, start: 0, end: 1, text: "המזרח התיכון משתנה." },

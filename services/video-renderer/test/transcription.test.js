@@ -513,6 +513,87 @@ test("rejects short low-confidence multilingual noise as no usable speech", asyn
   assert.match(result.noUsableSpeechReason, /weak low-confidence/);
 });
 
+test("rejects ultra-sparse single-word Deepgram hallucinations in short noisy clips", async () => {
+  const attemptedLanguages = [];
+  const result = await transcribeAudio({
+    provider: "deepgram",
+    audioPath: "/tmp/audio.mp3",
+    durationMs: 6767,
+    deepgramApiKey: "dg-key",
+    deepgramLanguageFallbacks: ["multi", "en", "fa", "he", "ar"],
+    fetchImpl: async (url) => {
+      const language = url.searchParams.get("language") || "auto";
+      attemptedLanguages.push(language);
+      if (language === "auto" || language === "he") {
+        return {
+          ok: true,
+          text: async () => JSON.stringify({
+            results: {
+              channels: [{ detected_language: "und", alternatives: [{ transcript: "", words: [] }] }],
+              utterances: [],
+            },
+          }),
+        };
+      }
+      if (language === "ar") {
+        return {
+          ok: true,
+          text: async () => JSON.stringify({
+            results: {
+              channels: [{
+                detected_language: "ar",
+                language_confidence: 0,
+                alternatives: [{
+                  transcript: "علي الطاه.",
+                  confidence: 0.86572266,
+                  words: [
+                    { word: "علي", start: 4.16, end: 4.64, confidence: 0.86572266 },
+                    { word: "الطاه", start: 4.64, end: 7.84, confidence: 0.77001953 },
+                  ],
+                }],
+              }],
+              utterances: [{ start: 4.16, end: 7.84, transcript: "علي الطاه." }],
+            },
+          }),
+        };
+      }
+      return {
+        ok: true,
+        text: async () => JSON.stringify({
+          results: {
+            channels: [{
+              detected_language: language,
+              language_confidence: 0,
+              alternatives: [{
+                transcript: language === "en" ? "Anita." : "عالیدا",
+                confidence: language === "en" ? 0.72558594 : 0.6326497,
+                words: [{
+                  word: language === "en" ? "Anita" : "عالیدا",
+                  start: language === "fa" ? 4.24 : 4.08,
+                  end: language === "en" ? 4.56 : language === "fa" ? 9.2 : 7.68,
+                  confidence: language === "en" ? 0.72558594 : 0.6326497,
+                }],
+              }],
+            }],
+            utterances: [{
+              start: language === "fa" ? 4.24 : 4.08,
+              end: language === "en" ? 4.56 : language === "fa" ? 9.2 : 7.68,
+              transcript: language === "en" ? "Anita." : "عالیدا",
+            }],
+          },
+        }),
+      };
+    },
+    readFileImpl: async () => Buffer.from("audio"),
+  });
+
+  assert.deepEqual(attemptedLanguages, ["auto", "multi", "en", "fa", "he", "ar"]);
+  assert.equal(result.provider, "deepgram");
+  assert.equal(result.noUsableSpeech, true);
+  assert.deepEqual(result.segments, []);
+  assert.match(result.noUsableSpeechReason, /weak low-confidence/);
+});
+
 test("continues after weak multilingual noise and selects stronger Persian fallback", async () => {
   const attemptedLanguages = [];
   const result = await transcribeAudio({

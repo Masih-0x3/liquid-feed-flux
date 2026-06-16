@@ -3,6 +3,30 @@ import { validateTranslatedSegments } from "./subtitles.js";
 
 const OPENAI_BASE_URL = "https://api.openai.com/v1";
 const MAX_TRANSCRIPTION_UPLOAD_BYTES = 25 * 1024 * 1024;
+const DEFAULT_OPENAI_REQUEST_TIMEOUT_MS = 90_000;
+
+function openAiRequestTimeoutMs() {
+  const value = Number(process.env.OPENAI_REQUEST_TIMEOUT_MS);
+  return Number.isFinite(value) && value >= 0 ? value : DEFAULT_OPENAI_REQUEST_TIMEOUT_MS;
+}
+
+async function fetchOpenAI(fetchImpl, url, init, label) {
+  const timeoutMs = openAiRequestTimeoutMs();
+  if (timeoutMs === 0) return await fetchImpl(url, init);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetchImpl(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`${label} timed out after ${timeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 function normalizeTranscriptionSegments(payload, fallbackDurationMs = null) {
   const rawSegments = Array.isArray(payload?.segments)
@@ -82,11 +106,11 @@ async function postMultipart({ apiKey, fields, filePath }) {
   }
   form.append("file", new Blob([fileBytes], { type: "audio/mpeg" }), filePath.split("/").pop() || "audio.mp3");
 
-  const response = await fetch(`${OPENAI_BASE_URL}/audio/transcriptions`, {
+  const response = await fetchOpenAI(fetch, `${OPENAI_BASE_URL}/audio/transcriptions`, {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}` },
     body: form,
-  });
+  }, "OpenAI transcription");
   const text = await response.text();
   let json;
   try {
@@ -415,14 +439,14 @@ export async function cleanupTranscriptSegments({
   contextText = "",
   fetchImpl = fetch,
 }) {
-  const response = await fetchImpl(`${OPENAI_BASE_URL}/responses`, {
+  const response = await fetchOpenAI(fetchImpl, `${OPENAI_BASE_URL}/responses`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(buildTranscriptCleanupRequest({ model, segments, sourceLanguage, contextText })),
-  });
+  }, "OpenAI transcript cleanup");
 
   const rawText = await response.text();
   let payload;
@@ -441,14 +465,14 @@ export async function cleanupTranscriptSegments({
 }
 
 export async function translateSegments({ apiKey, model, segments, targetLanguage = "fa", contextText = "", fetchImpl = fetch }) {
-  const response = await fetchImpl(`${OPENAI_BASE_URL}/responses`, {
+  const response = await fetchOpenAI(fetchImpl, `${OPENAI_BASE_URL}/responses`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(buildTranslationRequest({ model, segments, targetLanguage, contextText })),
-  });
+  }, "OpenAI translation");
 
   const rawText = await response.text();
   let payload;
@@ -466,7 +490,7 @@ export async function translateSegments({ apiKey, model, segments, targetLanguag
     const translated = validateTranslatedSegments(segments, parsed.segments);
     return { model, raw: payload, segments: translated };
   } catch (error) {
-    const repairResponse = await fetchImpl(`${OPENAI_BASE_URL}/responses`, {
+    const repairResponse = await fetchOpenAI(fetchImpl, `${OPENAI_BASE_URL}/responses`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -480,7 +504,7 @@ export async function translateSegments({ apiKey, model, segments, targetLanguag
         contextText,
         errorMessage: error instanceof Error ? error.message : String(error),
       })),
-    });
+    }, "OpenAI translation repair");
     const repairRawText = await repairResponse.text();
     let repairPayload;
     try {
@@ -1110,14 +1134,14 @@ function mergeVisionAnalyses(primary, specialistResults) {
 }
 
 async function postVisionPreflight({ apiKey, model, imageBase64, frameBase64s, focus }) {
-  const response = await fetch(`${OPENAI_BASE_URL}/responses`, {
+  const response = await fetchOpenAI(fetch, `${OPENAI_BASE_URL}/responses`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(buildVisionPreflightRequest({ model, imageBase64, frameBase64s, focus })),
-  });
+  }, "OpenAI vision");
   const rawText = await response.text();
   let payload;
   try {
@@ -1139,7 +1163,7 @@ async function postRemovableWatermarkDetection({
   topP,
   maxOutputTokens,
 }) {
-  const response = await fetch(`${OPENAI_BASE_URL}/responses`, {
+  const response = await fetchOpenAI(fetch, `${OPENAI_BASE_URL}/responses`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -1154,7 +1178,7 @@ async function postRemovableWatermarkDetection({
       topP,
       maxOutputTokens,
     })),
-  });
+  }, "OpenAI watermark detection");
   const rawText = await response.text();
   let payload;
   try {

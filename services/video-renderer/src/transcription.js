@@ -50,11 +50,16 @@ function transcriptText(transcription) {
     .join(" ");
 }
 
-function segmentSpeechSeconds(segments) {
+function segmentSpeechSeconds(segments, durationSeconds = null) {
+  const maxDuration = Number(durationSeconds);
+  const hasDurationBound = Number.isFinite(maxDuration) && maxDuration > 0;
   return segments.reduce((sum, segment) => {
     const start = Number(segment?.start);
     const end = Number(segment?.end);
-    return Number.isFinite(start) && Number.isFinite(end) && end > start ? sum + (end - start) : sum;
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return sum;
+    const clippedStart = hasDurationBound ? Math.min(Math.max(0, start), maxDuration) : start;
+    const clippedEnd = hasDurationBound ? Math.min(Math.max(0, end), maxDuration) : end;
+    return clippedEnd > clippedStart ? sum + (clippedEnd - clippedStart) : sum;
   }, 0);
 }
 
@@ -127,7 +132,7 @@ export function isSparseContextMismatchedTranscript(transcription, options = {})
   const durationSeconds = Number(options.durationMs) > 0 ? Number(options.durationMs) / 1000 : null;
   if (durationSeconds === null || durationSeconds < 8) return false;
 
-  const speechSeconds = segmentSpeechSeconds(segments);
+  const speechSeconds = segmentSpeechSeconds(segments, durationSeconds);
   const speechCoverage = speechSeconds / durationSeconds;
   const tokens = wordTokens(text);
   if (speechSeconds <= 0 || speechSeconds > 5 || speechCoverage > 0.35 || tokens.length > 14) return false;
@@ -208,7 +213,7 @@ export function isWeakSpeechDetection(transcription, options = {}) {
   if (segments.length === 0) return false;
 
   const durationSeconds = Number(options.durationMs) > 0 ? Number(options.durationMs) / 1000 : null;
-  const speechSeconds = segmentSpeechSeconds(segments);
+  const speechSeconds = segmentSpeechSeconds(segments, durationSeconds);
   const speechCoverage = durationSeconds ? speechSeconds / durationSeconds : null;
   const text = segments.map((segment) => segment?.text ?? "").join(" ");
   const words = countWords(text);
@@ -231,10 +236,22 @@ export function isWeakSpeechDetection(transcription, options = {}) {
     speechCoverage <= 0.12 &&
     (uncertainLanguage || (Number.isFinite(languageConfidence) && languageConfidence < 0.65)) &&
     (avgWordConfidence === null || avgWordConfidence < 0.9 || (Number.isFinite(confidence) && confidence < 0.9));
+  const ultraSparseWeakCue = durationSeconds !== null &&
+    durationSeconds >= 4 &&
+    segments.length <= 2 &&
+    words > 0 &&
+    words <= 2 &&
+    speechSeconds > 0 &&
+    speechSeconds <= 3.8 &&
+    speechCoverage !== null &&
+    speechCoverage <= 0.6 &&
+    uncertainLanguage &&
+    (avgWordConfidence === null || avgWordConfidence < 0.9 || (Number.isFinite(confidence) && confidence < 0.9));
 
   return Boolean(
     (shortSparseCue && sparseInClip && uncertainLanguage && weakTranscriptConfidence && weakWords) ||
-    sparseLowInformation
+    sparseLowInformation ||
+    ultraSparseWeakCue
   );
 }
 
