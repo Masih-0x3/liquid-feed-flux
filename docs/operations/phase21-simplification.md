@@ -29,9 +29,7 @@ This branch removes compatibility code only after the PR #13 release was live, a
 
 ## Deferred
 
-These items still need request-log evidence, follow-up refactoring, or a product decision before removal:
-
-- RSS query-token compatibility still has documented production relevance.
+No Phase 21 code-removal candidates remain deferred. Operational follow-up: deploy the RSS query-token compatibility removal and then remove the obsolete `RSSAPP_ALLOW_QUERY_TOKEN` Edge Function Secret.
 
 ### Worker Helper Export Cleanup Slice
 
@@ -65,7 +63,7 @@ Branch `codex/xot-remove-legacy-xapi-usage-writer` removed the obsolete `setting
 - Kept historical migration references untouched.
 - Live frontend bundle check against `https://xot.iraneyes.com/assets/index-BEOz4znd.js` found no `x_api_usage`, `xApiUsage`, `calls_24h`, `posts_24h`, or `media_uploads_24h` strings before the branch was committed.
 
-### Temporary Compatibility Telemetry
+### Historical Compatibility Telemetry
 
 PR #22 added `public.compatibility_usage_events` and best-effort Edge Function writes for compatibility paths that logs could not prove at the time:
 
@@ -73,9 +71,9 @@ PR #22 added `public.compatibility_usage_events` and best-effort Edge Function w
 - `admin_action_alias` when the `backfill_signatures` alias forwards to `backfill_dedupe`.
 - `rss_query_token` when RSS webhook auth succeeds through a query token instead of `x-webhook-token`.
 
-The table is service-role-only and intentionally stores no request body, auth token, or query string. Migration `20260615043000` was applied and repaired into the remote migration ledger, then shared-auth Edge Functions were deployed from `ccd06079eae7e454ffd372dce94f71940c64e560`.
+The table is service-role-only and intentionally stores no request body, auth token, or query string. Migration `20260615043000` was applied and repaired into the remote migration ledger, then shared-auth Edge Functions were deployed from `ccd06079eae7e454ffd372dce94f71940c64e560`. The migration remains historical database state; current Edge Function code no longer writes RSS query-token compatibility events.
 
-Follow-up telemetry at `2026-06-15T10:56:03Z` showed only `rss_query_token` activity: `41` hits for `/webhooks-rssapp` with `legacy_value=query:token`. No `monitoring_filter_alias` or `admin_action_alias` rows were present, so the Monitoring aliases and `backfill_signatures` alias were removed on branch `codex/xot-remove-unused-compat-aliases`. PR #51 later migrated production to RSS.app signed-webhook auth and set `RSSAPP_ALLOW_QUERY_TOKEN=false`; query-token-only requests now return HTTP 401. The old URL-token/shared-secret path was rotated at `2026-06-15T20:11:55Z`. RSS query-token compatibility code stays deferred until the stale RSS.app query string is removed, the exposed RSS.app signing secret is regenerated, and telemetry shows zero hits across the enforced quiet window.
+Follow-up telemetry at `2026-06-15T10:56:03Z` showed only `rss_query_token` activity: `41` hits for `/webhooks-rssapp` with `legacy_value=query:token`. No `monitoring_filter_alias` or `admin_action_alias` rows were present, so the Monitoring aliases and `backfill_signatures` alias were removed on branch `codex/xot-remove-unused-compat-aliases`. PR #51 later migrated production to RSS.app signed-webhook auth and set `RSSAPP_ALLOW_QUERY_TOKEN=false`; query-token-only requests returned HTTP 401. The old URL-token/shared-secret path was rotated at `2026-06-15T20:11:55Z`. After the stale RSS.app query string was removed, the exposed RSS.app signing secret was regenerated, and the enforced quiet-window gate reported zero `rss_query_token` hits, the query-token compatibility code was removed.
 
 Use this query during the observation window:
 
@@ -138,7 +136,8 @@ Response aliases removed from `get_monitoring_overview` were `needs_action`, `fa
 - The worker fallback cron now includes `reprocess`; the manually queued reprocess batch drained to `50` completed jobs in the 24-hour queue check.
 - Live `translation_prompt.max_completion_tokens` and `translation_prompt.scoring.max_completion_tokens` were normalized from `50000` to `8000`. `reasoning_effort=high` remains a deliberate product-quality/cost tradeoff to tune separately.
 - PR #51 added and deployed RSS.app signed-webhook verification from `257c69f047971683c22ca57df4cf137c8d89a8c7`; RSS.app signing was activated, `RSSAPP_SIGNING_SECRET` was stored, and `RSSAPP_ALLOW_QUERY_TOKEN=false` was set. A signed no-query webhook smoke returned HTTP 200, and an unsigned query-token-only request returned HTTP 401.
-- The exposed old URL-token/shared-secret path was rotated at `2026-06-15T20:11:55Z`; Supabase Edge Function Secret and Vault `WEBHOOK_SHARED_SECRET` were aligned, `public.verify_webhook_internal_token` accepted the regenerated value, `db-cleanup` dry-run with the regenerated `x-internal-token` returned HTTP 200, and post-rotation `npm run check:release-state` passed. Compatibility-code deletion remains gated on removing the stale RSS.app query string, regenerating the exposed RSS.app signing secret, and a zero-hit quiet window.
+- The exposed old URL-token/shared-secret path was rotated at `2026-06-15T20:11:55Z`; Supabase Edge Function Secret and Vault `WEBHOOK_SHARED_SECRET` were aligned, `public.verify_webhook_internal_token` accepted the regenerated value, `db-cleanup` dry-run with the regenerated `x-internal-token` returned HTTP 200, and post-rotation `npm run check:release-state` passed. At that time, compatibility-code deletion was still gated on removing the stale RSS.app query string, regenerating the exposed RSS.app signing secret, and a zero-hit quiet window.
+- The stale RSS.app query string was later removed, the exposed RSS.app signing secret was regenerated, and the enforced quiet-window gate reported zero `rss_query_token` hits on `2026-06-16`, allowing the query-token compatibility code removal.
 
 ## Validation
 

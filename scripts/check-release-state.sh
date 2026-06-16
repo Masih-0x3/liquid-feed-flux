@@ -4,7 +4,6 @@ set -uo pipefail
 PROJECT_REF="${SUPABASE_PROJECT_REF:-jzirqfzzvlbxwfzndaer}"
 PRIMARY_HOST="${XOT_PRIMARY_HOST:-https://xot.iraneyes.com}"
 VERCEL_HOST="${XOT_VERCEL_HOST:-https://xot.vercel.app}"
-COMPATIBILITY_QUIET_HOURS="${COMPATIBILITY_QUIET_HOURS:-24}"
 FAILURES=0
 
 section() {
@@ -72,80 +71,6 @@ NODE
   return 0
 }
 
-run_compatibility_usage() {
-  local quiet_hours="$COMPATIBILITY_QUIET_HOURS"
-  if ! [[ "$quiet_hours" =~ ^[0-9]+$ ]] || [[ "$quiet_hours" -eq 0 ]]; then
-    printf '!! COMPATIBILITY_QUIET_HOURS must be a positive integer, got %q\n' "$quiet_hours" >&2
-    FAILURES=$((FAILURES + 1))
-    return 0
-  fi
-
-  run env SUPABASE_TELEMETRY_DISABLED=1 npx supabase db query --linked "select feature, legacy_value, canonical_value, action, request_path, count(*)::int as hits, max(created_at) as last_seen_at from public.compatibility_usage_events group by 1, 2, 3, 4, 5 order by last_seen_at desc;"
-
-  local tmp
-  tmp="$(mktemp)"
-  printf '$ SUPABASE_TELEMETRY_DISABLED=1 npx supabase db query --linked %q | node <compatibility-quiet-parser>\n' "select feature, legacy_value, count(*)::int as hits, max(created_at) as last_seen_at from public.compatibility_usage_events where feature = 'rss_query_token' and created_at >= now() - make_interval(hours => $quiet_hours) group by 1, 2 order by last_seen_at desc;"
-
-  SUPABASE_TELEMETRY_DISABLED=1 npx supabase db query --linked "select feature, legacy_value, count(*)::int as hits, max(created_at) as last_seen_at from public.compatibility_usage_events where feature = 'rss_query_token' and created_at >= now() - make_interval(hours => $quiet_hours) group by 1, 2 order by last_seen_at desc;" >"$tmp"
-  local status=$?
-  if [[ $status -ne 0 ]]; then
-    rm -f "$tmp"
-    printf '!! compatibility quiet-window query exited with status %s\n' "$status" >&2
-    FAILURES=$((FAILURES + 1))
-    return 0
-  fi
-
-  if ! node - "$tmp" "$quiet_hours" "${CHECK_COMPATIBILITY_QUIET:-0}" <<'NODE'
-const fs = require("fs");
-
-const inputPath = process.argv[2];
-const quietHours = process.argv[3];
-const enforceQuiet = process.argv[4] === "1";
-const input = fs.readFileSync(inputPath, "utf8");
-const start = input.indexOf("{");
-
-if (start < 0) {
-  console.error("No JSON object found in compatibility telemetry output.");
-  process.exit(1);
-}
-
-let data;
-try {
-  data = JSON.parse(input.slice(start));
-} catch (error) {
-  console.error(`Failed to parse compatibility telemetry JSON: ${error.message}`);
-  process.exit(1);
-}
-
-const rows = data.rows || [];
-const hits = rows.reduce((sum, row) => sum + Number(row.hits || 0), 0);
-const lastSeen = rows.reduce((latest, row) => {
-  const seen = row.last_seen_at || "";
-  return seen > latest ? seen : latest;
-}, "");
-
-console.log(`rss_query_token hits in last ${quietHours}h: ${hits}${lastSeen ? `; last_seen_at=${lastSeen}` : ""}`);
-
-if (enforceQuiet && hits > 0) {
-  console.error(`rss_query_token compatibility is still active in the last ${quietHours}h; do not remove query-token support yet.`);
-  process.exit(2);
-}
-NODE
-  then
-    rm -f "$tmp"
-    FAILURES=$((FAILURES + 1))
-    return 0
-  fi
-
-  rm -f "$tmp"
-
-  if [[ "${CHECK_COMPATIBILITY_QUIET:-0}" == "1" ]]; then
-    echo "Compatibility quiet-window gate passed."
-  else
-    echo "Compatibility quiet-window gate is informational. Run CHECK_COMPATIBILITY_QUIET=1 npm run check:release-state before removing RSS query-token support."
-  fi
-}
-
 section "Local Git"
 run git status --short --branch
 run git rev-parse HEAD
@@ -183,9 +108,6 @@ run env SUPABASE_TELEMETRY_DISABLED=1 npx supabase migration list --linked
 
 section "Supabase Secret Names"
 run_secret_names
-
-section "Supabase Compatibility Telemetry"
-run_compatibility_usage
 
 section "Supabase Cron"
 run env SUPABASE_TELEMETRY_DISABLED=1 npx supabase db query --linked "select jobname, schedule, active from cron.job order by jobname;"
