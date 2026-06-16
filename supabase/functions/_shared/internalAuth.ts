@@ -3,8 +3,6 @@
  * or x-internal-token matching Vault secret WEBHOOK_SHARED_SECRET (pg_cron path).
  */
 
-import { recordCompatibilityUsage } from "./compatibilityTelemetry.ts";
-
 // deno-lint-ignore no-explicit-any
 export async function requireInternalAuth(
   req: Request,
@@ -46,7 +44,6 @@ export function serviceRoleBearerHeader(): Record<string, string> {
 
 export type RssWebhookToken = {
   provided: string;
-  fromQuery: boolean;
   source: string | null;
 };
 
@@ -63,38 +60,13 @@ type ParsedRssAppSignature = {
 };
 
 export function readRssWebhookToken(req: Request): RssWebhookToken {
-  const urlObj = new URL(req.url);
   const webhookHeader = req.headers.get('x-webhook-token')?.trim() || '';
-  if (webhookHeader) return { provided: webhookHeader, fromQuery: false, source: 'header:x-webhook-token' };
+  if (webhookHeader) return { provided: webhookHeader, source: 'header:x-webhook-token' };
 
   const rssHeader = req.headers.get('x-rssapp-token')?.trim() || '';
-  if (rssHeader) return { provided: rssHeader, fromQuery: false, source: 'header:x-rssapp-token' };
+  if (rssHeader) return { provided: rssHeader, source: 'header:x-rssapp-token' };
 
-  const tokenQuery = urlObj.searchParams.get('token')?.trim() || '';
-  if (tokenQuery) return { provided: tokenQuery, fromQuery: true, source: 'query:token' };
-
-  const webhookQuery = urlObj.searchParams.get('webhook_token')?.trim() || '';
-  if (webhookQuery) return { provided: webhookQuery, fromQuery: true, source: 'query:webhook_token' };
-
-  const rssQuery = urlObj.searchParams.get('rssapp_token')?.trim() || '';
-  if (rssQuery) return { provided: rssQuery, fromQuery: true, source: 'query:rssapp_token' };
-
-  return { provided: '', fromQuery: false, source: null };
-}
-
-export function parseRssQueryTokenAllowance(raw: string | null | undefined): boolean {
-  const normalized = (raw || 'true').trim().toLowerCase();
-  return !['0', 'false', 'no', 'off'].includes(normalized);
-}
-
-export function allowRssQueryToken(): boolean {
-  let raw: string | null | undefined;
-  try {
-    raw = Deno.env.get('RSSAPP_ALLOW_QUERY_TOKEN') || Deno.env.get('ALLOW_RSS_QUERY_TOKEN');
-  } catch (_e) {
-    raw = undefined;
-  }
-  return parseRssQueryTokenAllowance(raw);
+  return { provided: '', source: null };
 }
 
 function readOptionalEnv(name: string): string {
@@ -196,7 +168,7 @@ async function verifySignedRssAppRequest(
 }
 
 /**
- * RSS / webhook entry: token in x-webhook-token or x-rssapp-token.
+ * RSS / webhook entry: signed RSS.app request or token in x-webhook-token / x-rssapp-token.
  * When no env token is configured, falls back to Vault WEBHOOK_SHARED_SECRET (same as cron).
  */
 // deno-lint-ignore no-explicit-any
@@ -223,7 +195,7 @@ export async function requireRssWebhookAuth(
     });
   }
 
-  const { provided, fromQuery, source } = readRssWebhookToken(req);
+  const { provided } = readRssWebhookToken(req);
 
   if (!provided) {
     console.warn('Webhook token missing');
@@ -231,17 +203,6 @@ export async function requireRssWebhookAuth(
       status: 401,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
-  }
-
-  if (fromQuery) {
-    if (!allowRssQueryToken()) {
-      console.warn('Webhook query token rejected; use RSS.app signing or x-webhook-token/x-rssapp-token header');
-      return new Response(JSON.stringify({ error: 'Webhook auth must use RSS.app signing or a header token' }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-    console.warn('Webhook query token accepted for RSS.app compatibility; prefer signed RSS.app webhooks or x-webhook-token/x-rssapp-token header fallback');
   }
 
   const expectedEnv = (
@@ -252,17 +213,6 @@ export async function requireRssWebhookAuth(
 
   if (expectedEnv) {
     if (provided === expectedEnv) {
-      if (fromQuery) {
-        await recordCompatibilityUsage(supabase, {
-          source: 'webhooks-rssapp',
-          feature: 'rss_query_token',
-          legacyValue: source,
-          canonicalValue: 'header:RSSApp-Signature',
-          action: 'require_rss_webhook_auth',
-          request: req,
-          metadata: { token_source: source },
-        });
-      }
       return null;
     }
     console.warn('Webhook token invalid (env configured)');
@@ -277,17 +227,6 @@ export async function requireRssWebhookAuth(
     console.error(JSON.stringify({ module: 'internalAuth', action: 'rss_vault_rpc', message: error.message }));
   }
   if (data === true) {
-    if (fromQuery) {
-      await recordCompatibilityUsage(supabase, {
-        source: 'webhooks-rssapp',
-        feature: 'rss_query_token',
-        legacyValue: source,
-        canonicalValue: 'header:RSSApp-Signature',
-        action: 'require_rss_webhook_auth',
-        request: req,
-        metadata: { token_source: source, verifier: 'vault' },
-      });
-    }
     return null;
   }
 

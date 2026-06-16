@@ -1,7 +1,5 @@
 import { assertEquals } from "jsr:@std/assert";
 import {
-  allowRssQueryToken,
-  parseRssQueryTokenAllowance,
   readRssWebhookToken,
   requireRssWebhookAuth,
   verifyRssAppWebhookSignature,
@@ -37,22 +35,20 @@ Deno.test("readRssWebhookToken prefers header tokens", () => {
 
   assertEquals(readRssWebhookToken(req), {
     provided: "header-token",
-    fromQuery: false,
     source: "header:x-webhook-token",
   });
 });
 
-Deno.test("readRssWebhookToken accepts RSS.app query token compatibility", () => {
+Deno.test("readRssWebhookToken ignores query-only tokens", () => {
   const req = new Request("https://example.test/hook?token=query-token");
 
   assertEquals(readRssWebhookToken(req), {
-    provided: "query-token",
-    fromQuery: true,
-    source: "query:token",
+    provided: "",
+    source: null,
   });
 });
 
-Deno.test("readRssWebhookToken accepts alternate query token names", () => {
+Deno.test("readRssWebhookToken ignores alternate query token names", () => {
   const webhookReq = new Request(
     "https://example.test/hook?webhook_token=webhook-query-token",
   );
@@ -61,42 +57,22 @@ Deno.test("readRssWebhookToken accepts alternate query token names", () => {
   );
 
   assertEquals(readRssWebhookToken(webhookReq), {
-    provided: "webhook-query-token",
-    fromQuery: true,
-    source: "query:webhook_token",
+    provided: "",
+    source: null,
   });
   assertEquals(readRssWebhookToken(rssReq), {
-    provided: "rss-query-token",
-    fromQuery: true,
-    source: "query:rssapp_token",
+    provided: "",
+    source: null,
   });
 });
 
-Deno.test("allowRssQueryToken defaults on for current RSS.app compatibility", () => {
-  assertEquals(allowRssQueryToken(), true);
-  assertEquals(parseRssQueryTokenAllowance(undefined), true);
-});
-
-Deno.test("parseRssQueryTokenAllowance can be disabled after signed webhook migration", () => {
-  assertEquals(parseRssQueryTokenAllowance("false"), false);
-  assertEquals(parseRssQueryTokenAllowance("0"), false);
-  assertEquals(parseRssQueryTokenAllowance("off"), false);
-  assertEquals(parseRssQueryTokenAllowance("true"), true);
-});
-
-Deno.test("requireRssWebhookAuth records accepted query token compatibility", async () => {
-  const calls: Array<{ table: string; row: Record<string, unknown> }> = [];
+Deno.test("requireRssWebhookAuth rejects query-only tokens", async () => {
   const supabase = {
-    from(table: string) {
-      return {
-        insert(row: Record<string, unknown>) {
-          calls.push({ table, row });
-          return Promise.resolve({ error: null });
-        },
-      };
+    from() {
+      throw new Error("query-only requests should not write telemetry");
     },
     rpc() {
-      return Promise.resolve({ data: true });
+      throw new Error("query-only requests should not check vault auth");
     },
   };
 
@@ -111,21 +87,28 @@ Deno.test("requireRssWebhookAuth records accepted query token compatibility", as
     {},
   );
 
-  assertEquals(result, null);
-  assertEquals(calls, [{
-    table: "compatibility_usage_events",
-    row: {
-      source: "webhooks-rssapp",
-      feature: "rss_query_token",
-      legacy_value: "query:token",
-      canonical_value: "header:RSSApp-Signature",
-      action: "require_rss_webhook_auth",
-      actor_id: null,
-      request_method: "POST",
-      request_path: "/functions/v1/webhooks-rssapp",
-      metadata: { token_source: "query:token", verifier: "vault" },
+  assertEquals(result?.status, 401);
+});
+
+Deno.test("requireRssWebhookAuth accepts header token through vault fallback", async () => {
+  const supabase = {
+    rpc(name: string, args: Record<string, unknown>) {
+      assertEquals(name, "verify_webhook_internal_token");
+      assertEquals(args, { p_token: "header-token" });
+      return Promise.resolve({ data: true, error: null });
     },
-  }]);
+  };
+
+  const result = await requireRssWebhookAuth(
+    new Request("https://example.test/functions/v1/webhooks-rssapp", {
+      method: "POST",
+      headers: { "x-rssapp-token": "header-token" },
+    }),
+    supabase,
+    {},
+  );
+
+  assertEquals(result, null);
 });
 
 Deno.test("verifyRssAppWebhookSignature accepts RSS.app signed webhook format", async () => {
@@ -191,7 +174,7 @@ Deno.test("requireRssWebhookAuth accepts signed webhook without query-token tele
 
   const result = await requireRssWebhookAuth(
     new Request(
-      "https://example.test/functions/v1/webhooks-rssapp?token=legacy-token",
+      "https://example.test/functions/v1/webhooks-rssapp",
       {
         method: "POST",
         headers: { "RSSApp-Signature": `t=${timestamp},v1=${signature}` },
@@ -226,10 +209,13 @@ Deno.test("requireRssWebhookAuth rejects invalid RSS.app signatures", async () =
 
   const result = await requireRssWebhookAuth(
     new Request(
-      "https://example.test/functions/v1/webhooks-rssapp?token=legacy-token",
+      "https://example.test/functions/v1/webhooks-rssapp",
       {
         method: "POST",
-        headers: { "RSSApp-Signature": `t=${timestamp},v1=${"0".repeat(64)}` },
+        headers: {
+          "RSSApp-Signature": `t=${timestamp},v1=${"0".repeat(64)}`,
+          "x-webhook-token": "header-token",
+        },
         body: rawBody,
       },
     ),

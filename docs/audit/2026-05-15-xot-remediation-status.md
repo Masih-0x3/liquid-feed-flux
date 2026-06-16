@@ -8,7 +8,7 @@ This document maps the comprehensive audit findings to the local remediation wor
 | --- | --- | --- |
 | F-01 | Fixed locally | Added `20260515075613_harden_admin_surface.sql` to revoke broad privileged RPC execution, move role checks to `private.has_role`, and route dashboard/status RPC reads through `admin-actions`. |
 | F-02 | Fixed locally | Added local `digest-compiler` source and hardened it to require internal auth instead of anon-key or missing-secret bypasses. |
-| F-03 | Mitigated, rotate live secret | `requireRssWebhookAuth` now prefers RSS.app signed webhooks via `RSSApp-Signature`, still accepts `x-webhook-token` / `x-rssapp-token`, accepts query tokens only for RSS.app compatibility, and can reject query tokens via `RSSAPP_ALLOW_QUERY_TOKEN=false` after RSS.app is moved to signed or header auth. Rotate the live RSS webhook token during deployment/config migration. |
+| F-03 | Fixed | `requireRssWebhookAuth` prefers RSS.app signed webhooks via `RSSApp-Signature`, still accepts `x-webhook-token` / `x-rssapp-token` as header fallback, and no longer accepts query-string webhook tokens. The exposed old URL-token/shared-secret path was rotated during the RSS.app signed-webhook cutover. |
 | F-04 | Fixed locally | Auth loading now waits for role resolution, protected layout blocks unresolved roles, and admin-only RLS policies replace broad authenticated table reads. |
 | F-05 | Fixed locally | Migration revokes anon table/view access, sets exposed views to `security_invoker`, and recreates admin-only policies. |
 | F-06 | Fixed locally | Added scheduled stale-job reconciliation, stale running job detection without lease markers, reconcile run history, and dashboard health visibility. |
@@ -43,5 +43,5 @@ This document maps the comprehensive audit findings to the local remediation wor
 
 1. Apply the new Supabase migrations before deploying the updated frontend that depends on admin-only RPC routing.
 2. Deploy all Supabase functions, including the newly added `digest-compiler`.
-3. Enable RSS.app webhook signing, set the one-time signing secret as `RSSAPP_SIGNING_SECRET`, send a signed webhook test, then set `RSSAPP_ALLOW_QUERY_TOKEN=false` after signed traffic is confirmed. If signing is unavailable, fall back to `x-webhook-token` or `x-rssapp-token`; if RSS.app only supports URL auth, keep compatibility on and rotate the query token after log exposure.
+3. Keep RSS.app webhook signing enabled, store the active signing secret as `RSSAPP_SIGNING_SECRET`, and send a signed webhook test after any signing-secret rotation. If signing is unavailable during an incident, fall back to `x-webhook-token` or `x-rssapp-token`; URL query-token auth is no longer accepted.
 4. Set `ALLOWED_CORS_ORIGIN` for Edge Functions if the production app origin differs from `https://liquid-feed-flux.lovable.app`.

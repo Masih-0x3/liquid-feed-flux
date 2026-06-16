@@ -216,7 +216,7 @@ Secret verification: `public.verify_webhook_internal_token` returned true for th
 Renderer heartbeat: hermes-masih-1 online, version 0.1.0, render_version persian-subtitles-masihh-v1, processed 9, failed 0, last_seen_at 2026-06-15 20:12:36.689+00
 Smoke checks: post-rotation npm run check:release-state passed; main CI run 27573079602 passed; xot.iraneyes.com and xot.vercel.app returned HTTP 200 with app shell last-modified 2026-06-15T20:08:24Z and etag "e63c9d5f81f6c1f998761692f6ccd615"; all cron jobs active; no stale running jobs; renderer heartbeat online
 Rollback target: do not restore the exposed prior secret unless production is down and no safer option exists. If rollback is needed, generate another shared secret and keep Supabase Edge Function Secret plus Vault `WEBHOOK_SHARED_SECRET` aligned.
-Notes: The old RSS.app URL token was treated as exposed shared internal credential because production had no `RSSAPP_WEBHOOK_TOKEN`/`RSSAPP_TOKEN` secret and `webhooks-rssapp` falls back to `WEBHOOK_SHARED_SECRET`. Query-token-only RSS requests already return HTTP 401 because `RSSAPP_ALLOW_QUERY_TOKEN=false`. The remaining manual RSS.app work was completed later on 2026-06-15: the stale URL query string was removed, the RSS.app signing secret was regenerated, the regenerated value was stored in `RSSAPP_SIGNING_SECRET`, and a signed no-query RSS.app test returned HTTP 200. Query-token code deletion still requires a zero-hit compatibility quiet window.
+Notes: The old RSS.app URL token was treated as exposed shared internal credential because production had no `RSSAPP_WEBHOOK_TOKEN`/`RSSAPP_TOKEN` secret and `webhooks-rssapp` falls back to `WEBHOOK_SHARED_SECRET`. Query-token-only RSS requests already returned HTTP 401 because `RSSAPP_ALLOW_QUERY_TOKEN=false`. The remaining manual RSS.app work was completed later on 2026-06-15: the stale URL query string was removed, the RSS.app signing secret was regenerated, the regenerated value was stored in `RSSAPP_SIGNING_SECRET`, and a signed no-query RSS.app test returned HTTP 200. The zero-hit compatibility quiet window later passed on 2026-06-16, allowing query-token code deletion.
 ```
 
 ### 2026-06-15 - RSS.app URL cleanup and signing-secret regeneration
@@ -233,8 +233,18 @@ RSS.app smoke: regenerated-secret signed no-query test returned HTTP 200 in 420 
 Supabase function versions after secret update: webhooks-rssapp 228, worker 259, admin-retry 182, db-cleanup 154, media-processor 193, media-cleanup 190, admin-actions 181, x-poster 130, x-followers-snapshot 104, digest-compiler 110
 Compatibility telemetry: still only the earlier 118 accepted rss_query_token rows, latest 2026-06-15 19:55:11.9163+00; no post-cleanup query-token hit was observed
 Smoke checks: npm run check:release-state passed; xot.iraneyes.com and xot.vercel.app returned HTTP 200; all cron jobs active; no stale running jobs; renderer heartbeat online
-Remaining gate: CHECK_COMPATIBILITY_QUIET=1 COMPATIBILITY_QUIET_HOURS=24 npm run check:release-state must report zero rss_query_token hits before deleting query-token compatibility code
+Follow-up gate: CHECK_COMPATIBILITY_QUIET=1 COMPATIBILITY_QUIET_HOURS=24 npm run check:release-state reported zero rss_query_token hits on 2026-06-16, allowing query-token compatibility code deletion
 Rollback target: do not restore the exposed prior RSS.app signing secret. If RSS.app delivery fails, regenerate another RSS.app signing secret, update RSSAPP_SIGNING_SECRET, and retest signed no-query delivery.
+```
+
+### 2026-06-16 - RSS query-token compatibility removal
+
+```text
+Branch: codex/xot-remove-rss-query-token-compat
+Pre-removal gate: CHECK_COMPATIBILITY_QUIET=1 COMPATIBILITY_QUIET_HOURS=24 npm run check:release-state passed with rss_query_token hits in last 24h = 0
+Code change: remove query-string RSS webhook auth support and the now-unused compatibility telemetry writer
+Runtime contract after deploy: RSS.app signed webhooks through RSSApp-Signature, with x-webhook-token or x-rssapp-token header fallback only
+Deployment note: deploy webhooks-rssapp after merge, then remove obsolete RSSAPP_ALLOW_QUERY_TOKEN from Supabase Edge Function Secrets
 ```
 
 ### 2026-06-15 - PR #51 RSS.app signed-webhook auth

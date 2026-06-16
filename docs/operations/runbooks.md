@@ -51,31 +51,18 @@ Function-by-function auth mode, caller, required secret, and hardening details a
 2. After changing that secret, **redeploy** the Edge functions that enforce internal auth so they pick up the new env (or wait for the next deploy pipeline).
 3. **Post-deploy check:** Supabase → Edge Functions → `worker` → Logs. For the **latest deployment version**, cron `POST` requests should return **200**. Persistent **401** on the latest version means the secret or RPC path is still misaligned.
 
-### RSS.app webhook URL in logs
+### RSS.app webhook auth
 
-Supabase Edge logs may echo the full `webhooks-rssapp` URL including a `?token=` query. Treat that as credential exposure: rotate the webhook secret after any shared/exported logs, and prefer RSS.app signed webhooks over URL tokens.
+`webhooks-rssapp` accepts RSS.app signed webhooks through the `RSSApp-Signature` header. The header format is `t=<unix seconds>,v1=<hex hmac>`, and `v1` signs `${t}.${raw_body}` with HMAC-SHA256 using `RSSAPP_SIGNING_SECRET`.
 
-Current RSS.app public docs describe signed webhooks with an `RSSApp-Signature` header in the format `t=<unix seconds>,v1=<hex hmac>`. The signature is HMAC-SHA256 over `${t}.${raw_body}` with the webhook signing secret.
+Current production contract:
 
-Safe migration path:
+1. Keep the RSS.app webhook URL free of auth query strings.
+2. Keep webhook signing enabled in RSS.app and keep the current signing secret stored as `RSSAPP_SIGNING_SECRET`.
+3. Send an RSS.app webhook test after any signing-secret rotation and confirm `webhooks-rssapp` returns `200`.
+4. If signing is unavailable during an incident, use custom request headers as the fallback: set `x-rssapp-token: <new secret>` or `x-webhook-token: <new secret>`, then store the same value in `RSSAPP_WEBHOOK_TOKEN`.
 
-1. In RSS.app, enable webhook signing on the configured XOT webhook.
-2. Copy the one-time signing secret into Supabase Edge Function Secrets as `RSSAPP_SIGNING_SECRET`.
-3. Deploy `webhooks-rssapp` from the branch that supports signed RSS.app requests.
-4. Send an RSS.app webhook test and confirm `webhooks-rssapp` returns `200`.
-5. Set `RSSAPP_ALLOW_QUERY_TOKEN=false` in Supabase Edge Function Secrets to reject future query-token requests.
-6. Remove the query token from the RSS.app webhook URL.
-7. Rotate away from the old query token. Query-string compatibility should remain enabled only until the RSS.app configuration has been moved and telemetry is quiet.
-
-Before deleting query-token support from code, prove the compatibility path is quiet with the release-state gate:
-
-```bash
-CHECK_COMPATIBILITY_QUIET=1 COMPATIBILITY_QUIET_HOURS=24 npm run check:release-state
-```
-
-That command must report zero `rss_query_token` hits in the quiet window. Normal `npm run check:release-state` remains informational and reports compatibility telemetry without failing the release-state check.
-
-If webhook signing is unavailable on the account, use custom request headers as the fallback if RSS.app exposes them: set `x-rssapp-token: <new secret>` or `x-webhook-token: <new secret>`, then set the same value in `RSSAPP_WEBHOOK_TOKEN`. If neither signing nor custom headers are available, keep `RSSAPP_ALLOW_QUERY_TOKEN=true`, use a long random token in the URL, and rotate the token after any incident or log export. The webhook remains idempotent by `tweet_id`, so retries should not redeliver existing posts.
+Query-string tokens are no longer accepted. If a URL containing `?token=`, `?webhook_token=`, or `?rssapp_token=` appears in logs or screenshots, treat the value as exposed and rotate any matching RSS.app/header fallback secret. The webhook remains idempotent by `tweet_id`, so RSS.app retries should not redeliver existing posts.
 
 ---
 
