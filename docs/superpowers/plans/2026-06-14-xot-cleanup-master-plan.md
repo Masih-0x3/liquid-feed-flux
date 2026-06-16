@@ -2439,9 +2439,9 @@ git commit -m "chore: remove obsolete cleanup compatibility paths"
 - [x] Docs match the actual code for completed removals.
 - [x] Local and read-only live checks pass for completed removals and the later `f8ebcaa41dcd8ac38bc2586a242c37f91fbdb5fc` release.
 
-Current completion-audit follow-ups that are not safe to mark done without more work:
+Current completion-audit follow-ups:
 
-- Phase 21 final follow-up: deploy the RSS query-token compatibility removal, then remove the obsolete `RSSAPP_ALLOW_QUERY_TOKEN` Edge Function Secret.
+- [x] Phase 21 final follow-up: PR #56 deployed the RSS query-token compatibility removal from `aadd9bd294a9f871837e69e228d9288a92a79960` and removed the obsolete `RSSAPP_ALLOW_QUERY_TOKEN` Edge Function Secret.
 
 ---
 

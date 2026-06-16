@@ -55,7 +55,7 @@ Live secret values are never recorded here. Secret-name presence can drift, so r
 
 ## RSS.app Signing Cutover
 
-Cutover status as of 2026-06-16: RSS.app signing is live, the configured webhook URL has no auth query string, the exposed URL-token/shared-secret path was rotated, the exposed RSS.app signing secret was regenerated, and the regenerated signed no-query test returned HTTP 200. The enforced 24-hour quiet-window gate later reported zero `rss_query_token` hits, so branch `codex/xot-remove-rss-query-token-compat` removes the query-token compatibility code. Production still needs `webhooks-rssapp` deployed from this branch after merge, followed by removal of the obsolete `RSSAPP_ALLOW_QUERY_TOKEN` Edge Function Secret.
+Cutover status as of 2026-06-16: RSS.app signing is live, the configured webhook URL has no auth query string, the exposed URL-token/shared-secret path was rotated, the exposed RSS.app signing secret was regenerated, and the regenerated signed no-query test returned HTTP 200. The enforced 24-hour quiet-window gate later reported zero `rss_query_token` hits. PR #56 removed query-token compatibility code, deployed all 10 Edge Functions from `aadd9bd294a9f871837e69e228d9288a92a79960`, and removed the obsolete `RSSAPP_ALLOW_QUERY_TOKEN` Edge Function Secret.
 
 Current operating contract:
 

@@ -156,7 +156,6 @@ Secret names observed:
 - `DEPLOY_GIT_SHA`
 - `LOVABLE_API_KEY`
 - `OPENAI_API_KEY`
-- `RSSAPP_ALLOW_QUERY_TOKEN` (legacy RSS signing cutover flag; no longer read after query-token compatibility removal)
 - `RSSAPP_SIGNING_SECRET` (observed in the 2026-06-15 RSS signing refresh)
 - Supabase-managed keys
 - `TELEGRAM_BOT_TOKEN`
@@ -169,6 +168,7 @@ Secret names observed:
 
 Secrets not observed in Supabase Edge secret names:
 
+- `RSSAPP_ALLOW_QUERY_TOKEN` (obsolete RSS signing cutover flag; removed after query-token compatibility code deployed)
 - `RSSAPP_WEBHOOK_TOKEN`
 - `VIDEO_RENDERER_URL`
 - `VIDEO_RENDERER_TOKEN`
@@ -178,7 +178,7 @@ Targeted RSS signing refresh:
 
 - PR #51 deployed `webhooks-rssapp` signed-webhook verification from `257c69f047971683c22ca57df4cf137c8d89a8c7`.
 - `RSSAPP_SIGNING_SECRET` was stored in Supabase Edge Function Secrets at `2026-06-15T19:57:46.571Z`.
-- `RSSAPP_ALLOW_QUERY_TOKEN=false` was stored in Supabase Edge Function Secrets at `2026-06-15T19:58:19.779Z` for the temporary cutover window.
+- `RSSAPP_ALLOW_QUERY_TOKEN=false` was stored in Supabase Edge Function Secrets at `2026-06-15T19:58:19.779Z` for the temporary cutover window, then removed after query-token compatibility code was deployed.
 - After the secret updates, remote function versions were `webhooks-rssapp` `226`, `worker` `257`, `admin-retry` `180`, `db-cleanup` `152`, `media-processor` `191`, `media-cleanup` `188`, `admin-actions` `179`, `x-poster` `128`, `x-followers-snapshot` `102`, and `digest-compiler` `108`.
 - A signed RSS.app-style request without a query token returned HTTP `200`; an unsigned query-token-only request returned HTTP `401`.
 - Compatibility telemetry showed `118` accepted `rss_query_token` hits inside the earlier 24-hour observation window, latest `2026-06-15 19:55:11.9163+00`; the later enforced quiet-window gate reported zero hits and allowed query-token code removal.
@@ -192,7 +192,7 @@ Targeted shared webhook secret rotation refresh:
 - After the secret rotation, remote function versions were `webhooks-rssapp` `227`, `worker` `258`, `admin-retry` `181`, `db-cleanup` `153`, `media-processor` `192`, `media-cleanup` `189`, `admin-actions` `180`, `x-poster` `129`, `x-followers-snapshot` `103`, and `digest-compiler` `109`.
 - Post-rotation `npm run check:release-state` passed with all cron jobs active, no stale running jobs, and renderer `hermes-masih-1` online at `2026-06-15 20:12:36.689+00`.
 - RSS.app manual cleanup completed on 2026-06-15: the stale query token was removed from the webhook URL, the exposed RSS.app signing secret was regenerated, `RSSAPP_SIGNING_SECRET` was updated at `2026-06-15T20:31:26.118Z`, and a regenerated-secret signed no-query RSS.app test returned HTTP `200`.
-- Remaining RSS.app work: deploy the query-token compatibility removal and then remove the obsolete `RSSAPP_ALLOW_QUERY_TOKEN` Edge Function Secret.
+- RSS.app query-token compatibility removal completed on 2026-06-16: PR #56 deployed all 10 Edge Functions from `aadd9bd294a9f871837e69e228d9288a92a79960`, stamped `DEPLOY_GIT_SHA`, `webhooks-rssapp` reached version `231`, and obsolete `RSSAPP_ALLOW_QUERY_TOKEN` was removed from Supabase Edge Function Secrets.
 
 Advisor highlights:
 

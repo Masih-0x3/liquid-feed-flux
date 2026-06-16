@@ -244,7 +244,8 @@ Branch: codex/xot-remove-rss-query-token-compat
 Pre-removal gate: CHECK_COMPATIBILITY_QUIET=1 COMPATIBILITY_QUIET_HOURS=24 npm run check:release-state passed with rss_query_token hits in last 24h = 0
 Code change: remove query-string RSS webhook auth support and the now-unused compatibility telemetry writer
 Runtime contract after deploy: RSS.app signed webhooks through RSSApp-Signature, with x-webhook-token or x-rssapp-token header fallback only
-Deployment note: deploy webhooks-rssapp after merge, then remove obsolete RSSAPP_ALLOW_QUERY_TOKEN from Supabase Edge Function Secrets
+Deployment: PR #56 merged at aadd9bd294a9f871837e69e228d9288a92a79960; all 10 Edge Functions were deployed from that SHA; DEPLOY_GIT_SHA was stamped; webhooks-rssapp reached version 231; obsolete RSSAPP_ALLOW_QUERY_TOKEN was removed from Supabase Edge Function Secrets
+Post-deploy smoke: npm run check:release-state passed after deploy and secret removal; xot.iraneyes.com and xot.vercel.app returned HTTP 200; main CI run 27646991568 passed; all cron jobs active; no stale running jobs; renderer hermes-masih-1 online
 ```
 
 ### 2026-06-15 - PR #51 RSS.app signed-webhook auth
