@@ -195,6 +195,31 @@ Secret/config rollback:
 
 Add new entries at the top.
 
+### 2026-06-17 - X post idempotency claim incident fix
+
+```text
+Date: 2026-06-17
+Operator: Codex
+Git SHA deployed to Edge Functions: 2daeee12a38a781f8651e94eaa6731e4351b960d
+GitHub PR: not created before emergency-style Supabase rollout; branch is codex/x-post-idempotency-claim
+CI run: no branch CI recorded before deploy; local gates passed: npm run lint:functions, npm run check:functions, npm run test:functions (282 tests), npm run lint, npm run build with local-only Vite env values
+Vercel deployment: no frontend deploy; production hosts remained HTTP 200
+Vercel aliases checked: https://xot.iraneyes.com and https://xot.vercel.app returned HTTP 200 with matching etag "fb6dcdbe8b800e0d95eff522f3b68fc1" at 2026-06-17T22:52Z
+Supabase project ref: jzirqfzzvlbxwfzndaer
+Migration head before: 20260617004958 fix_claim_video_render_by_id_args
+Migration head after: 20260617224908 x_post_delivery_claims
+Local migration file: supabase/migrations/20260617230000_x_post_delivery_claims.sql
+Supabase function versions before deploy: webhooks-rssapp 234, worker 265, admin-retry 188, db-cleanup 160, media-processor 199, media-cleanup 196, admin-actions 187, x-poster 136, x-followers-snapshot 110, digest-compiler 116
+Supabase function versions after deploy/secret stamp: webhooks-rssapp 235, worker 266, admin-retry 189, db-cleanup 161, media-processor 200, media-cleanup 197, admin-actions 189, x-poster 138, x-followers-snapshot 111, digest-compiler 117
+Selected function code deploys: admin-actions, x-poster
+DEPLOY_GIT_SHA stamped: 2daeee12a38a781f8651e94eaa6731e4351b960d at 2026-06-17T22:51:19.545Z
+Renderer heartbeat: hermes-masih-1 online, version 0.1.0, render_version persian-subtitles-masihh-v1, processed 17, failed 0, last_seen_at 2026-06-17 22:53:20.988+00
+Smoke checks: release-state completed successfully; x-poster-tick active every minute; no stale running jobs; active posting claims 0; stale posting claims 0; posted attempts > 1 in last 30m 0; duplicate completed x_post events in last 30m 0
+DB verification: uq_x_deliveries_post_active_or_posted exists; claim_x_post_delivery exists; already-posted claim returned claimed=false reason=already_posted; transaction-rolled-back race simulation returned first claim claimed=true and second claim claimed=false reason=already_posting
+Rollback target: prior function versions admin-actions 187 and x-poster 136. Prefer forward-fix migration for database rollback; do not drop claim columns/indexes during an incident without reviewed SQL because active x-poster code depends on them.
+Notes: Normal runbook release-from-main was bypassed deliberately for the duplicate public X-post incident. The selected function deploy was from codex/x-post-idempotency-claim with DEPLOY_ALLOW_NON_MAIN=1. Supabase CLI db push remained blocked by pre-existing migration-history drift, so the reviewed migration was applied through the Supabase connector as 20260617224908 x_post_delivery_claims. Stamping DEPLOY_GIT_SHA updates Edge Function version metadata for all functions even though only admin-actions and x-poster code were uploaded.
+```
+
 ### 2026-06-15 - Shared webhook secret rotation after RSS URL-token exposure
 
 ```text
