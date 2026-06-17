@@ -1,4 +1,5 @@
 import { readFile, stat } from "node:fs/promises";
+import { fetchOpenAI } from "./openaiFetch.js";
 import { normalizedLanguage } from "./openaiSubtitles.js";
 
 const OPENAI_BASE_URL = "https://api.openai.com/v1";
@@ -72,11 +73,11 @@ async function postMultipart({ apiKey, fields, filePath }) {
   }
   form.append("file", new Blob([fileBytes], { type: "audio/mpeg" }), filePath.split("/").pop() || "audio.mp3");
 
-  const response = await fetch(`${OPENAI_BASE_URL}/audio/transcriptions`, {
+  const response = await fetchOpenAI(fetch, `${OPENAI_BASE_URL}/audio/transcriptions`, {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}` },
     body: form,
-  });
+  }, "OpenAI transcription");
   const text = await response.text();
   let json;
   try {

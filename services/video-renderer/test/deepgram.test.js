@@ -67,6 +67,58 @@ test("prioritizes multilingual Deepgram mode for Latin post context", () => {
   assert.equal(attempts[1].detectLanguage, true);
 });
 
+test("does not let existing Persian post translation bias Deepgram language attempts", () => {
+  const attempts = resolveDeepgramLanguageAttempts({
+    language: "",
+    detectLanguage: true,
+    languageFallbacks: ["multi", "en", "fa", "he", "ar"],
+    contextText: [
+      "Post context:",
+      "Author: osint613",
+      "Post: Hezbollah taking advantage and sending suicide drones into Israel",
+      "Existing translated post: حزب‌الله لبنان از وضعیت موجود استفاده می‌کند و پهپادهای انتحاری به اسرائیل می‌فرستد.",
+      "URL: https://twitter.com/Osint613/status/2066053953842745673",
+    ].join("\n"),
+  });
+
+  assert.deepEqual(attempts.map((attempt) => attempt.language || "auto"), ["multi", "auto", "en", "fa", "he", "ar"]);
+});
+
+test("does not force Farsi from Persian or Arabic-script post copy", () => {
+  const attempts = resolveDeepgramLanguageAttempts({
+    language: "",
+    detectLanguage: true,
+    languageFallbacks: ["multi", "en", "fa", "he", "ar"],
+    contextText: [
+      "Post context:",
+      "Author: osint613",
+      "Post: لحظه‌ای که ارتش اسرائیل مرکز فرماندهی حزب‌الله را هدف قرار داد.",
+      "Existing translated post: لحظه‌ای که ارتش اسرائیل مرکز فرماندهی حزب‌الله را هدف قرار داد.",
+      "URL: https://twitter.com/Osint613/status/2066116702878761242",
+      "Visual note: No removable third-party watermark is visible.",
+    ].join("\n"),
+  });
+
+  assert.deepEqual(attempts.map((attempt) => attempt.language || "auto"), ["multi", "auto", "en", "fa", "he", "ar"]);
+});
+
+test("does not let raw OCR script alone bias Deepgram spoken-language attempts", () => {
+  const attempts = resolveDeepgramLanguageAttempts({
+    language: "",
+    detectLanguage: true,
+    languageFallbacks: ["multi", "en", "fa", "he", "ar"],
+    contextText: [
+      "Post context:",
+      "Author: osint613",
+      "Post: Hezbollah taking advantage and sending suicide drones into Israel",
+      "Visible OCR text: ‎בطم 4 om! ۳ لخ ران ليتق اک",
+      "Visual note: No clear removable third-party watermark is visible.",
+    ].join("\n"),
+  });
+
+  assert.deepEqual(attempts.map((attempt) => attempt.language || "auto"), ["multi", "auto", "en", "fa", "he", "ar"]);
+});
+
 test("prioritizes Farsi when visual context indicates Persian broadcast graphics", () => {
   const attempts = resolveDeepgramLanguageAttempts({
     language: "",
