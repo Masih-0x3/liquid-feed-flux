@@ -474,6 +474,16 @@ Deno.test("posted retry records force feedback and locks the post", async () => 
 
   assertEquals((result.body as Record<string, unknown>).status, "posted");
   assertEquals((result.body as Record<string, unknown>).x_tweet_id, "x1");
+  const fetchInit = calls.fetches[0].init as RequestInit;
+  assertEquals(
+    JSON.parse(String(fetchInit.body)),
+    {
+      dry_run: false,
+      force_retry: true,
+      dispatch_source: "admin_retry",
+      tweet_id: "t1",
+    },
+  );
   assertEquals(calls.feedback, [{
     tweetId: "t1",
     feedbackAction: "force_x",

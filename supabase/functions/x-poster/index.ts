@@ -30,6 +30,13 @@ import {
   captureEdgeExceptionBackground,
   initSentryEdge,
 } from '../_shared/sentry.ts';
+import {
+  claimXPostDelivery,
+  completeXPostDelivery,
+  failXPostDelivery,
+  xPostClaimRejection,
+  type XPostDeliveryClaim,
+} from '../_shared/xPostDeliveryClaim.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': Deno.env.get('ALLOWED_CORS_ORIGIN') ?? 'https://liquid-feed-flux.lovable.app',
@@ -492,6 +499,9 @@ Deno.serve(async (req) => {
   const dryRun = body.dry_run === true;
   const onlyTweetId = typeof body.tweet_id === 'string' ? body.tweet_id : null;
   const targetTweetId = typeof body.target_tweet_id === 'string' ? body.target_tweet_id : null;
+  const requestSource = typeof body.dispatch_source === 'string' ? body.dispatch_source : null;
+  const forceRetry = body.force_retry === true || (onlyTweetId !== null && !dryRun);
+  const claimTtlSeconds = typeof body.claim_ttl_seconds === 'number' ? body.claim_ttl_seconds : 1800;
 
   // Load settings
   const { data: settingsRows } = await sb.from('settings').select('key, value')
@@ -560,7 +570,7 @@ Deno.serve(async (req) => {
   const startFrom = cfg.start_posting_from || null;
   const effectiveCutoff = startFrom && startFrom > dedupeCutoff ? startFrom : dedupeCutoff;
 
-  const { data: existingRows } = await sb.from('x_deliveries').select('post_id').eq('status', 'posted').gte('created_at', dedupeCutoff);
+  const { data: existingRows } = await sb.from('x_deliveries').select('post_id').in('status', ['posting', 'posted', 'pending']).gte('created_at', dedupeCutoff);
   const existing = new Set((existingRows || []).map((r) => r.post_id as string));
 
   let posts: Array<Record<string, unknown>> = [];
@@ -620,7 +630,7 @@ Deno.serve(async (req) => {
     const tweetId = String(post.tweet_id ?? '');
     if (!tweetId) continue;
     const startedAt = Date.now();
-    const dispatchSource = String(post.dispatch_source ?? (targetTweetId ? 'event' : onlyTweetId ? 'force' : 'cron'));
+    const dispatchSource = String(post.dispatch_source ?? requestSource ?? (targetTweetId ? 'event' : onlyTweetId ? 'force' : 'cron'));
     const candidateReason = typeof post.candidate_reason === 'string' ? post.candidate_reason : null;
     const candidateAgeMs = typeof post.candidate_age_ms === 'number' ? post.candidate_age_ms : null;
     const enrichStatus = (post as { enrich_status?: string | null }).enrich_status;
@@ -643,14 +653,38 @@ Deno.serve(async (req) => {
 
     const { data: latestX } = await sb
       .from('x_deliveries')
-      .select('status, last_error, skip_reason')
+      .select('status, last_error, skip_reason, x_tweet_id, claim_expires_at')
       .eq('post_id', tweetId)
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
-    const latestStatus = (latestX as { status?: string } | null)?.status;
+    const latestXRecord = latestX as { status?: string; x_tweet_id?: string | null; claim_expires_at?: string | null } | null;
+    const latestStatus = latestXRecord?.status;
 
-    if (!onlyTweetId && (latestStatus === 'failed' || latestStatus === 'skipped')) {
+    if (latestStatus === 'posted') {
+      results.push({
+        tweet_id: tweetId,
+        status: 'skipped',
+        reason: 'already_posted',
+        x_tweet_id: latestXRecord?.x_tweet_id ?? null,
+      });
+      console.log(`[x-poster] skipping ${tweetId}: already posted to X`);
+      continue;
+    }
+
+    if (latestStatus === 'posting' || latestStatus === 'pending') {
+      const stale = latestStatus === 'posting' && latestXRecord?.claim_expires_at &&
+        new Date(latestXRecord.claim_expires_at).getTime() < Date.now();
+      results.push({
+        tweet_id: tweetId,
+        status: 'deferred',
+        reason: stale ? 'stale_posting' : `active_x_${latestStatus}`,
+      });
+      console.log(`[x-poster] deferring ${tweetId}: active X status is ${latestStatus}`);
+      continue;
+    }
+
+    if (!forceRetry && (latestStatus === 'failed' || latestStatus === 'skipped')) {
       results.push({
         tweet_id: tweetId,
         status: 'deferred',
@@ -841,6 +875,7 @@ Deno.serve(async (req) => {
     let mediaBytes = 0;
     let mediaKind: string | null = null;
     let mediaWarning: string | null = null;
+    let deliveryClaim: XPostDeliveryClaim | null = null;
 
     const sel = selectMediaTier(mediaRowsForSelection, { allowVideo: cfg.allow_video === true });
 
@@ -913,23 +948,60 @@ Deno.serve(async (req) => {
       continue;
     }
 
+    if (!dryRun) {
+      try {
+        deliveryClaim = await claimXPostDelivery(sb, {
+          postId: tweetId,
+          source: dispatchSource,
+          forceRetry,
+          ttlSeconds: claimTtlSeconds,
+        });
+      } catch (e) {
+        const errMsg = (e as Error).message;
+        await insertXPipelineEvent(sb, tweetId, 'failed', new Date(startedAt).toISOString(), new Date().toISOString(), errMsg, {
+          candidate_reason: candidateReason,
+          candidate_age_ms: candidateAgeMs,
+          dispatch_source: dispatchSource,
+          claim_error: true,
+        });
+        results.push({ tweet_id: tweetId, status: 'failed', reason: 'claim_failed', error: errMsg, candidate_reason: candidateReason, candidate_age_ms: candidateAgeMs, dispatch_source: dispatchSource });
+        console.error('[x-poster] claim_x_post_delivery failed', { tweetId, err: errMsg });
+        continue;
+      }
+      if (!deliveryClaim.claimed || !deliveryClaim.deliveryId || !deliveryClaim.claimToken) {
+        const rejection = xPostClaimRejection(deliveryClaim);
+        await insertXPipelineEvent(sb, tweetId, rejection.status, new Date(startedAt).toISOString(), new Date().toISOString(), null, {
+          candidate_reason: candidateReason,
+          candidate_age_ms: candidateAgeMs,
+          dispatch_source: dispatchSource,
+          reason: rejection.reason,
+          existing_status: deliveryClaim.existingStatus,
+          existing_x_tweet_id: deliveryClaim.existingXTweetId,
+          claim_expires_at: deliveryClaim.claimExpiresAt,
+        });
+        results.push({ tweet_id: tweetId, ...rejection, candidate_reason: candidateReason, candidate_age_ms: candidateAgeMs, dispatch_source: dispatchSource });
+        console.log(`[x-poster] deferring ${tweetId}: X claim not acquired (${rejection.reason})`);
+        continue;
+      }
+    }
+
     if (sel.tier !== 'text' && !dryRun) {
       if (sel.tier === 'video') {
         const durationMs = sel.items[0]?.duration_ms ?? null;
         if (isOverAttemptedVideoDuration(durationMs)) {
           const seconds = Math.round(durationMs / 1000);
           const reason = `video_too_long_for_config:${seconds}s`;
-          const { error: skipErr } = await sb.from('x_deliveries').insert({
-            post_id: tweetId,
-            status: 'skipped',
-            media_count: 0,
-            media_bytes: 0,
-            media_kind: 'video',
-            skip_reason: reason,
-            last_error: `configured video duration cap is ${MAX_ATTEMPTED_VIDEO_DURATION_MS / 1000}s`,
-            attempts: 0,
-          });
-          if (skipErr) console.error('[x-poster] x_deliveries insert skipped failed (video duration)', { tweetId, err: skipErr.message });
+          const skipOk = deliveryClaim
+            ? await failXPostDelivery(sb, {
+              deliveryId: deliveryClaim.deliveryId!,
+              claimToken: deliveryClaim.claimToken!,
+              status: 'skipped',
+              error: `configured video duration cap is ${MAX_ATTEMPTED_VIDEO_DURATION_MS / 1000}s`,
+              skipReason: reason,
+              mediaKind: 'video',
+            })
+            : false;
+          if (!skipOk) console.error('[x-poster] x_deliveries claim release skipped failed (video duration)', { tweetId });
           results.push({ tweet_id: tweetId, status: 'skipped', reason });
           console.warn(`[x-poster] skipping ${tweetId}: ${reason}`);
           continue;
@@ -962,16 +1034,19 @@ Deno.serve(async (req) => {
         }
       } catch (e) {
         const errMsg = `media_upload_failed(${sel.tier}): ${(e as Error).message}`.slice(0, 500);
-        const { error: failInsErr } = await sb.from('x_deliveries').insert({
-          post_id: tweetId,
-          status: 'failed',
-          media_count: 0,
-          media_bytes: 0,
-          media_kind: sel.tier,
-          last_error: errMsg,
-          attempts: 1,
-        });
-        if (failInsErr) console.error('[x-poster] x_deliveries insert failed (media)', { tweetId, err: failInsErr.message });
+        try {
+          const failOk = deliveryClaim
+            ? await failXPostDelivery(sb, {
+              deliveryId: deliveryClaim.deliveryId!,
+              claimToken: deliveryClaim.claimToken!,
+              error: errMsg,
+              mediaKind: sel.tier,
+            })
+            : false;
+          if (!failOk) console.error('[x-poster] x_deliveries claim release failed (media)', { tweetId });
+        } catch (failErr) {
+          console.error('[x-poster] fail_x_post_delivery failed (media)', { tweetId, err: (failErr as Error).message });
+        }
         results.push({ tweet_id: tweetId, status: 'failed', error: errMsg });
         console.warn(`[x-poster] ${sel.tier} upload failed for ${tweetId}; not posting text-only: ${(e as Error).message}`);
         continue;
@@ -999,65 +1074,13 @@ Deno.serve(async (req) => {
       continue;
     }
 
-    // Post tweet
     const xApiStartedAt = Date.now();
+    let xId = '';
+    let raw: unknown = null;
     try {
-      const { id: xId, raw } = await postTweet(text, mediaIds, ck, cs, at, ats, sb, tweetId);
-      const xApiMs = Date.now() - xApiStartedAt;
-      const latency = Date.now() - startedAt;
-      posts24hCount += 1;
-      posts1hCount += 1;
-      lastPostTimeMs = Date.now();
-      const { data: existingPosted } = await sb
-        .from('x_deliveries')
-        .select('id, attempts')
-        .eq('post_id', tweetId)
-        .eq('status', 'posted')
-        .maybeSingle();
-      const postedAt = new Date().toISOString();
-      let writeErr: { message: string } | null = null;
-      if (existingPosted) {
-        const prevAttempts = (existingPosted as { attempts?: number }).attempts ?? 1;
-        const { error: updErr } = await sb.from('x_deliveries').update({
-          x_tweet_id: xId,
-          media_count: mediaCount,
-          media_bytes: mediaBytes,
-          media_kind: mediaKind,
-          posted_at: postedAt,
-          latency_ms: latency,
-          api_response: raw,
-          last_error: mediaWarning,
-          attempts: prevAttempts + 1,
-        }).eq('id', (existingPosted as { id: string }).id);
-        writeErr = updErr;
-      } else {
-        const { error: insErr } = await sb.from('x_deliveries').insert({
-          post_id: tweetId, x_tweet_id: xId, status: 'posted',
-          media_count: mediaCount, media_bytes: mediaBytes, media_kind: mediaKind,
-          posted_at: postedAt, latency_ms: latency, api_response: raw, attempts: 1,
-          last_error: mediaWarning,
-        });
-        writeErr = insErr;
-      }
-      if (writeErr) console.error('[x-poster] x_deliveries write failed', { tweetId, xId, err: writeErr.message });
-      await insertXPipelineEvent(sb, tweetId, 'completed', new Date(xApiStartedAt).toISOString(), new Date().toISOString(), null, {
-        x_tweet_id: xId,
-        x_api_ms: xApiMs,
-        latency_ms: latency,
-        media_count: mediaCount,
-        media_kind: mediaKind,
-        candidate_reason: candidateReason,
-        candidate_age_ms: candidateAgeMs,
-        dispatch_source: dispatchSource,
-      });
-      const renderCfg = await loadVideoRenderConfig(sb);
-      try {
-        await sb.rpc('mark_video_render_posted', {
-          p_tweet_id: tweetId,
-          p_retention_hours: renderCfg.retentionHours,
-        });
-      } catch (_e) { /* best-effort */ }
-      results.push({ tweet_id: tweetId, status: 'posted', x_tweet_id: xId, latency_ms: latency, x_api_ms: xApiMs, candidate_reason: candidateReason, candidate_age_ms: candidateAgeMs, dispatch_source: dispatchSource });
+      const posted = await postTweet(text, mediaIds, ck, cs, at, ats, sb, tweetId);
+      xId = posted.id;
+      raw = posted.raw;
     } catch (e) {
       const xApiMs = Date.now() - xApiStartedAt;
       const status = (e as { status?: number }).status || 0;
@@ -1077,20 +1100,94 @@ Deno.serve(async (req) => {
           x_api_ms: xApiMs,
         },
       });
-      const { error: postFailErr } = await sb.from('x_deliveries').insert({
-        post_id: tweetId, status: isRetriable ? 'pending' : 'failed',
-        last_error: errMsg, attempts: 1,
-        api_response: (e as { raw?: unknown }).raw ?? null,
-      });
-      if (postFailErr) console.error('[x-poster] x_deliveries insert failed (post)', { tweetId, err: postFailErr.message });
-      await insertXPipelineEvent(sb, tweetId, isRetriable ? 'pending' : 'failed', new Date(xApiStartedAt).toISOString(), new Date().toISOString(), errMsg, {
+      try {
+        const failOk = deliveryClaim
+          ? await failXPostDelivery(sb, {
+            deliveryId: deliveryClaim.deliveryId!,
+            claimToken: deliveryClaim.claimToken!,
+            error: errMsg,
+            apiResponse: (e as { raw?: unknown }).raw ?? null,
+            skipReason: isRetriable ? 'x_api_retriable' : null,
+            nextRetryAt: isRetriable ? new Date(Date.now() + 15 * 60 * 1000).toISOString() : null,
+            mediaCount,
+            mediaBytes,
+            mediaKind,
+          })
+          : false;
+        if (!failOk) console.error('[x-poster] x_deliveries claim release failed (post)', { tweetId });
+      } catch (failErr) {
+        console.error('[x-poster] fail_x_post_delivery failed (post)', { tweetId, err: (failErr as Error).message });
+      }
+      await insertXPipelineEvent(sb, tweetId, 'failed', new Date(xApiStartedAt).toISOString(), new Date().toISOString(), errMsg, {
         x_api_ms: xApiMs,
+        retriable: isRetriable,
         candidate_reason: candidateReason,
         candidate_age_ms: candidateAgeMs,
         dispatch_source: dispatchSource,
       });
-      results.push({ tweet_id: tweetId, status: isRetriable ? 'pending' : 'failed', error: errMsg, x_api_ms: xApiMs, candidate_reason: candidateReason, candidate_age_ms: candidateAgeMs, dispatch_source: dispatchSource });
+      results.push({ tweet_id: tweetId, status: 'failed', error: errMsg, retriable: isRetriable, x_api_ms: xApiMs, candidate_reason: candidateReason, candidate_age_ms: candidateAgeMs, dispatch_source: dispatchSource });
+      continue;
     }
+
+    const xApiMs = Date.now() - xApiStartedAt;
+    const latency = Date.now() - startedAt;
+    posts24hCount += 1;
+    posts1hCount += 1;
+    lastPostTimeMs = Date.now();
+    const postedAt = new Date().toISOString();
+    let deliveryWriteConfirmed = false;
+    let deliveryWriteError: string | null = null;
+    try {
+      deliveryWriteConfirmed = deliveryClaim
+        ? await completeXPostDelivery(sb, {
+          deliveryId: deliveryClaim.deliveryId!,
+          claimToken: deliveryClaim.claimToken!,
+          xTweetId: xId,
+          mediaCount,
+          mediaBytes,
+          mediaKind,
+          postedAt,
+          latencyMs: latency,
+          apiResponse: raw,
+          lastError: mediaWarning,
+        })
+        : false;
+      if (!deliveryWriteConfirmed) deliveryWriteError = 'claim_completion_rejected';
+    } catch (e) {
+      deliveryWriteError = (e as Error).message;
+      captureEdgeExceptionBackground(e, {
+        functionName: "x-poster",
+        action: "claim_complete_error",
+        extra: {
+          tweet_id: tweetId,
+          x_tweet_id: xId,
+          dispatch_source: dispatchSource,
+        },
+      });
+    }
+    if (deliveryWriteError) {
+      console.error('[x-poster] complete_x_post_delivery failed after X accepted post', { tweetId, xId, err: deliveryWriteError });
+    }
+
+    await insertXPipelineEvent(sb, tweetId, deliveryWriteConfirmed ? 'completed' : 'failed', new Date(xApiStartedAt).toISOString(), new Date().toISOString(), deliveryWriteError, {
+      x_tweet_id: xId,
+      x_api_ms: xApiMs,
+      latency_ms: latency,
+      media_count: mediaCount,
+      media_kind: mediaKind,
+      candidate_reason: candidateReason,
+      candidate_age_ms: candidateAgeMs,
+      dispatch_source: dispatchSource,
+      delivery_write_confirmed: deliveryWriteConfirmed,
+    });
+    const renderCfg = await loadVideoRenderConfig(sb);
+    try {
+      await sb.rpc('mark_video_render_posted', {
+        p_tweet_id: tweetId,
+        p_retention_hours: renderCfg.retentionHours,
+      });
+    } catch (_e) { /* best-effort */ }
+    results.push({ tweet_id: tweetId, status: 'posted', x_tweet_id: xId, latency_ms: latency, x_api_ms: xApiMs, candidate_reason: candidateReason, candidate_age_ms: candidateAgeMs, dispatch_source: dispatchSource, delivery_write_confirmed: deliveryWriteConfirmed });
   }
 
   return new Response(JSON.stringify({ ok: true, dry_run: dryRun, processed: results.length, results }), {

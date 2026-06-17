@@ -678,6 +678,15 @@ export async function getXPostingDiagnostics(
         severity: "blocker",
       });
     }
+    if (latestStatus === "posting" || latestStatus === "pending") {
+      blockers.push({
+        code: `active_x_${latestStatus}`,
+        label: latestStatus === "posting"
+          ? "X post is already being claimed/posting"
+          : "X post retry is pending",
+        severity: "deferred",
+      });
+    }
     if (latestStatus === "failed" || latestStatus === "skipped") {
       blockers.push({
         code: `previous_x_${latestStatus}`,
@@ -1011,6 +1020,8 @@ export async function runXPostAdminAction(
         },
         body: JSON.stringify({
           dry_run: action === "dry_run_x_post",
+          force_retry: action === "retry_x_post",
+          dispatch_source: action === "retry_x_post" ? "admin_retry" : "admin_dry_run",
           ...(tweetId ? { tweet_id: tweetId } : {}),
         }),
       },
