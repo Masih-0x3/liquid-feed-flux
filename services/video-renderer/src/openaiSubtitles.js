@@ -1,3 +1,4 @@
+import { fetchOpenAI } from "./openaiFetch.js";
 import { validateTranslatedSegments } from "./subtitles.js";
 
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
@@ -242,14 +243,14 @@ export async function cleanupTranscriptSegments({
   contextText = "",
   fetchImpl = fetch,
 }) {
-  const response = await fetchImpl(OPENAI_RESPONSES_URL, {
+  const response = await fetchOpenAI(fetchImpl, OPENAI_RESPONSES_URL, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(buildTranscriptCleanupRequest({ model, segments, sourceLanguage, contextText })),
-  });
+  }, "OpenAI transcript cleanup");
 
   const { rawText, payload } = await readJsonResponse(response);
   if (!response.ok) {
@@ -262,14 +263,14 @@ export async function cleanupTranscriptSegments({
 }
 
 export async function translateSegments({ apiKey, model, segments, targetLanguage = "fa", contextText = "", fetchImpl = fetch }) {
-  const response = await fetchImpl(OPENAI_RESPONSES_URL, {
+  const response = await fetchOpenAI(fetchImpl, OPENAI_RESPONSES_URL, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(buildTranslationRequest({ model, segments, targetLanguage, contextText })),
-  });
+  }, "OpenAI translation");
 
   const { rawText, payload } = await readJsonResponse(response);
   if (!response.ok) {
@@ -281,7 +282,7 @@ export async function translateSegments({ apiKey, model, segments, targetLanguag
     const translated = validateTranslatedSegments(segments, parsed.segments);
     return { model, raw: payload, segments: translated };
   } catch (error) {
-    const repairResponse = await fetchImpl(OPENAI_RESPONSES_URL, {
+    const repairResponse = await fetchOpenAI(fetchImpl, OPENAI_RESPONSES_URL, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -295,7 +296,7 @@ export async function translateSegments({ apiKey, model, segments, targetLanguag
         contextText,
         errorMessage: error instanceof Error ? error.message : String(error),
       })),
-    });
+    }, "OpenAI translation repair");
     const { rawText: repairRawText, payload: repairPayload } = await readJsonResponse(repairResponse);
     if (!repairResponse.ok) {
       throw new Error(`OpenAI translation repair ${repairResponse.status}: ${repairRawText.slice(0, 500)}`);

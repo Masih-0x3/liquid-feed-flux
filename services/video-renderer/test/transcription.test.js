@@ -1,7 +1,24 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isLikelyRepeatedFillerTranscript, isLikelyRomanizedHebrewTranscript, isWeakSpeechDetection, shouldRetryWithEnhancedAudio, transcribeAudio } from "../src/transcription.js";
+import { isLikelyContextMismatchedRepetitiveTranscript, isLikelyNonSpeechDescription, isLikelyRepeatedFillerTranscript, isLikelyRomanizedHebrewTranscript, isSparseContextMismatchedTranscript, isWeakSpeechDetection, shouldRetryWithEnhancedAudio, transcribeAudio } from "../src/transcription.js";
 import { transcribeWithEnhancedAudioRetry } from "../src/transcriptionPipeline.js";
+
+function weakDeepgramNoiseResponse() {
+  return {
+    results: {
+      channels: [{
+        detected_language: "multi",
+        language_confidence: 0,
+        alternatives: [{
+          transcript: "noise",
+          confidence: 0.28,
+          words: [{ word: "noise", start: 0.4, end: 0.9, confidence: 0.28 }],
+        }],
+      }],
+      utterances: [{ start: 0.4, end: 0.9, transcript: "noise" }],
+    },
+  };
+}
 
 test("uses Deepgram as the default transcription provider", async () => {
   const calls = [];
@@ -60,7 +77,6 @@ test("can fall back to OpenAI transcription when explicitly enabled", async () =
 test("classifies Deepgram no-transcript responses as no usable speech", async () => {
   const result = await transcribeAudio({
     provider: "deepgram",
-    fallbackProvider: "openai",
     audioPath: "/tmp/audio.mp3",
     durationMs: 3000,
     deepgramApiKey: "dg-key",
@@ -81,6 +97,225 @@ test("classifies Deepgram no-transcript responses as no usable speech", async ()
 
   assert.equal(result.provider, "deepgram");
   assert.equal(result.model, "nova-3");
+  assert.equal(result.noUsableSpeech, true);
+  assert.deepEqual(result.segments, []);
+  assert.match(result.noUsableSpeechReason, /returned no timed segments/);
+});
+
+test("does not fall back from sparse low-information Deepgram fragments to OpenAI speech", async () => {
+  let openaiCalled = false;
+  const result = await transcribeAudio({
+    provider: "deepgram",
+    fallbackProvider: "openai",
+    audioPath: "/tmp/audio.mp3",
+    durationMs: 22033,
+    deepgramApiKey: "dg-key",
+    openaiApiKey: "openai-key",
+    fetchImpl: async () => ({
+      ok: true,
+      text: async () => JSON.stringify({
+        results: {
+          channels: [{
+            detected_language: "es",
+            language_confidence: 0.42097387,
+            alternatives: [{
+              transcript: "BNI. Boon.",
+              confidence: 0.87320966,
+              words: [
+                { word: "BNI", start: 4.72, end: 5.52, confidence: 0.62 },
+                { word: "Boon", start: 13.571, end: 14.051, confidence: 0.87 },
+              ],
+            }],
+          }],
+          utterances: [
+            { start: 4.72, end: 5.52, transcript: "BNI." },
+            { start: 13.571, end: 14.051, transcript: "Boon." },
+          ],
+        },
+      }),
+    }),
+    readFileImpl: async () => Buffer.from("audio"),
+    openaiTranscribe: async () => {
+      openaiCalled = true;
+      return {
+        model: "gpt-4o-transcribe-diarize",
+        language: "he",
+        segments: [
+          { id: 1, start: 0, end: 1.8, text: "תבחן בי משאלה הנה" },
+          { id: 2, start: 1.8, end: 3.5, text: "איפה איפה היא מקרסקה?" },
+        ],
+      };
+    },
+  });
+
+  assert.equal(openaiCalled, false);
+  assert.equal(result.provider, "deepgram");
+  assert.equal(result.noUsableSpeech, true);
+  assert.deepEqual(result.segments, []);
+  assert.match(result.noUsableSpeechReason, /weak low-confidence/);
+  assert.equal(result.rejectedSegments.length, 2);
+});
+
+test("rejects descriptive OpenAI fallback captions instead of burning fake subtitles", async () => {
+  const result = await transcribeAudio({
+    provider: "deepgram",
+    fallbackProvider: "openai",
+    audioPath: "/tmp/audio.mp3",
+    durationMs: 15335,
+    deepgramApiKey: "dg-key",
+    openaiApiKey: "openai-key",
+    fetchImpl: async () => ({ ok: false, status: 503, text: async () => "temporary outage" }),
+    readFileImpl: async () => Buffer.from("audio"),
+    openaiTranscribe: async () => ({
+      model: "whisper-1",
+      language: "en",
+      segments: [{
+        id: 1,
+        start: 0,
+        end: 11.86,
+        text: "Multiple players chanting the same word, Argentine for the victory.",
+      }],
+    }),
+  });
+
+  assert.equal(result.provider, "openai");
+  assert.equal(result.noUsableSpeech, true);
+  assert.deepEqual(result.segments, []);
+  assert.match(result.noUsableSpeechReason, /OpenAI fallback produced no usable speech/);
+  assert.equal(isLikelyNonSpeechDescription({
+    segments: [{ id: 1, start: 0, end: 11.86, text: "Multiple players chanting the same word." }],
+  }), true);
+  assert.equal(isLikelyNonSpeechDescription({
+    segments: [{ id: 1, start: 0, end: 14.36, text: "SPEAKERS CHANTING" }],
+  }), true);
+});
+
+test("rejects repetitive fallback gibberish when it does not match post context", async () => {
+  const result = await transcribeAudio({
+    provider: "deepgram",
+    fallbackProvider: "openai",
+    audioPath: "/tmp/audio.mp3",
+    durationMs: 15335,
+    deepgramApiKey: "dg-key",
+    openaiApiKey: "openai-key",
+    contextText: "Post context:\nPost: Demonstrators chanted Ghalibaf, Araghchi, resign, resign.",
+    fetchImpl: async () => ({ ok: false, status: 503, text: async () => "temporary outage" }),
+    readFileImpl: async () => Buffer.from("audio"),
+    openaiTranscribe: async () => ({
+      model: "gpt-4o-transcribe-diarize",
+      language: "en",
+      segments: [
+        { id: 1, start: 0.25, end: 1.6, text: "HS, HS," },
+        { id: 2, start: 1.7, end: 3.25, text: "HS, olivar," },
+        { id: 3, start: 3.3, end: 4.7, text: "a la fin, HS," },
+        { id: 4, start: 6.3, end: 8.2, text: "olivar, a la fin," },
+      ],
+    }),
+  });
+
+  assert.equal(result.noUsableSpeech, true);
+  assert.deepEqual(result.segments, []);
+  assert.match(result.noUsableSpeechReason, /OpenAI fallback produced no usable speech/);
+  assert.equal(isLikelyContextMismatchedRepetitiveTranscript({
+    segments: [
+      { id: 1, start: 0, end: 1, text: "HS, HS, olivar, a la fin, HS, olivar, a la fin." },
+    ],
+  }, "Post: Demonstrators chanted Ghalibaf, Araghchi, resign."), true);
+  assert.equal(isLikelyContextMismatchedRepetitiveTranscript({
+    segments: [
+      { id: 1, start: 0, end: 1, text: "Araghchi, resign. Araghchi, resign. Araghchi, resign." },
+    ],
+  }, "Post: Demonstrators chanted Ghalibaf, Araghchi, resign."), false);
+});
+
+test("rejects sparse fallback phrases that do not match post context", async () => {
+  const result = await transcribeAudio({
+    provider: "deepgram",
+    fallbackProvider: "openai",
+    audioPath: "/tmp/audio.mp3",
+    durationMs: 15335,
+    deepgramApiKey: "dg-key",
+    openaiApiKey: "openai-key",
+    contextText: "Post context:\nPost: Demonstrators chanted Ghalibaf, Araghchi, resign, resign.",
+    fetchImpl: async () => ({ ok: false, status: 503, text: async () => "temporary outage" }),
+    readFileImpl: async () => Buffer.from("audio"),
+    openaiTranscribe: async () => ({
+      model: "gpt-4o-transcribe-diarize",
+      language: "en",
+      segments: [{ id: 1, start: 0, end: 2.2, text: "Este é o nosso..." }],
+    }),
+  });
+
+  assert.equal(result.noUsableSpeech, true);
+  assert.deepEqual(result.segments, []);
+  assert.equal(isSparseContextMismatchedTranscript({
+    segments: [{ id: 1, start: 0, end: 2.2, text: "Este é o nosso..." }],
+  }, {
+    durationMs: 15335,
+    contextText: "Post: Demonstrators chanted Ghalibaf, Araghchi, resign.",
+  }), true);
+  assert.equal(isSparseContextMismatchedTranscript({
+    segments: [{ id: 1, start: 0, end: 4.1, text: "Et c'est pas, et c'est pas, sans arriver, à la fille." }],
+  }, {
+    durationMs: 15335,
+    contextText: "Post: Demonstrators chanted Ghalibaf, Araghchi, resign.",
+  }), true);
+  assert.equal(isSparseContextMismatchedTranscript({
+    segments: [{ id: 1, start: 0, end: 1.1, text: "uh huh" }],
+  }, {
+    durationMs: 12000,
+    contextText: "Post: Unrelated context.",
+  }), false);
+});
+
+test("rejects generic OpenAI outro captions after Deepgram API failure", async () => {
+  const result = await transcribeAudio({
+    provider: "deepgram",
+    fallbackProvider: "openai",
+    audioPath: "/tmp/audio.mp3",
+    durationMs: 27567,
+    deepgramApiKey: "dg-key",
+    openaiApiKey: "openai-key",
+    contextText: "Post context:\nPost: Security camera footage from Gaza.",
+    fetchImpl: async () => ({ ok: false, status: 503, text: async () => "temporary outage" }),
+    readFileImpl: async () => Buffer.from("audio"),
+    openaiTranscribe: async () => ({
+      model: "whisper-1",
+      language: "en",
+      segments: [{ id: 1, start: 0, end: 27.56, text: "Thank you for watching!" }],
+    }),
+  });
+
+  assert.equal(result.noUsableSpeech, true);
+  assert.deepEqual(result.segments, []);
+  assert.match(result.noUsableSpeechReason, /OpenAI fallback produced no usable speech/);
+});
+
+test("does not invoke OpenAI fallback after Deepgram finds no timed speech", async () => {
+  const result = await transcribeAudio({
+    provider: "deepgram",
+    fallbackProvider: "openai",
+    audioPath: "/tmp/audio.mp3",
+    durationMs: 88345,
+    deepgramApiKey: "dg-key",
+    openaiApiKey: "openai-key",
+    contextText: "Post context:\nPost: convoy driving on a road near a town.",
+    fetchImpl: async () => ({
+      ok: true,
+      text: async () => JSON.stringify({
+        results: {
+          channels: [{ detected_language: "und", alternatives: [{ transcript: "", words: [] }] }],
+          utterances: [],
+        },
+      }),
+    }),
+    readFileImpl: async () => Buffer.from("audio"),
+    openaiTranscribe: async () => {
+      throw new Error("OpenAI fallback should not run after Deepgram finds no timed speech");
+    },
+  });
+
+  assert.equal(result.provider, "deepgram");
   assert.equal(result.noUsableSpeech, true);
   assert.deepEqual(result.segments, []);
   assert.match(result.noUsableSpeechReason, /returned no timed segments/);
@@ -131,6 +366,37 @@ test("enhanced audio retry fires only after empty or weak Deepgram output", asyn
   assert.equal(result.enhancedAudioRetry, true);
   assert.match(result.enhancedAudioRetryReason, /returned no timed segments/);
   assert.deepEqual(result.segments, [{ id: 1, start: 12.4, end: 13.44, text: "How are" }]);
+});
+
+test("enhanced audio retry after no timed speech does not reuse OpenAI fallback", async () => {
+  const calls = [];
+  const result = await transcribeWithEnhancedAudioRetry({
+    inputPath: "/tmp/source.mp4",
+    audioPath: "/tmp/audio.mp3",
+    enhancedAudioPath: "/tmp/audio.enhanced.mp3",
+    runEnhancedAudioExtract: async () => {},
+    runTranscription: async (options, label) => {
+      calls.push({ label, fallbackProvider: options.fallbackProvider });
+      return {
+        provider: "deepgram",
+        model: "nova-3",
+        noUsableSpeech: true,
+        noUsableSpeechReason: "Deepgram transcription returned no timed segments",
+        segments: [],
+      };
+    },
+    transcriptionOptions: {
+      provider: "deepgram",
+      fallbackProvider: "openai",
+    },
+  });
+
+  assert.deepEqual(calls, [
+    { label: "transcription", fallbackProvider: "openai" },
+    { label: "transcription_enhanced", fallbackProvider: "" },
+  ]);
+  assert.equal(result.noUsableSpeech, true);
+  assert.deepEqual(result.segments, []);
 });
 
 test("early transcript rescue prepends missed opening speech before a late first cue", async () => {
@@ -244,6 +510,87 @@ test("rejects short low-confidence multilingual noise as no usable speech", asyn
   assert.equal(result.noUsableSpeech, true);
   assert.deepEqual(result.segments, []);
   assert.deepEqual(result.rejectedSegments, [{ id: 1, start: 6.4, end: 8.08, text: "Skillers de pois, no." }]);
+  assert.match(result.noUsableSpeechReason, /weak low-confidence/);
+});
+
+test("rejects ultra-sparse single-word Deepgram hallucinations in short noisy clips", async () => {
+  const attemptedLanguages = [];
+  const result = await transcribeAudio({
+    provider: "deepgram",
+    audioPath: "/tmp/audio.mp3",
+    durationMs: 6767,
+    deepgramApiKey: "dg-key",
+    deepgramLanguageFallbacks: ["multi", "en", "fa", "he", "ar"],
+    fetchImpl: async (url) => {
+      const language = url.searchParams.get("language") || "auto";
+      attemptedLanguages.push(language);
+      if (language === "auto" || language === "he") {
+        return {
+          ok: true,
+          text: async () => JSON.stringify({
+            results: {
+              channels: [{ detected_language: "und", alternatives: [{ transcript: "", words: [] }] }],
+              utterances: [],
+            },
+          }),
+        };
+      }
+      if (language === "ar") {
+        return {
+          ok: true,
+          text: async () => JSON.stringify({
+            results: {
+              channels: [{
+                detected_language: "ar",
+                language_confidence: 0,
+                alternatives: [{
+                  transcript: "علي الطاه.",
+                  confidence: 0.86572266,
+                  words: [
+                    { word: "علي", start: 4.16, end: 4.64, confidence: 0.86572266 },
+                    { word: "الطاه", start: 4.64, end: 7.84, confidence: 0.77001953 },
+                  ],
+                }],
+              }],
+              utterances: [{ start: 4.16, end: 7.84, transcript: "علي الطاه." }],
+            },
+          }),
+        };
+      }
+      return {
+        ok: true,
+        text: async () => JSON.stringify({
+          results: {
+            channels: [{
+              detected_language: language,
+              language_confidence: 0,
+              alternatives: [{
+                transcript: language === "en" ? "Anita." : "عالیدا",
+                confidence: language === "en" ? 0.72558594 : 0.6326497,
+                words: [{
+                  word: language === "en" ? "Anita" : "عالیدا",
+                  start: language === "fa" ? 4.24 : 4.08,
+                  end: language === "en" ? 4.56 : language === "fa" ? 9.2 : 7.68,
+                  confidence: language === "en" ? 0.72558594 : 0.6326497,
+                }],
+              }],
+            }],
+            utterances: [{
+              start: language === "fa" ? 4.24 : 4.08,
+              end: language === "en" ? 4.56 : language === "fa" ? 9.2 : 7.68,
+              transcript: language === "en" ? "Anita." : "عالیدا",
+            }],
+          },
+        }),
+      };
+    },
+    readFileImpl: async () => Buffer.from("audio"),
+  });
+
+  assert.deepEqual(attemptedLanguages, ["auto", "multi", "en", "fa", "he", "ar"]);
+  assert.equal(result.provider, "deepgram");
+  assert.equal(result.noUsableSpeech, true);
+  assert.deepEqual(result.segments, []);
   assert.match(result.noUsableSpeechReason, /weak low-confidence/);
 });
 

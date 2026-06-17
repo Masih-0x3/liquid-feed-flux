@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { fetchOpenAI } from "./openaiFetch.js";
 
 const OPENAI_BASE_URL = "https://api.openai.com/v1";
 
@@ -687,14 +688,14 @@ function mergeVisionAnalyses(primary, specialistResults) {
 }
 
 async function postVisionPreflight({ apiKey, model, imageBase64, frameBase64s, focus }) {
-  const response = await fetch(`${OPENAI_BASE_URL}/responses`, {
+  const response = await fetchOpenAI(fetch, `${OPENAI_BASE_URL}/responses`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(buildVisionPreflightRequest({ model, imageBase64, frameBase64s, focus })),
-  });
+  }, "OpenAI vision");
   const rawText = await response.text();
   let payload;
   try {
@@ -716,7 +717,7 @@ async function postRemovableWatermarkDetection({
   topP,
   maxOutputTokens,
 }) {
-  const response = await fetch(`${OPENAI_BASE_URL}/responses`, {
+  const response = await fetchOpenAI(fetch, `${OPENAI_BASE_URL}/responses`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -731,7 +732,7 @@ async function postRemovableWatermarkDetection({
       topP,
       maxOutputTokens,
     })),
-  });
+  }, "OpenAI watermark detection");
   const rawText = await response.text();
   let payload;
   try {
@@ -812,4 +813,3 @@ export async function analyzeRemovableWatermarks({
     maxOutputTokens,
   });
 }
-
