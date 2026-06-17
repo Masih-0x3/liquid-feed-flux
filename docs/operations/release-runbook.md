@@ -208,7 +208,7 @@ Vercel aliases checked: https://xot.iraneyes.com and https://xot.vercel.app retu
 Supabase project ref: jzirqfzzvlbxwfzndaer
 Migration head before: 20260617004958 fix_claim_video_render_by_id_args
 Migration head after: 20260617224908 x_post_delivery_claims
-Local migration file: supabase/migrations/20260617230000_x_post_delivery_claims.sql
+Local migration file: supabase/migrations/20260617224908_x_post_delivery_claims.sql
 Supabase function versions before deploy: webhooks-rssapp 234, worker 265, admin-retry 188, db-cleanup 160, media-processor 199, media-cleanup 196, admin-actions 187, x-poster 136, x-followers-snapshot 110, digest-compiler 116
 Supabase function versions after deploy/secret stamp: webhooks-rssapp 235, worker 266, admin-retry 189, db-cleanup 161, media-processor 200, media-cleanup 197, admin-actions 189, x-poster 138, x-followers-snapshot 111, digest-compiler 117
 Selected function code deploys: admin-actions, x-poster
