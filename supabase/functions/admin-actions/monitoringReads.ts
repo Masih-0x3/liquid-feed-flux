@@ -180,7 +180,7 @@ function postSearchOr(term: string): string {
 }
 
 export function isActiveStatus(status: unknown): boolean {
-  return status === 'pending' || status === 'running' || status === 'queued';
+  return status === 'pending' || status === 'running' || status === 'queued' || status === 'posting';
 }
 
 export function scoreFromPost(post: Record<string, unknown>): number | null {
@@ -544,7 +544,7 @@ async function getTweetIdsFromFailedJobs(supabase: any, limit: number, offset: n
 // deno-lint-ignore no-explicit-any
 async function getTweetIdsFromXDeliveries(
   supabase: any,
-  status: string,
+  status: string | string[],
   limit: number,
   offset: number,
   since?: string,
@@ -552,9 +552,9 @@ async function getTweetIdsFromXDeliveries(
   let q = supabase
     .from('x_deliveries')
     .select('post_id, created_at')
-    .eq('status', status)
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1);
+  q = Array.isArray(status) ? q.in('status', status) : q.eq('status', status);
   if (since) q = q.gte('created_at', since);
   const { data } = await q;
   return [...new Set((data ?? []).map((row: { post_id?: string }) => row.post_id).filter(Boolean))] as string[];
@@ -1004,7 +1004,7 @@ export function matchesMonitoringFilter(entry: Record<string, unknown>, filter: 
     case 'telegram_pending':
       return state.code === 'telegram_pending';
     case 'x_pending':
-      return state.code === 'x_pending' || entry.x_status === 'pending';
+      return state.code === 'x_pending' || entry.x_status === 'pending' || entry.x_status === 'posting';
     case 'x_failed':
       return entry.x_status === 'failed';
     case 'delivered_24h':
@@ -1029,7 +1029,7 @@ export async function getMonitoringEntries(
 
   let idOrder: string[] | null = null;
   if (filter === 'failed_stuck') idOrder = await getTweetIdsFromFailedJobs(supabase, limit, cursor);
-  if (filter === 'x_pending') idOrder = await getTweetIdsFromXDeliveries(supabase, 'pending', limit, cursor);
+  if (filter === 'x_pending') idOrder = await getTweetIdsFromXDeliveries(supabase, ['pending', 'posting'], limit, cursor);
   if (filter === 'x_failed') idOrder = await getTweetIdsFromXDeliveries(supabase, 'failed', limit, cursor);
   if (filter === 'delivered_24h') idOrder = await getTweetIdsFromXDeliveries(supabase, 'posted', limit, cursor, since24h);
 
@@ -1170,7 +1170,7 @@ export async function getMonitoringOverview(supabase: any, body: Record<string, 
       .order('created_at', { ascending: false })
       .limit(10000),
     supabase.from('jobs').select('id', { count: 'exact', head: true }).eq('status', 'running').lt('locked_at', staleCutoff),
-    supabase.from('x_deliveries').select('id', { count: 'exact', head: true }).eq('status', 'pending').lt('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()),
+    supabase.from('x_deliveries').select('id', { count: 'exact', head: true }).in('status', ['pending', 'posting']).lt('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()),
   ]);
   const jobStateByTweet = await loadJobStateMap(supabase);
   const deliveryByTweet = new Map<string, Record<string, unknown>>();

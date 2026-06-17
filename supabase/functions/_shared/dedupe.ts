@@ -823,7 +823,7 @@ async function loadDuplicateCoverage(
         .from("x_deliveries")
         .select("status")
         .eq("post_id", canonicalTweetId)
-        .in("status", ["posted", "pending", "running"])
+        .in("status", ["posted", "pending", "posting", "running"])
         .limit(5),
       supabase
         .from("jobs")
@@ -909,7 +909,8 @@ async function loadDuplicateCoverage(
 }
 
 function isActiveStatusValue(status: unknown): boolean {
-  return status === "pending" || status === "running" || status === "queued";
+  return status === "pending" || status === "running" || status === "queued" ||
+    status === "posting";
 }
 
 function classifySemanticOnly(
