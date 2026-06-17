@@ -1,6 +1,7 @@
 import http from "node:http";
 import { isAuthorizedRendererRequest, loadConfigFromEnv, loadServerRuntimeFromEnv, normalizeRendererToken } from "./config.js";
 import { claimNextRender, claimRenderById, createSupabase, processRenderRow, runPreflightForRenderId } from "./renderer.js";
+import { captureRendererException, flushSentryRenderer, initSentryRenderer } from "./sentry.js";
 import { loadRenderSettingsOrDefault } from "./settings.js";
 
 function json(res, status, body) {
@@ -30,6 +31,7 @@ function readJson(req) {
 export function createRendererServer(options = {}) {
   const config = options.config || loadConfigFromEnv();
   const runtime = options.runtime || loadServerRuntimeFromEnv(options.env);
+  initSentryRenderer({ config, runtime, env: options.env || process.env });
   const supabase = options.supabase || createSupabase(config);
   const token = normalizeRendererToken(options.token ?? runtime.token);
   const state = { running: 0, processed: 0, failed: 0, lastError: null };
@@ -80,6 +82,11 @@ export function createRendererServer(options = {}) {
     } catch (error) {
       state.failed += 1;
       state.lastError = error instanceof Error ? error.message : String(error);
+      captureRendererException(error, {
+        action: "render_by_id_error",
+        extra: { render_id: renderId },
+      });
+      await flushSentryRenderer();
       throw error;
     } finally {
       state.running -= 1;
@@ -112,6 +119,11 @@ export function createRendererServer(options = {}) {
       }
       return json(res, 404, { error: "Not found" });
     } catch (error) {
+      captureRendererException(error, {
+        action: "http_error",
+        tags: { method: req.method, path: req.url || "/" },
+      });
+      await flushSentryRenderer();
       return json(res, 500, { error: error instanceof Error ? error.message : String(error) });
     }
   });
@@ -138,6 +150,10 @@ export function createRendererServer(options = {}) {
     } catch (error) {
       state.failed += 1;
       state.lastError = error instanceof Error ? error.message : String(error);
+      captureRendererException(error, {
+        action: "poll_render_error",
+        extra: { render_id: row.id, tweet_id: row.tweet_id },
+      });
       return null;
     } finally {
       state.running -= 1;
@@ -160,11 +176,13 @@ export function startRendererServer() {
   setInterval(() => {
     pollOnce().catch((error) => {
       console.error(JSON.stringify({ service: "xot-video-renderer", action: "poll_error", error: error.message }));
+      captureRendererException(error, { action: "poll_error" });
     });
   }, runtime.pollIntervalMs);
   setInterval(() => {
     writeModeHeartbeat({ action: "interval" }).catch((error) => {
       console.error(JSON.stringify({ service: "xot-video-renderer", action: "heartbeat_error", error: error.message }));
+      captureRendererException(error, { action: "heartbeat_error" });
     });
   }, runtime.heartbeatIntervalMs);
   return server;

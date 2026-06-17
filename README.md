@@ -81,6 +81,12 @@ Copy `.env.example` to `.env` and populate:
 | `VITE_SUPABASE_URL` | Supabase project URL |
 | `VITE_SUPABASE_PUBLISHABLE_KEY` | Supabase anon/public key |
 | `VITE_SUPABASE_PROJECT_ID` | Supabase project ref |
+| `VITE_SENTRY_DSN` | Optional Sentry DSN for the `xot-web` browser project |
+| `VITE_SENTRY_ENVIRONMENT` | Sentry environment label, usually `production` |
+| `VITE_SENTRY_TRACES_SAMPLE_RATE` | Browser tracing sample rate, default `0.1` |
+| `VITE_SENTRY_REPLAYS_SESSION_SAMPLE_RATE` | Session replay baseline sample rate, default `0` |
+| `VITE_SENTRY_REPLAYS_ERROR_SAMPLE_RATE` | Session replay sample rate after errors, default `1` |
+| `SENTRY_AUTH_TOKEN` | Build-only token for uploading Vite source maps; keep out of git |
 
 Production builds validate these values before bundling. Missing or placeholder
 values fail the build instead of producing a blank browser screen.
@@ -95,6 +101,10 @@ values fail the build instead of producing a blank browser screen.
 | `WEBHOOK_SHARED_SECRET` | Internal function-to-function auth (must match Vault/cron token; see [runbooks](docs/operations/runbooks.md#internal-cron-and-edge-auth)) |
 | `RSSAPP_SIGNING_SECRET` | Preferred RSS.app signed-webhook secret; verifies `RSSApp-Signature` HMAC requests |
 | `RSSAPP_WEBHOOK_TOKEN` | Optional dedicated RSS.app webhook token; accepted only in `x-webhook-token` or `x-rssapp-token` header fallback |
+| `SENTRY_DSN` | Optional Sentry DSN for Edge Functions (`xot-edge`) or the video renderer (`xot-renderer`) |
+| `SENTRY_ENVIRONMENT` | Sentry environment label, usually `production` |
+| `SENTRY_TRACES_SAMPLE_RATE` | Runtime tracing sample rate, default `0.1` |
+| `SENTRY_RELEASE` | Optional release name; falls back to deploy SHA/version when available |
 
 ## Scripts
 

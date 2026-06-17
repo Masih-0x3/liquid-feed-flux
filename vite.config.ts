@@ -1,5 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { sentryVitePlugin } from "@sentry/vite-plugin";
 import path from "path";
 import { execSync } from "child_process";
 
@@ -37,31 +38,46 @@ function manualChunks(id: string): string | undefined {
 }
 
 // https://vitejs.dev/config/
-export default defineConfig(() => ({
-  define: {
-    __APP_VERSION_SHA__: JSON.stringify(gitSha()),
-    __APP_VERSION_TIME__: JSON.stringify(new Date().toISOString()),
-  },
-  server: {
-    host: "::",
-    port: 8080,
-  },
-  plugins: [
-    react(),
-  ].filter(Boolean),
-  resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
+export default defineConfig(() => {
+  const sentrySourceMapsEnabled = Boolean(process.env.SENTRY_AUTH_TOKEN);
+
+  return {
+    define: {
+      __APP_VERSION_SHA__: JSON.stringify(gitSha()),
+      __APP_VERSION_TIME__: JSON.stringify(new Date().toISOString()),
     },
-  },
-  build: {
-    modulePreload: {
-      resolveDependencies: (_filename, deps) => deps.filter((dep) => !dep.includes('vendor-charts')),
+    server: {
+      host: "::",
+      port: 8080,
     },
-    rollupOptions: {
-      output: {
-        manualChunks,
+    plugins: [
+      react(),
+      sentrySourceMapsEnabled
+        ? sentryVitePlugin({
+          org: "xot",
+          project: "xot-web",
+          authToken: process.env.SENTRY_AUTH_TOKEN,
+          sourcemaps: {
+            filesToDeleteAfterUpload: ["./dist/**/*.map"],
+          },
+        })
+        : null,
+    ].filter(Boolean),
+    resolve: {
+      alias: {
+        "@": path.resolve(__dirname, "./src"),
       },
     },
-  },
-}));
+    build: {
+      sourcemap: sentrySourceMapsEnabled ? "hidden" : false,
+      modulePreload: {
+        resolveDependencies: (_filename, deps) => deps.filter((dep) => !dep.includes('vendor-charts')),
+      },
+      rollupOptions: {
+        output: {
+          manualChunks,
+        },
+      },
+    },
+  };
+});
