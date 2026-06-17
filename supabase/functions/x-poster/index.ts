@@ -25,11 +25,17 @@ import {
   normalizeVideoRenderConfigValue,
   type VideoRenderConfig,
 } from '../_shared/videoRenderConfig.ts';
+import {
+  captureEdgeException,
+  captureEdgeExceptionBackground,
+  initSentryEdge,
+} from '../_shared/sentry.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': Deno.env.get('ALLOWED_CORS_ORIGIN') ?? 'https://liquid-feed-flux.lovable.app',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-internal-token',
 };
+initSentryEdge();
 
 const enc = new TextEncoder();
 
@@ -474,6 +480,7 @@ async function postTweet(
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
+  try {
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
   const svcKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
   const sb = createClient<any, any>(supabaseUrl, svcKey);
@@ -532,7 +539,7 @@ Deno.serve(async (req) => {
   const lastPostAt = lastPostRows?.[0]?.posted_at || lastPostRows?.[0]?.created_at || null;
   let lastPostTimeMs = lastPostAt ? new Date(lastPostAt as string).getTime() : 0;
 
-  function quotaBlock(): string | null {
+  const quotaBlock = (): string | null => {
     if (posts1hCount >= limits.posts_per_hour) return 'rate_limit_hour';
     if (posts24hCount >= limits.posts_per_day) return 'rate_limit_day';
     if ((monthlyPosts ?? 0) >= limits.monthly_post_budget) return 'rate_limit_month';
@@ -545,7 +552,7 @@ Deno.serve(async (req) => {
       if (Date.now() - lastPostTimeMs < minGapMs) return 'min_spacing';
     }
     return null;
-  }
+  };
 
   // Select candidates
   const dedupeCutoff = new Date(Date.now() - cfg.dedupe_window_hours * 3600 * 1000).toISOString();
@@ -1056,6 +1063,20 @@ Deno.serve(async (req) => {
       const status = (e as { status?: number }).status || 0;
       const errMsg = (e as Error).message;
       const isRetriable = status === 429 || status >= 500;
+      captureEdgeExceptionBackground(e, {
+        functionName: "x-poster",
+        action: "post_error",
+        tags: {
+          status,
+          retriable: isRetriable,
+        },
+        extra: {
+          tweet_id: tweetId,
+          candidate_reason: candidateReason,
+          dispatch_source: dispatchSource,
+          x_api_ms: xApiMs,
+        },
+      });
       const { error: postFailErr } = await sb.from('x_deliveries').insert({
         post_id: tweetId, status: isRetriable ? 'pending' : 'failed',
         last_error: errMsg, attempts: 1,
@@ -1075,6 +1096,18 @@ Deno.serve(async (req) => {
   return new Response(JSON.stringify({ ok: true, dry_run: dryRun, processed: results.length, results }), {
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
+  } catch (error) {
+    console.error('[x-poster] fatal', error instanceof Error ? error.message : String(error));
+    await captureEdgeException(error, {
+      functionName: "x-poster",
+      action: "fatal",
+      request: req,
+    });
+    return new Response(JSON.stringify({ error: 'Internal server error' }), {
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
 });
 
 async function insertXPipelineEvent(

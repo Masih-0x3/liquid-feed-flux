@@ -3,11 +3,13 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
 import { requireInternalAuth } from "../_shared/internalAuth.ts";
 import { recordXApiEvent } from "../_shared/xApiLedger.ts";
 import { isMyXEnabled, MY_X_DISABLED_RESPONSE } from "../_shared/myXControls.ts";
+import { captureEdgeException, initSentryEdge } from "../_shared/sentry.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': Deno.env.get('ALLOWED_CORS_ORIGIN') ?? 'https://liquid-feed-flux.lovable.app',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-internal-token',
 };
+initSentryEdge();
 
 // ─── X API OAuth 1.0a helpers ──────────────
 const ENC = new TextEncoder();
@@ -389,6 +391,11 @@ serve(async (req) => {
 
   } catch (e) {
     console.error('x-followers-snapshot error', e);
+    await captureEdgeException(e, {
+      functionName: "x-followers-snapshot",
+      action: "error",
+      request: req,
+    });
     return new Response(JSON.stringify({ error: (e as Error).message }), {
       status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });

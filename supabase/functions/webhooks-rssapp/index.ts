@@ -2,11 +2,17 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
 import { requireRssWebhookAuth, serviceRoleBearerHeader } from "../_shared/internalAuth.ts";
 import { filterSendableIngestMedia } from "../_shared/mediaSelection.ts";
+import {
+  captureEdgeException,
+  captureEdgeExceptionBackground,
+  initSentryEdge,
+} from "../_shared/sentry.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': Deno.env.get('ALLOWED_CORS_ORIGIN') ?? 'https://liquid-feed-flux.lovable.app',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-webhook-token, x-rssapp-token, RSSApp-Signature',
 };
+initSentryEdge();
 
 async function hashUrl(url: string): Promise<string> {
   const data = new TextEncoder().encode(url);
@@ -574,6 +580,11 @@ serve(async (req) => {
 
       } catch (itemError) {
         console.error('Error processing item:', itemError);
+        captureEdgeExceptionBackground(itemError, {
+          functionName: "webhooks-rssapp",
+          action: "item_error",
+          request: req,
+        });
         continue;
       }
     }
@@ -590,6 +601,11 @@ serve(async (req) => {
     });
   } catch (error) {
     console.error('Webhook error:', (error as Error).message);
+    await captureEdgeException(error, {
+      functionName: "webhooks-rssapp",
+      action: "fatal",
+      request: req,
+    });
     return new Response(JSON.stringify({ error: 'Internal server error' }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

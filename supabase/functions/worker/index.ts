@@ -22,6 +22,11 @@ import {
   serviceRoleBearerHeader,
 } from "../_shared/internalAuth.ts";
 import {
+  captureEdgeException,
+  captureEdgeExceptionBackground,
+  initSentryEdge,
+} from "../_shared/sentry.ts";
+import {
   DEFAULT_DUPLICATE_GATE,
   normalizeDuplicateGateConfig,
   runDuplicateGate,
@@ -128,6 +133,7 @@ const corsHeaders = {
 };
 
 const SETTINGS_CACHE_MS = 45_000;
+initSentryEdge();
 type ScoringDecisionLog = NonNullable<
   ReturnType<typeof buildScoringBaseDecisionState>["logEvent"]
 >;
@@ -822,6 +828,12 @@ serve(async (req) => {
               error: err.message,
             }),
           );
+          captureEdgeExceptionBackground(err, {
+            functionName: "worker",
+            action: "job_error",
+            tags: { job_type: String(job.type ?? "unknown") },
+            extra: { job_id: job.id, payload },
+          });
           await handleJobFailure(supabase, job, err);
           await recordPipelineEvent(supabase, job, "failed", err.message);
           return { success: false, jobId: job.id, error: err.message };
@@ -837,6 +849,12 @@ serve(async (req) => {
             error: err.message,
           }),
         );
+        captureEdgeExceptionBackground(err, {
+          functionName: "worker",
+          action: "job_outer_error",
+          tags: { job_type: String(job.type ?? "unknown") },
+          extra: { job_id: job.id },
+        });
         await handleJobFailure(supabase, job, err);
         await recordPipelineEvent(supabase, job, "failed", err.message);
         return { success: false, jobId: job.id, error: err.message };
@@ -943,6 +961,11 @@ serve(async (req) => {
         error: jobError(error).message,
       }),
     );
+    await captureEdgeException(error, {
+      functionName: "worker",
+      action: "fatal",
+      request: req,
+    });
     return new Response(JSON.stringify({ error: "Internal server error" }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },

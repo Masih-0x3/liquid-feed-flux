@@ -92,9 +92,11 @@ import {
   recordFeedback,
 } from "./sideEffects.ts";
 import { queueManualAdvance } from "./manualAdvanceActions.ts";
+import { captureEdgeException, initSentryEdge } from "../_shared/sentry.ts";
 
 const DEPLOY_SHA = Deno.env.get('DEPLOY_GIT_SHA') ?? 'unknown';
 const DEPLOY_TIME = Deno.env.get('DEPLOY_TIME') ?? new Date().toISOString();
+initSentryEdge();
 
 function makeCorsHeaders(req?: Request): Record<string, string> {
   const configuredOrigins = (Deno.env.get('ALLOWED_CORS_ORIGIN') ?? '')
@@ -189,6 +191,7 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  let actionForSentry: string | undefined;
   try {
     const rawText = await req.text();
     let body: any = {};
@@ -196,6 +199,7 @@ serve(async (req) => {
       console.error('[admin-actions] body parse failed', { rawText: rawText.slice(0, 200), err: (e as Error).message });
     }
     const { action } = body;
+    actionForSentry = typeof action === 'string' ? action : undefined;
 
     const authResult = await requireAdmin(req);
     if (authResult instanceof Response) return authResult;
@@ -548,6 +552,11 @@ serve(async (req) => {
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.error('Admin action error:', message);
+    await captureEdgeException(error, {
+      functionName: "admin-actions",
+      action: actionForSentry ?? "handler",
+      request: req,
+    });
     return jsonResponse({ error: message }, 500);
   }
 });
