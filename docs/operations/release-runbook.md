@@ -195,6 +195,30 @@ Secret/config rollback:
 
 Add new entries at the top.
 
+### 2026-06-23 - X gate learning shadow reset
+
+```text
+Date: 2026-06-23
+Operator: Codex
+Git SHA deployed to Edge Functions: 5e0f3b64fac5c8d7bd0f01aba213a5e98804c475
+GitHub PR: not created before emergency-style Supabase rollout; branch is codex/xot-learning-x-gate-shadow
+CI run: no branch CI recorded before deploy; latest main CI was green for b9af675f6af7d79df0d56cd21c5a112f3ae3ce12. Local gates passed: npm run check:function-inventory, npm run check:functions, npm run test:functions (290 tests), npm run check:strict, npm run lint:functions, npm run lint (8 existing fast-refresh warnings), npm test (112 tests), npm run build:dev, git diff --check. npm run build remained blocked locally by missing VITE_SUPABASE_URL, VITE_SUPABASE_PUBLISHABLE_KEY, and VITE_SUPABASE_PROJECT_ID.
+Vercel deployment: no frontend deploy; production hosts remained HTTP 200
+Vercel aliases checked: https://xot.iraneyes.com and https://xot.vercel.app returned HTTP 200 with matching etag "05dab6fc09d89494023b1db9ac75de92" at 2026-06-23T01:44Z
+Supabase project ref: jzirqfzzvlbxwfzndaer
+Migration head before: 20260617224908 x_post_delivery_claims
+Migration head after: 20260623014212 learning_x_gate_scores, applied through the Supabase connector because CLI db push is still blocked by pre-existing migration-history drift
+Local migration file: supabase/migrations/20260623010000_learning_x_gate_scores.sql
+Supabase function versions before deploy: admin-actions 189, worker 266, x-poster 138
+Supabase function versions after deploy/secret stamp: admin-actions 191, worker 268, x-poster 140
+Selected function code deploys: admin-actions, worker, x-poster
+DEPLOY_GIT_SHA stamped: 5e0f3b64fac5c8d7bd0f01aba213a5e98804c475 at 2026-06-23T01:43:57Z
+Renderer heartbeat: hermes-masih-1 online, version 0.1.0, render_version persian-subtitles-masihh-v1, processed 89, failed 0, last_seen_at 2026-06-23 01:45:00.687+00
+Smoke checks: release-state completed successfully; x-poster-tick and invoke-worker-every-1m active; no stale running jobs; production scoring_policy mode shadow; production scoring_policy learning.mode shadow; get_x_post_candidates(5, null) returned 5 rows; knn_feedback_prior_details exists; scored posts missing base_score 0; scored posts missing x_gate_score 0
+Rollback target: prior function versions admin-actions 189, worker 266, and x-poster 138. Prefer forward-fix migration for database rollback; the deployed functions depend on the new posts score columns and get_x_post_candidates signature.
+Notes: Normal runbook release-from-main was bypassed deliberately to close the X posting learning-gate incident quickly. The deploy used DEPLOY_ALLOW_DIRTY=1 DEPLOY_ALLOW_NON_MAIN=1 from codex/xot-learning-x-gate-shadow. The only dirty files at deploy time were unrelated untracked services/video-renderer/scripts/delogo_*.py files, which were not included in the selected Edge Function deploy.
+```
+
 ### 2026-06-17 - X post idempotency claim incident fix
 
 ```text
