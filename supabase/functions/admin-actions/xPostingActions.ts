@@ -59,6 +59,10 @@ export type RunRescoreFn = (
   ok: boolean;
   score?: number;
   final_score?: number;
+  base_score?: number;
+  learned_score?: number;
+  learned_delta?: number;
+  x_gate_score?: number;
   decision?: string;
   error?: string;
 }>;
@@ -164,6 +168,50 @@ function asRecordArray(value: unknown): Array<Record<string, unknown>> {
       item !== null && typeof item === "object" && !Array.isArray(item)
     )
     : [];
+}
+
+function finiteNumber(value: unknown): number | null {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function scoreBreakdownNumber(
+  breakdown: Record<string, unknown>,
+  key: string,
+): number | null {
+  return finiteNumber(breakdown[key]);
+}
+
+function resolveXGateScore(post: Record<string, unknown>): {
+  xGateScore: number | null;
+  baseScore: number | null;
+  learnedScore: number | null;
+  learnedDelta: number | null;
+} {
+  const breakdown = asRecord(post.score_breakdown);
+  const finalScore = finiteNumber(post.final_score);
+  const importanceScore = finiteNumber(post.importance_score);
+  const baseScore = finiteNumber(post.base_score) ??
+    scoreBreakdownNumber(breakdown, "base") ??
+    scoreBreakdownNumber(breakdown, "ai") ??
+    finalScore ??
+    importanceScore;
+  const learnedScore = finiteNumber(post.learned_score) ??
+    scoreBreakdownNumber(breakdown, "learned") ??
+    scoreBreakdownNumber(breakdown, "final") ??
+    finalScore;
+  const learnedDelta = finiteNumber(post.learned_delta) ??
+    scoreBreakdownNumber(breakdown, "learned_delta") ??
+    (typeof learnedScore === "number" && typeof baseScore === "number"
+      ? Math.round((learnedScore - baseScore) * 1000) / 1000
+      : null);
+  const xGateScore = finiteNumber(post.x_gate_score) ??
+    scoreBreakdownNumber(breakdown, "x_gate_score") ??
+    scoreBreakdownNumber(breakdown, "x_gate") ??
+    baseScore ??
+    finalScore ??
+    importanceScore;
+  return { xGateScore, baseScore, learnedScore, learnedDelta };
 }
 
 export function upgradeImageUrl(url: string): string {
@@ -486,7 +534,7 @@ export async function getXPostingDiagnostics(
 
   let q = table(supabase, "posts")
     .select(
-      "tweet_id, text_original, text_translated, created_at, url, author_handle, has_media, delivery_decision, decision_reason, final_score, importance_score, dup_of_tweet_id, dedupe_status, dedupe_reason, is_truncated, hydrated_at, enrich_status, final_x_text",
+      "tweet_id, text_original, text_translated, created_at, url, author_handle, has_media, delivery_decision, decision_reason, final_score, base_score, learned_score, learned_delta, x_gate_score, learning_confidence, score_breakdown, importance_score, dup_of_tweet_id, dedupe_status, dedupe_reason, is_truncated, hydrated_at, enrich_status, final_x_text",
     )
     .order("created_at", { ascending: false })
     .limit(limit);
@@ -552,11 +600,14 @@ export async function getXPostingDiagnostics(
     ]);
     const blockers: XDiagnosticBlocker[] = [];
     const notes: XDiagnosticBlocker[] = [];
-    const score = typeof post.final_score === "number"
-      ? post.final_score
-      : typeof post.importance_score === "number"
-      ? post.importance_score
-      : null;
+    const {
+      xGateScore,
+      baseScore,
+      learnedScore,
+      learnedDelta,
+    } = resolveXGateScore(post);
+    const finalScore = finiteNumber(post.final_score);
+    const score = xGateScore;
     const hasTranslation = typeof post.text_translated === "string" &&
       post.text_translated.trim().length > 0;
     const latestStatus = asRecord(latestX.data).status as string | undefined;
@@ -615,7 +666,7 @@ export async function getXPostingDiagnostics(
     } else if (score < Number(xCfg.min_score || threshold)) {
       blockers.push({
         code: "score_below_x_min",
-        label: `Score ${score} is below X minimum ${
+        label: `X gate score ${score} is below X minimum ${
           xCfg.min_score || threshold
         }`,
         severity: "blocker",
@@ -761,6 +812,12 @@ export async function getXPostingDiagnostics(
       blockers,
       notes,
       score,
+      x_gate_score: xGateScore,
+      base_score: baseScore,
+      learned_score: learnedScore,
+      learned_delta: learnedDelta,
+      final_score: finalScore,
+      learning_confidence: post.learning_confidence ?? null,
       threshold: xCfg.min_score || threshold,
       decision: post.delivery_decision ?? null,
       latest_x: latestX.data ?? null,
@@ -926,7 +983,7 @@ export async function runXPostAdminAction(
   if (tweetId && action === "retry_x_post") {
     const { data: existing } = await table(supabase, "posts")
       .select(
-        "text_translated, importance_score, final_score, is_truncated, hydrated_at, dedupe_status, dup_of_tweet_id, dedupe_reason",
+        "text_translated, importance_score, final_score, base_score, learned_score, learned_delta, x_gate_score, learning_confidence, score_breakdown, is_truncated, hydrated_at, dedupe_status, dup_of_tweet_id, dedupe_reason",
       )
       .eq("tweet_id", tweetId)
       .maybeSingle();
@@ -1021,7 +1078,9 @@ export async function runXPostAdminAction(
         body: JSON.stringify({
           dry_run: action === "dry_run_x_post",
           force_retry: action === "retry_x_post",
-          dispatch_source: action === "retry_x_post" ? "admin_retry" : "admin_dry_run",
+          dispatch_source: action === "retry_x_post"
+            ? "admin_retry"
+            : "admin_dry_run",
           ...(tweetId ? { tweet_id: tweetId } : {}),
         }),
       },
@@ -1153,7 +1212,7 @@ export async function rehydrateRecentTruncatedAdminAction(
 
   const { data: posts, error: fetchErr } = await table(supabase, "posts")
     .select(
-      "tweet_id, text_original, url, delivery_decision, final_score, importance_score",
+      "tweet_id, text_original, url, delivery_decision, final_score, base_score, learned_score, learned_delta, x_gate_score, score_breakdown, importance_score",
     )
     .is("hydrated_at", null)
     .gte("created_at", since)
@@ -1172,9 +1231,7 @@ export async function rehydrateRecentTruncatedAdminAction(
   );
   const matches = truncatedMatches.filter((p) => {
     if (force) return true;
-    const score = typeof p.final_score === "number"
-      ? p.final_score
-      : p.importance_score;
+    const score = resolveXGateScore(p).xGateScore;
     return p.delivery_decision === "deliver" && typeof score === "number" &&
       score >= threshold;
   }).slice(0, maxJobs);

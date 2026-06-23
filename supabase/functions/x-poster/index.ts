@@ -589,10 +589,10 @@ Deno.serve(async (req) => {
     } else {
       console.warn('[x-poster] get_x_post_candidates RPC unavailable, using fallback query', rpcRes.error.message);
       let candidatesQ = sb.from('posts')
-        .select('tweet_id, text_translated, text_original, author_handle, has_media, importance_score, final_score, delivery_decision, decision_reason, url, is_truncated, hydrated_at, created_at, final_x_text, composed_post_text, post_format_hint, humanized_commentary, commentary_hook, commentary_question, narrative_callback, thread_continuation, enrich_status, dedupe_status, dup_of_tweet_id, dup_similarity, dedupe_reason, accounts!inner(handle)')
+        .select('tweet_id, text_translated, text_original, author_handle, has_media, importance_score, final_score, base_score, learned_score, learned_delta, x_gate_score, learning_confidence, delivery_decision, decision_reason, url, is_truncated, hydrated_at, created_at, final_x_text, composed_post_text, post_format_hint, humanized_commentary, commentary_hook, commentary_question, narrative_callback, thread_continuation, enrich_status, dedupe_status, dup_of_tweet_id, dup_similarity, dedupe_reason, accounts!inner(handle)')
         .gte('created_at', effectiveCutoff)
         .not('text_translated', 'is', null)
-        .or(`final_score.gte.${cfg.min_score},and(final_score.is.null,importance_score.gte.${cfg.min_score})`);
+        .or(`x_gate_score.gte.${cfg.min_score},and(x_gate_score.is.null,final_score.gte.${cfg.min_score}),and(x_gate_score.is.null,final_score.is.null,importance_score.gte.${cfg.min_score})`);
       if (targetTweetId) candidatesQ = candidatesQ.eq('tweet_id', targetTweetId);
       if (cfg.post_only_decision_deliver) candidatesQ = candidatesQ.eq('delivery_decision', 'deliver');
       candidatesQ = candidatesQ.or('is_truncated.eq.false,hydrated_at.not.is.null');

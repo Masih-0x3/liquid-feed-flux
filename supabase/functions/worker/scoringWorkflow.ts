@@ -421,6 +421,29 @@ export function buildScoringBaseDecisionState(
   let logEvent: ScoringDecisionLog | null = null;
 
   if (
+    input.scoringPolicyResult &&
+    !input.scoringPolicyActive &&
+    !input.legacyFilterEnabled
+  ) {
+    const existingFinalScore = typeof input.postFinalScore === "number"
+      ? input.postFinalScore
+      : Number(input.postFinalScore ?? NaN) || finalScore;
+    return {
+      decisionState: {
+        deliveryDecision: input.postDeliveryDecision === "skip"
+          ? "skip"
+          : "deliver",
+        decisionReason: typeof input.postDecisionReason === "string"
+          ? input.postDecisionReason
+          : "scoring_policy_shadow_preserve_existing_gate",
+        finalScore: existingFinalScore,
+      },
+      scoringFields,
+      logEvent: null,
+    };
+  }
+
+  if (
     input.filterEnabled && input.scoringPolicyActive &&
     input.scoringPolicyResult && !input.scoreOnly
   ) {

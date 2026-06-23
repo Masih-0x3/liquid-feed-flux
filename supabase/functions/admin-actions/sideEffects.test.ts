@@ -132,7 +132,7 @@ Deno.test("record feedback updates learned author and tag biases", async () => {
         key: "learned_biases",
         value: {
           author_bias: { sourcea: 3 },
-          tag_bias: { iran: 0, diplomacy: 0.2 },
+          tag_bias: { iran: -0.1, diplomacy: 0.1 },
           keyword_bias: {},
         },
         updated_at: "2026-01-04T00:00:00.000Z",

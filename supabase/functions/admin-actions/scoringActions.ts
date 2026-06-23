@@ -206,7 +206,7 @@ export function scoringPolicyPostUpdate(
     result,
     active ? "active" : "shadow",
   );
-  return {
+  const shadowUpdate = {
     scoring_version: SCORING_POLICY_VERSION,
     scoring_profile_id: result.profile_id,
     audience_class: result.audience_class,
@@ -214,24 +214,35 @@ export function scoringPolicyPostUpdate(
     audience_reason: result.audience_reason,
     global_exception_class: result.global_exception_class,
     score_review_status: active ? result.review_status : "shadow",
+  };
+  if (!active) return shadowUpdate;
+
+  return {
+    ...shadowUpdate,
     score_axes: result.axes,
     importance_score: Math.round(result.final_score),
     importance_tags: result.tags,
     importance_reasoning: result.audience_reason,
+    base_score: result.final_score,
+    learned_score: result.final_score,
+    learned_delta: 0,
+    x_gate_score: result.final_score,
+    learning_confidence: null,
     score_breakdown: {
       ai: result.uncapped_score,
+      base: result.final_score,
+      learned_delta: 0,
+      learned: result.final_score,
       final: result.final_score,
+      x_gate_score: result.final_score,
+      x_gate: result.final_score,
       scoring_v2: {
         ...scoringV2Meta,
       },
     },
-    ...(active
-      ? {
-        final_score: result.final_score,
-        delivery_decision: result.delivery_decision,
-        decision_reason: result.decision_reason,
-      }
-      : {}),
+    final_score: result.final_score,
+    delivery_decision: result.delivery_decision,
+    decision_reason: result.decision_reason,
   };
 }
 
@@ -368,6 +379,14 @@ export async function setManualScore(
       : {};
   const updatePayload: Record<string, unknown> = {
     final_score: score,
+    base_score: score,
+    learned_score: score,
+    learned_delta: 0,
+    x_gate_score: score,
+    learning_confidence: {
+      source: "manual_score",
+      feedback_locked: true,
+    },
     importance_score: score,
     delivery_decision: decision,
     decision_reason: decisionReason,
@@ -375,7 +394,12 @@ export async function setManualScore(
     score_breakdown: {
       ...existingBreakdown,
       manual: score,
+      base: score,
+      learned_delta: 0,
+      learned: score,
       final: score,
+      x_gate_score: score,
+      x_gate: score,
     },
     ...(expectedAudienceClass
       ? {
@@ -655,7 +679,7 @@ export async function scorePostV2(
     return { ok: false, error: result.error ?? result.audience_reason, result };
   }
 
-  const active = policy.mode === "active" || body.apply === true;
+  const active = policy.mode === "active";
   if (!dryRun) {
     const { error: updateError } = await table(supabase, "posts")
       .update(scoringPolicyPostUpdate(result, active))

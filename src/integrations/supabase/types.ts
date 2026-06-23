@@ -572,6 +572,11 @@ export type Database = {
           feedback_locked: boolean
           final_x_text: string | null
           final_score: number | null
+          base_score: number | null
+          learned_score: number | null
+          learned_delta: number | null
+          x_gate_score: number | null
+          learning_confidence: Json | null
           has_media: boolean | null
           humanized_commentary: string | null
           hydrated_at: string | null
@@ -634,6 +639,11 @@ export type Database = {
           feedback_locked?: boolean
           final_x_text?: string | null
           final_score?: number | null
+          base_score?: number | null
+          learned_score?: number | null
+          learned_delta?: number | null
+          x_gate_score?: number | null
+          learning_confidence?: Json | null
           has_media?: boolean | null
           humanized_commentary?: string | null
           hydrated_at?: string | null
@@ -696,6 +706,11 @@ export type Database = {
           feedback_locked?: boolean
           final_x_text?: string | null
           final_score?: number | null
+          base_score?: number | null
+          learned_score?: number | null
+          learned_delta?: number | null
+          x_gate_score?: number | null
+          learning_confidence?: Json | null
           has_media?: boolean | null
           humanized_commentary?: string | null
           hydrated_at?: string | null

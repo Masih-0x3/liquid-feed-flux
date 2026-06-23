@@ -433,6 +433,87 @@ Deno.test("buildScoringBaseDecisionState applies scoring policy active fields", 
   });
 });
 
+Deno.test("buildScoringBaseDecisionState keeps shadow scoring policy out of legacy gates", () => {
+  const scoringPolicyResult = {
+    final_score: 19,
+    delivery_decision: "deliver",
+    decision_reason: "scoring_v2:direct_focus:19>=12",
+    tags: ["v2"],
+    audience_reason: "v2 fit",
+    axes: { focus_relevance: 10 },
+    audience_class: "direct_focus",
+    profile_id: "iran-first",
+  };
+
+  const result = buildScoringBaseDecisionState({
+    feedbackLocked: false,
+    postFinalScore: null,
+    postDeliveryDecision: null,
+    postDecisionReason: null,
+    importanceScore: 10,
+    importanceTags: ["legacy"],
+    importanceReasoning: "legacy score",
+    scoreAxes: null,
+    scoringPolicyActive: false,
+    scoringPolicyResult: scoringPolicyResult as never,
+    filterEnabled: true,
+    legacyFilterEnabled: true,
+    scoreOnly: false,
+    editorialProfile: null,
+    authorHandle: "source",
+    authorRules: {},
+    defaultThreshold: 12,
+    textOriginal: "Original",
+  });
+
+  assertEquals(result.decisionState, {
+    deliveryDecision: "skip",
+    decisionReason: "below_threshold:10<12",
+    finalScore: 10,
+  });
+  assertEquals(result.scoringFields, {
+    importanceScore: 10,
+    importanceTags: ["legacy"],
+    importanceReasoning: "legacy score",
+    scoreAxes: null,
+  });
+  assertEquals(result.logEvent?.kind, "legacy_threshold");
+});
+
+Deno.test("buildScoringBaseDecisionState preserves existing gate for shadow-only v2 runs", () => {
+  const result = buildScoringBaseDecisionState({
+    feedbackLocked: false,
+    postFinalScore: 15,
+    postDeliveryDecision: "skip",
+    postDecisionReason: "manual_skip",
+    importanceScore: null,
+    importanceTags: null,
+    importanceReasoning: null,
+    scoreAxes: null,
+    scoringPolicyActive: false,
+    scoringPolicyResult: {
+      final_score: 19,
+      delivery_decision: "deliver",
+      decision_reason: "scoring_v2:direct_focus:19>=12",
+    } as never,
+    filterEnabled: true,
+    legacyFilterEnabled: false,
+    scoreOnly: false,
+    editorialProfile: null,
+    authorHandle: "source",
+    authorRules: {},
+    defaultThreshold: 12,
+    textOriginal: "Original",
+  });
+
+  assertEquals(result.decisionState, {
+    deliveryDecision: "skip",
+    decisionReason: "manual_skip",
+    finalScore: 15,
+  });
+  assertEquals(result.logEvent, null);
+});
+
 Deno.test("buildScoringBaseDecisionState applies legacy author threshold rules", () => {
   const custom = buildScoringBaseDecisionState({
     feedbackLocked: false,
