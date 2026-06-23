@@ -411,6 +411,8 @@ const defaults = {
     hashtags: '',
     max_chars: 280,
     dedupe_window_hours: 48,
+    max_candidate_age_minutes: 30,
+    max_posts_per_run: 1,
     post_only_decision_deliver: true,
   },
   x_rate_limits: {

@@ -21,6 +21,16 @@ Deno.test("settings validator rejects invalid shapes without touching storage", 
     validateSettingsValue("x_api_controls", { my_x_enabled: "true" }),
     "x_api_controls.my_x_enabled must be a boolean",
   );
+  assertEquals(
+    validateSettingsValue("x_posting_config", {
+      max_candidate_age_minutes: 0,
+    }),
+    "x_posting_config.max_candidate_age_minutes must be 1-1440",
+  );
+  assertEquals(
+    validateSettingsValue("x_posting_config", { max_posts_per_run: 21 }),
+    "x_posting_config.max_posts_per_run must be 1-20",
+  );
 });
 
 Deno.test("settings validator accepts minimal known setting payloads", () => {
@@ -33,6 +43,8 @@ Deno.test("settings validator accepts minimal known setting payloads", () => {
       enabled: true,
       min_score: 14,
       require_media: false,
+      max_candidate_age_minutes: 30,
+      max_posts_per_run: 1,
     }),
     null,
   );
@@ -91,6 +103,13 @@ Deno.test("x posting config restamps when saved changes expand eligibility", () 
     shouldRestampXPostingStart(
       { enabled: true, post_only_decision_deliver: true },
       { enabled: true, post_only_decision_deliver: false },
+    ),
+    true,
+  );
+  assertEquals(
+    shouldRestampXPostingStart(
+      { enabled: true, max_candidate_age_minutes: 30 },
+      { enabled: true, max_candidate_age_minutes: 120 },
     ),
     true,
   );

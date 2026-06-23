@@ -195,6 +195,29 @@ Secret/config rollback:
 
 Add new entries at the top.
 
+### 2026-06-23 - X poster no retro catch-up guard
+
+```text
+Date: 2026-06-23
+Operator: Codex
+Git SHA deployed to Edge Functions: 889a2a1182b5384f22ab317f722e57b1a9fe88db
+GitHub PR: pending at emergency backend rollout; branch is codex/xot-x-poster-no-retro-catchup
+CI run: no branch CI recorded before emergency rollout. Local gates passed: npm run check:functions, npm run test:functions (290 tests), npm run check:strict, npm test (112 tests), npm run lint -- --quiet, npm run build:dev, npm run check:release-state, git diff --check.
+Vercel deployment: no frontend deploy at backend rollout time; production hosts remained HTTP 200 with etag "c00cd722e7473ac6e868bfbee0c0eb4d"
+Supabase project ref: jzirqfzzvlbxwfzndaer
+Migration head before: 20260623014212 learning_x_gate_scores
+Migration head after: 20260623022722 x_post_no_retro_catchup, applied through the Supabase connector because CLI db push is still blocked by pre-existing migration-history drift
+Local migration file: supabase/migrations/20260623023000_x_post_no_retro_catchup.sql
+Supabase function versions before deploy: admin-actions 191 and x-poster 140
+Supabase function versions after deploy/secret stamp: admin-actions 193 and x-poster 142
+Selected function code deploys: admin-actions, x-poster
+DEPLOY_GIT_SHA stamped: 889a2a1182b5384f22ab317f722e57b1a9fe88db at 2026-06-23T02:32:07Z
+Renderer heartbeat: hermes-masih-1 online, version 0.1.0, render_version persian-subtitles-masihh-v1, processed 89, failed 0, last_seen_at 2026-06-23 02:29:51.238+00
+Smoke checks: release-state completed successfully; production x_posting_config max_candidate_age_minutes 30; max_posts_per_run 1; start_posting_from 2026-06-23 02:27:22.308183+00; get_x_post_candidates(20, null) returned 0 rows; posts since the new guard 0; posts older than freshness since the new guard 0
+Rollback target: prior function versions admin-actions 191 and x-poster 140. Prefer forward-fix migration for database rollback; the deployed x-poster relies on the new x_posting_config guard keys and refreshed get_x_post_candidates behavior.
+Notes: Normal runbook release-from-main was bypassed deliberately to stop retroactive X posting after the learning-gate fix drained old candidates. The deploy used DEPLOY_ALLOW_DIRTY=1 DEPLOY_ALLOW_NON_MAIN=1 from codex/xot-x-poster-no-retro-catchup. The only dirty files at deploy time were unrelated untracked services/video-renderer/scripts/delogo_*.py files, which were not included in the selected Edge Function deploy. Setting DEPLOY_GIT_SHA increments Edge Function metadata versions for all functions even though only admin-actions and x-poster code were uploaded.
+```
+
 ### 2026-06-23 - X gate learning shadow reset
 
 ```text

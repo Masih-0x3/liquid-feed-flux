@@ -114,6 +114,8 @@ const DEFAULT_X_POSTING_DIAG_CONFIG = {
   min_score: 14,
   allow_video: false,
   dedupe_window_hours: 48,
+  max_candidate_age_minutes: 30,
+  max_posts_per_run: 1,
   post_only_decision_deliver: true,
   start_posting_from: null as string | null,
 };
@@ -564,12 +566,22 @@ export async function getXPostingDiagnostics(
   const dedupeCutoff = new Date(
     now.getTime() - Number(xCfg.dedupe_window_hours || 48) * 3600 * 1000,
   ).toISOString();
+  const maxCandidateAgeMinutes = Math.max(
+    1,
+    Math.min(
+      1440,
+      Number(xCfg.max_candidate_age_minutes ?? 30) || 30,
+    ),
+  );
+  const freshnessCutoff = new Date(
+    now.getTime() - maxCandidateAgeMinutes * 60 * 1000,
+  ).toISOString();
   const startFrom = typeof xCfg.start_posting_from === "string"
     ? xCfg.start_posting_from
     : null;
-  const effectiveCutoff = startFrom && startFrom > dedupeCutoff
-    ? startFrom
-    : dedupeCutoff;
+  const effectiveCutoff = [dedupeCutoff, freshnessCutoff, startFrom].filter((
+    value,
+  ): value is string => !!value).sort().at(-1) ?? freshnessCutoff;
 
   const items: Array<Record<string, unknown>> = [];
   for (
@@ -645,8 +657,9 @@ export async function getXPostingDiagnostics(
     }
     if (post.created_at && String(post.created_at) < effectiveCutoff) {
       blockers.push({
-        code: "before_start_posting_from",
-        label: "Older than X posting cutover window",
+        code: "outside_x_auto_freshness_window",
+        label:
+          `Older than X auto-post freshness window (${maxCandidateAgeMinutes}m)`,
         severity: "blocker",
       });
     }

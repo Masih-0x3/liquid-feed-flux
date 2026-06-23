@@ -29,6 +29,8 @@ export interface XPostingConfigValue {
   hashtags_per_post: 0 | 1 | 2;
   max_chars: number;
   dedupe_window_hours: number;
+  max_candidate_age_minutes: number;
+  max_posts_per_run: number;
   post_only_decision_deliver: boolean;
   /** Forward-only floor — preserved across saves; server re-stamps on rule loosening. */
   start_posting_from?: string | null;
@@ -45,6 +47,8 @@ const DEFAULTS: XPostingConfigValue = {
   hashtags_per_post: 1,
   max_chars: 280,
   dedupe_window_hours: 48,
+  max_candidate_age_minutes: 30,
+  max_posts_per_run: 1,
   post_only_decision_deliver: true,
 };
 
@@ -292,11 +296,25 @@ export default function XPostingConfig({ initial }: Props) {
           </div>
         </div>
 
-        <div className="space-y-1.5">
-          <Label htmlFor="dedupe_hours">Dedupe window (hours)</Label>
-          <Input id="dedupe_hours" type="number" min={1} max={720} value={cfg.dedupe_window_hours}
-            onChange={(e) => update({ dedupe_window_hours: Math.max(1, Math.min(720, Number(e.target.value) || 48)) })} className="glass-input max-w-[200px]" />
-          <p className="text-xs text-muted-foreground">A post will not be reposted to X within this window.</p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="freshness_minutes">Auto-post freshness</Label>
+            <Input id="freshness_minutes" type="number" min={1} max={1440} value={cfg.max_candidate_age_minutes}
+              onChange={(e) => update({ max_candidate_age_minutes: Math.max(1, Math.min(1440, Number(e.target.value) || 30)) })} className="glass-input" />
+            <p className="text-xs text-muted-foreground">Minutes after ingest that cron may publish automatically.</p>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="max_posts_per_run">Posts per cron run</Label>
+            <Input id="max_posts_per_run" type="number" min={1} max={20} value={cfg.max_posts_per_run}
+              onChange={(e) => update({ max_posts_per_run: Math.max(1, Math.min(20, Number(e.target.value) || 1)) })} className="glass-input" />
+            <p className="text-xs text-muted-foreground">Caps each automatic run even when more posts are eligible.</p>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="dedupe_hours">Dedupe window</Label>
+            <Input id="dedupe_hours" type="number" min={1} max={720} value={cfg.dedupe_window_hours}
+              onChange={(e) => update({ dedupe_window_hours: Math.max(1, Math.min(720, Number(e.target.value) || 48)) })} className="glass-input" />
+            <p className="text-xs text-muted-foreground">Hours used to prevent reposting the same item.</p>
+          </div>
         </div>
 
         {/* Live preview */}
