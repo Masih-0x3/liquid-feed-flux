@@ -45,6 +45,8 @@ import {
 import {
   applyLearnedFeedbackBias,
   type FeedbackBiasResult,
+  normalizeKnnFeedbackPriorDetails,
+  priorFromKnnFeedbackDetails,
 } from "../_shared/feedbackBias.ts";
 import {
   AUTOCHAIN_DUE_WINDOW_MS,
@@ -136,6 +138,10 @@ const SETTINGS_CACHE_MS = 45_000;
 initSentryEdge();
 type ScoringDecisionLog = NonNullable<
   ReturnType<typeof buildScoringBaseDecisionState>["logEvent"]
+>;
+type FeedbackBiasBaseState = Pick<
+  FeedbackBiasResult,
+  "deliveryDecision" | "decisionReason" | "finalScore"
 >;
 // deno-lint-ignore no-explicit-any
 let configCache: { expiresAt: number; value: any } | null = null;
@@ -269,6 +275,9 @@ async function loadConfig(
     storyMemory: {
       ...DEFAULT_DUPLICATE_GATE,
     },
+    xPostingConfig: {
+      min_score: 14,
+    },
     scoringPolicy: normalizeScoringPolicy(null),
   };
 
@@ -283,6 +292,7 @@ async function loadConfig(
         "editorial_profiles",
         "active_profile_id",
         "story_memory",
+        "x_posting_config",
         "scoring_policy",
       ]);
 
@@ -417,6 +427,15 @@ async function loadConfig(
             ...defaults.storyMemory,
             ...s.value as Record<string, unknown>,
           });
+        }
+        if (
+          s.key === "x_posting_config" && typeof s.value === "object" &&
+          s.value !== null
+        ) {
+          defaults.xPostingConfig = {
+            ...defaults.xPostingConfig,
+            ...s.value as Record<string, unknown>,
+          };
         }
         if (
           s.key === "scoring_policy" && typeof s.value === "object" &&
@@ -1015,7 +1034,7 @@ async function handleTranslateJob(
     const { data: post, error } = await supabase
       .from("posts")
       .select(
-        "tweet_id, text_original, text_translated, account_id, url, tweeted_at, has_media, author_handle, is_truncated, hydrated_at, dedupe_status, dup_of_tweet_id, dedupe_reason, feedback_locked, importance_score, importance_tags, importance_reasoning, score_axes, final_score, delivery_decision, decision_reason, score_breakdown, accounts!inner(handle, display_name)",
+        "tweet_id, text_original, text_translated, account_id, url, tweeted_at, has_media, author_handle, is_truncated, hydrated_at, dedupe_status, dup_of_tweet_id, dedupe_reason, feedback_locked, importance_score, importance_tags, importance_reasoning, score_axes, final_score, base_score, learned_score, learned_delta, x_gate_score, learning_confidence, delivery_decision, decision_reason, score_breakdown, accounts!inner(handle, display_name)",
       )
       .eq("tweet_id", tweetId)
       .single();
@@ -1225,7 +1244,8 @@ async function handleTranslateJob(
     let scoringPolicyResult: ScoringPolicyResult | null = null;
     const scoringPolicyEnabled = scoringPolicyConfigured;
     const scoringPolicyActive = scoringPolicyEnabled &&
-      (config.scoringPolicy?.mode === "active" || forceScoringV2);
+      config.scoringPolicy?.enabled === true &&
+      config.scoringPolicy?.mode === "active";
     let splitDecisionState: FeedbackBiasResult | null = null;
 
     const activeFeedbackThreshold = () =>
@@ -1277,10 +1297,7 @@ async function handleTranslateJob(
       }));
     };
 
-    const buildBaseDecisionState = (): Omit<
-      FeedbackBiasResult,
-      "scoreBreakdown"
-    > => {
+    const buildBaseDecisionState = (): FeedbackBiasBaseState => {
       const result = buildScoringBaseDecisionState({
         feedbackLocked,
         postFinalScore: post.final_score,
@@ -1310,11 +1327,32 @@ async function handleTranslateJob(
     };
 
     const applyFeedbackBiasToDecision = async (
-      state: Omit<FeedbackBiasResult, "scoreBreakdown">,
+      state: FeedbackBiasBaseState,
     ): Promise<FeedbackBiasResult> => {
       if (feedbackLocked) {
+        const baseScore = typeof post.base_score === "number"
+          ? post.base_score
+          : state.finalScore;
+        const learnedScore = typeof post.learned_score === "number"
+          ? post.learned_score
+          : state.finalScore;
+        const xGateScore = typeof post.x_gate_score === "number"
+          ? post.x_gate_score
+          : baseScore;
         return {
           ...state,
+          baseScore,
+          learnedScore,
+          learnedDelta: typeof post.learned_delta === "number"
+            ? post.learned_delta
+            : (typeof learnedScore === "number" && typeof baseScore === "number"
+              ? Math.round((learnedScore - baseScore) * 1000) / 1000
+              : null),
+          xGateScore,
+          learningConfidence: post.learning_confidence &&
+              typeof post.learning_confidence === "object"
+            ? post.learning_confidence as Record<string, unknown>
+            : null,
           scoreBreakdown:
             post.score_breakdown && typeof post.score_breakdown === "object"
               ? post.score_breakdown as Record<string, unknown>
@@ -1322,22 +1360,42 @@ async function handleTranslateJob(
         };
       }
       if (state.finalScore === null) {
-        return { ...state, scoreBreakdown: null };
+        return {
+          ...state,
+          baseScore: null,
+          learnedScore: null,
+          learnedDelta: null,
+          xGateScore: null,
+          learningConfidence: null,
+          scoreBreakdown: null,
+        };
       }
       try {
         const { data: biasRow } = await supabase.from("settings").select(
           "value",
         ).eq("key", "learned_biases").maybeSingle();
         let knnPrior = 0;
+        let knnPriorDetails = null;
         const { data: sigRow } = await supabase.from("story_signatures").select(
           "embedding",
         ).eq("tweet_id", tweetId).maybeSingle();
         if (sigRow?.embedding) {
-          const { data: knnVal } = await supabase.rpc("knn_feedback_prior", {
-            query_embedding: sigRow.embedding,
-            exclude_tweet_id: tweetId,
-          });
-          knnPrior = typeof knnVal === "number" ? knnVal : 0;
+          const { data: detailsData, error: detailsError } = await supabase.rpc(
+            "knn_feedback_prior_details",
+            {
+              query_embedding: sigRow.embedding,
+              exclude_tweet_id: tweetId,
+            },
+          );
+          knnPriorDetails = normalizeKnnFeedbackPriorDetails(detailsData);
+          knnPrior = priorFromKnnFeedbackDetails(knnPriorDetails);
+          if (!knnPriorDetails || detailsError) {
+            const { data: knnVal } = await supabase.rpc("knn_feedback_prior", {
+              query_embedding: sigRow.embedding,
+              exclude_tweet_id: tweetId,
+            });
+            knnPrior = typeof knnVal === "number" ? knnVal : 0;
+          }
         }
 
         return applyLearnedFeedbackBias({
@@ -1347,10 +1405,15 @@ async function handleTranslateJob(
           filterEnabled,
           scoreOnly,
           threshold: activeFeedbackThreshold(),
+          xGateThreshold: typeof config.xPostingConfig?.min_score === "number"
+            ? config.xPostingConfig.min_score
+            : 14,
+          learningMode: config.scoringPolicy?.learning?.mode,
           authorHandle,
           tags: importanceTags,
           learnedBiases: biasRow?.value ?? {},
           knnPrior,
+          knnPriorDetails,
           scoringV2: scoringPolicyResult
             ? buildScoringPolicyEventMeta(
               scoringPolicyResult,
@@ -1360,7 +1423,23 @@ async function handleTranslateJob(
         });
       } catch (biasErr) {
         console.warn("feedback bias (non-fatal):", (biasErr as Error).message);
-        return { ...state, scoreBreakdown: null };
+        return {
+          ...state,
+          baseScore: state.finalScore,
+          learnedScore: state.finalScore,
+          learnedDelta: 0,
+          xGateScore: state.finalScore,
+          learningConfidence: null,
+          scoreBreakdown: state.finalScore === null ? null : {
+            ai: state.finalScore,
+            base: state.finalScore,
+            learned_delta: 0,
+            learned: state.finalScore,
+            final: state.finalScore,
+            x_gate_score: state.finalScore,
+            x_gate: state.finalScore,
+          },
+        };
       }
     };
 
@@ -1852,6 +1931,11 @@ async function handleTranslateJob(
     const decisionReason = duplicatePatch?.decision_reason ??
       finalDecisionState.decisionReason;
     const finalScore = finalDecisionState.finalScore;
+    const baseScore = finalDecisionState.baseScore;
+    const learnedScore = finalDecisionState.learnedScore;
+    const learnedDelta = finalDecisionState.learnedDelta;
+    const xGateScore = finalDecisionState.xGateScore;
+    const learningConfidence = finalDecisionState.learningConfidence;
     const scoreBreakdown = finalDecisionState.scoreBreakdown;
 
     const { error: updateError } = await supabase
@@ -1873,6 +1957,11 @@ async function handleTranslateJob(
         deliveryDecision,
         scoreAxes,
         finalScore,
+        baseScore,
+        learnedScore,
+        learnedDelta,
+        xGateScore,
+        learningConfidence,
         decisionReason,
         scoreBreakdown,
         scoringPolicy: scoringPolicyResult

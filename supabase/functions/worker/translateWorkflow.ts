@@ -90,6 +90,11 @@ type PostTranslationUpdatePatchInput = {
   deliveryDecision: string;
   scoreAxes: unknown;
   finalScore: number | null;
+  baseScore: number | null;
+  learnedScore: number | null;
+  learnedDelta: number | null;
+  xGateScore: number | null;
+  learningConfidence: Record<string, unknown> | null;
   decisionReason: string | null;
   scoreBreakdown: Record<string, unknown> | null;
   scoringPolicy: ScoringPolicyUpdateFields | null;
@@ -234,6 +239,11 @@ export function buildPostTranslationUpdatePatch(
     delivery_decision: input.deliveryDecision,
     score_axes: input.scoreAxes ?? null,
     final_score: input.finalScore,
+    base_score: input.baseScore,
+    learned_score: input.learnedScore,
+    learned_delta: input.learnedDelta,
+    x_gate_score: input.xGateScore,
+    learning_confidence: input.learningConfidence,
     decision_reason: input.decisionReason,
     score_breakdown: input.scoreBreakdown,
     ...(input.scoringPolicy

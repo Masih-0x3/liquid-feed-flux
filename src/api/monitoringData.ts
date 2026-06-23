@@ -23,6 +23,11 @@ export interface MonitoringEntry {
   delivery_decision: string | null;
   score_axes: Record<string, number> | null;
   final_score: number | null;
+  base_score: number | null;
+  learned_score: number | null;
+  learned_delta: number | null;
+  x_gate_score: number | null;
+  learning_confidence: Record<string, unknown> | null;
   decision_reason: string | null;
   scoring_version: string | null;
   scoring_profile_id: string | null;
@@ -66,7 +71,20 @@ export interface MonitoringEntry {
   dedupe_confidence: number | null;
   dedupe_reason: string | null;
   dedupe_new_facts: string[] | null;
-  score_breakdown: { ai?: number; author_bias?: number; tag_bias?: number; knn_prior?: number; final?: number; scoring_v2?: Record<string, unknown> } | null;
+  score_breakdown: {
+    ai?: number;
+    base?: number;
+    author_bias?: number;
+    tag_bias?: number;
+    knn_prior?: number;
+    learned_delta?: number;
+    learned?: number;
+    final?: number;
+    x_gate_score?: number;
+    x_gate?: number;
+    learning_confidence?: Record<string, unknown>;
+    scoring_v2?: Record<string, unknown>;
+  } | null;
   feedback_locked: boolean;
   enrich_status: string | null;
   enrichment_version: string | null;

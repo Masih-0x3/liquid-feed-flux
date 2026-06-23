@@ -101,6 +101,10 @@ export async function adminRescorePost(tweetId: string) {
     ok: boolean;
     score?: number;
     final_score?: number;
+    base_score?: number;
+    learned_score?: number;
+    learned_delta?: number;
+    x_gate_score?: number;
     decision?: string;
     decision_reason?: string | null;
     reasoning?: string;

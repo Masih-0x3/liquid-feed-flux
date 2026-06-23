@@ -588,3 +588,47 @@ Deno.test("posting diagnostics reports blockers without mutating", async () => {
     [],
   );
 });
+
+Deno.test("posting diagnostics gates on x gate score rather than learned final score", async () => {
+  const supabase = fakeSupabase({
+    settings: {
+      x_posting_config: { enabled: true, min_score: 17 },
+      content_filter: { default_threshold: 14 },
+    },
+    postsByTweet: {
+      t1: {
+        tweet_id: "t1",
+        text_translated: "translated",
+        created_at: "2026-01-01T00:00:00.000Z",
+        has_media: false,
+        delivery_decision: "deliver",
+        final_score: 16.9,
+        base_score: 18.9,
+        learned_score: 16.9,
+        learned_delta: -2,
+        x_gate_score: 18.9,
+      },
+    },
+  });
+
+  const result = await getXPostingDiagnostics(supabase, {
+    tweet_id: "t1",
+  }, { now: () => new Date("2026-01-01T01:00:00.000Z") });
+
+  const item = (result as {
+    diagnostics: {
+      items: Array<{
+        eligible: boolean;
+        blockers: Array<{ code: string }>;
+        score: number;
+        x_gate_score: number;
+        final_score: number;
+      }>;
+    };
+  }).diagnostics.items[0];
+  assertEquals(item.eligible, true);
+  assertEquals(item.blockers, []);
+  assertEquals(item.score, 18.9);
+  assertEquals(item.x_gate_score, 18.9);
+  assertEquals(item.final_score, 16.9);
+});

@@ -10,6 +10,11 @@ import {
   parseScoreAxes,
 } from "../_shared/scoring.ts";
 import {
+  applyLearnedFeedbackBias,
+  normalizeKnnFeedbackPriorDetails,
+  priorFromKnnFeedbackDetails,
+} from "../_shared/feedbackBias.ts";
+import {
   type InsertAdminPipelineEventFn,
   loadScoringModelOptions,
   loadScoringPolicyConfig,
@@ -40,6 +45,10 @@ export type RunRescoreResult = {
   error?: string;
   score?: number;
   final_score?: number;
+  base_score?: number;
+  learned_score?: number;
+  learned_delta?: number;
+  x_gate_score?: number;
   decision?: string;
   decision_reason?: string | null;
   threshold?: number;
@@ -222,6 +231,8 @@ export async function runRescore(
       "content_filter",
       "editorial_profiles",
       "active_profile_id",
+      "x_posting_config",
+      "scoring_policy",
     ]);
   const settingsMap = settingsRowsToMap(settings);
   const tp = settingsMap.translation_prompt || {};
@@ -449,80 +460,79 @@ export async function runRescore(
   const thresholdOut = editorialProfile
     ? editorialProfile.threshold
     : legacyThreshold;
+  const xPostingConfig = settingsMap.x_posting_config || {};
+  const xGateThreshold = typeof xPostingConfig.min_score === "number"
+    ? xPostingConfig.min_score
+    : 14;
+  const scoringPolicySetting = settingsMap.scoring_policy || {};
+  const scoringPolicyLearning = asRecord(scoringPolicySetting.learning);
+  const learningMode = scoringPolicyLearning.mode === "applied"
+    ? "applied"
+    : scoringPolicyLearning.mode === "human_only"
+    ? "human_only"
+    : "shadow";
 
   let scoreBreakdown: Record<string, unknown> | null = null;
+  let baseScore: number | null = finalScore;
+  let learnedScore: number | null = finalScore;
+  let learnedDelta: number | null = 0;
+  let xGateScore: number | null = finalScore;
+  let learningConfidence: Record<string, unknown> | null = null;
   if (finalScore !== null) {
     try {
       const { data: biasRow } = await table(supabase, "settings")
         .select("value")
         .eq("key", "learned_biases")
         .maybeSingle();
-      const biases = (asRecord(biasRow).value ?? {}) as {
-        author_bias?: Record<string, number>;
-        tag_bias?: Record<string, number>;
-      };
-      const authorDelta = authorHandle
-        ? (biases.author_bias?.[authorHandle.toLowerCase()] ?? 0)
-        : 0;
-      let tagDelta = 0;
-      for (const tag of newTags) {
-        tagDelta += biases.tag_bias?.[String(tag).toLowerCase()] ?? 0;
-      }
-      tagDelta = Math.max(-2, Math.min(2, tagDelta));
 
       let knnPrior = 0;
+      let knnPriorDetails = null;
       const { data: sigRow } = await table(supabase, "story_signatures")
         .select("embedding")
         .eq("tweet_id", tweetId)
         .maybeSingle();
       if (asRecord(sigRow).embedding) {
-        const { data: knnVal } = await supabase.rpc("knn_feedback_prior", {
-          query_embedding: asRecord(sigRow).embedding,
-          exclude_tweet_id: tweetId,
-        });
-        knnPrior = typeof knnVal === "number" ? knnVal : 0;
-      }
-
-      const totalBias = Math.max(
-        -5,
-        Math.min(5, authorDelta + tagDelta + knnPrior),
-      );
-      const aiFinal = finalScore;
-      if (totalBias !== 0) {
-        finalScore = Math.max(
-          1,
-          Math.min(20, Math.round((finalScore + totalBias) * 10) / 10),
+        const { data: detailsData, error: detailsError } = await supabase.rpc(
+          "knn_feedback_prior_details",
+          {
+            query_embedding: asRecord(sigRow).embedding,
+            exclude_tweet_id: tweetId,
+          },
         );
-        if (filterEnabled && !scoreOnly) {
-          const threshold = thresholdOut;
-          if (
-            finalScore >= threshold && deliveryDecision === "skip" &&
-            (decisionReason ?? "").startsWith("below_threshold")
-          ) {
-            deliveryDecision = "deliver";
-            decisionReason = `feedback_boost:${aiFinal.toFixed(1)}+${
-              totalBias.toFixed(1)
-            }>=${threshold}`;
-          } else if (
-            finalScore < threshold && deliveryDecision === "deliver" &&
-            (decisionReason ?? "").startsWith("score_pass")
-          ) {
-            deliveryDecision = "skip";
-            decisionReason = `feedback_reduce:${aiFinal.toFixed(1)}+${
-              totalBias.toFixed(1)
-            }<${threshold}`;
-          }
+        knnPriorDetails = normalizeKnnFeedbackPriorDetails(detailsData);
+        knnPrior = priorFromKnnFeedbackDetails(knnPriorDetails);
+        if (!knnPriorDetails || detailsError) {
+          const { data: knnVal } = await supabase.rpc("knn_feedback_prior", {
+            query_embedding: asRecord(sigRow).embedding,
+            exclude_tweet_id: tweetId,
+          });
+          knnPrior = typeof knnVal === "number" ? knnVal : 0;
         }
       }
-      scoreBreakdown = {
-        ai: Math.round(aiFinal * 10) / 10,
-        ...(authorDelta
-          ? { author_bias: Math.round(authorDelta * 1000) / 1000 }
-          : {}),
-        ...(tagDelta ? { tag_bias: Math.round(tagDelta * 1000) / 1000 } : {}),
-        ...(knnPrior ? { knn_prior: Math.round(knnPrior * 1000) / 1000 } : {}),
-        final: Math.round(finalScore * 10) / 10,
-      };
+      const biased = applyLearnedFeedbackBias({
+        deliveryDecision,
+        decisionReason,
+        finalScore,
+        filterEnabled,
+        scoreOnly,
+        threshold: thresholdOut,
+        xGateThreshold,
+        learningMode,
+        authorHandle,
+        tags: newTags,
+        learnedBiases: asRecord(biasRow).value as never,
+        knnPrior,
+        knnPriorDetails,
+      });
+      deliveryDecision = biased.deliveryDecision;
+      decisionReason = biased.decisionReason;
+      finalScore = biased.finalScore;
+      baseScore = biased.baseScore;
+      learnedScore = biased.learnedScore;
+      learnedDelta = biased.learnedDelta;
+      xGateScore = biased.xGateScore;
+      learningConfidence = biased.learningConfidence;
+      scoreBreakdown = biased.scoreBreakdown;
     } catch {
       // Feedback priors should never block an explicit rescore.
     }
@@ -535,6 +545,11 @@ export async function runRescore(
     delivery_decision: deliveryDecision,
     score_axes: scoreAxes ?? null,
     final_score: finalScore,
+    base_score: baseScore,
+    learned_score: learnedScore,
+    learned_delta: learnedDelta,
+    x_gate_score: xGateScore,
+    learning_confidence: learningConfidence,
     decision_reason: decisionReason,
     score_breakdown: scoreBreakdown,
   };
@@ -554,6 +569,10 @@ export async function runRescore(
     ok: true,
     score: importanceScore,
     final_score: finalScore ?? undefined,
+    base_score: baseScore ?? undefined,
+    learned_score: learnedScore ?? undefined,
+    learned_delta: learnedDelta ?? undefined,
+    x_gate_score: xGateScore ?? undefined,
     tags: newTags,
     reasoning: newReasoning,
     translated: typeof args.translated_text === "string"
@@ -895,6 +914,10 @@ export async function rescorePostAdminAction(
         tweet_id: tweetId,
         score: v2.result?.raw_priority_score,
         final_score: v2.result?.final_score,
+        base_score: v2.result?.final_score,
+        learned_score: v2.result?.final_score,
+        learned_delta: 0,
+        x_gate_score: v2.result?.final_score,
         tags: v2.result?.tags,
         reasoning: v2.result?.audience_reason,
         decision: v2.result?.delivery_decision,
@@ -941,6 +964,18 @@ export async function rescorePostAdminAction(
       tweet_id: tweetId,
       score: result.score,
       final_score: result.final_score,
+      ...(result.base_score !== undefined
+        ? { base_score: result.base_score }
+        : {}),
+      ...(result.learned_score !== undefined
+        ? { learned_score: result.learned_score }
+        : {}),
+      ...(result.learned_delta !== undefined
+        ? { learned_delta: result.learned_delta }
+        : {}),
+      ...(result.x_gate_score !== undefined
+        ? { x_gate_score: result.x_gate_score }
+        : {}),
       tags: result.tags,
       reasoning: result.reasoning,
       decision: result.decision,

@@ -7,6 +7,7 @@ import {
   runScoringEval,
   scorePostV2,
   type ScoringActionDeps,
+  scoringPolicyPostUpdate,
   setManualScore,
 } from "./scoringActions.ts";
 import type { SupabaseAdminClient } from "./types.ts";
@@ -308,6 +309,10 @@ Deno.test("manual score below threshold updates review fields without advancing"
     call.op === "update" && call.table === "posts"
   )?.value as Record<string, unknown>;
   assertEquals(update.final_score, 10);
+  assertEquals(update.base_score, 10);
+  assertEquals(update.learned_score, 10);
+  assertEquals(update.learned_delta, 0);
+  assertEquals(update.x_gate_score, 10);
   assertEquals(update.delivery_decision, "skip");
   assertEquals(update.decision_reason, "manual_score_skip:10<14");
   assertEquals(update.feedback_locked, true);
@@ -432,8 +437,66 @@ Deno.test("scorePostV2 applies active policy result and records an event", async
     call.op === "update" && call.table === "posts"
   )?.value as Record<string, unknown>;
   assertEquals(update.final_score, 17);
+  assertEquals(update.base_score, 17);
+  assertEquals(update.learned_score, 17);
+  assertEquals(update.learned_delta, 0);
+  assertEquals(update.x_gate_score, 17);
   assertEquals(update.delivery_decision, "deliver");
   assertEquals(calls.events[0].step, "score");
+});
+
+Deno.test("scoring policy shadow update does not overwrite production score fields", () => {
+  const update = scoringPolicyPostUpdate(
+    scoringResult({ final_score: 19, delivery_decision: "deliver" }),
+    false,
+  );
+
+  assertEquals(update.scoring_version, "audience-fit-v2");
+  assertEquals(update.score_review_status, "shadow");
+  assertEquals(update.final_score, undefined);
+  assertEquals(update.importance_score, undefined);
+  assertEquals(update.base_score, undefined);
+  assertEquals(update.learned_score, undefined);
+  assertEquals(update.x_gate_score, undefined);
+  assertEquals(update.delivery_decision, undefined);
+  assertEquals(update.decision_reason, undefined);
+});
+
+Deno.test("scorePostV2 keeps apply requests shadow when policy mode is shadow", async () => {
+  const supabase = fakeSupabase({
+    settings: {
+      scoring_policy: { enabled: true, mode: "shadow" },
+    },
+    postsByTweet: {
+      t1: {
+        tweet_id: "t1",
+        text_original: "Original text",
+        author_handle: "source",
+        url: "https://x.com/status/1",
+        tweeted_at: "2026-01-01T00:00:00.000Z",
+        accounts: { display_name: "Feed" },
+      },
+    },
+  });
+  const { deps } = fakeDeps(
+    scoringResult({ final_score: 19, raw_priority_score: 19 }),
+  );
+
+  const result = await scorePostV2(
+    supabase,
+    { tweet_id: "t1", apply: true },
+    deps,
+  );
+
+  assertEquals(result.ok, true);
+  assertEquals(result.active, false);
+  const update = supabase.calls.find((call) =>
+    call.op === "update" && call.table === "posts"
+  )?.value as Record<string, unknown>;
+  assertEquals(update.score_review_status, "shadow");
+  assertEquals(update.final_score, undefined);
+  assertEquals(update.importance_score, undefined);
+  assertEquals(update.delivery_decision, undefined);
 });
 
 Deno.test("backfillScoreV2 dry-run defaults to no queue and clamps max", async () => {

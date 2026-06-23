@@ -34,6 +34,24 @@ function nowIso(deps?: SideEffectDeps): string {
   return (deps?.now?.() ?? new Date()).toISOString();
 }
 
+function finiteNumber(value: unknown): number | null {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function feedbackResidual(
+  polarity: number,
+  meta?: Record<string, unknown>,
+): number {
+  const oldScore = finiteNumber(meta?.old_score);
+  const targetScore = finiteNumber(meta?.manual_score) ??
+    finiteNumber(meta?.new_score);
+  const residual = oldScore !== null && targetScore !== null
+    ? targetScore - oldScore
+    : polarity;
+  return Math.max(-2, Math.min(2, residual));
+}
+
 export async function recordFeedback(
   supabase: SupabaseAdminClient,
   tweetId: string,
@@ -80,6 +98,7 @@ export async function recordFeedback(
     keyword_bias: Record<string, number>;
   };
 
+  const residual = feedbackResidual(polarity, meta);
   const perEventClamp = 0.5;
   const perKeyCap = 3;
   const clampDelta = (delta: number) =>
@@ -90,7 +109,7 @@ export async function recordFeedback(
   if (postRecord.author_handle) {
     const handle = String(postRecord.author_handle).toLowerCase();
     biases.author_bias[handle] = clampTotal(
-      (biases.author_bias[handle] || 0) + clampDelta(polarity * 0.6),
+      (biases.author_bias[handle] || 0) + clampDelta(residual * 0.25),
     );
   }
 
@@ -98,7 +117,7 @@ export async function recordFeedback(
     ? postRecord.importance_tags as string[]
     : [];
   if (tags.length > 0) {
-    const perTag = polarity * 0.2 / tags.length;
+    const perTag = residual * 0.1 / tags.length;
     for (const tag of tags) {
       const normalizedTag = String(tag).toLowerCase();
       biases.tag_bias[normalizedTag] = clampTotal(
