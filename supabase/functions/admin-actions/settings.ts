@@ -227,6 +227,18 @@ export function validateSettingsValue(
         (typeof v.dedupe_window_hours !== "number" ||
           v.dedupe_window_hours < 1 || v.dedupe_window_hours > 720)
       ) return "x_posting_config.dedupe_window_hours must be 1-720";
+      if (
+        v.max_candidate_age_minutes !== undefined &&
+        (typeof v.max_candidate_age_minutes !== "number" ||
+          v.max_candidate_age_minutes < 1 ||
+          v.max_candidate_age_minutes > 1440)
+      ) return "x_posting_config.max_candidate_age_minutes must be 1-1440";
+      if (
+        v.max_posts_per_run !== undefined &&
+        (typeof v.max_posts_per_run !== "number" ||
+          v.max_posts_per_run < 1 ||
+          v.max_posts_per_run > 20)
+      ) return "x_posting_config.max_posts_per_run must be 1-20";
       const strs: Array<[string, number]> = [["post_template", 1000], [
         "leading_emoji",
         32,
@@ -601,10 +613,17 @@ export function shouldRestampXPostingStart(
   const decisionGateLoosened = nextEnabled &&
     prevCfg.post_only_decision_deliver === true &&
     nextCfg.post_only_decision_deliver === false;
+  const prevMaxAge = typeof prevCfg.max_candidate_age_minutes === "number"
+    ? prevCfg.max_candidate_age_minutes as number
+    : 30;
+  const nextMaxAge = typeof nextCfg.max_candidate_age_minutes === "number"
+    ? nextCfg.max_candidate_age_minutes as number
+    : prevMaxAge;
+  const freshnessWindowLoosened = nextEnabled && nextMaxAge > prevMaxAge;
 
   return !userProvidedStart &&
     (enableTransition || thresholdLowered || mediaLoosened ||
-      decisionGateLoosened);
+      decisionGateLoosened || freshnessWindowLoosened);
 }
 
 export async function saveSettingsAdminAction(
@@ -658,6 +677,12 @@ export async function saveSettingsAdminAction(
           decisionGateLoosened: !!nextCfg.enabled &&
             prevCfg.post_only_decision_deliver === true &&
             nextCfg.post_only_decision_deliver === false,
+          freshnessWindowLoosened: !!nextCfg.enabled &&
+            typeof nextCfg.max_candidate_age_minutes === "number" &&
+            nextCfg.max_candidate_age_minutes >
+              (typeof prevCfg.max_candidate_age_minutes === "number"
+                ? prevCfg.max_candidate_age_minutes
+                : 30),
           prevMin: typeof prevCfg.min_score === "number"
             ? prevCfg.min_score
             : 14,

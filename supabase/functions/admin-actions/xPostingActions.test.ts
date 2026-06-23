@@ -576,9 +576,9 @@ Deno.test("posting diagnostics reports blockers without mutating", async () => {
     item.blockers.map((blocker) => blocker.code).slice(0, 4),
     [
       "x_disabled",
+      "outside_x_auto_freshness_window",
       "missing_translation",
       "score_below_x_min",
-      "decision_not_deliver",
     ],
   );
   assertEquals(
@@ -592,7 +592,11 @@ Deno.test("posting diagnostics reports blockers without mutating", async () => {
 Deno.test("posting diagnostics gates on x gate score rather than learned final score", async () => {
   const supabase = fakeSupabase({
     settings: {
-      x_posting_config: { enabled: true, min_score: 17 },
+      x_posting_config: {
+        enabled: true,
+        min_score: 17,
+        max_candidate_age_minutes: 120,
+      },
       content_filter: { default_threshold: 14 },
     },
     postsByTweet: {

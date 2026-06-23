@@ -91,6 +91,10 @@ interface PostingConfig {
   post_only_decision_deliver: boolean;
   /** ISO timestamp — only posts created at/after this are eligible. Set when posting is (re)enabled. */
   start_posting_from?: string | null;
+  /** Automatic X posting never catches up posts older than this. Manual force still bypasses it. */
+  max_candidate_age_minutes?: number;
+  /** Hard cap for one automatic cron/event run so newly unblocked queues cannot drain in a burst. */
+  max_posts_per_run?: number;
   /** Max posts per day (0 = unlimited). Reduces aggregator signals. */
   daily_budget?: number;
   /** Minimum minutes between posts (0 = no spacing). Reduces burst patterns. */
@@ -108,6 +112,7 @@ const DEFAULT_CFG: PostingConfig = {
   post_template: '{leading_emoji} {translated_text}', leading_emoji: '📰',
   hashtags: '', hashtag_pool: [], hashtags_per_post: 1,
   max_chars: 280, dedupe_window_hours: 48, post_only_decision_deliver: true,
+  max_candidate_age_minutes: 30, max_posts_per_run: 1,
 };
 const DEFAULT_LIMITS: RateLimits = {
   posts_per_hour: 20, posts_per_day: 100, monthly_post_budget: 2500, media_uploads_per_day: 200,
@@ -566,9 +571,12 @@ Deno.serve(async (req) => {
 
   // Select candidates
   const dedupeCutoff = new Date(Date.now() - cfg.dedupe_window_hours * 3600 * 1000).toISOString();
+  const maxCandidateAgeMinutes = Math.max(1, Math.min(1440, Number(cfg.max_candidate_age_minutes ?? 30) || 30));
+  const freshnessCutoff = new Date(Date.now() - maxCandidateAgeMinutes * 60 * 1000).toISOString();
   // Hard floor: never look at posts created before X posting was enabled.
   const startFrom = cfg.start_posting_from || null;
-  const effectiveCutoff = startFrom && startFrom > dedupeCutoff ? startFrom : dedupeCutoff;
+  const effectiveCutoff = [dedupeCutoff, freshnessCutoff, startFrom].filter((v): v is string => !!v).sort().at(-1) ?? freshnessCutoff;
+  const maxPostsPerRun = Math.max(1, Math.min(20, Number(cfg.max_posts_per_run ?? 1) || 1));
 
   const { data: existingRows } = await sb.from('x_deliveries').select('post_id').in('status', ['posting', 'posted', 'pending']).gte('created_at', dedupeCutoff);
   const existing = new Set((existingRows || []).map((r) => r.post_id as string));
@@ -576,7 +584,7 @@ Deno.serve(async (req) => {
   let posts: Array<Record<string, unknown>> = [];
   let postsErr: { message: string } | null = null;
   if (!onlyTweetId) {
-    const rpcLimit = targetTweetId ? 1 : 20;
+    const rpcLimit = targetTweetId ? 1 : maxPostsPerRun;
     const rpcRes = await sb.rpc('get_x_post_candidates', {
       candidate_limit: rpcLimit,
       target_tweet_id: targetTweetId,
