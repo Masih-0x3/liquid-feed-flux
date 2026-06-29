@@ -6,7 +6,9 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { ManualVideoIntakePanel } from '@/components/video/ManualVideoIntakePanel';
 import { VideoRenderDetailPanel } from '@/components/video/VideoRenderDetailPanel';
 import {
   useRetryVideoRender,
@@ -144,95 +146,108 @@ export default function VideoRenders() {
         </Card>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(440px,0.95fr)]">
-        <Card className="glass-card">
-          <CardHeader className="pb-3">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <CardTitle>Render Queue</CardTitle>
-                <CardDescription>Production rows from Supabase, not local golden outputs</CardDescription>
-              </div>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-full sm:w-52"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {STATUS_OPTIONS.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-          </CardHeader>
-          <CardContent className="p-0">
-            {queue.isLoading ? (
-              <div className="flex min-h-60 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
-            ) : rows.length === 0 ? (
-              <div className="p-8 text-center text-sm text-muted-foreground">No video renders match this filter.</div>
-            ) : (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Post</TableHead>
-                      <TableHead>Lang</TableHead>
-                      <TableHead>Time</TableHead>
-                      <TableHead>Size</TableHead>
-                      <TableHead className="text-right">Action</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {rows.map((row: VideoRenderQueueRow) => (
-                      <TableRow key={row.id} className={selected?.id === row.id ? 'bg-primary/5' : undefined}>
-                        <TableCell>
-                          <div className="space-y-1">
-                            <Badge className={statusClass(row.status)}>{row.status}</Badge>
-                            {row.latest_feedback?.label && <Badge variant="outline" className="block w-fit text-[10px]">{row.latest_feedback.label.replaceAll('_', ' ')}</Badge>}
-                          </div>
-                        </TableCell>
-                        <TableCell className="max-w-[280px]">
-                          <button type="button" onClick={() => setSelectedRenderId(row.id)} className="block w-full text-left hover:text-primary">
-                            <p className="truncate font-medium">{row.post?.author_handle ? `@${row.post.author_handle}` : row.tweet_id}</p>
-                            <p className="line-clamp-2 text-xs text-muted-foreground">{row.post?.text_original || row.error || row.block_reason || row.id}</p>
-                          </button>
-                        </TableCell>
-                        <TableCell className="text-sm">{row.source_language || '-'} → {row.target_language || '-'}</TableCell>
-                        <TableCell className="text-sm">{row.activity_at ? formatDistanceToNow(new Date(row.activity_at), { addSuffix: true }) : '-'}</TableCell>
-                        <TableCell className="text-sm">{formatBytes(row.output_file_size)}</TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-2">
-                            <Button size="sm" variant="outline" onClick={() => setSelectedRenderId(row.id)}>Review</Button>
-                            <Button size="sm" variant="ghost" onClick={() => retry.mutate({ render_id: row.id })} disabled={retry.isPending}>
-                              {retry.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+      <Tabs defaultValue="queue" className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="queue">Queue</TabsTrigger>
+          <TabsTrigger value="manual">Manual Intake</TabsTrigger>
+        </TabsList>
 
-        <div className="space-y-3">
-          <Card className="glass-card">
-            <CardContent className="grid gap-2 p-4 text-sm sm:grid-cols-3">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                <span>{compactNumber(overview.data?.counts?.completed ?? 0)} completed</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <HardDrive className="h-4 w-4 text-primary" />
-                <span>{formatBytes(overview.data?.output_bytes_7d)} in 7d</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Clock className="h-4 w-4 text-blue-500" />
-                <span>{overview.data?.oldest_queued_at ? `Oldest ${formatDistanceToNow(new Date(overview.data.oldest_queued_at), { addSuffix: true })}` : 'No backlog'}</span>
-              </div>
-            </CardContent>
-          </Card>
-          <VideoRenderDetailPanel renderId={selected?.id ?? null} enabled={Boolean(selected)} compact />
-        </div>
-      </div>
+        <TabsContent value="queue" className="mt-0">
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(440px,0.95fr)]">
+            <Card className="glass-card">
+              <CardHeader className="pb-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <CardTitle>Render Queue</CardTitle>
+                    <CardDescription>Production rows from Supabase, not local golden outputs</CardDescription>
+                  </div>
+                  <Select value={statusFilter} onValueChange={setStatusFilter}>
+                    <SelectTrigger className="w-full sm:w-52"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {STATUS_OPTIONS.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                {queue.isLoading ? (
+                  <div className="flex min-h-60 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
+                ) : rows.length === 0 ? (
+                  <div className="p-8 text-center text-sm text-muted-foreground">No video renders match this filter.</div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Post</TableHead>
+                          <TableHead>Lang</TableHead>
+                          <TableHead>Time</TableHead>
+                          <TableHead>Size</TableHead>
+                          <TableHead className="text-right">Action</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {rows.map((row: VideoRenderQueueRow) => (
+                          <TableRow key={row.id} className={selected?.id === row.id ? 'bg-primary/5' : undefined}>
+                            <TableCell>
+                              <div className="space-y-1">
+                                <Badge className={statusClass(row.status)}>{row.status}</Badge>
+                                {row.latest_feedback?.label && <Badge variant="outline" className="block w-fit text-[10px]">{row.latest_feedback.label.replaceAll('_', ' ')}</Badge>}
+                              </div>
+                            </TableCell>
+                            <TableCell className="max-w-[280px]">
+                              <button type="button" onClick={() => setSelectedRenderId(row.id)} className="block w-full text-left hover:text-primary">
+                                <p className="truncate font-medium">{row.post?.author_handle ? `@${row.post.author_handle}` : row.tweet_id}</p>
+                                <p className="line-clamp-2 text-xs text-muted-foreground">{row.post?.text_original || row.error || row.block_reason || row.id}</p>
+                              </button>
+                            </TableCell>
+                            <TableCell className="text-sm">{row.source_language || '-'} → {row.target_language || '-'}</TableCell>
+                            <TableCell className="text-sm">{row.activity_at ? formatDistanceToNow(new Date(row.activity_at), { addSuffix: true }) : '-'}</TableCell>
+                            <TableCell className="text-sm">{formatBytes(row.output_file_size)}</TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex justify-end gap-2">
+                                <Button size="sm" variant="outline" onClick={() => setSelectedRenderId(row.id)}>Review</Button>
+                                <Button size="sm" variant="ghost" onClick={() => retry.mutate({ render_id: row.id })} disabled={retry.isPending}>
+                                  {retry.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <div className="space-y-3">
+              <Card className="glass-card">
+                <CardContent className="grid gap-2 p-4 text-sm sm:grid-cols-3">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                    <span>{compactNumber(overview.data?.counts?.completed ?? 0)} completed</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <HardDrive className="h-4 w-4 text-primary" />
+                    <span>{formatBytes(overview.data?.output_bytes_7d)} in 7d</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Clock className="h-4 w-4 text-blue-500" />
+                    <span>{overview.data?.oldest_queued_at ? `Oldest ${formatDistanceToNow(new Date(overview.data.oldest_queued_at), { addSuffix: true })}` : 'No backlog'}</span>
+                  </div>
+                </CardContent>
+              </Card>
+              <VideoRenderDetailPanel renderId={selected?.id ?? null} enabled={Boolean(selected)} compact />
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="manual" className="mt-0">
+          <ManualVideoIntakePanel />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

@@ -26,6 +26,16 @@ import {
   getMonitoringOverview,
 } from "./monitoringReads.ts";
 import {
+  manualVideoIntakeCancelAdminAction,
+  manualVideoIntakeCreateAdminAction,
+  manualVideoIntakeGetAdminAction,
+  manualVideoIntakeListAdminAction,
+  manualVideoIntakePostAdminAction,
+  manualVideoIntakeRefreshAdminAction,
+  manualVideoIntakeSaveCaptionAdminAction,
+  manualVideoIntakeSetDuplicateOverrideAdminAction,
+} from "./manualVideoIntakeActions.ts";
+import {
   bulkIgnoreMonitoringItemsAdminAction,
   ignoreMonitoringItemAdminAction,
 } from "./monitoringMutations.ts";
@@ -337,6 +347,63 @@ serve(async (req) => {
 
       case 'save_video_render_feedback': {
         return jsonResponse(await saveVideoRenderFeedbackAdmin(supabase, body, insertAdminPipelineEvent, authResult.userId));
+      }
+
+      case 'manual_video_intake_create': {
+        const result = await manualVideoIntakeCreateAdminAction(supabase, body, {
+          runTranslationOnly: runTranslationOnlyForAdmin,
+          insertAdminPipelineEvent,
+        }, authResult.userId);
+        return jsonResponse(result.body, result.status);
+      }
+
+      case 'manual_video_intake_get': {
+        const result = await manualVideoIntakeGetAdminAction(supabase, body, {
+          runTranslationOnly: runTranslationOnlyForAdmin,
+          insertAdminPipelineEvent,
+        });
+        return jsonResponse(result.body, result.status);
+      }
+
+      case 'manual_video_intake_list': {
+        const result = await manualVideoIntakeListAdminAction(supabase, body);
+        return jsonResponse(result.body, result.status);
+      }
+
+      case 'manual_video_intake_refresh': {
+        const result = await manualVideoIntakeRefreshAdminAction(supabase, body, {
+          runTranslationOnly: runTranslationOnlyForAdmin,
+          insertAdminPipelineEvent,
+        });
+        return jsonResponse(result.body, result.status);
+      }
+
+      case 'manual_video_intake_save_caption': {
+        const result = await manualVideoIntakeSaveCaptionAdminAction(supabase, body, {
+          insertAdminPipelineEvent,
+        });
+        return jsonResponse(result.body, result.status);
+      }
+
+      case 'manual_video_intake_set_duplicate_override': {
+        const result = await manualVideoIntakeSetDuplicateOverrideAdminAction(supabase, body, {
+          insertAdminPipelineEvent,
+        });
+        return jsonResponse(result.body, result.status);
+      }
+
+      case 'manual_video_intake_cancel': {
+        const result = await manualVideoIntakeCancelAdminAction(supabase, body, {
+          insertAdminPipelineEvent,
+        });
+        return jsonResponse(result.body, result.status);
+      }
+
+      case 'manual_video_intake_post': {
+        const result = await manualVideoIntakePostAdminAction(supabase, body, {
+          insertAdminPipelineEvent,
+        });
+        return jsonResponse(result.body, result.status);
       }
 
       case 'get_x_posting_diagnostics': {

@@ -488,6 +488,562 @@ async function postTweet(
   return { id, raw: json };
 }
 
+function cleanString(value: unknown, maxLength = 2000): string {
+  return typeof value === 'string' ? value.trim().slice(0, maxLength) : '';
+}
+
+function xPosterJson(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
+}
+
+// deno-lint-ignore no-explicit-any
+async function updateManualIntake(sb: any, intakeId: string, patch: Record<string, unknown>): Promise<void> {
+  try {
+    await sb.from('manual_video_intakes').update({
+      ...patch,
+      updated_at: new Date().toISOString(),
+    }).eq('id', intakeId);
+  } catch (e) {
+    console.error('[x-poster] manual intake update failed', { intakeId, err: (e as Error).message });
+  }
+}
+
+// deno-lint-ignore no-explicit-any
+async function completeManualFailure(
+  sb: any,
+  input: {
+    intakeId: string;
+    tweetId: string;
+    status: 'blocked' | 'failed';
+    reason: string;
+    startedAt: number;
+    meta?: Record<string, unknown>;
+  },
+): Promise<Response> {
+  await updateManualIntake(sb, input.intakeId, {
+    status: input.status,
+    last_error: input.reason.slice(0, 1000),
+  });
+  await insertXPipelineEvent(
+    sb,
+    input.tweetId,
+    input.status === 'blocked' ? 'skipped' : 'failed',
+    new Date(input.startedAt).toISOString(),
+    new Date().toISOString(),
+    input.reason,
+    {
+      dispatch_source: 'manual_video_intake',
+      intake_id: input.intakeId,
+      reason: input.reason,
+      ...(input.meta ?? {}),
+    },
+  );
+  return xPosterJson({
+    ok: false,
+    status: input.status,
+    reason: input.reason,
+    tweet_id: input.tweetId,
+    intake_id: input.intakeId,
+  });
+}
+
+// deno-lint-ignore no-explicit-any
+async function handleManualVideoIntakePost(params: {
+  sb: any;
+  body: Record<string, unknown>;
+  cfg: PostingConfig;
+  duplicateGateCfg: unknown;
+  claimTtlSeconds: number;
+  quotaBlock: () => string | null;
+  ck: string;
+  cs: string;
+  at: string;
+  ats: string;
+}): Promise<Response | null> {
+  const manualIntakeId = cleanString(params.body.manual_intake_id, 80);
+  if (!manualIntakeId) return null;
+
+  const startedAt = Date.now();
+  if (params.body.confirm_manual_post !== true) {
+    return xPosterJson({ ok: false, error: 'confirm_manual_post is required' }, 400);
+  }
+
+  const { data: intake, error: intakeError } = await params.sb
+    .from('manual_video_intakes')
+    .select('id, tweet_id, status, caption_draft, caption_edited, selected_render_id, safety_flags, duplicate_override, duplicate_override_reason, posted_x_tweet_id, posted_at')
+    .eq('id', manualIntakeId)
+    .maybeSingle();
+  if (intakeError) {
+    return xPosterJson({ ok: false, error: intakeError.message ?? 'manual intake lookup failed' }, 500);
+  }
+  if (!intake) {
+    return xPosterJson({ ok: false, error: 'manual intake not found' }, 404);
+  }
+
+  const tweetId = String(intake.tweet_id ?? '');
+  const requestedTweetId = cleanString(params.body.tweet_id, 80);
+  if (!tweetId || (requestedTweetId && requestedTweetId !== tweetId)) {
+    return xPosterJson({ ok: false, error: 'manual intake tweet mismatch' }, 400);
+  }
+  if (intake.status === 'canceled') {
+    return xPosterJson({ ok: false, error: 'manual intake is canceled', intake_id: manualIntakeId }, 400);
+  }
+  if (typeof intake.posted_x_tweet_id === 'string' && intake.posted_x_tweet_id) {
+    return xPosterJson({
+      ok: true,
+      status: 'skipped',
+      reason: 'already_posted',
+      tweet_id: tweetId,
+      intake_id: manualIntakeId,
+      x_tweet_id: intake.posted_x_tweet_id,
+    });
+  }
+
+  const textOverride = cleanString(params.body.text_override, 1200);
+  const caption = textOverride ||
+    cleanString(intake.caption_edited, 1200) ||
+    cleanString(intake.caption_draft, 1200);
+  if (!caption) {
+    return completeManualFailure(params.sb, {
+      intakeId: manualIntakeId,
+      tweetId,
+      status: 'blocked',
+      reason: 'caption_required',
+      startedAt,
+    });
+  }
+  const maxChars = Number(params.cfg.max_chars || 280);
+  if (caption.length > maxChars) {
+    return completeManualFailure(params.sb, {
+      intakeId: manualIntakeId,
+      tweetId,
+      status: 'blocked',
+      reason: `caption_too_long:${caption.length}/${maxChars}`,
+      startedAt,
+    });
+  }
+
+  const { data: latestX } = await params.sb
+    .from('x_deliveries')
+    .select('status, x_tweet_id, posted_at, created_at')
+    .eq('post_id', tweetId)
+    .eq('status', 'posted')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (latestX?.status === 'posted' && latestX.x_tweet_id) {
+    await updateManualIntake(params.sb, manualIntakeId, {
+      status: 'posted',
+      posted_x_tweet_id: latestX.x_tweet_id,
+      posted_at: latestX.posted_at ?? latestX.created_at ?? new Date().toISOString(),
+      blocks_auto_delivery: false,
+    });
+    return xPosterJson({
+      ok: true,
+      status: 'skipped',
+      reason: 'already_posted',
+      tweet_id: tweetId,
+      intake_id: manualIntakeId,
+      x_tweet_id: latestX.x_tweet_id,
+    });
+  }
+
+  const selectedRenderId = cleanString(params.body.render_id, 80) ||
+    cleanString(intake.selected_render_id, 80);
+  if (!selectedRenderId) {
+    return completeManualFailure(params.sb, {
+      intakeId: manualIntakeId,
+      tweetId,
+      status: 'blocked',
+      reason: 'completed_render_required',
+      startedAt,
+    });
+  }
+
+  const { data: post, error: postError } = await params.sb
+    .from('posts')
+    .select('tweet_id, text_translated, text_original, author_handle, has_media, importance_score, final_score, delivery_decision, decision_reason, url, is_truncated, hydrated_at, created_at, final_x_text, composed_post_text, post_format_hint, humanized_commentary, commentary_hook, commentary_question, narrative_callback, thread_continuation, enrich_status, dedupe_status, dup_of_tweet_id, dup_similarity, dedupe_reason')
+    .eq('tweet_id', tweetId)
+    .maybeSingle();
+  if (postError || !post) {
+    return completeManualFailure(params.sb, {
+      intakeId: manualIntakeId,
+      tweetId,
+      status: 'failed',
+      reason: `post_lookup_failed:${postError?.message ?? 'not_found'}`,
+      startedAt,
+    });
+  }
+
+  const duplicateOverride = intake.duplicate_override === true &&
+    cleanString(intake.duplicate_override_reason, 500).length > 0;
+  if (!duplicateOverride) {
+    let finalDuplicateAssertion: FinalDuplicateAssertionResult;
+    try {
+      finalDuplicateAssertion = await assertFinalDuplicateState(params.sb, tweetId, params.duplicateGateCfg, {
+        dryRun: false,
+        source: 'manual_video_intake_final_assertion',
+      });
+    } catch (e) {
+      return completeManualFailure(params.sb, {
+        intakeId: manualIntakeId,
+        tweetId,
+        status: 'failed',
+        reason: `dedupe_assertion_failed:${(e as Error).message}`,
+        startedAt,
+      });
+    }
+    if (finalDuplicateAssertion.blocked) {
+      return completeManualFailure(params.sb, {
+        intakeId: manualIntakeId,
+        tweetId,
+        status: 'blocked',
+        reason: finalDuplicateAssertion.reason ?? 'duplicate_gate',
+        startedAt,
+        meta: {
+          duplicate_gate: true,
+          dup_of_tweet_id: finalDuplicateAssertion.result?.dup_of_tweet_id ?? null,
+        },
+      });
+    }
+
+    const duplicateSkipReason = duplicateXSkipReason(post as {
+      dedupe_status?: string | null;
+      dup_of_tweet_id?: string | null;
+      dedupe_reason?: string | null;
+    });
+    if (duplicateSkipReason) {
+      return completeManualFailure(params.sb, {
+        intakeId: manualIntakeId,
+        tweetId,
+        status: 'blocked',
+        reason: duplicateSkipReason,
+        startedAt,
+        meta: { duplicate_gate: true },
+      });
+    }
+  }
+
+  const { data: mediaRows } = await params.sb.from('media')
+    .select('id, storage_path, downloaded_at, mime_type, file_size, kind, duration_ms, src_url')
+    .eq('tweet_id', tweetId)
+    .order('ordering', { ascending: true });
+  const rawMediaRows = ((mediaRows as XMediaRow[] | null) ?? []);
+
+  const { data: renderRow, error: renderError } = await params.sb
+    .from('video_renders')
+    .select('id, tweet_id, source_media_id, status, output_storage_path, output_mime_type, output_file_size, duration_ms, width, height, render_version, updated_at')
+    .eq('id', selectedRenderId)
+    .eq('tweet_id', tweetId)
+    .maybeSingle();
+  if (renderError || !renderRow) {
+    return completeManualFailure(params.sb, {
+      intakeId: manualIntakeId,
+      tweetId,
+      status: 'blocked',
+      reason: `render_lookup_failed:${renderError?.message ?? 'not_found'}`,
+      startedAt,
+      meta: { render_id: selectedRenderId },
+    });
+  }
+  if (renderRow.status !== 'completed' || !renderRow.output_storage_path) {
+    return completeManualFailure(params.sb, {
+      intakeId: manualIntakeId,
+      tweetId,
+      status: 'blocked',
+      reason: `render_not_ready:${renderRow.status ?? 'unknown'}`,
+      startedAt,
+      meta: { render_id: selectedRenderId },
+    });
+  }
+
+  const sourceMedia = rawMediaRows.find((row) => row.id && row.id === renderRow.source_media_id) ??
+    rawMediaRows.find((row) => String(row.kind ?? '').toLowerCase() === 'video' || String(row.mime_type ?? '').startsWith('video/')) ??
+    {
+      id: renderRow.source_media_id ?? `render:${renderRow.id}`,
+      kind: 'video',
+      storage_path: renderRow.output_storage_path,
+      downloaded_at: renderRow.updated_at ?? new Date().toISOString(),
+      mime_type: renderRow.output_mime_type ?? 'video/mp4',
+      file_size: renderRow.output_file_size ?? null,
+      duration_ms: renderRow.duration_ms ?? null,
+      src_url: null,
+    };
+  const renderedRows = rawMediaRows.some((row) => row.id === sourceMedia.id)
+    ? applyRenderedVideoPreference(rawMediaRows, {
+      action: 'use_render',
+      media: sourceMedia,
+      render: renderRow as VideoRenderRow,
+    })
+    : [sourceMedia as XMediaRow];
+
+  const sel = selectMediaTier(renderedRows, { allowVideo: params.cfg.allow_video === true });
+  if (sel.tier === 'blocked') {
+    return completeManualFailure(params.sb, {
+      intakeId: manualIntakeId,
+      tweetId,
+      status: 'blocked',
+      reason: sel.reason ?? 'media_blocked',
+      startedAt,
+      meta: { render_id: selectedRenderId },
+    });
+  }
+  if (sel.tier !== 'video') {
+    return completeManualFailure(params.sb, {
+      intakeId: manualIntakeId,
+      tweetId,
+      status: 'blocked',
+      reason: sel.reason ? `video_required:${sel.reason}` : 'video_required',
+      startedAt,
+      meta: { render_id: selectedRenderId },
+    });
+  }
+  const durationMs = sel.items[0]?.duration_ms ?? null;
+  if (isOverAttemptedVideoDuration(durationMs)) {
+    const seconds = Math.round((durationMs ?? 0) / 1000);
+    return completeManualFailure(params.sb, {
+      intakeId: manualIntakeId,
+      tweetId,
+      status: 'blocked',
+      reason: `video_too_long_for_config:${seconds}s`,
+      startedAt,
+      meta: { render_id: selectedRenderId },
+    });
+  }
+
+  const quotaReason = params.quotaBlock();
+  if (quotaReason) {
+    return completeManualFailure(params.sb, {
+      intakeId: manualIntakeId,
+      tweetId,
+      status: 'blocked',
+      reason: quotaReason,
+      startedAt,
+      meta: { render_id: selectedRenderId },
+    });
+  }
+
+  await updateManualIntake(params.sb, manualIntakeId, {
+    status: 'post_requested',
+    selected_render_id: selectedRenderId,
+    last_error: null,
+  });
+
+  let deliveryClaim: XPostDeliveryClaim | null = null;
+  try {
+    deliveryClaim = await claimXPostDelivery(params.sb, {
+      postId: tweetId,
+      source: 'manual_video_intake',
+      forceRetry: duplicateOverride,
+      ttlSeconds: params.claimTtlSeconds,
+    });
+  } catch (e) {
+    return completeManualFailure(params.sb, {
+      intakeId: manualIntakeId,
+      tweetId,
+      status: 'failed',
+      reason: `claim_failed:${(e as Error).message}`,
+      startedAt,
+      meta: { render_id: selectedRenderId },
+    });
+  }
+  if (!deliveryClaim.claimed || !deliveryClaim.deliveryId || !deliveryClaim.claimToken) {
+    const rejection = xPostClaimRejection(deliveryClaim);
+    if (rejection.reason === 'already_posted' && rejection.x_tweet_id) {
+      await updateManualIntake(params.sb, manualIntakeId, {
+        status: 'posted',
+        posted_x_tweet_id: rejection.x_tweet_id,
+        posted_at: new Date().toISOString(),
+        blocks_auto_delivery: false,
+      });
+    } else {
+      await updateManualIntake(params.sb, manualIntakeId, {
+        status: 'blocked',
+        last_error: rejection.reason,
+      });
+    }
+    return xPosterJson({
+      ok: false,
+      tweet_id: tweetId,
+      intake_id: manualIntakeId,
+      ...rejection,
+    });
+  }
+
+  let mediaId = '';
+  let mediaBytes = 0;
+  try {
+    const video = sel.items[0];
+    const { data: blob, error: dlErr } = await params.sb.storage.from('temp-media').download(video.storage_path!);
+    if (dlErr || !blob) throw new Error(`download ${video.storage_path}: ${dlErr?.message || 'no blob'}`);
+    const buf = new Uint8Array(await blob.arrayBuffer());
+    mediaId = await uploadVideoChunked(
+      buf,
+      video.mime_type || 'video/mp4',
+      params.ck,
+      params.cs,
+      params.at,
+      params.ats,
+      params.sb,
+      tweetId,
+    );
+    mediaBytes = buf.length;
+  } catch (e) {
+    const errMsg = `media_upload_failed(video): ${(e as Error).message}`.slice(0, 500);
+    try {
+      await failXPostDelivery(params.sb, {
+        deliveryId: deliveryClaim.deliveryId,
+        claimToken: deliveryClaim.claimToken,
+        error: errMsg,
+        mediaKind: 'video',
+      });
+    } catch (failErr) {
+      console.error('[x-poster] manual fail_x_post_delivery failed (media)', { tweetId, err: (failErr as Error).message });
+    }
+    return completeManualFailure(params.sb, {
+      intakeId: manualIntakeId,
+      tweetId,
+      status: 'failed',
+      reason: errMsg,
+      startedAt,
+      meta: { render_id: selectedRenderId },
+    });
+  }
+
+  const xApiStartedAt = Date.now();
+  let xId = '';
+  let raw: unknown = null;
+  try {
+    const posted = await postTweet(
+      caption,
+      [mediaId],
+      params.ck,
+      params.cs,
+      params.at,
+      params.ats,
+      params.sb,
+      tweetId,
+    );
+    xId = posted.id;
+    raw = posted.raw;
+  } catch (e) {
+    const xApiMs = Date.now() - xApiStartedAt;
+    const status = (e as { status?: number }).status || 0;
+    const errMsg = (e as Error).message;
+    const isRetriable = status === 429 || status >= 500;
+    captureEdgeExceptionBackground(e, {
+      functionName: 'x-poster',
+      action: 'manual_post_error',
+      tags: { status, retriable: isRetriable },
+      extra: {
+        tweet_id: tweetId,
+        intake_id: manualIntakeId,
+        render_id: selectedRenderId,
+        x_api_ms: xApiMs,
+      },
+    });
+    try {
+      await failXPostDelivery(params.sb, {
+        deliveryId: deliveryClaim.deliveryId,
+        claimToken: deliveryClaim.claimToken,
+        error: errMsg,
+        apiResponse: (e as { raw?: unknown }).raw ?? null,
+        skipReason: isRetriable ? 'x_api_retriable' : null,
+        nextRetryAt: isRetriable ? new Date(Date.now() + 15 * 60 * 1000).toISOString() : null,
+        mediaCount: 1,
+        mediaBytes,
+        mediaKind: 'video',
+      });
+    } catch (failErr) {
+      console.error('[x-poster] manual fail_x_post_delivery failed (post)', { tweetId, err: (failErr as Error).message });
+    }
+    return completeManualFailure(params.sb, {
+      intakeId: manualIntakeId,
+      tweetId,
+      status: 'failed',
+      reason: errMsg,
+      startedAt,
+      meta: { render_id: selectedRenderId, x_api_ms: xApiMs },
+    });
+  }
+
+  const postedAt = new Date().toISOString();
+  const latency = Date.now() - startedAt;
+  const xApiMs = Date.now() - xApiStartedAt;
+  let deliveryWriteConfirmed = false;
+  let deliveryWriteError: string | null = null;
+  try {
+    deliveryWriteConfirmed = await completeXPostDelivery(params.sb, {
+      deliveryId: deliveryClaim.deliveryId,
+      claimToken: deliveryClaim.claimToken,
+      xTweetId: xId,
+      mediaCount: 1,
+      mediaBytes,
+      mediaKind: 'video',
+      postedAt,
+      latencyMs: latency,
+      apiResponse: raw,
+      lastError: null,
+    });
+    if (!deliveryWriteConfirmed) deliveryWriteError = 'claim_completion_rejected';
+  } catch (e) {
+    deliveryWriteError = (e as Error).message;
+    captureEdgeExceptionBackground(e, {
+      functionName: 'x-poster',
+      action: 'manual_claim_complete_error',
+      extra: {
+        tweet_id: tweetId,
+        x_tweet_id: xId,
+        intake_id: manualIntakeId,
+        render_id: selectedRenderId,
+      },
+    });
+  }
+
+  await insertXPipelineEvent(params.sb, tweetId, deliveryWriteConfirmed ? 'completed' : 'failed', new Date(xApiStartedAt).toISOString(), new Date().toISOString(), deliveryWriteError, {
+    x_tweet_id: xId,
+    x_api_ms: xApiMs,
+    latency_ms: latency,
+    media_count: 1,
+    media_kind: 'video',
+    dispatch_source: 'manual_video_intake',
+    intake_id: manualIntakeId,
+    render_id: selectedRenderId,
+    duplicate_override: duplicateOverride,
+    delivery_write_confirmed: deliveryWriteConfirmed,
+  });
+  const renderCfg = await loadVideoRenderConfig(params.sb);
+  try {
+    await params.sb.rpc('mark_video_render_posted', {
+      p_tweet_id: tweetId,
+      p_retention_hours: renderCfg.retentionHours,
+    });
+  } catch (_e) { /* best-effort */ }
+  await updateManualIntake(params.sb, manualIntakeId, {
+    status: 'posted',
+    posted_x_tweet_id: xId,
+    posted_at: postedAt,
+    selected_render_id: selectedRenderId,
+    blocks_auto_delivery: false,
+    last_error: deliveryWriteError,
+  });
+
+  return xPosterJson({
+    ok: true,
+    status: 'posted',
+    tweet_id: tweetId,
+    intake_id: manualIntakeId,
+    render_id: selectedRenderId,
+    x_tweet_id: xId,
+    latency_ms: latency,
+    x_api_ms: xApiMs,
+    delivery_write_confirmed: deliveryWriteConfirmed,
+  });
+}
+
 // ─── Main ────────────────────────────────────────────────────────────
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -569,6 +1125,20 @@ Deno.serve(async (req) => {
     return null;
   };
 
+  const manualResponse = await handleManualVideoIntakePost({
+    sb,
+    body,
+    cfg,
+    duplicateGateCfg,
+    claimTtlSeconds,
+    quotaBlock,
+    ck,
+    cs,
+    at,
+    ats,
+  });
+  if (manualResponse) return manualResponse;
+
   // Select candidates
   const dedupeCutoff = new Date(Date.now() - cfg.dedupe_window_hours * 3600 * 1000).toISOString();
   const maxCandidateAgeMinutes = Math.max(1, Math.min(1440, Number(cfg.max_candidate_age_minutes ?? 30) || 30));
@@ -628,9 +1198,29 @@ Deno.serve(async (req) => {
   }
 
   const results: Array<Record<string, unknown>> = [];
+  const activeManualIntakeTweets = new Set<string>();
+  if (!onlyTweetId && posts.length > 0) {
+    const candidateTweetIds = Array.from(new Set(posts.map((p) => String(p.tweet_id ?? '')).filter(Boolean)));
+    if (candidateTweetIds.length > 0) {
+      const { data: manualRows, error: manualRowsError } = await sb
+        .from('manual_video_intakes')
+        .select('tweet_id')
+        .in('tweet_id', candidateTweetIds)
+        .eq('blocks_auto_delivery', true)
+        .not('status', 'in', '(posted,canceled)');
+      if (manualRowsError) {
+        console.warn('[x-poster] active manual intake filter failed', manualRowsError.message);
+      } else {
+        for (const row of manualRows ?? []) {
+          if (row?.tweet_id) activeManualIntakeTweets.add(String(row.tweet_id));
+        }
+      }
+    }
+  }
   const candidates = (posts || []).filter((p) => {
     const id = String(p.tweet_id ?? '');
     if (!onlyTweetId && existing.has(id)) return false;
+    if (!onlyTweetId && activeManualIntakeTweets.has(id)) return false;
     return true;
   });
 
