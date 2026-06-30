@@ -195,6 +195,28 @@ Secret/config rollback:
 
 Add new entries at the top.
 
+### 2026-06-30 - X post RTL isolation
+
+```text
+Date: 2026-06-30
+Operator: Codex
+Git SHA deployed to Edge Functions: fd5f735c2309ad6ef71f05f0d6900ddd271e17d1
+GitHub PR: direct push to main for production hotfix
+CI run: https://github.com/Masihhedayati/liquid-feed-flux/actions/runs/28465787309
+Vercel deployment: deployment ID not available from local CLI; production hosts returned HTTP 200 with etag "0e3d1a1e66dbbfdf75f58bdd980270e7"
+Supabase project ref: jzirqfzzvlbxwfzndaer
+Migration head before: 20260629010000 manual_video_intakes; no migrations in this hotfix
+Migration head after: 20260629010000 manual_video_intakes; no migrations applied
+Supabase function versions before deploy: webhooks-rssapp 239, worker 272, admin-retry 193, db-cleanup 165, media-processor 204, media-cleanup 201, admin-actions 196, x-poster 146, x-followers-snapshot 115, digest-compiler 121
+Supabase function versions after deploy/secret stamp: webhooks-rssapp 240, worker 273, admin-retry 194, db-cleanup 166, media-processor 205, media-cleanup 202, admin-actions 198, x-poster 148, x-followers-snapshot 116, digest-compiler 122
+Selected function code deploys: admin-actions, x-poster
+DEPLOY_GIT_SHA: deploy command stamped fd5f735c2309ad6ef71f05f0d6900ddd271e17d1; Supabase CLI secrets list exposes only digests, so value readback was not possible from local CLI
+Renderer heartbeat: hermes-masih-1 online, version 0.1.0, render_version persian-subtitles-masihh-v1, processed 3, failed 0, last_seen_at 2026-06-30 18:12:11.4+00
+Smoke checks: local gates passed: npx --yes deno test supabase/functions/_shared/xPostText.test.ts (7 tests), npm run lint:functions, npm run check:functions, npm run test:functions (305 tests), npm run check:function-inventory, git diff --check. GitHub main CI passed. Deploy dry-run passed from clean main. Edge function deploy completed for admin-actions and x-poster using the local supabase CLI after the runbook wrapper's npx deploy call hung before reporting success. Supabase stale running jobs query returned no rows. Vercel aliases https://xot.iraneyes.com and https://xot.vercel.app returned HTTP 200 with matching etag "0e3d1a1e66dbbfdf75f58bdd980270e7". No real X post, force-post, or manual expose invoke was run as a smoke check.
+Rollback target: Edge functions can be redeployed from previous main 4d3265108a6431d2c239e8d158b1d15e5fb49690.
+Notes: Hotfix wraps every built X post text in RTL isolate controls and prefixes non-empty lines with RLM while preserving existing templates, emoji, hashtags, prompt settings, and translation behavior. The change affects automatic x-poster text and admin-actions/manual intake preview text through the shared xPostText module.
+```
+
 ### 2026-06-30 - Stale media storage pointer repair
 
 ```text
