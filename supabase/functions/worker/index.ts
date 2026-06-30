@@ -58,6 +58,11 @@ import {
 import { applyRenderedVideoPreference } from "../_shared/videoRenderGate.ts";
 import type { XMediaRow } from "../_shared/mediaSelection.ts";
 import {
+  isProcessedRenderStoragePath,
+  repairStaleMediaObject,
+  StaleMediaObjectError,
+} from "../_shared/staleMediaRepair.ts";
+import {
   extractHandleFromUrl,
   extractMediaFromText,
   extractNumericTweetId,
@@ -2586,6 +2591,26 @@ async function handleDeliverJob(
     await markVideoRenderPosted(supabase, tweetId);
     return true;
   } catch (error) {
+    if (
+      error instanceof StaleMediaObjectError &&
+      !isProcessedRenderStoragePath(error.storagePath)
+    ) {
+      await repairStaleMediaObject(supabase, {
+        tweetId,
+        mediaId: error.mediaId,
+        storagePath: error.storagePath,
+        source: "telegram_delivery",
+      });
+      throw new JobDeferred(
+        `stale_media_repair:${error.storagePath}`,
+        VIDEO_RENDER_DEFER_MS,
+        {
+          tweet_id: tweetId,
+          media_id: error.mediaId,
+          storage_path: error.storagePath,
+        },
+      );
+    }
     const e = jobError(error);
     console.error(
       JSON.stringify({

@@ -83,6 +83,104 @@ async function loadRenderSource(supabase, row) {
   return data;
 }
 
+function storageErrorMessage(error) {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object" && "message" in error) return String(error.message ?? "");
+  return String(error ?? "");
+}
+
+export function isStorageObjectNotFoundError(error) {
+  const message = storageErrorMessage(error).toLowerCase();
+  const statusCode = error && typeof error === "object" && "statusCode" in error
+    ? String(error.statusCode ?? "")
+    : "";
+  return statusCode === "404" ||
+    message.includes("object not found") ||
+    message.includes("not found") ||
+    message.includes("does not exist") ||
+    message.includes("nosuchkey");
+}
+
+async function hasPendingMediaRepair(supabase, tweetId) {
+  try {
+    const { data } = await supabase
+      .from("jobs")
+      .select("id")
+      .in("type", ["resolve_media", "download_media"])
+      .in("status", ["pending", "running"])
+      .filter("payload->>tweet_id", "eq", tweetId)
+      .limit(1);
+    return Array.isArray(data) && data.length > 0;
+  } catch (_error) {
+    return false;
+  }
+}
+
+export async function repairStaleSourceMedia(supabase, { row, source, storagePath }) {
+  const tweetId = source.tweet_id ?? row.tweet_id;
+  const now = new Date().toISOString();
+  let mediaCleared = false;
+
+  if (source.id) {
+    const { error } = await supabase
+      .from("media")
+      .update({
+        storage_path: null,
+        downloaded_at: null,
+        file_size: null,
+        mime_type: null,
+      })
+      .eq("id", source.id)
+      .eq("storage_path", storagePath);
+    if (error) throw new Error(`stale media clear failed: ${error.message ?? "unknown error"}`);
+    mediaCleared = true;
+  }
+
+  const downloadQueued = !(await hasPendingMediaRepair(supabase, tweetId));
+  if (downloadQueued) {
+    const { error } = await supabase.from("jobs").insert({
+      type: "download_media",
+      payload: {
+        tweet_id: tweetId,
+        source: "video_renderer",
+        repair: "stale_media_object",
+        media_id: source.id ?? null,
+        render_id: row.id,
+        stale_storage_path: storagePath,
+      },
+      status: "pending",
+      idempotency_key: `download_media:stale_storage:${tweetId}:${source.id ?? storagePath}:${Date.now()}`,
+      next_run_at: now,
+      priority: 12,
+    });
+    if (error) throw new Error(`stale media download enqueue failed: ${error.message ?? "unknown error"}`);
+  }
+
+  try {
+    await supabase.from("pipeline_events").insert({
+      subject_type: "post",
+      subject_id: tweetId,
+      step: "download_media",
+      status: "queued",
+      started_at: null,
+      completed_at: null,
+      error: null,
+      meta: {
+        source: "video_renderer",
+        repair: "stale_media_object",
+        render_id: row.id,
+        media_id: source.id ?? null,
+        storage_path: storagePath,
+        media_cleared: mediaCleared,
+        download_queued: downloadQueued,
+      },
+    });
+  } catch (_error) {
+  }
+
+  return { mediaCleared, downloadQueued };
+}
+
 function compactContextText(value) {
   return String(value ?? "")
     .split(/\r?\n/)
@@ -532,7 +630,12 @@ export async function processRenderRow({ supabase, row, config }) {
 
     await measure(metrics, "download", async () => {
       const { data, error } = await supabase.storage.from(runtimeConfig.bucket).download(source.storage_path);
-      if (error || !data) throw new Error(`download ${source.storage_path}: ${error?.message || "no blob"}`);
+      if (error || !data) {
+        if (isStorageObjectNotFoundError(error)) {
+          await repairStaleSourceMedia(supabase, { row, source, storagePath: source.storage_path });
+        }
+        throw new Error(`download ${source.storage_path}: ${error?.message || "no blob"}`);
+      }
       metrics.source_bytes = await writeBlobToFile(data, inputPath);
     });
 

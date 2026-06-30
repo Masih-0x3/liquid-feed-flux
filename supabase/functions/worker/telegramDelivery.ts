@@ -10,6 +10,7 @@ import {
   stripMarkdownToPlain,
   videoUploadFilename,
 } from "./workerUtils.ts";
+import { staleMediaObjectErrorForDownload } from "../_shared/staleMediaRepair.ts";
 
 class TelegramRateLimitError extends Error {
   retryAfterSeconds: number;
@@ -246,6 +247,10 @@ async function fetchVideoBytes(
     .from("temp-media")
     .download(storagePath);
   if (error || !data) {
+    const staleError = staleMediaObjectErrorForDownload(storagePath, error, {
+      id: typeof video.id === "string" ? video.id : null,
+    });
+    if (staleError) throw staleError;
     throw new Error(
       `telegram_video_download_failed:${storagePath}:${
         error?.message ?? "no blob"

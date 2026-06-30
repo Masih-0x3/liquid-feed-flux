@@ -1,4 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert";
+import { StaleMediaObjectError } from "../_shared/staleMediaRepair.ts";
 import { TELEGRAM_BOT_VIDEO_UPLOAD_MAX_BYTES } from "../_shared/telegramVideoLimits.ts";
 import { NonRetryableJobError } from "./jobLifecycle.ts";
 import {
@@ -18,6 +19,7 @@ function createStorageSupabase(options: {
   signedUrl?: string | null;
   signedUrlThrows?: boolean;
   downloadBlob?: Blob;
+  downloadErrorMessage?: string;
 } = {}) {
   const calls: Array<{ action: string; path: string }> = [];
   return {
@@ -38,7 +40,7 @@ function createStorageSupabase(options: {
             calls.push({ action: "download", path });
             return Promise.resolve({
               data: options.downloadBlob ?? null,
-              error: options.downloadBlob ? null : { message: "missing" },
+              error: options.downloadBlob ? null : { message: options.downloadErrorMessage ?? "missing" },
             });
           },
         };
@@ -223,6 +225,34 @@ Deno.test("sendTelegramVideoFromStorage rejects declared oversized videos before
     "telegram_video_too_large_for_bot_api:50MB>50MB",
   );
   assertEquals(supabase.calls.length, 0);
+});
+
+Deno.test("sendTelegramVideoFromStorage throws repairable stale media error when storage object is missing", async () => {
+  const supabase = createStorageSupabase({
+    downloadErrorMessage: "Object not found",
+  });
+  let thrown: unknown;
+
+  try {
+    await sendTelegramVideoFromStorage(
+      supabase,
+      "token",
+      "chat",
+      {
+        id: "media-1",
+        storage_path: "2026/6/tweet_0.mp4",
+        mime_type: "video/mp4",
+      },
+      "caption",
+    );
+  } catch (error) {
+    thrown = error;
+  }
+
+  assert(thrown instanceof StaleMediaObjectError);
+  assertEquals((thrown as StaleMediaObjectError).storagePath, "2026/6/tweet_0.mp4");
+  assertEquals((thrown as StaleMediaObjectError).mediaId, "media-1");
+  assertEquals(supabase.calls, [{ action: "download", path: "2026/6/tweet_0.mp4" }]);
 });
 
 Deno.test("computeAdaptiveSpacing preserves current zero-or-fallback behavior", async () => {

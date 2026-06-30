@@ -37,6 +37,12 @@ import {
   xPostClaimRejection,
   type XPostDeliveryClaim,
 } from '../_shared/xPostDeliveryClaim.ts';
+import {
+  isProcessedRenderStoragePath,
+  repairStaleMediaObject,
+  StaleMediaObjectError,
+  staleMediaObjectErrorForDownload,
+} from '../_shared/staleMediaRepair.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': Deno.env.get('ALLOWED_CORS_ORIGIN') ?? 'https://liquid-feed-flux.lovable.app',
@@ -121,6 +127,47 @@ const VIDEO_RENDER_VERSION = 'persian-subtitles-masihh-v1';
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 function isRecord(v: unknown): v is Record<string, unknown> { return typeof v === 'object' && v !== null && !Array.isArray(v); }
+
+type PreparedMediaUpload = {
+  bytes: Uint8Array;
+  mimeType: string;
+};
+
+async function downloadMediaForUpload(
+  sb: any,
+  row: XMediaRow,
+): Promise<PreparedMediaUpload> {
+  const storagePath = row.storage_path;
+  if (!storagePath) throw new Error('media_missing_storage_path');
+  const { data: blob, error } = await sb.storage.from('temp-media').download(storagePath);
+  if (error || !blob) {
+    const staleError = staleMediaObjectErrorForDownload(storagePath, error, {
+      id: row.id ?? null,
+    });
+    if (staleError) throw staleError;
+    throw new Error(`download ${storagePath}: ${error?.message || 'no blob'}`);
+  }
+  return {
+    bytes: new Uint8Array(await blob.arrayBuffer()),
+    mimeType: row.mime_type || (blob as Blob).type || 'application/octet-stream',
+  };
+}
+
+async function repairOriginalStaleMediaForX(
+  sb: any,
+  tweetId: string,
+  error: StaleMediaObjectError,
+  source: string,
+): Promise<boolean> {
+  if (isProcessedRenderStoragePath(error.storagePath)) return false;
+  await repairStaleMediaObject(sb, {
+    tweetId,
+    mediaId: error.mediaId,
+    storagePath: error.storagePath,
+    source,
+  });
+  return true;
+}
 
 // deno-lint-ignore no-explicit-any
 async function loadVideoRenderConfig(sb: any): Promise<VideoRenderConfig> {
@@ -826,6 +873,33 @@ async function handleManualVideoIntakePost(params: {
     });
   }
 
+  let preparedVideo: PreparedMediaUpload;
+  try {
+    preparedVideo = await downloadMediaForUpload(params.sb, sel.items[0]);
+  } catch (e) {
+    if (
+      e instanceof StaleMediaObjectError &&
+      await repairOriginalStaleMediaForX(params.sb, tweetId, e, 'manual_video_intake')
+    ) {
+      return completeManualFailure(params.sb, {
+        intakeId: manualIntakeId,
+        tweetId,
+        status: 'blocked',
+        reason: `stale_media_repair_queued:${e.storagePath}`,
+        startedAt,
+        meta: { render_id: selectedRenderId, media_id: e.mediaId },
+      });
+    }
+    return completeManualFailure(params.sb, {
+      intakeId: manualIntakeId,
+      tweetId,
+      status: 'failed',
+      reason: `media_upload_failed(video): ${(e as Error).message}`.slice(0, 500),
+      startedAt,
+      meta: { render_id: selectedRenderId },
+    });
+  }
+
   await updateManualIntake(params.sb, manualIntakeId, {
     status: 'post_requested',
     selected_render_id: selectedRenderId,
@@ -876,13 +950,9 @@ async function handleManualVideoIntakePost(params: {
   let mediaId = '';
   let mediaBytes = 0;
   try {
-    const video = sel.items[0];
-    const { data: blob, error: dlErr } = await params.sb.storage.from('temp-media').download(video.storage_path!);
-    if (dlErr || !blob) throw new Error(`download ${video.storage_path}: ${dlErr?.message || 'no blob'}`);
-    const buf = new Uint8Array(await blob.arrayBuffer());
     mediaId = await uploadVideoChunked(
-      buf,
-      video.mime_type || 'video/mp4',
+      preparedVideo.bytes,
+      preparedVideo.mimeType || 'video/mp4',
       params.ck,
       params.cs,
       params.at,
@@ -890,7 +960,7 @@ async function handleManualVideoIntakePost(params: {
       params.sb,
       tweetId,
     );
-    mediaBytes = buf.length;
+    mediaBytes = preparedVideo.bytes.length;
   } catch (e) {
     const errMsg = `media_upload_failed(video): ${(e as Error).message}`.slice(0, 500);
     try {
@@ -1546,6 +1616,35 @@ Deno.serve(async (req) => {
       continue;
     }
 
+    let preparedMediaUploads: PreparedMediaUpload[] = [];
+    if (sel.tier !== 'text' && !dryRun) {
+      try {
+        preparedMediaUploads = [];
+        for (const item of sel.items) {
+          preparedMediaUploads.push(await downloadMediaForUpload(sb, item));
+        }
+      } catch (e) {
+        if (
+          e instanceof StaleMediaObjectError &&
+          await repairOriginalStaleMediaForX(sb, tweetId, e, 'x_poster')
+        ) {
+          results.push({
+            tweet_id: tweetId,
+            status: 'deferred',
+            reason: 'stale_media_repair_queued',
+            storage_path: e.storagePath,
+            media_id: e.mediaId,
+          });
+          console.warn(`[x-poster] deferred ${tweetId}: stale media object repair queued for ${e.storagePath}`);
+          continue;
+        }
+        const errMsg = `media_upload_failed(${sel.tier}): ${(e as Error).message}`.slice(0, 500);
+        results.push({ tweet_id: tweetId, status: 'failed', error: errMsg });
+        console.warn(`[x-poster] ${sel.tier} media preparation failed for ${tweetId}; not claiming delivery: ${(e as Error).message}`);
+        continue;
+      }
+    }
+
     if (!dryRun) {
       try {
         deliveryClaim = await claimXPostDelivery(sb, {
@@ -1607,24 +1706,19 @@ Deno.serve(async (req) => {
       }
       try {
         if (sel.tier === 'video') {
-          const m = sel.items[0];
-          const { data: blob, error: dlErr } = await sb.storage.from('temp-media').download(m.storage_path!);
-          if (dlErr || !blob) throw new Error(`download ${m.storage_path}: ${dlErr?.message || 'no blob'}`);
-          const buf = new Uint8Array(await blob.arrayBuffer());
-          const id = await uploadVideoChunked(buf, m.mime_type || 'video/mp4', ck, cs, at, ats, sb, tweetId);
+          const prepared = preparedMediaUploads[0];
+          if (!prepared) throw new Error('media_prepare_missing_video');
+          const id = await uploadVideoChunked(prepared.bytes, prepared.mimeType || 'video/mp4', ck, cs, at, ats, sb, tweetId);
           mediaIds.push(id);
-          mediaBytes += buf.length;
+          mediaBytes += prepared.bytes.length;
           mediaCount = 1;
           mediaKind = 'video';
           mediaUp24hCount += 1;
         } else {
-          for (const m of sel.items) {
-            const { data: blob, error: dlErr } = await sb.storage.from('temp-media').download(m.storage_path!);
-            if (dlErr || !blob) throw new Error(`download ${m.storage_path}: ${dlErr?.message || 'no blob'}`);
-            const buf = new Uint8Array(await blob.arrayBuffer());
-            const id = await uploadImage(buf, m.mime_type || 'image/jpeg', ck, cs, at, ats, sb, tweetId);
+          for (const prepared of preparedMediaUploads) {
+            const id = await uploadImage(prepared.bytes, prepared.mimeType || 'image/jpeg', ck, cs, at, ats, sb, tweetId);
             mediaIds.push(id);
-            mediaBytes += buf.length;
+            mediaBytes += prepared.bytes.length;
             mediaCount += 1;
             mediaUp24hCount += 1;
           }
