@@ -195,6 +195,28 @@ Secret/config rollback:
 
 Add new entries at the top.
 
+### 2026-06-30 - Stale media storage pointer repair
+
+```text
+Date: 2026-06-30
+Operator: Codex
+Git SHA deployed to Edge Functions: 3a9241b9c7563b8eb95146d54022eb535348dd41
+GitHub PR: direct push to main for production hotfix
+CI run: https://github.com/Masihhedayati/liquid-feed-flux/actions/runs/28418987448
+Vercel deployment: deployment ID not available from local CLI; production hosts returned HTTP 200 with etag "e0f3afa88b56649f2135e6786a00aa17"
+Supabase project ref: jzirqfzzvlbxwfzndaer
+Migration head before: unchanged; no migrations in this hotfix
+Migration head after: unchanged; no migrations applied
+Supabase function versions before deploy: webhooks-rssapp 238, worker 270, admin-retry 192, db-cleanup 164, media-processor 203, media-cleanup 200, admin-actions 195, x-poster 144, x-followers-snapshot 114, digest-compiler 120
+Supabase function versions after deploy/secret stamp: webhooks-rssapp 239, worker 272, admin-retry 193, db-cleanup 165, media-processor 204, media-cleanup 201, admin-actions 196, x-poster 146, x-followers-snapshot 115, digest-compiler 121
+Selected function code deploys: worker, x-poster
+DEPLOY_GIT_SHA: deploy script stamped 3a9241b9c7563b8eb95146d54022eb535348dd41; Supabase secret timestamp 2026-06-30T03:52:28.530Z
+Renderer heartbeat: hermes-masih-1 online, version 0.1.0, render_version persian-subtitles-masihh-v1, processed 0, failed 0, last_seen_at 2026-06-30 03:56:22.893+00
+Smoke checks: local gates passed: npm run lint:functions, npm run check:functions, npm run test:functions (301 tests), npm --prefix services/video-renderer test (164 tests), git diff --check. GitHub main CI passed. Pre- and post-deploy npm run check:release-state completed successfully. Supabase worker version 272 and x-poster version 146 are active. Renderer host root@xot-renderer-do is on 3a9241b9c7563b8eb95146d54022eb535348dd41, Docker Compose container is healthy, and /health returned {"ok":true,"running":0,"processed":0,"failed":0,"lastError":null}. No worker, x-poster, manual expose, or real posting invoke was run as a smoke check.
+Rollback target: Edge functions can be redeployed from previous main 443ab2f17cf1f36563d31e3ed480f675386b2096; renderer previous deployed checkout was 34d612923fc8783789ff87c2377aba260584deb2.
+Notes: Hotfix added stale temp-media object detection and repair for renderer source downloads, Telegram delivery downloads, manual video intake posting, and automatic x-poster media preparation. The deploy used DEPLOY_ALLOW_DIRTY=1 only because unrelated untracked services/video-renderer/scripts/delogo_*.py files were present locally and were not committed or deployed as Edge Function assets. The renderer host could not fetch git@github.com due missing deploy-key access, so the clean /opt/xot-renderer checkout was updated by direct SSH git push from local main before Docker rebuild.
+```
+
 ### 2026-06-23 - X poster no retro catch-up guard
 
 ```text
