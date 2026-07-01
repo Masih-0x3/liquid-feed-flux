@@ -195,6 +195,28 @@ Secret/config rollback:
 
 Add new entries at the top.
 
+### 2026-07-01 - Persian X post readability guard
+
+```text
+Date: 2026-07-01
+Operator: Codex
+Git SHA deployed to Edge Functions: 9dc55700b866c487484e8fff118c0fbd46fa1b83
+GitHub PR: direct push to main for production text-quality rollout
+CI run: https://github.com/Masihhedayati/liquid-feed-flux/actions/runs/28544952778
+Vercel deployment: deployment ID not available from local CLI; production hosts returned HTTP 200 with matching etag "2118a24f92067737a97859055d48501b"
+Supabase project ref: jzirqfzzvlbxwfzndaer
+Migration head before: 20260629010000 manual_video_intakes; no migrations in this release
+Migration head after: 20260629010000 manual_video_intakes; no migrations applied
+Supabase function versions before deploy: webhooks-rssapp 240, worker 273, admin-retry 194, db-cleanup 166, media-processor 205, media-cleanup 202, admin-actions 198, x-poster 148, x-followers-snapshot 116, digest-compiler 122
+Supabase function versions after deploy/secret stamp: webhooks-rssapp 241, worker 275, admin-retry 195, db-cleanup 167, media-processor 206, media-cleanup 203, admin-actions 200, x-poster 150, x-followers-snapshot 117, digest-compiler 123
+Selected function code deploys: admin-actions, worker, x-poster
+DEPLOY_GIT_SHA: deploy command stamped 9dc55700b866c487484e8fff118c0fbd46fa1b83; Supabase secret timestamp 2026-07-01T20:17:02.374Z
+Renderer heartbeat: hermes-masih-1 online, version 0.1.0, render_version persian-subtitles-masihh-v1, processed 9, failed 0, last_seen_at 2026-07-01 20:18:36.518+00
+Smoke checks: local gates passed: npx --yes deno test supabase/functions/_shared/translationReadability.test.ts supabase/functions/worker/translateWorkflow.test.ts supabase/functions/admin-actions/translationRescoreActions.test.ts (30 tests), npm run lint:functions, npm run check:functions, npm run test:functions (311 tests), npm run check:function-inventory, npm run check:strict, npm test (112 tests), npm run lint (8 existing fast-refresh warnings), npm --prefix services/video-renderer test (164 tests), VITE_SUPABASE_URL=https://jzirqfzzvlbxwfzndaer.supabase.co VITE_SUPABASE_PUBLISHABLE_KEY=local-build-validation-key VITE_SUPABASE_PROJECT_ID=jzirqfzzvlbxwfzndaer npm run build, git diff --check. GitHub main CI passed. Pre- and post-deploy npm run check:release-state completed successfully. Supabase admin-actions version 200, worker version 275, and x-poster version 150 are active. Live settings readback confirmed translation_prompt contains X feed readability rules, x_posting_config post_template is "{translated_text}", leading_emoji is empty, and max_chars remains 4000 as the technical cap. Supabase stale running jobs query returned no rows. Vercel aliases https://xot.iraneyes.com and https://xot.vercel.app returned HTTP 200 with matching etag "2118a24f92067737a97859055d48501b". No real X post, force-post, or manual expose invoke was run as a smoke check.
+Rollback target: Edge functions can be redeployed from previous main 53a7e579b4bb99ebcf2209f63543c01fb04a2169. Restore previous runtime settings by removing the appended "X feed readability rules" block from translation_prompt and setting x_posting_config post_template back to "{leading_emoji} {translated_text}" with leading_emoji "📰".
+Notes: Release adds a shared translation readability analyzer/repair helper and wires retry-once repair into worker translation, admin preview, rescore, and translation-only paths. The change is scoped to translation text shaping and runtime X template cleanup; ranking, dedupe, media handling, video rendering, and posting idempotency are unchanged.
+```
+
 ### 2026-06-30 - X post RTL isolation
 
 ```text
