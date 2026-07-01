@@ -144,6 +144,7 @@ Deno.test("buildTranslationResultMeta preserves worker job result metadata", () 
       usage: { total_tokens: 30 },
       scoringUsage: { total_tokens: 10 },
       translationUsage: { total_tokens: 20 },
+      translationReadability: null,
       scoringV2Usage: { total_tokens: 5 },
       scoringCallMs: 111,
       translationCallMs: 222,

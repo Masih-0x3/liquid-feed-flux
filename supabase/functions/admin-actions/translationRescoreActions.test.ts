@@ -193,7 +193,7 @@ Deno.test("translation-only preview uses request settings and returns the existi
       callOpenAI: (async (request: Record<string, unknown>) => {
         requests.push(request);
         return openAiResponse({
-          content: "سلام",
+          content: "سلام.",
           endpoint: "responses",
           raw: { usage: { total_tokens: 5 } },
         });
@@ -207,7 +207,7 @@ Deno.test("translation-only preview uses request settings and returns the existi
   assertEquals(result.body, {
     ok: true,
     result: {
-      translated_text: "سلام",
+      translated_text: "سلام.",
       importance_score: null,
       importance_tags: null,
       reasoning: null,
@@ -244,7 +244,7 @@ Deno.test("filter-enabled preview parses classify_importance tool calls", async 
           toolCall: {
             name: "classify_importance",
             arguments: JSON.stringify({
-              translated_text: "ترجمه",
+              translated_text: "ترجمه.",
               importance_score: 18,
               tags: ["iran"],
               reasoning: "direct",
@@ -257,11 +257,52 @@ Deno.test("filter-enabled preview parses classify_importance tool calls", async 
 
   assertEquals(requests[0].temperature, 0.2);
   const payload = result.body as { result: Record<string, unknown> };
-  assertEquals(payload.result.translated_text, "ترجمه");
+  assertEquals(payload.result.translated_text, "ترجمه.");
   assertEquals(payload.result.importance_score, 18);
   assertEquals(payload.result.importance_tags, ["iran"]);
   assertEquals(payload.result.reasoning, "direct");
   assertEquals(payload.result.used_filter, true);
+});
+
+Deno.test("preview repairs readability before returning translated text", async () => {
+  const requests: Array<Record<string, unknown>> = [];
+  const responses = [
+    openAiResponse({
+      content:
+        "The Michael Knowles Show درباره گفت‌وگوهای آمریکا و ایران صحبت کرد",
+    }),
+    openAiResponse({
+      content:
+        "برنامه «مایکل نولز شو» به ادامه گفت‌وگوهای فنی آمریکا و ایران پرداخت.",
+    }),
+  ];
+
+  const result = await previewTranslationAdminAction(
+    {
+      text: "The Michael Knowles Show discussed the talks.",
+      translation_settings: { model: "gpt-4o-mini" },
+      content_filter: { enabled: false },
+    },
+    {
+      getOpenAiApiKey: () => "key",
+      now: () => new Date("2026-01-01T00:00:00.000Z"),
+      callOpenAI: (async (request: Record<string, unknown>) => {
+        requests.push(request);
+        return responses.shift()!;
+      }) as never,
+    },
+  );
+
+  const payload = result.body as { result: Record<string, unknown> };
+  assertEquals(requests.length, 2);
+  assertEquals(
+    payload.result.translated_text,
+    "برنامه «مایکل نولز شو» به ادامه گفت‌وگوهای فنی آمریکا و ایران پرداخت.",
+  );
+  assertEquals(
+    (payload.result.readability as Record<string, unknown>).repair_status,
+    "accepted",
+  );
 });
 
 Deno.test("translate post validates mode and delegates to runTranslationOnly", async () => {
@@ -312,7 +353,7 @@ Deno.test("runTranslationOnly updates post, records event, and records feedback"
     now: () => new Date("2026-01-01T00:00:00.000Z"),
     callOpenAI: (async () =>
       openAiResponse({
-        content: " translated ",
+        content: " ترجمه. ",
         raw: { usage: { total_tokens: 9 } },
       })) as never,
     insertAdminPipelineEvent: async (
@@ -330,7 +371,7 @@ Deno.test("runTranslationOnly updates post, records event, and records feedback"
 
   assertEquals(result, {
     ok: true,
-    translated: "translated",
+    translated: "ترجمه.",
     model: "test-model",
   });
   assertEquals(
@@ -339,7 +380,7 @@ Deno.test("runTranslationOnly updates post, records event, and records feedback"
     )
       ?.value,
     {
-      text_translated: "translated",
+      text_translated: "ترجمه.",
       translated_at: "2026-01-01T00:00:00.000Z",
       translation_model: "test-model",
       translation_tokens: 9,
@@ -353,6 +394,76 @@ Deno.test("runTranslationOnly updates post, records event, and records feedback"
     error: undefined,
   });
   assertEquals(feedback.calls[0].feedbackAction, "translate_only");
+});
+
+Deno.test("runTranslationOnly repairs feed readability before persisting", async () => {
+  const supabase = fakeSupabase({
+    post: {
+      tweet_id: "t1",
+      text_original:
+        "J.D. Vance said on The Michael Knowles Show that technical talks continue.",
+    },
+    settings: [{
+      key: "translation_prompt",
+      value: { model: "test-model", max_completion_tokens: 2400 },
+    }],
+  });
+  const requests: Array<Record<string, unknown>> = [];
+  const events: Array<Record<string, unknown>> = [];
+  const responses = [
+    openAiResponse({
+      content:
+        "The Michael Knowles Show در برنامه‌ای که جی‌دی ونس در آن گفت مذاکرات فنی بین آمریکا و ایران ادامه دارد",
+    }),
+    openAiResponse({
+      content:
+        "جی‌دی ونس در برنامه «مایکل نولز شو» گفت گفت‌وگوهای فنی آمریکا و ایران همچنان ادامه دارد.",
+    }),
+  ];
+  const feedback = feedbackRecorder();
+
+  const result = await runTranslationOnly(supabase, "t1", {
+    getOpenAiApiKey: () => "key",
+    now: () => new Date("2026-01-01T00:00:00.000Z"),
+    callOpenAI: (async (request: Record<string, unknown>) => {
+      requests.push(request);
+      return responses.shift()!;
+    }) as never,
+    insertAdminPipelineEvent: async (
+      _supabase,
+      tweetId,
+      step,
+      status,
+      meta,
+      error,
+    ) => {
+      events.push({ tweetId, step, status, meta, error });
+    },
+    recordFeedback: feedback.recordFeedback,
+  });
+
+  assertEquals(requests.length, 2);
+  assertEquals(result.ok, true);
+  assertEquals(
+    result.translated,
+    "جی‌دی ونس در برنامه «مایکل نولز شو» گفت گفت‌وگوهای فنی آمریکا و ایران همچنان ادامه دارد.",
+  );
+  assertEquals(result.readability?.repair_status, "accepted");
+  const postUpdate = supabase.calls.find((call) =>
+    call.op === "update" && call.table === "posts"
+  )?.value as Record<string, unknown>;
+  assertEquals(
+    postUpdate.text_translated,
+    "جی‌دی ونس در برنامه «مایکل نولز شو» گفت گفت‌وگوهای فنی آمریکا و ایران همچنان ادامه دارد.",
+  );
+  assertEquals(
+    (events[0].meta as Record<string, unknown>).readability &&
+      ((events[0].meta as Record<string, unknown>).readability as Record<
+        string,
+        unknown
+      >).repair_status,
+    "accepted",
+  );
 });
 
 Deno.test("runTranslationOnly records failed event when OpenAI fails", async () => {
@@ -524,7 +635,7 @@ Deno.test("runRescore updates post with parsed tool score", async () => {
         toolCall: {
           name: "classify_importance",
           arguments: JSON.stringify({
-            translated_text: "ترجمه",
+            translated_text: "ترجمه.",
             importance_score: 16,
             axes: {
               iran_relevance: 10,
@@ -543,11 +654,11 @@ Deno.test("runRescore updates post with parsed tool score", async () => {
 
   assertEquals(result.ok, true);
   assertEquals(result.score, 16);
-  assertEquals(result.translated, "ترجمه");
+  assertEquals(result.translated, "ترجمه.");
   const postUpdate = supabase.calls.find((call) =>
     call.op === "update" && call.table === "posts"
   )?.value as Record<string, unknown>;
   assertEquals(postUpdate.importance_score, 16);
-  assertEquals(postUpdate.text_translated, "ترجمه");
+  assertEquals(postUpdate.text_translated, "ترجمه.");
   assertEquals(postUpdate.translation_model, "legacy-model");
 });

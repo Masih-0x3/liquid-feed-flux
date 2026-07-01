@@ -56,6 +56,7 @@ type TranslationResultMetaInput = {
   usage: unknown;
   scoringUsage: Record<string, unknown> | null;
   translationUsage: Record<string, unknown> | null;
+  translationReadability: Record<string, unknown> | null;
   scoringV2Usage: unknown;
   scoringCallMs: number | null;
   translationCallMs: number | null;
@@ -209,6 +210,9 @@ export function buildTranslationResultMeta(
     usage: input.usage,
     scoring_usage: input.scoringUsage,
     translation_usage: input.translationUsage,
+    ...(input.translationReadability
+      ? { translation_readability: input.translationReadability }
+      : {}),
     scoring_v2_usage: input.scoringV2Usage,
     scoring_call_ms: input.scoringCallMs,
     translation_call_ms: input.translationCallMs,

@@ -3,6 +3,10 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
 import { callOpenAI, type ToolFunctionDef } from "../_shared/openai.ts";
 import {
+  repairTranslationReadability,
+  translationReadabilityMeta,
+} from "../_shared/translationReadability.ts";
+import {
   type EnrichmentConfig,
   isAutoEnrichmentEnabled,
   normalizeEnrichmentConfig,
@@ -1123,6 +1127,8 @@ async function handleTranslateJob(
     let data: Record<string, unknown> = {};
     let scoringUsage: Record<string, unknown> | null = null;
     let translationUsage: Record<string, unknown> | null = null;
+    let translationReadability: Record<string, unknown> | null = null;
+    let translationGeneratedThisRun = false;
     let translationSkippedByFilter = false;
     let scoringCallMs: number | null = null;
     let translationCallMs: number | null = null;
@@ -1493,6 +1499,7 @@ async function handleTranslateJob(
               null;
           data = trResult.raw;
           translatedText = trResult.content;
+          translationGeneratedThisRun = true;
           console.log(
             JSON.stringify({
               function: "worker",
@@ -1726,6 +1733,7 @@ async function handleTranslateJob(
         translationUsage =
           (trResult.raw?.usage as Record<string, unknown> | undefined) ?? null;
         translatedText = trResult.content;
+        translationGeneratedThisRun = true;
         console.log(
           JSON.stringify({
             function: "worker",
@@ -1796,6 +1804,7 @@ async function handleTranslateJob(
             { includeTranslatedText: true },
           );
           translatedText = parsedScore.translatedText || "";
+          translationGeneratedThisRun = true;
           importanceScore = parsedScore.importanceScore;
           importanceTags = parsedScore.importanceTags;
           importanceReasoning = parsedScore.importanceReasoning;
@@ -1834,9 +1843,11 @@ async function handleTranslateJob(
             (parseErr as Error).message,
           );
           translatedText = result.content;
+          translationGeneratedThisRun = true;
         }
       } else {
         translatedText = result.content;
+        translationGeneratedThisRun = true;
       }
     } else {
       // No filtering — simple translation
@@ -1851,6 +1862,51 @@ async function handleTranslateJob(
       }
       data = result.raw;
       translatedText = result.content;
+      translationGeneratedThisRun = true;
+    }
+
+    if (
+      !translationSkippedByFilter && translationGeneratedThisRun &&
+      translatedText && String(translatedText).trim()
+    ) {
+      const readability = await measureTranslationCall(() =>
+        repairTranslationReadability({
+          apiKey: openaiApiKey,
+          model: config.openaiModel,
+          originalText: String(post.text_original || ""),
+          translatedText,
+          callOpenAI,
+          maxOutputTokens: config.openaiMaxCompletionTokens,
+          temperature: config.openaiTemperature,
+          topP: config.openaiTopP,
+          frequencyPenalty: config.openaiFrequencyPenalty,
+          presencePenalty: config.openaiPresencePenalty,
+          reasoningEffort: config.openaiReasoningEffort,
+          verbosity: config.openaiVerbosity,
+          seed: config.openaiSeed,
+          serviceTier: config.openaiServiceTier,
+          parallelToolCalls: config.openaiParallelToolCalls,
+        })
+      );
+      translatedText = readability.text;
+      translationReadability = translationReadabilityMeta(readability);
+      if (!readability.initial.ok || readability.repaired) {
+        console.log(JSON.stringify({
+          function: "worker",
+          action: "translation_readability_checked",
+          tweet_id: tweetId,
+          initial_issue_codes: readability.initial.issues.map((issue) =>
+            issue.code
+          ),
+          final_issue_codes: readability.final.issues.map((issue) =>
+            issue.code
+          ),
+          repair_status: readability.repairStatus,
+          accepted_repair: readability.acceptedRepair,
+          chars_before: readability.initial.metrics.chars,
+          chars_after: readability.final.metrics.chars,
+        }));
+      }
     }
 
     // GUARD: Empty translation = silent failure mode.
@@ -1889,6 +1945,7 @@ async function handleTranslateJob(
       usage: data.usage ?? null,
       scoringUsage,
       translationUsage,
+      translationReadability,
       scoringV2Usage: scoringPolicyResult?.usage ?? null,
       scoringCallMs,
       translationCallMs,

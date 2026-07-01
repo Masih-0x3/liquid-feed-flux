@@ -4,6 +4,11 @@ import {
   type ToolFunctionDef,
 } from "../_shared/openai.ts";
 import {
+  repairTranslationReadability,
+  translationReadabilityMeta,
+  type TranslationReadabilityRepairResult,
+} from "../_shared/translationReadability.ts";
+import {
   applyProfileDecision,
   computeFinalScore,
   type EditorialProfile,
@@ -55,6 +60,7 @@ export type RunRescoreResult = {
   tags?: string[];
   reasoning?: string | null;
   translated?: string | null;
+  readability?: Record<string, unknown>;
   model?: string;
 };
 
@@ -67,6 +73,7 @@ export type RunTranslationOnlyResult = {
   ok: boolean;
   translated?: string;
   model?: string;
+  readability?: Record<string, unknown>;
   error?: string;
 };
 
@@ -179,6 +186,38 @@ function previewCallOptions(settings: Record<string, unknown>) {
       ? settings.temperature
       : 0.2,
   } as const;
+}
+
+async function repairTranslationForReadability(input: {
+  deps?: OpenAiDeps;
+  apiKey: string;
+  model: string;
+  settings: Record<string, unknown>;
+  originalText: string;
+  translatedText: string;
+  maxOutputTokens: number;
+  preview?: boolean;
+}): Promise<TranslationReadabilityRepairResult> {
+  const callOptions = input.preview
+    ? previewCallOptions(input.settings)
+    : sharedCallOptions(input.settings);
+  return await repairTranslationReadability({
+    apiKey: input.apiKey,
+    model: input.model,
+    originalText: input.originalText,
+    translatedText: input.translatedText,
+    callOpenAI: input.deps?.callOpenAI ?? callOpenAI,
+    maxOutputTokens: input.maxOutputTokens,
+    ...callOptions,
+  });
+}
+
+function visibleReadabilityMeta(
+  result: TranslationReadabilityRepairResult,
+): Record<string, unknown> | undefined {
+  return result.repairStatus === "not_needed"
+    ? undefined
+    : translationReadabilityMeta(result);
 }
 
 function axesSchema() {
@@ -402,6 +441,21 @@ export async function runRescore(
     : null;
   const authorHandle = (postRecord.author_handle as string | null) ?? null;
   const textOriginal = String(postRecord.text_original || "");
+  let translatedForUpdate: string | null = null;
+  let readabilityMeta: Record<string, unknown> | undefined;
+  if (typeof args.translated_text === "string") {
+    const readability = await repairTranslationForReadability({
+      deps,
+      apiKey,
+      model,
+      settings: tp,
+      originalText: textOriginal,
+      translatedText: args.translated_text,
+      maxOutputTokens,
+    });
+    translatedForUpdate = readability.text;
+    readabilityMeta = visibleReadabilityMeta(readability);
+  }
 
   let deliveryDecision = "deliver";
   let decisionReason: string | null = null;
@@ -553,8 +607,8 @@ export async function runRescore(
     decision_reason: decisionReason,
     score_breakdown: scoreBreakdown,
   };
-  if (typeof args.translated_text === "string") {
-    updatePayload.text_translated = args.translated_text;
+  if (translatedForUpdate !== null) {
+    updatePayload.text_translated = translatedForUpdate;
     updatePayload.translated_at = nowIso(deps);
     updatePayload.translation_model = model;
   }
@@ -575,12 +629,11 @@ export async function runRescore(
     x_gate_score: xGateScore ?? undefined,
     tags: newTags,
     reasoning: newReasoning,
-    translated: typeof args.translated_text === "string"
-      ? args.translated_text
-      : null,
+    translated: translatedForUpdate,
     decision: deliveryDecision,
     decision_reason: decisionReason,
     threshold: thresholdOut,
+    ...(readabilityMeta ? { readability: readabilityMeta } : {}),
     model,
   };
 }
@@ -621,6 +674,10 @@ export async function runTranslationOnly(
   const apiKey = openAiApiKey(deps);
   if (!apiKey) return { ok: false, error: "OPENAI_API_KEY is not configured" };
 
+  const maxOutputTokens = typeof tp.max_completion_tokens === "number"
+    ? Math.min(8000, Math.max(1, tp.max_completion_tokens))
+    : 2000;
+
   const result = await (deps.callOpenAI ?? callOpenAI)({
     apiKey,
     model,
@@ -628,9 +685,7 @@ export async function runTranslationOnly(
       { role: "system", content: systemPrompt },
       { role: "user", content: String(postRecord.text_original) },
     ],
-    maxOutputTokens: typeof tp.max_completion_tokens === "number"
-      ? Math.min(8000, Math.max(1, tp.max_completion_tokens))
-      : 2000,
+    maxOutputTokens,
     ...sharedCallOptions(tp),
   });
   if (!result.ok) {
@@ -644,7 +699,7 @@ export async function runTranslationOnly(
     );
     return { ok: false, error: modelError(result) };
   }
-  const translated = result.content.trim();
+  let translated = result.content.trim();
   if (!translated) {
     await deps.insertAdminPipelineEvent(
       supabase,
@@ -656,6 +711,17 @@ export async function runTranslationOnly(
     );
     return { ok: false, error: "OpenAI returned an empty translation" };
   }
+  const readability = await repairTranslationForReadability({
+    deps,
+    apiKey,
+    model,
+    settings: tp,
+    originalText: String(postRecord.text_original),
+    translatedText: translated,
+    maxOutputTokens,
+  });
+  translated = readability.text;
+  const readabilityMeta = visibleReadabilityMeta(readability);
 
   const { error: upErr } = await table(supabase, "posts").update({
     text_translated: translated,
@@ -676,12 +742,18 @@ export async function runTranslationOnly(
     {
       mode: "translation_only",
       model,
+      ...(readabilityMeta ? { readability: readabilityMeta } : {}),
     },
   );
   await deps.recordFeedback(supabase, tweetId, "translate_only", 0).catch(
     () => {},
   );
-  return { ok: true, translated, model };
+  return {
+    ok: true,
+    translated,
+    ...(readabilityMeta ? { readability: readabilityMeta } : {}),
+    model,
+  };
 }
 
 export async function previewTranslationAdminAction(
@@ -868,6 +940,18 @@ export async function previewTranslationAdminAction(
       translatedText = result.content;
     }
 
+    const readability = await repairTranslationForReadability({
+      deps,
+      apiKey,
+      model,
+      settings: ts,
+      originalText: text,
+      translatedText,
+      maxOutputTokens: maxTokens,
+      preview: true,
+    });
+    translatedText = readability.text;
+    const readabilityMeta = visibleReadabilityMeta(readability);
     const usage = (raw as { usage?: Record<string, number> }).usage ?? null;
     return {
       body: {
@@ -882,6 +966,7 @@ export async function previewTranslationAdminAction(
           usage,
           duration_ms: nowMs(deps) - startedAt,
           used_filter: filterEnabled,
+          ...(readabilityMeta ? { readability: readabilityMeta } : {}),
           raw,
         },
       },
