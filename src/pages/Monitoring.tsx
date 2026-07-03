@@ -68,6 +68,7 @@ import {
 import { MonitoringActionDialog } from "@/components/monitoring/MonitoringActionDialog";
 import { MonitoringDetailDrawer } from "@/components/monitoring/MonitoringDetailDrawer";
 import { MonitoringFilters } from "@/components/monitoring/MonitoringFilters";
+import { MonitoringProcessHud } from "@/components/monitoring/MonitoringProcessHud";
 import { MonitoringQueueCards } from "@/components/monitoring/MonitoringQueueCards";
 import { MonitoringMobileCard, MonitoringTableEntryRows } from "@/components/monitoring/MonitoringRow";
 import {
@@ -711,6 +712,8 @@ export default function Monitoring() {
       )}
 
       <MonitoringQueueCards counts={counts} xSummary={xSummary} />
+
+      <MonitoringProcessHud entries={entries} onOpenPost={openDetails} />
 
       <Card>
         <MonitoringFilters
