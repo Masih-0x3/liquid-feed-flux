@@ -2,10 +2,13 @@ import { assert, assertEquals } from "jsr:@std/assert";
 import {
   assertFinalDuplicateState,
   type DuplicateGateResult,
+  fetchObservedStoryEmbedding,
   normalizeDuplicateGateConfig,
   normalizeStoryText,
+  observedDedupeOpenAI,
   runDuplicateGate,
 } from "./dedupe.ts";
+import type { NormalizedOpenAIResponse, OpenAICallParams } from "./openai.ts";
 
 Deno.test("normalizeDuplicateGateConfig keeps legacy settings and fills new gate defaults", () => {
   const cfg = normalizeDuplicateGateConfig({
@@ -178,6 +181,191 @@ Deno.test("runDuplicateGate canonicalizes AI duplicate decisions from duplicate 
   assertEquals(result.dup_of_tweet_id, "older");
   assertEquals(result.reason.includes("canonicalized_from:middle"), true);
   assertEquals(supabase.updates[0].update.dup_of_tweet_id, "older");
+});
+
+Deno.test("runDuplicateGate uses injected OpenAI caller for duplicate adjudication", async () => {
+  const supabase = makeFakeSupabase({
+    candidates: [candidate({ similarity: 0.86 })],
+    canonicalPost: {
+      tweet_id: "older",
+      delivery_decision: "deliver",
+      decision_reason: "score_pass:15>=14",
+    },
+  });
+  const calls: OpenAICallParams[] = [];
+  const result = await runDuplicateGate(supabase, basePost(), {
+    enabled: true,
+    action: "skip",
+    auto_duplicate_similarity: 0.94,
+  }, {
+    fetchEmbedding: async () => [0.1, 0.2, 0.3],
+    callOpenAI: async (request) => {
+      calls.push(request);
+      return {
+        ok: true,
+        status: 200,
+        rawText: "{}",
+        raw: {},
+        content: "",
+        toolCall: {
+          name: "classify_story_duplicate",
+          arguments: JSON.stringify({
+            decision: "related_new_info",
+            confidence: 0.82,
+            canonical_tweet_id: "older",
+            new_facts: ["new official confirmation"],
+            reason: "same story but materially updated",
+          }),
+        },
+        webSearchResults: [],
+        outputItems: [],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+        endpoint: "responses",
+      } satisfies NormalizedOpenAIResponse;
+    },
+  });
+
+  assertEquals(calls.length, 1);
+  assertEquals(calls[0].model, "gpt-5.4-mini");
+  assertEquals(calls[0].tool?.name, "classify_story_duplicate");
+  assertEquals(result.status, "related_new_info");
+  assertEquals(result.method, "semantic_ai");
+  assertEquals(result.dup_of_tweet_id, null);
+  assertEquals(result.should_enqueue_translate, true);
+});
+
+Deno.test("fetchObservedStoryEmbedding records provider-call ledgers without text metadata", async () => {
+  const supabase = makeFakeSupabase();
+  const embedding = await fetchObservedStoryEmbedding({
+    supabase,
+    workflowRunKey: "worker:dedupe:job-1",
+    apiKey: "test-key",
+    text: "SECRET story text",
+    metadata: {
+      tweet_id: "newer",
+      story_text: "SECRET story text",
+      mode: "hybrid_ai",
+    },
+    fetchEmbedding: async () => ({
+      embedding: [0.1, 0.2, 0.3],
+      usage: { prompt_tokens: 7, total_tokens: 7 },
+      status: 200,
+    }),
+  });
+
+  assertEquals(embedding, [0.1, 0.2, 0.3]);
+  const aiRow = supabase.inserts.find((insert) =>
+    insert.table === "ai_call_ledger"
+  )?.row;
+  assert(aiRow);
+  assertEquals(aiRow.trace_name, "dedupe-pipeline");
+  assertEquals(aiRow.operation_name, "create_story_embedding");
+  assertEquals(aiRow.agent_name, "duplicate-embedding");
+  assertEquals(aiRow.endpoint, "embeddings");
+  assertEquals(aiRow.total_tokens, 7);
+  assertEquals(aiRow.foglamp_span_estimate, 0);
+  assertEquals(aiRow.foglamp_skip_reason, "non_chat_endpoint");
+  const metadata = aiRow.metadata as Record<string, unknown>;
+  assertEquals(metadata.tweet_id, "newer");
+  assertEquals(metadata.mode, "hybrid_ai");
+  assertEquals("story_text" in metadata, false);
+
+  const budgetRows = supabase.inserts
+    .filter((insert) => insert.table === "budget_ledger")
+    .flatMap((insert) => Array.isArray(insert.row) ? insert.row : [insert.row]);
+  assert(budgetRows.some((row) =>
+    row.provider === "openai" && row.unit === "token" && row.quantity === 7
+  ));
+  assertEquals(
+    budgetRows.some((row) =>
+      row.provider === "foglamp" && row.unit === "estimated_span_skipped"
+    ),
+    false,
+  );
+});
+
+Deno.test("observedDedupeOpenAI records adjudicator ledgers without prompt metadata", async () => {
+  const supabase = makeFakeSupabase();
+  const calls: OpenAICallParams[] = [];
+  const callOpenAIImpl = async (
+    params: OpenAICallParams,
+  ): Promise<NormalizedOpenAIResponse> => {
+    calls.push(params);
+    return {
+      ok: true,
+      status: 200,
+      rawText: "{}",
+      raw: {},
+      content: "",
+      toolCall: {
+        name: "classify_story_duplicate",
+        arguments: JSON.stringify({
+          decision: "distinct",
+          confidence: 0.91,
+          canonical_tweet_id: "older",
+          new_facts: ["new confirmation"],
+          reason: "materially different",
+        }),
+      },
+      webSearchResults: [],
+      outputItems: [],
+      usage: { prompt_tokens: 11, completion_tokens: 3, total_tokens: 14 },
+      endpoint: "responses",
+    };
+  };
+
+  const call = observedDedupeOpenAI(
+    supabase,
+    "x-poster:dedupe-final:run-1",
+    {
+      tweet_id: "newer",
+      prompt_text: "SECRET prompt",
+      assertion_source: "x_final_assertion",
+    },
+    callOpenAIImpl,
+  );
+
+  const response = await call({
+    apiKey: "test-key",
+    model: "gpt-5.4-mini",
+    messages: [{ role: "user", content: "SECRET prompt" }],
+    tool: {
+      name: "classify_story_duplicate",
+      parameters: { type: "object", properties: {} },
+    },
+    maxOutputTokens: 100,
+  });
+
+  assertEquals(response.ok, true);
+  assertEquals(calls.length, 1);
+  const aiRow = supabase.inserts.find((insert) =>
+    insert.table === "ai_call_ledger"
+  )?.row;
+  assert(aiRow);
+  assertEquals(aiRow.workflow_run_key, "x-poster:dedupe-final:run-1");
+  assertEquals(aiRow.trace_name, "dedupe-pipeline");
+  assertEquals(aiRow.operation_name, "classify_story_duplicate");
+  assertEquals(aiRow.agent_name, "duplicate-adjudicator");
+  assertEquals(aiRow.endpoint, "responses");
+  assertEquals(aiRow.total_tokens, 14);
+  assertEquals(aiRow.foglamp_span_estimate, 2);
+  assertEquals(aiRow.foglamp_skip_reason, "dedupe_local_only");
+  const metadata = aiRow.metadata as Record<string, unknown>;
+  assertEquals(metadata.tweet_id, "newer");
+  assertEquals(metadata.assertion_source, "x_final_assertion");
+  assertEquals("prompt_text" in metadata, false);
+
+  const budgetRows = supabase.inserts
+    .filter((insert) => insert.table === "budget_ledger")
+    .flatMap((insert) => Array.isArray(insert.row) ? insert.row : [insert.row]);
+  assert(budgetRows.some((row) =>
+    row.provider === "openai" && row.unit === "token" && row.quantity === 14
+  ));
+  assert(budgetRows.some((row) =>
+    row.provider === "foglamp" &&
+    row.unit === "estimated_span_skipped" &&
+    row.quantity === 2
+  ));
 });
 
 Deno.test("runDuplicateGate resolves duplicate-of-duplicate chains to the original canonical post", async () => {

@@ -9,7 +9,14 @@ import { recordXApiEvent } from '../_shared/xApiLedger.ts';
 import { buildXPostText, isEnrichmentBlockingXPost, pickHashtags } from '../_shared/xPostText.ts';
 import { allowCompletedEnrichmentForPosting, doesEnrichmentBlockX, normalizeEnrichmentConfig } from '../_shared/enrich.ts';
 import { duplicateXSkipReason } from '../_shared/duplicateGuard.ts';
-import { assertFinalDuplicateState, normalizeDuplicateGateConfig, type FinalDuplicateAssertionResult } from '../_shared/dedupe.ts';
+import {
+  assertFinalDuplicateState,
+  fetchObservedStoryEmbedding,
+  normalizeDuplicateGateConfig,
+  observedDedupeOpenAI,
+  type FinalDuplicateAssertionResult,
+} from '../_shared/dedupe.ts';
+import { finishWorkflowRun, startWorkflowRun } from '../_shared/observability.ts';
 import {
   MAX_ATTEMPTED_VIDEO_DURATION_MS,
   isOverAttemptedVideoDuration,
@@ -598,6 +605,73 @@ async function completeManualFailure(
 }
 
 // deno-lint-ignore no-explicit-any
+async function assertObservedFinalDuplicateState(params: {
+  sb: any;
+  tweetId: string;
+  duplicateGateCfg: unknown;
+  dryRun: boolean;
+  source: string;
+  sourceFunction: string;
+  metadata?: Record<string, unknown>;
+}): Promise<FinalDuplicateAssertionResult> {
+  const workflowRunId = `x-poster-final-dedupe:${params.tweetId}:${crypto.randomUUID()}`;
+  const workflowRunKey = `x-poster:dedupe-final:${workflowRunId}`;
+  const metadata = {
+    assertion_source: params.source,
+    dry_run: params.dryRun,
+    ...(params.metadata ?? {}),
+  };
+
+  await startWorkflowRun(params.sb, {
+    runKey: workflowRunKey,
+    workflowName: 'dedupe-pipeline',
+    workflowRunId,
+    status: 'running',
+    source: 'x-poster',
+    sourceFunction: params.sourceFunction,
+    subjectType: 'post',
+    subjectId: params.tweetId,
+    tweetId: params.tweetId,
+    metadata,
+  });
+
+  try {
+    const openaiApiKey = Deno.env.get('OPENAI_API_KEY') ?? '';
+    const result = await assertFinalDuplicateState(params.sb, params.tweetId, params.duplicateGateCfg, {
+      dryRun: params.dryRun,
+      source: params.source,
+      fetchEmbedding: (text) =>
+        fetchObservedStoryEmbedding({
+          supabase: params.sb,
+          workflowRunKey,
+          apiKey: openaiApiKey,
+          text,
+          metadata,
+        }),
+      callOpenAI: observedDedupeOpenAI(params.sb, workflowRunKey, metadata),
+    });
+
+    await finishWorkflowRun(
+      params.sb,
+      workflowRunKey,
+      result.checked ? 'completed' : 'skipped',
+      {
+        ...metadata,
+        checked: result.checked,
+        blocked: result.blocked,
+        reason: result.reason,
+        result_status: result.result?.status ?? null,
+        result_method: result.result?.method ?? null,
+      },
+    );
+    return result;
+  } catch (error) {
+    await finishWorkflowRun(params.sb, workflowRunKey, 'failed', metadata, error);
+    throw error;
+  }
+}
+
+// deno-lint-ignore no-explicit-any
 async function handleManualVideoIntakePost(params: {
   sb: any;
   body: Record<string, unknown>;
@@ -730,9 +804,16 @@ async function handleManualVideoIntakePost(params: {
   if (!duplicateOverride) {
     let finalDuplicateAssertion: FinalDuplicateAssertionResult;
     try {
-      finalDuplicateAssertion = await assertFinalDuplicateState(params.sb, tweetId, params.duplicateGateCfg, {
+      finalDuplicateAssertion = await assertObservedFinalDuplicateState({
+        sb: params.sb,
+        tweetId,
+        duplicateGateCfg: params.duplicateGateCfg,
         dryRun: false,
         source: 'manual_video_intake_final_assertion',
+        sourceFunction: 'handleManualVideoIntakePost',
+        metadata: {
+          intake_id: manualIntakeId,
+        },
       });
     } catch (e) {
       return completeManualFailure(params.sb, {
@@ -1363,10 +1444,20 @@ Deno.serve(async (req) => {
     }
 
     let finalDuplicateAssertion: FinalDuplicateAssertionResult;
+    const finalAssertionSource = onlyTweetId ? 'x_force_final_assertion' : targetTweetId ? 'x_target_final_assertion' : 'x_final_assertion';
     try {
-      finalDuplicateAssertion = await assertFinalDuplicateState(sb, tweetId, duplicateGateCfg, {
+      finalDuplicateAssertion = await assertObservedFinalDuplicateState({
+        sb,
+        tweetId,
+        duplicateGateCfg,
         dryRun,
-        source: onlyTweetId ? 'x_force_final_assertion' : targetTweetId ? 'x_target_final_assertion' : 'x_final_assertion',
+        source: finalAssertionSource,
+        sourceFunction: 'x-poster',
+        metadata: {
+          dispatch_source: dispatchSource,
+          target_tweet: Boolean(targetTweetId),
+          forced_post: Boolean(onlyTweetId),
+        },
       });
     } catch (e) {
       const error = (e as Error).message;

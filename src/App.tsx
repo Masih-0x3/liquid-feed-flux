@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { lazy, Suspense } from "react";
@@ -39,6 +39,9 @@ const Threads = lazyWithRetry(() => import("./pages/Threads"));
 const Settings = lazyWithRetry(() => import("./pages/Settings"));
 const XAccountDisabled = lazyWithRetry(() => import("./pages/XAccountDisabled"));
 const Downloader = lazyWithRetry(() => import("./pages/Downloader"));
+const FoglampHUDDev = import.meta.env.DEV && import.meta.env.VITE_FOGLAMP_HUD === "1"
+  ? lazy(() => import("foglamp/hud").then((mod) => ({ default: mod.FoglampHUD })))
+  : null;
 
 const queryClient = new QueryClient();
 
@@ -79,6 +82,17 @@ function ConfigErrorScreen() {
   );
 }
 
+function FoglampHUDMount() {
+  const location = useLocation();
+  if (!FoglampHUDDev || location.pathname === "/monitoring") return null;
+
+  return (
+    <Suspense fallback={null}>
+      <FoglampHUDDev redact defaultOpen={false} />
+    </Suspense>
+  );
+}
+
 const App = () => (
   supabaseConfigError ? <ConfigErrorScreen /> :
   <QueryClientProvider client={queryClient}>
@@ -87,6 +101,7 @@ const App = () => (
         <Toaster />
         <Sonner />
         <BrowserRouter>
+          <FoglampHUDMount />
           <Suspense fallback={<PageLoader />}>
             <Routes>
               <Route path="/auth" element={<AuthPage />} />

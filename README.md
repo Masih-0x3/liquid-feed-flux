@@ -86,6 +86,7 @@ Copy `.env.example` to `.env` and populate:
 | `VITE_SENTRY_TRACES_SAMPLE_RATE` | Browser tracing sample rate, default `0.1` |
 | `VITE_SENTRY_REPLAYS_SESSION_SAMPLE_RATE` | Session replay baseline sample rate, default `0` |
 | `VITE_SENTRY_REPLAYS_ERROR_SAMPLE_RATE` | Session replay sample rate after errors, default `1` |
+| `VITE_FOGLAMP_HUD` | Optional local-only Foglamp floating HUD opt-in; leave unset unless debugging the upstream HUD broker |
 | `SENTRY_AUTH_TOKEN` | Build-only token for uploading Vite source maps; keep out of git |
 
 Production builds validate these values before bundling. Missing or placeholder
@@ -105,6 +106,13 @@ values fail the build instead of producing a blank browser screen.
 | `SENTRY_ENVIRONMENT` | Sentry environment label, usually `production` |
 | `SENTRY_TRACES_SAMPLE_RATE` | Runtime tracing sample rate, default `0.1` |
 | `SENTRY_RELEASE` | Optional release name; falls back to deploy SHA/version when available |
+| `FOGLAMP_API_KEY` | Optional hosted Foglamp ingest key for AI SDK traces; XOT local ledgers still work without it |
+| `FOGLAMP_ENABLED` | Optional hosted Foglamp export switch; set `0` to keep all observability local |
+| `FOGLAMP_INGEST_URL` | Optional alternate Foglamp ingest endpoint |
+| `FOGLAMP_MONTHLY_SPAN_LIMIT` | Observed hosted plan span limit; defaults to `10000` and should be operator-confirmed if the plan changes |
+| `FOGLAMP_MONTHLY_SPAN_CAP` | XOT hard stop before hosted Foglamp export; defaults to `8000` estimated spans/month |
+| `FOGLAMP_MONTHLY_SPAN_WARN` | Dashboard warning threshold for hosted Foglamp export; defaults to `6000` estimated spans/month |
+| `FOGLAMP_RECORD_INPUTS` / `FOGLAMP_RECORD_OUTPUTS` | Keep `false` in production; XOT ledgers do not store prompt/output text by default |
 
 ## Scripts
 

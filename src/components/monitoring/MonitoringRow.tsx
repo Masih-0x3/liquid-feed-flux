@@ -314,8 +314,13 @@ export function MonitoringTableEntryRows({
             <div><MonitoringCostFlags entry={entry} /></div>
           </div>
         </TableCell>
-        <TableCell className="px-2 py-4 text-right">
-          {renderRowActions(entry)}
+        <TableCell className="px-2 py-4">
+          <div className="flex items-center justify-end gap-1">
+            <Button variant="outline" size="sm" className="h-8 px-2" onClick={() => onOpenDetails(entry.tweet_id)}>
+              Details
+            </Button>
+            {renderRowActions(entry)}
+          </div>
         </TableCell>
       </TableRow>
       {entry.duplicate_cluster && expandedClusters.has(entry.duplicate_cluster.cluster_id) && (

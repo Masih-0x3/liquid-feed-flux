@@ -1,6 +1,14 @@
 // Algorithm-aware enrichment pipeline:
 // Archivist + Researcher (parallel) -> Creator Analyst -> Humanizer -> Composer -> Critic/Gate
-import { callOpenAI } from "./openai.ts";
+import {
+  callOpenAI,
+  type NormalizedOpenAIResponse,
+  type OpenAICallParams,
+} from "./openai.ts";
+import {
+  estimateFoglampSpans,
+  recordObservedOpenAICall,
+} from "./observability.ts";
 
 export interface EnrichmentConfig {
   enabled: boolean;
@@ -204,6 +212,99 @@ interface RecentPost {
   commentary_hook: string | null;
   importance_score: number | null;
   tweeted_at: string | null;
+}
+
+type SupabaseLike = { from(table: string): unknown };
+
+type EnrichmentOpenAICallContext = {
+  operationName: string;
+  agentName: string;
+  metadata?: Record<string, unknown>;
+};
+
+type EnrichmentOpenAICaller = (
+  params: OpenAICallParams,
+  context: EnrichmentOpenAICallContext,
+) => Promise<NormalizedOpenAIResponse>;
+
+function thrownEnrichmentOpenAIResponse(
+  error: unknown,
+  model: string,
+): NormalizedOpenAIResponse {
+  const message = error instanceof Error ? error.message : String(error);
+  const raw = { error: { message } };
+  return {
+    ok: false,
+    status: 0,
+    rawText: JSON.stringify(raw),
+    raw,
+    content: "",
+    toolCall: null,
+    webSearchResults: [],
+    outputItems: [],
+    usage: null,
+    endpoint: /^gpt-5\.(4|5)/i.test(model) ? "responses" : "chat.completions",
+  };
+}
+
+export function observedEnrichmentOpenAI(
+  supabase: SupabaseLike | undefined,
+  workflowRunKey: string | null | undefined,
+  callOpenAIImpl: (params: OpenAICallParams) => Promise<NormalizedOpenAIResponse> = callOpenAI,
+): EnrichmentOpenAICaller {
+  return async (
+    params: OpenAICallParams,
+    context: EnrichmentOpenAICallContext,
+  ) => {
+    const startedAt = new Date();
+    let response: NormalizedOpenAIResponse;
+    try {
+      response = await callOpenAIImpl(params);
+    } catch (error) {
+      response = thrownEnrichmentOpenAIResponse(error, params.model);
+      if (workflowRunKey) {
+        await recordObservedOpenAICall(supabase, {
+          workflowRunKey,
+          traceName: "enrichment-pipeline",
+          operationName: context.operationName,
+          agentName: context.agentName,
+          model: params.model,
+          endpoint: response.endpoint,
+          request: params,
+          response,
+          status: "failed",
+          startedAt,
+          endedAt: new Date(),
+          spanEstimate: estimateFoglampSpans(params),
+          foglampExported: false,
+          foglampSkipReason: "enrichment_local_only",
+          metadata: context.metadata,
+        });
+      }
+      throw error;
+    }
+
+    if (workflowRunKey) {
+      await recordObservedOpenAICall(supabase, {
+        workflowRunKey,
+        traceName: "enrichment-pipeline",
+        operationName: context.operationName,
+        agentName: context.agentName,
+        model: params.model,
+        endpoint: response.endpoint,
+        request: params,
+        response,
+        status: response.ok ? "completed" : "failed",
+        startedAt,
+        endedAt: new Date(),
+        spanEstimate: estimateFoglampSpans(params),
+        foglampExported: false,
+        foglampSkipReason: "enrichment_local_only",
+        metadata: context.metadata,
+      });
+    }
+    return response;
+  };
 }
 
 // Style modifiers randomly injected per run for variety
@@ -801,6 +902,8 @@ export async function runEnrichPipeline(params: {
   sourceUrl?: string | null;
   sourceLabel?: string | null;
   sameSourceRecentCount?: number;
+  workflowRunKey?: string | null;
+  callOpenAI?: (params: OpenAICallParams) => Promise<NormalizedOpenAIResponse>;
 }): Promise<EnrichResult> {
   const config = normalizeEnrichmentConfig(params.config);
   const { supabase, apiKey, voiceSamples, tweetId, textOriginal, textTranslated, importanceScore, previousFormatUsed } = params;
@@ -808,6 +911,11 @@ export async function runEnrichPipeline(params: {
   const voiceProfile = normalizePersonalVoiceProfile(params.voiceProfile);
   const startTime = Date.now();
   let totalTokens = 0;
+  const callModel = observedEnrichmentOpenAI(
+    supabase,
+    params.workflowRunKey,
+    params.callOpenAI ?? callOpenAI,
+  );
 
   const skipResearch = importanceScore !== null && config.skip_research_below_score > 0 && importanceScore < config.skip_research_below_score;
   const researchCacheKey = await makeResearchCacheKey(params.sourceUrl, textOriginal);
@@ -817,27 +925,27 @@ export async function runEnrichPipeline(params: {
 
   // Phase 1: Archivist + Researcher in parallel
   const [archivistResult, researcherResult] = await Promise.all([
-    runArchivist(supabase, apiKey, config, tweetId, textOriginal, textTranslated),
-    skipResearch ? Promise.resolve(null) : runResearcher(supabase, apiKey, config, tweetId, textOriginal, params.sourceUrl ?? null, researchCacheKey),
+    runArchivist(supabase, apiKey, config, tweetId, textOriginal, textTranslated, callModel),
+    skipResearch ? Promise.resolve(null) : runResearcher(supabase, apiKey, config, tweetId, textOriginal, params.sourceUrl ?? null, researchCacheKey, callModel),
   ]);
 
   if (archivistResult?.usage) totalTokens += archivistResult.usage;
   if (researcherResult?.usage) totalTokens += researcherResult.usage;
 
   // Phase 2: Analyst
-  const analystResult = await runAnalyst(apiKey, config, voiceGuide, voiceProfile, textOriginal, textTranslated, archivistResult?.output ?? null, researcherResult?.output ?? null, styleModifier);
+  const analystResult = await runAnalyst(apiKey, config, voiceGuide, voiceProfile, textOriginal, textTranslated, archivistResult?.output ?? null, researcherResult?.output ?? null, styleModifier, callModel);
   totalTokens += analystResult.usage;
 
   // Phase 3: @masihh Voice Match
-  const humanizerResult = await runHumanizer(apiKey, config, voiceSamples, voiceGuide, voiceProfile, analystResult.output, styleModifier);
+  const humanizerResult = await runHumanizer(apiKey, config, voiceSamples, voiceGuide, voiceProfile, analystResult.output, styleModifier, callModel);
   totalTokens += humanizerResult.usage;
 
   // Phase 4: Composer with 3 manual-review variants
-  const composerResult = await runComposer(apiKey, config, voiceGuide, voiceProfile, textOriginal, textTranslated, humanizerResult.output, analystResult.output, archivistResult?.output ?? null, researcherResult?.output ?? null, previousFormatUsed, styleModifier, params.sourceLabel ?? null, params.sourceUrl ?? null);
+  const composerResult = await runComposer(apiKey, config, voiceGuide, voiceProfile, textOriginal, textTranslated, humanizerResult.output, analystResult.output, archivistResult?.output ?? null, researcherResult?.output ?? null, previousFormatUsed, styleModifier, params.sourceLabel ?? null, params.sourceUrl ?? null, callModel);
   totalTokens += composerResult.usage;
 
   // Phase 5: @masihh Voice Critic (advisory only)
-  const voiceCriticResult = await runVoiceCritic(apiKey, config, voiceGuide, voiceProfile, textOriginal, textTranslated, composerResult.output);
+  const voiceCriticResult = await runVoiceCritic(apiKey, config, voiceGuide, voiceProfile, textOriginal, textTranslated, composerResult.output, callModel);
   totalTokens += voiceCriticResult.usage;
   composerResult.output.source_context.voice = {
     profile_version: voiceProfile.version,
@@ -860,7 +968,7 @@ export async function runEnrichPipeline(params: {
   });
 
   // Phase 6: Algorithm-aware Critic
-  const criticResult = await runCritic(apiKey, config, textOriginal, textTranslated, composerResult.output, antiAggregator);
+  const criticResult = await runCritic(apiKey, config, textOriginal, textTranslated, composerResult.output, antiAggregator, callModel);
   totalTokens += criticResult.usage;
   const critic = criticResult.output;
   const publishRecommendation = combineRecommendation(antiAggregator.publish_recommendation, critic.publish_recommendation);
@@ -887,7 +995,7 @@ export async function runEnrichPipeline(params: {
 
 // ─── Agent 0: Archivist ───────────────────────────────────────────────
 // deno-lint-ignore no-explicit-any
-async function runArchivist(supabase: any, apiKey: string, config: EnrichmentConfig, tweetId: string, textOriginal: string, textTranslated: string): Promise<{ output: ArchivistOutput; usage: number } | null> {
+async function runArchivist(supabase: any, apiKey: string, config: EnrichmentConfig, tweetId: string, textOriginal: string, textTranslated: string, callModel: EnrichmentOpenAICaller): Promise<{ output: ArchivistOutput; usage: number } | null> {
   try {
     const lookbackDate = new Date();
     lookbackDate.setDate(lookbackDate.getDate() - config.archivist_lookback_days);
@@ -935,7 +1043,7 @@ IMPORTANT RULES:
       },
     };
 
-    const resp = await callOpenAI({
+    const resp = await callModel({
       apiKey,
       model: config.model,
       messages: [
@@ -945,6 +1053,10 @@ IMPORTANT RULES:
       tool,
       maxOutputTokens: config.max_archivist_tokens,
       topP: randomTopP(),
+    }, {
+      operationName: "find_narrative_thread",
+      agentName: "archivist",
+      metadata: { tweet_id: tweetId, recent_post_count: recentPosts.length },
     });
 
     if (!resp.ok || !resp.toolCall) {
@@ -982,7 +1094,7 @@ IMPORTANT RULES:
 
 // ─── Agent 1: Researcher ──────────────────────────────────────────────
 // deno-lint-ignore no-explicit-any
-async function runResearcher(supabase: any, apiKey: string, config: EnrichmentConfig, tweetId: string, textOriginal: string, sourceUrl: string | null, cacheKey: string): Promise<{ output: ResearcherOutput; usage: number } | null> {
+async function runResearcher(supabase: any, apiKey: string, config: EnrichmentConfig, tweetId: string, textOriginal: string, sourceUrl: string | null, cacheKey: string, callModel: EnrichmentOpenAICaller): Promise<{ output: ResearcherOutput; usage: number } | null> {
   try {
     if (config.research_cache_hours > 0) {
       const { data: cached } = await supabase
@@ -1022,7 +1134,7 @@ IMPORTANT RULES:
       },
     };
 
-    const resp = await callOpenAI({
+    const resp = await callModel({
       apiKey,
       model: config.model,
       messages: [
@@ -1032,6 +1144,14 @@ IMPORTANT RULES:
       tool,
       builtInTools: [{ type: 'web_search' }],
       maxOutputTokens: config.max_research_tokens,
+    }, {
+      operationName: "research_background",
+      agentName: "researcher",
+      metadata: {
+        tweet_id: tweetId,
+        has_source_url: Boolean(sourceUrl),
+        research_cache_enabled: config.research_cache_hours > 0,
+      },
     });
 
     if (!resp.ok || !resp.toolCall) {
@@ -1067,7 +1187,7 @@ IMPORTANT RULES:
 }
 
 // ─── Agent 2: Analyst ─────────────────────────────────────────────────
-async function runAnalyst(apiKey: string, config: EnrichmentConfig, voiceGuide: VoiceGuide, voiceProfile: PersonalVoiceProfile, textOriginal: string, textTranslated: string, archivist: ArchivistOutput | null, researcher: ResearcherOutput | null, styleModifier: string): Promise<{ output: AnalystOutput; usage: number }> {
+async function runAnalyst(apiKey: string, config: EnrichmentConfig, voiceGuide: VoiceGuide, voiceProfile: PersonalVoiceProfile, textOriginal: string, textTranslated: string, archivist: ArchivistOutput | null, researcher: ResearcherOutput | null, styleModifier: string, callModel: EnrichmentOpenAICaller): Promise<{ output: AnalystOutput; usage: number }> {
   const contextParts: string[] = [];
   contextParts.push(`NEWS ITEM (English original):\n${textOriginal}`);
 
@@ -1113,7 +1233,7 @@ CRITICAL INSTRUCTIONS:
     },
   };
 
-  const resp = await callOpenAI({
+  const resp = await callModel({
     apiKey,
     model: config.model,
     messages: [
@@ -1123,6 +1243,13 @@ CRITICAL INSTRUCTIONS:
     tool,
     maxOutputTokens: config.max_analysis_tokens,
     topP: randomTopP(),
+  }, {
+    operationName: "compose_analysis",
+    agentName: "analyst",
+    metadata: {
+      has_archivist_context: Boolean(archivist),
+      has_research_context: Boolean(researcher),
+    },
   });
 
   if (!resp.ok || !resp.toolCall) {
@@ -1145,7 +1272,7 @@ CRITICAL INSTRUCTIONS:
 }
 
 // ─── Agent 3: Humanizer ───────────────────────────────────────────────
-async function runHumanizer(apiKey: string, config: EnrichmentConfig, voiceSamples: VoiceSamples, voiceGuide: VoiceGuide, voiceProfile: PersonalVoiceProfile, analyst: AnalystOutput, styleModifier: string): Promise<{ output: HumanizerOutput; usage: number }> {
+async function runHumanizer(apiKey: string, config: EnrichmentConfig, voiceSamples: VoiceSamples, voiceGuide: VoiceGuide, voiceProfile: PersonalVoiceProfile, analyst: AnalystOutput, styleModifier: string, callModel: EnrichmentOpenAICaller): Promise<{ output: HumanizerOutput; usage: number }> {
   const samplesBlock = voiceSamples.samples.length > 0
     ? `\n\nVOICE SAMPLES (real tweets from this author -- match this style):\n${voiceSamples.samples.map((s, i) => `[${i + 1}] ${s}`).join('\n')}`
     : '';
@@ -1188,7 +1315,7 @@ ANTI-AI-DETECTION TECHNIQUES (apply at least 3):
 
   const userContent = `Rewrite this to sound authentically human. Keep the meaning but change the texture:\n\nCommentary: ${analyst.commentary}\nHook: ${analyst.hook}${analyst.suggested_question ? `\nQuestion: ${analyst.suggested_question}` : ''}`;
 
-  const resp = await callOpenAI({
+  const resp = await callModel({
     apiKey,
     model: config.model,
     messages: [
@@ -1198,6 +1325,10 @@ ANTI-AI-DETECTION TECHNIQUES (apply at least 3):
     tool,
     maxOutputTokens: config.max_humanizer_tokens,
     topP: randomTopP(),
+  }, {
+    operationName: "humanize_text",
+    agentName: "humanizer",
+    metadata: { voice_sample_count: voiceSamples.samples.length },
   });
 
   if (!resp.ok || !resp.toolCall) {
@@ -1244,6 +1375,7 @@ async function runComposer(
   styleModifier: string,
   sourceLabel: string | null,
   sourceUrl: string | null,
+  callModel: EnrichmentOpenAICaller,
 ): Promise<{ output: ComposerOutput; usage: number }> {
   const components: string[] = [];
   components.push(`ORIGINAL SOURCE TEXT:\n${textOriginal}`);
@@ -1350,7 +1482,7 @@ VARIETY IS CRITICAL. Each post should feel structurally different from the last.
     },
   };
 
-  const resp = await callOpenAI({
+  const resp = await callModel({
     apiKey,
     model: config.model,
     messages: [
@@ -1360,6 +1492,16 @@ VARIETY IS CRITICAL. Each post should feel structurally different from the last.
     tool,
     maxOutputTokens: config.max_composer_tokens,
     topP: randomTopP(),
+  }, {
+    operationName: "compose_post",
+    agentName: "composer",
+    metadata: {
+      has_source_label: Boolean(sourceLabel),
+      has_source_url: Boolean(sourceUrl),
+      has_archivist_context: Boolean(archivist),
+      has_research_context: Boolean(researcher),
+      avoided_format_count: avoidFormats.length,
+    },
   });
 
   if (!resp.ok || !resp.toolCall) {
@@ -1461,6 +1603,7 @@ async function runVoiceCritic(
   textOriginal: string,
   textTranslated: string,
   composer: ComposerOutput,
+  callModel: EnrichmentOpenAICaller,
 ): Promise<{ output: VoiceCriticOutput; usage: number }> {
   const tool = {
     name: 'critique_voice_match',
@@ -1492,7 +1635,7 @@ async function runVoiceCritic(
     },
   };
 
-  const resp = await callOpenAI({
+  const resp = await callModel({
     apiKey,
     model: config.model,
     messages: [
@@ -1517,6 +1660,14 @@ You are the separate @masihh Voice Critic. Score the drafts against the style gu
     maxOutputTokens: Math.min(config.max_critic_tokens, 2500),
     reasoningEffort: 'low',
     verbosity: 'low',
+  }, {
+    operationName: "critique_voice_match",
+    agentName: "voice-critic",
+    metadata: {
+      variant_count: composer.variants.length,
+      intent: composer.intent,
+      language_choice: composer.language_choice,
+    },
   });
 
   if (!resp.ok || !resp.toolCall) {
@@ -1586,6 +1737,7 @@ async function runCritic(
   textTranslated: string,
   composer: ComposerOutput,
   gate: AntiAggregatorGateOutput,
+  callModel: EnrichmentOpenAICaller,
 ): Promise<{ output: CriticOutput; usage: number }> {
   const systemPrompt = `${config.critic_prompt}
 
@@ -1627,7 +1779,7 @@ STRICT RULES:
     },
   };
 
-  const resp = await callOpenAI({
+  const resp = await callModel({
     apiKey,
     model: config.model,
     messages: [
@@ -1648,6 +1800,13 @@ STRICT RULES:
     maxOutputTokens: config.max_critic_tokens,
     reasoningEffort: 'low',
     verbosity: 'low',
+  }, {
+    operationName: "critique_enrichment",
+    agentName: "critic",
+    metadata: {
+      anti_aggregator_recommendation: gate.publish_recommendation,
+      monetization_flag_count: gate.monetization_risk_flags.length,
+    },
   });
 
   if (!resp.ok || !resp.toolCall) {

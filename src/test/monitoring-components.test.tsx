@@ -15,7 +15,7 @@ import {
   MonitoringScore,
   MonitoringXBadge,
 } from "@/components/monitoring/MonitoringStatusBadges";
-import { MonitoringMobileCard } from "@/components/monitoring/MonitoringRow";
+import { MonitoringMobileCard, MonitoringTableEntryRows } from "@/components/monitoring/MonitoringRow";
 import type { DuplicateCluster, MonitoringEntry } from "@/hooks/useMonitoringData";
 
 function entry(overrides: Partial<MonitoringEntry> = {}): MonitoringEntry {
@@ -349,6 +349,43 @@ describe("monitoring row renderers", () => {
     expect(onRunDedupe).not.toHaveBeenCalled();
     expect(onClearDuplicate).not.toHaveBeenCalled();
   });
+
+  it("shows an explicit desktop table Details action", () => {
+    const onOpenDetails = vi.fn();
+    const renderRowActions = vi.fn(() => <button type="button" aria-label="Row actions">More</button>);
+
+    render(
+      <table>
+        <tbody>
+          <MonitoringTableEntryRows
+            entry={entry({
+              final_score: 16,
+              delivery_decision: "deliver",
+              importance_tags: ["regional"],
+              audience_class: "direct_focus",
+            })}
+            isSelected={false}
+            deliverThreshold={14}
+            entryByTweetId={new Map()}
+            expandedClusters={new Set()}
+            renderRowActions={renderRowActions}
+            onSelectChange={vi.fn()}
+            onOpenDetails={onOpenDetails}
+            onOpenManualScore={vi.fn()}
+            onToggleCluster={vi.fn()}
+            onInspectDuplicateMatch={vi.fn()}
+            onRunDedupe={vi.fn()}
+            onClearDuplicate={vi.fn()}
+          />
+        </tbody>
+      </table>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+
+    expect(onOpenDetails).toHaveBeenCalledWith("tweet-1");
+    expect(renderRowActions).toHaveBeenCalledWith(expect.objectContaining({ tweet_id: "tweet-1" }));
+  });
 });
 
 describe("monitoring detail drawer", () => {
@@ -365,6 +402,53 @@ describe("monitoring detail drawer", () => {
       audience_confidence: 0.91,
       enrich_status: "awaiting_approval",
       enrichment_version: "voice-v1",
+      process_observability: {
+        available: true,
+        source: "workflow_runs",
+        partial_reason: null,
+        ai_calls: 1,
+        failed_ai_calls: 0,
+        total_tokens: 1250,
+        foglamp_exported: 0,
+        foglamp_skipped: 1,
+        recent_runs: [],
+        latest_run: {
+          run_key: "post:tweet-1:job:abc",
+          workflow_name: "rss-item-pipeline",
+          workflow_run_id: "worker:tweet-1:abc",
+          status: "completed",
+          source_function: "worker",
+          started_at: "2026-05-23T14:00:00.000Z",
+          ended_at: "2026-05-23T14:00:05.000Z",
+          duration_seconds: 5,
+          last_error: null,
+          ai_call_count: 1,
+          failed_ai_call_count: 0,
+          total_tokens: 1250,
+          foglamp_exported: 0,
+          foglamp_skipped: 1,
+          calls: [
+            {
+              workflow_run_key: "post:tweet-1:job:abc",
+              trace_name: "rss-item-pipeline",
+              operation_name: "translate",
+              agent_name: "translator",
+              model: "gpt-4.1-mini",
+              endpoint: "chat_completions",
+              status: "completed",
+              total_tokens: 1250,
+              reasoning_tokens: 0,
+              duration_ms: 5000,
+              started_at: "2026-05-23T14:00:00.000Z",
+              ended_at: "2026-05-23T14:00:05.000Z",
+              foglamp_exported: false,
+              foglamp_span_estimate: 1,
+              foglamp_skip_reason: "worker_local_only",
+              error_message: null,
+            },
+          ],
+        },
+      },
       monitoring_state: {
         code: "ready_to_deliver",
         stage_label: "Ready",
@@ -415,6 +499,11 @@ describe("monitoring detail drawer", () => {
     );
 
     expect(screen.getByText("Pipeline Details")).toBeInTheDocument();
+    expect(screen.getByText("Process Observability")).toBeInTheDocument();
+    expect(screen.getByText("rss-item-pipeline")).toBeInTheDocument();
+    expect(screen.getByText("translator")).toBeInTheDocument();
+    expect(screen.getAllByText("1,250 tokens").length).toBeGreaterThan(0);
+    expect(screen.getByText("worker local only")).toBeInTheDocument();
     expect(screen.getByText("Why not on X?")).toBeInTheDocument();
     expect(screen.getByText("Scoring")).toBeInTheDocument();
     expect(screen.getByText("Enrichment Studio")).toBeInTheDocument();

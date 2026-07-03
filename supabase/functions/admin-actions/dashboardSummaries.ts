@@ -6,6 +6,7 @@ import {
   monitoringPolicyRuleKind,
   postForJob,
 } from "./readHelpers.ts";
+import { getFoglampBudgetSettings } from "../_shared/observability.ts";
 
 const DEFAULT_STORAGE_LIMIT_BYTES = 100_000_000_000;
 
@@ -319,6 +320,160 @@ async function loadOpenAiUsageSummary(supabase: any, since: string) {
     (data ?? []) as Array<Record<string, unknown>>,
     24,
   );
+}
+
+function currentPeriodKey(): string {
+  return new Date().toISOString().slice(0, 7);
+}
+
+function pct(value: number, max: number): number | null {
+  if (!Number.isFinite(value) || !Number.isFinite(max) || max <= 0) {
+    return null;
+  }
+  return Math.max(0, Math.min(100, Math.round((value / max) * 100)));
+}
+
+function numeric(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+}
+
+function mapRecentWorkflowRun(row: Record<string, unknown>) {
+  const metadata = recordValue(row.metadata);
+  return {
+    run_key: String(row.run_key ?? ""),
+    workflow_name: String(row.workflow_name ?? "unknown"),
+    workflow_run_id: typeof row.workflow_run_id === "string"
+      ? row.workflow_run_id
+      : null,
+    status: String(row.status ?? "unknown"),
+    source: typeof row.source === "string" ? row.source : null,
+    source_function: typeof row.source_function === "string"
+      ? row.source_function
+      : null,
+    subject_type: typeof row.subject_type === "string"
+      ? row.subject_type
+      : null,
+    subject_id: typeof row.subject_id === "string" ? row.subject_id : null,
+    started_at: typeof row.started_at === "string" ? row.started_at : null,
+    ended_at: typeof row.ended_at === "string" ? row.ended_at : null,
+    duration_seconds: durationSeconds(row.started_at, row.ended_at),
+    last_error: typeof row.last_error === "string" ? row.last_error : null,
+    used_filter: metadata.used_filter === true ||
+      metadata.content_filter_enabled === true,
+  };
+}
+
+async function loadProcessObservabilitySummary(
+  supabase: any,
+  since: string,
+): Promise<Record<string, unknown>> {
+  const periodKey = currentPeriodKey();
+  const [
+    { data: runRows, error: runError },
+    { data: callRows, error: callError },
+    { data: budgetRows, error: budgetError },
+  ] = await Promise.all([
+    supabase
+      .from("workflow_runs")
+      .select(
+        "run_key, workflow_name, workflow_run_id, status, source, source_function, subject_type, subject_id, started_at, ended_at, last_error, metadata",
+      )
+      .gte("started_at", since)
+      .order("started_at", { ascending: false })
+      .limit(25),
+    supabase
+      .from("ai_call_ledger")
+      .select(
+        "workflow_run_key, trace_name, operation_name, agent_name, model, endpoint, status, total_tokens, reasoning_tokens, duration_ms, started_at, ended_at, foglamp_exported, foglamp_span_estimate, foglamp_skip_reason, error_message",
+      )
+      .gte("started_at", since)
+      .order("started_at", { ascending: false })
+      .limit(500),
+    supabase
+      .from("budget_ledger")
+      .select("provider, unit, quantity, period_key, metadata, created_at")
+      .eq("period_key", periodKey)
+      .in("provider", ["foglamp", "openai"])
+      .limit(10000),
+  ]);
+
+  if (runError) throw runError;
+  if (callError) throw callError;
+  if (budgetError) throw budgetError;
+
+  const runs = (runRows ?? []) as Array<Record<string, unknown>>;
+  const calls = (callRows ?? []) as Array<Record<string, unknown>>;
+  const budgets = (budgetRows ?? []) as Array<Record<string, unknown>>;
+  const settings = getFoglampBudgetSettings();
+  const durationSummary = summarizeDurations(
+    calls.map((row) => {
+      const ms = num(row.duration_ms, Number.NaN);
+      return Number.isFinite(ms) ? ms / 1000 : null;
+    }),
+  );
+
+  const activeRuns =
+    runs.filter((row) => row.status === "running" || row.status === "pending")
+      .length;
+  const failedRuns = runs.filter((row) => row.status === "failed").length;
+  const completedRuns = runs.filter((row) => row.status === "completed").length;
+  const failedCalls = calls.filter((row) => row.status === "failed").length;
+  const totalTokens = calls.reduce(
+    (sum, row) => sum + num(row.total_tokens),
+    0,
+  );
+  const reasoningTokens = calls.reduce(
+    (sum, row) => sum + num(row.reasoning_tokens),
+    0,
+  );
+  const foglampSpansUsed = budgets
+    .filter((row) =>
+      row.provider === "foglamp" && row.unit === "estimated_span"
+    )
+    .reduce((sum, row) => sum + numeric(row.quantity), 0);
+  const foglampSpansSkipped = budgets
+    .filter((row) =>
+      row.provider === "foglamp" && row.unit === "estimated_span_skipped"
+    )
+    .reduce((sum, row) => sum + numeric(row.quantity), 0);
+  const openAiTokensThisMonth = budgets
+    .filter((row) => row.provider === "openai" && row.unit === "token")
+    .reduce((sum, row) => sum + numeric(row.quantity), 0);
+
+  return {
+    available: true,
+    window_hours: 24,
+    active_runs: activeRuns,
+    completed_runs_24h: completedRuns,
+    failed_runs_24h: failedRuns,
+    ai_calls_24h: calls.length,
+    failed_ai_calls_24h: failedCalls,
+    total_tokens_24h: Math.round(totalTokens),
+    reasoning_tokens_24h: Math.round(reasoningTokens),
+    ai_call_p95_seconds: durationSummary.p95_seconds,
+    latest_run: runs[0] ? mapRecentWorkflowRun(runs[0]) : null,
+    recent_runs: runs.slice(0, 8).map(mapRecentWorkflowRun),
+    foglamp: {
+      hosted_export_enabled: settings.enabled && settings.hasApiKey,
+      has_api_key: settings.hasApiKey,
+      monthly_span_limit: settings.monthlySpanLimit,
+      monthly_span_cap: settings.monthlySpanCap,
+      monthly_span_warn: settings.monthlySpanWarn,
+      estimated_spans_used: Math.round(foglampSpansUsed),
+      estimated_spans_skipped: Math.round(foglampSpansSkipped),
+      cap_used_pct: pct(foglampSpansUsed, settings.monthlySpanCap),
+      warning: settings.monthlySpanCap > 0 &&
+        foglampSpansUsed >= settings.monthlySpanWarn,
+      stopped: settings.monthlySpanCap > 0 &&
+        foglampSpansUsed >= settings.monthlySpanCap,
+    },
+    openai_tokens_month_to_date: Math.round(openAiTokensThisMonth),
+  };
 }
 
 async function loadDashboardQueueBreakdown(
@@ -1143,6 +1298,7 @@ export async function getEnhancedDashboardSummary(supabase: any) {
     queueBreakdown,
     xLocalUsage,
     openAiUsage,
+    processObservability,
     activity,
     systemPerformance,
     scoringTuning,
@@ -1207,6 +1363,14 @@ export async function getEnhancedDashboardSummary(supabase: any) {
     withDashboardFallback(
       "openai_usage",
       loadOpenAiUsageSummary(supabase, since),
+      (error) => ({
+        available: false,
+        error: errorMessage(error),
+      }),
+    ),
+    withDashboardFallback(
+      "process_observability",
+      loadProcessObservabilitySummary(supabase, since),
       (error) => ({
         available: false,
         error: errorMessage(error),
@@ -1363,6 +1527,7 @@ export async function getEnhancedDashboardSummary(supabase: any) {
     queue_breakdown: queueBreakdown,
     x_local_usage: xLocalUsage,
     openai_usage: openAiUsage,
+    process_observability: processObservability,
     system_performance: systemPerformance,
     scoring_tuning: scoringTuning,
     activity,

@@ -83,6 +83,61 @@ export interface DuplicateTargetSummary {
     | "not_covered";
 }
 
+type MonitoringProcessAiCall = {
+  workflow_run_key: string;
+  trace_name: string;
+  operation_name: string;
+  agent_name: string | null;
+  model: string | null;
+  endpoint: string | null;
+  status: string;
+  total_tokens: number;
+  reasoning_tokens: number;
+  duration_ms: number | null;
+  started_at: string | null;
+  ended_at: string | null;
+  foglamp_exported: boolean;
+  foglamp_span_estimate: number;
+  foglamp_skip_reason: string | null;
+  error_message: string | null;
+};
+
+type MonitoringProcessRun = {
+  run_key: string;
+  workflow_name: string;
+  workflow_run_id: string | null;
+  status: string;
+  source_function: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  duration_seconds: number | null;
+  last_error: string | null;
+  ai_call_count: number;
+  failed_ai_call_count: number;
+  total_tokens: number;
+  foglamp_exported: number;
+  foglamp_skipped: number;
+  calls: MonitoringProcessAiCall[];
+};
+
+type MonitoringProcessSnapshot = {
+  available: boolean;
+  source: "workflow_runs" | "unavailable";
+  partial_reason: string | null;
+  latest_run: MonitoringProcessRun | null;
+  recent_runs: MonitoringProcessRun[];
+  ai_calls: number;
+  failed_ai_calls: number;
+  total_tokens: number;
+  foglamp_exported: number;
+  foglamp_skipped: number;
+};
+
+type MonitoringProcessLookup = {
+  byTweet: Map<string, MonitoringProcessSnapshot>;
+  unavailableReason: string | null;
+};
+
 const MONITORING_BASE_POST_COLUMNS = [
   "tweet_id",
   "text_original",
@@ -714,6 +769,219 @@ function latestJobFor(
   jobStateByTweet: Map<string, Map<string, LatestJobState>>,
 ): LatestJobState | null {
   return jobStateByTweet.get(tweetId)?.get(type) ?? null;
+}
+
+function textOrNull(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function numeric(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+}
+
+function integer(value: unknown): number {
+  return Math.max(0, Math.round(numeric(value)));
+}
+
+function nullableInteger(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  return integer(value);
+}
+
+function durationSeconds(startedAt: unknown, endedAt: unknown): number | null {
+  if (typeof startedAt !== "string" || typeof endedAt !== "string") {
+    return null;
+  }
+  const started = Date.parse(startedAt);
+  const ended = Date.parse(endedAt);
+  if (!Number.isFinite(started) || !Number.isFinite(ended)) return null;
+  return Math.max(0, Math.round((ended - started) / 1000));
+}
+
+function mapProcessAiCall(row: Record<string, unknown>): MonitoringProcessAiCall {
+  return {
+    workflow_run_key: String(row.workflow_run_key ?? ""),
+    trace_name: String(row.trace_name ?? "unknown"),
+    operation_name: String(row.operation_name ?? "unknown"),
+    agent_name: textOrNull(row.agent_name),
+    model: textOrNull(row.model),
+    endpoint: textOrNull(row.endpoint),
+    status: String(row.status ?? "unknown"),
+    total_tokens: integer(row.total_tokens),
+    reasoning_tokens: integer(row.reasoning_tokens),
+    duration_ms: nullableInteger(row.duration_ms),
+    started_at: textOrNull(row.started_at),
+    ended_at: textOrNull(row.ended_at),
+    foglamp_exported: row.foglamp_exported === true,
+    foglamp_span_estimate: integer(row.foglamp_span_estimate),
+    foglamp_skip_reason: textOrNull(row.foglamp_skip_reason),
+    error_message: textOrNull(row.error_message),
+  };
+}
+
+function mapProcessRun(
+  row: Record<string, unknown>,
+  calls: MonitoringProcessAiCall[],
+): MonitoringProcessRun {
+  return {
+    run_key: String(row.run_key ?? ""),
+    workflow_name: String(row.workflow_name ?? "unknown"),
+    workflow_run_id: textOrNull(row.workflow_run_id),
+    status: String(row.status ?? "unknown"),
+    source_function: textOrNull(row.source_function),
+    started_at: textOrNull(row.started_at),
+    ended_at: textOrNull(row.ended_at),
+    duration_seconds: durationSeconds(row.started_at, row.ended_at),
+    last_error: textOrNull(row.last_error),
+    ai_call_count: calls.length,
+    failed_ai_call_count: calls.filter((call) => call.status === "failed")
+      .length,
+    total_tokens: calls.reduce((sum, call) => sum + call.total_tokens, 0),
+    foglamp_exported: calls.filter((call) => call.foglamp_exported).length,
+    foglamp_skipped: calls.filter((call) => !call.foglamp_exported).length,
+    calls,
+  };
+}
+
+function unavailableProcessSnapshot(reason: string): MonitoringProcessSnapshot {
+  return {
+    available: false,
+    source: "unavailable",
+    partial_reason: reason,
+    latest_run: null,
+    recent_runs: [],
+    ai_calls: 0,
+    failed_ai_calls: 0,
+    total_tokens: 0,
+    foglamp_exported: 0,
+    foglamp_skipped: 0,
+  };
+}
+
+// deno-lint-ignore no-explicit-any
+async function loadProcessObservabilityByTweet(
+  supabase: any,
+  tweetIds: string[],
+): Promise<MonitoringProcessLookup> {
+  const uniqueTweetIds = [...new Set(tweetIds.filter(Boolean))];
+  const empty = {
+    byTweet: new Map<string, MonitoringProcessSnapshot>(),
+    unavailableReason: null,
+  };
+  if (uniqueTweetIds.length === 0) return empty;
+
+  try {
+    const { data: runData, error: runError } = await supabase
+      .from("workflow_runs")
+      .select(
+        "run_key, workflow_name, workflow_run_id, status, source_function, tweet_id, started_at, ended_at, last_error",
+      )
+      .in("tweet_id", uniqueTweetIds)
+      .order("started_at", { ascending: false })
+      .limit(Math.min(Math.max(uniqueTweetIds.length * 5, 25), 250));
+
+    if (runError) {
+      return {
+        byTweet: new Map(),
+        unavailableReason: isMissingSchemaError(runError)
+          ? "observability_schema_missing"
+          : "workflow_runs_unavailable",
+      };
+    }
+
+    const runRows = ((runData ?? []) as Array<Record<string, unknown>>)
+      .filter((row) => typeof row.run_key === "string" && row.run_key);
+    const runKeys = [...new Set(runRows.map((row) => row.run_key as string))];
+    const callsByRun = new Map<string, MonitoringProcessAiCall[]>();
+    let partialReason: string | null = null;
+
+    if (runKeys.length > 0) {
+      const { data: callData, error: callError } = await supabase
+        .from("ai_call_ledger")
+        .select(
+          "workflow_run_key, trace_name, operation_name, agent_name, model, endpoint, status, total_tokens, reasoning_tokens, duration_ms, started_at, ended_at, foglamp_exported, foglamp_span_estimate, foglamp_skip_reason, error_message",
+        )
+        .in("workflow_run_key", runKeys)
+        .order("started_at", { ascending: false })
+        .limit(1000);
+
+      if (callError) {
+        partialReason = isMissingSchemaError(callError)
+          ? "ai_call_ledger_schema_missing"
+          : "ai_call_ledger_unavailable";
+      } else {
+        for (
+          const call of ((callData ?? []) as Array<Record<string, unknown>>)
+            .map(mapProcessAiCall)
+        ) {
+          if (!call.workflow_run_key) continue;
+          if (!callsByRun.has(call.workflow_run_key)) {
+            callsByRun.set(call.workflow_run_key, []);
+          }
+          callsByRun.get(call.workflow_run_key)!.push(call);
+        }
+      }
+    }
+
+    const runsByTweet = new Map<string, Record<string, unknown>[]>();
+    for (const row of runRows) {
+      const tweetId = textOrNull(row.tweet_id);
+      if (!tweetId) continue;
+      if (!runsByTweet.has(tweetId)) runsByTweet.set(tweetId, []);
+      runsByTweet.get(tweetId)!.push(row);
+    }
+
+    const byTweet = new Map<string, MonitoringProcessSnapshot>();
+    for (const [tweetId, rows] of runsByTweet) {
+      const recentRuns = rows.slice(0, 5).map((row) =>
+        mapProcessRun(
+          row,
+          (callsByRun.get(String(row.run_key ?? "")) ?? []).slice(0, 12),
+        )
+      );
+      const totals = recentRuns.reduce(
+        (acc, run) => {
+          acc.aiCalls += run.ai_call_count;
+          acc.failedAiCalls += run.failed_ai_call_count;
+          acc.totalTokens += run.total_tokens;
+          acc.foglampExported += run.foglamp_exported;
+          acc.foglampSkipped += run.foglamp_skipped;
+          return acc;
+        },
+        {
+          aiCalls: 0,
+          failedAiCalls: 0,
+          totalTokens: 0,
+          foglampExported: 0,
+          foglampSkipped: 0,
+        },
+      );
+      byTweet.set(tweetId, {
+        available: true,
+        source: "workflow_runs",
+        partial_reason: partialReason,
+        latest_run: recentRuns[0] ?? null,
+        recent_runs: recentRuns,
+        ai_calls: totals.aiCalls,
+        failed_ai_calls: totals.failedAiCalls,
+        total_tokens: totals.totalTokens,
+        foglamp_exported: totals.foglampExported,
+        foglamp_skipped: totals.foglampSkipped,
+      });
+    }
+
+    return { byTweet, unavailableReason: null };
+  } catch {
+    return {
+      byTweet: new Map(),
+      unavailableReason: "process_observability_unavailable",
+    };
+  }
 }
 
 // deno-lint-ignore no-explicit-any
@@ -1478,16 +1746,31 @@ export async function getMonitoringEntries(
     rows,
     threshold,
   );
+  const processObservability = await loadProcessObservabilityByTweet(
+    supabase,
+    tweetIds,
+  );
   const entries = rows
-    .map((post) =>
-      toMonitoringEntry(
+    .map((post) => {
+      const base = toMonitoringEntry(
         post,
         statusByTweet[post.tweet_id as string],
         threshold,
         jobStateByTweet,
         duplicateTargets,
-      )
-    )
+      );
+      const tweetId = String(base.tweet_id ?? "");
+      return {
+        ...base,
+        process_observability:
+          processObservability.byTweet.get(tweetId) ??
+            (processObservability.unavailableReason
+              ? unavailableProcessSnapshot(
+                processObservability.unavailableReason,
+              )
+              : null),
+      };
+    })
     .filter((entry: Record<string, unknown>) =>
       matchesMonitoringFilter(entry, filter) &&
       matchesMonitoringScoreBucket(entry, scoreBucket)

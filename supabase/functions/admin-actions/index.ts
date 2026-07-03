@@ -509,7 +509,7 @@ serve(async (req) => {
       }
 
       case 'preview_translation': {
-        const result = await previewTranslationAdminAction(body);
+        const result = await previewTranslationAdminAction(body, { supabase });
         return jsonResponse(result.body, result.status);
       }
 

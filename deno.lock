@@ -4,6 +4,7 @@
     "jsr:@std/assert@*": "1.0.19",
     "jsr:@std/internal@^1.0.12": "1.0.13",
     "jsr:@supabase/functions-js@*": "2.105.4",
+    "npm:@ai-sdk/openai@3.0.79": "3.0.79_zod@3.25.76",
     "npm:@eslint/js@^9.32.0": "9.39.4",
     "npm:@hookform/resolvers@^3.10.0": "3.10.0_react-hook-form@7.75.0__react@18.3.1_react@18.3.1",
     "npm:@radix-ui/react-accordion@^1.2.11": "1.2.12_@types+react@18.3.28_@types+react-dom@18.3.7__@types+react@18.3.28_react@18.3.1_react-dom@18.3.1__react@18.3.1",
@@ -45,6 +46,7 @@
     "npm:@types/react-dom@^18.3.7": "18.3.7_@types+react@18.3.28",
     "npm:@types/react@^18.3.23": "18.3.28",
     "npm:@vitejs/plugin-react@^5.2.0": "5.2.0_vite@8.0.16__@types+node@22.19.19_@types+node@22.19.19",
+    "npm:ai@6.0.217": "6.0.217_zod@3.25.76",
     "npm:autoprefixer@^10.4.21": "10.5.0_postcss@8.5.15",
     "npm:class-variance-authority@~0.7.1": "0.7.1",
     "npm:clsx@^2.1.1": "2.1.1",
@@ -54,6 +56,7 @@
     "npm:eslint-plugin-react-hooks@^5.2.0": "5.2.0_eslint@9.39.4",
     "npm:eslint-plugin-react-refresh@~0.4.20": "0.4.26_eslint@9.39.4",
     "npm:eslint@^9.32.0": "9.39.4",
+    "npm:foglamp@0.7.0": "0.7.0_ai@6.0.217__zod@3.25.76_react@18.3.1_react-dom@18.3.1__react@18.3.1_zod@3.25.76",
     "npm:globals@^15.15.0": "15.15.0",
     "npm:husky@^9.1.0": "9.1.7",
     "npm:input-otp@^1.4.2": "1.4.2_react@18.3.1_react-dom@18.3.1__react@18.3.1",
@@ -101,6 +104,38 @@
   "npm": {
     "@adobe/css-tools@4.4.4": {
       "integrity": "sha512-Elp+iwUx5rN5+Y8xLt5/GRoG20WGoDCQ/1Fb+1LiGtvwbDavuSk0jhD/eZdckHAuzcDzccnkv+rEjyWfRx18gg=="
+    },
+    "@ai-sdk/gateway@3.0.141_zod@3.25.76": {
+      "integrity": "sha512-BVisCihanCq+rXJZHY+aKVOSHe+gQDEitSexnvU9UuRTX/P16fu4x31AZLDNIR/bWAShT3Ct+dDltO1enBPK6Q==",
+      "dependencies": [
+        "@ai-sdk/provider",
+        "@ai-sdk/provider-utils",
+        "@vercel/oidc",
+        "zod"
+      ]
+    },
+    "@ai-sdk/openai@3.0.79_zod@3.25.76": {
+      "integrity": "sha512-HI+hvdlW94RlpOQGQzS5Tp+Wgf1r4PQSPYndESBWp6NOowbzNwVfIkZyVNGa4Klvmo6t2T0ik3nSlpmbcauRnQ==",
+      "dependencies": [
+        "@ai-sdk/provider",
+        "@ai-sdk/provider-utils",
+        "zod"
+      ]
+    },
+    "@ai-sdk/provider-utils@4.0.34_zod@3.25.76": {
+      "integrity": "sha512-VL3tE0RV1ZwrtC8grTfcveFoyy9X96blfnRzIx5ayeGlCyTKpsZ4U4Ej3XpjOppAyAXKNflYSHAktOHE6gTLiw==",
+      "dependencies": [
+        "@ai-sdk/provider",
+        "@standard-schema/spec",
+        "eventsource-parser",
+        "zod"
+      ]
+    },
+    "@ai-sdk/provider@3.0.13": {
+      "integrity": "sha512-ZPtVYt5QIJzOta1kdUiDuCx4HhFkvNPv/rvmZ2b1iXwybYjJsCnNYR4PAw4kW7rgVfDARvHXcU64efWuqNp6bw==",
+      "dependencies": [
+        "json-schema"
+      ]
     },
     "@alloc/quick-lru@5.2.0": {
       "integrity": "sha512-UrcABB+4bUrFABwbluTIBErXwvbsU/V7TZWfmbgJfbkwiBuziS9gxdODUyuiecfdGQ85jglMW6juS3+z5TsKLw=="
@@ -2024,6 +2059,9 @@
         "eslint-visitor-keys@5.0.1"
       ]
     },
+    "@vercel/oidc@3.2.0": {
+      "integrity": "sha512-UycprH3T6n3jH0k44NHMa7pnFHGu/N05MjojYr+Mc6I7obkoLIJujSWwin1pCvdy/eOxrI/l3uDLQsmcrOb4ug=="
+    },
     "@vitejs/plugin-react@5.2.0_vite@8.0.16__@types+node@22.19.19_@types+node@22.19.19": {
       "integrity": "sha512-YmKkfhOAi3wsB1PhJq5Scj3GXMn3WvtQ/JC0xoopuHoXSdmtdStOpFrYaT1kie2YgFBcIe64ROzMYRjCrYOdYw==",
       "dependencies": [
@@ -2118,6 +2156,16 @@
       "integrity": "sha512-kja8j7PjmncONqaTsB8fQ+wE2mSU2DJ9D4XKoJ5PFWIdRMa6SLSN1ff4mOr4jCbfRSsxR4keIiySJU0N9T5hIQ==",
       "dependencies": [
         "humanize-ms"
+      ]
+    },
+    "ai@6.0.217_zod@3.25.76": {
+      "integrity": "sha512-BCA/1sNqQwfmZ8RxK2i+oezgzwfo1IAYt+wxBVpZlRLFswyi+t5TU0/5GvV6Hic7A2/UlnMtljz/Q3F94+2WzA==",
+      "dependencies": [
+        "@ai-sdk/gateway",
+        "@ai-sdk/provider",
+        "@ai-sdk/provider-utils",
+        "@opentelemetry/api",
+        "zod"
       ]
     },
     "ajv@6.15.0": {
@@ -2670,6 +2718,9 @@
     "eventemitter3@5.0.4": {
       "integrity": "sha512-mlsTRyGaPBjPedk6Bvw+aqbsXDtoAyAzm5MO7JgU+yVRyMQ5O8bD4Kcci7BS85f93veegeCPkL8R4GLClnjLFw=="
     },
+    "eventsource-parser@3.1.0": {
+      "integrity": "sha512-kJezFj9YFAMLeORyi7aCLxLbD5/qWMQnoMVlVPyHIll7lgRJCc3JVln9Vgl9nwQi0YkMnhdGTMNn7CkRRAptMg=="
+    },
     "execa@8.0.1": {
       "integrity": "sha512-VyhnebXciFV2DESc+p6B+y0LjSm0krU4OgJN44qFAhBY0TJ+1V61tYD2+wHusZ6F9n5K+vl8k0sTy7PEfV4qpg==",
       "dependencies": [
@@ -2752,6 +2803,20 @@
     },
     "flatted@3.4.2": {
       "integrity": "sha512-PjDse7RzhcPkIJwy5t7KPWQSZ9cAbzQXcafsetQoD7sOJRQlGikNbx7yZp2OotDnJyrDcbyRq3Ttb18iYOqkxA=="
+    },
+    "foglamp@0.7.0_ai@6.0.217__zod@3.25.76_react@18.3.1_react-dom@18.3.1__react@18.3.1_zod@3.25.76": {
+      "integrity": "sha512-UDubV00FQpG646CHxjRFI/zIcLJtT1FPlWC7CrI1xEu+IrWIxJC41Q/P/mXYp7oGtCO7YdVtkLSefQ9aWTv48g==",
+      "dependencies": [
+        "ai",
+        "react",
+        "react-dom",
+        "uuidv7"
+      ],
+      "optionalPeers": [
+        "react",
+        "react-dom"
+      ],
+      "bin": true
     },
     "form-data-encoder@1.7.2": {
       "integrity": "sha512-qfqtYan3rxrnCk1VYaA4H+Ms9xdpPqvLZa6xmMgFvhO32x7/3J/ExcTd6qpxM0vH2GdMI+poehyBZvqfMTto8A=="
@@ -3014,6 +3079,9 @@
     },
     "json-schema-traverse@0.4.1": {
       "integrity": "sha512-xbbCH5dCYU5T8LcEhhuh7HJ88HXuW3qsI3Y0zOZFKfZEHcpWiHU/Jxzk629Brsab/mMiHQti9wMP+845RPe3Vg=="
+    },
+    "json-schema@0.4.0": {
+      "integrity": "sha512-es94M3nTIfsEPisRafak+HDLfHXnKBhV3vU5eqPcS3flIWqcxJWgXHXiey3YrpaNsanY5ei1VoYEbOzijuq9BA=="
     },
     "json-stable-stringify-without-jsonify@1.0.1": {
       "integrity": "sha512-Bdboy+l7tA3OGW6FjyFHWkP5LuByj1Tk33Ljyq0axyzdk9//JSi2u3fP1QSmd1KNwq6VOKYGlAu87CisVir6Pw=="
@@ -4030,6 +4098,10 @@
     "util-deprecate@1.0.2": {
       "integrity": "sha512-EPD5q1uXyFxJpCrLnCc1nHnq3gOa6DZBocAIiI2TaSCA7VCJ1UJDMagCzIkXNsUYfD1daK//LTEQ8xiIbrHtcw=="
     },
+    "uuidv7@1.2.1": {
+      "integrity": "sha512-4kPkK3/XTQW9Hbm4CaqfICn+kY9LJtDVEOfgsRRra/+n2Ofg4NqzRFceAkxvQ/Ud/6BpHOPzj8cirqM7TzTN5Q==",
+      "bin": true
+    },
     "vaul@0.9.9_react@18.3.1_react-dom@18.3.1__react@18.3.1_@types+react@18.3.28_@types+react-dom@18.3.7__@types+react@18.3.28": {
       "integrity": "sha512-7afKg48srluhZwIkaU+lgGtFCUsYBSGOl8vcc8N/M3YQlZFlynHD15AE+pwrYdc826o7nrIND4lL9Y6b9WWZZQ==",
       "dependencies": [
@@ -4204,6 +4276,7 @@
   "workspace": {
     "packageJson": {
       "dependencies": [
+        "npm:@ai-sdk/openai@3.0.79",
         "npm:@eslint/js@^9.32.0",
         "npm:@hookform/resolvers@^3.10.0",
         "npm:@radix-ui/react-accordion@^1.2.11",
@@ -4244,6 +4317,7 @@
         "npm:@types/react-dom@^18.3.7",
         "npm:@types/react@^18.3.23",
         "npm:@vitejs/plugin-react@^5.2.0",
+        "npm:ai@6.0.217",
         "npm:autoprefixer@^10.4.21",
         "npm:class-variance-authority@~0.7.1",
         "npm:clsx@^2.1.1",
@@ -4253,6 +4327,7 @@
         "npm:eslint-plugin-react-hooks@^5.2.0",
         "npm:eslint-plugin-react-refresh@~0.4.20",
         "npm:eslint@^9.32.0",
+        "npm:foglamp@0.7.0",
         "npm:globals@^15.15.0",
         "npm:husky@^9.1.0",
         "npm:input-otp@^1.4.2",

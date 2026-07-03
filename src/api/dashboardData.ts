@@ -111,6 +111,51 @@ export interface OpenAIUsage {
   retryAttempts: number;
 }
 
+export interface ProcessObservabilityRun {
+  runKey: string;
+  workflowName: string;
+  workflowRunId: string | null;
+  status: string;
+  source: string | null;
+  sourceFunction: string | null;
+  subjectType: string | null;
+  subjectId: string | null;
+  startedAt: string | null;
+  endedAt: string | null;
+  durationSeconds: number | null;
+  lastError: string | null;
+  usedFilter: boolean;
+}
+
+export interface ProcessObservabilitySummary {
+  available: boolean;
+  error: string | null;
+  windowHours: number;
+  activeRuns: number;
+  completedRuns24h: number;
+  failedRuns24h: number;
+  aiCalls24h: number;
+  failedAiCalls24h: number;
+  totalTokens24h: number;
+  reasoningTokens24h: number;
+  aiCallP95Seconds: number | null;
+  latestRun: ProcessObservabilityRun | null;
+  recentRuns: ProcessObservabilityRun[];
+  foglamp: {
+    hostedExportEnabled: boolean;
+    hasApiKey: boolean;
+    monthlySpanLimit: number;
+    monthlySpanCap: number;
+    monthlySpanWarn: number;
+    estimatedSpansUsed: number;
+    estimatedSpansSkipped: number;
+    capUsedPct: number | null;
+    warning: boolean;
+    stopped: boolean;
+  };
+  openAiTokensMonthToDate: number;
+}
+
 export interface IngestHeartbeat {
   state: 'ok' | 'warning' | 'critical';
   lastPostAt: string | null;
@@ -287,6 +332,7 @@ interface RpcResult {
   };
   x_local_usage?: Record<string, unknown>;
   openai_usage?: Record<string, unknown>;
+  process_observability?: Record<string, unknown>;
   system_performance?: Record<string, unknown>;
   scoring_tuning?: Record<string, unknown>;
   activity?: Array<Record<string, unknown>>;
@@ -569,6 +615,59 @@ function normalizeOpenAIUsage(input: RpcResult['openai_usage']): OpenAIUsage {
   };
 }
 
+function normalizeProcessRun(input: unknown): ProcessObservabilityRun {
+  const row = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+  return {
+    runKey: String(row.run_key ?? row.runKey ?? ''),
+    workflowName: String(row.workflow_name ?? row.workflowName ?? 'unknown'),
+    workflowRunId: typeof (row.workflow_run_id ?? row.workflowRunId) === 'string' ? String(row.workflow_run_id ?? row.workflowRunId) : null,
+    status: String(row.status ?? 'unknown'),
+    source: typeof row.source === 'string' ? row.source : null,
+    sourceFunction: typeof (row.source_function ?? row.sourceFunction) === 'string' ? String(row.source_function ?? row.sourceFunction) : null,
+    subjectType: typeof (row.subject_type ?? row.subjectType) === 'string' ? String(row.subject_type ?? row.subjectType) : null,
+    subjectId: typeof (row.subject_id ?? row.subjectId) === 'string' ? String(row.subject_id ?? row.subjectId) : null,
+    startedAt: typeof (row.started_at ?? row.startedAt) === 'string' ? String(row.started_at ?? row.startedAt) : null,
+    endedAt: typeof (row.ended_at ?? row.endedAt) === 'string' ? String(row.ended_at ?? row.endedAt) : null,
+    durationSeconds: asNullableNumber(row.duration_seconds ?? row.durationSeconds),
+    lastError: typeof (row.last_error ?? row.lastError) === 'string' ? String(row.last_error ?? row.lastError) : null,
+    usedFilter: (row.used_filter ?? row.usedFilter) === true,
+  };
+}
+
+function normalizeProcessObservability(input: RpcResult['process_observability']): ProcessObservabilitySummary {
+  const foglamp = input?.foglamp && typeof input.foglamp === 'object' ? input.foglamp as Record<string, unknown> : {};
+  const recentRuns = Array.isArray(input?.recent_runs) ? input.recent_runs : Array.isArray(input?.recentRuns) ? input.recentRuns : [];
+  const latest = input?.latest_run ?? input?.latestRun ?? null;
+  return {
+    available: input?.available === true,
+    error: typeof input?.error === 'string' ? input.error : null,
+    windowHours: asNumber(input?.window_hours ?? input?.windowHours, 24),
+    activeRuns: asNumber(input?.active_runs ?? input?.activeRuns),
+    completedRuns24h: asNumber(input?.completed_runs_24h ?? input?.completedRuns24h),
+    failedRuns24h: asNumber(input?.failed_runs_24h ?? input?.failedRuns24h),
+    aiCalls24h: asNumber(input?.ai_calls_24h ?? input?.aiCalls24h),
+    failedAiCalls24h: asNumber(input?.failed_ai_calls_24h ?? input?.failedAiCalls24h),
+    totalTokens24h: asNumber(input?.total_tokens_24h ?? input?.totalTokens24h),
+    reasoningTokens24h: asNumber(input?.reasoning_tokens_24h ?? input?.reasoningTokens24h),
+    aiCallP95Seconds: asNullableNumber(input?.ai_call_p95_seconds ?? input?.aiCallP95Seconds),
+    latestRun: latest ? normalizeProcessRun(latest) : null,
+    recentRuns: recentRuns.map(normalizeProcessRun),
+    foglamp: {
+      hostedExportEnabled: foglamp.hosted_export_enabled === true || foglamp.hostedExportEnabled === true,
+      hasApiKey: foglamp.has_api_key === true || foglamp.hasApiKey === true,
+      monthlySpanLimit: asNumber(foglamp.monthly_span_limit ?? foglamp.monthlySpanLimit, 10_000),
+      monthlySpanCap: asNumber(foglamp.monthly_span_cap ?? foglamp.monthlySpanCap, 8_000),
+      monthlySpanWarn: asNumber(foglamp.monthly_span_warn ?? foglamp.monthlySpanWarn, 6_000),
+      estimatedSpansUsed: asNumber(foglamp.estimated_spans_used ?? foglamp.estimatedSpansUsed),
+      estimatedSpansSkipped: asNumber(foglamp.estimated_spans_skipped ?? foglamp.estimatedSpansSkipped),
+      capUsedPct: asNullableNumber(foglamp.cap_used_pct ?? foglamp.capUsedPct),
+      warning: foglamp.warning === true,
+      stopped: foglamp.stopped === true,
+    },
+    openAiTokensMonthToDate: asNumber(input?.openai_tokens_month_to_date ?? input?.openAiTokensMonthToDate),
+  };
+}
+
 function normalizeActivity(rpc: RpcResult): ActivityItem[] {
   if (Array.isArray(rpc.activity) && rpc.activity.length > 0) {
     return rpc.activity.map((item, index) => ({
@@ -642,9 +741,10 @@ export async function fetchDashboardData() {
   const queueBreakdown = normalizeQueueBreakdown(rpc.queue_breakdown, metrics, health);
   const xLocalUsage = normalizeXLocalUsage(rpc.x_local_usage, metrics, health);
   const openAiUsage = normalizeOpenAIUsage(rpc.openai_usage);
+  const processObservability = normalizeProcessObservability(rpc.process_observability);
   const systemPerformance = normalizeSystemPerformance(rpc.system_performance);
   const scoringTuning = normalizeScoringTuning(rpc.scoring_tuning);
   const activities = normalizeActivity(rpc);
 
-  return { metrics, health, activities, heartbeat, opsStatus, pipelineCounts, queueBreakdown, xLocalUsage, openAiUsage, systemPerformance, scoringTuning };
+  return { metrics, health, activities, heartbeat, opsStatus, pipelineCounts, queueBreakdown, xLocalUsage, openAiUsage, processObservability, systemPerformance, scoringTuning };
 }

@@ -3,6 +3,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import WebSocket from "ws";
 import { buildAudioExtractCommand, buildContactSheetCommand, buildFrameSampleCommand, buildOpenCvInpaintRenderCommand, buildRenderCommand, buildWatermarkInspectionSheetCommand, probeVideo, runCommand } from "./ffmpeg.js";
+import { createObservedOpenAIFetch, finishWorkflowRun, startWorkflowRun } from "./observability.js";
 import { analyzeRemovableWatermarks, cleanupTranscriptSegments, detectLanguageFromTranscription, translateSegments } from "./openai.js";
 import { decidePreflightBlock, decideWatermarkOnlyBlock, delogoRegionsFromWatermarkOnly, evaluateDelogoPlan, normalizeLanguage, normalizeWatermarkOnlyDecision, recoverDelogoRegions, runOptionalOcr, runVisualPreflight, scoreWatermarkSignals, selectDelogoRegions, selectTargetLanguage, subtitlePlacementFromVision, visionFromWatermarkOnly } from "./preflight.js";
 import { resolveRenderEffects } from "./renderEffects.js";
@@ -497,7 +498,32 @@ async function renderAndComplete({
   };
 }
 
-async function maybeRunVisionPreflight({ inputPath, workingDir, config, preflight, metrics }) {
+function createRendererObservability({ supabase, workflowRunKey, row, runtimeConfig, sourceFunction }) {
+  const baseMetadata = {
+    render_id: row.id,
+    source_media_id: row.source_media_id ?? null,
+    render_version: runtimeConfig.renderVersion,
+    renderer_id: runtimeConfig.rendererId,
+    source_function: sourceFunction,
+  };
+  return {
+    metadata: baseMetadata,
+    fetch(operationName, agentName, metadata = {}) {
+      return createObservedOpenAIFetch({
+        supabase,
+        workflowRunKey,
+        operationName,
+        agentName,
+        metadata: {
+          ...baseMetadata,
+          ...metadata,
+        },
+      });
+    },
+  };
+}
+
+async function maybeRunVisionPreflight({ inputPath, workingDir, config, preflight, metrics, observability = null }) {
   const contactSheetPath = join(workingDir, "contact-sheet.jpg");
   const frameSpecs = visionFrameSeekTimes(metrics).map((seekSeconds, index) => ({
     path: join(workingDir, `vision-frame-${index + 1}.jpg`),
@@ -528,6 +554,9 @@ async function maybeRunVisionPreflight({ inputPath, workingDir, config, prefligh
       temperature: config.watermarkVisionTemperature,
       topP: config.watermarkVisionTopP,
       maxOutputTokens: config.watermarkVisionMaxOutputTokens,
+      fetchImpl: observability?.fetch("inspect_watermarks", "vision-checker", {
+        phase: "preflight",
+      }),
     }));
     watermarkOnly = normalizeWatermarkOnlyDecision(watermarkOnly);
     vision = visionFromWatermarkOnly(watermarkOnly);
@@ -607,6 +636,10 @@ export async function processRenderRow({ supabase, row, config }) {
   const started = Date.now();
   const dbSettings = await measure(metrics, "config_load", () => loadRenderSettingsOrDefault(supabase, metrics));
   const runtimeConfig = applyRenderSettings(config, dbSettings);
+  const workflowRunKey = `video-renderer:render:${row.id}`;
+  const workflowRunId = String(row.id);
+  let workflowStatus = "completed";
+  let workflowMetadata = {};
   metrics.video_render_config = {
     mode: dbSettings.mode,
     transcription_provider: dbSettings.transcription_provider,
@@ -614,8 +647,33 @@ export async function processRenderRow({ supabase, row, config }) {
     translation_model: dbSettings.translation_model,
     vision_model: dbSettings.vision_model,
   };
+  await startWorkflowRun(supabase, {
+    runKey: workflowRunKey,
+    workflowName: "video-renderer-ai",
+    workflowRunId,
+    status: "running",
+    source: "video-renderer",
+    sourceFunction: "processRenderRow",
+    subjectType: "video_render",
+    subjectId: row.id,
+    tweetId: row.tweet_id,
+    metadata: {
+      render_id: row.id,
+      source_media_id: row.source_media_id ?? null,
+      render_version: runtimeConfig.renderVersion,
+      renderer_id: runtimeConfig.rendererId,
+      mode: dbSettings.mode,
+    },
+  });
+  const observability = createRendererObservability({
+    supabase,
+    workflowRunKey,
+    row,
+    runtimeConfig,
+    sourceFunction: "processRenderRow",
+  });
+  workflowMetadata = observability.metadata;
   const workingDir = join(runtimeConfig.workDir, row.id);
-  await mkdir(workingDir, { recursive: true });
 
   const inputPath = join(workingDir, "source.mp4");
   const audioPath = join(workingDir, "audio.mp3");
@@ -624,6 +682,7 @@ export async function processRenderRow({ supabase, row, config }) {
   const outputPath = join(workingDir, "rendered.mp4");
 
   try {
+    await mkdir(workingDir, { recursive: true });
     const source = await measure(metrics, "source_lookup", () => loadRenderSource(supabase, row));
     const postContext = await measure(metrics, "post_context_lookup", () => loadPostContextText(supabase, row.tweet_id));
     metrics.subtitle_context_available = Boolean(postContext);
@@ -649,10 +708,16 @@ export async function processRenderRow({ supabase, row, config }) {
       probe,
       options: preflightOptions(runtimeConfig),
     }));
-    preflight = await maybeRunVisionPreflight({ inputPath, workingDir, config: runtimeConfig, preflight, metrics });
+    preflight = await maybeRunVisionPreflight({ inputPath, workingDir, config: runtimeConfig, preflight, metrics, observability });
     metrics.preflight = preflight;
     if (preflight.block?.blocked) {
       metrics.total_ms = Date.now() - started;
+      workflowStatus = "skipped";
+      workflowMetadata = {
+        ...observability.metadata,
+        blocked: true,
+        block_reason: preflight.block.reason ?? null,
+      };
       return await blockRender({ supabase, row, reason: preflight.block.reason, preflight, metrics });
     }
 
@@ -700,6 +765,7 @@ export async function processRenderRow({ supabase, row, config }) {
         deepgramLanguageFallbacks: runtimeConfig.deepgramLanguageFallbacks,
         deepgramDetectLanguage: runtimeConfig.deepgramDetectLanguage,
         openaiApiKey: runtimeConfig.openaiApiKey,
+        openaiFetchImpl: observability.fetch("transcribe_audio", "transcription-cleaner"),
         openaiModel: runtimeConfig.transcriptionModel,
         openaiFallbackModel: runtimeConfig.fallbackTranscriptionModel,
         durationMs: metrics.duration_ms,
@@ -784,6 +850,9 @@ export async function processRenderRow({ supabase, row, config }) {
         segments: timedSourceSegments,
         sourceLanguage,
         contextText,
+        fetchImpl: observability.fetch("clean_transcript", "transcription-cleaner", {
+          source_language: sourceLanguage,
+        }),
       }))
       : { model: null, segments: timedSourceSegments, skipped: true };
     const sourceSegments = sanitizeSubtitleSegments(cleanup.segments, { durationMs: metrics.duration_ms });
@@ -830,6 +899,12 @@ export async function processRenderRow({ supabase, row, config }) {
       segments: readableSourceSegments,
       targetLanguage,
       contextText,
+      fetchImpl: observability.fetch("translate_subtitles", "subtitle-translator", {
+        target_language: targetLanguage,
+      }),
+      repairFetchImpl: observability.fetch("repair_subtitle_translation", "subtitle-translator", {
+        target_language: targetLanguage,
+      }),
     }));
     metrics.translation_model = translation.model;
     if (!hasUsableSubtitleText(translation.segments)) {
@@ -859,7 +934,7 @@ export async function processRenderRow({ supabase, row, config }) {
       await writeFile(assPath, ass);
     });
 
-    return await renderAndComplete({
+    const result = await renderAndComplete({
       supabase,
       row,
       config: runtimeConfig,
@@ -878,8 +953,20 @@ export async function processRenderRow({ supabase, row, config }) {
       probe,
       started,
     });
+    workflowMetadata = {
+      ...observability.metadata,
+      original_selected: result.original_selected === true,
+      output_storage_path: result.output_storage_path ?? null,
+      total_ms: metrics.total_ms ?? null,
+    };
+    return result;
   } catch (error) {
     metrics.total_ms = Date.now() - started;
+    workflowStatus = "failed";
+    workflowMetadata = {
+      ...observability.metadata,
+      total_ms: metrics.total_ms ?? null,
+    };
     const data = await recordRenderFailure(supabase, {
       renderId: row.id,
       error,
@@ -888,16 +975,21 @@ export async function processRenderRow({ supabase, row, config }) {
     await maybeInvokePostingFunctions(supabase, data, row.tweet_id);
     throw error;
   } finally {
+    await finishWorkflowRun(supabase, workflowRunKey, workflowStatus, workflowMetadata).catch(() => null);
     await rm(workingDir, { recursive: true, force: true }).catch(() => null);
   }
 }
 
 export async function runPreflightForRenderId({ supabase, renderId, config }) {
   const metrics = {};
+  const started = Date.now();
   const dbSettings = await measure(metrics, "config_load", () => loadRenderSettingsOrDefault(supabase, metrics));
   const runtimeConfig = applyRenderSettings(config, dbSettings);
   metrics.video_render_config = { mode: dbSettings.mode };
   const workingDir = join(runtimeConfig.workDir, `preflight-${renderId}-${Date.now()}`);
+  let workflowRunKey = null;
+  let workflowStatus = "completed";
+  let workflowMetadata = {};
   await mkdir(workingDir, { recursive: true });
   const inputPath = join(workingDir, "source.mp4");
   try {
@@ -908,6 +1000,39 @@ export async function runPreflightForRenderId({ supabase, renderId, config }) {
       .maybeSingle();
     if (error) throw error;
     if (!row) throw new Error(`render ${renderId} not found`);
+    const workflowRunSuffix = `${renderId}:${Date.now()}`;
+    workflowRunKey = `video-renderer:preflight:${workflowRunSuffix}`;
+    const workflowRunId = `preflight:${workflowRunSuffix}`;
+    await startWorkflowRun(supabase, {
+      runKey: workflowRunKey,
+      workflowName: "video-renderer-ai",
+      workflowRunId,
+      status: "running",
+      source: "video-renderer",
+      sourceFunction: "runPreflightForRenderId",
+      subjectType: "video_render",
+      subjectId: row.id,
+      tweetId: row.tweet_id,
+      metadata: {
+        render_id: row.id,
+        source_media_id: row.source_media_id ?? null,
+        render_version: runtimeConfig.renderVersion,
+        renderer_id: runtimeConfig.rendererId,
+        mode: dbSettings.mode,
+        preflight_only: true,
+      },
+    });
+    const observability = createRendererObservability({
+      supabase,
+      workflowRunKey,
+      row,
+      runtimeConfig,
+      sourceFunction: "runPreflightForRenderId",
+    });
+    workflowMetadata = {
+      ...observability.metadata,
+      preflight_only: true,
+    };
     const source = await measure(metrics, "source_lookup", () => loadRenderSource(supabase, row));
     await measure(metrics, "download", async () => {
       const { data, error: downloadError } = await supabase.storage.from(runtimeConfig.bucket).download(source.storage_path);
@@ -923,13 +1048,31 @@ export async function runPreflightForRenderId({ supabase, renderId, config }) {
       probe,
       options: preflightOptions(runtimeConfig),
     }));
-    preflight = await maybeRunVisionPreflight({ inputPath, workingDir, config: runtimeConfig, preflight, metrics });
+    preflight = await maybeRunVisionPreflight({ inputPath, workingDir, config: runtimeConfig, preflight, metrics, observability });
     preflight = {
       ...preflight,
       hasAudio: hasAudioStream(probe),
     };
+    metrics.total_ms = Date.now() - started;
+    workflowMetadata = {
+      ...workflowMetadata,
+      blocked: preflight.block?.blocked === true,
+      block_reason: preflight.block?.reason ?? null,
+      total_ms: metrics.total_ms,
+    };
     return { ok: true, render_id: renderId, tweet_id: row.tweet_id, preflight, metrics };
+  } catch (error) {
+    workflowStatus = "failed";
+    metrics.total_ms = Date.now() - started;
+    workflowMetadata = {
+      ...workflowMetadata,
+      total_ms: metrics.total_ms,
+    };
+    throw error;
   } finally {
+    if (workflowRunKey) {
+      await finishWorkflowRun(supabase, workflowRunKey, workflowStatus, workflowMetadata).catch(() => null);
+    }
     if (!runtimeConfig.keepPreflightWorkdir) {
       await rm(workingDir, { recursive: true, force: true }).catch(() => null);
     }

@@ -185,6 +185,48 @@ const dashboardData = {
     quotaFailedJobs: 1,
     retryAttempts: 2,
   },
+  processObservability: {
+    available: true,
+    error: null,
+    windowHours: 24,
+    activeRuns: 1,
+    completedRuns24h: 7,
+    failedRuns24h: 1,
+    aiCalls24h: 9,
+    failedAiCalls24h: 1,
+    totalTokens24h: 23_456,
+    reasoningTokens24h: 1_200,
+    aiCallP95Seconds: 12,
+    latestRun: {
+      runKey: "worker:translate:job-1",
+      workflowName: "rss-item-pipeline",
+      workflowRunId: "job-1",
+      status: "completed",
+      source: "worker",
+      sourceFunction: "handleTranslateJob",
+      subjectType: "post",
+      subjectId: "tweet-1",
+      startedAt: new Date().toISOString(),
+      endedAt: new Date().toISOString(),
+      durationSeconds: 8,
+      lastError: null,
+      usedFilter: true,
+    },
+    recentRuns: [],
+    foglamp: {
+      hostedExportEnabled: false,
+      hasApiKey: true,
+      monthlySpanLimit: 10_000,
+      monthlySpanCap: 8_000,
+      monthlySpanWarn: 6_000,
+      estimatedSpansUsed: 120,
+      estimatedSpansSkipped: 9,
+      capUsedPct: 2,
+      warning: false,
+      stopped: false,
+    },
+    openAiTokensMonthToDate: 100_000,
+  },
   systemPerformance: {
     success: true,
     error: null,
@@ -347,6 +389,26 @@ describe("Dashboard", () => {
     expect(screen.getByText("Last 24h from completed job metadata")).toBeTruthy();
     expect(screen.getByText("12,345")).toBeTruthy();
     expect(screen.getByText(/5 measured jobs - 2 retry attempts/)).toBeTruthy();
+  });
+
+  it("shows local process observability and Foglamp cap state on the pipeline tab", () => {
+    mockedUseDashboardData.mockReturnValue({
+      data: dashboardData,
+      isLoading: false,
+      isError: false,
+      error: null,
+      dataUpdatedAt: Date.now(),
+      isFetching: false,
+    } as ReturnType<typeof useDashboardData>);
+
+    renderDashboard(["/?tab=pipeline"]);
+
+    expect(screen.getByText("Process Observability")).toBeTruthy();
+    expect(screen.getByText("Last 24h from XOT-owned ledgers")).toBeTruthy();
+    expect(screen.getByText("Local only")).toBeTruthy();
+    expect(screen.getByText("rss-item-pipeline")).toBeTruthy();
+    expect(screen.getByText("120 / 8,000")).toBeTruthy();
+    expect(screen.getByText("9 estimated spans kept local")).toBeTruthy();
   });
 
   it("surfaces storage warning when no higher-priority issue is active", () => {

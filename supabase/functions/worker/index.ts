@@ -1,7 +1,19 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
-import { callOpenAI, type ToolFunctionDef } from "../_shared/openai.ts";
+import {
+  callOpenAI,
+  type NormalizedOpenAIResponse,
+  type OpenAICallParams,
+  type ToolFunctionDef,
+} from "../_shared/openai.ts";
+import {
+  estimateFoglampSpans,
+  finishWorkflowRun,
+  recordObservedOpenAICall,
+  recordObservedProviderCall,
+  startWorkflowRun,
+} from "../_shared/observability.ts";
 import {
   repairTranslationReadability,
   translationReadabilityMeta,
@@ -32,6 +44,7 @@ import {
 } from "../_shared/sentry.ts";
 import {
   DEFAULT_DUPLICATE_GATE,
+  fetchObservedStoryEmbedding,
   normalizeDuplicateGateConfig,
   runDuplicateGate,
 } from "../_shared/dedupe.ts";
@@ -494,6 +507,17 @@ async function handleDedupeJob(
   const payload = job.payload as Record<string, unknown>;
   const tweetId = payload.tweet_id as string;
   if (!tweetId) throw new Error("dedupe: missing tweet_id in job payload");
+  let workflowRunKey: string | null = null;
+  let workflowFinalized = false;
+  const finishDedupeWorkflow = async (
+    status: "completed" | "failed" | "skipped",
+    metadata?: Record<string, unknown>,
+    error?: unknown,
+  ) => {
+    if (!workflowRunKey || workflowFinalized) return;
+    await finishWorkflowRun(supabase, workflowRunKey, status, metadata, error);
+    workflowFinalized = true;
+  };
   const sm = config.storyMemory;
   if (!sm?.enabled) {
     if (enqueueNext) {
@@ -531,47 +555,128 @@ async function handleDedupeJob(
       ? "running:post_hydrate"
       : `running:${String(job.type)}`,
   );
-  const result = await runDuplicateGate(supabase, post, sm, {
-    force: payload.force === true,
-    source: payload.post_hydrate === true ? "post_hydrate" : String(job.type),
+  const workflowRunId = workerWorkflowRunId(job, tweetId, "dedupe");
+  workflowRunKey = workerWorkflowRunKey("dedupe", workflowRunId);
+  await startWorkflowRun(supabase, {
+    runKey: workflowRunKey,
+    workflowName: "dedupe-pipeline",
+    workflowRunId,
+    status: "running",
+    source: "worker",
+    sourceFunction: "handleDedupeJob",
+    subjectType: "post",
+    subjectId: tweetId,
+    jobId: typeof job.id === "string" ? job.id : null,
+    tweetId,
+    metadata: {
+      job_type: String(job.type),
+      source: payload.post_hydrate === true ? "post_hydrate" : String(job.type),
+      force: payload.force === true,
+      enqueue_next: enqueueNext,
+      mode: sm.mode,
+      action: sm.action,
+    },
   });
-  if (!result.ok) {
-    console.warn(JSON.stringify({
-      function: "worker",
-      action: result.retryable ? "dedupe_failed_retry" : "dedupe_failed_closed",
-      tweet_id: tweetId,
-      error: result.error ?? result.reason,
-      failure_phase: result.failure_phase ?? null,
-      retryable: result.retryable === true,
-      enqueue_translate: false,
-    }));
-    if (result.retryable) {
-      throw new Error(
-        `dedupe_retryable:${result.failure_phase ?? "unknown"}:${
-          result.error ?? result.reason
-        }`,
+
+  try {
+    const openaiApiKey = Deno.env.get("OPENAI_API_KEY") ?? "";
+    const result = await runDuplicateGate(supabase, post, sm, {
+      force: payload.force === true,
+      source: payload.post_hydrate === true ? "post_hydrate" : String(job.type),
+      fetchEmbedding: (text) =>
+        fetchObservedStoryEmbedding({
+          supabase,
+          workflowRunKey,
+          apiKey: openaiApiKey,
+          text,
+          metadata: {
+            job_type: String(job.type),
+            source: payload.post_hydrate === true
+              ? "post_hydrate"
+              : String(job.type),
+            mode: sm.mode,
+          },
+        }),
+      callOpenAI: (params) =>
+        callObservedWorkerOpenAI(
+          supabase,
+          workflowRunKey!,
+          params,
+          {
+            traceName: "dedupe-pipeline",
+            operationName: "classify_story_duplicate",
+            agentName: "duplicate-adjudicator",
+            foglampSkipReason: "dedupe_local_only",
+            metadata: {
+              job_type: String(job.type),
+              source: payload.post_hydrate === true
+                ? "post_hydrate"
+                : String(job.type),
+              mode: sm.mode,
+            },
+          },
+        ),
+    });
+    if (!result.ok) {
+      console.warn(JSON.stringify({
+        function: "worker",
+        action: result.retryable
+          ? "dedupe_failed_retry"
+          : "dedupe_failed_closed",
+        tweet_id: tweetId,
+        error: result.error ?? result.reason,
+        failure_phase: result.failure_phase ?? null,
+        retryable: result.retryable === true,
+        enqueue_translate: false,
+      }));
+      await finishDedupeWorkflow("failed", {
+        job_type: String(job.type),
+        status: result.status,
+        method: result.method,
+        failure_phase: result.failure_phase ?? null,
+        retryable: result.retryable === true,
+      }, result.error ?? result.reason);
+      if (result.retryable) {
+        throw new Error(
+          `dedupe_retryable:${result.failure_phase ?? "unknown"}:${
+            result.error ?? result.reason
+          }`,
+        );
+      }
+      return true;
+    }
+    if (enqueueNext && result.should_enqueue_translate) {
+      await queueTranslateFromDedupe(
+        supabase,
+        tweetId,
+        payload.post_hydrate === true,
       );
     }
+    await finishDedupeWorkflow("completed", {
+      job_type: String(job.type),
+      status: result.status,
+      method: result.method,
+      confidence: result.confidence,
+      candidate_count: result.candidates.length,
+      enqueue_translate: enqueueNext && result.should_enqueue_translate,
+    });
+    console.log(JSON.stringify({
+      function: "worker",
+      action: "dedupe_complete",
+      tweet_id: tweetId,
+      status: result.status,
+      method: result.method,
+      dup_of: result.dup_of_tweet_id,
+      confidence: result.confidence,
+      enqueue_translate: enqueueNext && result.should_enqueue_translate,
+    }));
     return true;
+  } catch (error) {
+    await finishDedupeWorkflow("failed", {
+      job_type: String(job.type),
+    }, error);
+    throw error;
   }
-  if (enqueueNext && result.should_enqueue_translate) {
-    await queueTranslateFromDedupe(
-      supabase,
-      tweetId,
-      payload.post_hydrate === true,
-    );
-  }
-  console.log(JSON.stringify({
-    function: "worker",
-    action: "dedupe_complete",
-    tweet_id: tweetId,
-    status: result.status,
-    method: result.method,
-    dup_of: result.dup_of_tweet_id,
-    confidence: result.confidence,
-    enqueue_translate: enqueueNext && result.should_enqueue_translate,
-  }));
-  return true;
 }
 
 serve(async (req) => {
@@ -1019,14 +1124,127 @@ async function enqueuePostDeliveryAfterRenderGate(
   );
 }
 
+function workerWorkflowRunId(
+  job: Record<string, unknown>,
+  fallbackSubjectId: string,
+  fallbackType = "translate",
+): string {
+  return typeof job.id === "string" && job.id.trim()
+    ? job.id
+    : `${fallbackType}:${fallbackSubjectId}:${Date.now()}`;
+}
+
+function workerWorkflowRunKey(type: string, runId: string): string {
+  return `worker:${type}:${runId}`;
+}
+
+function thrownWorkerOpenAIResponse(
+  error: unknown,
+  model: string,
+): NormalizedOpenAIResponse {
+  const message = error instanceof Error ? error.message : String(error);
+  const raw = { error: { message } };
+  return {
+    ok: false,
+    status: 0,
+    rawText: JSON.stringify(raw),
+    raw,
+    content: "",
+    toolCall: null,
+    webSearchResults: [],
+    outputItems: [],
+    usage: null,
+    endpoint: /^gpt-5\.(4|5)/i.test(model) ? "responses" : "chat.completions",
+  };
+}
+
+async function callObservedWorkerOpenAI(
+  supabase: { from(table: string): unknown },
+  workflowRunKey: string,
+  params: OpenAICallParams,
+  options: {
+    operationName: string;
+    agentName: string;
+    traceName?: string;
+    foglampSkipReason?: string;
+    metadata?: Record<string, unknown>;
+  },
+): Promise<NormalizedOpenAIResponse> {
+  const traceName = options.traceName ?? "rss-item-pipeline";
+  const foglampSkipReason = options.foglampSkipReason ?? "worker_local_only";
+  const startedAt = new Date();
+  let response: NormalizedOpenAIResponse;
+  try {
+    response = await callOpenAI(params);
+  } catch (error) {
+    response = thrownWorkerOpenAIResponse(error, params.model);
+    await recordObservedOpenAICall(supabase, {
+      workflowRunKey,
+      traceName,
+      operationName: options.operationName,
+      agentName: options.agentName,
+      model: params.model,
+      endpoint: response.endpoint,
+      request: params,
+      response,
+      status: "failed",
+      startedAt,
+      endedAt: new Date(),
+      spanEstimate: estimateFoglampSpans(params),
+      foglampExported: false,
+      foglampSkipReason,
+      metadata: options.metadata,
+    });
+    throw error;
+  }
+
+  await recordObservedOpenAICall(supabase, {
+    workflowRunKey,
+    traceName,
+    operationName: options.operationName,
+    agentName: options.agentName,
+    model: params.model,
+    endpoint: response.endpoint,
+    request: params,
+    response,
+    status: response.ok ? "completed" : "failed",
+    startedAt,
+    endedAt: new Date(),
+    spanEstimate: estimateFoglampSpans(params),
+    foglampExported: false,
+    foglampSkipReason,
+    metadata: options.metadata,
+  });
+  return response;
+}
+
 async function handleTranslateJob(
   job: Record<string, unknown>, // deno-lint-ignore no-explicit-any
   supabase: any,
   config: Awaited<ReturnType<typeof loadConfig>>,
 ): Promise<boolean> {
+  let workflowRunKey: string | null = null;
   try {
     const payload = job.payload as Record<string, unknown>;
     const tweetId = payload.tweet_id as string;
+    const workflowRunId = workerWorkflowRunId(job, tweetId);
+    workflowRunKey = workerWorkflowRunKey("translate", workflowRunId);
+    await startWorkflowRun(supabase, {
+      runKey: workflowRunKey,
+      workflowName: "rss-item-pipeline",
+      workflowRunId,
+      status: "running",
+      source: "worker",
+      sourceFunction: "handleTranslateJob",
+      subjectType: "post",
+      subjectId: tweetId,
+      jobId: typeof job.id === "string" ? job.id : null,
+      tweetId,
+      metadata: {
+        job_type: "translate",
+        attempt: typeof job.attempts === "number" ? job.attempts : null,
+      },
+    });
     console.log(
       JSON.stringify({
         function: "worker",
@@ -1107,6 +1325,10 @@ async function handleTranslateJob(
           decision: "skip",
         },
       );
+      await finishWorkflowRun(supabase, workflowRunKey, "skipped", {
+        reason: "duplicate_gate",
+        delivery_decision: "skip",
+      });
       return true;
     }
 
@@ -1484,10 +1706,19 @@ async function handleTranslateJob(
             source: "feedback_locked",
           }));
           const trResult = await measureTranslationCall(() =>
-            callOpenAI({
-              apiKey: openaiApiKey,
-              ...buildTranslationRequest(),
-            })
+            callObservedWorkerOpenAI(
+              supabase,
+              workflowRunKey!,
+              {
+                apiKey: openaiApiKey,
+                ...buildTranslationRequest(),
+              },
+              {
+                operationName: "translate",
+                agentName: "translator",
+                metadata: { path: "feedback_locked" },
+              },
+            )
           );
           if (!trResult.ok) {
             throw new Error(
@@ -1574,6 +1805,20 @@ async function handleTranslateJob(
             },
             {
               calibrationExamples,
+              callOpenAIImpl: (params) =>
+                callObservedWorkerOpenAI(
+                  supabase,
+                  workflowRunKey!,
+                  params,
+                  {
+                    operationName: "score-v2",
+                    agentName: "importance-scorer",
+                    metadata: {
+                      path: "scoring_policy",
+                      mode: scoringPolicyActive ? "active" : "shadow",
+                    },
+                  },
+                ),
             },
           )
         );
@@ -1618,23 +1863,32 @@ async function handleTranslateJob(
         );
 
         const scoreResult = await measureScoringCall(() =>
-          callOpenAI({
-            apiKey: openaiApiKey,
-            model: scoringModel,
-            messages: [
-              { role: "system", content: renderSystemPrompt() },
-              { role: "user", content: buildUserMessage() },
-            ],
-            tool: scoreToolFunction as unknown as ToolFunctionDef,
-            maxOutputTokens: scoringMaxTokens,
-            temperature: scoringTemperature,
-            topP: scoringTopP,
-            reasoningEffort: scoringReasoningEffort,
-            verbosity: scoringVerbosity,
-            seed: scoringSeed,
-            serviceTier: scoringServiceTier,
-            parallelToolCalls: scoringParallelTools,
-          })
+          callObservedWorkerOpenAI(
+            supabase,
+            workflowRunKey!,
+            {
+              apiKey: openaiApiKey,
+              model: scoringModel,
+              messages: [
+                { role: "system", content: renderSystemPrompt() },
+                { role: "user", content: buildUserMessage() },
+              ],
+              tool: scoreToolFunction as unknown as ToolFunctionDef,
+              maxOutputTokens: scoringMaxTokens,
+              temperature: scoringTemperature,
+              topP: scoringTopP,
+              reasoningEffort: scoringReasoningEffort,
+              verbosity: scoringVerbosity,
+              seed: scoringSeed,
+              serviceTier: scoringServiceTier,
+              parallelToolCalls: scoringParallelTools,
+            },
+            {
+              operationName: "score",
+              agentName: "importance-scorer",
+              metadata: { path: "legacy_split" },
+            },
+          )
         );
 
         if (!scoreResult.ok) {
@@ -1720,10 +1974,19 @@ async function handleTranslateJob(
           }),
         );
         const trResult = await measureTranslationCall(() =>
-          callOpenAI({
-            apiKey: openaiApiKey,
-            ...buildTranslationRequest(),
-          })
+          callObservedWorkerOpenAI(
+            supabase,
+            workflowRunKey!,
+            {
+              apiKey: openaiApiKey,
+              ...buildTranslationRequest(),
+            },
+            {
+              operationName: "translate",
+              agentName: "translator",
+              metadata: { path: "split_gate_passed" },
+            },
+          )
         );
         if (!trResult.ok) {
           throw new Error(
@@ -1772,25 +2035,34 @@ async function handleTranslateJob(
       // ============ COMBINED PATH (legacy, when split_calls = false) ============
       const toolFunction = buildToolFunction(true);
       const result = await measureTranslationCall(() =>
-        callOpenAI({
-          apiKey: openaiApiKey,
-          model: config.openaiModel,
-          messages: [
-            { role: "system", content: renderSystemPrompt() },
-            { role: "user", content: buildUserMessage() },
-          ],
-          tool: toolFunction as unknown as ToolFunctionDef,
-          maxOutputTokens: config.openaiMaxCompletionTokens,
-          temperature: config.openaiTemperature,
-          topP: config.openaiTopP,
-          frequencyPenalty: config.openaiFrequencyPenalty,
-          presencePenalty: config.openaiPresencePenalty,
-          reasoningEffort: config.openaiReasoningEffort,
-          verbosity: config.openaiVerbosity,
-          seed: config.openaiSeed,
-          serviceTier: config.openaiServiceTier,
-          parallelToolCalls: config.openaiParallelToolCalls,
-        })
+        callObservedWorkerOpenAI(
+          supabase,
+          workflowRunKey!,
+          {
+            apiKey: openaiApiKey,
+            model: config.openaiModel,
+            messages: [
+              { role: "system", content: renderSystemPrompt() },
+              { role: "user", content: buildUserMessage() },
+            ],
+            tool: toolFunction as unknown as ToolFunctionDef,
+            maxOutputTokens: config.openaiMaxCompletionTokens,
+            temperature: config.openaiTemperature,
+            topP: config.openaiTopP,
+            frequencyPenalty: config.openaiFrequencyPenalty,
+            presencePenalty: config.openaiPresencePenalty,
+            reasoningEffort: config.openaiReasoningEffort,
+            verbosity: config.openaiVerbosity,
+            seed: config.openaiSeed,
+            serviceTier: config.openaiServiceTier,
+            parallelToolCalls: config.openaiParallelToolCalls,
+          },
+          {
+            operationName: "classify-and-translate",
+            agentName: "importance-scorer",
+            metadata: { path: "combined_filter" },
+          },
+        )
       );
       scoringCallMs = scoringCallMs ?? translationCallMs;
       if (!result.ok) {
@@ -1852,10 +2124,19 @@ async function handleTranslateJob(
     } else {
       // No filtering — simple translation
       const result = await measureTranslationCall(() =>
-        callOpenAI({
-          apiKey: openaiApiKey,
-          ...buildTranslationRequest(),
-        })
+        callObservedWorkerOpenAI(
+          supabase,
+          workflowRunKey!,
+          {
+            apiKey: openaiApiKey,
+            ...buildTranslationRequest(),
+          },
+          {
+            operationName: "translate",
+            agentName: "translator",
+            metadata: { path: "translation_only" },
+          },
+        )
       );
       if (!result.ok) {
         throw new Error(`OpenAI API error: ${result.status} ${result.rawText}`);
@@ -1875,7 +2156,17 @@ async function handleTranslateJob(
           model: config.openaiModel,
           originalText: String(post.text_original || ""),
           translatedText,
-          callOpenAI,
+          callOpenAI: (params) =>
+            callObservedWorkerOpenAI(
+              supabase,
+              workflowRunKey!,
+              params,
+              {
+                operationName: "readability-repair",
+                agentName: "readability-repair",
+                metadata: { path: "translation_readability" },
+              },
+            ),
           maxOutputTokens: config.openaiMaxCompletionTokens,
           temperature: config.openaiTemperature,
           topP: config.openaiTopP,
@@ -2188,6 +2479,13 @@ async function handleTranslateJob(
       );
     }
 
+    await finishWorkflowRun(supabase, workflowRunKey, "completed", {
+      delivery_decision: deliveryDecision,
+      route: postTranslationRoute.kind,
+      scoring_policy_v2: scoringPolicyResult != null,
+      translation_generated: translationGeneratedThisRun,
+      translation_skipped_by_filter: translationSkippedByFilter,
+    });
     return true;
   } catch (error) {
     const e = jobError(error);
@@ -2200,7 +2498,15 @@ async function handleTranslateJob(
       name: e.name,
     }));
     if (tid != null && typeof tid === "string") {
+      if (workflowRunKey) {
+        await finishWorkflowRun(supabase, workflowRunKey, "failed", {
+          tweet_id: tid,
+        }, e);
+      }
       throw new Error(`translate[${tid}]: ${e.message}`);
+    }
+    if (workflowRunKey) {
+      await finishWorkflowRun(supabase, workflowRunKey, "failed", {}, e);
     }
     throw e;
   }
@@ -2210,9 +2516,32 @@ async function handleModerateJob(
   job: Record<string, unknown>, // deno-lint-ignore no-explicit-any
   supabase: any,
 ): Promise<boolean> {
+  let workflowRunKey: string | null = null;
   try {
     const payload = job.payload as Record<string, unknown>;
     const subjectId = payload.subject_id as string;
+    if (!subjectId) throw new Error("moderate: missing subject_id in job payload");
+    const subjectType = typeof payload.subject_type === "string"
+      ? payload.subject_type
+      : "unknown";
+    const workflowRunId = workerWorkflowRunId(job, subjectId, "moderate");
+    workflowRunKey = workerWorkflowRunKey("moderate", workflowRunId);
+    await startWorkflowRun(supabase, {
+      runKey: workflowRunKey,
+      workflowName: "moderation-pipeline",
+      workflowRunId,
+      status: "running",
+      source: "worker",
+      sourceFunction: "handleModerateJob",
+      subjectType,
+      subjectId,
+      jobId: typeof job.id === "string" ? job.id : null,
+      tweetId: subjectType === "post" ? subjectId : null,
+      metadata: {
+        job_type: "moderate",
+        subject_type: subjectType,
+      },
+    });
     console.log(
       JSON.stringify({
         function: "worker",
@@ -2225,7 +2554,7 @@ async function handleModerateJob(
     if (!openaiApiKey) throw new Error("OpenAI API key not configured");
 
     let content = "";
-    if (payload.subject_type === "post") {
+    if (subjectType === "post") {
       const { data: post } = await supabase
         .from("posts")
         .select("text_translated, text_original")
@@ -2236,35 +2565,98 @@ async function handleModerateJob(
 
     if (!content) throw new Error("No content to moderate");
 
-    const response = await fetch("https://api.openai.com/v1/moderations", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${openaiApiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ input: content }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`OpenAI Moderation API error: ${response.statusText}`);
+    const moderationStartedAt = new Date();
+    let moderationHttpStatus: number | null = null;
+    let data: Record<string, unknown>;
+    try {
+      const response = await fetch("https://api.openai.com/v1/moderations", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${openaiApiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ input: content }),
+      });
+      moderationHttpStatus = response.status;
+      const rawText = await response.text();
+      if (!response.ok) {
+        throw new Error(
+          `OpenAI Moderation API error: ${response.statusText || response.status}`,
+        );
+      }
+      data = JSON.parse(rawText);
+      await recordObservedProviderCall(supabase, {
+        workflowRunKey: workflowRunKey!,
+        traceName: "moderation-pipeline",
+        operationName: "moderate_content",
+        agentName: "moderation-classifier",
+        model: typeof data.model === "string" ? data.model : null,
+        endpoint: "moderations",
+        status: "completed",
+        httpStatus: moderationHttpStatus,
+        usage: data.usage && typeof data.usage === "object"
+          ? data.usage as Record<string, unknown>
+          : null,
+        startedAt: moderationStartedAt,
+        endedAt: new Date(),
+        spanEstimate: 0,
+        foglampExported: false,
+        foglampSkipReason: "non_chat_endpoint",
+        metadata: {
+          subject_type: subjectType,
+        },
+      });
+    } catch (moderationError) {
+      await recordObservedProviderCall(supabase, {
+        workflowRunKey: workflowRunKey!,
+        traceName: "moderation-pipeline",
+        operationName: "moderate_content",
+        agentName: "moderation-classifier",
+        model: null,
+        endpoint: "moderations",
+        status: "failed",
+        httpStatus: moderationHttpStatus,
+        usage: null,
+        startedAt: moderationStartedAt,
+        endedAt: new Date(),
+        error: moderationError,
+        spanEstimate: 0,
+        foglampExported: false,
+        foglampSkipReason: "non_chat_endpoint",
+        metadata: {
+          subject_type: subjectType,
+        },
+      });
+      throw moderationError;
     }
-
-    const data = await response.json();
-    const moderation = data.results[0];
+    const moderation = Array.isArray(data.results) &&
+        data.results[0] && typeof data.results[0] === "object"
+      ? data.results[0] as Record<string, unknown>
+      : {};
 
     const { error } = await supabase
       .from("moderation_events")
       .insert([{
-        subject_type: payload.subject_type,
+        subject_type: subjectType,
         subject_id: subjectId,
-        verdict: moderation.flagged ? null : "allow",
+        verdict: moderation.flagged === true ? null : "allow",
         categories: moderation.categories,
       }]);
 
     if (error) throw error;
+    await finishWorkflowRun(supabase, workflowRunKey!, "completed", {
+      job_type: "moderate",
+      subject_type: subjectType,
+      flagged: moderation.flagged === true,
+    });
     return true;
   } catch (error) {
     const e = jobError(error);
+    if (workflowRunKey) {
+      await finishWorkflowRun(supabase, workflowRunKey, "failed", {
+        job_type: "moderate",
+      }, e);
+    }
     console.error(
       JSON.stringify({
         function: "worker",
@@ -2693,6 +3085,7 @@ async function handleEnrichJob(
   const payload = job.payload as Record<string, unknown>;
   const tweetId = payload.tweet_id as string;
   const forceReview = payload.force_review === true;
+  let workflowRunKey: string | null = null;
   if (!tweetId) throw new Error("enrich: missing tweet_id in job payload");
 
   const openaiApiKey = Deno.env.get("OPENAI_API_KEY");
@@ -2806,6 +3199,30 @@ async function handleEnrichJob(
     "running",
     startedAt,
   );
+  const workflowRunId = workerWorkflowRunId(job, tweetId, "enrich");
+  workflowRunKey = workerWorkflowRunKey("enrich", workflowRunId);
+  await startWorkflowRun(supabase, {
+    runKey: workflowRunKey,
+    workflowName: "enrichment-pipeline",
+    workflowRunId,
+    status: "running",
+    source: "worker",
+    sourceFunction: "handleEnrichJob",
+    subjectType: "post",
+    subjectId: tweetId,
+    jobId: typeof job.id === "string" ? job.id : null,
+    tweetId,
+    metadata: {
+      job_type: "enrich",
+      force_review: forceReview,
+      pipeline_mode: enrichConfig.pipeline_mode,
+      review_mode: enrichConfig.review_mode,
+      importance_score: post.importance_score,
+      has_source_url: Boolean(post.url),
+      has_source_label: Boolean(post.author_handle),
+      same_source_recent_count: sameSourceRecentCount,
+    },
+  });
 
   try {
     const result = await runEnrichPipeline({
@@ -2823,6 +3240,7 @@ async function handleEnrichJob(
       sourceUrl: post.url,
       sourceLabel: post.author_handle,
       sameSourceRecentCount,
+      workflowRunKey,
     });
 
     // Store results. Shadow/review mode is conservative: no auto-delivery until
@@ -2924,11 +3342,19 @@ async function handleEnrichJob(
         risk_flags: result.critic.monetization_risk_flags,
       },
     );
-
     // If not requiring approval AND not a manual test, enqueue deliver immediately
     if (enrichStatus === "completed") {
       await enqueueDeliverAfterEnrich(supabase, tweetId);
     }
+    await finishWorkflowRun(supabase, workflowRunKey, "completed", {
+      job_type: "enrich",
+      post_count: 1,
+      token_count: result.totalTokens,
+      duration_ms: result.durationMs,
+      status: enrichStatus,
+      publish_recommendation: result.publishRecommendation,
+      agent_count: 7,
+    });
 
     console.log(JSON.stringify({
       function: "worker",
@@ -2942,6 +3368,12 @@ async function handleEnrichJob(
     return true;
   } catch (e) {
     const err = e instanceof Error ? e : new Error(String(e));
+    if (workflowRunKey) {
+      await finishWorkflowRun(supabase, workflowRunKey, "failed", {
+        job_type: "enrich",
+        post_count: 1,
+      }, err);
+    }
     await supabase.from("posts").update({ enrich_status: "failed" }).eq(
       "tweet_id",
       tweetId,

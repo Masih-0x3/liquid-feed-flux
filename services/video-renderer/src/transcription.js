@@ -287,6 +287,7 @@ export function markEnhancedAudioRetry(transcription, retryReason) {
 async function runOpenAITranscription({
   openaiTranscribe = transcribeWithOpenAI,
   openaiApiKey,
+  openaiFetchImpl,
   audioPath,
   openaiModel,
   openaiFallbackModel,
@@ -298,6 +299,7 @@ async function runOpenAITranscription({
     model: openaiModel,
     fallbackModel: openaiFallbackModel,
     durationMs,
+    fetchImpl: openaiFetchImpl,
   });
   return {
     provider: "openai",

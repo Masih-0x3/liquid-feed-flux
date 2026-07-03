@@ -18,7 +18,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { invokeAdminRetry } from '@/api/adminRetry';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Brain, MessageSquare, Eye, Code, Sparkles, Send, Shield, Loader2, Filter, AtSign, ChevronDown, Info, Film } from 'lucide-react';
+import { Activity, Brain, MessageSquare, Eye, Code, Sparkles, Send, Shield, Loader2, Filter, AtSign, ChevronDown, Info, Film } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   useSettingsData, useSaveSettings, openaiModels, messagePlaceholders, promptPlaceholders,
@@ -37,8 +37,9 @@ const TranslationPlayground = lazy(() => import('@/components/settings/Translati
 const LearnedSignalsCard = lazy(() => import('@/components/settings/LearnedSignalsCard'));
 const EnrichmentSettings = lazy(() => import('@/components/settings/EnrichmentSettings'));
 const VideoRenderingSettings = lazy(() => import('@/components/settings/VideoRenderingSettings'));
+const ObservabilitySettings = lazy(() => import('@/components/settings/ObservabilitySettings'));
 
-const SETTINGS_TAB_IDS = ['translation', 'filter', 'messages', 'telegram', 'x-automation', 'video-rendering', 'enrichment'] as const;
+const SETTINGS_TAB_IDS = ['translation', 'filter', 'messages', 'telegram', 'x-automation', 'video-rendering', 'enrichment', 'observability'] as const;
 type SettingsTabId = (typeof SETTINGS_TAB_IDS)[number];
 const OPENAI_MAX_COMPLETION_TOKENS_LIMIT = 8000;
 
@@ -197,6 +198,7 @@ export default function Settings() {
           <TabsTrigger value="x-automation" className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><AtSign className="w-4 h-4" />X Automation</TabsTrigger>
           <TabsTrigger value="video-rendering" className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><Film className="w-4 h-4" />Video</TabsTrigger>
           <TabsTrigger value="enrichment" className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><Sparkles className="w-4 h-4" />Enrichment</TabsTrigger>
+          <TabsTrigger value="observability" className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><Activity className="w-4 h-4" />Observability</TabsTrigger>
         </TabsList>
 
         {/* Translation Tab */}
@@ -775,6 +777,13 @@ export default function Settings() {
         <TabsContent value="enrichment" className="space-y-6">
           <Suspense fallback={<SettingsPanelFallback />}>
             <EnrichmentSettings />
+          </Suspense>
+        </TabsContent>
+
+        {/* Observability Tab */}
+        <TabsContent value="observability" className="space-y-6">
+          <Suspense fallback={<SettingsPanelFallback />}>
+            <ObservabilitySettings />
           </Suspense>
         </TabsContent>
       </Tabs>

@@ -1,4 +1,14 @@
-import { callOpenAI, type ToolFunctionDef } from "./openai.ts";
+import {
+  callOpenAI,
+  type NormalizedOpenAIResponse,
+  type OpenAICallParams,
+  type ToolFunctionDef,
+} from "./openai.ts";
+import {
+  estimateFoglampSpans,
+  recordObservedOpenAICall,
+  recordObservedProviderCall,
+} from "./observability.ts";
 import { isRetryableProviderError } from "./providerErrors.ts";
 
 export type DedupeStatus =
@@ -105,6 +115,7 @@ export interface DuplicateGateRunOptions {
   force?: boolean;
   source?: string;
   fetchEmbedding?: (text: string) => Promise<number[]>;
+  callOpenAI?: typeof callOpenAI;
   adjudicate?: (
     post: DuplicateGatePost,
     candidates: StoryCandidate[],
@@ -117,6 +128,92 @@ export interface FinalDuplicateAssertionResult {
   blocked: boolean;
   reason: string | null;
   result: DuplicateGateResult | null;
+}
+
+type SupabaseLike = { from(table: string): unknown };
+
+type StoryEmbeddingFetchResult = {
+  embedding: number[];
+  usage: Record<string, unknown> | null;
+  status: number;
+};
+
+function thrownDedupeOpenAIResponse(
+  error: unknown,
+  model: string,
+): NormalizedOpenAIResponse {
+  const message = error instanceof Error ? error.message : String(error);
+  const raw = { error: { message } };
+  return {
+    ok: false,
+    status: 0,
+    rawText: JSON.stringify(raw),
+    raw,
+    content: "",
+    toolCall: null,
+    webSearchResults: [],
+    outputItems: [],
+    usage: null,
+    endpoint: /^gpt-5\.(4|5)/i.test(model) ? "responses" : "chat.completions",
+  };
+}
+
+export function observedDedupeOpenAI(
+  supabase: SupabaseLike | undefined,
+  workflowRunKey: string | null | undefined,
+  metadata?: Record<string, unknown>,
+  callOpenAIImpl: typeof callOpenAI = callOpenAI,
+): typeof callOpenAI {
+  return async (params: OpenAICallParams) => {
+    const startedAt = new Date();
+    let response: NormalizedOpenAIResponse;
+    try {
+      response = await callOpenAIImpl(params);
+    } catch (error) {
+      response = thrownDedupeOpenAIResponse(error, params.model);
+      if (workflowRunKey) {
+        await recordObservedOpenAICall(supabase, {
+          workflowRunKey,
+          traceName: "dedupe-pipeline",
+          operationName: "classify_story_duplicate",
+          agentName: "duplicate-adjudicator",
+          model: params.model,
+          endpoint: response.endpoint,
+          request: params,
+          response,
+          status: "failed",
+          startedAt,
+          endedAt: new Date(),
+          spanEstimate: estimateFoglampSpans(params),
+          foglampExported: false,
+          foglampSkipReason: "dedupe_local_only",
+          metadata,
+        });
+      }
+      throw error;
+    }
+
+    if (workflowRunKey) {
+      await recordObservedOpenAICall(supabase, {
+        workflowRunKey,
+        traceName: "dedupe-pipeline",
+        operationName: "classify_story_duplicate",
+        agentName: "duplicate-adjudicator",
+        model: params.model,
+        endpoint: response.endpoint,
+        request: params,
+        response,
+        status: response.ok ? "completed" : "failed",
+        startedAt,
+        endedAt: new Date(),
+        spanEstimate: estimateFoglampSpans(params),
+        foglampExported: false,
+        foglampSkipReason: "dedupe_local_only",
+        metadata,
+      });
+    }
+    return response;
+  };
 }
 
 export const DEFAULT_DUPLICATE_GATE: DuplicateGateConfig = {
@@ -213,6 +310,13 @@ export async function fetchStoryEmbedding(
   apiKey: string,
   text: string,
 ): Promise<number[]> {
+  return (await fetchStoryEmbeddingResult(apiKey, text)).embedding;
+}
+
+async function fetchStoryEmbeddingResult(
+  apiKey: string,
+  text: string,
+): Promise<StoryEmbeddingFetchResult> {
   const resp = await fetch("https://api.openai.com/v1/embeddings", {
     method: "POST",
     headers: {
@@ -239,7 +343,81 @@ export async function fetchStoryEmbedding(
   if (!Array.isArray(embedding)) {
     throw new Error("embedding_error:missing_embedding");
   }
-  return embedding;
+  return {
+    embedding,
+    usage: data.usage && typeof data.usage === "object"
+      ? data.usage as Record<string, unknown>
+      : null,
+    status: resp.status,
+  };
+}
+
+function embeddingErrorStatus(error: unknown): number | null {
+  const message = error instanceof Error ? error.message : String(error);
+  const match = message.match(/^embedding_error:(\d+):/);
+  return match ? Number(match[1]) : null;
+}
+
+export async function fetchObservedStoryEmbedding(params: {
+  supabase?: SupabaseLike;
+  workflowRunKey?: string | null;
+  apiKey: string;
+  text: string;
+  metadata?: Record<string, unknown>;
+  fetchEmbedding?: (
+    apiKey: string,
+    text: string,
+  ) => Promise<StoryEmbeddingFetchResult>;
+}): Promise<number[]> {
+  const startedAt = new Date();
+  const model = "text-embedding-3-small";
+  const fetchEmbedding = params.fetchEmbedding ?? fetchStoryEmbeddingResult;
+  try {
+    if (!params.apiKey) throw new Error("OPENAI_API_KEY is not configured");
+    const result = await fetchEmbedding(params.apiKey, params.text);
+    if (params.workflowRunKey) {
+      await recordObservedProviderCall(params.supabase, {
+        workflowRunKey: params.workflowRunKey,
+        traceName: "dedupe-pipeline",
+        operationName: "create_story_embedding",
+        agentName: "duplicate-embedding",
+        model,
+        endpoint: "embeddings",
+        status: "completed",
+        httpStatus: result.status,
+        usage: result.usage,
+        startedAt,
+        endedAt: new Date(),
+        spanEstimate: 0,
+        foglampExported: false,
+        foglampSkipReason: "non_chat_endpoint",
+        metadata: params.metadata,
+      });
+    }
+    return result.embedding;
+  } catch (error) {
+    if (params.workflowRunKey) {
+      await recordObservedProviderCall(params.supabase, {
+        workflowRunKey: params.workflowRunKey,
+        traceName: "dedupe-pipeline",
+        operationName: "create_story_embedding",
+        agentName: "duplicate-embedding",
+        model,
+        endpoint: "embeddings",
+        status: "failed",
+        httpStatus: embeddingErrorStatus(error),
+        usage: null,
+        startedAt,
+        endedAt: new Date(),
+        error,
+        spanEstimate: 0,
+        foglampExported: false,
+        foglampSkipReason: "non_chat_endpoint",
+        metadata: params.metadata,
+      });
+    }
+    throw error;
+  }
 }
 
 export async function runDuplicateGate(
@@ -363,8 +541,10 @@ export async function runDuplicateGate(
     }
 
     const getOpenAiApiKey = () => {
-      const key = Deno.env.get("OPENAI_API_KEY") ?? "";
-      if (!key) throw new Error("OPENAI_API_KEY is not configured");
+      const key = readOpenAiApiKey();
+      if (!key && !options.callOpenAI) {
+        throw new Error("OPENAI_API_KEY is not configured");
+      }
       return key;
     };
     const embedding = options.fetchEmbedding
@@ -430,6 +610,7 @@ export async function runDuplicateGate(
             post,
             candidates,
             config,
+            options.callOpenAI,
           );
       }
       result = canonicalizeDedupeResult(result, candidates);
@@ -705,8 +886,8 @@ export async function assertFinalDuplicateState(
   } else if (options.adjudicate) {
     result = await options.adjudicate(postRecord, candidates, config);
   } else {
-    const key = Deno.env.get("OPENAI_API_KEY") ?? "";
-    if (!key) {
+    const key = readOpenAiApiKey();
+    if (!key && !options.callOpenAI) {
       return {
         checked: true,
         blocked: false,
@@ -714,7 +895,13 @@ export async function assertFinalDuplicateState(
         result: null,
       };
     }
-    result = await adjudicateWithModel(key, postRecord, candidates, config);
+    result = await adjudicateWithModel(
+      key,
+      postRecord,
+      candidates,
+      config,
+      options.callOpenAI,
+    );
     if (result.status === "unique") {
       result = {
         ...result,
@@ -942,6 +1129,7 @@ async function adjudicateWithModel(
   post: DuplicateGatePost,
   candidates: StoryCandidate[],
   config: DuplicateGateConfig,
+  callOpenAIImpl: typeof callOpenAI = callOpenAI,
 ): Promise<DuplicateGateResult> {
   const tool: ToolFunctionDef = {
     name: "classify_story_duplicate",
@@ -985,7 +1173,7 @@ async function adjudicateWithModel(
     text: c.text_translated || c.text_original || c.normalized_text || "",
   }));
 
-  const result = await callOpenAI({
+  const result = await callOpenAIImpl({
     apiKey,
     model: config.adjudicator_model,
     messages: [
@@ -1120,8 +1308,16 @@ async function adjudicateWithModel(
   };
 }
 
+function readOpenAiApiKey(): string {
+  try {
+    return Deno.env.get("OPENAI_API_KEY") ?? "";
+  } catch {
+    return "";
+  }
+}
+
 function requiredOpenAiApiKey(): string {
-  const key = Deno.env.get("OPENAI_API_KEY") ?? "";
+  const key = readOpenAiApiKey();
   if (!key) throw new Error("OPENAI_API_KEY is not configured");
   return key;
 }

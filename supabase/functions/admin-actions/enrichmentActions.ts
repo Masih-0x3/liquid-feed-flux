@@ -5,6 +5,11 @@ import {
   normalizeVoiceGuide,
   type VoiceSamples,
 } from "../_shared/enrich.ts";
+import {
+  finishWorkflowRun,
+  recordObservedProviderCall,
+  startWorkflowRun,
+} from "../_shared/observability.ts";
 import type { AdminActionResponse, SupabaseAdminClient } from "./types.ts";
 
 type QueryResult = {
@@ -89,6 +94,20 @@ function readEnv(
   deps?: Pick<EnrichmentActionDeps, "readEnv">,
 ): string {
   return deps?.readEnv?.(key) ?? Deno.env.get(key) ?? "";
+}
+
+function voiceProfileEndpointForModel(model: string): string {
+  return /^gpt-5\.(4|5)/i.test(model) ? "responses" : "chat.completions";
+}
+
+function voiceProfileUsageRecord(
+  usage: unknown,
+): Record<string, unknown> | null {
+  if (typeof usage === "number") return { total_tokens: usage };
+  if (usage && typeof usage === "object" && !Array.isArray(usage)) {
+    return usage as Record<string, unknown>;
+  }
+  return null;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -300,21 +319,92 @@ export async function generateVoiceProfileAdminAction(
     { samples: [], updated_at: null }) as VoiceSamples;
   const generator = deps.generatePersonalVoiceProfile ??
     generatePersonalVoiceProfile;
-  const result = await generator({
-    apiKey: openaiApiKey,
-    model: config.model || "gpt-5.4-mini",
-    voiceGuide: guide,
-    voiceSamples,
+  const model = config.model || "gpt-5.4-mini";
+  const workflowRunId = `settings-voice-profile:${crypto.randomUUID()}`;
+  const workflowRunKey = `admin-actions:${workflowRunId}`;
+  const metadata = {
+    guide_source: typeof body.guide === "string" ? "custom" : "default",
+    sample_count: Array.isArray(voiceSamples.samples)
+      ? voiceSamples.samples.length
+      : 0,
+  };
+  await startWorkflowRun(supabase, {
+    runKey: workflowRunKey,
+    workflowName: "settings-voice-profile",
+    workflowRunId,
+    status: "running",
+    source: "admin-actions",
+    sourceFunction: "generateVoiceProfileAdminAction",
+    subjectType: "settings",
+    subjectId: "personal_voice_profile",
+    metadata,
   });
 
-  await table(supabase, "settings").upsert([
-    { key: "voice_guide", value: guide, updated_at: stamp },
-    {
-      key: "personal_voice_profile",
-      value: result.profile,
-      updated_at: stamp,
-    },
-  ], { onConflict: "key" });
+  let result: Awaited<ReturnType<typeof generatePersonalVoiceProfile>>;
+  let aiCallRecorded = false;
+  const aiStartedAt = new Date();
+  try {
+    result = await generator({
+      apiKey: openaiApiKey,
+      model,
+      voiceGuide: guide,
+      voiceSamples,
+    });
+    await recordObservedProviderCall(supabase, {
+      workflowRunKey,
+      traceName: "settings-voice-profile",
+      operationName: "generate_voice_profile",
+      agentName: "voice-profile-generator",
+      model,
+      endpoint: voiceProfileEndpointForModel(model),
+      status: "completed",
+      usage: voiceProfileUsageRecord(result.usage),
+      startedAt: aiStartedAt,
+      endedAt: new Date(),
+      spanEstimate: 2,
+      foglampExported: false,
+      foglampSkipReason: "settings_local_only",
+      metadata,
+    });
+    aiCallRecorded = true;
+
+    await table(supabase, "settings").upsert([
+      { key: "voice_guide", value: guide, updated_at: stamp },
+      {
+        key: "personal_voice_profile",
+        value: result.profile,
+        updated_at: stamp,
+      },
+    ], { onConflict: "key" });
+
+    await finishWorkflowRun(supabase, workflowRunKey, "completed", {
+      ...metadata,
+      usage_total_tokens: voiceProfileUsageRecord(result.usage)?.total_tokens ??
+        null,
+    });
+  } catch (error) {
+    if (!aiCallRecorded) {
+      await recordObservedProviderCall(supabase, {
+        workflowRunKey,
+        traceName: "settings-voice-profile",
+        operationName: "generate_voice_profile",
+        agentName: "voice-profile-generator",
+        model,
+        endpoint: voiceProfileEndpointForModel(model),
+        status: "failed",
+        usage: null,
+        startedAt: aiStartedAt,
+        endedAt: new Date(),
+        error,
+        spanEstimate: 2,
+        foglampExported: false,
+        foglampSkipReason: "settings_local_only",
+        metadata,
+      });
+    }
+    await finishWorkflowRun(supabase, workflowRunKey, "failed", metadata, error);
+    throw error;
+  }
 
   return { body: { ok: true, profile: result.profile, usage: result.usage } };
 }
