@@ -35,6 +35,7 @@ import {
   type DashboardSeverity,
   type OpenAIUsage,
   type PipelineCounts,
+  type ProcessObservabilitySummary,
   type SystemPerformanceSummary,
 } from '@/hooks/useDashboardData';
 import { DashboardActivity } from '@/components/dashboard/DashboardActivity';
@@ -202,6 +203,35 @@ const EMPTY_OPENAI_USAGE: OpenAIUsage = {
   retryAttempts: 0,
 };
 
+const EMPTY_PROCESS_OBSERVABILITY: ProcessObservabilitySummary = {
+  available: false,
+  error: null,
+  windowHours: 24,
+  activeRuns: 0,
+  completedRuns24h: 0,
+  failedRuns24h: 0,
+  aiCalls24h: 0,
+  failedAiCalls24h: 0,
+  totalTokens24h: 0,
+  reasoningTokens24h: 0,
+  aiCallP95Seconds: null,
+  latestRun: null,
+  recentRuns: [],
+  foglamp: {
+    hostedExportEnabled: false,
+    hasApiKey: false,
+    monthlySpanLimit: 10_000,
+    monthlySpanCap: 8_000,
+    monthlySpanWarn: 6_000,
+    estimatedSpansUsed: 0,
+    estimatedSpansSkipped: 0,
+    capUsedPct: null,
+    warning: false,
+    stopped: false,
+  },
+  openAiTokensMonthToDate: 0,
+};
+
 export default function Dashboard() {
   const { data, isLoading, isError, error, dataUpdatedAt, isFetching } = useDashboardData();
   const queryClient = useQueryClient();
@@ -263,6 +293,7 @@ export default function Dashboard() {
 
   const { metrics, health, activities, heartbeat, opsStatus, pipelineCounts, queueBreakdown, xLocalUsage, systemPerformance } = data;
   const openAiUsage = data.openAiUsage ?? EMPTY_OPENAI_USAGE;
+  const processObservability = data.processObservability ?? EMPTY_PROCESS_OBSERVABILITY;
   const requestedTab = searchParams.get('tab');
   const activeTab = DASHBOARD_TAB_IDS.includes(requestedTab as DashboardTabId) ? requestedTab as DashboardTabId : 'activity';
   const setDashboardTab = (value: string) => {
@@ -430,6 +461,22 @@ export default function Dashboard() {
     ['Reasoning tokens', openAiUsage.reasoningTokens],
     ['Quota failures', openAiUsage.quotaFailedJobs],
   ];
+  const processObservationMetrics = [
+    ['Active runs', processObservability.activeRuns],
+    ['AI calls 24h', processObservability.aiCalls24h],
+    ['Failed calls', processObservability.failedAiCalls24h],
+    ['AI p95', formatSeconds(processObservability.aiCallP95Seconds)],
+  ];
+  const foglampPct = processObservability.foglamp.capUsedPct ?? percent(
+    processObservability.foglamp.estimatedSpansUsed,
+    processObservability.foglamp.monthlySpanCap,
+  );
+  const foglampTone = processObservability.foglamp.stopped
+    ? 'text-destructive'
+    : processObservability.foglamp.warning
+      ? 'text-warning'
+      : 'text-success';
+  const latestProcessRun = processObservability.latestRun;
 
   const resourceMetrics = [
     {
@@ -796,6 +843,72 @@ export default function Dashboard() {
                   ) : (
                     <div className="rounded-md border border-border/60 p-3 text-sm text-muted-foreground">
                       OpenAI usage unavailable{openAiUsage.error ? `: ${openAiUsage.error}` : '.'}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+              <Card className="glass-card">
+                <CardHeader>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <CardTitle className="flex items-center gap-2 text-lg font-display text-glass-foreground">
+                        <Activity className="h-4 w-4 text-primary" />
+                        Process Observability
+                      </CardTitle>
+                      <CardDescription>Last {processObservability.windowHours}h from XOT-owned ledgers</CardDescription>
+                    </div>
+                    <Badge variant="outline" className={processObservability.foglamp.hostedExportEnabled ? 'border-success/30 text-success' : 'border-border/60 text-muted-foreground'}>
+                      {processObservability.foglamp.hostedExportEnabled ? 'Foglamp on' : 'Local only'}
+                    </Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {processObservability.available ? (
+                    <>
+                      <div className="grid grid-cols-2 gap-2">
+                        {processObservationMetrics.map(([label, value]) => (
+                          <div key={label as string} className="rounded-md border border-border/60 p-3">
+                            <p className="text-xs text-muted-foreground">{label}</p>
+                            <p className={(label === 'Failed calls' && Number(value) > 0) ? 'text-lg font-semibold text-destructive tabular-nums' : 'text-lg font-semibold tabular-nums'}>
+                              {typeof value === 'number' ? compactNumber(value) : value}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="rounded-md border border-border/60 p-3">
+                        <div className="flex items-center justify-between gap-3 text-xs">
+                          <span className="text-muted-foreground">Hosted Foglamp cap</span>
+                          <span className={`font-medium tabular-nums ${foglampTone}`}>
+                            {compactNumber(processObservability.foglamp.estimatedSpansUsed)} / {compactNumber(processObservability.foglamp.monthlySpanCap)}
+                          </span>
+                        </div>
+                        <Progress value={foglampPct} className="mt-2 h-2" />
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          {compactNumber(processObservability.foglamp.estimatedSpansSkipped)} estimated spans kept local
+                        </p>
+                      </div>
+                      <div className="rounded-md border border-border/60 bg-muted/20 p-3 text-xs">
+                        {latestProcessRun ? (
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="truncate font-medium text-glass-foreground">{latestProcessRun.workflowName}</span>
+                              <Badge variant="secondary" className="shrink-0">{latestProcessRun.status}</Badge>
+                            </div>
+                            <p className="text-muted-foreground">
+                              {joinParts([
+                                latestProcessRun.sourceFunction,
+                                latestProcessRun.durationSeconds == null ? null : formatSeconds(latestProcessRun.durationSeconds),
+                              ]) || 'Latest workflow run'}
+                            </p>
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground">No observed workflow runs in the window.</span>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="rounded-md border border-border/60 p-3 text-sm text-muted-foreground">
+                      Process observability unavailable{processObservability.error ? `: ${processObservability.error}` : '.'}
                     </div>
                   )}
                 </CardContent>

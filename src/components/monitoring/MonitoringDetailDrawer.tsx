@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Ban, Check, Loader2, SlidersHorizontal, Sparkles, Twitter } from "lucide-react";
+import { Activity, AlertTriangle, Ban, Check, Loader2, SlidersHorizontal, Sparkles, Timer, Twitter } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -42,6 +42,142 @@ function scoringRuleLabel(value: string | null | undefined): string {
   if (value === 'oil_energy_exception') return 'Oil / energy exception';
   if (value === 'major_leader_statement') return 'Major leader statement';
   return value ? value.replace(/_/g, ' ') : 'No policy override';
+}
+
+function processStatusTone(status: string | null | undefined): 'good' | 'warn' | 'bad' | 'muted' | 'info' {
+  if (status === 'completed') return 'good';
+  if (status === 'failed') return 'bad';
+  if (status === 'skipped') return 'muted';
+  if (status === 'running' || status === 'pending') return 'info';
+  return 'muted';
+}
+
+function compactNumber(value: number | null | undefined): string {
+  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(value ?? 0);
+}
+
+function formatDuration(value: number | null | undefined, unit: 'seconds' | 'milliseconds'): string {
+  if (value == null || !Number.isFinite(value)) return '—';
+  const seconds = unit === 'milliseconds' ? value / 1000 : value;
+  if (seconds < 1) return `${Math.round(seconds * 1000)}ms`;
+  return `${seconds.toFixed(seconds >= 10 ? 0 : 1)}s`;
+}
+
+function processReasonLabel(value: string | null | undefined): string {
+  return value ? value.replaceAll('_', ' ') : 'not exported';
+}
+
+type ProcessObservability = NonNullable<MonitoringEntry['process_observability']>;
+
+function ProcessObservabilityPanel({ observability }: { observability?: ProcessObservability | null }) {
+  const latestRun = observability?.latest_run ?? null;
+  const latestCalls = latestRun?.calls ?? [];
+  const hasEvidence = Boolean(latestRun || (observability?.ai_calls ?? 0) > 0);
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <Activity className="h-4 w-4" />Process Observability
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        {!hasEvidence ? (
+          <div className="rounded-md border bg-muted/20 p-3">
+            <div className="mb-1 flex items-center gap-2 font-medium">
+              <AlertTriangle className="h-4 w-4 text-muted-foreground" />
+              Trace not captured
+            </div>
+            <p className="text-muted-foreground">
+              {observability?.partial_reason
+                ? `Observability is partial: ${processReasonLabel(observability.partial_reason)}.`
+                : 'No XOT workflow run has been captured for this post yet.'}
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="flex flex-wrap items-center gap-2">
+              {latestRun && (
+                <Badge className={toneClass(processStatusTone(latestRun.status))}>
+                  {latestRun.status.replaceAll('_', ' ')}
+                </Badge>
+              )}
+              <Badge variant="outline">{observability?.source === 'workflow_runs' ? 'Local ledger' : 'Unavailable'}</Badge>
+              {observability?.partial_reason && (
+                <Badge variant="outline">Partial: {processReasonLabel(observability.partial_reason)}</Badge>
+              )}
+            </div>
+            {latestRun && (
+              <div className="rounded-md border bg-muted/20 p-3">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="truncate font-medium" title={latestRun.workflow_name}>{latestRun.workflow_name}</p>
+                    <p className="truncate text-xs text-muted-foreground" title={latestRun.workflow_run_id ?? latestRun.run_key}>
+                      {latestRun.workflow_run_id ?? latestRun.run_key}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <Timer className="h-3.5 w-3.5" />
+                    {formatDuration(latestRun.duration_seconds, 'seconds')}
+                  </div>
+                </div>
+                {latestRun.last_error && (
+                  <p className="mt-2 rounded border border-destructive/30 bg-destructive/10 p-2 text-xs text-destructive">
+                    {latestRun.last_error}
+                  </p>
+                )}
+              </div>
+            )}
+            <div className="grid gap-2 sm:grid-cols-4">
+              <div className="rounded-md border p-2">
+                <p className="text-xs text-muted-foreground">AI calls</p>
+                <p className="font-medium">{compactNumber(observability?.ai_calls)}</p>
+              </div>
+              <div className="rounded-md border p-2">
+                <p className="text-xs text-muted-foreground">Tokens</p>
+                <p className="font-medium">{compactNumber(observability?.total_tokens)}</p>
+              </div>
+              <div className="rounded-md border p-2">
+                <p className="text-xs text-muted-foreground">Failures</p>
+                <p className="font-medium">{compactNumber(observability?.failed_ai_calls)}</p>
+              </div>
+              <div className="rounded-md border p-2">
+                <p className="text-xs text-muted-foreground">Hosted trace</p>
+                <p className="font-medium">{compactNumber(observability?.foglamp_exported)} / {compactNumber(observability?.foglamp_skipped)} skipped</p>
+              </div>
+            </div>
+            {latestCalls.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs font-medium uppercase text-muted-foreground">Latest AI calls</p>
+                {latestCalls.slice(0, 6).map((call, index) => (
+                  <div key={`${call.workflow_run_key}:${call.operation_name}:${call.started_at ?? index}`} className="grid gap-2 rounded-md border p-2 text-xs sm:grid-cols-[minmax(0,1fr)_auto]">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="truncate font-medium text-sm" title={call.operation_name}>{call.operation_name}</p>
+                        <Badge className={toneClass(processStatusTone(call.status))}>{call.status}</Badge>
+                        {call.agent_name && <Badge variant="outline">{call.agent_name}</Badge>}
+                      </div>
+                      <p className="mt-1 truncate text-muted-foreground" title={[call.model, call.endpoint].filter(Boolean).join(' · ')}>
+                        {[call.model, call.endpoint].filter(Boolean).join(' · ') || call.trace_name}
+                      </p>
+                      {call.error_message && <p className="mt-1 text-destructive">{call.error_message}</p>}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                      <Badge variant="outline">{compactNumber(call.total_tokens)} tokens</Badge>
+                      <Badge variant="outline">{formatDuration(call.duration_ms, 'milliseconds')}</Badge>
+                      <Badge variant={call.foglamp_exported ? 'default' : 'outline'}>
+                        {call.foglamp_exported ? 'hosted trace' : processReasonLabel(call.foglamp_skip_reason)}
+                      </Badge>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 interface MonitoringDetailDrawerProps {
@@ -167,6 +303,8 @@ export function MonitoringDetailDrawer({
                     </div>
                   </CardContent>
                 </Card>
+
+                <ProcessObservabilityPanel observability={entry.process_observability} />
 
                 <Card>
                   <CardHeader className="pb-2">

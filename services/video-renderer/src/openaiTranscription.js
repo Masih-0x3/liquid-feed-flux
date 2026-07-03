@@ -56,7 +56,7 @@ export function detectLanguageFromTranscription(payload) {
   return "und";
 }
 
-async function postMultipart({ apiKey, fields, filePath }) {
+async function postMultipart({ apiKey, fields, filePath, fetchImpl = fetch }) {
   const fileInfo = await stat(filePath);
   if (fileInfo.size > MAX_TRANSCRIPTION_UPLOAD_BYTES) {
     throw new Error(`transcription upload is ${fileInfo.size} bytes; OpenAI audio uploads must stay under 25 MB`);
@@ -73,7 +73,7 @@ async function postMultipart({ apiKey, fields, filePath }) {
   }
   form.append("file", new Blob([fileBytes], { type: "audio/mpeg" }), filePath.split("/").pop() || "audio.mp3");
 
-  const response = await fetchOpenAI(fetch, `${OPENAI_BASE_URL}/audio/transcriptions`, {
+  const response = await fetchOpenAI(fetchImpl, `${OPENAI_BASE_URL}/audio/transcriptions`, {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}` },
     body: form,
@@ -91,12 +91,12 @@ async function postMultipart({ apiKey, fields, filePath }) {
   return json;
 }
 
-export async function transcribeAudio({ apiKey, audioPath, model, fallbackModel = "whisper-1", durationMs = null }) {
+export async function transcribeAudio({ apiKey, audioPath, model, fallbackModel = "whisper-1", durationMs = null, fetchImpl = fetch }) {
   const primaryFields = model.includes("diarize")
     ? { model, response_format: "diarized_json", chunking_strategy: "auto" }
     : { model, response_format: "json" };
 
-  const primary = await postMultipart({ apiKey, fields: primaryFields, filePath: audioPath });
+  const primary = await postMultipart({ apiKey, fields: primaryFields, filePath: audioPath, fetchImpl });
   const primarySegments = normalizeTranscriptionSegments(primary, durationMs);
   if (primarySegments.length > 0) {
     return { model, raw: primary, segments: primarySegments, language: detectLanguageFromTranscription(primary) };
@@ -110,6 +110,7 @@ export async function transcribeAudio({ apiKey, audioPath, model, fallbackModel 
       "timestamp_granularities[]": "segment",
     },
     filePath: audioPath,
+    fetchImpl,
   });
   const fallbackSegments = normalizeTranscriptionSegments(fallback, durationMs);
   if (fallbackSegments.length === 0) throw new Error("transcription returned no timed segments");

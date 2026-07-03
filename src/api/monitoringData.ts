@@ -151,6 +151,7 @@ export interface MonitoringEntry {
     hydration_expected: boolean;
     reasons: string[];
   };
+  process_observability?: MonitoringProcessObservability | null;
   monitoring_state?: MonitoringStateSnapshot;
   duplicate_cluster?: DuplicateCluster | null;
   hidden_in_cluster?: boolean;
@@ -215,6 +216,56 @@ export interface PipelineEvent {
   ended_at: string | null;
   error: string | null;
   meta?: Record<string, unknown>;
+}
+
+export interface MonitoringProcessAiCall {
+  workflow_run_key: string;
+  trace_name: string;
+  operation_name: string;
+  agent_name: string | null;
+  model: string | null;
+  endpoint: string | null;
+  status: string;
+  total_tokens: number;
+  reasoning_tokens: number;
+  duration_ms: number | null;
+  started_at: string | null;
+  ended_at: string | null;
+  foglamp_exported: boolean;
+  foglamp_span_estimate: number;
+  foglamp_skip_reason: string | null;
+  error_message: string | null;
+}
+
+export interface MonitoringProcessRun {
+  run_key: string;
+  workflow_name: string;
+  workflow_run_id: string | null;
+  status: string;
+  source_function: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  duration_seconds: number | null;
+  last_error: string | null;
+  ai_call_count: number;
+  failed_ai_call_count: number;
+  total_tokens: number;
+  foglamp_exported: number;
+  foglamp_skipped: number;
+  calls: MonitoringProcessAiCall[];
+}
+
+export interface MonitoringProcessObservability {
+  available: boolean;
+  source: 'workflow_runs' | 'unavailable';
+  partial_reason: string | null;
+  latest_run: MonitoringProcessRun | null;
+  recent_runs: MonitoringProcessRun[];
+  ai_calls: number;
+  failed_ai_calls: number;
+  total_tokens: number;
+  foglamp_exported: number;
+  foglamp_skipped: number;
 }
 
 export type MonitoringFilter =

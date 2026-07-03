@@ -687,8 +687,8 @@ function mergeVisionAnalyses(primary, specialistResults) {
   };
 }
 
-async function postVisionPreflight({ apiKey, model, imageBase64, frameBase64s, focus }) {
-  const response = await fetchOpenAI(fetch, `${OPENAI_BASE_URL}/responses`, {
+async function postVisionPreflight({ apiKey, model, imageBase64, frameBase64s, focus, fetchImpl = fetch }) {
+  const response = await fetchOpenAI(fetchImpl, `${OPENAI_BASE_URL}/responses`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -716,8 +716,9 @@ async function postRemovableWatermarkDetection({
   temperature,
   topP,
   maxOutputTokens,
+  fetchImpl = fetch,
 }) {
-  const response = await fetchOpenAI(fetch, `${OPENAI_BASE_URL}/responses`, {
+  const response = await fetchOpenAI(fetchImpl, `${OPENAI_BASE_URL}/responses`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -752,7 +753,7 @@ async function safeSpecialistVisionCall(params) {
   }
 }
 
-export async function analyzeWatermarkContactSheet({ apiKey, model = "gpt-5.4-mini", imagePath, framePath = "", framePaths = [], specialistMode = "auto", includeContactSheet = false }) {
+export async function analyzeWatermarkContactSheet({ apiKey, model = "gpt-5.4-mini", imagePath, framePath = "", framePaths = [], specialistMode = "auto", includeContactSheet = false, fetchImpl = fetch }) {
   const contactSheetBase64 = imagePath ? (await readFile(imagePath)).toString("base64") : "";
   const imageBase64 = includeContactSheet ? contactSheetBase64 : "";
   const allFramePaths = framePaths.length > 0 ? framePaths : [framePath].filter(Boolean);
@@ -760,19 +761,20 @@ export async function analyzeWatermarkContactSheet({ apiKey, model = "gpt-5.4-mi
   const mode = String(specialistMode || "auto").toLowerCase();
   if (mode === "always") {
     const [primary, ...specialistResults] = await Promise.all([
-      postVisionPreflight({ apiKey, model, imageBase64, frameBase64s, focus: "general" }),
+      postVisionPreflight({ apiKey, model, imageBase64, frameBase64s, focus: "general", fetchImpl }),
       ...["watermark", "subtitles", "placement"].map((focus) => safeSpecialistVisionCall({
         apiKey,
         model,
         imageBase64: focus === "watermark" ? contactSheetBase64 : imageBase64,
         frameBase64s,
         focus,
+        fetchImpl,
       })),
     ]);
     return mergeVisionAnalyses(primary, specialistResults);
   }
 
-  const primary = await postVisionPreflight({ apiKey, model, imageBase64, frameBase64s, focus: "general" });
+  const primary = await postVisionPreflight({ apiKey, model, imageBase64, frameBase64s, focus: "general", fetchImpl });
   const runSpecialists = mode === "always" || (mode === "auto" && shouldRunSpecialistVisionChecks(primary));
   if (!runSpecialists || mode === "off") {
     return { ...primary, specialistChecks: [] };
@@ -784,6 +786,7 @@ export async function analyzeWatermarkContactSheet({ apiKey, model = "gpt-5.4-mi
     imageBase64: focus === "watermark" ? contactSheetBase64 : imageBase64,
     frameBase64s,
     focus,
+    fetchImpl,
   })));
   return mergeVisionAnalyses(primary, specialistResults);
 }
@@ -798,6 +801,7 @@ export async function analyzeRemovableWatermarks({
   temperature = 0,
   topP = null,
   maxOutputTokens = 1200,
+  fetchImpl = fetch,
 }) {
   const allFramePaths = framePaths.length > 0 ? framePaths : [framePath].filter(Boolean);
   const frameBase64s = await Promise.all(allFramePaths.map(async (path) => (await readFile(path)).toString("base64")));
@@ -811,5 +815,6 @@ export async function analyzeRemovableWatermarks({
     temperature,
     topP,
     maxOutputTokens,
+    fetchImpl,
   });
 }

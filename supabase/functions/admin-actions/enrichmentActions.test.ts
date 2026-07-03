@@ -82,6 +82,10 @@ function fakeSupabase(config: FakeConfig = {}) {
           calls.push({ table: tableName, op: "update", value });
           return builder;
         },
+        insert(value: Record<string, unknown> | Array<Record<string, unknown>>) {
+          calls.push({ table: tableName, op: "insert", value });
+          return Promise.resolve({});
+        },
         upsert(
           value: Record<string, unknown> | Array<Record<string, unknown>>,
           args?: Record<string, unknown>,
@@ -360,4 +364,54 @@ Deno.test("generate voice profile validates API key and persists generated profi
     "voice_guide",
     "personal_voice_profile",
   ]);
+
+  const workflowUpsert = supabase.calls.find((call) =>
+    call.op === "upsert" && call.table === "workflow_runs"
+  )?.value as Record<string, unknown>;
+  assertEquals(workflowUpsert.workflow_name, "settings-voice-profile");
+  assertEquals(workflowUpsert.source_function, "generateVoiceProfileAdminAction");
+  assertEquals(workflowUpsert.subject_id, "personal_voice_profile");
+  const workflowMeta = workflowUpsert.metadata as Record<string, unknown>;
+  assertEquals(workflowMeta.guide_source, "custom");
+  assertEquals(workflowMeta.sample_count, 1);
+  assertEquals("guide" in workflowMeta, false);
+
+  const aiCall = supabase.calls.find((call) =>
+    call.op === "insert" && call.table === "ai_call_ledger"
+  )?.value as Record<string, unknown>;
+  assertEquals(aiCall.trace_name, "settings-voice-profile");
+  assertEquals(aiCall.operation_name, "generate_voice_profile");
+  assertEquals(aiCall.agent_name, "voice-profile-generator");
+  assertEquals(aiCall.model, "test-model");
+  assertEquals(aiCall.endpoint, "chat.completions");
+  assertEquals(aiCall.total_tokens, 12);
+  assertEquals(aiCall.foglamp_span_estimate, 2);
+  assertEquals(aiCall.foglamp_skip_reason, "settings_local_only");
+  const aiMeta = aiCall.metadata as Record<string, unknown>;
+  assertEquals(aiMeta.guide_source, "custom");
+  assertEquals(aiMeta.sample_count, 1);
+  assertEquals("voice_samples" in aiMeta, false);
+
+  const budgetRows = supabase.calls
+    .filter((call) => call.op === "insert" && call.table === "budget_ledger")
+    .flatMap((call) => Array.isArray(call.value) ? call.value : [call.value]) as Array<Record<string, unknown>>;
+  assertEquals(
+    budgetRows.some((row) =>
+      row.provider === "openai" && row.unit === "token" && row.quantity === 12
+    ),
+    true,
+  );
+  assertEquals(
+    budgetRows.some((row) =>
+      row.provider === "foglamp" &&
+      row.unit === "estimated_span_skipped" &&
+      row.quantity === 2
+    ),
+    true,
+  );
+
+  const workflowFinish = supabase.calls.find((call) =>
+    call.op === "update" && call.table === "workflow_runs"
+  )?.value as Record<string, unknown>;
+  assertEquals(workflowFinish.status, "completed");
 });

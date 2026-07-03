@@ -19,6 +19,9 @@ export type {
   MonitoringFilter,
   MonitoringOverview,
   MonitoringPage,
+  MonitoringProcessAiCall,
+  MonitoringProcessObservability,
+  MonitoringProcessRun,
   PipelineEvent,
   ScoreBucket,
   XApiSummary,
@@ -65,11 +68,15 @@ export function useMonitoringDataSearchWithScore(filter: MonitoringFilter = 'all
     const ch2 = supabase.channel('mon-jobs').on('postgres_changes', { event: '*', schema: 'public', table: 'jobs' }, debouncedInvalidate).subscribe();
     const ch3 = supabase.channel('mon-del').on('postgres_changes', { event: '*', schema: 'public', table: 'deliveries' }, debouncedInvalidate).subscribe();
     const ch4 = supabase.channel('mon-x-del').on('postgres_changes', { event: '*', schema: 'public', table: 'x_deliveries' }, debouncedInvalidate).subscribe();
+    const ch5 = supabase.channel('mon-workflow-runs').on('postgres_changes', { event: '*', schema: 'public', table: 'workflow_runs' }, debouncedInvalidate).subscribe();
+    const ch6 = supabase.channel('mon-ai-call-ledger').on('postgres_changes', { event: '*', schema: 'public', table: 'ai_call_ledger' }, debouncedInvalidate).subscribe();
     return () => {
       supabase.removeChannel(ch1);
       supabase.removeChannel(ch2);
       supabase.removeChannel(ch3);
       supabase.removeChannel(ch4);
+      supabase.removeChannel(ch5);
+      supabase.removeChannel(ch6);
       if (timerRef.current) clearTimeout(timerRef.current);
     };
   }, [debouncedInvalidate]);

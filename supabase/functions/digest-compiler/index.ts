@@ -1,6 +1,14 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { requireInternalAuth } from "../_shared/internalAuth.ts";
+import { callOpenAI, type OpenAICallParams } from "../_shared/openai.ts";
+import {
+  estimateFoglampSpans,
+  finishWorkflowRun,
+  recordObservedOpenAICall,
+  startWorkflowRun,
+  type WorkflowRunStatus,
+} from "../_shared/observability.ts";
 import { captureEdgeException, initSentryEdge } from "../_shared/sentry.ts";
 
 const corsHeaders = {
@@ -44,6 +52,11 @@ const DEFAULT_OPENAI_CONFIG: OpenAIConfig = {
   temperature: 0.3,
   max_completion_tokens: 1500,
 };
+
+const DIGEST_WORKFLOW_NAME = "digest-compiler";
+const DIGEST_TRACE_NAME = "digest-compiler";
+const DIGEST_AGENT_NAME = "digest-summarizer";
+const DIGEST_OPERATION_NAME = "compile_digest";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -209,6 +222,18 @@ serve(async (req) => {
   if (authError) return authError;
 
   let dryRun = false;
+  let workflowRunKey = "";
+  let workflowFinalized = false;
+
+  const finishDigestWorkflow = async (
+    status: Extract<WorkflowRunStatus, "completed" | "failed" | "skipped">,
+    metadata?: Record<string, unknown>,
+    error?: unknown,
+  ) => {
+    if (!workflowRunKey || workflowFinalized) return;
+    await finishWorkflowRun(sb, workflowRunKey, status, metadata, error);
+    workflowFinalized = true;
+  };
 
   try {
     if (!supabaseUrl || !serviceKey || !openaiKey) {
@@ -250,13 +275,35 @@ serve(async (req) => {
     if (envTwitterAccessTokenSecret) digestConfig.twitter_access_token_secret = envTwitterAccessTokenSecret;
 
     const openaiConfig = readOpenAIConfig(settingsMap.openai_config);
-
-    if (!dryRun && !hasSavedDigestConfig) {
-      return jsonResponse({ skipped: true, reason: "no_config" });
-    }
-
     const periodEnd = new Date();
     const periodStart = new Date(periodEnd.getTime() - digestConfig.frequency_minutes * 60 * 1000);
+
+    const workflowRunId = `digest:${periodEnd.toISOString()}`;
+    workflowRunKey = `digest-compiler:${periodEnd.toISOString()}`;
+    const workflowMetadata = {
+      dry_run: dryRun,
+      frequency_minutes: digestConfig.frequency_minutes,
+      max_bullets: digestConfig.max_bullets,
+      min_posts: digestConfig.min_posts,
+      period_start: periodStart.toISOString(),
+      period_end: periodEnd.toISOString(),
+    };
+
+    if (!dryRun && !hasSavedDigestConfig) {
+      await startWorkflowRun(sb, {
+        runKey: workflowRunKey,
+        workflowName: DIGEST_WORKFLOW_NAME,
+        workflowRunId,
+        status: "running",
+        source: "edge_function",
+        sourceFunction: "digest-compiler",
+        subjectType: "digest",
+        subjectId: periodEnd.toISOString(),
+        metadata: { ...workflowMetadata, reason: "no_config" },
+      });
+      await finishDigestWorkflow("skipped", { ...workflowMetadata, reason: "no_config" });
+      return jsonResponse({ skipped: true, reason: "no_config" });
+    }
 
     const { data: posts, error: postsErr } = await sb
       .from("posts")
@@ -269,6 +316,18 @@ serve(async (req) => {
     if (postsErr) throw postsErr;
 
     const postCount = posts?.length ?? 0;
+    await startWorkflowRun(sb, {
+      runKey: workflowRunKey,
+      workflowName: DIGEST_WORKFLOW_NAME,
+      workflowRunId,
+      status: "running",
+      source: "edge_function",
+      sourceFunction: "digest-compiler",
+      subjectType: "digest",
+      subjectId: periodEnd.toISOString(),
+      metadata: { ...workflowMetadata, post_count: postCount },
+    });
+
     if (!dryRun && postCount < digestConfig.min_posts) {
       await sb.from("digests").insert({
         period_start: periodStart.toISOString(),
@@ -277,10 +336,20 @@ serve(async (req) => {
         status: "skipped",
         error: `Only ${postCount} posts (min: ${digestConfig.min_posts})`,
       });
+      await finishDigestWorkflow("skipped", {
+        ...workflowMetadata,
+        post_count: postCount,
+        reason: "below_min_posts",
+      });
       return jsonResponse({ skipped: true, post_count: postCount });
     }
 
     if (postCount === 0) {
+      await finishDigestWorkflow("skipped", {
+        ...workflowMetadata,
+        post_count: 0,
+        reason: "no_posts",
+      });
       return jsonResponse({
         dry_run: dryRun,
         skipped: true,
@@ -305,32 +374,70 @@ Guidelines:
 - Use the same language as the source posts.
 - Do not include usernames, handles, links, or source attribution.`;
 
-    const openaiRequestPayload: Record<string, unknown> = {
+    const openaiRequest: OpenAICallParams = {
+      apiKey: openaiKey,
       model: openaiConfig.model,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: bulletPrompt },
       ],
-      ...(usesMaxCompletionTokens(openaiConfig.model)
-        ? { max_completion_tokens: openaiConfig.max_completion_tokens }
-        : { max_tokens: openaiConfig.max_completion_tokens }),
-      ...(supportsTemperature(openaiConfig.model) ? { temperature: openaiConfig.temperature } : {}),
+      maxOutputTokens: openaiConfig.max_completion_tokens,
+      temperature: supportsTemperature(openaiConfig.model) ? openaiConfig.temperature : null,
     };
 
-    const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${openaiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify(openaiRequestPayload),
-    });
-    if (!openaiRes.ok) {
-      const errText = await openaiRes.text();
-      throw new Error(`OpenAI ${openaiRes.status}: ${errText.slice(0, 500)}`);
+    const aiMetadata = {
+      ...workflowMetadata,
+      post_count: postCount,
+      dry_run: dryRun,
+    };
+    const openaiStartedAt = new Date();
+    let openaiResponse;
+    try {
+      openaiResponse = await callOpenAI(openaiRequest);
+    } catch (openaiError) {
+      const openaiEndedAt = new Date();
+      await recordObservedOpenAICall(sb, {
+        workflowRunKey,
+        traceName: DIGEST_TRACE_NAME,
+        operationName: DIGEST_OPERATION_NAME,
+        agentName: DIGEST_AGENT_NAME,
+        model: openaiConfig.model,
+        request: openaiRequest,
+        status: "failed",
+        startedAt: openaiStartedAt,
+        endedAt: openaiEndedAt,
+        spanEstimate: estimateFoglampSpans(openaiRequest),
+        foglampExported: false,
+        foglampSkipReason: "digest_local_only",
+        metadata: { ...aiMetadata, failure_stage: "request_threw" },
+      });
+      throw openaiError;
     }
 
-    const openaiJson = await openaiRes.json();
-    const summary = typeof openaiJson.choices?.[0]?.message?.content === "string"
-      ? openaiJson.choices[0].message.content.trim()
-      : "";
+    const openaiEndedAt = new Date();
+    await recordObservedOpenAICall(sb, {
+      workflowRunKey,
+      traceName: DIGEST_TRACE_NAME,
+      operationName: DIGEST_OPERATION_NAME,
+      agentName: DIGEST_AGENT_NAME,
+      model: openaiConfig.model,
+      endpoint: openaiResponse.endpoint,
+      request: openaiRequest,
+      response: openaiResponse,
+      status: openaiResponse.ok ? "completed" : "failed",
+      startedAt: openaiStartedAt,
+      endedAt: openaiEndedAt,
+      spanEstimate: estimateFoglampSpans(openaiRequest),
+      foglampExported: false,
+      foglampSkipReason: "digest_local_only",
+      metadata: aiMetadata,
+    });
+
+    if (!openaiResponse.ok) {
+      throw new Error(`OpenAI ${openaiResponse.status}: ${openaiResponse.rawText.slice(0, 500)}`);
+    }
+
+    const summary = openaiResponse.content.trim();
     if (!summary) throw new Error("OpenAI returned empty digest summary");
 
     const timeStr = periodEnd.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
@@ -338,6 +445,12 @@ Guidelines:
     const tweets = buildThreadTweets(summary, header);
 
     if (dryRun) {
+      await finishDigestWorkflow("completed", {
+        ...workflowMetadata,
+        post_count: postCount,
+        tweet_count: tweets.length,
+        dry_run: true,
+      });
       return jsonResponse({
         dry_run: true,
         period_start: periodStart.toISOString(),
@@ -345,7 +458,7 @@ Guidelines:
         post_count: postCount,
         tweet_count: tweets.length,
         formatted_tweets: tweets,
-        usage: openaiJson.usage ?? null,
+        usage: openaiResponse.usage ?? null,
       });
     }
 
@@ -355,6 +468,12 @@ Guidelines:
       !digestConfig.twitter_access_token ||
       !digestConfig.twitter_access_token_secret
     ) {
+      await finishDigestWorkflow("skipped", {
+        ...workflowMetadata,
+        post_count: postCount,
+        tweet_count: tweets.length,
+        reason: "no_twitter_keys",
+      });
       return jsonResponse({ skipped: true, reason: "no_twitter_keys", post_count: postCount });
     }
 
@@ -382,8 +501,14 @@ Guidelines:
       status: "posted",
     });
 
+    await finishDigestWorkflow("completed", {
+      ...workflowMetadata,
+      post_count: postCount,
+      tweet_count: tweetIds.length,
+    });
     return jsonResponse({ success: true, tweet_count: tweetIds.length, post_count: postCount });
   } catch (err) {
+    await finishDigestWorkflow("failed", { dry_run: dryRun }, err);
     console.error(JSON.stringify({
       function: "digest-compiler",
       action: "error",

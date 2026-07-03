@@ -764,13 +764,13 @@ export default function Monitoring() {
                     <col className="w-[3%]" />
                     <col className="w-[8%]" />
                     <col className="w-[8%]" />
-                    <col className="w-[28%]" />
+                    <col className="w-[25%]" />
                     <col className="w-[7%]" />
                     <col className="w-[7%]" />
                     <col className="w-[11%]" />
-                    <col className="w-[18%]" />
+                    <col className="w-[16%]" />
                     <col className="w-[7%]" />
-                    <col className="w-[3%]" />
+                    <col className="w-[8%]" />
                   </colgroup>
                   <TableHeader>
                     <TableRow>

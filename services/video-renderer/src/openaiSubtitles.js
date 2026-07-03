@@ -262,7 +262,15 @@ export async function cleanupTranscriptSegments({
   return { model, raw: payload, segments: cleaned };
 }
 
-export async function translateSegments({ apiKey, model, segments, targetLanguage = "fa", contextText = "", fetchImpl = fetch }) {
+export async function translateSegments({
+  apiKey,
+  model,
+  segments,
+  targetLanguage = "fa",
+  contextText = "",
+  fetchImpl = fetch,
+  repairFetchImpl = fetchImpl,
+}) {
   const response = await fetchOpenAI(fetchImpl, OPENAI_RESPONSES_URL, {
     method: "POST",
     headers: {
@@ -282,7 +290,7 @@ export async function translateSegments({ apiKey, model, segments, targetLanguag
     const translated = validateTranslatedSegments(segments, parsed.segments);
     return { model, raw: payload, segments: translated };
   } catch (error) {
-    const repairResponse = await fetchOpenAI(fetchImpl, OPENAI_RESPONSES_URL, {
+    const repairResponse = await fetchOpenAI(repairFetchImpl, OPENAI_RESPONSES_URL, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,

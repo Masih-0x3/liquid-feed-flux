@@ -3,6 +3,14 @@ import {
   type NormalizedOpenAIResponse,
   type ToolFunctionDef,
 } from "../_shared/openai.ts";
+import { callOpenAIWithFoglamp } from "../_shared/foglampOpenAI.ts";
+import {
+  estimateFoglampSpans,
+  finishWorkflowRun,
+  readFoglampBudgetDecision,
+  recordObservedOpenAICall,
+  startWorkflowRun,
+} from "../_shared/observability.ts";
 import {
   repairTranslationReadability,
   translationReadabilityMeta,
@@ -88,6 +96,7 @@ type OpenAiDeps = {
   callOpenAI?: CallOpenAIFn;
   getOpenAiApiKey?: () => string | undefined;
   now?: () => Date;
+  supabase?: SupabaseAdminClient;
 };
 
 export type RunTranslationOnlyDeps = OpenAiDeps & {
@@ -188,8 +197,127 @@ function previewCallOptions(settings: Record<string, unknown>) {
   } as const;
 }
 
+function previewWorkflowRunId(): string {
+  return crypto.randomUUID();
+}
+
+function previewWorkflowRunKey(workflowRunId: string): string {
+  return `admin-preview:${workflowRunId}`;
+}
+
+function previewAgentName(step: string): string {
+  return step === "readability-repair" ? "readability-repair" : "translator";
+}
+
+function thrownOpenAIResponse(
+  error: unknown,
+  endpoint: NormalizedOpenAIResponse["endpoint"],
+): NormalizedOpenAIResponse {
+  const message = error instanceof Error ? error.message : String(error);
+  const raw = { error: { message } };
+  return {
+    ok: false,
+    status: 0,
+    rawText: JSON.stringify(raw),
+    raw,
+    content: "",
+    toolCall: null,
+    webSearchResults: [],
+    outputItems: [],
+    usage: null,
+    endpoint,
+  };
+}
+
+function previewOpenAI(
+  deps: OpenAiDeps,
+  workflowRunId: string,
+  step: string,
+  metadata: Record<string, unknown>,
+): CallOpenAIFn {
+  return async (params) => {
+    const startedAt = new Date(nowMs(deps));
+    const spanEstimate = estimateFoglampSpans(params);
+    const workflowRunKey = previewWorkflowRunKey(workflowRunId);
+    const callMetadata = {
+      step,
+      endpoint: params.tool ? "classification" : "translation",
+      foglamp_span_estimate: spanEstimate,
+      ...metadata,
+    };
+    let foglampExported = false;
+    let foglampSkipReason: string | null = "injected_call_openai";
+    let response: NormalizedOpenAIResponse;
+
+    try {
+      if (deps.callOpenAI) {
+        response = await deps.callOpenAI(params);
+      } else {
+        const decision = await readFoglampBudgetDecision(
+          deps.supabase,
+          spanEstimate,
+          startedAt,
+        );
+        foglampExported = decision.allowed;
+        foglampSkipReason = decision.reason;
+        response = decision.allowed
+          ? await callOpenAIWithFoglamp(params, {
+            traceName: "translation-preview",
+            workflowName: "translation-preview",
+            workflowRunId,
+            agentName: previewAgentName(step),
+            metadata: callMetadata,
+          })
+          : await callOpenAI(params);
+      }
+    } catch (error) {
+      const endpoint: NormalizedOpenAIResponse["endpoint"] =
+        /^gpt-5\.(4|5)/i.test(params.model) ? "responses" : "chat.completions";
+      response = thrownOpenAIResponse(error, endpoint);
+      await recordObservedOpenAICall(deps.supabase, {
+        workflowRunKey,
+        traceName: "translation-preview",
+        operationName: step,
+        agentName: previewAgentName(step),
+        model: params.model,
+        endpoint,
+        request: params,
+        response,
+        status: "failed",
+        startedAt,
+        endedAt: new Date(nowMs(deps)),
+        spanEstimate,
+        foglampExported,
+        foglampSkipReason,
+        metadata: callMetadata,
+      });
+      throw error;
+    }
+
+    await recordObservedOpenAICall(deps.supabase, {
+      workflowRunKey,
+      traceName: "translation-preview",
+      operationName: step,
+      agentName: previewAgentName(step),
+      model: params.model,
+      endpoint: response.endpoint,
+      request: params,
+      response,
+      status: response.ok ? "completed" : "failed",
+      startedAt,
+      endedAt: new Date(nowMs(deps)),
+      spanEstimate,
+      foglampExported,
+      foglampSkipReason,
+      metadata: callMetadata,
+    });
+    return response;
+  };
+}
+
 async function repairTranslationForReadability(input: {
   deps?: OpenAiDeps;
+  callOpenAI?: CallOpenAIFn;
   apiKey: string;
   model: string;
   settings: Record<string, unknown>;
@@ -206,7 +334,7 @@ async function repairTranslationForReadability(input: {
     model: input.model,
     originalText: input.originalText,
     translatedText: input.translatedText,
-    callOpenAI: input.deps?.callOpenAI ?? callOpenAI,
+    callOpenAI: input.callOpenAI ?? input.deps?.callOpenAI ?? callOpenAI,
     maxOutputTokens: input.maxOutputTokens,
     ...callOptions,
   });
@@ -806,6 +934,37 @@ export async function previewTranslationAdminAction(
   }
 
   const startedAt = nowMs(deps);
+  const workflowRunId = previewWorkflowRunId();
+  const workflowRunKey = previewWorkflowRunKey(workflowRunId);
+  await startWorkflowRun(deps.supabase, {
+    runKey: workflowRunKey,
+    workflowName: "translation-preview",
+    workflowRunId,
+    status: "running",
+    source: "admin-actions",
+    sourceFunction: "previewTranslationAdminAction",
+    subjectType: "admin_action",
+    subjectId: "preview_translation",
+    foglampWorkflowRunId: workflowRunId,
+    startedAt: new Date(startedAt),
+    metadata: {
+      content_filter_enabled: filterEnabled,
+      model,
+      max_completion_tokens: maxTokens,
+    },
+  });
+  const finishPreviewWorkflow = (
+    status: "completed" | "failed" | "skipped",
+    metadata?: Record<string, unknown>,
+    error?: unknown,
+  ) =>
+    finishWorkflowRun(
+      deps.supabase,
+      workflowRunKey,
+      status,
+      metadata,
+      error,
+    );
   let translatedText = "";
   let importanceScore: number | null = null;
   let importanceTags: string[] | null = null;
@@ -859,6 +1018,9 @@ export async function previewTranslationAdminAction(
           },
         };
       } catch (e) {
+        await finishPreviewWorkflow("failed", {
+          failure_step: "classifier_schema",
+        }, e);
         return {
           body: {
             ok: false,
@@ -873,7 +1035,11 @@ export async function previewTranslationAdminAction(
       const userMessage = `Author: @${authorHandle || "preview"}\nPublished: ${
         nowIso(deps)
       }\nHas media: no\nURL: N/A\n\nContent:\n${text}`;
-      const result = await (deps.callOpenAI ?? callOpenAI)({
+      const previewCall = previewOpenAI(deps, workflowRunId, "classify", {
+        content_filter_enabled: true,
+        author_handle: authorHandle || null,
+      });
+      const result = await previewCall({
         apiKey,
         model,
         messages: [
@@ -887,6 +1053,10 @@ export async function previewTranslationAdminAction(
       raw = result.raw;
       usedEndpoint = result.endpoint;
       if (!result.ok) {
+        await finishPreviewWorkflow("failed", {
+          failure_step: "classify",
+          endpoint: usedEndpoint,
+        }, result.raw);
         return {
           body: {
             ok: false,
@@ -916,7 +1086,10 @@ export async function previewTranslationAdminAction(
         translatedText = result.content;
       }
     } else {
-      const result = await (deps.callOpenAI ?? callOpenAI)({
+      const previewCall = previewOpenAI(deps, workflowRunId, "translate", {
+        content_filter_enabled: false,
+      });
+      const result = await previewCall({
         apiKey,
         model,
         messages: [
@@ -929,6 +1102,10 @@ export async function previewTranslationAdminAction(
       raw = result.raw;
       usedEndpoint = result.endpoint;
       if (!result.ok) {
+        await finishPreviewWorkflow("failed", {
+          failure_step: "translate",
+          endpoint: usedEndpoint,
+        }, result.raw);
         return {
           body: {
             ok: false,
@@ -942,6 +1119,9 @@ export async function previewTranslationAdminAction(
 
     const readability = await repairTranslationForReadability({
       deps,
+      callOpenAI: previewOpenAI(deps, workflowRunId, "readability-repair", {
+        content_filter_enabled: filterEnabled,
+      }),
       apiKey,
       model,
       settings: ts,
@@ -953,6 +1133,11 @@ export async function previewTranslationAdminAction(
     translatedText = readability.text;
     const readabilityMeta = visibleReadabilityMeta(readability);
     const usage = (raw as { usage?: Record<string, number> }).usage ?? null;
+    await finishPreviewWorkflow("completed", {
+      used_filter: filterEnabled,
+      endpoint: usedEndpoint,
+      readability_repair_status: readabilityMeta?.repair_status ?? null,
+    });
     return {
       body: {
         ok: true,
@@ -972,6 +1157,7 @@ export async function previewTranslationAdminAction(
       },
     };
   } catch (e) {
+    await finishPreviewWorkflow("failed", { failure_step: "preview" }, e);
     return { body: { ok: false, error: (e as Error).message } };
   }
 }

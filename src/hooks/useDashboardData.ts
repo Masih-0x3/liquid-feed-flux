@@ -12,6 +12,7 @@ export type {
   OpsStatus,
   PipelineCounts,
   PipelineHealth,
+  ProcessObservabilitySummary,
   QueueBreakdown,
   ScoringTuningSummary,
   SystemPerformanceSummary,

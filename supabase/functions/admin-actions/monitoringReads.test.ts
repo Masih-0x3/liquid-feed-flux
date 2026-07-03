@@ -23,6 +23,8 @@ type FakeMonitoringSupabaseOptions = {
   postRows?: Array<Record<string, unknown>>;
   pipelineRows?: Array<Record<string, unknown>>;
   xDeliveryRows?: Array<Record<string, unknown>>;
+  workflowRows?: Array<Record<string, unknown>>;
+  aiCallRows?: Array<Record<string, unknown>>;
 };
 
 function fakeMonitoringSupabase(options: FakeMonitoringSupabaseOptions = {}) {
@@ -46,6 +48,8 @@ function fakeMonitoringSupabase(options: FakeMonitoringSupabaseOptions = {}) {
   ];
   const pipelineRows = options.pipelineRows ?? [];
   const xDeliveryRows = options.xDeliveryRows ?? [];
+  const workflowRows = options.workflowRows ?? [];
+  const aiCallRows = options.aiCallRows ?? [];
 
   const query = (table: string) => {
     const state = {
@@ -83,6 +87,8 @@ function fakeMonitoringSupabase(options: FakeMonitoringSupabaseOptions = {}) {
       }
       if (state.table === "jobs") return { data: [] };
       if (state.table === "x_deliveries") return { data: xDeliveryRows };
+      if (state.table === "workflow_runs") return { data: workflowRows };
+      if (state.table === "ai_call_ledger") return { data: aiCallRows };
       return { data: [] };
     };
     const builder = {
@@ -361,4 +367,74 @@ Deno.test("getMonitoringEntries preserves x-delivery status filter row id order"
   );
   assertEquals(xDeliveryStatusFilter?.value, "failed");
   assertEquals(postsIdFilter?.values, ["x2", "x1"]);
+});
+
+Deno.test("getMonitoringEntries attaches process observability evidence by tweet", async () => {
+  const supabase = fakeMonitoringSupabase({
+    postRows: [
+      {
+        tweet_id: "obs-1",
+        text_original: "source",
+        text_translated: "translated",
+        url: "https://x.com/status/obs-1",
+        created_at: "2026-01-01T00:00:00.000Z",
+        translated_at: "2026-01-01T00:01:00.000Z",
+        has_media: false,
+        author_handle: "source",
+        final_score: 16,
+        delivery_decision: "deliver",
+        accounts: { handle: "feed" },
+      },
+    ],
+    workflowRows: [
+      {
+        run_key: "post:obs-1:job:abc",
+        workflow_name: "rss-item-pipeline",
+        workflow_run_id: "worker:obs-1:abc",
+        status: "completed",
+        source_function: "worker",
+        tweet_id: "obs-1",
+        started_at: "2026-01-01T00:00:00.000Z",
+        ended_at: "2026-01-01T00:00:04.000Z",
+      },
+    ],
+    aiCallRows: [
+      {
+        workflow_run_key: "post:obs-1:job:abc",
+        trace_name: "rss-item-pipeline",
+        operation_name: "translate",
+        agent_name: "translator",
+        model: "gpt-4.1-mini",
+        endpoint: "chat_completions",
+        status: "completed",
+        total_tokens: 120,
+        reasoning_tokens: 0,
+        duration_ms: 1234,
+        started_at: "2026-01-01T00:00:01.000Z",
+        ended_at: "2026-01-01T00:00:02.234Z",
+        foglamp_exported: false,
+        foglamp_span_estimate: 1,
+        foglamp_skip_reason: "worker_local_only",
+      },
+    ],
+  });
+
+  const result = await getMonitoringEntries(supabase, { limit: 10 });
+  const entry = result.entries[0] as Record<string, unknown>;
+  const observability = entry.process_observability as Record<
+    string,
+    unknown
+  >;
+  const latestRun = observability.latest_run as Record<string, unknown>;
+
+  assertEquals(observability.available, true);
+  assertEquals(observability.ai_calls, 1);
+  assertEquals(observability.total_tokens, 120);
+  assertEquals(observability.foglamp_skipped, 1);
+  assertEquals(latestRun.workflow_name, "rss-item-pipeline");
+  assertEquals(latestRun.duration_seconds, 4);
+  assertEquals(
+    ((latestRun.calls as Array<Record<string, unknown>>)[0]).agent_name,
+    "translator",
+  );
 });

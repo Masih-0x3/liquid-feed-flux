@@ -28,6 +28,9 @@ type FakeConfig = {
   signatureRow?: Record<string, unknown> | null;
   preScore?: number | null;
   rpcData?: unknown;
+  budgetRows?: Array<Record<string, unknown>>;
+  workflowRows?: Array<Record<string, unknown>>;
+  aiCallRows?: Array<Record<string, unknown>>;
 };
 
 function fakeSupabase(config: FakeConfig = {}) {
@@ -60,6 +63,15 @@ function fakeSupabase(config: FakeConfig = {}) {
         if (tableName === "story_signatures") {
           return { data: config.signatureRow ?? null };
         }
+        if (tableName === "budget_ledger") {
+          return { data: config.budgetRows ?? [] };
+        }
+        if (tableName === "workflow_runs") {
+          return { data: config.workflowRows ?? [] };
+        }
+        if (tableName === "ai_call_ledger") {
+          return { data: config.aiCallRows ?? [] };
+        }
         return {};
       };
       const builder = {
@@ -84,8 +96,27 @@ function fakeSupabase(config: FakeConfig = {}) {
           calls.push({ op: "update", table: tableName, value });
           return builder;
         },
+        insert(
+          value: Record<string, unknown> | Array<Record<string, unknown>>,
+        ) {
+          calls.push({ op: "insert", table: tableName, value });
+          return builder;
+        },
+        upsert(
+          value: Record<string, unknown> | Array<Record<string, unknown>>,
+          args?: Record<string, unknown>,
+        ) {
+          calls.push({ op: "upsert", table: tableName, value, args });
+          return builder;
+        },
         eq(column: string, value: unknown) {
           const call = { op: "eq", table: tableName, column, value };
+          filters.push(call);
+          calls.push(call);
+          return builder;
+        },
+        gte(column: string, value: unknown) {
+          const call = { op: "gte", table: tableName, column, value };
           filters.push(call);
           calls.push(call);
           return builder;
@@ -94,6 +125,14 @@ function fakeSupabase(config: FakeConfig = {}) {
           const call = { op: "in", table: tableName, column, values };
           filters.push(call);
           calls.push(call);
+          return builder;
+        },
+        order(column: string, args?: Record<string, unknown>) {
+          calls.push({ op: "order", table: tableName, column, args });
+          return builder;
+        },
+        limit(value: number) {
+          calls.push({ op: "limit", table: tableName, value });
           return builder;
         },
         maybeSingle() {
@@ -219,6 +258,67 @@ Deno.test("translation-only preview uses request settings and returns the existi
       raw: { usage: { total_tokens: 5 } },
     },
   });
+});
+
+Deno.test("preview translation writes local observability ledgers without prompt or output text metadata", async () => {
+  const supabase = fakeSupabase();
+
+  const result = await previewTranslationAdminAction(
+    {
+      text: "hello source text",
+      translation_settings: { model: "gpt-4o-mini" },
+      content_filter: { enabled: false },
+    },
+    {
+      supabase,
+      getOpenAiApiKey: () => "key",
+      now: () => new Date("2026-01-01T00:00:00.000Z"),
+      callOpenAI: (async () =>
+        openAiResponse({
+          content: "سلام خروجی",
+          raw: { usage: { total_tokens: 11 } },
+          usage: { total_tokens: 11 },
+        })) as never,
+    },
+  );
+
+  assertEquals((result.body as { ok?: boolean }).ok, true);
+
+  const workflowUpsert = supabase.calls.find((call) =>
+    call.op === "upsert" && call.table === "workflow_runs"
+  );
+  assertEquals(Boolean(workflowUpsert), true);
+  assertEquals(
+    (workflowUpsert!.value as Record<string, unknown>).workflow_name,
+    "translation-preview",
+  );
+
+  const workflowFinish = supabase.calls.find((call) =>
+    call.op === "update" && call.table === "workflow_runs" &&
+    (call.value as Record<string, unknown>).status === "completed"
+  );
+  assertEquals(Boolean(workflowFinish), true);
+
+  const aiLedgerInsert = supabase.calls.find((call) =>
+    call.op === "insert" && call.table === "ai_call_ledger"
+  );
+  assertEquals(Boolean(aiLedgerInsert), true);
+  const aiLedgerRow = aiLedgerInsert!.value as Record<string, unknown>;
+  assertEquals(aiLedgerRow.trace_name, "translation-preview");
+  assertEquals(aiLedgerRow.operation_name, "translate");
+  assertEquals(aiLedgerRow.agent_name, "translator");
+  assertEquals(aiLedgerRow.total_tokens, 11);
+  assertEquals(aiLedgerRow.foglamp_exported, false);
+  assertEquals(aiLedgerRow.foglamp_skip_reason, "injected_call_openai");
+
+  const metadataText = JSON.stringify(aiLedgerRow.metadata);
+  assertEquals(metadataText.includes("hello source text"), false);
+  assertEquals(metadataText.includes("سلام خروجی"), false);
+
+  const budgetInsert = supabase.calls.find((call) =>
+    call.op === "insert" && call.table === "budget_ledger"
+  );
+  assertEquals(Boolean(budgetInsert), true);
 });
 
 Deno.test("filter-enabled preview parses classify_importance tool calls", async () => {
