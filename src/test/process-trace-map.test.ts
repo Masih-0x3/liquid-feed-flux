@@ -207,6 +207,53 @@ describe("process trace map view-model", () => {
     expect(node(map, "x-post")).toMatchObject({ status: "skipped", skipReason: "duplicate" });
   });
 
+  it("does not keep posted items running when hosted trace evidence is absent", () => {
+    const map = buildProcessTraceMap(entry({
+      final_score: 16,
+      delivery_decision: "deliver",
+      is_translated: true,
+      is_delivered: true,
+      telegram_message_ids: ["123"],
+      x_status: "posted",
+      x_tweet_id: "2056",
+      x_posted_at: "2026-05-23T14:05:00.000Z",
+      monitoring_state: {
+        code: "delivered",
+        stage_label: "X posted",
+        tone: "good",
+        decision_label: "X posted",
+        primary_blocker: null,
+        translation_state: "translated",
+        telegram_state: "delivered",
+        x_state: "posted",
+        needs_attention: false,
+        next_actions: ["details"],
+      },
+    }));
+
+    expect(node(map, "trace-export")).toMatchObject({ status: "skipped", skipReason: "local_only" });
+    expect(map.summary.status).toBe("completed");
+  });
+
+  it("treats enrichment approval as a manual review checkpoint", () => {
+    const map = buildProcessTraceMap(entry({
+      final_score: 16,
+      delivery_decision: "deliver",
+      enrich_status: "awaiting_approval",
+      enrichment_version: "voice-v1",
+    }));
+    const enrich = node(map, "enrich");
+
+    expect(enrich).toMatchObject({
+      label: "Manual enrichment",
+      shortLabel: "Manual enrich",
+      status: "blocked",
+      skipReason: "manual_review",
+    });
+    expect(enrich.detail).toContain("Manual enrichment is awaiting approval");
+    expect(map.summary.status).toBe("blocked");
+  });
+
   it("surfaces partial observability and failed AI calls on the matching stage", () => {
     const source = entry({
       process_observability: {

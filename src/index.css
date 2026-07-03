@@ -211,6 +211,7 @@
   }
 
   .xot-hud-shell {
+    color-scheme: dark;
     color: oklch(0.97 0 0);
     background: oklch(0.205 0 0);
     border: 1px solid oklch(0.31 0 0);
@@ -296,6 +297,8 @@
 
   .xot-hud-list {
     border-right: 1px solid oklch(0.26 0 0);
+    color-scheme: dark;
+    overscroll-behavior: contain;
     @apply max-h-[560px] space-y-0.5 overflow-y-auto p-2;
   }
 
@@ -385,6 +388,8 @@
   }
 
   .xot-hud-tree {
+    color-scheme: dark;
+    overscroll-behavior: contain;
     @apply flex max-h-[520px] flex-col gap-0.5 overflow-y-auto p-2;
   }
 
@@ -408,7 +413,7 @@
   }
 
   .xot-hud-wf-label {
-    @apply flex w-[7.5rem] shrink-0 items-center gap-1.5;
+    @apply flex w-[8.25rem] shrink-0 items-center gap-1.5;
   }
 
   .xot-hud-wf-label.ai {
@@ -416,7 +421,7 @@
   }
 
   .xot-hud-wf-label b {
-    @apply min-w-0 truncate text-[12.5px] font-semibold;
+    @apply min-w-0 shrink-0 truncate text-[12.5px] font-semibold;
   }
 
   .xot-hud-wf-icon {
@@ -507,6 +512,7 @@
 
   .xot-hud-io pre {
     background: oklch(0.27 0 0);
+    color-scheme: dark;
     @apply m-0 max-h-[150px] overflow-auto whitespace-pre-wrap break-words rounded-lg px-2.5 py-2 font-mono text-[11px] leading-relaxed;
   }
 
@@ -678,7 +684,7 @@
     }
 
     .xot-hud-wf-label {
-      width: 6.25rem;
+      width: 7.5rem;
     }
   }
 

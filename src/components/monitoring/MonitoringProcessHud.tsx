@@ -37,6 +37,7 @@ interface MonitoringProcessTraceDetailProps {
   traceMap: ProcessTraceMap;
   title?: string;
   subtitle?: string;
+  statusOverride?: ProcessTraceStatus;
   onBack?: () => void;
   onOpenPost?: () => void | Promise<void>;
 }
@@ -80,6 +81,26 @@ function statusToHud(status: ProcessTraceStatus): HudStatus {
 
 function isLive(status: ProcessTraceStatus): boolean {
   return status === "running" || status === "pending";
+}
+
+function terminalStatus(entry: MonitoringEntry, traceMap: ProcessTraceMap): ProcessTraceStatus | null {
+  if (traceMap.summary.failed > 0 || entry.x_status === "failed" || entry.x_error || entry.delivery_error || entry.translation_error) {
+    return "failed";
+  }
+  if (
+    entry.x_status === "posted" ||
+    entry.monitoring_state?.x_state === "posted" ||
+    entry.monitoring_state?.code === "delivered" ||
+    entry.is_delivered ||
+    entry.telegram_message_ids.length > 0 ||
+    entry.monitoring_state?.telegram_state === "delivered"
+  ) {
+    return "completed";
+  }
+  if (entry.dup_of_tweet_id || entry.dedupe_status === "duplicate" || entry.delivery_decision === "skip" || entry.monitoring_state?.code === "below_threshold") {
+    return "blocked";
+  }
+  return null;
 }
 
 function traceSortScore(trace: HudTrace): number {
@@ -146,6 +167,7 @@ function traceFromEntry(entry: MonitoringEntry): HudTrace {
   const title = entry.author_handle ? `@${entry.author_handle}` : entry.account_handle || entry.tweet_id;
   const toolCount = traceMap.nodes.filter((node) => node.status !== "unknown").length;
   const errorCount = traceMap.nodes.filter((node) => node.status === "failed").length;
+  const status = terminalStatus(entry, traceMap) ?? traceMap.summary.status;
 
   return {
     id: entry.tweet_id,
@@ -153,7 +175,7 @@ function traceFromEntry(entry: MonitoringEntry): HudTrace {
     traceMap,
     title,
     subtitle: entry.monitoring_state?.stage_label ?? entry.monitoring_state?.decision_label ?? shortText(entry),
-    status: traceMap.summary.status,
+    status,
     startedAt,
     endedAt,
     durationMs,
@@ -398,10 +420,12 @@ export function MonitoringProcessTraceDetail({
   traceMap,
   title = traceMap.summary.workflowName ?? "Post process",
   subtitle = traceMap.summary.workflowRunId ?? "XOT-owned process ledger",
+  statusOverride,
   onBack,
   onOpenPost,
 }: MonitoringProcessTraceDetailProps) {
-  const status = statusToHud(traceMap.summary.status);
+  const effectiveStatus = statusOverride ?? traceMap.summary.status;
+  const status = statusToHud(effectiveStatus);
   const model = traceMap.nodes.find((node) => node.model)?.model ?? "XOT pipeline";
   const stepCount = traceMap.nodes.length;
   const traceExportText = traceMap.summary.hostedExports > 0
@@ -420,7 +444,7 @@ export function MonitoringProcessTraceDetail({
         )}
         <div className="min-w-0 flex-1">
           <div className="xot-hud-title-line">
-            <AgentBadge label={title} status={traceMap.summary.status} />
+            <AgentBadge label={title} status={effectiveStatus} />
             <b>{title}</b>
           </div>
           <p><span>{model}</span><span> - </span><span>{subtitle}</span></p>
@@ -525,6 +549,7 @@ export function MonitoringProcessHud({ entries, onOpenPost }: MonitoringProcessH
             traceMap={selected.traceMap}
             title={selected.title}
             subtitle={selected.entry.tweet_id}
+            statusOverride={selected.status}
             onOpenPost={() => onOpenPost(selected.id)}
           />
         ) : (

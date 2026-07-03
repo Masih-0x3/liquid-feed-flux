@@ -109,7 +109,7 @@ const CANONICAL_NODES: Array<Pick<ProcessTraceNode, "id" | "label" | "shortLabel
   { id: "dedupe", label: "Duplicate gate", shortLabel: "Dedupe", kind: "system" },
   { id: "score", label: "Scoring agent", shortLabel: "Score", kind: "ai" },
   { id: "translate", label: "Translation agent", shortLabel: "Translate", kind: "ai" },
-  { id: "enrich", label: "Voice enrichment", shortLabel: "Enrich", kind: "ai", optional: true },
+  { id: "enrich", label: "Manual enrichment", shortLabel: "Manual enrich", kind: "ai", optional: true },
   { id: "media", label: "Media preparation", shortLabel: "Media", kind: "system", optional: true },
   { id: "telegram", label: "Telegram delivery", shortLabel: "Telegram", kind: "delivery" },
   { id: "x-dispatch", label: "X dispatch gate", shortLabel: "X gate", kind: "delivery" },
@@ -272,6 +272,17 @@ function shouldShowMedia(entry: MonitoringEntry, node: ProcessTraceNode): boolea
   return Boolean(entry.has_media || entry.hydrated_at || entry.x_cost_flags?.media_upload_expected || node.evidence.length > 0);
 }
 
+function isTerminalDelivery(entry: MonitoringEntry): boolean {
+  return Boolean(
+    entry.x_status === "posted" ||
+      entry.monitoring_state?.x_state === "posted" ||
+      entry.monitoring_state?.code === "delivered" ||
+      entry.is_delivered ||
+      entry.telegram_message_ids.length > 0 ||
+      entry.monitoring_state?.telegram_state === "delivered",
+  );
+}
+
 function applyTimelineEvents(nodes: Map<ProcessTraceNodeId, ProcessTraceNode>, events: PipelineEvent[]) {
   for (const event of events) {
     const nodeId = eventNodeId(event);
@@ -411,20 +422,29 @@ function applyEntryState(nodes: Map<ProcessTraceNodeId, ProcessTraceNode>, entry
 
   const enrich = nodes.get("enrich")!;
   if (entry.enrich_status || entry.final_x_text || entry.composed_post_text) {
-    const enrichStatus = entry.enrich_status ? normalizeStatus(entry.enrich_status) : "completed";
+    const enrichStatus = entry.enrich_status === "awaiting_approval"
+      ? "blocked"
+      : entry.enrich_status
+        ? normalizeStatus(entry.enrich_status)
+        : "completed";
     updateNode(enrich, {
       status: enrichStatus === "unknown" ? "pending" : enrichStatus,
-      detail: entry.enrich_status ? entry.enrich_status.replaceAll("_", " ") : "Enriched X copy is available.",
+      detail: entry.enrich_status === "awaiting_approval"
+        ? "Manual enrichment is awaiting approval."
+        : entry.enrich_status
+          ? `Manual enrichment ${entry.enrich_status.replaceAll("_", " ")}.`
+          : "Manual enriched X copy is available.",
       durationMs: entry.enrich_duration_ms,
       tokens: entry.enrich_tokens,
-      evidence: "entry:enrichment",
+      skipReason: entry.enrich_status === "awaiting_approval" ? "manual_review" : undefined,
+      evidence: "manual:enrichment",
     });
   } else if (isDuplicateBlocked(entry) || isBelowThresholdSkip(entry)) {
     updateNode(enrich, {
       status: "skipped",
-      detail: "No enrichment needed for a skipped item.",
+      detail: "Manual enrichment is not needed for a skipped item.",
       skipReason: isDuplicateBlocked(entry) ? "duplicate" : "below_threshold",
-      evidence: "entry:enrichment_skipped",
+      evidence: "manual:enrichment_skipped",
     });
   }
 
@@ -544,9 +564,16 @@ function applyEntryState(nodes: Map<ProcessTraceNodeId, ProcessTraceNode>, entry
       skipReason: firstSkipReason ?? "local_only",
       evidence: "observability:foglamp_skipped",
     });
+  } else if (isTerminalDelivery(entry)) {
+    updateNode(traceExport, {
+      status: "skipped",
+      detail: "Post finished before a hosted trace export was captured.",
+      skipReason: "local_only",
+      evidence: "observability:terminal_local_only",
+    });
   } else {
     updateNode(traceExport, {
-      status: observability?.available === false ? "unknown" : "pending",
+      status: "unknown",
       detail: observability?.partial_reason ? observability.partial_reason.replaceAll("_", " ") : "No workflow ledger evidence yet.",
       evidence: "observability:no_trace",
     });

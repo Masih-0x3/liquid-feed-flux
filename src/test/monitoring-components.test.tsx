@@ -8,6 +8,7 @@ import {
 } from "@/components/monitoring/MonitoringDuplicateEvidence";
 import { MonitoringDuplicateGateCard } from "@/components/monitoring/MonitoringDuplicateGateCard";
 import { MonitoringDetailDrawer } from "@/components/monitoring/MonitoringDetailDrawer";
+import { MonitoringProcessHud } from "@/components/monitoring/MonitoringProcessHud";
 import {
   MonitoringAudienceBadge,
   MonitoringCostFlags,
@@ -531,6 +532,37 @@ describe("monitoring detail drawer", () => {
 });
 
 describe("monitoring process trace map", () => {
+  it("does not animate the left run marker for completed X posts", () => {
+    const posted = entry({
+      final_score: 16,
+      delivery_decision: "deliver",
+      is_translated: true,
+      is_delivered: true,
+      telegram_message_ids: ["123"],
+      x_status: "posted",
+      x_tweet_id: "2056",
+      x_posted_at: "2026-05-23T14:05:00.000Z",
+      monitoring_state: {
+        code: "delivered",
+        stage_label: "X posted",
+        tone: "good",
+        decision_label: "X posted",
+        primary_blocker: null,
+        translation_state: "translated",
+        telegram_state: "delivered",
+        x_state: "posted",
+        needs_attention: false,
+        next_actions: ["details"],
+      },
+    });
+
+    const { container } = render(<MonitoringProcessHud entries={[posted]} onOpenPost={vi.fn()} />);
+
+    expect(screen.getByText(/latest complete/i)).toBeInTheDocument();
+    expect(container.querySelector(".xot-hud-list .xot-hud-diamond.run")).toBeNull();
+    expect(container.querySelector(".xot-hud-detail-header .xot-hud-diamond.run")).toBeNull();
+  });
+
   it("renders a successful local-only AI trace with visible stage labels", () => {
     const source = entry({
       final_score: 16,
