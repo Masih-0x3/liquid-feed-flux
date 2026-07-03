@@ -43,10 +43,34 @@ export default function AuthPage() {
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
+    const submitted = new FormData(e.currentTarget as HTMLFormElement);
+    const email = String(submitted.get('email') ?? formData.email).trim();
+    const password = String(submitted.get('password') ?? formData.password);
+
+    if (!email || !password) {
+      toast({
+        title: "Sign in failed",
+        description: "Enter an email and password.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setFormData({ email, password });
     setLoading(true);
     
     try {
-      const { error } = await signIn(formData.email, formData.password);
+      const timeoutError = {
+        name: 'AuthTimeoutError',
+        message: 'Supabase Auth is not responding. Please try again after the backend recovers.',
+        status: 504,
+      } as Awaited<ReturnType<typeof signIn>>['error'];
+      const { error } = await Promise.race([
+        signIn(email, password),
+        new Promise<Awaited<ReturnType<typeof signIn>>>((resolve) => {
+          setTimeout(() => resolve({ error: timeoutError }), 20000);
+        }),
+      ]);
       
       if (error) {
         toast({
