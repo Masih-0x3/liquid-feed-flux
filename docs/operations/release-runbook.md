@@ -195,6 +195,30 @@ Secret/config rollback:
 
 Add new entries at the top.
 
+### 2026-07-03 - Dashboard process cockpit
+
+```text
+Date: 2026-07-03
+Operator: Codex
+Git SHA deployed to Edge Functions: 4922911aeac3d925c1ce8550264497fcd4081744
+Frontend app release SHA: 4922911aeac3d925c1ce8550264497fcd4081744
+GitHub PR: none; direct main push at user request after checkpoint-quality-loop passed.
+GitHub CI run: https://github.com/Masihhedayati/liquid-feed-flux/actions/runs/28672861861
+Vercel deployment: dpl_HMQ2HmomLTZCj2thQjWR9mmaEba6 for 4922911aeac3d925c1ce8550264497fcd4081744, inspector https://vercel.com/masihation-8914s-projects/xot/HMQ2HmomLTZCj2thQjWR9mmaEba6
+Vercel aliases checked: https://xot.iraneyes.com and https://xot.vercel.app returned HTTP 200 with matching etag "ecd8227303ad1841e892d25244c42548" and expected security headers.
+Supabase project ref: jzirqfzzvlbxwfzndaer
+Migration head before: existing historical drift preserved; newest shared local/remote heads were 20260703010000 and 20260703013000.
+Migration head after: unchanged; no migrations were applied in this release.
+Supabase function versions before deploy: admin-actions 203, worker 278, digest-compiler 126, x-poster 153, webhooks-rssapp 243, admin-retry 197, media-cleanup 205, media-processor 208, db-cleanup 169, x-followers-snapshot 119.
+Supabase function versions after deploy/secret stamp: admin-actions 205, worker 279, digest-compiler 127, x-poster 154, webhooks-rssapp 244, admin-retry 198, media-cleanup 206, media-processor 209, db-cleanup 170, x-followers-snapshot 120. Secret stamping bumped non-selected functions.
+Selected function code deploys: admin-actions
+DEPLOY_GIT_SHA: deploy command stamped 4922911aeac3d925c1ce8550264497fcd4081744; Supabase secret timestamp 2026-07-03T16:33:48.065Z
+Renderer heartbeat: hermes-masih-1 online, version 0.1.0, render_version persian-subtitles-masihh-v1, processed 27, failed 0, last_seen_at 2026-07-03 16:35:28.598+00
+Smoke checks: local gates passed: npm run lint (0 errors, 8 existing Fast Refresh warnings), npm run check:function-inventory, npm run lint:functions, npm run check:functions, npm run check:strict, npm test (132 tests), npm run test:functions (318 tests), npm --prefix services/video-renderer test (166 tests), Vercel-env production npm run build, git diff --check, staged secret-pattern scan, deploy dry-run, and post-release npm run check:release-state. GitHub CI passed. Vercel production deployment was READY. Post-release queue health had no stale running jobs, cron was active, and renderer heartbeat was online.
+Browser smoke: local mocked authenticated Dashboard browser QA for this implementation rendered Dashboard, Post process HUD, Limits & Trace Guard, no Recent Activity, and no rendering error on desktop and mobile. Live authenticated browser control was attempted after deploy but blocked because the in-app browser automation surface reported no controllable tabs / webview attach timeout; live unauthenticated host and backend release-state checks passed.
+Rollback target: previous Vercel production deployment dpl_F35rx4A6wd4NRrQgZRZYHN6NDDtV for 8b07582d8ef9741cf72c113e6b214b84694acc7c; previous admin-actions function version 203 / prior DEPLOY_GIT_SHA before this release.
+```
+
 ### 2026-07-03 - XOT native process observability
 
 ```text
