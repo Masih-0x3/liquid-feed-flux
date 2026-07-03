@@ -373,6 +373,25 @@ describe("Dashboard", () => {
     expect(screen.getByText(/Official X usage is not synced from Dashboard/)).toBeTruthy();
   });
 
+  it("keeps dashboard status in normal page flow instead of sticking over cards", () => {
+    mockedUseDashboardData.mockReturnValue({
+      data: dashboardData,
+      isLoading: false,
+      isError: false,
+      error: null,
+      dataUpdatedAt: Date.now(),
+      isFetching: false,
+    } as ReturnType<typeof useDashboardData>);
+
+    renderDashboard();
+
+    const status = screen.getByLabelText("Dashboard status");
+
+    expect(status).not.toHaveClass("sticky");
+    expect(status).not.toHaveClass("top-16");
+    expect(status).not.toHaveClass("z-30");
+  });
+
   it("shows local OpenAI usage from completed job metadata on the pipeline tab", () => {
     mockedUseDashboardData.mockReturnValue({
       data: dashboardData,

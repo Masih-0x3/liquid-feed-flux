@@ -420,7 +420,7 @@ export default function Dashboard() {
     },
   ];
 
-  const stickyStatusItems = [
+  const statusItems = [
     pipelineCounts.failedStuck > 0
       ? { label: `${compactNumber(pipelineCounts.failedStuck)} failed/stuck`, className: 'border-destructive/30 text-destructive' }
       : null,
@@ -531,9 +531,9 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="sticky top-16 z-30 -mx-2 rounded-lg border border-border/60 bg-background/90 px-2 py-2 shadow-lg backdrop-blur-glass sm:top-20 sm:-mx-3 sm:px-3">
+      <div aria-label="Dashboard status" className="rounded-lg border border-border/60 bg-background/70 px-2 py-2">
         <div className="flex flex-wrap items-center gap-2">
-          {stickyStatusItems.map((item) => (
+          {statusItems.map((item) => (
             <span key={item.label} className={cn('rounded-full border px-2.5 py-1 text-xs font-medium', item.className)}>
               {item.label}
             </span>
