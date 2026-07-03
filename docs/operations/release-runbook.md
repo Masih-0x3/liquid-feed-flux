@@ -195,6 +195,36 @@ Secret/config rollback:
 
 Add new entries at the top.
 
+### 2026-07-03 - XOT native process observability
+
+```text
+Date: 2026-07-03
+Operator: Codex
+Git SHA deployed to Edge Functions: 0006662ec223bd8768c7e1f3e0a7f04daa60c1e4
+Final frontend/main SHA after auth hotfix: 0e9aba2a92d0f45c7920eeb664bdfb997affa6e1
+GitHub PR: https://github.com/Masihhedayati/liquid-feed-flux/pull/65
+Follow-up direct commits: 0006662ec223bd8768c7e1f3e0a7f04daa60c1e4 hardened observability grants; 0e9aba2a92d0f45c7920eeb664bdfb997affa6e1 hardened admin sign-in handling.
+CI runs: PR CI https://github.com/Masihhedayati/liquid-feed-flux/actions/runs/28650136223; main migration CI https://github.com/Masihhedayati/liquid-feed-flux/actions/runs/28650825902; main auth hotfix CI https://github.com/Masihhedayati/liquid-feed-flux/actions/runs/28651486992
+Vercel deployment: https://vercel.com/masihation-8914s-projects/xot/8v9hU1Qeb1NJNhdynELiHqVVunJR for final frontend SHA 0e9aba2a92d0f45c7920eeb664bdfb997affa6e1
+Vercel aliases checked: https://xot.iraneyes.com and https://xot.vercel.app returned HTTP 200 with matching etag "0258c5e17a0fd549e6d0f27fd5ab90a9" and expected security headers.
+Supabase project ref: jzirqfzzvlbxwfzndaer
+Migration head before: existing drift preserved; observability migrations absent; newest matched local/remote release migration was 20260629010000.
+Migration head after: 20260703010000 xot_process_observability and 20260703013000 harden_observability_grants are present locally and remotely.
+Supabase function versions before observability deploy: admin-actions 200, worker 275, digest-compiler 123, x-poster 150. Setting Foglamp hosted-off secrets bumped immediate pre-code-deploy versions to admin-actions 201, worker 276, digest-compiler 124, x-poster 151.
+Supabase function versions after deploy/secret stamp: admin-actions 203, worker 278, digest-compiler 126, x-poster 153. Secret stamping also bumped non-selected function versions.
+Selected function code deploys: admin-actions, worker, digest-compiler, x-poster
+DEPLOY_GIT_SHA: deploy command stamped 0006662ec223bd8768c7e1f3e0a7f04daa60c1e4; Supabase secret timestamp 2026-07-03T09:17:31.834Z
+Foglamp secret names present: FOGLAMP_ENABLED, FOGLAMP_RECORD_INPUTS, FOGLAMP_RECORD_OUTPUTS. No FOGLAMP_API_KEY was set. Hosted Foglamp export remains disabled; local XOT ledgers are the source of truth.
+Foglamp cap settings: not set because hosted export is disabled and the live account free limit was not verified during release. XOT recorded skipped estimated spans locally instead of sending hosted spans.
+Renderer heartbeat: hermes-masih-1 online, version 0.1.0, render_version persian-subtitles-masihh-v1, processed 18, failed 0, last_seen_at 2026-07-03 09:30:16.724+00
+Smoke checks: local gates passed: npm run lint (0 errors, 8 existing Fast Refresh warnings), npm run check:function-inventory, npm run lint:functions, npm run check:functions, npm run check:strict, npm test (116 tests), npm run test:functions (317 tests), npm --prefix services/video-renderer test (166 tests), npm run build:dev, Vercel-env production npm run build, git diff --check, staged secret key-pattern scan, and deploy dry-run. PR CI and both follow-up main CI runs passed. Post-release npm run check:release-state completed successfully.
+Browser smoke: production /monitoring sign-in route loaded. Saved-browser credential submit originally stuck; follow-up frontend hotfix 0e9aba2 made empty/autofill-missing submits fail visibly with "Enter an email and password" instead of spinning. Authenticated production Dashboard/Monitoring/Settings UI proof still requires a manual admin login in the browser.
+SQL row proof summary: normal worker cron created real workflow rows for dedupe-pipeline and rss-item-pipeline on https://twitter.com/FirstSquawk/status/2072971267544903751. ai_call_ledger recorded duplicate-embedding on text-embedding-3-small with 28 tokens and importance-scorer calls on gpt-5.4-mini with 2808 and 5132 tokens. budget_ledger recorded openai token quantity 7968 and foglamp estimated_span_skipped quantity 4 for period 2026-07. Hosted export flags were false with skip reasons non_chat_endpoint and worker_local_only. No prompt/output text was observed in the queried ledger fields.
+Queue and cron health: cron jobs active; queue summary showed completed dedupe/deliver/download_media/hydrate_tweet/resolve_media/translate counts, two pre-existing failed deliver jobs, and no stale running jobs.
+Rollback target: for Edge Functions, redeploy previous production release SHA 9dc55700b866c487484e8fff118c0fbd46fa1b83 if observability function code causes an incident. For frontend-only auth hotfix rollback, promote the Vercel deployment for 0006662ec223bd8768c7e1f3e0a7f04daa60c1e4. Leave observability tables in place unless a reviewed forward-fix migration says otherwise.
+Notes: Release adds XOT-owned workflow_runs, ai_call_ledger, and budget_ledger tables; dashboard/monitoring/settings surfaces; Edge Function and renderer provider-call observability; hosted Foglamp-compatible metadata with hosted export disabled; admin-only RLS reads; and a small admin sign-in hardening fix discovered during browser smoke. No fake traces, demo endpoints, forced posts, or manual X posts were used as smoke checks.
+```
+
 ### 2026-07-01 - Persian X post readability guard
 
 ```text
