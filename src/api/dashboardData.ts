@@ -164,16 +164,6 @@ export interface IngestHeartbeat {
   criticalMinutes: number;
 }
 
-export interface ActivityItem {
-  id: string;
-  title: string;
-  description: string;
-  timestamp: string;
-  status: 'success' | 'pending' | 'failed' | 'warning';
-  kind?: 'post' | 'job' | 'delivery' | 'x' | 'system';
-  route?: string;
-}
-
 export interface StageTiming {
   count: number;
   avgSeconds: number | null;
@@ -335,7 +325,6 @@ interface RpcResult {
   process_observability?: Record<string, unknown>;
   system_performance?: Record<string, unknown>;
   scoring_tuning?: Record<string, unknown>;
-  activity?: Array<Record<string, unknown>>;
 }
 
 const DEFAULT_STORAGE_LIMIT_BYTES = 100_000_000_000;
@@ -668,30 +657,6 @@ function normalizeProcessObservability(input: RpcResult['process_observability']
   };
 }
 
-function normalizeActivity(rpc: RpcResult): ActivityItem[] {
-  if (Array.isArray(rpc.activity) && rpc.activity.length > 0) {
-    return rpc.activity.map((item, index) => ({
-      id: String(item.id ?? `${item.kind ?? 'activity'}-${index}`),
-      title: String(item.title ?? 'Pipeline event'),
-      description: String(item.description ?? ''),
-      timestamp: String(item.timestamp ?? new Date().toISOString()),
-      status: item.status === 'failed' || item.status === 'warning' || item.status === 'success' || item.status === 'pending' ? item.status : 'pending',
-      kind: item.kind === 'job' || item.kind === 'delivery' || item.kind === 'x' || item.kind === 'system' ? item.kind : 'post',
-      route: typeof item.route === 'string' ? item.route : undefined,
-    }));
-  }
-
-  return (rpc.recent_posts || []).map(post => ({
-    id: post.tweet_id,
-    title: `New post from @${post.account_handle || 'unknown'}`,
-    description: (post.text_original?.substring(0, 100) || 'No content') + '...',
-    timestamp: post.created_at,
-    status: post.text_translated ? 'success' as const : 'pending' as const,
-    kind: 'post' as const,
-    route: `/monitoring?search=${encodeURIComponent(post.tweet_id)}`,
-  }));
-}
-
 export async function fetchDashboardData() {
   const data = await invokeAdminAction<{ success?: boolean; error?: string; dashboard: unknown }>({ action: 'get_dashboard_summary' });
   if (!data?.success) throw new Error(data?.error || 'Failed to load dashboard summary');
@@ -744,7 +709,6 @@ export async function fetchDashboardData() {
   const processObservability = normalizeProcessObservability(rpc.process_observability);
   const systemPerformance = normalizeSystemPerformance(rpc.system_performance);
   const scoringTuning = normalizeScoringTuning(rpc.scoring_tuning);
-  const activities = normalizeActivity(rpc);
 
-  return { metrics, health, activities, heartbeat, opsStatus, pipelineCounts, queueBreakdown, xLocalUsage, openAiUsage, processObservability, systemPerformance, scoringTuning };
+  return { metrics, health, heartbeat, opsStatus, pipelineCounts, queueBreakdown, xLocalUsage, openAiUsage, processObservability, systemPerformance, scoringTuning };
 }

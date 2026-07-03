@@ -4,6 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import Dashboard from "@/pages/Dashboard";
 import { useDashboardData } from "@/hooks/useDashboardData";
+import { useDashboardProcessHudData } from "@/hooks/useDashboardProcessHudData";
 import { DashboardHealth } from "@/components/dashboard/DashboardHealth";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
@@ -15,6 +16,14 @@ vi.mock("@/hooks/useDashboardData", async () => {
   };
 });
 
+vi.mock("@/hooks/useDashboardProcessHudData", async () => {
+  const actual = await vi.importActual<typeof import("@/hooks/useDashboardProcessHudData")>("@/hooks/useDashboardProcessHudData");
+  return {
+    ...actual,
+    useDashboardProcessHudData: vi.fn(),
+  };
+});
+
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: {
     functions: { invoke: vi.fn() },
@@ -22,6 +31,7 @@ vi.mock("@/integrations/supabase/client", () => ({
 }));
 
 const mockedUseDashboardData = vi.mocked(useDashboardData);
+const mockedUseDashboardProcessHudData = vi.mocked(useDashboardProcessHudData);
 
 function renderDashboard(initialEntries = ["/"]) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -75,35 +85,6 @@ const dashboardData = {
     xMonthlyBudget: 3000,
     xBudgetUsedPct: 4,
   },
-  activities: [
-    {
-      id: "a1",
-      title: "Ingested @rss-feed",
-      description: "Fresh post",
-      timestamp: new Date().toISOString(),
-      status: "pending" as const,
-      kind: "post" as const,
-      route: "/monitoring?search=1",
-    },
-    {
-      id: "a2",
-      title: "Telegram posted",
-      description: "Delivery state changed",
-      timestamp: new Date(Date.now() - 1000).toISOString(),
-      status: "success" as const,
-      kind: "delivery" as const,
-      route: "/monitoring?search=2",
-    },
-    {
-      id: "a3",
-      title: "Failed item",
-      description: "Worker failed",
-      timestamp: new Date(Date.now() - 2000).toISOString(),
-      status: "failed" as const,
-      kind: "job" as const,
-      route: "/monitoring?search=3",
-    },
-  ],
   heartbeat: {
     state: "ok" as const,
     lastPostAt: new Date().toISOString(),
@@ -320,6 +301,24 @@ const dashboardData = {
 describe("Dashboard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockedUseDashboardProcessHudData.mockReturnValue({
+      data: {
+        available: true,
+        generatedAt: new Date().toISOString(),
+        windowHours: 24,
+        source: "local-ledger",
+        partialReason: null,
+        error: null,
+        truncated: false,
+        entries: [],
+      },
+      entries: [],
+      isLoading: false,
+      isError: false,
+      error: null,
+      isFetching: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useDashboardProcessHudData>);
   });
 
   it("renders an actionable error state", () => {
@@ -406,11 +405,11 @@ describe("Dashboard", () => {
 
     expect(screen.getByText("OpenAI Usage")).toBeTruthy();
     expect(screen.getByText("Last 24h from completed job metadata")).toBeTruthy();
-    expect(screen.getByText("12,345")).toBeTruthy();
+    expect(screen.getAllByText("12,345").length).toBeGreaterThan(0);
     expect(screen.getByText(/5 measured jobs - 2 retry attempts/)).toBeTruthy();
   });
 
-  it("shows local process observability and Foglamp cap state on the pipeline tab", () => {
+  it("shows the process HUD and local trace guardrail instead of Recent Activity", () => {
     mockedUseDashboardData.mockReturnValue({
       data: dashboardData,
       isLoading: false,
@@ -420,14 +419,15 @@ describe("Dashboard", () => {
       isFetching: false,
     } as ReturnType<typeof useDashboardData>);
 
-    renderDashboard(["/?tab=pipeline"]);
+    renderDashboard();
 
-    expect(screen.getByText("Process Observability")).toBeTruthy();
-    expect(screen.getByText("Last 24h from XOT-owned ledgers")).toBeTruthy();
-    expect(screen.getByText("Local only")).toBeTruthy();
+    expect(screen.getByText("Post process HUD")).toBeTruthy();
+    expect(screen.getByText("Limits & Trace Guard")).toBeTruthy();
     expect(screen.getByText("rss-item-pipeline")).toBeTruthy();
     expect(screen.getByText("120 / 8,000")).toBeTruthy();
-    expect(screen.getByText("9 estimated spans kept local")).toBeTruthy();
+    expect(screen.getByText(/Native HUD remains local/)).toBeTruthy();
+    expect(screen.queryByText("Recent Activity")).toBeNull();
+    expect(screen.queryByRole("tab", { name: "Activity" })).toBeNull();
   });
 
   it("surfaces storage warning when no higher-priority issue is active", () => {
@@ -572,7 +572,7 @@ describe("Dashboard", () => {
     expect(screen.getByRole("button", { name: /Dry-run media cleanup/i })).toBeTruthy();
   });
 
-  it("filters recent activity by operator status", () => {
+  it("defaults secondary dashboard tabs to pipeline", () => {
     mockedUseDashboardData.mockReturnValue({
       data: dashboardData,
       isLoading: false,
@@ -584,25 +584,8 @@ describe("Dashboard", () => {
 
     renderDashboard();
 
-    expect(screen.getByText("Failed item")).toBeTruthy();
-    expect(screen.getByText("Ingested @rss-feed")).toBeTruthy();
-    expect(screen.getByText("Telegram posted")).toBeTruthy();
-
-    fireEvent.click(screen.getByRole("button", { name: /^Failed$/i }));
-    expect(screen.getByText("Failed item")).toBeTruthy();
-    expect(screen.queryByText("Ingested @rss-feed")).toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: /^Pending$/i }));
-    expect(screen.getByText("Ingested @rss-feed")).toBeTruthy();
-    expect(screen.queryByText("Telegram posted")).toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: /^Delivered$/i }));
-    expect(screen.getByText("Telegram posted")).toBeTruthy();
-    expect(screen.queryByText("Failed item")).toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: /^Ingested$/i }));
-    expect(screen.getByText("Ingested @rss-feed")).toBeTruthy();
-    expect(screen.queryByText("Telegram posted")).toBeNull();
+    expect(screen.getByRole("tab", { name: "Pipeline" })).toHaveAttribute("data-state", "active");
+    expect(screen.queryByText("Recent Activity")).toBeNull();
   });
 
   it("keeps live pipeline testing behind a confirmation", () => {

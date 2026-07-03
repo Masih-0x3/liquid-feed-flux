@@ -19,8 +19,8 @@ worker (Edge Function, cron-triggered)
 pipeline_events table
   ↓
 React Admin Dashboard (Vite + shadcn/ui)
-  ├─ Dashboard   — 24h metrics, health, recent posts
-  ├─ Monitoring  — Per-post pipeline stepper, filters, detail drawer
+  ├─ Dashboard   — Ops cockpit with live/recent post process HUD, triage, and guardrails
+  ├─ Monitoring  — Per-post workbench: filters, bulk actions, detail drawer, manual intervention
   ├─ Threads     — Grouped tweet threads
   └─ Settings    — Content filter, translation prompts, message templates, accounts
 ```

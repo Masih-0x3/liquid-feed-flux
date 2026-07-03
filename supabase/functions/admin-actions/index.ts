@@ -22,6 +22,7 @@ import {
   runDedupeAdminAction,
 } from "./dedupeActions.ts";
 import {
+  getDashboardProcessHud,
   getMonitoringEntries,
   getMonitoringOverview,
 } from "./monitoringReads.ts";
@@ -312,6 +313,10 @@ serve(async (req) => {
 
       case 'get_monitoring_entries': {
         return jsonResponse(await getMonitoringEntries(supabase, body));
+      }
+
+      case 'get_dashboard_process_hud': {
+        return jsonResponse(await getDashboardProcessHud(supabase, body));
       }
 
       case 'get_x_api_summary': {

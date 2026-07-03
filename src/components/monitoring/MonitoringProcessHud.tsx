@@ -31,6 +31,12 @@ import { shortText } from "@/lib/monitoringViewModel";
 interface MonitoringProcessHudProps {
   entries: MonitoringEntry[];
   onOpenPost: (tweetId: string) => void | Promise<void>;
+  isLoading?: boolean;
+  error?: Error | null;
+  emptyReason?: string | null;
+  mode?: "dashboard" | "monitoring";
+  maxEntries?: number;
+  onRetry?: () => void;
 }
 
 interface MonitoringProcessTraceDetailProps {
@@ -83,7 +89,14 @@ function isLive(status: ProcessTraceStatus): boolean {
   return status === "running" || status === "pending";
 }
 
+function isAnimatingStatus(status: ProcessTraceStatus): boolean {
+  return status === "running";
+}
+
 function terminalStatus(entry: MonitoringEntry, traceMap: ProcessTraceMap): ProcessTraceStatus | null {
+  const telegramMessageIds = Array.isArray(entry.telegram_message_ids)
+    ? entry.telegram_message_ids
+    : [];
   if (traceMap.summary.failed > 0 || entry.x_status === "failed" || entry.x_error || entry.delivery_error || entry.translation_error) {
     return "failed";
   }
@@ -92,7 +105,7 @@ function terminalStatus(entry: MonitoringEntry, traceMap: ProcessTraceMap): Proc
     entry.monitoring_state?.x_state === "posted" ||
     entry.monitoring_state?.code === "delivered" ||
     entry.is_delivered ||
-    entry.telegram_message_ids.length > 0 ||
+    telegramMessageIds.length > 0 ||
     entry.monitoring_state?.telegram_state === "delivered"
   ) {
     return "completed";
@@ -240,7 +253,7 @@ function Timeline({ traces, selectedId, onSelect }: { traces: HudTrace[]; select
             <button
               key={trace.id}
               type="button"
-              className={cn("xot-hud-timeline-bar", isLive(trace.status) && "run", selectedId === trace.id && "selected")}
+              className={cn("xot-hud-timeline-bar", isAnimatingStatus(trace.status) && "run", selectedId === trace.id && "selected")}
               style={{ left: `${left}%`, width: `${width}%`, backgroundColor: color }}
               onClick={() => onSelect(trace.id)}
               title={`${trace.title} - ${formatDuration(traceDuration(trace))}`}
@@ -298,7 +311,7 @@ function TraceList({
               <span className="shrink-0">- {trace.toolCount} steps</span>
             </span>
           </span>
-          {isLive(trace.status) ? (
+          {isAnimatingStatus(trace.status) ? (
             <Diamond status="run" />
           ) : trace.errorCount > 0 ? (
             <span className="xot-hud-error-count"><AlertTriangle className="h-3 w-3" />{trace.errorCount}</span>
@@ -399,7 +412,7 @@ function TraceWaterfall({
               </span>
               <span className="xot-hud-wf-track">
                 <span
-                  className={cn("xot-hud-wf-bar", isLive(node.status) && "run")}
+                  className={cn("xot-hud-wf-bar", isAnimatingStatus(node.status) && "run")}
                   style={{ left: `${left}%`, width: `${width}%`, backgroundColor: color } as CSSProperties}
                 />
               </span>
@@ -486,13 +499,22 @@ export function MonitoringProcessTraceDetail({
   );
 }
 
-export function MonitoringProcessHud({ entries, onOpenPost }: MonitoringProcessHudProps) {
+export function MonitoringProcessHud({
+  entries,
+  onOpenPost,
+  isLoading = false,
+  error = null,
+  emptyReason = null,
+  mode = "monitoring",
+  maxEntries = 30,
+  onRetry,
+}: MonitoringProcessHudProps) {
   const traces = useMemo(() => (
     entries
       .map(traceFromEntry)
       .sort((a, b) => traceSortScore(b) - traceSortScore(a) || b.startedAt - a.startedAt)
-      .slice(0, 30)
-  ), [entries]);
+      .slice(0, maxEntries)
+  ), [entries, maxEntries]);
   const autoSelectedId = traces.find((trace) => isLive(trace.status))?.id ?? traces[0]?.id ?? null;
   const [selectedId, setSelectedId] = useState<string | null>(autoSelectedId);
   const [manualSelection, setManualSelection] = useState(false);
@@ -507,8 +529,17 @@ export function MonitoringProcessHud({ entries, onOpenPost }: MonitoringProcessH
   }, [autoSelectedId, manualSelection, selectedId, traces]);
 
   const selected = traces.find((trace) => trace.id === selectedId) ?? traces[0] ?? null;
-  const running = traces.some((trace) => isLive(trace.status));
-  const status = running ? "run" : traces.some((trace) => trace.status === "failed") ? "err" : "";
+  const animating = traces.some((trace) => isAnimatingStatus(trace.status));
+  const hasFailures = traces.some((trace) => trace.status === "failed");
+  const hasWaiting = traces.some((trace) => trace.status === "pending" || trace.status === "blocked");
+  const status = animating ? "run" : hasFailures ? "err" : "";
+  const subtitle = traces.length > 0
+    ? `${traces.length} loaded - ${animating ? "live follow" : hasFailures ? "needs review" : hasWaiting ? "waiting/manual" : "latest complete"}`
+    : isLoading
+      ? "loading post runs"
+      : error
+        ? "process feed unavailable"
+        : emptyReason ?? "waiting for posts";
 
   const select = (id: string) => {
     setSelectedId(id);
@@ -516,13 +547,17 @@ export function MonitoringProcessHud({ entries, onOpenPost }: MonitoringProcessH
   };
 
   return (
-    <section className="xot-hud-shell" data-testid="monitoring-process-hud" aria-label="XOT post process HUD">
+    <section
+      className={cn("xot-hud-shell", mode === "dashboard" && "dashboard")}
+      data-testid="monitoring-process-hud"
+      aria-label="XOT post process HUD"
+    >
       <div className="xot-hud-header">
         <div className="xot-hud-heading">
           <Workflow className="h-4 w-4" />
           <div>
             <b>Post process HUD</b>
-            <span>{traces.length > 0 ? `${traces.length} loaded - ${running ? "live follow" : "latest complete"}` : "waiting for posts"}</span>
+            <span>{subtitle}</span>
           </div>
         </div>
         <div className="xot-hud-header-actions">
@@ -530,6 +565,7 @@ export function MonitoringProcessHud({ entries, onOpenPost }: MonitoringProcessH
           <button
             type="button"
             className="xot-hud-reset"
+            disabled={traces.length === 0}
             onClick={() => {
               setSelectedId(autoSelectedId);
               setManualSelection(false);
@@ -537,6 +573,11 @@ export function MonitoringProcessHud({ entries, onOpenPost }: MonitoringProcessH
           >
             Follow latest
           </button>
+          {onRetry && (
+            <button type="button" className="xot-hud-reset" onClick={onRetry}>
+              Retry
+            </button>
+          )}
         </div>
       </div>
 
@@ -556,7 +597,7 @@ export function MonitoringProcessHud({ entries, onOpenPost }: MonitoringProcessH
           <div className="xot-hud-detail">
             <div className="xot-hud-empty">
               <span className="xot-hud-listening"><span /><span /></span>
-              <p>Waiting for a new post process.</p>
+              <p>{isLoading ? "Loading post processes..." : error ? error.message : emptyReason ?? "Waiting for a new post process."}</p>
             </div>
           </div>
         )}

@@ -84,7 +84,7 @@ describe("monitoring page", () => {
     expect(monitoringHooks.useMonitoringDataSearchWithScore).toHaveBeenCalledWith("x_failed", "", "any");
   });
 
-  it("renders the compact post process HUD from monitoring entries", () => {
+  it("keeps the process HUD off the monitoring workbench while preserving post actions", () => {
     const entry = {
       tweet_id: "post-1",
       text_original: "Source post text",
@@ -235,10 +235,10 @@ describe("monitoring page", () => {
 
     renderMonitoring();
 
-    expect(screen.getByTestId("monitoring-process-hud")).toBeInTheDocument();
-    expect(screen.getByText("Post process HUD")).toBeInTheDocument();
+    expect(screen.queryByTestId("monitoring-process-hud")).toBeNull();
+    expect(screen.queryByText("Post process HUD")).toBeNull();
     expect(screen.getAllByText("@FirstSquawk").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Translate").length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: /full post/i })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /details/i }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: /row actions/i }).length).toBeGreaterThan(0);
   });
 });

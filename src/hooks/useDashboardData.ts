@@ -4,7 +4,6 @@ import { fetchDashboardData } from '@/api/dashboardData';
 import { supabase } from '@/integrations/supabase/client';
 
 export type {
-  ActivityItem,
   DashboardMetrics,
   DashboardSeverity,
   IngestHeartbeat,

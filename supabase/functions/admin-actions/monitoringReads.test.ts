@@ -3,6 +3,7 @@ import {
   applyJobStateToRpc,
   attachDuplicateClusters,
   deriveMonitoringState,
+  getDashboardProcessHud,
   getMonitoringEntries,
   matchesMonitoringFilter,
   normalizeMonitoringFilter,
@@ -112,6 +113,10 @@ function fakeMonitoringSupabase(options: FakeMonitoringSupabaseOptions = {}) {
       },
       eq(column: string, value: unknown) {
         calls.push({ table, op: "eq", column, value });
+        return builder;
+      },
+      gte(column: string, value: unknown) {
+        calls.push({ table, op: "gte", column, value });
         return builder;
       },
       in(column: string, values: unknown[]) {
@@ -436,5 +441,78 @@ Deno.test("getMonitoringEntries attaches process observability evidence by tweet
   assertEquals(
     ((latestRun.calls as Array<Record<string, unknown>>)[0]).agent_name,
     "translator",
+  );
+});
+
+Deno.test("getDashboardProcessHud returns bounded ordered process entries", async () => {
+  const supabase = fakeMonitoringSupabase({
+    postRows: [
+      {
+        tweet_id: "done-1",
+        text_original: "done",
+        text_translated: "translated",
+        url: "https://x.com/status/done-1",
+        created_at: "2026-01-01T00:00:00.000Z",
+        translated_at: "2026-01-01T00:01:00.000Z",
+        has_media: false,
+        author_handle: "done",
+        final_score: 16,
+        delivery_decision: "deliver",
+        x_status: "posted",
+        accounts: { handle: "feed" },
+      },
+      {
+        tweet_id: "manual-1",
+        text_original: "manual",
+        text_translated: "translated",
+        url: "https://x.com/status/manual-1",
+        created_at: "2026-01-01T00:02:00.000Z",
+        translated_at: "2026-01-01T00:03:00.000Z",
+        has_media: false,
+        author_handle: "manual",
+        final_score: 16,
+        delivery_decision: "deliver",
+        enrich_status: "awaiting_approval",
+        accounts: { handle: "feed" },
+      },
+      {
+        tweet_id: "running-1",
+        text_original: "running",
+        text_translated: "",
+        url: "https://x.com/status/running-1",
+        created_at: "2026-01-01T00:04:00.000Z",
+        has_media: false,
+        author_handle: "running",
+        accounts: { handle: "feed" },
+      },
+    ],
+    workflowRows: [
+      {
+        run_key: "post:running-1:job:abc",
+        workflow_name: "rss-item-pipeline",
+        workflow_run_id: "worker:running-1:abc",
+        status: "running",
+        source_function: "worker",
+        tweet_id: "running-1",
+        started_at: "2026-01-01T00:04:00.000Z",
+      },
+    ],
+  });
+
+  const result = await getDashboardProcessHud(supabase, {
+    limit: "2",
+    window_hours: "bad",
+  }) as Record<string, unknown>;
+  const processHud = result.process_hud as Record<string, unknown>;
+  const entries = processHud.entries as Array<Record<string, unknown>>;
+
+  assertEquals(result.success, true);
+  assertEquals(processHud.available, true);
+  assertEquals(processHud.window_hours, 24);
+  assertEquals(processHud.truncated, true);
+  assertEquals(entries.map((entry) => entry.tweet_id), ["running-1", "manual-1"]);
+  assertEquals(
+    supabase.calls.some((call) => call.op === "range"),
+    false,
   );
 });

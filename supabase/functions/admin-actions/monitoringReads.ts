@@ -138,6 +138,12 @@ type MonitoringProcessLookup = {
   unavailableReason: string | null;
 };
 
+function monitoringErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  return "Unknown monitoring error";
+}
+
 const MONITORING_BASE_POST_COLUMNS = [
   "tweet_id",
   "text_original",
@@ -1788,6 +1794,174 @@ export async function getMonitoringEntries(
     score_bucket: scoreBucket,
     search,
   };
+}
+
+function latestDashboardHudTimestamp(entry: Record<string, unknown>): number {
+  const observability = (entry.process_observability ?? null) as
+    | MonitoringProcessSnapshot
+    | null;
+  const latestRun = observability?.latest_run ?? null;
+  const candidates = [
+    latestRun?.started_at,
+    latestRun?.ended_at,
+    entry.x_posted_at,
+    entry.hydrated_at,
+    entry.dedupe_checked_at,
+    entry.created_at,
+  ].filter((value): value is string =>
+    typeof value === "string" && value.length > 0
+  );
+  const times = candidates
+    .map((value) => new Date(value).getTime())
+    .filter((value) => Number.isFinite(value));
+  return times.length > 0 ? Math.max(...times) : 0;
+}
+
+function dashboardHudRank(entry: Record<string, unknown>): number {
+  const state = (entry.monitoring_state ?? {}) as MonitoringState;
+  const observability = (entry.process_observability ?? null) as
+    | MonitoringProcessSnapshot
+    | null;
+  const latestRunStatus = observability?.latest_run?.status ?? null;
+  if (latestRunStatus === "running" || latestRunStatus === "pending") return 50;
+  if (
+    entry.translation_job_status === "running" ||
+    entry.translation_job_status === "pending" ||
+    entry.delivery_job_status === "running" ||
+    entry.delivery_job_status === "pending" ||
+    state.translation_state === "pending" ||
+    state.telegram_state === "pending" ||
+    state.x_state === "pending"
+  ) return 45;
+  if (
+    latestRunStatus === "failed" ||
+    Boolean(entry.translation_error) ||
+    Boolean(entry.delivery_error) ||
+    Boolean(entry.x_error) ||
+    entry.x_status === "failed" ||
+    state.needs_attention === true
+  ) return 40;
+  if (
+    entry.enrich_status === "awaiting_approval" ||
+    entry.dedupe_status === "uncertain" ||
+    state.code === "manual_review"
+  ) return 35;
+  if (
+    entry.x_status === "posted" ||
+    state.x_state === "posted" ||
+    state.code === "delivered"
+  ) return 20;
+  return 10;
+}
+
+// deno-lint-ignore no-explicit-any
+export async function getDashboardProcessHud(
+  supabase: any,
+  body: Record<string, unknown> = {},
+) {
+  const limit = Math.min(Math.max(Number(body.limit) || 30, 1), 30);
+  const windowHours = Math.min(
+    Math.max(Number(body.window_hours) || 24, 1),
+    24,
+  );
+
+  try {
+    const since = new Date(Date.now() - windowHours * 60 * 60 * 1000)
+      .toISOString();
+    const threshold = await loadActiveThreshold(supabase);
+    const queryLimit = Math.min(limit * 4, 120);
+
+    const buildQuery = (selectColumns: string) =>
+      supabase
+        .from("posts")
+        .select(selectColumns)
+        .gte("created_at", since)
+        .order("created_at", { ascending: false })
+        .limit(queryLimit);
+
+    let result = await buildQuery(MONITORING_POST_SELECT);
+    if (result.error && isMissingSchemaError(result.error)) {
+      result = await buildQuery(MONITORING_POST_SELECT_NO_ENRICHMENT_V2);
+    }
+    if (result.error && isMissingSchemaError(result.error)) {
+      result = await buildQuery(MONITORING_POST_SELECT_NO_SCORING_V2);
+    }
+    if (result.error) throw result.error;
+
+    const rows = ((result.data ?? []) as Array<Record<string, unknown>>);
+    const tweetIds = rows.map((post) => post.tweet_id as string).filter(Boolean);
+    const statusByTweet: Record<string, Record<string, unknown>> = {};
+    const jobStateByTweet = await loadJobStateMap(supabase, tweetIds);
+    if (tweetIds.length > 0) {
+      const { data: statuses } = await supabase.rpc("get_post_pipeline_status", {
+        tweet_ids: tweetIds,
+      });
+      for (const row of statuses ?? []) {
+        statusByTweet[row.tweet_id as string] = row;
+      }
+    }
+    const duplicateTargets = await loadDuplicateTargetMap(
+      supabase,
+      rows,
+      threshold,
+    );
+    const processObservability = await loadProcessObservabilityByTweet(
+      supabase,
+      tweetIds,
+    );
+    const entries = rows.map((post) => {
+      const base = toMonitoringEntry(
+        post,
+        statusByTweet[post.tweet_id as string],
+        threshold,
+        jobStateByTweet,
+        duplicateTargets,
+      );
+      const tweetId = String(base.tweet_id ?? "");
+      return {
+        ...base,
+        process_observability:
+          processObservability.byTweet.get(tweetId) ??
+            (processObservability.unavailableReason
+              ? unavailableProcessSnapshot(
+                processObservability.unavailableReason,
+              )
+              : null),
+      };
+    })
+      .sort((a, b) =>
+        dashboardHudRank(b) - dashboardHudRank(a) ||
+        latestDashboardHudTimestamp(b) - latestDashboardHudTimestamp(a)
+      );
+
+    return {
+      success: true,
+      process_hud: {
+        available: true,
+        generated_at: new Date().toISOString(),
+        window_hours: windowHours,
+        source: "local-ledger",
+        partial_reason: null,
+        error: null,
+        truncated: entries.length > limit || rows.length === queryLimit,
+        entries: entries.slice(0, limit),
+      },
+    };
+  } catch (error) {
+    return {
+      success: true,
+      process_hud: {
+        available: false,
+        generated_at: new Date().toISOString(),
+        window_hours: windowHours,
+        source: "unavailable",
+        partial_reason: "dashboard_process_hud_unavailable",
+        error: monitoringErrorMessage(error),
+        truncated: false,
+        entries: [],
+      },
+    };
+  }
 }
 
 // deno-lint-ignore no-explicit-any

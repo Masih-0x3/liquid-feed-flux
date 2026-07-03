@@ -219,6 +219,10 @@
     @apply overflow-hidden rounded-[18px];
   }
 
+  .xot-hud-shell.dashboard {
+    @apply rounded-xl;
+  }
+
   .xot-hud-header {
     border-bottom: 1px solid oklch(0.26 0 0);
     @apply flex items-center justify-between gap-3 px-4 py-3;
@@ -245,6 +249,10 @@
     background: oklch(0.27 0 0);
     border: 1px solid oklch(0.31 0 0);
     @apply rounded-full px-3 py-1 text-xs transition-colors hover:text-white;
+  }
+
+  .xot-hud-reset:disabled {
+    @apply cursor-not-allowed opacity-45 hover:text-current;
   }
 
   .xot-hud-timeline {
@@ -299,6 +307,7 @@
     border-right: 1px solid oklch(0.26 0 0);
     color-scheme: dark;
     overscroll-behavior: contain;
+    scrollbar-gutter: stable;
     @apply max-h-[560px] space-y-0.5 overflow-y-auto p-2;
   }
 
@@ -390,11 +399,11 @@
   .xot-hud-tree {
     color-scheme: dark;
     overscroll-behavior: contain;
+    scrollbar-gutter: stable;
     @apply flex max-h-[520px] flex-col gap-0.5 overflow-y-auto p-2;
   }
 
   .xot-hud-row-item {
-    animation: xot-hud-row-in 0.26s cubic-bezier(0.22, 1, 0.36, 1);
     @apply flex flex-col;
   }
 
@@ -660,11 +669,6 @@
     50% { opacity: 0.38; }
   }
 
-  @keyframes xot-hud-row-in {
-    from { opacity: 0; transform: translateY(8px); }
-    to { opacity: 1; transform: none; }
-  }
-
   @keyframes xot-hud-flash {
     0% { background: oklch(0.30 0.06 16); }
     35% { background: oklch(0.68 0.2 16); }
@@ -693,7 +697,6 @@
     .xot-hud-timeline-bar.run,
     .xot-hud-wf-bar.run,
     .xot-hud-listening span,
-    .xot-hud-row-item,
     .xot-hud-row.err {
       animation: none;
     }

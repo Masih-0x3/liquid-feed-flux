@@ -38,9 +38,10 @@ import {
   type ProcessObservabilitySummary,
   type SystemPerformanceSummary,
 } from '@/hooks/useDashboardData';
-import { DashboardActivity } from '@/components/dashboard/DashboardActivity';
+import { useDashboardProcessHudData } from '@/hooks/useDashboardProcessHudData';
 import { DashboardHealth } from '@/components/dashboard/DashboardHealth';
 import { IngestHeartbeatAlert } from '@/components/dashboard/IngestHeartbeatAlert';
+import { MonitoringProcessHud } from '@/components/monitoring/MonitoringProcessHud';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { cn } from '@/lib/utils';
@@ -113,7 +114,7 @@ function joinParts(parts: Array<string | null | undefined>): string {
 
 const STORAGE_WARNING_PCT = 85;
 const STORAGE_CRITICAL_PCT = 90;
-const DASHBOARD_TAB_IDS = ['activity', 'pipeline', 'x', 'controls'] as const;
+const DASHBOARD_TAB_IDS = ['pipeline', 'x', 'controls'] as const;
 
 type DashboardTabId = (typeof DASHBOARD_TAB_IDS)[number];
 
@@ -234,11 +235,15 @@ const EMPTY_PROCESS_OBSERVABILITY: ProcessObservabilitySummary = {
 
 export default function Dashboard() {
   const { data, isLoading, isError, error, dataUpdatedAt, isFetching } = useDashboardData();
+  const processHudQuery = useDashboardProcessHudData();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    processHudQuery.refetch();
+  };
 
   if (isLoading) {
     return (
@@ -291,14 +296,14 @@ export default function Dashboard() {
     );
   }
 
-  const { metrics, health, activities, heartbeat, opsStatus, pipelineCounts, queueBreakdown, xLocalUsage, systemPerformance } = data;
+  const { metrics, health, heartbeat, opsStatus, pipelineCounts, queueBreakdown, xLocalUsage, systemPerformance } = data;
   const openAiUsage = data.openAiUsage ?? EMPTY_OPENAI_USAGE;
   const processObservability = data.processObservability ?? EMPTY_PROCESS_OBSERVABILITY;
   const requestedTab = searchParams.get('tab');
-  const activeTab = DASHBOARD_TAB_IDS.includes(requestedTab as DashboardTabId) ? requestedTab as DashboardTabId : 'activity';
+  const activeTab = DASHBOARD_TAB_IDS.includes(requestedTab as DashboardTabId) ? requestedTab as DashboardTabId : 'pipeline';
   const setDashboardTab = (value: string) => {
     const next = new URLSearchParams(searchParams);
-    if (value === 'activity') {
+    if (value === 'pipeline') {
       next.delete('tab');
     } else {
       next.set('tab', value);
@@ -461,12 +466,6 @@ export default function Dashboard() {
     ['Reasoning tokens', openAiUsage.reasoningTokens],
     ['Quota failures', openAiUsage.quotaFailedJobs],
   ];
-  const processObservationMetrics = [
-    ['Active runs', processObservability.activeRuns],
-    ['AI calls 24h', processObservability.aiCalls24h],
-    ['Failed calls', processObservability.failedAiCalls24h],
-    ['AI p95', formatSeconds(processObservability.aiCallP95Seconds)],
-  ];
   const foglampPct = processObservability.foglamp.capUsedPct ?? percent(
     processObservability.foglamp.estimatedSpansUsed,
     processObservability.foglamp.monthlySpanCap,
@@ -477,6 +476,16 @@ export default function Dashboard() {
       ? 'text-warning'
       : 'text-success';
   const latestProcessRun = processObservability.latestRun;
+  const processHudError = processHudQuery.isError
+    ? processHudQuery.error as Error
+    : processHudQuery.data?.available === false && processHudQuery.data.error
+      ? new Error(processHudQuery.data.error)
+      : null;
+  const processHudEmptyReason = processHudQuery.data?.available === false
+    ? processHudQuery.data.partialReason?.replaceAll('_', ' ') ?? 'Process feed unavailable.'
+    : processHudQuery.data?.truncated
+      ? 'Showing latest 30 process runs.'
+      : 'Waiting for post processes.';
 
   const resourceMetrics = [
     {
@@ -519,8 +528,8 @@ export default function Dashboard() {
           <p className="mt-1 max-w-3xl text-xs text-muted-foreground">{provenanceCopy}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="sm" onClick={refresh} disabled={isFetching}>
-            {isFetching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+          <Button variant="outline" size="sm" onClick={refresh} disabled={isFetching || processHudQuery.isFetching}>
+            {isFetching || processHudQuery.isFetching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
             Refresh
           </Button>
           <div className="flex items-center gap-2 rounded-md border border-border/60 px-3 py-2 text-sm">
@@ -573,6 +582,91 @@ export default function Dashboard() {
             <p className="mt-1 truncate text-xs text-muted-foreground">{card.context}</p>
           </button>
         ))}
+      </div>
+
+      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <MonitoringProcessHud
+          entries={processHudQuery.entries}
+          isLoading={processHudQuery.isLoading}
+          error={processHudError}
+          emptyReason={processHudEmptyReason}
+          mode="dashboard"
+          maxEntries={30}
+          onRetry={() => processHudQuery.refetch()}
+          onOpenPost={(tweetId) => navigate(`/monitoring?search=${encodeURIComponent(tweetId)}`)}
+        />
+
+        <Card className="glass-card">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-lg font-display text-glass-foreground">
+              <ShieldCheck className="h-5 w-5 text-primary" />
+              Limits & Trace Guard
+            </CardTitle>
+            <CardDescription>Cost, hosted export cap, and pipeline posture.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="grid grid-cols-2 gap-2">
+              <div className="rounded-md border border-border/60 p-3">
+                <p className="text-xs text-muted-foreground">OpenAI 24h</p>
+                <p className="text-lg font-semibold tabular-nums">{compactNumber(openAiUsage.totalTokens)}</p>
+                <p className="truncate text-xs text-muted-foreground">{compactNumber(openAiUsage.measuredJobs)} jobs</p>
+              </div>
+              <div className="rounded-md border border-border/60 p-3">
+                <p className="text-xs text-muted-foreground">AI calls</p>
+                <p className={processObservability.failedAiCalls24h > 0 ? 'text-lg font-semibold text-destructive tabular-nums' : 'text-lg font-semibold tabular-nums'}>
+                  {compactNumber(processObservability.aiCalls24h)}
+                </p>
+                <p className="truncate text-xs text-muted-foreground">{compactNumber(processObservability.failedAiCalls24h)} failed</p>
+              </div>
+              <div className="rounded-md border border-border/60 p-3">
+                <p className="text-xs text-muted-foreground">X budget</p>
+                <p className={xLocalUsage.budgetUsedPct >= 90 ? 'text-lg font-semibold text-destructive tabular-nums' : xLocalUsage.budgetUsedPct >= 70 ? 'text-lg font-semibold text-warning tabular-nums' : 'text-lg font-semibold text-success tabular-nums'}>
+                  {xLocalUsage.budgetUsedPct}%
+                </p>
+                <p className="truncate text-xs text-muted-foreground">{compactNumber(xLocalUsage.monthlyPosts)} / {compactNumber(xLocalUsage.monthlyBudget)}</p>
+              </div>
+              <div className="rounded-md border border-border/60 p-3">
+                <p className="text-xs text-muted-foreground">Ingest</p>
+                <p className={heartbeat.state === 'critical' ? 'text-lg font-semibold text-destructive' : heartbeat.state === 'warning' ? 'text-lg font-semibold text-warning' : 'text-lg font-semibold text-success'}>
+                  {heartbeat.state}
+                </p>
+                <p className="truncate text-xs text-muted-foreground">{formatAge(heartbeat.ageSeconds)} ago</p>
+              </div>
+            </div>
+
+            <div className="rounded-md border border-border/60 p-3">
+              <div className="flex items-center justify-between gap-3 text-xs">
+                <span className="text-muted-foreground">Hosted Foglamp cap</span>
+                <span className={`font-medium tabular-nums ${foglampTone}`}>
+                  {compactNumber(processObservability.foglamp.estimatedSpansUsed)} / {compactNumber(processObservability.foglamp.monthlySpanCap)}
+                </span>
+              </div>
+              <Progress value={foglampPct} className="mt-2 h-2" />
+              <p className="mt-2 text-xs text-muted-foreground">
+                Native HUD remains local when hosted export is capped or off.
+              </p>
+            </div>
+
+            <div className="rounded-md border border-border/60 bg-muted/20 p-3 text-xs">
+              {latestProcessRun ? (
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate font-medium text-glass-foreground">{latestProcessRun.workflowName}</span>
+                    <Badge variant="secondary" className="shrink-0">{latestProcessRun.status}</Badge>
+                  </div>
+                  <p className="text-muted-foreground">
+                    {joinParts([
+                      latestProcessRun.sourceFunction,
+                      latestProcessRun.durationSeconds == null ? null : formatSeconds(latestProcessRun.durationSeconds),
+                    ]) || 'Latest workflow run'}
+                  </p>
+                </div>
+              ) : (
+                <span className="text-muted-foreground">No observed workflow runs in the window.</span>
+              )}
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(380px,0.9fr)]">
@@ -765,16 +859,11 @@ export default function Dashboard() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setDashboardTab} className="space-y-3">
-        <TabsList className="grid h-auto w-full grid-cols-2 gap-1 sm:inline-flex sm:w-auto">
-          <TabsTrigger value="activity">Activity</TabsTrigger>
+        <TabsList className="grid h-auto w-full grid-cols-3 gap-1 sm:inline-flex sm:w-auto">
           <TabsTrigger value="pipeline">Pipeline</TabsTrigger>
           <TabsTrigger value="x">X usage</TabsTrigger>
           <TabsTrigger value="controls">Controls</TabsTrigger>
         </TabsList>
-
-        <TabsContent value="activity">
-          <DashboardActivity activities={activities} />
-        </TabsContent>
 
         <TabsContent value="pipeline">
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
@@ -843,72 +932,6 @@ export default function Dashboard() {
                   ) : (
                     <div className="rounded-md border border-border/60 p-3 text-sm text-muted-foreground">
                       OpenAI usage unavailable{openAiUsage.error ? `: ${openAiUsage.error}` : '.'}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-              <Card className="glass-card">
-                <CardHeader>
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <CardTitle className="flex items-center gap-2 text-lg font-display text-glass-foreground">
-                        <Activity className="h-4 w-4 text-primary" />
-                        Process Observability
-                      </CardTitle>
-                      <CardDescription>Last {processObservability.windowHours}h from XOT-owned ledgers</CardDescription>
-                    </div>
-                    <Badge variant="outline" className={processObservability.foglamp.hostedExportEnabled ? 'border-success/30 text-success' : 'border-border/60 text-muted-foreground'}>
-                      {processObservability.foglamp.hostedExportEnabled ? 'Foglamp on' : 'Local only'}
-                    </Badge>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {processObservability.available ? (
-                    <>
-                      <div className="grid grid-cols-2 gap-2">
-                        {processObservationMetrics.map(([label, value]) => (
-                          <div key={label as string} className="rounded-md border border-border/60 p-3">
-                            <p className="text-xs text-muted-foreground">{label}</p>
-                            <p className={(label === 'Failed calls' && Number(value) > 0) ? 'text-lg font-semibold text-destructive tabular-nums' : 'text-lg font-semibold tabular-nums'}>
-                              {typeof value === 'number' ? compactNumber(value) : value}
-                            </p>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="rounded-md border border-border/60 p-3">
-                        <div className="flex items-center justify-between gap-3 text-xs">
-                          <span className="text-muted-foreground">Hosted Foglamp cap</span>
-                          <span className={`font-medium tabular-nums ${foglampTone}`}>
-                            {compactNumber(processObservability.foglamp.estimatedSpansUsed)} / {compactNumber(processObservability.foglamp.monthlySpanCap)}
-                          </span>
-                        </div>
-                        <Progress value={foglampPct} className="mt-2 h-2" />
-                        <p className="mt-2 text-xs text-muted-foreground">
-                          {compactNumber(processObservability.foglamp.estimatedSpansSkipped)} estimated spans kept local
-                        </p>
-                      </div>
-                      <div className="rounded-md border border-border/60 bg-muted/20 p-3 text-xs">
-                        {latestProcessRun ? (
-                          <div className="space-y-1">
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="truncate font-medium text-glass-foreground">{latestProcessRun.workflowName}</span>
-                              <Badge variant="secondary" className="shrink-0">{latestProcessRun.status}</Badge>
-                            </div>
-                            <p className="text-muted-foreground">
-                              {joinParts([
-                                latestProcessRun.sourceFunction,
-                                latestProcessRun.durationSeconds == null ? null : formatSeconds(latestProcessRun.durationSeconds),
-                              ]) || 'Latest workflow run'}
-                            </p>
-                          </div>
-                        ) : (
-                          <span className="text-muted-foreground">No observed workflow runs in the window.</span>
-                        )}
-                      </div>
-                    </>
-                  ) : (
-                    <div className="rounded-md border border-border/60 p-3 text-sm text-muted-foreground">
-                      Process observability unavailable{processObservability.error ? `: ${processObservability.error}` : '.'}
                     </div>
                   )}
                 </CardContent>

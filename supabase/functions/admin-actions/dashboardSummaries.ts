@@ -750,132 +750,6 @@ async function loadDashboardXLocalUsage(
   };
 }
 
-async function loadDashboardActivity(supabase: any) {
-  const [postsRes, jobsRes, deliveriesRes, xDeliveriesRes] = await Promise.all([
-    supabase
-      .from("posts")
-      .select(
-        "tweet_id, text_original, created_at, text_translated, accounts!inner(handle)",
-      )
-      .order("created_at", { ascending: false })
-      .limit(8),
-    supabase
-      .from("jobs")
-      .select(
-        "id, type, status, created_at, last_error, payload, result_meta, idempotency_key",
-      )
-      .in("status", ["failed", "pending", "running"])
-      .order("created_at", { ascending: false })
-      .limit(8),
-    supabase
-      .from("deliveries")
-      .select("id, subject_id, status, created_at, posted_at, last_error")
-      .eq("subject_type", "post")
-      .in("status", ["posted", "failed", "pending"])
-      .order("created_at", { ascending: false })
-      .limit(8),
-    supabase
-      .from("x_deliveries")
-      .select("id, post_id, status, created_at, posted_at, last_error")
-      .in("status", ["posted", "failed", "pending"])
-      .order("created_at", { ascending: false })
-      .limit(8),
-  ]);
-  for (const res of [postsRes, jobsRes, deliveriesRes, xDeliveriesRes]) {
-    if (res.error) throw res.error;
-  }
-
-  const items: Array<Record<string, unknown>> = [];
-  const jobRows = (jobsRes.data ?? []) as Array<Record<string, unknown>>;
-  const postByJobRef = await loadPostsByJobReferences(
-    supabase,
-    jobRows.filter((row) => row.status === "failed"),
-  );
-  for (const post of postsRes.data ?? []) {
-    const account = post.accounts as { handle?: string } | null;
-    const tweetId = String(post.tweet_id);
-    items.push({
-      id: `post-${tweetId}`,
-      kind: "post",
-      status: post.text_translated ? "success" : "pending",
-      title: `Ingested @${account?.handle ?? "unknown"}`,
-      description: String(post.text_original ?? "No content").replace(
-        /\s+/g,
-        " ",
-      ).slice(0, 140),
-      timestamp: post.created_at,
-      route: `/monitoring?search=${encodeURIComponent(tweetId)}`,
-    });
-  }
-  for (const job of jobRows) {
-    if (
-      job.status === "failed" &&
-      !isFailedJobActionable(job, postForJob(job, postByJobRef))
-    ) continue;
-    const tweetId = getPayloadTweetId(job.payload);
-    items.push({
-      id: `job-${job.id}`,
-      kind: "job",
-      status: job.status === "failed" ? "failed" : "pending",
-      title: `${job.type} job ${job.status}`,
-      description: job.last_error
-        ? String(job.last_error).slice(0, 140)
-        : "Pipeline job needs attention",
-      timestamp: job.created_at,
-      route: tweetId
-        ? `/monitoring?search=${encodeURIComponent(tweetId)}`
-        : "/monitoring?filter=failed_stuck",
-    });
-  }
-  for (const delivery of deliveriesRes.data ?? []) {
-    const tweetId = String(delivery.subject_id ?? "");
-    items.push({
-      id: `delivery-${delivery.id}`,
-      kind: "delivery",
-      status: delivery.status === "posted"
-        ? "success"
-        : delivery.status === "failed"
-        ? "failed"
-        : "pending",
-      title: `Telegram ${delivery.status}`,
-      description: delivery.last_error
-        ? String(delivery.last_error).slice(0, 140)
-        : "Telegram delivery state changed",
-      timestamp: delivery.posted_at ?? delivery.created_at,
-      route: tweetId
-        ? `/monitoring?search=${encodeURIComponent(tweetId)}`
-        : "/monitoring",
-    });
-  }
-  for (const x of xDeliveriesRes.data ?? []) {
-    const tweetId = String(x.post_id ?? "");
-    items.push({
-      id: `x-${x.id}`,
-      kind: "x",
-      status: x.status === "posted"
-        ? "success"
-        : x.status === "failed"
-        ? "failed"
-        : "pending",
-      title: `X ${x.status}`,
-      description: x.last_error
-        ? String(x.last_error).slice(0, 140)
-        : "X delivery state changed",
-      timestamp: x.posted_at ?? x.created_at,
-      route: tweetId
-        ? `/monitoring?search=${encodeURIComponent(tweetId)}`
-        : "/monitoring?filter=x_failed",
-    });
-  }
-  return items
-    .filter((item) => typeof item.timestamp === "string")
-    .sort((a, b) =>
-      new Date(String(b.timestamp)).getTime() -
-      new Date(String(a.timestamp)).getTime()
-    )
-    .slice(0, 16);
-}
-
 function toTimeMs(value: unknown): number | null {
   if (typeof value !== "string" || value.length === 0) return null;
   const time = new Date(value).getTime();
@@ -1299,7 +1173,6 @@ export async function getEnhancedDashboardSummary(supabase: any) {
     xLocalUsage,
     openAiUsage,
     processObservability,
-    activity,
     systemPerformance,
     scoringTuning,
   ] = await Promise.all([
@@ -1375,11 +1248,6 @@ export async function getEnhancedDashboardSummary(supabase: any) {
         available: false,
         error: errorMessage(error),
       }),
-    ),
-    withDashboardFallback(
-      "activity",
-      loadDashboardActivity(supabase),
-      [] as Array<Record<string, unknown>>,
     ),
     getSystemPerformanceSummary(supabase).catch((error) => ({
       success: false,
@@ -1530,6 +1398,5 @@ export async function getEnhancedDashboardSummary(supabase: any) {
     process_observability: processObservability,
     system_performance: systemPerformance,
     scoring_tuning: scoringTuning,
-    activity,
   };
 }

@@ -11,6 +11,7 @@ export const ADMIN_ACTION_NAMES = [
   'get_health',
   'reconcile_stuck_jobs',
   'get_dashboard_summary',
+  'get_dashboard_process_hud',
   'get_system_performance_summary',
   'dry_run_old_media_cleanup',
   'get_monitoring_overview',

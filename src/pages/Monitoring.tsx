@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   AlertCircle,
@@ -68,7 +68,6 @@ import {
 import { MonitoringActionDialog } from "@/components/monitoring/MonitoringActionDialog";
 import { MonitoringDetailDrawer } from "@/components/monitoring/MonitoringDetailDrawer";
 import { MonitoringFilters } from "@/components/monitoring/MonitoringFilters";
-import { MonitoringProcessHud } from "@/components/monitoring/MonitoringProcessHud";
 import { MonitoringQueueCards } from "@/components/monitoring/MonitoringQueueCards";
 import { MonitoringMobileCard, MonitoringTableEntryRows } from "@/components/monitoring/MonitoringRow";
 import {
@@ -167,6 +166,7 @@ export default function Monitoring() {
   const [enrichingTweetIds, setEnrichingTweetIds] = useState<Set<string>>(() => new Set());
   const [expandedClusters, setExpandedClusters] = useState<Set<string>>(() => new Set());
   const pollRefs = useRef<Map<string, { interval: ReturnType<typeof setInterval>; timeout: ReturnType<typeof setTimeout> }>>(new Map());
+  const autoOpenedTweetRef = useRef<string | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -219,6 +219,16 @@ export default function Monitoring() {
   });
   const loadedCounts = useMemo(() => loadedMonitoringCounts(entries), [entries]);
   const counts = overview?.counts ?? loadedCounts;
+
+  useEffect(() => {
+    const nextSearch = searchParams.get('search') ?? '';
+    setSearchTerm((current) => current === nextSearch ? current : nextSearch);
+
+    const rawFilter = searchParams.get('filter')?.replaceAll('-', '_');
+    if (rawFilter && FILTERS.some((item) => item.value === rawFilter)) {
+      setFilter((current) => current === rawFilter ? current : rawFilter as MonitoringFilter);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     setSelectedTweetIds((prev) => {
@@ -299,7 +309,7 @@ export default function Monitoring() {
     });
   };
 
-  const openDetails = async (tweetId: string) => {
+  const openDetails = useCallback(async (tweetId: string) => {
     setDrawerTweetId(tweetId);
     setDrawerOpen(true);
     try {
@@ -314,7 +324,20 @@ export default function Monitoring() {
     } catch {
       setTimeline([]);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    const requested = searchParams.get('search')?.trim();
+    if (!requested || requested !== debouncedSearch.trim()) return;
+    const exact = entries.find((entry) =>
+      entry.tweet_id === requested ||
+      entry.url === requested ||
+      entry.url?.includes(requested)
+    );
+    if (!exact || autoOpenedTweetRef.current === exact.tweet_id) return;
+    autoOpenedTweetRef.current = exact.tweet_id;
+    void openDetails(exact.tweet_id);
+  }, [debouncedSearch, entries, openDetails, searchParams]);
 
   const handleSaveEdit = async () => {
     if (!editingEntry) return;
@@ -712,8 +735,6 @@ export default function Monitoring() {
       )}
 
       <MonitoringQueueCards counts={counts} xSummary={xSummary} />
-
-      <MonitoringProcessHud entries={entries} onOpenPost={openDetails} />
 
       <Card>
         <MonitoringFilters

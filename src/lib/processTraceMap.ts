@@ -273,12 +273,15 @@ function shouldShowMedia(entry: MonitoringEntry, node: ProcessTraceNode): boolea
 }
 
 function isTerminalDelivery(entry: MonitoringEntry): boolean {
+  const telegramMessageIds = Array.isArray(entry.telegram_message_ids)
+    ? entry.telegram_message_ids
+    : [];
   return Boolean(
     entry.x_status === "posted" ||
       entry.monitoring_state?.x_state === "posted" ||
       entry.monitoring_state?.code === "delivered" ||
       entry.is_delivered ||
-      entry.telegram_message_ids.length > 0 ||
+      telegramMessageIds.length > 0 ||
       entry.monitoring_state?.telegram_state === "delivered",
   );
 }
@@ -328,6 +331,10 @@ function applyAiCalls(nodes: Map<ProcessTraceNodeId, ProcessTraceNode>, observab
 }
 
 function applyEntryState(nodes: Map<ProcessTraceNodeId, ProcessTraceNode>, entry: MonitoringEntry, observability: MonitoringProcessObservability | null | undefined) {
+  const telegramMessageIds = Array.isArray(entry.telegram_message_ids)
+    ? entry.telegram_message_ids
+    : [];
+
   updateNode(nodes.get("ingest")!, {
     status: "completed",
     detail: entry.author_handle ? `Captured from ${entry.author_handle}` : "Captured from source feed.",
@@ -466,10 +473,10 @@ function applyEntryState(nodes: Map<ProcessTraceNodeId, ProcessTraceNode>, entry
       error: entry.delivery_error,
       evidence: "entry:delivery_error",
     });
-  } else if (entry.is_delivered || entry.telegram_message_ids.length > 0 || entry.monitoring_state?.telegram_state === "delivered") {
+  } else if (entry.is_delivered || telegramMessageIds.length > 0 || entry.monitoring_state?.telegram_state === "delivered") {
     updateNode(telegram, {
       status: "completed",
-      detail: entry.telegram_message_ids.length > 0 ? `${entry.telegram_message_ids.length} Telegram message ID(s).` : "Telegram delivery is marked delivered.",
+      detail: telegramMessageIds.length > 0 ? `${telegramMessageIds.length} Telegram message ID(s).` : "Telegram delivery is marked delivered.",
       evidence: "entry:telegram_delivered",
     });
   } else {

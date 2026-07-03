@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchDashboardData } from "@/api/dashboardData";
+import {
+  fetchDashboardProcessHud,
+  normalizeDashboardProcessHud,
+} from "@/api/dashboardProcessHud";
 import { invokeAdminAction } from "@/api/adminActions";
 
 vi.mock("@/api/adminActions", () => ({
@@ -80,11 +84,6 @@ describe("dashboard data API", () => {
       primaryIssue: "Manual review backlog",
       recommendedRoute: "/monitoring?filter=manual_review",
     });
-    expect(result.activities[0]).toMatchObject({
-      id: "tweet-1",
-      route: "/monitoring?search=tweet-1",
-      status: "pending",
-    });
     expect(invokeAdminActionMock).toHaveBeenCalledWith({ action: "get_dashboard_summary" });
   });
 
@@ -92,5 +91,54 @@ describe("dashboard data API", () => {
     invokeAdminActionMock.mockResolvedValueOnce({ success: false, error: "edge function unavailable" });
 
     await expect(fetchDashboardData()).rejects.toThrow("edge function unavailable");
+  });
+
+  it("fetches and normalizes the bounded dashboard process HUD payload", async () => {
+    invokeAdminActionMock.mockResolvedValueOnce({
+      success: true,
+      process_hud: {
+        available: true,
+        generated_at: "2026-07-03T12:00:00.000Z",
+        window_hours: 24,
+        source: "local-ledger",
+        partial_reason: null,
+        error: null,
+        truncated: true,
+        entries: [{ tweet_id: "tweet-1", text_original: "post" }],
+      },
+    });
+
+    const result = await fetchDashboardProcessHud();
+
+    expect(invokeAdminActionMock).toHaveBeenCalledWith({
+      action: "get_dashboard_process_hud",
+      limit: 30,
+      window_hours: 24,
+    });
+    expect(result).toMatchObject({
+      available: true,
+      generatedAt: "2026-07-03T12:00:00.000Z",
+      windowHours: 24,
+      source: "local-ledger",
+      truncated: true,
+    });
+    expect(result.entries[0].tweet_id).toBe("tweet-1");
+  });
+
+  it("keeps malformed dashboard process HUD payloads safe", () => {
+    const result = normalizeDashboardProcessHud({
+      available: false,
+      source: "unexpected",
+      error: "",
+      entries: "bad",
+    });
+
+    expect(result).toMatchObject({
+      available: false,
+      source: "unavailable",
+      entries: [],
+      error: null,
+      windowHours: 24,
+    });
   });
 });

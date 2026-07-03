@@ -532,6 +532,54 @@ describe("monitoring detail drawer", () => {
 });
 
 describe("monitoring process trace map", () => {
+  it("renders loading and error states without enabling follow latest", () => {
+    const onRetry = vi.fn();
+    const { rerender } = render(
+      <MonitoringProcessHud entries={[]} isLoading onOpenPost={vi.fn()} onRetry={onRetry} />,
+    );
+
+    expect(screen.getByText("loading post runs")).toBeInTheDocument();
+    expect(screen.getByText("Loading post processes...")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Follow latest" })).toBeDisabled();
+
+    rerender(
+      <MonitoringProcessHud entries={[]} error={new Error("ledger unavailable")} onOpenPost={vi.fn()} onRetry={onRetry} />,
+    );
+
+    expect(screen.getByText("process feed unavailable")).toBeInTheDocument();
+    expect(screen.getByText("ledger unavailable")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(onRetry).toHaveBeenCalled();
+  });
+
+  it("renders lean dashboard HUD entries when optional arrays are omitted", () => {
+    const leanEntry = entry({
+      final_score: 16,
+      delivery_decision: "deliver",
+      is_translated: true,
+      text_translated: "ترجمه",
+      enrich_status: "awaiting_approval",
+      telegram_message_ids: undefined as unknown as string[],
+      monitoring_state: {
+        code: "manual_review",
+        stage_label: "Manual review",
+        tone: "warn",
+        decision_label: "Awaiting review",
+        primary_blocker: "Enrichment is awaiting approval",
+        translation_state: "translated",
+        telegram_state: "none",
+        x_state: "none",
+        needs_attention: true,
+        next_actions: ["approve_enrichment"],
+      },
+    });
+
+    render(<MonitoringProcessHud entries={[leanEntry]} onOpenPost={vi.fn()} />);
+
+    expect(screen.getByTestId("monitoring-process-hud")).toBeInTheDocument();
+    expect(screen.getByText(/waiting\/manual/i)).toBeInTheDocument();
+  });
+
   it("does not animate the left run marker for completed X posts", () => {
     const posted = entry({
       final_score: 16,
@@ -561,6 +609,35 @@ describe("monitoring process trace map", () => {
     expect(screen.getByText(/latest complete/i)).toBeInTheDocument();
     expect(container.querySelector(".xot-hud-list .xot-hud-diamond.run")).toBeNull();
     expect(container.querySelector(".xot-hud-detail-header .xot-hud-diamond.run")).toBeNull();
+  });
+
+  it("keeps manual enrichment waiting states static", () => {
+    const awaitingManual = entry({
+      final_score: 16,
+      delivery_decision: "deliver",
+      is_translated: true,
+      text_translated: "ترجمه",
+      enrich_status: "awaiting_approval",
+      monitoring_state: {
+        code: "manual_review",
+        stage_label: "Manual review",
+        tone: "warn",
+        decision_label: "Awaiting review",
+        primary_blocker: "Enrichment is awaiting approval",
+        translation_state: "translated",
+        telegram_state: "none",
+        x_state: "none",
+        needs_attention: true,
+        next_actions: ["approve_enrichment"],
+      },
+    });
+
+    const { container } = render(<MonitoringProcessHud entries={[awaitingManual]} onOpenPost={vi.fn()} />);
+
+    expect(screen.getAllByText("Manual enrich").length).toBeGreaterThan(0);
+    expect(screen.getByText(/waiting\/manual/i)).toBeInTheDocument();
+    expect(container.querySelector(".xot-hud-list .xot-hud-diamond.run")).toBeNull();
+    expect(container.querySelector(".xot-hud-wf-bar.run")).toBeNull();
   });
 
   it("renders a successful local-only AI trace with visible stage labels", () => {
