@@ -30,7 +30,9 @@ import { MediaThumbnails } from "@/components/monitoring/MediaThumbnails";
 import { MonitoringDeliveryTimeline } from "@/components/monitoring/MonitoringDeliveryTimeline";
 import { MonitoringDuplicateGateCard } from "@/components/monitoring/MonitoringDuplicateGateCard";
 import { MonitoringDuplicateMatch } from "@/components/monitoring/MonitoringDuplicateEvidence";
+import { MonitoringProcessTraceMap } from "@/components/monitoring/MonitoringProcessTraceMap";
 import { VideoRenderDetailPanel } from "@/components/video/VideoRenderDetailPanel";
+import { buildProcessTraceMap } from "@/lib/processTraceMap";
 
 function scoringReasonTagLabel(value: string | null | undefined): string {
   return value ? value.replace(/_/g, ' ') : 'No reason tag';
@@ -238,6 +240,10 @@ export function MonitoringDetailDrawer({
     [entry, timeline],
   );
   const timelineGroups = useMemo(() => buildPipelineTimelineGroups(timeline), [timeline]);
+  const processTraceMap = useMemo(
+    () => entry ? buildProcessTraceMap(entry, timeline, entry.process_observability) : null,
+    [entry, timeline],
+  );
   const selectedScoringV2 = useMemo(
     () => entry ? getScoringV2Snapshot(entry, timeline) : null,
     [entry, timeline],
@@ -305,6 +311,7 @@ export function MonitoringDetailDrawer({
                 </Card>
 
                 <ProcessObservabilityPanel observability={entry.process_observability} />
+                {processTraceMap && <MonitoringProcessTraceMap traceMap={processTraceMap} />}
 
                 <Card>
                   <CardHeader className="pb-2">

@@ -16,6 +16,8 @@ import {
   MonitoringXBadge,
 } from "@/components/monitoring/MonitoringStatusBadges";
 import { MonitoringMobileCard, MonitoringTableEntryRows } from "@/components/monitoring/MonitoringRow";
+import { MonitoringProcessTraceMap } from "@/components/monitoring/MonitoringProcessTraceMap";
+import { buildProcessTraceMap } from "@/lib/processTraceMap";
 import type { DuplicateCluster, MonitoringEntry } from "@/hooks/useMonitoringData";
 
 function entry(overrides: Partial<MonitoringEntry> = {}): MonitoringEntry {
@@ -42,6 +44,11 @@ function entry(overrides: Partial<MonitoringEntry> = {}): MonitoringEntry {
     delivery_decision: null,
     score_axes: null,
     final_score: null,
+    base_score: null,
+    learned_score: null,
+    learned_delta: null,
+    x_gate_score: null,
+    learning_confidence: null,
     decision_reason: null,
     scoring_version: null,
     scoring_profile_id: null,
@@ -500,10 +507,13 @@ describe("monitoring detail drawer", () => {
 
     expect(screen.getByText("Pipeline Details")).toBeInTheDocument();
     expect(screen.getByText("Process Observability")).toBeInTheDocument();
-    expect(screen.getByText("rss-item-pipeline")).toBeInTheDocument();
-    expect(screen.getByText("translator")).toBeInTheDocument();
+    expect(screen.getByTestId("process-trace-map")).toBeInTheDocument();
+    expect(screen.getByLabelText(/Translation agent: Completed/)).toBeInTheDocument();
+    expect(screen.getByText("Process trace map")).toBeInTheDocument();
+    expect(screen.getAllByText("rss-item-pipeline").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("translator").length).toBeGreaterThan(0);
     expect(screen.getAllByText("1,250 tokens").length).toBeGreaterThan(0);
-    expect(screen.getByText("worker local only")).toBeInTheDocument();
+    expect(screen.getAllByText("worker local only").length).toBeGreaterThan(0);
     expect(screen.getByText("Why not on X?")).toBeInTheDocument();
     expect(screen.getByText("Scoring")).toBeInTheDocument();
     expect(screen.getByText("Enrichment Studio")).toBeInTheDocument();
@@ -517,5 +527,150 @@ describe("monitoring detail drawer", () => {
     expect(onScoreFeedback).toHaveBeenCalledWith(drawerEntry, "should_skip", "direct_focus");
     expect(onRequestAction).toHaveBeenCalledWith({ type: "force_x", entry: drawerEntry });
     expect(onRequestAction).toHaveBeenCalledWith({ type: "approve_enrichment", entry: drawerEntry });
+  });
+});
+
+describe("monitoring process trace map", () => {
+  it("renders a successful local-only AI trace with visible stage labels", () => {
+    const source = entry({
+      final_score: 16,
+      delivery_decision: "deliver",
+      is_translated: true,
+      text_translated: "ترجمه",
+      is_delivered: true,
+      telegram_message_ids: ["123"],
+      x_status: "posted",
+      x_tweet_id: "2056",
+      process_observability: {
+        available: true,
+        source: "workflow_runs",
+        partial_reason: null,
+        ai_calls: 1,
+        failed_ai_calls: 0,
+        total_tokens: 1250,
+        foglamp_exported: 0,
+        foglamp_skipped: 1,
+        recent_runs: [],
+        latest_run: {
+          run_key: "post:tweet-1:job:abc",
+          workflow_name: "rss-item-pipeline",
+          workflow_run_id: "worker:tweet-1:abc",
+          status: "completed",
+          source_function: "worker",
+          started_at: "2026-05-23T14:00:00.000Z",
+          ended_at: "2026-05-23T14:00:05.000Z",
+          duration_seconds: 5,
+          last_error: null,
+          ai_call_count: 1,
+          failed_ai_call_count: 0,
+          total_tokens: 1250,
+          foglamp_exported: 0,
+          foglamp_skipped: 1,
+          calls: [
+            {
+              workflow_run_key: "post:tweet-1:job:abc",
+              trace_name: "rss-item-pipeline",
+              operation_name: "translate",
+              agent_name: "translator",
+              model: "gpt-4.1-mini",
+              endpoint: "chat_completions",
+              status: "completed",
+              total_tokens: 1250,
+              reasoning_tokens: 0,
+              duration_ms: 5000,
+              started_at: "2026-05-23T14:00:00.000Z",
+              ended_at: "2026-05-23T14:00:05.000Z",
+              foglamp_exported: false,
+              foglamp_span_estimate: 1,
+              foglamp_skip_reason: "worker_local_only",
+              error_message: null,
+            },
+          ],
+        },
+      },
+    });
+
+    render(<MonitoringProcessTraceMap traceMap={buildProcessTraceMap(source)} />);
+
+    expect(screen.getByTestId("process-trace-map")).toBeInTheDocument();
+    expect(screen.getByText("Process trace map")).toBeInTheDocument();
+    expect(screen.getByLabelText(/Translation agent: Completed/)).toBeInTheDocument();
+    expect(screen.getByText("worker:tweet-1:abc")).toBeInTheDocument();
+    expect(screen.getByText("1 local only")).toBeInTheDocument();
+  });
+
+  it("renders duplicate-blocked and skipped downstream stages", () => {
+    render(
+      <MonitoringProcessTraceMap
+        traceMap={buildProcessTraceMap(entry({
+          dup_of_tweet_id: "canonical-tweet",
+          dedupe_status: "duplicate",
+          dedupe_reason: "same story",
+        }))}
+      />,
+    );
+
+    expect(screen.getByTestId("process-trace-node-dedupe")).toHaveAttribute("aria-label", expect.stringContaining("Blocked"));
+    expect(screen.getByTestId("process-trace-node-x-post")).toHaveAttribute("aria-label", expect.stringContaining("Skipped"));
+    expect(screen.getByText("same story")).toBeInTheDocument();
+  });
+
+  it("renders partial observability notes for failed AI stages", () => {
+    const source = entry({
+      process_observability: {
+        available: true,
+        source: "workflow_runs",
+        partial_reason: "workflow_run_without_complete_ledger",
+        ai_calls: 1,
+        failed_ai_calls: 1,
+        total_tokens: 322,
+        foglamp_exported: 0,
+        foglamp_skipped: 1,
+        recent_runs: [],
+        latest_run: {
+          run_key: "post:tweet-1:job:failed",
+          workflow_name: "rss-item-pipeline",
+          workflow_run_id: "worker:tweet-1:failed",
+          status: "failed",
+          source_function: "worker",
+          started_at: "2026-05-23T14:00:00.000Z",
+          ended_at: "2026-05-23T14:00:02.000Z",
+          duration_seconds: 2,
+          last_error: "model timeout",
+          ai_call_count: 1,
+          failed_ai_call_count: 1,
+          total_tokens: 322,
+          foglamp_exported: 0,
+          foglamp_skipped: 1,
+          calls: [
+            {
+              workflow_run_key: "post:tweet-1:job:failed",
+              trace_name: "rss-item-pipeline",
+              operation_name: "score_post",
+              agent_name: "scorer",
+              model: "gpt-4.1-mini",
+              endpoint: "chat_completions",
+              status: "failed",
+              total_tokens: 322,
+              reasoning_tokens: 0,
+              duration_ms: 2000,
+              started_at: "2026-05-23T14:00:00.000Z",
+              ended_at: "2026-05-23T14:00:02.000Z",
+              foglamp_exported: false,
+              foglamp_span_estimate: 1,
+              foglamp_skip_reason: "worker_local_only",
+              error_message: "model timeout",
+            },
+          ],
+        },
+      },
+    });
+
+    render(<MonitoringProcessTraceMap traceMap={buildProcessTraceMap(source)} />);
+
+    expect(screen.getByTestId("process-trace-node-score")).toHaveAttribute("aria-label", expect.stringContaining("Failed"));
+    expect(screen.getByText("Trace notes")).toBeInTheDocument();
+    expect(screen.getByText(/workflow run without complete ledger/)).toBeInTheDocument();
+    expect(screen.getAllByText(/model timeout/).length).toBeGreaterThan(0);
   });
 });
