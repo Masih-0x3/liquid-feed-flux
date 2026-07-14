@@ -33,8 +33,10 @@ hash review.
   `dpl_3TXochCtQkx8dRFKhbVcrdcLCCJo` reported exact Node `20.20.2`; it then
   failed because `.vercelignore` had removed renderer contract metadata. The
   build log also says Node 20 deployments created on or after 2026-10-01 will
-  fail. The follow-up includes only the renderer package, lock, and Dockerfile
-  metadata in the build context so the guard can verify them.
+  fail. Follow-up deployment `dpl_5z2ntVZ9dHxxPcrUKhtW3fW6FSUV` included only
+  the renderer package, lock, and Dockerfile metadata needed by the guard,
+  reported Node `20.20.2` and npm `10.8.2`, passed the contract, built all 2,492
+  Vite modules, and reached READY at commit `082fd241e87b54b686191952a729b9584a797b4d`.
 - Vite 8 requires Node `20.19+` or `22.12+`. The guarded Vercel probe proves
   Node `20.20.2`; the prior preview proved a successful supported Vite build.
   The prebuild guard prints exact Node and npm versions, rejects a Node 20 patch

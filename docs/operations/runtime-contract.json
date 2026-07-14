@@ -1,6 +1,6 @@
 {
   "schema_version": "xot-runtime-contract-v1",
-  "observed_at": "2026-07-14T11:57:18Z",
+  "observed_at": "2026-07-14T12:47:38Z",
   "status": "current_divergence_frozen_upgrade_deferred",
   "node": {
     "vite_supported_range": "^20.19.0 || >=22.12.0",
@@ -14,7 +14,7 @@
     "root_npm_engine": "10.x",
     "root_package_manager": "npm@10.8.2",
     "npm_major": 10,
-    "npm_effective_exact": "captured_by_runtime_guard_per_build",
+    "npm_effective_exact": "10.8.2",
     "ci_selector": "20",
     "ci_job": "lint-build",
     "ci_runs_on": "ubuntu-latest",
@@ -54,6 +54,18 @@
       "node": "20.20.2",
       "result": "build_gate_failed_renderer_metadata_excluded",
       "source": "vercel inspect dpl_3TXochCtQkx8dRFKhbVcrdcLCCJo --logs"
+    },
+    "guarded_ready": {
+      "deployment_id": "dpl_5z2ntVZ9dHxxPcrUKhtW3fW6FSUV",
+      "deployment_url": "https://xot-rc75z1spz-masihation-8914s-projects.vercel.app",
+      "alias": "https://xot-git-codex-xot-sr-runtime-freeze-masihation-8914s-projects.vercel.app",
+      "git_sha": "082fd241e87b54b686191952a729b9584a797b4d",
+      "node": "20.20.2",
+      "npm": "10.8.2",
+      "vite_version": "8.0.16",
+      "vite_modules_transformed": 2492,
+      "result": "ready",
+      "source": "vercel inspect dpl_5z2ntVZ9dHxxPcrUKhtW3fW6FSUV --logs"
     }
   },
   "vercel_config": {
