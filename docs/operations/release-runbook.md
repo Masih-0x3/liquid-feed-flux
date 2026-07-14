@@ -77,6 +77,8 @@ For every production release, record:
    ```
 6. Run the full local validation gate:
    ```bash
+   npm run check:runtime-contract
+   npm run test:runtime-contract
    npm run lint
    npm run check:function-inventory
    npm run lint:functions
@@ -89,6 +91,10 @@ For every production release, record:
    npm run build
    npm --prefix services/video-renderer test
    ```
+   The runtime check freezes the current matrix and prints the effective local
+   Node/npm versions. After the Vercel build, capture the matching prebuild line
+   from deployment logs. A successful build on a different, unreviewed major is
+   not runtime approval; follow [`runtime-contract.md`](./runtime-contract.md).
 7. Dry-run function deploy preflight:
    ```bash
    DEPLOY_FUNCTIONS_DRY_RUN=1 ./scripts/deploy-functions.sh

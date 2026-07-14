@@ -16,6 +16,8 @@ jobs:
           node-version: '20'
           cache: 'npm'
       - run: npm ci
+      - run: npm run check:runtime-contract
+      - run: npm run test:runtime-contract
       - run: npm run lint
       - run: npm run check:function-inventory
       - run: npm run check:migration-baseline
