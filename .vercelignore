@@ -1,2 +1,4 @@
-services/video-renderer
 services/video-renderer/**
+!services/video-renderer/package.json
+!services/video-renderer/package-lock.json
+!services/video-renderer/Dockerfile

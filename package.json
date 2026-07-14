@@ -11,7 +11,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "prebuild": "npm run check:vite-env",
+    "prebuild": "node scripts/check-build-contract.mjs",
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
@@ -19,6 +19,7 @@
     "check:functions": "npx --yes deno task check:functions",
     "test:functions": "npx --yes deno task test:functions",
     "check:vite-env": "node scripts/check-vite-env.mjs",
+    "check:runtime-contract": "node scripts/check-runtime-contract.mjs",
     "check:function-inventory": "node scripts/check-function-inventory.mjs",
     "check:migration-baseline": "node scripts/check-migration-baseline.mjs",
     "check:migration-release": "node scripts/check-migration-baseline.mjs --release-gate",
@@ -26,6 +27,7 @@
     "check:strict": "tsc --noEmit -p tsconfig.strict.json",
     "test": "vitest run",
     "test:migration-baseline": "node --test scripts/check-migration-baseline.test.mjs",
+    "test:runtime-contract": "node --test scripts/check-runtime-contract.test.mjs",
     "test:watch": "vitest",
     "preview": "vite preview",
     "prepare": "husky"

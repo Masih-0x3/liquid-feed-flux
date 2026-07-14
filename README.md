@@ -121,6 +121,8 @@ values fail the build instead of producing a blank browser screen.
 | `npm run dev` | Start dev server |
 | `npm run build` | Production build |
 | `npm run check:vite-env` | Validate required frontend environment variables |
+| `npm run check:runtime-contract` | Verify and print the frozen Node/npm/Supabase runtime matrix |
+| `npm run test:runtime-contract` | Run adversarial runtime-drift guard tests |
 | `npm run lint` | ESLint check |
 | `npm test` | Run Vitest tests |
 | `npm run test:watch` | Watch mode tests |
@@ -128,7 +130,8 @@ values fail the build instead of producing a blank browser screen.
 
 ## CI/CD
 
-GitHub Actions (`.github/workflows/ci.yml`) runs lint → test → env validation → build on push/PR to `main`.
+GitHub Actions (`.github/workflows/ci.yml`) runs runtime, migration, lint, type,
+function, test, environment, and build gates on push/PR to `main`.
 Set `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, and `VITE_SUPABASE_PROJECT_ID`
 as GitHub repository secrets before relying on CI builds.
 Pre-commit hooks (husky + lint-staged) run ESLint and TypeScript checks on staged files.
