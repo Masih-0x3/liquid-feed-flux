@@ -11,6 +11,7 @@ function withFixture(callback) {
   try {
     for (const path of [
       ".github",
+      ".vercelignore",
       "docs/operations/runtime-contract.json",
       "package.json",
       "package-lock.json",
@@ -90,6 +91,12 @@ test("Vercel cannot bypass prebuild or reproducible install commands", () => wit
   const errors = validateRuntimeContract({ root, actualNodeVersion: "20.19.0" }).errors;
   assert.ok(errors.some((error) => error.includes("Vercel build command")));
   assert.ok(errors.some((error) => error.includes("Vercel install command")));
+}));
+
+test("Vercel must include the renderer runtime metadata used by the build gate", () => withFixture((root) => {
+  const path = join(root, ".vercelignore");
+  writeFileSync(path, "services/video-renderer/**\n");
+  assert.ok(validateRuntimeContract({ root, actualNodeVersion: "20.19.0" }).errors.some((error) => error.includes("Vercel ignore contract hash")));
 }));
 
 test("the prebuild wrapper cannot silently drop runtime or environment checks", () => withFixture((root) => {

@@ -8,7 +8,7 @@
     "deployment_selector": "20.x",
     "deployment_minimum": "20.19.0",
     "vercel_project_setting": "24.x",
-    "vercel_effective_exact": "captured_by_runtime_guard_per_build",
+    "vercel_effective_exact": "20.20.2",
     "vercel_node20_build_deadline": "2026-10-01",
     "root_engine": "20.x",
     "root_npm_engine": "10.x",
@@ -47,7 +47,14 @@
     "inspection_cli": "56.1.0",
     "managed_build_cli": "55.0.0",
     "result": "ready",
-    "source": "vercel inspect dpl_GkzZnfyUQGMtbdJ46mz68kPm4aWj --logs"
+    "source": "vercel inspect dpl_GkzZnfyUQGMtbdJ46mz68kPm4aWj --logs",
+    "runtime_probe": {
+      "deployment_id": "dpl_3TXochCtQkx8dRFKhbVcrdcLCCJo",
+      "git_sha": "0bc98a80f70849cf836e3c0763589088cb57e988",
+      "node": "20.20.2",
+      "result": "build_gate_failed_renderer_metadata_excluded",
+      "source": "vercel inspect dpl_3TXochCtQkx8dRFKhbVcrdcLCCJo --logs"
+    }
   },
   "vercel_config": {
     "buildCommand": "npm run build",
@@ -55,6 +62,8 @@
     "outputDirectory": "dist"
   },
   "build_guard": {
+    "vercel_ignore_path": ".vercelignore",
+    "vercel_ignore_sha256": "abc295fdc2acda9d3430d70254bc2c93cf3ae324bad2d9b06141d9cd728405fa",
     "ci_workflow_path": ".github/workflows/ci.yml",
     "ci_workflow_sha256": "46f256d042ea97a7d0880b9a3526b9acd469ce388f90be3e445ae0c0c3e81d36",
     "wrapper_path": "scripts/check-build-contract.mjs",

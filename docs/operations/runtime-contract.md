@@ -29,11 +29,15 @@ hash review.
   and 2,492 transformed modules. Inspection used Vercel CLI `56.1.0`; the
   managed build used Vercel CLI `55.0.0`.
 - Vercel project settings select Node `24.x`, but root `engines.node` overrides
-  that setting with `20.x`. The build log says Node 20 deployments created on or
-  after 2026-10-01 will fail.
-- Vite 8 requires Node `20.19+` or `22.12+`. The prior Vercel log proved a
-  successful supported build but did not emit the exact Node patch. The new
-  prebuild guard prints exact Node and npm versions, rejects a Node 20 patch
+  that setting with `20.x`. Guarded preview probe
+  `dpl_3TXochCtQkx8dRFKhbVcrdcLCCJo` reported exact Node `20.20.2`; it then
+  failed because `.vercelignore` had removed renderer contract metadata. The
+  build log also says Node 20 deployments created on or after 2026-10-01 will
+  fail. The follow-up includes only the renderer package, lock, and Dockerfile
+  metadata in the build context so the guard can verify them.
+- Vite 8 requires Node `20.19+` or `22.12+`. The guarded Vercel probe proves
+  Node `20.20.2`; the prior preview proved a successful supported Vite build.
+  The prebuild guard prints exact Node and npm versions, rejects a Node 20 patch
   below 20.19, and requires npm major 10 during this freeze. The current local
   evidence surface is the Codex bundled workspace runtime on Node `22.23.1`
   with npm `10.9.8`; the `npm@10.8.2` package-manager declaration is not

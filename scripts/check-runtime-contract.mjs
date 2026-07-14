@@ -11,6 +11,8 @@ export const CONTRACT_PATH = "docs/operations/runtime-contract.json";
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 
+const observedNpmVersion = () => process.env.npm_config_user_agent?.match(/(?:^|\s)npm\/([^\s]+)/)?.[1] ?? null;
+
 function parseVersion(value) {
   const match = String(value).replace(/^v/, "").match(/^(\d+)\.(\d+)\.(\d+)/);
   return match ? match.slice(1).map(Number) : null;
@@ -246,7 +248,7 @@ function requireEqual(errors, label, actual, expected) {
 export function validateRuntimeContract({
   root = REPO_ROOT,
   actualNodeVersion = process.versions.node,
-  actualNpmVersion = process.env.npm_config_user_agent?.match(/(?:^|\s)npm\/([^\s]+)/)?.[1] ?? null,
+  actualNpmVersion = observedNpmVersion(),
   requireDeploymentMajor = Boolean(process.env.CI || process.env.VERCEL),
 } = {}) {
   const contract = JSON.parse(readFileSync(resolve(root, CONTRACT_PATH), "utf8"));
@@ -256,6 +258,7 @@ export function validateRuntimeContract({
   const rendererLock = JSON.parse(readFileSync(join(root, "services/video-renderer/package-lock.json"), "utf8"));
   const denoLock = JSON.parse(readFileSync(join(root, "deno.lock"), "utf8"));
   const vercel = JSON.parse(readFileSync(join(root, "vercel.json"), "utf8"));
+  const vercelIgnore = readFileSync(join(root, ".vercelignore"), "utf8");
   const dockerfile = readFileSync(join(root, "services/video-renderer/Dockerfile"), "utf8");
   const ci = readFileSync(join(root, ".github/workflows/ci.yml"), "utf8");
   const errors = [];
@@ -329,6 +332,8 @@ export function validateRuntimeContract({
   requireEqual(errors, "Vercel build command", vercel.buildCommand, contract.vercel_config.buildCommand);
   requireEqual(errors, "Vercel install command", vercel.installCommand, contract.vercel_config.installCommand);
   requireEqual(errors, "Vercel output directory", vercel.outputDirectory, contract.vercel_config.outputDirectory);
+  requireEqual(errors, "Vercel ignore contract path", contract.build_guard.vercel_ignore_path, ".vercelignore");
+  requireEqual(errors, "Vercel ignore contract hash", sha256(vercelIgnore), contract.build_guard.vercel_ignore_sha256);
   requireEqual(
     errors,
     "build contract wrapper hash",
@@ -384,6 +389,7 @@ export function validateRuntimeContract({
 
 const isMain = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) {
+  console.log(`Runtime observed before contract validation: node ${process.versions.node}; npm ${observedNpmVersion() ?? "not reported"}.`);
   const result = validateRuntimeContract({ requireDeploymentMajor: process.argv.includes("--require-deployment-major") || Boolean(process.env.CI || process.env.VERCEL) });
   if (result.errors.length) {
     console.error(`Runtime contract FAIL:\n- ${result.errors.join("\n- ")}`);
