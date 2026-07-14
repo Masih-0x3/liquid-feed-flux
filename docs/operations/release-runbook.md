@@ -157,21 +157,81 @@ Both should return `HTTP/2 200`, matching ETags, and the security headers from `
 
 ## Supabase Migration Release
 
-Do not apply migrations until Phase 3 migration trust repair has produced a reviewed plan.
+Do not apply migrations until Phase 1 migration trust has passed SR-MIG-01 and
+the fail-closed release gate. A passing offline inventory check is not migration
+release approval.
 
 Before applying migrations:
 
-1. Compare local and remote migration history:
+1. Validate the immutable 210-side observation and the separate current 107-file
+   source inventory:
+   ```bash
+   npm run check:migration-baseline
+   ```
+   The final release invocation must also supply a fresh protected remote export,
+   both reviewed schema dumps, the freshly generated production types, and its
+   typed evidence receipt:
+   ```bash
+   node scripts/check-migration-baseline.mjs --release-gate \
+     --remote-json /secure/path/xot-remote-migrations.json \
+     --replay-schema /secure/path/xot-replay-public-schema.sql \
+     --production-schema /secure/path/xot-production-public-schema.sql \
+     --production-types /secure/path/xot-production-types.ts \
+     --types-receipt /secure/path/xot-production-types-receipt.json
+   ```
+   These protected inputs must be freshly captured from the reviewed project;
+   checked-in manifest values are not accepted as their own proof.
+   Every resolved owner/gate receipt must also reference a repository-relative
+   typed JSON evidence package. The validator verifies its hash, scans decoded
+   and raw content for credential patterns, checks the entry/gate-specific
+   claims, regenerates schema grants and revokes plus the other privilege facts
+   from the supplied dumps, and verifies each required gate check against a
+   typed, hash-verified artifact. `candidate.reviewed_git_sha` must be the direct
+   parent of a clean evidence-only commit; that evidence commit may change only
+   the migration manifest and schema/privilege receipt. The validator compares
+   the evidence manifest with the reviewed parent and rejects changes to the
+   project/anchor facts, source inventory, historical entry facts, dispositions,
+   blocker definitions, or protected input contract. Only review/closure state
+   and explicitly evidence-derived hashes may advance in that commit.
+
+   Typed gate JSON is an integrity envelope, not a cryptographic signature and
+   not independent authentication of GitHub, Supabase, or a restore target. The
+   security boundary is a branch-protected PR approved by the named database,
+   security, and release owners after they open the referenced provider run,
+   restore, log-query, and role-matrix evidence. Reject locally authored or
+   unverifiable gate artifacts even when their hashes and schemas pass. Provider
+   run IDs, reviewed SHA, timestamps, and source links must be checked against
+   the provider before the evidence commit is approved.
+2. Compare local and remote migration history:
    ```bash
    SUPABASE_TELEMETRY_DISABLED=1 npx supabase migration list --linked
    ```
-2. Confirm there are no unreviewed local-only migrations.
-3. Confirm production schema diff is understood.
-4. Apply only reviewed migrations.
-5. Re-run:
+3. Confirm every manifest entry has database-owner approval. Non-lexical
+   normalized hashes are diagnostic only and cannot approve an entry.
+4. Obtain a clean, no-egress empty-database replay receipt. Historical cron and
+   `pg_net` definitions must be blocked or redirected to a local no-op target,
+   and production Edge logs must show no replay traffic.
+5. Confirm PITR/equivalent recovery readiness with a successful disposable
+   restore-drill receipt.
+6. Confirm the full schema, policy, grant, function, index, and generated-type
+   diff is expected-empty or explicitly approved. Resolve the missing remote
+   body for `20260516050042` and all security privilege divergences with reviewed
+   forward-only migrations.
+7. Run the complete release command shown in step 1 against a fresh protected
+   remote migration export and matching schema/type evidence. Never
+   commit that export because historical statements may contain credentials.
+   Its envelope must declare `export_contract` as
+   `xot-remote-migration-snapshot-v1`, the exact `project_ref`, a `captured_at`
+   timestamp less than six hours old, source/query metadata, and one unique row
+   for every expected remote version:
+8. Apply only the reviewed forward migration set. Broad `db push`, timestamp-only
+   history repair, and replaying restored historical sources against production
+   remain prohibited.
+9. Re-run:
    ```bash
    SUPABASE_TELEMETRY_DISABLED=1 npx supabase migration list --linked
    npm run check:release-state
+   npm run check:migration-baseline
    ```
 
 ## Post-Release Smoke Checks
