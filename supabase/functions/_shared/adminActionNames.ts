@@ -23,6 +23,7 @@ export const ADMIN_ACTION_NAMES = [
   'get_video_render_queue',
   'get_video_render_detail',
   'retry_video_render',
+  'set_video_render_reviewed',
   'save_video_render_feedback',
   'manual_video_intake_create',
   'manual_video_intake_get',

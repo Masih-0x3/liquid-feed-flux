@@ -1,17 +1,30 @@
 import { useMemo, useState } from 'react';
 import { formatDistanceToNow } from 'date-fns';
-import { AlertTriangle, CheckCircle2, Clock, Film, HardDrive, Loader2, RefreshCw, Settings, TimerReset, Wand2, Wifi, WifiOff } from 'lucide-react';
+import { AlertTriangle, CheckCheck, CheckCircle2, Clock, Film, HardDrive, Loader2, RefreshCw, Settings, TimerReset, Undo2, Wand2, Wifi, WifiOff } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ManualVideoIntakePanel } from '@/components/video/ManualVideoIntakePanel';
 import { VideoRenderDetailPanel } from '@/components/video/VideoRenderDetailPanel';
 import {
   useRetryVideoRender,
+  useSetVideoRenderReviewed,
   useVideoRenderOverview,
   useVideoRenderQueue,
   type VideoRenderQueueRow,
@@ -59,13 +72,19 @@ const STATUS_OPTIONS: Array<{ value: string; label: string; statuses?: VideoRend
 
 export default function VideoRenders() {
   const [statusFilter, setStatusFilter] = useState('active');
+  const [showReviewed, setShowReviewed] = useState(false);
   const statuses = STATUS_OPTIONS.find((item) => item.value === statusFilter)?.statuses;
   const overview = useVideoRenderOverview();
-  const queue = useVideoRenderQueue(statuses);
+  const queue = useVideoRenderQueue(statuses, showReviewed ? 'all' : 'unreviewed');
   const retry = useRetryVideoRender();
+  const setReviewed = useSetVideoRenderReviewed();
   const [selectedRenderId, setSelectedRenderId] = useState<string | null>(null);
 
   const rows = useMemo(() => queue.data?.rows ?? [], [queue.data?.rows]);
+  const unreviewedIssueRows = useMemo(
+    () => rows.filter((row) => (row.status === 'failed' || row.status === 'blocked') && !row.reviewed_at),
+    [rows],
+  );
   const selected = useMemo(
     () => rows.find((row) => row.id === selectedRenderId) ?? rows[0] ?? null,
     [rows, selectedRenderId],
@@ -132,7 +151,8 @@ export default function VideoRenders() {
               <p className="text-sm text-muted-foreground">Issues</p>
               <AlertTriangle className="h-4 w-4 text-red-500" />
             </div>
-            <p className="mt-2 text-2xl font-semibold">{compactNumber((overview.data?.counts?.failed ?? 0) + (overview.data?.counts?.blocked ?? 0))}</p>
+            <p className="mt-2 text-2xl font-semibold">{compactNumber(overview.data?.unreviewed_issues ?? ((overview.data?.counts?.failed ?? 0) + (overview.data?.counts?.blocked ?? 0)))}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{compactNumber(overview.data?.reviewed_issues ?? 0)} reviewed</p>
           </CardContent>
         </Card>
         <Card className="glass-card">
@@ -161,12 +181,42 @@ export default function VideoRenders() {
                     <CardTitle>Render Queue</CardTitle>
                     <CardDescription>Production rows from Supabase, not local golden outputs</CardDescription>
                   </div>
-                  <Select value={statusFilter} onValueChange={setStatusFilter}>
-                    <SelectTrigger className="w-full sm:w-52"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {STATUS_OPTIONS.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
+                  <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+                    <label htmlFor="show-reviewed-renders" className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm text-muted-foreground">
+                      <Switch id="show-reviewed-renders" checked={showReviewed} onCheckedChange={setShowReviewed} />
+                      Show reviewed
+                    </label>
+                    {unreviewedIssueRows.length > 0 && (
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button size="sm" variant="outline" disabled={setReviewed.isPending}>
+                            {setReviewed.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCheck className="mr-2 h-4 w-4" />}
+                            Mark {unreviewedIssueRows.length} reviewed
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Clear these issues from the actionable queue?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              This marks {unreviewedIssueRows.length} visible failed or blocked render{unreviewedIssueRows.length === 1 ? '' : 's'} as reviewed. Their real status and diagnostics stay intact. Use “Show reviewed” to restore any of them later.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => setReviewed.mutate({ render_ids: unreviewedIssueRows.map((row) => row.id), reviewed: true })}>
+                              Mark reviewed
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    )}
+                    <Select value={statusFilter} onValueChange={setStatusFilter}>
+                      <SelectTrigger className="w-full sm:w-52"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {STATUS_OPTIONS.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent className="p-0">
@@ -193,6 +243,7 @@ export default function VideoRenders() {
                             <TableCell>
                               <div className="space-y-1">
                                 <Badge className={statusClass(row.status)}>{row.status}</Badge>
+                                {row.reviewed_at && <Badge variant="outline" className="block w-fit border-emerald-500/30 text-[10px] text-emerald-500">Reviewed</Badge>}
                                 {row.latest_feedback?.label && <Badge variant="outline" className="block w-fit text-[10px]">{row.latest_feedback.label.replaceAll('_', ' ')}</Badge>}
                               </div>
                             </TableCell>
@@ -208,6 +259,17 @@ export default function VideoRenders() {
                             <TableCell className="text-right">
                               <div className="flex justify-end gap-2">
                                 <Button size="sm" variant="outline" onClick={() => setSelectedRenderId(row.id)}>Review</Button>
+                                {(row.status === 'failed' || row.status === 'blocked') && (
+                                  <Button
+                                    size="sm"
+                                    variant={row.reviewed_at ? 'ghost' : 'outline'}
+                                    onClick={() => setReviewed.mutate({ render_id: row.id, reviewed: !row.reviewed_at })}
+                                    disabled={setReviewed.isPending}
+                                  >
+                                    {setReviewed.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : row.reviewed_at ? <Undo2 className="mr-2 h-4 w-4" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+                                    {row.reviewed_at ? 'Restore' : 'Mark reviewed'}
+                                  </Button>
+                                )}
                                 <Button size="sm" variant="ghost" onClick={() => retry.mutate({ render_id: row.id })} disabled={retry.isPending}>
                                   {retry.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                                 </Button>

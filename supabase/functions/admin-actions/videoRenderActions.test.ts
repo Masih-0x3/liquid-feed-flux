@@ -1,6 +1,8 @@
 import { assertEquals } from "jsr:@std/assert";
 import {
   latestTimestamp,
+  normalizeVideoRenderIds,
+  normalizeVideoRenderReviewState,
   normalizeVideoRenderStatuses,
   sanitizeVideoRenderFeedbackLabel,
   videoRenderActionLabel,
@@ -36,4 +38,18 @@ Deno.test("video render status filter keeps only supported statuses and defaults
     normalizeVideoRenderStatuses(["queued", "running", "completed", "failed", "blocked", "expired", "extra"]),
     ["queued", "running", "completed", "failed", "blocked", "expired"],
   );
+});
+
+Deno.test("video render review state defaults closed and only accepts explicit all", () => {
+  assertEquals(normalizeVideoRenderReviewState(undefined), "unreviewed");
+  assertEquals(normalizeVideoRenderReviewState("reviewed"), "unreviewed");
+  assertEquals(normalizeVideoRenderReviewState("all"), "all");
+});
+
+Deno.test("video render review ids accept one or many unique UUIDs", () => {
+  const first = "00bf8307-38db-41f9-8594-06435247b1c1";
+  const second = "3b268a62-a906-4d84-9354-fb158f388667";
+  assertEquals(normalizeVideoRenderIds({ render_id: ` ${first} ` }), [first]);
+  assertEquals(normalizeVideoRenderIds({ render_ids: [first, second, first, "bad", null] }), [first, second]);
+  assertEquals(normalizeVideoRenderIds({}), []);
 });

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { formatDistanceToNow } from 'date-fns';
-import { AlertTriangle, CheckCircle2, Languages, Loader2, Play, RotateCcw, Save, ShieldAlert, Wand2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Languages, Loader2, Play, RotateCcw, Save, ShieldAlert, Undo2, Wand2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import {
   useRetryVideoRender,
   useSaveVideoRenderFeedback,
+  useSetVideoRenderReviewed,
   useVideoRenderDetail,
 } from '@/hooks/useVideoRenderData';
 
@@ -55,6 +56,7 @@ export function VideoRenderDetailPanel({
   const detail = useVideoRenderDetail({ renderId, tweetId, enabled });
   const retry = useRetryVideoRender();
   const saveFeedback = useSaveVideoRenderFeedback();
+  const setReviewed = useSetVideoRenderReviewed();
   const [feedbackLabel, setFeedbackLabel] = useState('pass');
   const [feedbackNote, setFeedbackNote] = useState('');
 
@@ -111,6 +113,7 @@ export function VideoRenderDetailPanel({
             </div>
             <div className="flex flex-wrap gap-2">
               <Badge className={statusClass(render.status)}>{render.status}</Badge>
+              {render.reviewed_at && <Badge variant="outline" className="border-emerald-500/30 text-emerald-500">Reviewed</Badge>}
               <Badge variant="outline">{render.action_label}</Badge>
               {render.source_language && render.target_language && (
                 <Badge variant="outline" className="gap-1">
@@ -221,7 +224,7 @@ export function VideoRenderDetailPanel({
                 <Label>Note</Label>
                 <Textarea value={feedbackNote} onChange={(event) => setFeedbackNote(event.target.value)} placeholder="What should be improved?" className="min-h-10" />
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Button
                   size="sm"
                   onClick={() => saveFeedback.mutate({ render_id: render.id, label: feedbackLabel, note: feedbackNote })}
@@ -234,6 +237,17 @@ export function VideoRenderDetailPanel({
                   {retry.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
                   Retry
                 </Button>
+                {(render.status === 'failed' || render.status === 'blocked') && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setReviewed.mutate({ render_id: render.id, reviewed: !render.reviewed_at })}
+                    disabled={setReviewed.isPending}
+                  >
+                    {setReviewed.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : render.reviewed_at ? <Undo2 className="mr-2 h-4 w-4" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+                    {render.reviewed_at ? 'Restore' : 'Mark reviewed'}
+                  </Button>
+                )}
               </div>
             </div>
             {detail.data?.feedback?.length ? (

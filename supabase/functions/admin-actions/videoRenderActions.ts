@@ -12,10 +12,11 @@ type TableQueryBuilder = PromiseLike<QueryResult> & {
   select(columns: string): TableQueryBuilder;
   update(value: Record<string, unknown>): TableQueryBuilder;
   upsert(value: Record<string, unknown>, options?: Record<string, unknown>): PromiseLike<{ error?: unknown }>;
-  insert(value: Record<string, unknown>): TableQueryBuilder;
+  insert(value: Record<string, unknown> | Array<Record<string, unknown>>): TableQueryBuilder;
   eq(column: string, value: unknown): TableQueryBuilder;
   in(column: string, values: unknown[]): TableQueryBuilder;
   gte(column: string, value: unknown): TableQueryBuilder;
+  is(column: string, value: unknown): TableQueryBuilder;
   order(column: string, options?: Record<string, unknown>): TableQueryBuilder;
   limit(value: number): TableQueryBuilder;
   maybeSingle(): PromiseLike<QueryResult>;
@@ -118,7 +119,7 @@ export async function getVideoRenderOverview(supabase: SupabaseAdminClient) {
   const [cfg, rendersRes, heartbeatRes] = await Promise.all([
     loadVideoRenderConfigAdmin(supabase),
     table(supabase, 'video_renders')
-      .select('status, metrics, queued_at, started_at, completed_at, failed_at, blocked_at, updated_at, output_file_size')
+      .select('status, metrics, queued_at, started_at, completed_at, failed_at, blocked_at, reviewed_at, updated_at, output_file_size')
       .gte('created_at', since)
       .order('updated_at', { ascending: false })
       .limit(5000),
@@ -132,10 +133,16 @@ export async function getVideoRenderOverview(supabase: SupabaseAdminClient) {
 
   const counts: Record<string, number> = { queued: 0, running: 0, completed: 0, failed: 0, blocked: 0, expired: 0 };
   const totals = { render_ms: [] as number[], total_ms: [] as number[], output_bytes: 0 };
+  let unreviewedIssues = 0;
+  let reviewedIssues = 0;
   let oldestQueuedAt: string | null = null;
   for (const row of (rendersRes.data ?? []) as Array<Record<string, unknown>>) {
     const status = String(row.status ?? 'unknown');
     counts[status] = (counts[status] ?? 0) + 1;
+    if (status === 'failed' || status === 'blocked') {
+      if (row.reviewed_at) reviewedIssues += 1;
+      else unreviewedIssues += 1;
+    }
     if (status === 'queued' && typeof row.queued_at === 'string') {
       oldestQueuedAt = oldestQueuedAt && oldestQueuedAt < row.queued_at ? oldestQueuedAt : row.queued_at;
     }
@@ -157,6 +164,8 @@ export async function getVideoRenderOverview(supabase: SupabaseAdminClient) {
     ok: true,
     config: cfg.config,
     counts,
+    unreviewed_issues: unreviewedIssues,
+    reviewed_issues: reviewedIssues,
     oldest_queued_at: oldestQueuedAt,
     medians: {
       render_ms: median(totals.render_ms),
@@ -173,14 +182,33 @@ export function normalizeVideoRenderStatuses(value: unknown): string[] {
   return value.map((item) => String(item)).filter((item) => allowed.has(item)).slice(0, 6);
 }
 
+export type VideoRenderReviewState = 'unreviewed' | 'all';
+
+export function normalizeVideoRenderReviewState(value: unknown): VideoRenderReviewState {
+  return value === 'all' ? 'all' : 'unreviewed';
+}
+
+export function normalizeVideoRenderIds(body: Record<string, unknown>): string[] {
+  const values = Array.isArray(body.render_ids)
+    ? body.render_ids
+    : [body.render_id];
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  return [...new Set(values
+    .map((value) => typeof value === 'string' ? value.trim() : '')
+    .filter((value) => uuidPattern.test(value)))]
+    .slice(0, 100);
+}
+
 export async function getVideoRenderQueue(supabase: SupabaseAdminClient, body: Record<string, unknown>) {
   const limit = Math.min(Math.max(Number(body.limit) || 50, 1), 100);
   const statuses = normalizeVideoRenderStatuses(body.statuses ?? body.status);
-  const { data: renders, error } = await table(supabase, 'video_renders')
-    .select('id, tweet_id, source_media_id, status, failure_policy, render_version, output_storage_path, output_file_size, width, height, duration_ms, source_language, target_language, metrics, error, block_reason, attempts, queued_at, started_at, completed_at, failed_at, blocked_at, updated_at, created_at, preflight')
+  const reviewState = normalizeVideoRenderReviewState(body.review_state);
+  let query = table(supabase, 'video_renders')
+    .select('id, tweet_id, source_media_id, status, failure_policy, render_version, output_storage_path, output_file_size, width, height, duration_ms, source_language, target_language, metrics, error, block_reason, attempts, queued_at, started_at, completed_at, failed_at, blocked_at, reviewed_at, reviewed_by, updated_at, created_at, preflight')
     .in('status', statuses)
-    .order('updated_at', { ascending: false })
-    .limit(limit);
+    .order('updated_at', { ascending: false });
+  if (reviewState === 'unreviewed') query = query.is('reviewed_at', null);
+  const { data: renders, error } = await query.limit(limit);
   if (error) throw error;
 
   const renderRows = (renders ?? []) as Array<Record<string, unknown>>;
@@ -224,7 +252,7 @@ export async function getVideoRenderDetail(supabase: SupabaseAdminClient, body: 
   const renderId = typeof body.render_id === 'string' ? body.render_id.trim() : '';
   const tweetId = typeof body.tweet_id === 'string' ? body.tweet_id.trim() : '';
   let query = table(supabase, 'video_renders')
-    .select('id, tweet_id, source_media_id, status, failure_policy, render_version, output_storage_path, output_mime_type, output_file_size, width, height, duration_ms, original_srt, persian_srt, translated_srt, ass_subtitles, source_language, target_language, preflight, metrics, error, block_reason, attempts, queued_at, started_at, completed_at, failed_at, blocked_at, posted_at, expires_at, created_at, updated_at')
+    .select('id, tweet_id, source_media_id, status, failure_policy, render_version, output_storage_path, output_mime_type, output_file_size, width, height, duration_ms, original_srt, persian_srt, translated_srt, ass_subtitles, source_language, target_language, preflight, metrics, error, block_reason, attempts, queued_at, started_at, completed_at, failed_at, blocked_at, reviewed_at, reviewed_by, posted_at, expires_at, created_at, updated_at')
     .order('updated_at', { ascending: false })
     .limit(1);
   if (renderId) query = query.eq('id', renderId);
@@ -315,6 +343,8 @@ export async function retryVideoRenderAdmin(
     completed_at: null,
     failed_at: null,
     blocked_at: null,
+    reviewed_at: null,
+    reviewed_by: null,
   }).eq('id', render.id);
   if (updateError) throw updateError;
 
@@ -325,6 +355,63 @@ export async function retryVideoRenderAdmin(
   });
 
   return { ok: true, render_id: render.id, tweet_id: render.tweet_id, mode: cfg.mode };
+}
+
+export async function setVideoRenderReviewedAdmin(
+  supabase: SupabaseAdminClient,
+  body: Record<string, unknown>,
+  userId?: string,
+) {
+  const renderIds = normalizeVideoRenderIds(body);
+  if (!renderIds.length) return { ok: false, error: 'render_id or render_ids is required' };
+  const reviewed = body.reviewed !== false;
+
+  const { data: candidates, error: loadError } = await table(supabase, 'video_renders')
+    .select('id, tweet_id, status')
+    .in('id', renderIds);
+  if (loadError) throw loadError;
+
+  const rows = (candidates ?? []) as Array<Record<string, unknown>>;
+  if (rows.length !== renderIds.length) {
+    return { ok: false, error: 'One or more video renders were not found' };
+  }
+  const unsupported = rows.filter((row) => row.status !== 'failed' && row.status !== 'blocked');
+  if (unsupported.length) {
+    return { ok: false, error: 'Only failed or blocked video renders can be marked reviewed' };
+  }
+
+  const reviewedAt = reviewed ? new Date().toISOString() : null;
+  const { data: updated, error: updateError } = await table(supabase, 'video_renders')
+    .update({
+      reviewed_at: reviewedAt,
+      reviewed_by: reviewed ? userId ?? null : null,
+    })
+    .in('id', renderIds)
+    .select('id, tweet_id, status, reviewed_at, reviewed_by');
+  if (updateError) throw updateError;
+
+  const eventRows = rows.map((row) => ({
+    subject_type: 'post',
+    subject_id: String(row.tweet_id),
+    step: 'video_render_review',
+    status: 'completed',
+    started_at: reviewedAt ?? new Date().toISOString(),
+    ended_at: reviewedAt ?? new Date().toISOString(),
+    actor: userId ?? 'admin',
+    meta: {
+      source: 'admin-actions',
+      render_id: row.id,
+      reviewed,
+    },
+  }));
+  await table(supabase, 'pipeline_events').insert(eventRows).then(() => null, () => null);
+
+  return {
+    ok: true,
+    reviewed,
+    updated: ((updated ?? []) as Array<unknown>).length,
+    render_ids: renderIds,
+  };
 }
 
 export async function saveVideoRenderFeedbackAdmin(

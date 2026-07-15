@@ -64,6 +64,8 @@ export interface VideoRenderOverview {
   ok: boolean;
   config: VideoRenderConfigValue;
   counts: Record<string, number>;
+  unreviewed_issues: number;
+  reviewed_issues: number;
   oldest_queued_at: string | null;
   medians: { render_ms: number | null; total_ms: number | null };
   output_bytes_7d: number;
@@ -93,6 +95,8 @@ export interface VideoRenderQueueRow {
   completed_at: string | null;
   failed_at: string | null;
   blocked_at: string | null;
+  reviewed_at: string | null;
+  reviewed_by: string | null;
   updated_at: string | null;
   created_at: string | null;
   preflight: Record<string, unknown> | null;
@@ -146,12 +150,13 @@ export function useVideoRenderOverview() {
   });
 }
 
-export function useVideoRenderQueue(statuses?: VideoRenderStatus[]) {
+export function useVideoRenderQueue(statuses?: VideoRenderStatus[], reviewState: 'unreviewed' | 'all' = 'unreviewed') {
   return useQuery({
-    queryKey: ['video-render-queue', statuses?.join(',') ?? 'default'],
+    queryKey: ['video-render-queue', statuses?.join(',') ?? 'default', reviewState],
     queryFn: () => invokeAdminAction<{ ok: boolean; rows: VideoRenderQueueRow[] }>({
       action: 'get_video_render_queue',
       statuses,
+      review_state: reviewState,
       limit: 100,
     }),
     staleTime: 15_000,
@@ -217,6 +222,34 @@ export function useRetryVideoRender() {
     },
     onError: (error) => {
       toast({ title: 'Could not queue video render', description: (error as Error).message, variant: 'destructive' });
+    },
+  });
+}
+
+export function useSetVideoRenderReviewed() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: (input: { render_id?: string; render_ids?: string[]; reviewed: boolean }) => invokeAdminAction<{
+      ok: boolean;
+      reviewed: boolean;
+      updated: number;
+      render_ids: string[];
+    }>({
+      action: 'set_video_render_reviewed',
+      ...input,
+    }),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['video-render-overview'] });
+      queryClient.invalidateQueries({ queryKey: ['video-render-queue'] });
+      queryClient.invalidateQueries({ queryKey: ['video-render-detail'] });
+      toast({
+        title: data.reviewed ? 'Video issue marked reviewed' : 'Video issue restored',
+        description: `${data.updated} render${data.updated === 1 ? '' : 's'} updated`,
+      });
+    },
+    onError: (error) => {
+      toast({ title: 'Could not update review state', description: (error as Error).message, variant: 'destructive' });
     },
   });
 }

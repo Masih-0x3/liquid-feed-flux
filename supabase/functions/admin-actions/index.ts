@@ -47,6 +47,7 @@ import {
   loadVideoRenderConfigAdmin,
   retryVideoRenderAdmin,
   saveVideoRenderFeedbackAdmin,
+  setVideoRenderReviewedAdmin,
   updateVideoRenderConfigAdmin,
 } from "./videoRenderActions.ts";
 import { getXApiSummary } from "./xApiSummary.ts";
@@ -348,6 +349,10 @@ serve(async (req) => {
 
       case 'retry_video_render': {
         return jsonResponse(await retryVideoRenderAdmin(supabase, body, insertAdminPipelineEvent));
+      }
+
+      case 'set_video_render_reviewed': {
+        return jsonResponse(await setVideoRenderReviewedAdmin(supabase, body, authResult.userId));
       }
 
       case 'save_video_render_feedback': {
