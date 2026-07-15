@@ -9,6 +9,7 @@ import {
 import { MonitoringDuplicateGateCard } from "@/components/monitoring/MonitoringDuplicateGateCard";
 import { MonitoringDetailDrawer } from "@/components/monitoring/MonitoringDetailDrawer";
 import { MonitoringProcessHud } from "@/components/monitoring/MonitoringProcessHud";
+import { MonitoringQueueCards } from "@/components/monitoring/MonitoringQueueCards";
 import {
   MonitoringAudienceBadge,
   MonitoringCostFlags,
@@ -123,6 +124,83 @@ function duplicateTarget(overrides: Partial<NonNullable<MonitoringEntry["duplica
     ...overrides,
   };
 }
+
+describe("monitoring queue priority", () => {
+  it("surfaces attention first and routes its action to the queue workflow", () => {
+    const onReviewAttention = vi.fn();
+    render(
+      <MonitoringQueueCards
+        counts={{
+          needs_attention: 4,
+          failed_stuck: 1,
+          translation_queue: 2,
+          needs_score: 1,
+          ready_to_deliver: 3,
+          manual_review: 0,
+          duplicates: 0,
+          coverage_gap: 0,
+          possible_duplicate: 0,
+          duplicate_anomalies: 0,
+          hydration: 0,
+          x_pending: 0,
+          x_failed: 1,
+          delivered_24h: 12,
+          telegram_pending: 0,
+          below_threshold: 0,
+          stale_jobs: 1,
+          stale_x_pending_24h: 0,
+          v2_regional_auto: 0,
+          global_pilot_review: 0,
+          manual_scoring_feedback: 0,
+        }}
+        xSummary={{ counted_attempts: 8, posts_local: 7, success_rate: 87 }}
+        onReviewAttention={onReviewAttention}
+      />,
+    );
+
+    expect(screen.getByText("Needs attention")).toBeInTheDocument();
+    expect(screen.getByText("Pipeline & delivery health")).toBeInTheDocument();
+    expect(screen.getByText("Routine throughput")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /review attention queue/i }));
+    expect(onReviewAttention).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not append a percentage sign when X success is unavailable", () => {
+    render(
+      <MonitoringQueueCards
+        counts={{
+          needs_attention: 0,
+          failed_stuck: 0,
+          translation_queue: 0,
+          needs_score: 0,
+          ready_to_deliver: 0,
+          manual_review: 0,
+          duplicates: 0,
+          coverage_gap: 0,
+          possible_duplicate: 0,
+          duplicate_anomalies: 0,
+          hydration: 0,
+          x_pending: 0,
+          x_failed: 0,
+          delivered_24h: 0,
+          telegram_pending: 0,
+          below_threshold: 0,
+          stale_jobs: 0,
+          stale_x_pending_24h: 0,
+          v2_regional_auto: 0,
+          global_pilot_review: 0,
+          manual_scoring_feedback: 0,
+        }}
+        xSummary={null}
+        onReviewAttention={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("X success").nextElementSibling).toHaveTextContent("—");
+    expect(screen.queryByText("-%")).not.toBeInTheDocument();
+  });
+});
 
 describe("monitoring status badges", () => {
   it("keeps status, score, cost, and audience labels stable", () => {

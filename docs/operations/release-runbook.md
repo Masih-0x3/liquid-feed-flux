@@ -2,6 +2,31 @@
 
 This runbook is the production gate for XOT frontend, Supabase Edge Functions, database migrations, and renderer-related releases.
 
+## Active Safety Hold — Cleanup Disabled (2026-07-14)
+
+Production cleanup is intentionally paused while AIR-001/AIR-065 are remediated. This is a safety containment, not a scheduler outage.
+
+- Supabase project: `jzirqfzzvlbxwfzndaer`.
+- `invoke-db-cleanup-daily` is job `17`, schedule `0 3 * * *`, currently `active=false`.
+- `invoke-media-cleanup-6h` is job `19`, schedule `0 */6 * * *`, currently `active=false`.
+- Keep the entire DB cleanup job paused: the current `cleanup_old_data` RPC deletes old `media` rows, and `db-cleanup` also invokes path-blind media cleanup.
+- Do not manually invoke non-dry `db-cleanup`, `media-cleanup`, or the `media-processor` `cleanup_old_media` action during the hold.
+- Do not invoke `public.cleanup_old_data(integer, integer)` directly through SQL, PostgREST, a service-role client, or any operator script. The Phase 0 Edge guards do not protect that privileged database RPC; this prohibition remains an operational control until a database-side gate or privilege redesign lands after SR-MIG-01.
+- Scope the Phase 0 containment claim precisely: the paused schedules stop the known automated callers, and the source candidate gates the three application Edge entry points. It does not make the underlying legacy RPC or storage-path cleanup intrinsically safe.
+- Dry-run inventory remains allowed when it is bounded and performs zero writes.
+- The Phase 0 source candidate adds fail-closed mutation guards named `DB_CLEANUP_MUTATIONS_ENABLED` and `MEDIA_CLEANUP_MUTATIONS_ENABLED`. Until a production deployment receipt is recorded below, treat the paused cron jobs—not those undeployed guards—as the live control.
+- During the hold, both guard values must remain absent or anything other than the exact lowercase string `true`. Setting either value to `true` authorizes the corresponding legacy mutation path and is prohibited until its reference-safe replacement passes the required canary gate.
+- Monitor database growth while retention cleanup is paused. At containment, the database was `331,754,643 / 500,000,000` bytes.
+
+Verify the hold:
+
+```bash
+npx supabase db query --linked \
+  "select jobid, jobname, schedule, active from cron.job where jobname in ('invoke-media-cleanup-6h','invoke-db-cleanup-daily') order by jobname;"
+```
+
+Do not reactivate either schedule merely to clear an accumulated backlog. Reactivation is permitted only after BR-MEDIA-03 passes reference-aware dry-run, fault, shadow, and bounded canary evidence. The retained rollback form is `cron.alter_job(job_id := <jobid>, active := true)`, followed by exact schedule and run verification; job `17` and job `19` must be reviewed independently.
+
 ## Release Rules
 
 - Release from a clean `main` checkout unless an emergency override is explicitly recorded.

@@ -2,6 +2,8 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
 import { requireInternalAuth } from "../_shared/internalAuth.ts";
 import { captureEdgeException, initSentryEdge } from "../_shared/sentry.ts";
+import { createMediaProcessorHandler } from "./handler.ts";
+import { cleanupOldMedia } from "./cleanupOldMedia.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': Deno.env.get('ALLOWED_CORS_ORIGIN') ?? 'https://liquid-feed-flux.lovable.app',
@@ -9,71 +11,22 @@ const corsHeaders = {
 };
 initSentryEdge();
 
-serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
-  }
-
-  const supabase = createClient<any, any>(
+const handler = createMediaProcessorHandler({
+  corsHeaders,
+  createSupabase: () => createClient<any, any>(
     Deno.env.get('SUPABASE_URL') ?? '',
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-  );
-
-  const authError = await requireInternalAuth(req, supabase, corsHeaders);
-  if (authError) return authError;
-
-  try {
-
-    const body = await req.json().catch(() => ({}));
-    const { action, tweet_id, media_ids, dry_run } = body;
-    
-    if (!action || typeof action !== 'string') {
-      return new Response(JSON.stringify({ error: 'Missing or invalid action parameter' }), {
-        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-
-    console.log(JSON.stringify({ function: 'media-processor', action }));
-
-    switch (action) {
-      case 'download_media':
-        if (!tweet_id || typeof tweet_id !== 'string') {
-          return new Response(JSON.stringify({ error: 'tweet_id is required' }), {
-            status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          });
-        }
-        return await downloadMediaForTweet(supabase, tweet_id, dry_run === true);
-      case 'cleanup_old_media': {
-        const daysOld = typeof (body as Record<string, unknown>).days_old === 'number'
-          ? Math.max(1, Math.min(365, Math.floor((body as Record<string, number>).days_old)))
-          : 1;
-        return await cleanupOldMedia(supabase, dry_run === true, daysOld);
-      }
-      case 'get_media_info':
-        if (!media_ids || !Array.isArray(media_ids)) {
-          return new Response(JSON.stringify({ error: 'media_ids array is required' }), {
-            status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          });
-        }
-        return await getMediaInfo(supabase, media_ids);
-      default:
-        return new Response(JSON.stringify({ error: `Unknown action: ${action}` }), {
-          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-    }
-
-  } catch (error) {
-    console.error(JSON.stringify({ function: 'media-processor', action: 'error', error: (error as Error).message }));
-    await captureEdgeException(error, {
-      functionName: "media-processor",
-      action: "error",
-      request: req,
-    });
-    return new Response(JSON.stringify({ error: 'Internal server error' }), {
-      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
-  }
+  ),
+  requireInternalAuth,
+  getEnv: (name) => Deno.env.get(name),
+  downloadMediaForTweet,
+  cleanupOldMedia: (supabase, dryRun, daysOld) =>
+    cleanupOldMedia(supabase, dryRun, daysOld, corsHeaders),
+  getMediaInfo,
+  captureException: captureEdgeException,
 });
+
+serve(handler);
 
 async function downloadMediaForTweet(// deno-lint-ignore no-explicit-any
 supabase: any, tweetId: string, dryRun: boolean) {
@@ -288,95 +241,6 @@ async function guardedMediaUpdate(// deno-lint-ignore no-explicit-any
     return false;
   }
   return true;
-}
-
-async function cleanupOldMedia(// deno-lint-ignore no-explicit-any
-supabase: any, dryRun: boolean, daysOld = 1) {
-  console.log(JSON.stringify({ function: 'media-processor', action: 'cleanup_start', dry_run: dryRun, days_old: daysOld }));
-
-  const { data: oldMedia, error: queryError } = await supabase.rpc('get_old_media', { days_old: daysOld });
-  const oldMediaArr: any[] = (oldMedia as any[]) ?? [];
-
-  if (queryError) throw new Error(`Failed to query old media: ${queryError.message}`);
-
-  const { data: expiredRenders, error: renderQueryError } = await supabase.rpc('get_expired_video_render_paths', { limit_count: 200 });
-  if (renderQueryError) throw new Error(`Failed to query expired video renders: ${renderQueryError.message}`);
-  const expiredRenderArr: any[] = (expiredRenders as any[]) ?? [];
-
-  if ((!oldMediaArr || oldMediaArr.length === 0) && expiredRenderArr.length === 0) {
-    return new Response(JSON.stringify({ success: true, message: 'No old media to cleanup', deleted: 0 }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
-  }
-
-  if (dryRun) {
-    return new Response(JSON.stringify({
-      success: true,
-      dry_run: true,
-      would_delete: oldMediaArr.length + expiredRenderArr.length,
-      would_delete_original_media: oldMediaArr.length,
-      would_delete_processed_video_renders: expiredRenderArr.length,
-    }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
-  }
-
-  const BATCH_SIZE = 100;
-  let deletedCount = 0;
-  let deletedProcessedCount = 0;
-  let failedCount = 0;
-
-  for (let i = 0; i < oldMediaArr.length; i += BATCH_SIZE) {
-    const batch = oldMediaArr.slice(i, i + BATCH_SIZE);
-    const paths = batch.map((m: Record<string, unknown>) => m.storage_path as string).filter(Boolean);
-    
-    if (paths.length > 0) {
-      const { error: storageError } = await supabase.storage.from('temp-media').remove(paths);
-      if (storageError) { failedCount += paths.length; } else { deletedCount += paths.length; }
-    }
-
-    const ids = batch.map((m: Record<string, unknown>) => m.id as string);
-    await supabase.from('media').update({
-      storage_path: null, downloaded_at: null, file_size: null, mime_type: null
-    }).in('id', ids);
-  }
-
-  for (let i = 0; i < expiredRenderArr.length; i += BATCH_SIZE) {
-    const batch = expiredRenderArr.slice(i, i + BATCH_SIZE);
-    const paths = batch.map((m: Record<string, unknown>) => m.output_storage_path as string).filter(Boolean);
-    const ids = batch.map((m: Record<string, unknown>) => m.id as string).filter(Boolean);
-
-    if (paths.length > 0) {
-      const { error: storageError } = await supabase.storage.from('temp-media').remove(paths);
-      if (storageError) {
-        failedCount += paths.length;
-        continue;
-      }
-      deletedProcessedCount += paths.length;
-    }
-    if (ids.length > 0) {
-      await supabase.rpc('mark_video_renders_expired', { render_ids: ids });
-    }
-  }
-
-  console.log(JSON.stringify({
-    function: 'media-processor',
-    action: 'cleanup_complete',
-    deleted: deletedCount,
-    deleted_processed: deletedProcessedCount,
-    failed: failedCount,
-  }));
-
-  return new Response(JSON.stringify({
-    success: true,
-    deleted: deletedCount + deletedProcessedCount,
-    deleted_original_media: deletedCount,
-    deleted_processed_video_renders: deletedProcessedCount,
-    failed: failedCount,
-    total: oldMediaArr.length + expiredRenderArr.length,
-  }), {
-    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-  });
 }
 
 async function getMediaInfo(// deno-lint-ignore no-explicit-any

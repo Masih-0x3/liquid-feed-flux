@@ -1,0 +1,1385 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>XOT · UX & Design Engineering Audit Review</title>
+  <style>
+    :root {
+      --ink: #05090e;
+      --navy: #09131d;
+      --panel: #0b1721;
+      --panel-raised: #0e1d29;
+      --panel-quiet: #0a141d;
+      --line: #233644;
+      --line-bright: #315064;
+      --text: #e7f0f6;
+      --muted: #91a7b7;
+      --subtle: #667d8d;
+      --teal: #31d2bf;
+      --teal-dim: rgba(49, 210, 191, .13);
+      --amber: #f7b955;
+      --amber-dim: rgba(247, 185, 85, .13);
+      --red: #ef6c6c;
+      --red-dim: rgba(239, 108, 108, .13);
+      --blue: #6bafff;
+      --blue-dim: rgba(107, 175, 255, .13);
+      --violet: #b59bff;
+      --radius: 10px;
+      --shadow: 0 20px 44px rgba(0, 0, 0, .28);
+      --focus: 0 0 0 3px rgba(49, 210, 191, .3);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { min-width: 320px; background: var(--ink); }
+    body {
+      min-width: 320px;
+      margin: 0;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 78% -18%, rgba(39, 167, 183, .13), transparent 34rem),
+        radial-gradient(circle at 12% 5%, rgba(50, 105, 165, .09), transparent 29rem),
+        var(--ink);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    button, textarea { font: inherit; }
+    button { color: inherit; }
+    button:focus-visible, textarea:focus-visible { outline: none; box-shadow: var(--focus); }
+    button { cursor: pointer; }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+    }
+
+    .app-shell {
+      width: min(1680px, 100%);
+      min-height: 100vh;
+      margin: 0 auto;
+      border-inline: 1px solid rgba(65, 95, 114, .26);
+      background: linear-gradient(180deg, rgba(8, 18, 27, .83), rgba(5, 9, 14, .9));
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      min-height: 60px;
+      padding: 0 22px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(5, 12, 18, .92);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      white-space: nowrap;
+    }
+
+    .brand-mark {
+      color: var(--teal);
+      font-weight: 900;
+      font-size: 21px;
+      letter-spacing: -.09em;
+      text-shadow: 0 0 18px rgba(49, 210, 191, .32);
+    }
+
+    .brand-copy {
+      padding-left: 11px;
+      border-left: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+
+    .crumbs {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      min-width: 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .crumbs strong { color: var(--text); font-weight: 700; }
+    .crumb-separator { color: var(--subtle); }
+    .top-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-left: auto;
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .key {
+      display: inline-flex;
+      min-width: 21px;
+      height: 21px;
+      align-items: center;
+      justify-content: center;
+      padding: 0 5px;
+      border: 1px solid var(--line-bright);
+      border-radius: 4px;
+      color: var(--text);
+      background: rgba(22, 37, 48, .7);
+      font-size: 10px;
+      font-weight: 750;
+    }
+    .online-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--teal);
+      box-shadow: 0 0 10px rgba(49, 210, 191, .75);
+    }
+
+    .review-summary {
+      display: grid;
+      grid-template-columns: minmax(190px, 1.05fr) minmax(300px, 1.6fr) minmax(240px, 1fr);
+      gap: 1px;
+      border-bottom: 1px solid var(--line);
+      background: var(--line);
+    }
+
+    .summary-unit {
+      min-width: 0;
+      padding: 16px 22px;
+      background: rgba(8, 20, 30, .97);
+    }
+
+    .summary-label {
+      display: block;
+      margin-bottom: 7px;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 750;
+      letter-spacing: .09em;
+      text-transform: uppercase;
+    }
+
+    .summary-line { display: flex; align-items: baseline; gap: 9px; }
+    .summary-number { font-size: 28px; font-weight: 780; letter-spacing: -.05em; }
+    .summary-help { color: var(--muted); font-size: 11px; }
+    .decision-stats {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .stat { min-width: 0; padding-left: 10px; border-left: 2px solid var(--line); }
+    .stat:first-child { padding-left: 0; border-left: 0; }
+    .stat b { display: block; margin-bottom: 1px; font-size: 18px; }
+    .stat span { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .045em; }
+    .approved-text { color: var(--teal); }
+    .denied-text { color: var(--red); }
+    .discuss-text { color: var(--amber); }
+    .progress-wrap { display: flex; align-items: center; gap: 12px; }
+    .progress-track {
+      height: 8px;
+      flex: 1;
+      min-width: 80px;
+      overflow: hidden;
+      border: 1px solid #274051;
+      border-radius: 999px;
+      background: #071019;
+    }
+    .progress-bar {
+      width: 0%;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #1aafaa, var(--teal));
+      transition: width .18s ease-out;
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: 262px minmax(0, 1fr) 284px;
+      gap: 0;
+      align-items: start;
+      padding: 14px;
+    }
+
+    .rail, .finding-workbench, .decision-panel, .handoff-panel, .working-panel {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: linear-gradient(180deg, rgba(13, 28, 39, .97), rgba(7, 16, 24, .97));
+      box-shadow: var(--shadow);
+    }
+
+    .left-rail {
+      position: sticky;
+      top: 12px;
+      align-self: start;
+      margin-right: 14px;
+      overflow: hidden;
+    }
+    .rail-section { padding: 14px; border-bottom: 1px solid var(--line); }
+    .rail-section:last-child { border-bottom: 0; }
+    .rail-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin: 0 0 10px;
+      color: var(--text);
+      font-size: 11px;
+      font-weight: 780;
+      letter-spacing: .07em;
+      text-transform: uppercase;
+    }
+    .info-mark {
+      display: inline-flex;
+      width: 15px;
+      height: 15px;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--line-bright);
+      border-radius: 50%;
+      color: var(--muted);
+      font-size: 10px;
+    }
+    .proof-item, .working-item {
+      display: grid;
+      grid-template-columns: 20px 1fr;
+      gap: 8px;
+      align-items: start;
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .proof-symbol {
+      display: inline-flex;
+      width: 18px;
+      height: 18px;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid currentColor;
+      border-radius: 3px;
+      font-size: 9px;
+      font-weight: 800;
+    }
+    .proof-source { color: var(--blue); }
+    .proof-live { color: var(--teal); }
+    .proof-recheck { color: var(--amber); }
+    .proof-item strong, .working-item strong { display: block; color: var(--text); font-weight: 700; }
+    .proof-item span, .working-item span { display: block; margin-top: 1px; color: var(--muted); line-height: 1.35; }
+
+    .priority-groups { display: grid; gap: 10px; }
+    .priority-group { border-left: 2px solid var(--line); }
+    .priority-group.priority-p1 { border-color: var(--red); }
+    .priority-group.priority-p2 { border-color: var(--amber); }
+    .priority-group.priority-p3 { border-color: var(--blue); }
+    .priority-label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 4px 6px 5px 9px;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 750;
+      letter-spacing: .07em;
+      text-transform: uppercase;
+    }
+    .priority-group.priority-p1 .priority-label { color: #ff9b9b; }
+    .priority-group.priority-p2 .priority-label { color: #ffd482; }
+    .priority-group.priority-p3 .priority-label { color: #a2c8ff; }
+
+    .finding-list { display: grid; gap: 2px; }
+    .finding-list-item {
+      display: grid;
+      grid-template-columns: 33px 1fr 16px;
+      gap: 7px;
+      width: 100%;
+      align-items: start;
+      padding: 7px 7px 7px 9px;
+      border: 1px solid transparent;
+      border-radius: 5px;
+      color: var(--muted);
+      text-align: left;
+      background: transparent;
+    }
+    .finding-list-item:hover { background: rgba(43, 66, 80, .42); }
+    .finding-list-item[aria-current="true"] {
+      border-color: rgba(49, 210, 191, .42);
+      color: var(--text);
+      background: rgba(49, 210, 191, .09);
+    }
+    .finding-list-id { color: var(--subtle); font-size: 10px; font-weight: 800; letter-spacing: .03em; }
+    .finding-list-title { overflow: hidden; font-size: 11px; line-height: 1.25; text-overflow: ellipsis; }
+    .finding-list-state { font-size: 13px; line-height: 1; }
+
+    .finding-workbench {
+      min-width: 0;
+      overflow: hidden;
+    }
+    .workbench-top {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 52px;
+      padding: 11px 15px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(7, 16, 24, .58);
+    }
+    .finding-counter {
+      color: var(--muted);
+      font-size: 11px;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+    }
+    .finding-counter b { color: var(--text); }
+    .inline-actions { display: flex; align-items: center; gap: 7px; }
+    .compact-button {
+      min-height: 30px;
+      padding: 5px 9px;
+      border: 1px solid var(--line-bright);
+      border-radius: 5px;
+      color: var(--muted);
+      background: rgba(16, 34, 45, .7);
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .compact-button:hover { color: var(--text); border-color: var(--teal); }
+    .compact-button:disabled { opacity: .45; cursor: not-allowed; }
+
+    .finding-header {
+      padding: 18px 20px 13px;
+      border-bottom: 1px solid var(--line);
+    }
+    .finding-kicker {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 7px;
+      margin-bottom: 8px;
+    }
+    .badge {
+      display: inline-flex;
+      min-height: 21px;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 7px;
+      border: 1px solid currentColor;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+    }
+    .badge-p1 { color: #ff9797; background: var(--red-dim); }
+    .badge-p2 { color: #ffd182; background: var(--amber-dim); }
+    .badge-p3 { color: #9dc7ff; background: var(--blue-dim); }
+    .badge-source { color: #9dc7ff; border-color: rgba(107, 175, 255, .45); background: var(--blue-dim); }
+    .badge-live { color: #8ce9dc; border-color: rgba(49, 210, 191, .45); background: var(--teal-dim); }
+    .badge-recheck { color: #ffd182; border-color: rgba(247, 185, 85, .45); background: var(--amber-dim); }
+    .finding-header h1 {
+      max-width: 1000px;
+      margin: 0;
+      font-size: clamp(20px, 2vw, 28px);
+      line-height: 1.18;
+      letter-spacing: -.035em;
+    }
+    .finding-summary { max-width: 950px; margin: 9px 0 0; color: var(--muted); font-size: 13px; }
+    .finding-metadata {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0;
+      margin-top: 13px;
+      border-top: 1px solid rgba(49, 76, 92, .7);
+    }
+    .meta-item {
+      min-width: 130px;
+      padding: 10px 16px 0 0;
+      margin-right: 16px;
+      color: var(--muted);
+      font-size: 10px;
+    }
+    .meta-item span { display: block; margin-bottom: 2px; color: var(--subtle); text-transform: uppercase; letter-spacing: .06em; }
+    .meta-item b { color: var(--text); font-size: 11px; font-weight: 700; }
+
+    .comparison {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 12px;
+      padding: 16px 20px;
+      background: linear-gradient(180deg, rgba(9, 19, 27, .35), rgba(7, 14, 20, .35));
+    }
+    .comparison-panel { min-width: 0; }
+    .comparison-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin: 0 0 8px;
+      color: var(--text);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .07em;
+      text-transform: uppercase;
+    }
+    .comparison-heading small { color: var(--muted); font-weight: 600; letter-spacing: 0; text-transform: none; }
+    .sim-screen {
+      overflow: hidden;
+      min-height: 290px;
+      border: 1px solid #2b4251;
+      border-radius: 7px;
+      background: #07121a;
+    }
+    .sim-screen.proposed { border-color: rgba(49, 210, 191, .54); }
+    .sim-top {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 37px;
+      padding: 0 11px;
+      border-bottom: 1px solid #213743;
+      background: #0c1a24;
+    }
+    .sim-name { font-size: 10px; font-weight: 750; }
+    .sim-chip {
+      margin-left: auto;
+      padding: 2px 5px;
+      border: 1px solid #2d4657;
+      border-radius: 3px;
+      color: #7892a5;
+      font-size: 9px;
+    }
+    .sim-screen.proposed .sim-chip { color: #80e8db; border-color: rgba(49, 210, 191, .42); }
+    .sim-body { display: grid; gap: 7px; padding: 12px; }
+    .sim-blank {
+      display: grid;
+      min-height: 180px;
+      place-items: center;
+      border: 1px dashed #2b4150;
+      color: #71889a;
+      font-size: 12px;
+      text-align: center;
+    }
+    .sim-toolbar { display: flex; flex-wrap: wrap; gap: 5px; }
+    .sim-control {
+      min-height: 22px;
+      padding: 4px 6px;
+      border: 1px solid #294253;
+      border-radius: 3px;
+      color: #8199ab;
+      background: rgba(18, 37, 49, .75);
+      font-size: 9px;
+    }
+    .sim-control.primary { color: #06211f; border-color: var(--teal); background: var(--teal); font-weight: 800; }
+    .sim-control.warn { color: #ffda95; border-color: rgba(247, 185, 85, .65); background: var(--amber-dim); }
+    .sim-control.danger { color: #ff9a9a; border-color: rgba(239, 108, 108, .65); background: var(--red-dim); }
+    .sim-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      padding: 8px 9px;
+      border: 1px solid rgba(40, 62, 76, .8);
+      border-radius: 4px;
+      color: #a9bdc9;
+      background: rgba(16, 33, 44, .46);
+      font-size: 10px;
+    }
+    .sim-row strong { color: #e2eef4; font-size: 10px; }
+    .sim-row-value { color: #7f97a7; font-size: 9px; text-align: right; }
+    .sim-row-value.good { color: #75ded2; }
+    .sim-row-value.warn { color: #ffd182; }
+    .sim-row-value.bad { color: #ff9696; }
+    .sim-callout {
+      display: flex;
+      gap: 7px;
+      align-items: flex-start;
+      padding: 8px 9px;
+      border: 1px dashed #3c5565;
+      color: #a9bdc9;
+      background: rgba(12, 29, 40, .72);
+      font-size: 10px;
+      line-height: 1.35;
+    }
+    .sim-callout::before { color: var(--amber); content: "●"; }
+    .sim-screen.proposed .sim-callout { border-color: rgba(49, 210, 191, .56); }
+    .sim-screen.proposed .sim-callout::before { color: var(--teal); content: "✓"; }
+    .sim-screen.proposed .sim-callout { color: #b8e8e2; }
+    .sim-tabs { display: flex; overflow: hidden; gap: 5px; padding-bottom: 1px; }
+    .sim-tab { flex: 0 0 auto; padding: 4px 6px; border-bottom: 2px solid #344e5f; color: #7f99aa; font-size: 9px; }
+    .sim-tab.active { border-color: var(--teal); color: #d9f8f4; }
+    .mini-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+    .mini-metric { padding: 9px; border: 1px solid #2b4353; border-radius: 4px; background: rgba(17, 35, 46, .5); }
+    .mini-metric span { display: block; color: #7d96a7; font-size: 9px; }
+    .mini-metric b { display: block; margin-top: 4px; font-size: 16px; }
+    .mini-metric b.red { color: var(--red); }
+    .mini-metric b.amber { color: var(--amber); }
+    .mini-metric b.teal { color: var(--teal); }
+    .status-matrix { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
+    .matrix-item { padding: 7px; border: 1px solid #2b4353; border-radius: 3px; color: #849cab; font-size: 9px; }
+    .matrix-item.active { border-color: rgba(49, 210, 191, .57); color: #aaf2e9; background: var(--teal-dim); }
+    .form-line { display: grid; grid-template-columns: 72px 1fr; gap: 6px; align-items: center; color: #738d9e; font-size: 9px; }
+    .form-input { height: 22px; border: 1px solid #2b4353; border-radius: 3px; background: #0b1822; }
+
+    .finding-detail-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.12fr);
+      gap: 16px;
+      padding: 0 20px 20px;
+    }
+    .detail-block {
+      min-width: 0;
+      padding-top: 13px;
+      border-top: 1px solid rgba(43, 66, 80, .78);
+    }
+    .detail-block h2 {
+      margin: 0 0 8px;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: .075em;
+      text-transform: uppercase;
+    }
+    .detail-block p { margin: 0; color: #c6d5de; font-size: 12px; }
+    .evidence-list { display: grid; gap: 6px; }
+    .evidence-item {
+      display: flex;
+      gap: 7px;
+      align-items: start;
+      padding: 7px 8px;
+      border-left: 2px solid var(--blue);
+      color: #a9bfce;
+      background: rgba(32, 56, 73, .28);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 10px;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+    .evidence-item.live { border-left-color: var(--teal); }
+    .evidence-item.recheck { border-left-color: var(--amber); }
+    .scope-note {
+      margin: 0 20px 20px;
+      padding: 10px 12px;
+      border: 1px solid rgba(49, 210, 191, .32);
+      border-radius: 5px;
+      color: #a8dfd8;
+      background: rgba(49, 210, 191, .06);
+      font-size: 11px;
+    }
+
+    .right-rail { position: sticky; top: 12px; align-self: start; margin-left: 14px; }
+    .decision-panel { overflow: hidden; }
+    .decision-header { padding: 15px; border-bottom: 1px solid var(--line); }
+    .decision-header h2 { margin: 0; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; }
+    .decision-header p { margin: 4px 0 0; color: var(--muted); font-size: 11px; }
+    .decision-controls { display: grid; gap: 8px; padding: 14px; }
+    .decision-button {
+      display: grid;
+      grid-template-columns: 23px 1fr auto;
+      gap: 8px;
+      min-height: 50px;
+      align-items: center;
+      width: 100%;
+      padding: 9px 10px;
+      border: 1px solid var(--line-bright);
+      border-radius: 5px;
+      text-align: left;
+      background: rgba(15, 33, 45, .72);
+    }
+    .decision-button .decision-glyph { font-size: 17px; text-align: center; }
+    .decision-button b { font-size: 12px; }
+    .decision-button span { display: block; margin-top: 1px; color: var(--muted); font-size: 10px; }
+    .decision-button small { color: var(--subtle); font-size: 10px; }
+    .decision-button.approve[aria-pressed="true"] { border-color: var(--teal); background: var(--teal-dim); }
+    .decision-button.approve[aria-pressed="true"] b, .decision-button.approve .decision-glyph { color: var(--teal); }
+    .decision-button.deny[aria-pressed="true"] { border-color: var(--red); background: var(--red-dim); }
+    .decision-button.deny[aria-pressed="true"] b, .decision-button.deny .decision-glyph { color: var(--red); }
+    .decision-button.discuss[aria-pressed="true"] { border-color: var(--amber); background: var(--amber-dim); }
+    .decision-button.discuss[aria-pressed="true"] b, .decision-button.discuss .decision-glyph { color: var(--amber); }
+    .decision-note { padding: 0 14px 14px; }
+    .decision-note label { display: block; margin-bottom: 6px; color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .065em; text-transform: uppercase; }
+    .decision-note textarea {
+      display: block;
+      width: 100%;
+      min-height: 95px;
+      resize: vertical;
+      padding: 9px;
+      border: 1px solid var(--line-bright);
+      border-radius: 5px;
+      color: var(--text);
+      background: #07131c;
+      line-height: 1.35;
+    }
+    .decision-note textarea:disabled { opacity: .5; cursor: not-allowed; }
+    .decision-note-help { margin: 5px 0 0; color: var(--subtle); font-size: 10px; }
+    .local-actions { display: grid; gap: 7px; padding: 14px; border-top: 1px solid var(--line); }
+    .local-actions .compact-button { width: 100%; }
+    .reset-confirm {
+      display: grid;
+      gap: 8px;
+      margin: 0 14px 14px;
+      padding: 10px;
+      border: 1px solid rgba(255, 190, 107, .38);
+      border-radius: 5px;
+      background: rgba(255, 190, 107, .06);
+    }
+    .reset-confirm[hidden] { display: none; }
+    .reset-confirm p { margin: 0; color: var(--text); font-size: 10px; line-height: 1.45; }
+    .reset-confirm-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+    .reset-confirm-actions .compact-button { width: 100%; }
+    .reset-confirm-actions .confirm-reset { color: #ffd182; border-color: rgba(255, 190, 107, .48); }
+    .reset-confirm-actions .confirm-reset:hover { color: #fff3d5; border-color: #ffd182; }
+
+    .bottom-area { padding: 0 14px 16px; }
+    .working-panel { margin-bottom: 14px; overflow: hidden; }
+    .working-panel header, .handoff-panel header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 13px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+    .working-panel h2, .handoff-panel h2 { margin: 0; font-size: 12px; letter-spacing: .05em; text-transform: uppercase; }
+    .working-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; }
+    .working-item { padding: 12px 16px; border-bottom: 1px solid rgba(39, 61, 75, .67); }
+    .working-item:nth-last-child(-n+2) { border-bottom: 0; }
+    .working-check { color: var(--teal); font-size: 15px; line-height: 1.1; }
+    .handoff-grid { display: grid; grid-template-columns: minmax(215px, .88fr) minmax(0, 1.6fr) minmax(220px, .75fr); gap: 0; }
+    .handoff-column { min-width: 0; padding: 16px; border-right: 1px solid var(--line); }
+    .handoff-column:last-child { border-right: 0; }
+    .handoff-column h3 { margin: 0 0 9px; color: var(--muted); font-size: 10px; letter-spacing: .07em; text-transform: uppercase; }
+    .handoff-summary { display: grid; gap: 8px; }
+    .handoff-summary-row { display: flex; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 11px; }
+    .handoff-summary-row b { color: var(--text); text-align: right; }
+    .handoff-preview {
+      width: 100%;
+      min-height: 172px;
+      resize: vertical;
+      padding: 10px;
+      border: 1px solid var(--line-bright);
+      border-radius: 5px;
+      color: #bed0dc;
+      background: #061019;
+      font: 10px/1.38 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .copy-button {
+      display: inline-flex;
+      min-height: 40px;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      gap: 8px;
+      padding: 9px 12px;
+      border: 1px solid var(--teal);
+      border-radius: 5px;
+      color: #05201d;
+      background: var(--teal);
+      font-weight: 850;
+    }
+    .copy-button:hover { background: #70ebdf; }
+    .copy-status { min-height: 30px; margin: 8px 0 0; color: var(--muted); font-size: 10px; }
+    .copy-status.good { color: #8ce9dc; }
+    .copy-status.warn { color: #ffd182; }
+    .handoff-footer {
+      padding: 9px 16px;
+      border-top: 1px solid var(--line);
+      color: var(--subtle);
+      font-size: 10px;
+    }
+
+    @media (max-width: 1220px) {
+      .workspace { grid-template-columns: 225px minmax(0, 1fr); }
+      .right-rail { position: static; grid-column: 1 / -1; margin: 14px 0 0; }
+      .decision-panel { display: grid; grid-template-columns: minmax(180px, .7fr) minmax(0, 1fr) minmax(250px, 1.2fr); }
+      .decision-header { border-bottom: 0; border-right: 1px solid var(--line); }
+      .decision-controls { border-right: 1px solid var(--line); }
+      .decision-note { padding: 14px; }
+      .local-actions { grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 820px) {
+      .app-shell { border: 0; }
+      .topbar { min-height: 54px; padding: 0 14px; }
+      .brand-copy, .crumbs, .top-actions .shortcut-help { display: none; }
+      .top-actions { gap: 6px; }
+      .review-summary { grid-template-columns: 1fr; }
+      .summary-unit { padding: 13px 15px; }
+      .workspace { display: block; padding: 10px; }
+      .left-rail, .right-rail { position: static; margin: 0 0 10px; }
+      .left-rail .rail-section:first-child { display: none; }
+      .priority-groups { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+      .priority-group { min-width: 0; }
+      .finding-list-item { grid-template-columns: 29px 1fr 12px; padding: 6px; }
+      .finding-list-title { font-size: 10px; }
+      .finding-workbench { margin: 0; }
+      .comparison, .finding-detail-grid { grid-template-columns: 1fr; padding-inline: 13px; }
+      .finding-header { padding: 14px 13px 10px; }
+      .scope-note { margin-inline: 13px; }
+      .sim-screen { min-height: 250px; }
+      .right-rail { margin-top: 10px; }
+      .decision-panel { display: block; }
+      .decision-header, .decision-controls { border-right: 0; border-bottom: 1px solid var(--line); }
+      .decision-controls { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .decision-button { grid-template-columns: 1fr; min-height: 64px; text-align: center; }
+      .decision-button span, .decision-button small { display: none; }
+      .decision-button .decision-glyph { font-size: 18px; }
+      .local-actions { grid-template-columns: 1fr; }
+      .bottom-area { padding: 0 10px 10px; }
+      .working-grid, .handoff-grid { grid-template-columns: 1fr; }
+      .working-item, .working-item:nth-last-child(-n+2) { border-bottom: 1px solid rgba(39, 61, 75, .67); }
+      .working-item:last-child { border-bottom: 0; }
+      .handoff-column { border-right: 0; border-bottom: 1px solid var(--line); }
+      .handoff-column:last-child { border-bottom: 0; }
+    }
+
+    @media (max-width: 480px) {
+      .summary-number { font-size: 24px; }
+      .decision-stats { gap: 4px; }
+      .stat { padding-left: 6px; }
+      .stat span { font-size: 8px; }
+      .priority-groups { display: block; }
+      .priority-group { margin-bottom: 8px; }
+      .comparison-heading { align-items: flex-start; flex-direction: column; }
+      .meta-item { min-width: 100px; margin-right: 8px; }
+      .workbench-top { padding: 9px; }
+      .finding-header h1 { font-size: 20px; }
+      .decision-controls { gap: 5px; padding: 9px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand" aria-label="XOT Operations Console">
+        <span class="brand-mark">XOT</span>
+        <span class="brand-copy">Operations console</span>
+      </div>
+      <nav class="crumbs" aria-label="Artifact location">
+        <span>Audit review console</span><span class="crumb-separator">›</span>
+        <span>UX &amp; design engineering</span><span class="crumb-separator">›</span>
+        <strong>Review findings</strong>
+      </nav>
+      <div class="top-actions" aria-label="Keyboard help">
+        <span class="shortcut-help"><span class="key">J</span> <span class="key">K</span> Next / prev</span>
+        <span class="shortcut-help"><span class="key">A</span> Approve</span>
+        <span class="shortcut-help"><span class="key">D</span> Deny</span>
+        <span class="shortcut-help"><span class="key">X</span> Discuss</span>
+        <span class="online-dot" aria-hidden="true"></span><span>Local review</span>
+      </div>
+    </header>
+
+    <section class="review-summary" aria-label="Audit review summary">
+      <div class="summary-unit">
+        <span class="summary-label">Review progress</span>
+        <div class="summary-line"><strong class="summary-number" id="reviewedCount">0 / 12</strong><span class="summary-help" id="reviewedHelp">No decisions yet</span></div>
+      </div>
+      <div class="summary-unit">
+        <span class="summary-label">Decision summary</span>
+        <div class="decision-stats">
+          <div class="stat"><b class="approved-text" id="approvedCount">0</b><span>Approved</span></div>
+          <div class="stat"><b class="denied-text" id="deniedCount">0</b><span>Denied</span></div>
+          <div class="stat"><b class="discuss-text" id="discussCount">0</b><span>Discuss</span></div>
+          <div class="stat"><b id="pendingCount">12</b><span>Pending</span></div>
+        </div>
+      </div>
+      <div class="summary-unit">
+        <span class="summary-label">Completion</span>
+        <div class="progress-wrap"><div class="progress-track" aria-hidden="true"><div class="progress-bar" id="progressBar"></div></div><b id="completionPercent">0%</b></div>
+        <p class="summary-help" id="coverageText">12 verified findings · source and live proof kept distinct</p>
+      </div>
+    </section>
+
+    <div class="workspace">
+      <aside class="rail left-rail" aria-label="Evidence and finding navigation">
+        <section class="rail-section">
+          <h2 class="rail-title">Proof legend <span class="info-mark" title="Evidence provenance">i</span></h2>
+          <div class="proof-item proof-source"><span class="proof-symbol">S</span><div><strong>Source verified</strong><span>Current code-path evidence.</span></div></div>
+          <div class="proof-item proof-live"><span class="proof-symbol">L</span><div><strong>Live observed</strong><span>Rendered console evidence, dated in finding.</span></div></div>
+          <div class="proof-item proof-recheck"><span class="proof-symbol">R</span><div><strong>Recheck before change</strong><span>Time-sensitive deployment state.</span></div></div>
+        </section>
+        <section class="rail-section">
+          <h2 class="rail-title">Priority rail <span class="info-mark" title="Select a finding to review">i</span></h2>
+          <div class="priority-groups" id="priorityGroups"></div>
+        </section>
+      </aside>
+
+      <main class="finding-workbench" aria-live="polite" aria-label="Selected audit finding">
+        <div class="workbench-top">
+          <div class="finding-counter" id="findingCounter">Finding <b>1</b> of 12</div>
+          <div class="inline-actions">
+            <button type="button" class="compact-button" id="previousButton" aria-label="Previous finding">← Previous</button>
+            <button type="button" class="compact-button" id="nextButton" aria-label="Next finding">Next →</button>
+          </div>
+        </div>
+        <article id="findingView"></article>
+      </main>
+
+      <aside class="right-rail" aria-label="Decision controls">
+        <section class="decision-panel">
+          <div class="decision-header">
+            <h2>Finding status</h2>
+            <p id="decisionFindingName">F-01 · Pending a decision</p>
+          </div>
+          <div class="decision-controls" role="group" aria-label="Set decision for selected finding">
+            <button type="button" class="decision-button approve" id="approveButton" aria-pressed="false">
+              <span class="decision-glyph" aria-hidden="true">✓</span><span><b>Approve</b><span>Move to implementation</span></span><small>A</small>
+            </button>
+            <button type="button" class="decision-button deny" id="denyButton" aria-pressed="false">
+              <span class="decision-glyph" aria-hidden="true">×</span><span><b>Deny</b><span>Do not make this change</span></span><small>D</small>
+            </button>
+            <button type="button" class="decision-button discuss" id="discussButton" aria-pressed="false">
+              <span class="decision-glyph" aria-hidden="true">◌</span><span><b>Discuss</b><span>Needs a Codex conversation</span></span><small>X</small>
+            </button>
+          </div>
+          <div class="decision-note">
+            <label for="decisionNote">Discussion note</label>
+            <textarea id="decisionNote" placeholder="Add context or a question. Notes are enabled when Discuss is selected." disabled></textarea>
+            <p class="decision-note-help" id="noteHelp">Notes stay in this browser unless you copy the handoff.</p>
+          </div>
+          <div class="local-actions">
+            <button type="button" class="compact-button" id="resetButton">Reset local decisions</button>
+            <button type="button" class="compact-button" id="jumpHandoffButton">Jump to handoff ↓</button>
+          </div>
+          <div class="reset-confirm" id="resetConfirm" role="group" aria-label="Confirm resetting local decisions" hidden>
+            <p>Remove the locally stored decisions and discussion notes from this browser?</p>
+            <div class="reset-confirm-actions">
+              <button type="button" class="compact-button confirm-reset" id="confirmResetButton">Yes, reset</button>
+              <button type="button" class="compact-button" id="cancelResetButton">Keep decisions</button>
+            </div>
+          </div>
+        </section>
+      </aside>
+    </div>
+
+    <div class="bottom-area">
+      <section class="working-panel" aria-labelledby="workingTitle">
+        <header><h2 id="workingTitle">What is already working</h2><span class="badge badge-live">No action</span></header>
+        <div class="working-grid">
+          <div class="working-item"><span class="working-check">✓</span><div><strong>Physical mobile drawer</strong><span>Vaul supplies a grab affordance and direct manipulation foundation.</span></div></div>
+          <div class="working-item"><span class="working-check">✓</span><div><strong>Guarded destructive actions</strong><span>Monitoring actions provide contextual Cancel and Confirm states.</span></div></div>
+          <div class="working-item"><span class="working-check">✓</span><div><strong>Hover is pointer-aware</strong><span>Fine-pointer gating avoids desktop hover behavior on touch devices.</span></div></div>
+          <div class="working-item"><span class="working-check">✓</span><div><strong>Responsive shell has a useful base</strong><span>Live checks saw top/bottom nav switching without document overflow; Downloader stays focused.</span></div></div>
+        </div>
+      </section>
+
+      <section class="handoff-panel" id="handoffPanel" aria-labelledby="handoffTitle">
+        <header>
+          <h2 id="handoffTitle">Review handoff package</h2>
+          <span class="badge badge-source">Local only</span>
+        </header>
+        <div class="handoff-grid">
+          <div class="handoff-column">
+            <h3>Decision summary</h3>
+            <div class="handoff-summary">
+              <div class="handoff-summary-row"><span>Findings</span><b>12 verified</b></div>
+              <div class="handoff-summary-row"><span>Reviewed</span><b id="handoffReviewed">0 / 12</b></div>
+              <div class="handoff-summary-row"><span>Approved</span><b class="approved-text" id="handoffApproved">0</b></div>
+              <div class="handoff-summary-row"><span>Denied</span><b class="denied-text" id="handoffDenied">0</b></div>
+              <div class="handoff-summary-row"><span>Discuss</span><b class="discuss-text" id="handoffDiscuss">0</b></div>
+            </div>
+          </div>
+          <div class="handoff-column">
+            <h3>Paste-back preview</h3>
+            <textarea id="handoffPreview" class="handoff-preview" readonly aria-label="Generated decision handoff preview"></textarea>
+          </div>
+          <div class="handoff-column">
+            <h3>Copy for Codex</h3>
+            <p class="summary-help">Copies every finding, state, evidence confidence, and discussion note only after you click.</p>
+            <button type="button" class="copy-button" id="copyButton">⧉ Copy decisions for Codex</button>
+            <p class="copy-status" id="copyStatus" aria-live="polite">Nothing has been copied.</p>
+          </div>
+        </div>
+        <footer class="handoff-footer">Scope: read-only UX/design-engineering audit. This artifact changes no application code, data, or live service.</footer>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const STORAGE_KEY = "xot-design-audit-review:2026-07-14:v1";
+      const FINDINGS = [
+        {
+          id: "F-01", priority: "P1", proof: ["Source verified"], area: "Settings reliability",
+          title: "Partial settings data can render a completely blank Settings route.",
+          summary: "A partial settings response leaves the operator with no visible screen, explanation, or recovery path.",
+          evidence: ["src/pages/Settings.tsx:134-142", "if (!ts || !tgs || !mt) return null;"],
+          proposal: "Preserve usable sections, name unavailable settings explicitly, and provide a Retry action.",
+          current: { app: "Settings", chip: "partial payload", blank: "No Settings content is rendered", callout: "Partial API data collapses the entire route." },
+          proposed: { app: "Settings", chip: "recoverable", controls: ["Translation ready", "Telegram unavailable", "Retry"], rows: [["Translation settings", "Ready", "good"], ["Telegram settings", "Unavailable", "warn"], ["Message template", "Ready", "good"]], callout: "Valid areas remain available; the missing scope is named." }
+        },
+        {
+          id: "F-02", priority: "P1", proof: ["Source verified"], area: "Threads correctness",
+          title: "Thread preview can retain earlier content or load forever after failure.",
+          summary: "Preview opens before data is settled, does not clear prior records, and has no explicit error state.",
+          evidence: ["src/pages/Threads.tsx:30-34,54-73,177-210"],
+          proposal: "Clear records on selection, model loading/ready/error explicitly, and block posting until the selected thread is ready.",
+          current: { app: "Thread Preview", chip: "@new-account", controls: ["Preview open", "Post thread"], rows: [["Post 1", "from a prior selection", "bad"], ["Loading posts…", "no recovery", "warn"]], callout: "Stale content can be mistaken for the newly selected thread." },
+          proposed: { app: "Thread Preview", chip: "@new-account", controls: ["Loading selected thread"], rows: [["Selected thread", "Loading", "warn"], ["Post action", "Unavailable until ready", "good"]], callout: "The preview is empty by design until the correct data arrives or Retry is offered." }
+        },
+        {
+          id: "F-03", priority: "P1", proof: ["Source verified", "Live observed"], area: "Video availability",
+          title: "Video data failure is visually indistinguishable from an empty queue; an unresolved heartbeat reads Offline.",
+          summary: "The console cannot tell an operator whether there is genuinely nothing to do or data has not loaded.",
+          evidence: ["src/pages/VideoRenders.tsx:61-75,114-117,173-177", "ManualVideoIntakePanel.tsx:104,228-234", "VideoRenderDetailPanel.tsx:81-95", "Live observed 2026-07-14: Offline · Mode - · Queue 0"],
+          proposal: "Use Loading, Unavailable, Stale/last-known, and Healthy-empty states; call health Unknown until it resolves.",
+          current: { app: "Video Renders", chip: "Offline", metrics: [["Renderer", "Offline", "red"], ["Queue", "0", ""], ["Mode", "-", ""]], callout: "A request failure and an empty queue look the same." },
+          proposed: { app: "Video Renders", chip: "availability", matrix: ["Loading", "Unknown", "Stale / last-known", "Healthy-empty"], active: "Unknown", controls: ["Retry data", "Last successful: —"], callout: "Availability is explicit; empty is only shown after a successful read." }
+        },
+        {
+          id: "F-04", priority: "P1", proof: ["Live observed", "Source verified", "Recheck before change"], area: "Release observability",
+          title: "A dashboard/backend deployment mismatch is demoted to a tiny header chip and absent on mobile.",
+          summary: "Time-sensitive live deployment drift is easy to miss precisely when it changes the meaning of the operations console.",
+          evidence: ["VersionBanner.tsx:70-90", "AppLayout.tsx:237-239", "Live observed 2026-07-14: UI about 10d old; API just now"],
+          proposal: "Promote drift into a contextual dashboard alert with revision, time, impact, and a remediation handoff.",
+          current: { app: "Dashboard", chip: "small header chip", metrics: [["Dashboard", "10d ago", "amber"], ["API", "just now", "teal"]], callout: "Critical mismatch lives in a compact chip and is hidden below xl." },
+          proposed: { app: "Dashboard", chip: "release alert", controls: ["UI ec05e33 · 10d ago", "API current", "Open deploy handoff"], rows: [["Impact", "Browser and backend may disagree", "warn"]], callout: "Keep a compact chip after acknowledgement; show the operational consequence first." }
+        },
+        {
+          id: "F-05", priority: "P2", proof: ["Source verified", "Live observed"], area: "Monitoring triage",
+          title: "Fourteen monitoring metrics have equal visual weight, pushing urgent triage and the queue workflow down on mobile.",
+          summary: "Urgent failure states and routine throughput receive identical cards, weakening scan order.",
+          evidence: ["src/components/monitoring/MonitoringQueueCards.tsx:42-65", "Live mobile monitoring: two-column metric wall before queue/filter workflow"],
+          proposal: "Show an actionable Needs-attention strip first; group pipeline and health information second; keep routine throughput tertiary.",
+          current: { app: "Monitoring", chip: "14 equal cards", metrics: [["Needs attention", "3", "amber"], ["Failed/stuck", "1", "red"], ["Delivered 24h", "0", "teal"], ["Hydration", "0", ""]], callout: "All metrics compete for the same first-glance priority." },
+          proposed: { app: "Monitoring", chip: "triage first", controls: ["Needs attention · 3", "Open queue"], rows: [["Pipeline health", "0 blocked · 0 queued", "good"], ["Throughput", "0 delivered 24h", ""], ["Queue workflow", "Visible above fold", "good"]], callout: "Priority drives reading order; drill-in remains available." }
+        },
+        {
+          id: "F-06", priority: "P2", proof: ["Source verified"], area: "Monitoring responsiveness",
+          title: "Monitoring filters have an impossible intermediate-width minimum and the shell clips overflow.",
+          summary: "The sm breakpoint activates three controls that require more width than the breakpoint guarantees.",
+          evidence: ["src/components/monitoring/MonitoringFilters.tsx:48-72", "sm grid requires 672px including gaps at 640px breakpoint", "src/components/layout/AppLayout.tsx:256-259"],
+          proposal: "Stack controls until a safe breakpoint, or use truly responsive minmax sizing while preserving action order.",
+          current: { app: "Queue filters", chip: "640px viewport", controls: ["Search 18rem", "Filter 13rem", "Score 10rem"], callout: "The last control is clipped while app overflow is hidden." },
+          proposed: { app: "Queue filters", chip: "narrow layout", rows: [["Search", "Full width", "good"], ["Status", "Full width", "good"], ["Score", "Full width", "good"]], callout: "Controls stack intentionally before the desktop grid is viable." }
+        },
+        {
+          id: "F-07", priority: "P2", proof: ["Source verified", "Live observed"], area: "Settings mobile wayfinding",
+          title: "Settings uses a horizontally scrolling tab strip with little affordance and fixed two-column narrow fields.",
+          summary: "At 390px the tab list is 893px wide inside a 359px viewport region; configuration context is easy to lose.",
+          evidence: ["src/pages/Settings.tsx:192-202,238-242", "Live 390px: tablist 359px client width / 893px scroll width"],
+          proposal: "Use a category chooser or clear overflow affordance, keep the selected section visible, and move narrow forms to one column.",
+          current: { app: "Settings", chip: "390px", tabs: ["Translation", "Scoring", "Messages", "Video", "Enrichment"], callout: "A native scroll strip does not reveal the hidden categories or their current scope." },
+          proposed: { app: "Settings", chip: "category menu", controls: ["☰ Translation settings", "Section 1 of 6"], rows: [["Model", "Full width", "good"], ["Max tokens", "Full width", "good"]], callout: "Selection remains explicit and fields retain readable width." }
+        },
+        {
+          id: "F-08", priority: "P2", proof: ["Source verified"], area: "Threads mobile & accessibility",
+          title: "Threads has no mobile table escape and Preview/Queue post are unnamed 32px icon controls.",
+          summary: "Five columns compete in a clipped shell while meaningful actions are ambiguous to assistive tech and touch users.",
+          evidence: ["src/pages/Threads.tsx:115-153", "Preview/Queue post controls at 144-149"],
+          proposal: "Provide compact mobile rows or discoverable table scroll plus named 44px actions and tooltips.",
+          current: { app: "Threads", chip: "five columns", rows: [["@account · 4 posts", "◉  ✈", "bad"], ["Created · confidence", "offscreen", "warn"]], callout: "The table has no escape hatch and icon intent is not named." },
+          proposed: { app: "Threads", chip: "compact row", rows: [["@account · 4 posts · 82%", "Ready", "good"], ["Actions", "Preview · Queue post", "good"]], callout: "Compact, named 44px actions make intent and reachability explicit." }
+        },
+        {
+          id: "F-09", priority: "P2", proof: ["Source verified"], area: "Video form semantics",
+          title: "Video form labels are visible but not programmatically associated with their fields.",
+          summary: "A visual label alone does not reliably transfer field context to keyboard and assistive-technology users.",
+          evidence: ["src/components/video/VideoRenderDetailPanel.tsx:199-225", "ManualVideoIntakePanel.tsx:372-383,429-435"],
+          proposal: "Use stable IDs and htmlFor, and retain a persistent Reason label rather than relying on placeholder text.",
+          current: { app: "Render feedback", chip: "visual-only", form: [["Feedback", false], ["Note", false], ["Reason", false]], callout: "Labels are nearby, but their programmatic relationship is missing." },
+          proposed: { app: "Render feedback", chip: "associated", form: [["Feedback", true], ["Note", true], ["Reason", true]], callout: "Every field announces a durable name and context." }
+        },
+        {
+          id: "F-10", priority: "P2", proof: ["Source verified"], area: "Video action feedback",
+          title: "Retrying one video row makes every row look pending.",
+          summary: "A shared mutation state hides which render is actually being retried.",
+          evidence: ["src/pages/VideoRenders.tsx:208-213", "Each row uses shared retry.isPending"],
+          proposal: "Track a pending render ID and show feedback only on the initiated row, with follow-up error or cancellation feedback where possible.",
+          current: { app: "Render queue", chip: "shared pending", rows: [["@north · Failed", "⟳ Retrying…", "warn"], ["@east · Blocked", "⟳ Retrying…", "warn"], ["@west · Queued", "⟳ Retrying…", "warn"]], callout: "All rows look busy, so the initiated action is unclear." },
+          proposed: { app: "Render queue", chip: "keyed pending", rows: [["@north · Failed", "⟳ Retrying…", "warn"], ["@east · Blocked", "Retry", "good"], ["@west · Queued", "Retry", "good"]], callout: "Only the selected render owns the pending state." }
+        },
+        {
+          id: "F-11", priority: "P2", proof: ["Source verified"], area: "Motion, material & preferences",
+          title: "Motion and glass material lack system-preference accommodations.",
+          summary: "Page entrances and translucent surfaces remain active even when a user asks for less motion or more contrast.",
+          evidence: ["src/index.css:122-145,695-704,729-753", "Settings and Threads use route entrance animation"],
+          proposal: "Centralize reduced-motion behavior and offer near-solid high-contrast/reduced-transparency material variants.",
+          current: { app: "Preferences", chip: "current", controls: ["Glass + blur", "20px route lift", "HUD-only reduce rule"], callout: "Nonessential movement and translucency continue beyond the narrow HUD exception." },
+          proposed: { app: "Preferences", chip: "system-aware", matrix: ["Standard", "Reduced motion", "Reduced transparency", "Higher contrast"], active: "Reduced motion", callout: "State feedback stays; transforms, loops, blur, and low-contrast material adapt." }
+        },
+        {
+          id: "F-12", priority: "P3", proof: ["Source verified"], area: "Interaction polish",
+          title: "Passive cards and controls get inconsistent, broad motion feedback.",
+          summary: "Global glass panels transition all properties and lift on hover while canonical buttons only transition color.",
+          evidence: ["src/index.css:122-145,197-204", "src/components/ui/button.tsx:7-26"],
+          proposal: "Transition named properties only, reserve elevation for interactive cards, and standardize a reduced-motion-safe active state.",
+          current: { app: "Interactions", chip: "inconsistent", rows: [["Passive metric card", "hover lifts", "warn"], ["Glass button", "scale 0.95", "warn"], ["Canonical button", "color only", "bad"]], callout: "Visual motion does not consistently express whether an element is interactive." },
+          proposed: { app: "Interactions", chip: "intentional", rows: [["Passive metric card", "static", "good"], ["Interactive card", "border + named shadow", "good"], ["All pressables", "subtle active state", "good"]], callout: "Feedback communicates affordance without making the operations surface restless." }
+        }
+      ];
+
+      const state = loadState();
+      let selectedId = FINDINGS[0].id;
+
+      const elements = {
+        priorityGroups: document.getElementById("priorityGroups"),
+        findingView: document.getElementById("findingView"),
+        findingCounter: document.getElementById("findingCounter"),
+        previousButton: document.getElementById("previousButton"),
+        nextButton: document.getElementById("nextButton"),
+        decisionFindingName: document.getElementById("decisionFindingName"),
+        approveButton: document.getElementById("approveButton"),
+        denyButton: document.getElementById("denyButton"),
+        discussButton: document.getElementById("discussButton"),
+        decisionNote: document.getElementById("decisionNote"),
+        noteHelp: document.getElementById("noteHelp"),
+        resetButton: document.getElementById("resetButton"),
+        resetConfirm: document.getElementById("resetConfirm"),
+        confirmResetButton: document.getElementById("confirmResetButton"),
+        cancelResetButton: document.getElementById("cancelResetButton"),
+        jumpHandoffButton: document.getElementById("jumpHandoffButton"),
+        reviewedCount: document.getElementById("reviewedCount"),
+        reviewedHelp: document.getElementById("reviewedHelp"),
+        approvedCount: document.getElementById("approvedCount"),
+        deniedCount: document.getElementById("deniedCount"),
+        discussCount: document.getElementById("discussCount"),
+        pendingCount: document.getElementById("pendingCount"),
+        completionPercent: document.getElementById("completionPercent"),
+        progressBar: document.getElementById("progressBar"),
+        coverageText: document.getElementById("coverageText"),
+        handoffReviewed: document.getElementById("handoffReviewed"),
+        handoffApproved: document.getElementById("handoffApproved"),
+        handoffDenied: document.getElementById("handoffDenied"),
+        handoffDiscuss: document.getElementById("handoffDiscuss"),
+        handoffPreview: document.getElementById("handoffPreview"),
+        copyButton: document.getElementById("copyButton"),
+        copyStatus: document.getElementById("copyStatus"),
+        handoffPanel: document.getElementById("handoffPanel")
+      };
+
+      function loadState() {
+        try {
+          const stored = window.localStorage.getItem(STORAGE_KEY);
+          if (!stored) return {};
+          const parsed = JSON.parse(stored);
+          return parsed && typeof parsed === "object" ? parsed : {};
+        } catch {
+          return {};
+        }
+      }
+
+      function persistState() {
+        try {
+          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        } catch {
+          setCopyStatus("Local storage is unavailable; decisions remain until this page is closed.", "warn");
+        }
+      }
+
+      function getRecord(id) {
+        const record = state[id];
+        if (!record || typeof record !== "object") return { decision: "pending", note: "" };
+        return {
+          decision: ["approved", "denied", "discuss"].includes(record.decision) ? record.decision : "pending",
+          note: typeof record.note === "string" ? record.note : ""
+        };
+      }
+
+      function counts() {
+        return FINDINGS.reduce((result, finding) => {
+          const decision = getRecord(finding.id).decision;
+          result[decision] += 1;
+          return result;
+        }, { approved: 0, denied: 0, discuss: 0, pending: 0 });
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
+      function selectedFinding() {
+        return FINDINGS.find((finding) => finding.id === selectedId) || FINDINGS[0];
+      }
+
+      function proofBadge(proof) {
+        if (proof === "Live observed") return '<span class="badge badge-live">Live observed</span>';
+        if (proof === "Recheck before change") return '<span class="badge badge-recheck">Recheck live</span>';
+        return '<span class="badge badge-source">Source verified</span>';
+      }
+
+      function priorityClass(priority) {
+        return priority === "P1" ? "badge-p1" : priority === "P2" ? "badge-p2" : "badge-p3";
+      }
+
+      function simulationRows(rows) {
+        if (!rows || !rows.length) return "";
+        return rows.map(([label, value, tone]) => '<div class="sim-row"><strong>' + escapeHtml(label) + '</strong><span class="sim-row-value ' + escapeHtml(tone || "") + '">' + escapeHtml(value) + '</span></div>').join("");
+      }
+
+      function renderForm(form) {
+        return '<div class="sim-body">' + form.map(([label, associated]) =>
+          '<div class="form-line"><span>' + escapeHtml(label) + (associated ? " ↳" : "") + '</span><span class="form-input"></span></div>'
+        ).join("") + '</div>';
+      }
+
+      function renderMetrics(metrics) {
+        return '<div class="mini-grid">' + metrics.map(([label, value, tone]) =>
+          '<div class="mini-metric"><span>' + escapeHtml(label) + '</span><b class="' + escapeHtml(tone || "") + '">' + escapeHtml(value) + '</b></div>'
+        ).join("") + '</div>';
+      }
+
+      function renderSimulation(simulation, proposed) {
+        const classes = "sim-screen" + (proposed ? " proposed" : "");
+        let body = "";
+        if (simulation.blank) {
+          body = '<div class="sim-body"><div class="sim-blank">' + escapeHtml(simulation.blank) + '</div></div>';
+        } else if (simulation.form) {
+          body = renderForm(simulation.form);
+        } else {
+          const toolbar = simulation.tabs
+            ? '<div class="sim-tabs">' + simulation.tabs.map((tab, index) => '<span class="sim-tab ' + (index === 0 ? "active" : "") + '">' + escapeHtml(tab) + '</span>').join("") + '</div>'
+            : simulation.controls
+              ? '<div class="sim-toolbar">' + simulation.controls.map((control, index) => {
+                const flavor = index === 0 && proposed ? " primary" : control.toLowerCase().includes("retry") || control.toLowerCase().includes("open") ? " warn" : "";
+                return '<span class="sim-control' + flavor + '">' + escapeHtml(control) + '</span>';
+              }).join("") + '</div>'
+              : "";
+          const matrix = simulation.matrix
+            ? '<div class="status-matrix">' + simulation.matrix.map((item) => '<div class="matrix-item ' + (item === simulation.active ? "active" : "") + '">' + escapeHtml(item) + '</div>').join("") + '</div>'
+            : "";
+          const metrics = simulation.metrics ? renderMetrics(simulation.metrics) : "";
+          body = '<div class="sim-body">' + toolbar + matrix + metrics + simulationRows(simulation.rows) + '</div>';
+        }
+        return '<div class="' + classes + '"><div class="sim-top"><span class="sim-name">' + escapeHtml(simulation.app) + '</span><span class="sim-chip">' + escapeHtml(simulation.chip) + '</span></div>' + body + '<div class="sim-callout">' + escapeHtml(simulation.callout) + '</div></div>';
+      }
+
+      function renderFinding() {
+        const finding = selectedFinding();
+        const index = FINDINGS.findIndex((entry) => entry.id === finding.id);
+        const proof = finding.proof.map(proofBadge).join("");
+        const evidence = finding.evidence.map((item) => {
+          const isLive = item.startsWith("Live");
+          const isRecheck = finding.proof.includes("Recheck before change") && (item.includes("Live") || item.includes("Version"));
+          return '<div class="evidence-item' + (isLive ? " live" : "") + (isRecheck ? " recheck" : "") + '">' + escapeHtml(item) + '</div>';
+        }).join("");
+
+        elements.findingCounter.innerHTML = "Finding <b>" + (index + 1) + "</b> of " + FINDINGS.length;
+        elements.previousButton.disabled = index === 0;
+        elements.nextButton.disabled = index === FINDINGS.length - 1;
+        elements.findingView.innerHTML =
+          '<div class="finding-header">' +
+            '<div class="finding-kicker"><span class="badge ' + priorityClass(finding.priority) + '">' + finding.priority + '</span>' + proof + '<span class="badge">' + escapeHtml(finding.id) + '</span></div>' +
+            '<h1>' + escapeHtml(finding.title) + '</h1>' +
+            '<p class="finding-summary">' + escapeHtml(finding.summary) + '</p>' +
+            '<div class="finding-metadata"><div class="meta-item"><span>Area</span><b>' + escapeHtml(finding.area) + '</b></div><div class="meta-item"><span>Evidence confidence</span><b>' + escapeHtml(finding.proof.join(" · ")) + '</b></div><div class="meta-item"><span>Audit date</span><b>2026-07-14</b></div></div>' +
+          '</div>' +
+          '<section class="comparison" aria-label="Current and suggested state">' +
+            '<div class="comparison-panel"><h2 class="comparison-heading">Current state <small>Representative simulation</small></h2>' + renderSimulation(finding.current, false) + '</div>' +
+            '<div class="comparison-panel"><h2 class="comparison-heading">Suggested improvement <small>Representative simulation</small></h2>' + renderSimulation(finding.proposed, true) + '</div>' +
+          '</section>' +
+          '<section class="finding-detail-grid">' +
+            '<div class="detail-block"><h2>Suggested change</h2><p>' + escapeHtml(finding.proposal) + '</p></div>' +
+            '<div class="detail-block"><h2>Evidence trace</h2><div class="evidence-list">' + evidence + '</div></div>' +
+          '</section>' +
+          '<p class="scope-note">These comparison panels are source-backed representative UI simulations, not live-product screenshots. Live-observed evidence is marked and time-sensitive release state should be rechecked before remediation.</p>';
+
+        renderDecisionPanel();
+        renderFindingList();
+      }
+
+      function renderFindingList() {
+        const priorities = [
+          { id: "P1", label: "P1 · Critical workflow risk" },
+          { id: "P2", label: "P2 · Reachability & clarity" },
+          { id: "P3", label: "P3 · Interaction polish" }
+        ];
+        elements.priorityGroups.innerHTML = priorities.map(({ id, label }) => {
+          const group = FINDINGS.filter((finding) => finding.priority === id);
+          const items = group.map((finding) => {
+            const record = getRecord(finding.id);
+            const stateIcon = record.decision === "approved" ? "✓" : record.decision === "denied" ? "×" : record.decision === "discuss" ? "◌" : "·";
+            return '<button type="button" class="finding-list-item" data-finding-id="' + finding.id + '" aria-current="' + (finding.id === selectedId ? "true" : "false") + '" aria-label="Review ' + finding.id + ': ' + escapeHtml(finding.title) + '">' +
+              '<span class="finding-list-id">' + finding.id + '</span><span class="finding-list-title">' + escapeHtml(finding.title) + '</span><span class="finding-list-state" aria-hidden="true">' + stateIcon + '</span></button>';
+          }).join("");
+          return '<div class="priority-group priority-' + id.toLowerCase() + '"><div class="priority-label"><span>' + label + '</span><span>' + group.length + '</span></div><div class="finding-list">' + items + '</div></div>';
+        }).join("");
+        elements.priorityGroups.querySelectorAll("[data-finding-id]").forEach((button) => {
+          button.addEventListener("click", () => selectFinding(button.dataset.findingId, true));
+        });
+      }
+
+      function renderDecisionPanel() {
+        const finding = selectedFinding();
+        const record = getRecord(finding.id);
+        elements.decisionFindingName.textContent = finding.id + " · " + (record.decision === "pending" ? "Pending a decision" : record.decision.charAt(0).toUpperCase() + record.decision.slice(1));
+        elements.approveButton.setAttribute("aria-pressed", String(record.decision === "approved"));
+        elements.denyButton.setAttribute("aria-pressed", String(record.decision === "denied"));
+        elements.discussButton.setAttribute("aria-pressed", String(record.decision === "discuss"));
+        elements.approveButton.setAttribute("aria-label", "Approve " + finding.id + ": " + finding.title);
+        elements.denyButton.setAttribute("aria-label", "Deny " + finding.id + ": " + finding.title);
+        elements.discussButton.setAttribute("aria-label", "Discuss " + finding.id + ": " + finding.title);
+        elements.decisionNote.value = record.note;
+        const canDiscuss = record.decision === "discuss";
+        elements.decisionNote.disabled = !canDiscuss;
+        elements.decisionNote.placeholder = canDiscuss ? "What needs a Codex discussion?" : "Select Discuss to add a note.";
+        elements.noteHelp.textContent = canDiscuss
+          ? "This note is included in the copied handoff."
+          : "Notes are enabled only for Discuss to keep decisions unambiguous.";
+      }
+
+      function buildHandoff() {
+        const now = new Date().toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+        const summary = counts();
+        const lines = [
+          "# XOT UX & Design Engineering Audit Decisions",
+          "",
+          "Audit date: 2026-07-14",
+          "Handoff generated locally: " + now,
+          "Scope: read-only review artifact; no application code changed by this review.",
+          "Summary: " + (summary.approved + summary.denied + summary.discuss) + "/12 decided · " + summary.approved + " approved · " + summary.denied + " denied · " + summary.discuss + " discuss · " + summary.pending + " undecided",
+          "",
+          "## Decisions"
+        ];
+        FINDINGS.forEach((finding) => {
+          const record = getRecord(finding.id);
+          const stateLabel = record.decision === "pending" ? "UNDECIDED" : record.decision.toUpperCase();
+          lines.push("");
+          lines.push("- [" + stateLabel + "] " + finding.id + " · " + finding.title);
+          lines.push("  - Priority: " + finding.priority + " · Proof: " + finding.proof.join(", "));
+          lines.push("  - Proposal: " + finding.proposal);
+          lines.push("  - Evidence: " + finding.evidence.join(" | "));
+          if (record.note.trim()) lines.push("  - Discussion note: " + record.note.trim().replace(/\n/g, " "));
+        });
+        lines.push("");
+        lines.push("## Next step");
+        lines.push("Implement only APPROVED findings. Discuss items require follow-up before remediation; denied and undecided items must remain unchanged.");
+        return lines.join("\n");
+      }
+
+      function renderSummary() {
+        const summary = counts();
+        const reviewed = summary.approved + summary.denied + summary.discuss;
+        const percent = Math.round((reviewed / FINDINGS.length) * 100);
+        elements.reviewedCount.textContent = reviewed + " / " + FINDINGS.length;
+        elements.reviewedHelp.textContent = reviewed ? (FINDINGS.length - reviewed) + " findings remaining" : "No decisions yet";
+        elements.approvedCount.textContent = summary.approved;
+        elements.deniedCount.textContent = summary.denied;
+        elements.discussCount.textContent = summary.discuss;
+        elements.pendingCount.textContent = summary.pending;
+        elements.completionPercent.textContent = percent + "%";
+        elements.progressBar.style.width = percent + "%";
+        elements.coverageText.textContent = reviewed + " decisions · 12 verified findings · source and live proof kept distinct";
+        elements.handoffReviewed.textContent = reviewed + " / " + FINDINGS.length;
+        elements.handoffApproved.textContent = summary.approved;
+        elements.handoffDenied.textContent = summary.denied;
+        elements.handoffDiscuss.textContent = summary.discuss;
+        elements.handoffPreview.value = buildHandoff();
+      }
+
+      function selectFinding(id, focus) {
+        if (!FINDINGS.some((finding) => finding.id === id)) return;
+        selectedId = id;
+        renderFinding();
+        if (focus) {
+          const title = elements.findingView.querySelector("h1");
+          if (title) {
+            title.setAttribute("tabindex", "-1");
+            title.focus({ preventScroll: true });
+          }
+        }
+      }
+
+      function setDecision(decision) {
+        const finding = selectedFinding();
+        const previous = getRecord(finding.id);
+        state[finding.id] = { decision, note: decision === "discuss" ? previous.note : "" };
+        persistState();
+        renderFinding();
+        renderSummary();
+      }
+
+      function setCopyStatus(message, tone) {
+        elements.copyStatus.textContent = message;
+        elements.copyStatus.className = "copy-status " + (tone || "");
+      }
+
+      async function copyHandoff() {
+        const text = buildHandoff();
+        elements.handoffPreview.value = text;
+        try {
+          if (!navigator.clipboard || !window.isSecureContext) throw new Error("clipboard unavailable");
+          await navigator.clipboard.writeText(text);
+          setCopyStatus("Copied to the clipboard. Paste this back into Codex to implement or discuss the selected items.", "good");
+        } catch {
+          elements.handoffPreview.focus();
+          elements.handoffPreview.select();
+          let fallbackCopied = false;
+          try { fallbackCopied = document.execCommand("copy"); } catch { fallbackCopied = false; }
+          setCopyStatus(fallbackCopied
+            ? "Copied with the browser fallback. Paste this back into Codex."
+            : "Clipboard access was unavailable. The complete handoff is selected above; copy it manually.",
+            fallbackCopied ? "good" : "warn");
+        }
+      }
+
+      elements.approveButton.addEventListener("click", () => setDecision("approved"));
+      elements.denyButton.addEventListener("click", () => setDecision("denied"));
+      elements.discussButton.addEventListener("click", () => setDecision("discuss"));
+      elements.decisionNote.addEventListener("input", () => {
+        const finding = selectedFinding();
+        const record = getRecord(finding.id);
+        if (record.decision !== "discuss") return;
+        state[finding.id] = { decision: "discuss", note: elements.decisionNote.value };
+        persistState();
+        renderSummary();
+      });
+      elements.previousButton.addEventListener("click", () => {
+        const index = FINDINGS.findIndex((finding) => finding.id === selectedId);
+        if (index > 0) selectFinding(FINDINGS[index - 1].id, true);
+      });
+      elements.nextButton.addEventListener("click", () => {
+        const index = FINDINGS.findIndex((finding) => finding.id === selectedId);
+        if (index < FINDINGS.length - 1) selectFinding(FINDINGS[index + 1].id, true);
+      });
+      elements.resetButton.addEventListener("click", () => {
+        elements.resetConfirm.hidden = false;
+        elements.confirmResetButton.focus();
+      });
+      elements.cancelResetButton.addEventListener("click", () => {
+        elements.resetConfirm.hidden = true;
+        elements.resetButton.focus();
+      });
+      elements.confirmResetButton.addEventListener("click", () => {
+        Object.keys(state).forEach((key) => delete state[key]);
+        try { window.localStorage.removeItem(STORAGE_KEY); } catch { /* no-op */ }
+        elements.resetConfirm.hidden = true;
+        setCopyStatus("Local decisions were reset.", "good");
+        renderFinding();
+        renderSummary();
+      });
+      elements.jumpHandoffButton.addEventListener("click", () => elements.handoffPanel.scrollIntoView({ behavior: "smooth", block: "start" }));
+      elements.copyButton.addEventListener("click", copyHandoff);
+      document.addEventListener("keydown", (event) => {
+        const tag = document.activeElement && document.activeElement.tagName;
+        if (tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT" || event.metaKey || event.ctrlKey || event.altKey) return;
+        const key = event.key.toLowerCase();
+        if (key === "j") { event.preventDefault(); elements.nextButton.click(); }
+        if (key === "k") { event.preventDefault(); elements.previousButton.click(); }
+        if (key === "a") { event.preventDefault(); elements.approveButton.click(); }
+        if (key === "d") { event.preventDefault(); elements.denyButton.click(); }
+        if (key === "x") { event.preventDefault(); elements.discussButton.click(); }
+      });
+
+      renderFinding();
+      renderSummary();
+    })();
+  </script>
+</body>
+</html>

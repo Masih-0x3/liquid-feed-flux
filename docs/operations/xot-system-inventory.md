@@ -39,17 +39,17 @@ Remote branches currently present:
 
 ## GitHub
 
-- Repository: `Masihhedayati/liquid-feed-flux`
+- Repository: `Masih-0x3/liquid-feed-flux`
 - Visibility: private
 - Default branch: `main`
 - Open pull requests: none
 - Open issues: none
-- Latest merged PR: [#12](https://github.com/Masihhedayati/liquid-feed-flux/pull/12), `[codex] XOT production rollout`
+- Latest merged PR: [#12](https://github.com/Masih-0x3/liquid-feed-flux/pull/12), `[codex] XOT production rollout`
 - PR #12 merged at: `2026-06-14T07:39:49Z`
 - PR #12 merge commit: `5d351a9db81809fac4e668c5d03f298f03647808`
 - Latest `main` CI run: `27492167983`
 - Latest `main` CI status: success
-- Latest `main` CI URL: `https://github.com/Masihhedayati/liquid-feed-flux/actions/runs/27492167983`
+- Latest `main` CI URL: `https://github.com/Masih-0x3/liquid-feed-flux/actions/runs/27492167983`
 
 ## Vercel
 

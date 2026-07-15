@@ -1,5 +1,7 @@
-import { Card, CardContent } from "@/components/ui/card";
-import { compactNumber } from "@/lib/monitoringViewModel";
+import { ArrowRight, AlertTriangle } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { compactNumber } from '@/lib/monitoringViewModel';
 
 interface MonitoringQueueCounts {
   needs_attention: number;
@@ -34,73 +36,88 @@ interface MonitoringXSummary {
 interface MonitoringQueueCardsProps {
   counts: MonitoringQueueCounts;
   xSummary?: MonitoringXSummary | null;
+  onReviewAttention: () => void;
 }
 
-export function MonitoringQueueCards({ counts, xSummary }: MonitoringQueueCardsProps) {
+function QueueMetric({ label, value, tone = 'text-glass-foreground', suffix }: { label: string; value: number | undefined; tone?: string; suffix?: string }) {
   return (
-    <>
-      <div className="grid grid-cols-2 gap-2 min-[480px]:grid-cols-3 md:grid-cols-4 xl:grid-cols-7">
-        {[
-          ['Needs attention', counts.needs_attention, 'text-amber-500'],
-          ['Failed/stuck', counts.failed_stuck, 'text-destructive'],
-          ['Translation queue', counts.translation_queue, 'text-blue-500'],
-          ['Needs score', counts.needs_score, 'text-amber-500'],
-          ['Ready to deliver', counts.ready_to_deliver, 'text-primary'],
-          ['Manual review', counts.manual_review, 'text-purple-500'],
-          ['Duplicates', counts.duplicates, 'text-muted-foreground'],
-          ['Coverage gaps', counts.coverage_gap ?? 0, 'text-amber-500'],
-          ['Possible dupes', counts.possible_duplicate ?? 0, 'text-amber-500'],
-          ['Dup anomalies', counts.duplicate_anomalies ?? 0, 'text-destructive'],
-          ['Hydration', counts.hydration, 'text-blue-500'],
-          ['X pending', counts.x_pending, 'text-amber-500'],
-          ['X failed', counts.x_failed, 'text-destructive'],
-          ['Delivered 24h', counts.delivered_24h, 'text-emerald-500'],
-        ].map(([label, value, cls]) => (
-          <Card key={label as string}>
-            <CardContent className="p-2.5 sm:p-3">
-              <p className="text-xs text-muted-foreground">{label}</p>
-              <p className={`text-xl font-semibold tabular-nums sm:text-2xl ${cls}`}>{compactNumber(value as number)}</p>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+    <div className="rounded-md border border-border/60 bg-background/30 p-3">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className={`mt-1 text-xl font-semibold tabular-nums ${tone}`}>{compactNumber(value)}{typeof value === 'number' ? suffix : ''}</p>
+    </div>
+  );
+}
 
-      <div className="grid gap-3 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <CardContent className="grid grid-cols-2 gap-3 p-3 sm:grid-cols-4">
-            {[
-              ['Telegram pending', counts.telegram_pending],
-              ['Below threshold', counts.below_threshold],
-              ['Stale jobs', counts.stale_jobs],
-              ['Stale X pending', counts.stale_x_pending_24h],
-              ['Regional auto', counts.v2_regional_auto],
-              ['Global pilot', counts.global_pilot_review],
-              ['Manual scoring', counts.manual_scoring_feedback],
-            ].map(([label, value]) => (
-              <div key={label as string}>
-                <p className="text-xs text-muted-foreground">{label}</p>
-                <p className="text-lg font-semibold tabular-nums">{compactNumber(value as number)}</p>
+export function MonitoringQueueCards({ counts, xSummary, onReviewAttention }: MonitoringQueueCardsProps) {
+  const blockers = counts.failed_stuck + counts.x_failed + counts.stale_jobs + (counts.duplicate_anomalies ?? 0);
+
+  return (
+    <div className="space-y-3">
+      <section aria-labelledby="monitoring-attention-title">
+        <Card className={counts.needs_attention > 0 ? 'border-amber-500/40 bg-amber-500/10' : 'border-border/60 bg-muted/20'}>
+          <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className={`mt-0.5 h-5 w-5 shrink-0 ${counts.needs_attention > 0 ? 'text-amber-500' : 'text-muted-foreground'}`} />
+              <div>
+                <p id="monitoring-attention-title" className="text-sm font-semibold text-glass-foreground">Needs attention</p>
+                <p className="mt-1 text-3xl font-semibold tabular-nums text-glass-foreground">{compactNumber(counts.needs_attention)}</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {counts.needs_attention > 0
+                    ? `${compactNumber(blockers)} blocker${blockers === 1 ? '' : 's'} need an operator decision before routine throughput.`
+                    : 'No active triage items. Review the queue or continue with routine pipeline health.'}
+                </p>
               </div>
-            ))}
+            </div>
+            <Button type="button" variant="outline" onClick={onReviewAttention}>
+              Review attention queue
+              <ArrowRight className="ml-2 h-4 w-4" />
+            </Button>
           </CardContent>
         </Card>
+
+        <div className="mt-3 grid gap-3 min-[520px]:grid-cols-2 xl:grid-cols-4">
+          <QueueMetric label="Failed / stuck" value={counts.failed_stuck} tone={counts.failed_stuck > 0 ? 'text-destructive' : 'text-glass-foreground'} />
+          <QueueMetric label="Needs score" value={counts.needs_score} tone={counts.needs_score > 0 ? 'text-amber-500' : 'text-glass-foreground'} />
+          <QueueMetric label="X failed" value={counts.x_failed} tone={counts.x_failed > 0 ? 'text-destructive' : 'text-glass-foreground'} />
+          <QueueMetric label="Stale jobs" value={counts.stale_jobs} tone={counts.stale_jobs > 0 ? 'text-amber-500' : 'text-glass-foreground'} />
+        </div>
+      </section>
+
+      <section aria-labelledby="monitoring-pipeline-title">
         <Card>
-          <CardContent className="grid grid-cols-3 gap-3 p-3">
-            <div>
-              <p className="text-xs text-muted-foreground">X attempts</p>
-              <p className="text-lg font-semibold tabular-nums">{compactNumber(xSummary?.counted_attempts)}</p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Local posts</p>
-              <p className="text-lg font-semibold tabular-nums">{compactNumber(xSummary?.posts_local ?? counts.delivered_24h)}</p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Success</p>
-              <p className="text-lg font-semibold tabular-nums">{xSummary ? `${xSummary.success_rate}%` : '—'}</p>
-            </div>
+          <CardHeader className="pb-3">
+            <CardTitle id="monitoring-pipeline-title" className="text-base">Pipeline & delivery health</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-3 min-[520px]:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
+            <QueueMetric label="Translation queue" value={counts.translation_queue} tone={counts.translation_queue > 0 ? 'text-blue-500' : 'text-glass-foreground'} />
+            <QueueMetric label="Ready to deliver" value={counts.ready_to_deliver} tone="text-primary" />
+            <QueueMetric label="Manual review" value={counts.manual_review} tone={counts.manual_review > 0 ? 'text-purple-500' : 'text-glass-foreground'} />
+            <QueueMetric label="Telegram pending" value={counts.telegram_pending} tone={counts.telegram_pending > 0 ? 'text-amber-500' : 'text-glass-foreground'} />
+            <QueueMetric label="X pending" value={counts.x_pending} tone={counts.x_pending > 0 ? 'text-amber-500' : 'text-glass-foreground'} />
+            <QueueMetric label="Hydration" value={counts.hydration} tone={counts.hydration > 0 ? 'text-blue-500' : 'text-glass-foreground'} />
+            <QueueMetric label="Coverage gaps" value={counts.coverage_gap ?? 0} tone={(counts.coverage_gap ?? 0) > 0 ? 'text-amber-500' : 'text-glass-foreground'} />
+            <QueueMetric label="Duplicate anomalies" value={counts.duplicate_anomalies ?? 0} tone={(counts.duplicate_anomalies ?? 0) > 0 ? 'text-destructive' : 'text-glass-foreground'} />
           </CardContent>
         </Card>
-      </div>
-    </>
+      </section>
+
+      <section aria-labelledby="monitoring-throughput-title">
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle id="monitoring-throughput-title" className="text-base">Routine throughput</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-3 min-[520px]:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
+            <QueueMetric label="Delivered 24h" value={counts.delivered_24h} tone="text-emerald-500" />
+            <QueueMetric label="X attempts" value={xSummary?.counted_attempts} />
+            <QueueMetric label="Local posts" value={xSummary?.posts_local ?? counts.delivered_24h} />
+            <QueueMetric label="X success" value={xSummary ? xSummary.success_rate : undefined} tone={xSummary && (xSummary.success_rate ?? 0) < 100 ? 'text-amber-500' : 'text-emerald-500'} suffix="%" />
+            <QueueMetric label="Below threshold" value={counts.below_threshold} />
+            <QueueMetric label="Duplicates" value={counts.duplicates} />
+            <QueueMetric label="Possible dupes" value={counts.possible_duplicate ?? 0} />
+            <QueueMetric label="Manual scoring" value={counts.manual_scoring_feedback} />
+          </CardContent>
+        </Card>
+      </section>
+    </div>
   );
 }

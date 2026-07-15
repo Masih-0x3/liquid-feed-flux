@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import Dashboard from "@/pages/Dashboard";
-import { useDashboardData } from "@/hooks/useDashboardData";
+import { type SystemPerformanceSummary, useDashboardData } from "@/hooks/useDashboardData";
 import { useDashboardProcessHudData } from "@/hooks/useDashboardProcessHudData";
 import { DashboardHealth } from "@/components/dashboard/DashboardHealth";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -46,12 +46,17 @@ function renderDashboard(initialEntries = ["/"]) {
   );
 }
 
-function renderHealthControls() {
+function renderHealthControls(systemPerformance?: SystemPerformanceSummary) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
-        <DashboardHealth health={dashboardData.health} queue={dashboardData.queueBreakdown} xUsage={dashboardData.xLocalUsage} />
+        <DashboardHealth
+          health={dashboardData.health}
+          queue={dashboardData.queueBreakdown}
+          xUsage={dashboardData.xLocalUsage}
+          systemPerformance={systemPerformance}
+        />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -593,5 +598,45 @@ describe("Dashboard", () => {
     fireEvent.click(screen.getByRole("button", { name: /live test pipeline/i }));
 
     expect(screen.getByText("Send a production test webhook?")).toBeTruthy();
+  });
+
+  it("labels paused cleanup schedules as an intentional safety hold", () => {
+    const systemPerformance = {
+      ...dashboardData.systemPerformance,
+      resources: {
+        ...dashboardData.systemPerformance.resources,
+        cronJobs: [
+          { jobname: "invoke-db-cleanup-daily", schedule: "0 3 * * *", active: false },
+          { jobname: "invoke-media-cleanup-6h", schedule: "0 */6 * * *", active: false },
+        ],
+      },
+    } as SystemPerformanceSummary;
+
+    renderHealthControls(systemPerformance);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Cleanup safety hold active");
+    expect(screen.getByRole("alert")).toHaveTextContent("intentionally paused");
+    expect(screen.getAllByText("Safety hold")).toHaveLength(2);
+    expect(screen.getByText(/does not certify shared paths as safe/i)).toBeTruthy();
+  });
+
+  it("names only the cleanup schedule that is actually paused", () => {
+    const systemPerformance = {
+      ...dashboardData.systemPerformance,
+      resources: {
+        ...dashboardData.systemPerformance.resources,
+        cronJobs: [
+          { jobname: "invoke-db-cleanup-daily", schedule: "0 3 * * *", active: true },
+          { jobname: "invoke-media-cleanup-6h", schedule: "0 */6 * * *", active: false },
+        ],
+      },
+    } as SystemPerformanceSummary;
+
+    renderHealthControls(systemPerformance);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Media cleanup is intentionally paused");
+    expect(screen.getByRole("alert")).not.toHaveTextContent("database retention are intentionally paused");
+    expect(screen.getByText("Active / daily")).toBeTruthy();
+    expect(screen.getAllByText("Safety hold")).toHaveLength(1);
   });
 });

@@ -5,13 +5,13 @@ existing Supabase project `jzirqfzzvlbxwfzndaer` as the production backend.
 
 ## Vercel Project
 
-1. Import `Masihhedayati/liquid-feed-flux` into Vercel.
+1. Import `Masih-0x3/liquid-feed-flux` into Vercel.
 2. Use the Vite framework preset.
 3. Use `npm ci` as the install command.
 4. Use `npm run build` as the build command.
 5. Use `dist` as the output directory.
 6. Keep the committed `vercel.json`; it rewrites SPA routes to `index.html`.
-7. Set Node.js to 20.x.
+7. Set Node.js to 24.x. The app supports Vite 8's Node range (`^20.19.0 || >=22.12.0`), while CI and the current Vercel project use Node 24.
 
 ## Vercel Environment
 

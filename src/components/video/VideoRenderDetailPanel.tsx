@@ -71,14 +71,37 @@ export function VideoRenderDetailPanel({
   if (detail.isLoading) {
     return (
       <Card className="glass-card">
-        <CardContent className="flex min-h-32 items-center justify-center">
+        <CardContent className="flex min-h-32 flex-col items-center justify-center gap-3 text-sm text-muted-foreground" role="status">
           <Loader2 className="h-5 w-5 animate-spin text-primary" />
+          Loading render details…
         </CardContent>
       </Card>
     );
   }
 
-  if (detail.data?.ok === false || detail.error || !render) {
+  if (detail.data?.ok === false || detail.error) {
+    return (
+      <Card className="glass-card border-destructive/40">
+        <CardContent className="flex flex-col gap-4 p-4 text-sm" role="alert">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+            <div>
+              <p className="font-medium text-glass-foreground">Video render details are unavailable</p>
+              <p className="mt-1 text-muted-foreground">
+                {detail.error instanceof Error ? detail.error.message : detail.data?.error || 'The selected render could not be loaded. This is not a missing render row.'}
+              </p>
+            </div>
+          </div>
+          <Button size="sm" variant="outline" className="w-fit" onClick={() => void detail.refetch()} disabled={detail.isFetching}>
+            {detail.isFetching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
+            Retry details
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (!render) {
     return (
       <Card className="glass-card border-dashed">
         <CardContent className="flex flex-col gap-3 p-4 text-sm text-muted-foreground">
@@ -96,6 +119,9 @@ export function VideoRenderDetailPanel({
       </Card>
     );
   }
+
+  const feedbackLabelId = `video-render-feedback-${render.id}`;
+  const feedbackNoteId = `video-render-feedback-note-${render.id}`;
 
   return (
     <div className="space-y-3">
@@ -199,9 +225,9 @@ export function VideoRenderDetailPanel({
           <div className="flex flex-col gap-2 rounded-md border bg-muted/20 p-3">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
               <div className="grid gap-1 sm:w-48">
-                <Label>Feedback</Label>
+                <Label htmlFor={feedbackLabelId}>Feedback</Label>
                 <Select value={feedbackLabel} onValueChange={setFeedbackLabel}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger id={feedbackLabelId}><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="pass">Pass</SelectItem>
                     <SelectItem value="needs_review">Needs review</SelectItem>
@@ -218,8 +244,8 @@ export function VideoRenderDetailPanel({
                 </Select>
               </div>
               <div className="grid min-w-0 flex-1 gap-1">
-                <Label>Note</Label>
-                <Textarea value={feedbackNote} onChange={(event) => setFeedbackNote(event.target.value)} placeholder="What should be improved?" className="min-h-10" />
+                <Label htmlFor={feedbackNoteId}>Note</Label>
+                <Textarea id={feedbackNoteId} value={feedbackNote} onChange={(event) => setFeedbackNote(event.target.value)} placeholder="What should be improved?" className="min-h-10" />
               </div>
               <div className="flex gap-2">
                 <Button

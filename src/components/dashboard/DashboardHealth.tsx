@@ -1,6 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Activity, AlertTriangle, Eye, RefreshCw, Loader2, Settings, Wrench, Play, RotateCcw, Clock, HardDrive } from 'lucide-react';
 import type { PipelineHealth, QueueBreakdown, SystemPerformanceSummary, XLocalUsage } from '@/hooks/useDashboardData';
 import { useState } from 'react';
@@ -34,6 +35,14 @@ function storageTone(value: number | null | undefined): string {
   if (value >= 90) return 'text-destructive';
   if (value >= 85) return 'text-warning';
   return 'text-success';
+}
+
+function cronActive(
+  cronJobs: Array<Record<string, unknown>>,
+  jobName: string,
+): boolean | null {
+  const job = cronJobs.find((item) => item.jobname === jobName);
+  return typeof job?.active === 'boolean' ? job.active : null;
 }
 
 export function DashboardHealth({ health, queue, xUsage, systemPerformance }: Props) {
@@ -73,7 +82,10 @@ export function DashboardHealth({ health, queue, xUsage, systemPerformance }: Pr
         case 'media-cleanup-dry-run': {
           const data = await invokeAdminAction<{ result?: { would_delete?: number } }>({ action: 'dry_run_old_media_cleanup', days_old: 1 });
           const wouldDelete = data?.result?.would_delete ?? 0;
-          toast({ title: 'Media cleanup dry run complete', description: `${wouldDelete} old media object(s) are currently safe to clean.` });
+          toast({
+            title: 'Media cleanup dry run complete',
+            description: `${wouldDelete} candidate row(s) reported; no deletion occurred. Shared-reference safety is not yet proven.`,
+          });
           invalidate();
           break;
         }
@@ -98,9 +110,33 @@ export function DashboardHealth({ health, queue, xUsage, systemPerformance }: Pr
   ];
   const storage = systemPerformance?.resources;
   const storagePct = storage?.storageUsedPct ?? null;
+  const mediaCleanupActive = storage
+    ? cronActive(storage.cronJobs, 'invoke-media-cleanup-6h')
+    : null;
+  const dbCleanupActive = storage
+    ? cronActive(storage.cronJobs, 'invoke-db-cleanup-daily')
+    : null;
+  const cleanupSafetyHold = mediaCleanupActive === false || dbCleanupActive === false;
+  const pausedCleanupLabels = [
+    mediaCleanupActive === false ? 'media cleanup' : null,
+    dbCleanupActive === false ? 'database retention' : null,
+  ].filter((label): label is string => Boolean(label));
+  const pausedCleanupSummary = pausedCleanupLabels.length === 2
+    ? 'Media cleanup and database retention are'
+    : `${pausedCleanupLabels[0] === 'media cleanup' ? 'Media cleanup is' : 'Database retention is'}`;
 
   return (
     <div className="space-y-4">
+      {cleanupSafetyHold && (
+        <Alert className="border-warning/50 bg-warning/10">
+          <AlertTriangle className="h-4 w-4 !text-warning" />
+          <AlertTitle>Cleanup safety hold active</AlertTitle>
+          <AlertDescription className="text-muted-foreground">
+            {pausedCleanupSummary} intentionally paused to protect shared files. Dry-run inspection remains available; do not re-enable a paused schedule until the reference-aware cleaner passes canary validation.
+          </AlertDescription>
+        </Alert>
+      )}
+
       <Card className="glass-card">
         <CardHeader className="pb-3">
           <CardTitle className="text-base font-display text-glass-foreground flex items-center">
@@ -182,11 +218,19 @@ export function DashboardHealth({ health, queue, xUsage, systemPerformance }: Pr
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Cleanup cron</p>
-                <p className="font-semibold text-glass-foreground">Every 6h</p>
+                <p className={mediaCleanupActive === false ? 'font-semibold text-warning' : 'font-semibold text-glass-foreground'}>
+                  {mediaCleanupActive === false ? 'Safety hold' : mediaCleanupActive === true ? 'Active / 6h' : 'Unknown'}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">DB retention</p>
+                <p className={dbCleanupActive === false ? 'font-semibold text-warning' : 'font-semibold text-glass-foreground'}>
+                  {dbCleanupActive === false ? 'Safety hold' : dbCleanupActive === true ? 'Active / daily' : 'Unknown'}
+                </p>
               </div>
             </div>
             <div className="rounded-md border border-border/60 bg-muted/20 p-3 text-xs text-muted-foreground">
-              This check reads the Supabase temp-media bucket. Use the dry-run below to estimate old media cleanup without deleting objects.
+              This check reads the Supabase temp-media bucket. Dry-run reports legacy candidate rows without deleting objects; it does not certify shared paths as safe.
             </div>
           </CardContent>
         </Card>
