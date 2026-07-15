@@ -116,12 +116,16 @@ export async function updateVideoRenderConfigAdmin(supabase: SupabaseAdminClient
 
 export async function getVideoRenderOverview(supabase: SupabaseAdminClient) {
   const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-  const [cfg, rendersRes, heartbeatRes] = await Promise.all([
+  const [cfg, rendersRes, issuesRes, heartbeatRes] = await Promise.all([
     loadVideoRenderConfigAdmin(supabase),
     table(supabase, 'video_renders')
-      .select('status, metrics, queued_at, started_at, completed_at, failed_at, blocked_at, reviewed_at, updated_at, output_file_size')
+      .select('status, metrics, queued_at, started_at, completed_at, failed_at, blocked_at, updated_at, output_file_size')
       .gte('created_at', since)
       .order('updated_at', { ascending: false })
+      .limit(5000),
+    table(supabase, 'video_renders')
+      .select('status, reviewed_at')
+      .in('status', ['failed', 'blocked'])
       .limit(5000),
     table(supabase, 'video_renderer_heartbeats')
       .select('renderer_id, status, version, render_version, running, processed, failed, last_error, last_seen_at, metadata')
@@ -129,6 +133,7 @@ export async function getVideoRenderOverview(supabase: SupabaseAdminClient) {
       .limit(10),
   ]);
   if (rendersRes.error) throw rendersRes.error;
+  if (issuesRes.error) throw issuesRes.error;
   if (heartbeatRes.error) throw heartbeatRes.error;
 
   const counts: Record<string, number> = { queued: 0, running: 0, completed: 0, failed: 0, blocked: 0, expired: 0 };
@@ -139,10 +144,6 @@ export async function getVideoRenderOverview(supabase: SupabaseAdminClient) {
   for (const row of (rendersRes.data ?? []) as Array<Record<string, unknown>>) {
     const status = String(row.status ?? 'unknown');
     counts[status] = (counts[status] ?? 0) + 1;
-    if (status === 'failed' || status === 'blocked') {
-      if (row.reviewed_at) reviewedIssues += 1;
-      else unreviewedIssues += 1;
-    }
     if (status === 'queued' && typeof row.queued_at === 'string') {
       oldestQueuedAt = oldestQueuedAt && oldestQueuedAt < row.queued_at ? oldestQueuedAt : row.queued_at;
     }
@@ -153,6 +154,10 @@ export async function getVideoRenderOverview(supabase: SupabaseAdminClient) {
     if (Number.isFinite(totalMs)) totals.total_ms.push(totalMs);
     const bytes = Number(row.output_file_size ?? 0);
     if (Number.isFinite(bytes) && bytes > 0) totals.output_bytes += bytes;
+  }
+  for (const row of (issuesRes.data ?? []) as Array<Record<string, unknown>>) {
+    if (row.reviewed_at) reviewedIssues += 1;
+    else unreviewedIssues += 1;
   }
   const median = (values: number[]) => {
     if (!values.length) return null;
