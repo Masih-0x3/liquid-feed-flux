@@ -166,6 +166,19 @@ export default function Monitoring() {
   const [enrichingTweetIds, setEnrichingTweetIds] = useState<Set<string>>(() => new Set());
   const [expandedClusters, setExpandedClusters] = useState<Set<string>>(() => new Set());
   const pollRefs = useRef<Map<string, { interval: ReturnType<typeof setInterval>; timeout: ReturnType<typeof setTimeout> }>>(new Map());
+  const queueRef = useRef<HTMLDivElement | null>(null);
+
+  const reviewAttentionQueue = useCallback(() => {
+    setFilter('needs_attention');
+    setScoreBucket('any');
+    setSearchTerm('');
+    window.requestAnimationFrame(() => {
+      queueRef.current?.scrollIntoView({
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+        block: 'start',
+      });
+    });
+  }, []);
   const autoOpenedTweetRef = useRef<string | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -734,9 +747,9 @@ export default function Monitoring() {
         </div>
       )}
 
-      <MonitoringQueueCards counts={counts} xSummary={xSummary} />
+      <MonitoringQueueCards counts={counts} xSummary={xSummary} onReviewAttention={reviewAttentionQueue} />
 
-      <Card>
+      <Card ref={queueRef} id="monitoring-queue">
         <MonitoringFilters
           searchTerm={searchTerm}
           onSearchTermChange={setSearchTerm}

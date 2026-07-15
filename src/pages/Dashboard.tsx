@@ -39,6 +39,7 @@ import {
   type SystemPerformanceSummary,
 } from '@/hooks/useDashboardData';
 import { useDashboardProcessHudData } from '@/hooks/useDashboardProcessHudData';
+import { fullDate, useDeploymentVersionStatus } from '@/hooks/useDeploymentVersionStatus';
 import { DashboardHealth } from '@/components/dashboard/DashboardHealth';
 import { IngestHeartbeatAlert } from '@/components/dashboard/IngestHeartbeatAlert';
 import { MonitoringProcessHud } from '@/components/monitoring/MonitoringProcessHud';
@@ -236,6 +237,7 @@ const EMPTY_PROCESS_OBSERVABILITY: ProcessObservabilitySummary = {
 export default function Dashboard() {
   const { data, isLoading, isError, error, dataUpdatedAt, isFetching } = useDashboardData();
   const processHudQuery = useDashboardProcessHudData();
+  const deploymentVersion = useDeploymentVersionStatus();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -243,6 +245,7 @@ export default function Dashboard() {
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     processHudQuery.refetch();
+    void deploymentVersion.refetch();
   };
 
   if (isLoading) {
@@ -329,6 +332,37 @@ export default function Dashboard() {
     ctaLabel: getOpsCtaLabel(opsStatus, pipelineCounts),
   };
   const primaryAlert = getPrimaryAlert(opsAlert, storageAlert);
+  const deploymentAlert = deploymentVersion.error
+    ? {
+        title: 'Backend deployment revision cannot be verified',
+        impact: 'The dashboard cannot confirm whether its controls and the deployed Edge Functions are aligned.',
+        remediation: 'Check the admin-actions version response, then deploy the reviewed Edge Function revision with release metadata and recheck here.',
+      }
+    : deploymentVersion.backend && !deploymentVersion.backendMetadataAvailable
+      ? {
+          title: 'Backend deployment metadata is unavailable',
+          impact: 'The dashboard cannot safely compare this build with the deployed Edge Functions until the backend reports an explicit revision and deploy time.',
+          remediation: 'Deploy the reviewed Edge Function revision through the release script, then recheck both revisions here.',
+        }
+      : deploymentVersion.mismatch === 'frontend_behind'
+        ? {
+        title: 'Dashboard deployment is behind the backend',
+        impact: 'The browser can show controls or status logic that no longer match the deployed Edge Functions.',
+        remediation: 'Deploy the latest reviewed Git commit to Vercel, then recheck both revisions here.',
+      }
+        : deploymentVersion.mismatch === 'backend_behind'
+          ? {
+          title: 'Backend deployment is behind the dashboard',
+          impact: 'The dashboard can expose controls or expectations that the deployed Edge Functions have not received yet.',
+          remediation: 'Deploy the reviewed Edge Function revision, then recheck both revisions here.',
+        }
+          : deploymentVersion.mismatch === 'revision_mismatch'
+            ? {
+                title: 'Dashboard and backend revisions differ',
+                impact: 'Both sides reported release metadata, but not the same Git revision. Release order is unclear until the intended deployment is confirmed.',
+                remediation: 'Confirm the intended release, deploy the missing reviewed surface, then recheck both revisions here.',
+              }
+            : null;
   const oldestPendingSeconds = systemPerformance.queue.oldestPendingAgeSeconds ?? queueBreakdown.oldestPendingAgeSeconds;
   const storagePct = systemPerformance.resources.storageUsedPct;
 
@@ -565,6 +599,40 @@ export default function Dashboard() {
           </Button>
         </CardContent>
       </Card>
+
+      {deploymentAlert && (
+        <Card className="border-amber-500/40 bg-amber-500/10" role="alert">
+          <CardContent className="flex flex-col gap-4 p-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="flex min-w-0 items-start gap-3">
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="font-semibold text-glass-foreground">{deploymentAlert.title}</p>
+                  <Badge variant="outline" className="border-amber-500/40 text-amber-500">Recheck before changing behavior</Badge>
+                </div>
+                <p className="mt-1 text-sm text-muted-foreground">{deploymentAlert.impact}</p>
+                <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
+                  <p className="rounded-md border border-border/60 bg-background/30 p-2">
+                    <span className="block font-medium text-glass-foreground">Dashboard</span>
+                    <code className="break-all">{deploymentVersion.frontendSha}</code>
+                    <span className="mt-1 block">Built {fullDate(deploymentVersion.frontendTime)}</span>
+                  </p>
+                  <p className="rounded-md border border-border/60 bg-background/30 p-2">
+                    <span className="block font-medium text-glass-foreground">Backend API</span>
+                    <code className="break-all">{deploymentVersion.backend?.sha ?? 'unknown'}</code>
+                    <span className="mt-1 block">Deployed {fullDate(deploymentVersion.backend?.deployed_at ?? '')}</span>
+                  </p>
+                </div>
+                <p className="mt-3 text-sm text-glass-foreground"><span className="font-medium">Remediation handoff:</span> {deploymentAlert.remediation}</p>
+              </div>
+            </div>
+            <Button variant="outline" size="sm" onClick={() => void deploymentVersion.refetch()} disabled={deploymentVersion.isFetching}>
+              {deploymentVersion.isFetching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+              Recheck revisions
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
         {triageCards.map((card) => (

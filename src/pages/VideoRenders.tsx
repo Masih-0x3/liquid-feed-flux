@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ManualVideoIntakePanel } from '@/components/video/ManualVideoIntakePanel';
 import { VideoRenderDetailPanel } from '@/components/video/VideoRenderDetailPanel';
+import { rendererStateFor, type RendererState } from '@/lib/videoRenderState';
 import {
   useRetryVideoRender,
   useVideoRenderOverview,
@@ -42,9 +43,22 @@ function statusClass(status?: string): string {
   return 'border-muted-foreground/30 bg-muted text-muted-foreground';
 }
 
-function heartbeatFresh(lastSeenAt?: string | null): boolean {
-  if (!lastSeenAt) return false;
-  return Date.now() - new Date(lastSeenAt).getTime() < 90_000;
+function rendererStateClasses(state: RendererState): string {
+  if (state === 'online') return 'text-emerald-500';
+  if (state === 'offline') return 'text-red-500';
+  if (state === 'stale') return 'text-amber-500';
+  return 'text-muted-foreground';
+}
+
+function rendererStateLabel(state: RendererState): string {
+  if (state === 'checking') return 'Checking';
+  if (state === 'stale') return 'Stale';
+  if (state === 'unknown') return 'Unknown';
+  return state === 'online' ? 'Online' : 'Offline';
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 const STATUS_OPTIONS: Array<{ value: string; label: string; statuses?: VideoRenderStatus[] }> = [
@@ -64,6 +78,7 @@ export default function VideoRenders() {
   const queue = useVideoRenderQueue(statuses);
   const retry = useRetryVideoRender();
   const [selectedRenderId, setSelectedRenderId] = useState<string | null>(null);
+  const [retryingRenderIds, setRetryingRenderIds] = useState<Set<string>>(() => new Set());
 
   const rows = useMemo(() => queue.data?.rows ?? [], [queue.data?.rows]);
   const selected = useMemo(
@@ -71,7 +86,33 @@ export default function VideoRenders() {
     [rows, selectedRenderId],
   );
   const heartbeat = overview.data?.heartbeats?.[0] ?? null;
-  const online = heartbeatFresh(heartbeat?.last_seen_at) && heartbeat?.status === 'online';
+  const rendererState = rendererStateFor({
+    isLoading: overview.isLoading,
+    isError: overview.isError,
+    hasOverview: Boolean(overview.data),
+    heartbeat,
+  });
+  const overviewUnavailable = overview.isError && !overview.data;
+  const overviewStale = overview.isError && Boolean(overview.data);
+  const queueUnavailable = queue.isError && rows.length === 0;
+  const queueStale = queue.isError && rows.length > 0;
+
+  const retryRow = (renderId: string) => {
+    setRetryingRenderIds((current) => new Set(current).add(renderId));
+    retry.mutate(
+      { render_id: renderId },
+      {
+        onSettled: () => {
+          setRetryingRenderIds((current) => {
+            if (!current.has(renderId)) return current;
+            const next = new Set(current);
+            next.delete(renderId);
+            return next;
+          });
+        },
+      },
+    );
+  };
 
   return (
     <div className="w-full space-y-4 animate-fade-in-up">
@@ -104,17 +145,21 @@ export default function VideoRenders() {
               <p className="text-sm text-muted-foreground">Mode</p>
               <Wand2 className="h-4 w-4 text-primary" />
             </div>
-            <p className="mt-2 text-2xl font-semibold">{overview.data?.config?.mode ?? '-'}</p>
+            <p className="mt-2 text-2xl font-semibold">{overview.data?.config?.mode ?? 'Unknown'}</p>
           </CardContent>
         </Card>
         <Card className="glass-card">
           <CardContent className="p-4">
             <div className="flex items-center justify-between gap-2">
               <p className="text-sm text-muted-foreground">Renderer</p>
-              {online ? <Wifi className="h-4 w-4 text-emerald-500" /> : <WifiOff className="h-4 w-4 text-red-500" />}
+              {rendererState === 'online' ? <Wifi className="h-4 w-4 text-emerald-500" /> : rendererState === 'checking' ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : <WifiOff className={`h-4 w-4 ${rendererStateClasses(rendererState)}`} />}
             </div>
-            <p className={online ? 'mt-2 text-2xl font-semibold text-emerald-500' : 'mt-2 text-2xl font-semibold text-red-500'}>{online ? 'Online' : 'Offline'}</p>
-            {heartbeat?.last_seen_at && <p className="mt-1 text-xs text-muted-foreground">Seen {formatDistanceToNow(new Date(heartbeat.last_seen_at), { addSuffix: true })}</p>}
+            <p className={`mt-2 text-2xl font-semibold ${rendererStateClasses(rendererState)}`}>{rendererStateLabel(rendererState)}</p>
+            {heartbeat?.last_seen_at ? (
+              <p className="mt-1 text-xs text-muted-foreground">{rendererState === 'stale' ? 'Last known ' : 'Seen '}{formatDistanceToNow(new Date(heartbeat.last_seen_at), { addSuffix: true })}</p>
+            ) : (
+              <p className="mt-1 text-xs text-muted-foreground">{rendererState === 'unknown' ? 'No heartbeat has resolved yet' : 'Waiting for a heartbeat'}</p>
+            )}
           </CardContent>
         </Card>
         <Card className="glass-card">
@@ -123,7 +168,7 @@ export default function VideoRenders() {
               <p className="text-sm text-muted-foreground">Queued</p>
               <Clock className="h-4 w-4 text-blue-500" />
             </div>
-            <p className="mt-2 text-2xl font-semibold">{compactNumber(overview.data?.counts?.queued ?? 0)}</p>
+            <p className="mt-2 text-2xl font-semibold">{overview.data ? compactNumber(overview.data.counts?.queued ?? 0) : '—'}</p>
           </CardContent>
         </Card>
         <Card className="glass-card">
@@ -132,7 +177,7 @@ export default function VideoRenders() {
               <p className="text-sm text-muted-foreground">Issues</p>
               <AlertTriangle className="h-4 w-4 text-red-500" />
             </div>
-            <p className="mt-2 text-2xl font-semibold">{compactNumber((overview.data?.counts?.failed ?? 0) + (overview.data?.counts?.blocked ?? 0))}</p>
+            <p className="mt-2 text-2xl font-semibold">{overview.data ? compactNumber((overview.data.counts?.failed ?? 0) + (overview.data.counts?.blocked ?? 0)) : '—'}</p>
           </CardContent>
         </Card>
         <Card className="glass-card">
@@ -141,10 +186,30 @@ export default function VideoRenders() {
               <p className="text-sm text-muted-foreground">Median total</p>
               <TimerReset className="h-4 w-4 text-primary" />
             </div>
-            <p className="mt-2 text-2xl font-semibold">{formatMs(overview.data?.medians?.total_ms)}</p>
+            <p className="mt-2 text-2xl font-semibold">{overview.data ? formatMs(overview.data.medians?.total_ms) : '—'}</p>
           </CardContent>
         </Card>
       </div>
+
+      {(overviewUnavailable || overviewStale) && (
+        <div className={`flex flex-col gap-3 rounded-lg border p-4 text-sm sm:flex-row sm:items-start sm:justify-between ${overviewUnavailable ? 'border-destructive/40 bg-destructive/5' : 'border-amber-500/40 bg-amber-500/10'}`} role="alert">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className={`mt-0.5 h-5 w-5 shrink-0 ${overviewUnavailable ? 'text-destructive' : 'text-amber-500'}`} />
+            <div>
+              <p className="font-medium text-glass-foreground">{overviewUnavailable ? 'Renderer overview is unavailable' : 'Renderer overview is stale'}</p>
+              <p className="mt-1 text-muted-foreground">
+                {overviewUnavailable
+                  ? errorMessage(overview.error, 'Queue data may still be available, but current renderer health and counts could not be confirmed.')
+                  : `Showing last-known renderer data from ${overview.dataUpdatedAt ? formatDistanceToNow(new Date(overview.dataUpdatedAt), { addSuffix: true }) : 'an earlier refresh'}. ${errorMessage(overview.error, '')}`}
+              </p>
+            </div>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => void overview.refetch()} disabled={overview.isFetching}>
+            {overview.isFetching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+            Retry overview
+          </Button>
+        </div>
+      )}
 
       <Tabs defaultValue="queue" className="space-y-4">
         <TabsList>
@@ -171,12 +236,39 @@ export default function VideoRenders() {
               </CardHeader>
               <CardContent className="p-0">
                 {queue.isLoading ? (
-                  <div className="flex min-h-60 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
+                  <div className="flex min-h-60 flex-col items-center justify-center gap-3 text-sm text-muted-foreground" role="status">
+                    <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                    Loading render rows…
+                  </div>
+                ) : queueUnavailable ? (
+                  <div className="flex min-h-60 flex-col items-center justify-center gap-4 p-6 text-center">
+                    <AlertTriangle className="h-6 w-6 text-destructive" />
+                    <div>
+                      <p className="font-medium text-glass-foreground">Render queue is unavailable</p>
+                      <p className="mt-1 text-sm text-muted-foreground">{errorMessage(queue.error, 'No queue rows could be loaded. This is not an empty queue.')}</p>
+                    </div>
+                    <Button variant="outline" size="sm" onClick={() => void queue.refetch()} disabled={queue.isFetching}>
+                      {queue.isFetching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                      Retry queue
+                    </Button>
+                  </div>
                 ) : rows.length === 0 ? (
-                  <div className="p-8 text-center text-sm text-muted-foreground">No video renders match this filter.</div>
+                  <div className="p-8 text-center text-sm text-muted-foreground">The queue is healthy but no video renders match this filter.</div>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <Table>
+                  <div className="space-y-3 p-3">
+                    {queueStale && (
+                      <div className="flex flex-col gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm sm:flex-row sm:items-start sm:justify-between" role="alert">
+                        <div className="flex items-start gap-2">
+                          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+                          <span>Showing last-known queue rows while the latest refresh failed: {errorMessage(queue.error, 'retry to confirm current status.')}</span>
+                        </div>
+                        <Button variant="outline" size="sm" onClick={() => void queue.refetch()} disabled={queue.isFetching}>
+                          Retry queue
+                        </Button>
+                      </div>
+                    )}
+                  <div className="overflow-x-auto rounded-md border border-border/60">
+                    <Table className="min-w-[700px]">
                       <TableHeader>
                         <TableRow>
                           <TableHead>Status</TableHead>
@@ -208,8 +300,15 @@ export default function VideoRenders() {
                             <TableCell className="text-right">
                               <div className="flex justify-end gap-2">
                                 <Button size="sm" variant="outline" onClick={() => setSelectedRenderId(row.id)}>Review</Button>
-                                <Button size="sm" variant="ghost" onClick={() => retry.mutate({ render_id: row.id })} disabled={retry.isPending}>
-                                  {retry.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => retryRow(row.id)}
+                                  disabled={retryingRenderIds.has(row.id)}
+                                  aria-label={`Retry render for ${row.post?.author_handle ? `@${row.post.author_handle}` : row.tweet_id}`}
+                                  title="Retry this render"
+                                >
+                                  {retryingRenderIds.has(row.id) ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                                 </Button>
                               </div>
                             </TableCell>
@@ -217,6 +316,7 @@ export default function VideoRenders() {
                         ))}
                       </TableBody>
                     </Table>
+                  </div>
                   </div>
                 )}
               </CardContent>
@@ -227,15 +327,15 @@ export default function VideoRenders() {
                 <CardContent className="grid gap-2 p-4 text-sm sm:grid-cols-3">
                   <div className="flex items-center gap-2">
                     <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                    <span>{compactNumber(overview.data?.counts?.completed ?? 0)} completed</span>
+                    <span>{overview.data ? `${compactNumber(overview.data.counts?.completed ?? 0)} completed` : 'Completed count unavailable'}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <HardDrive className="h-4 w-4 text-primary" />
-                    <span>{formatBytes(overview.data?.output_bytes_7d)} in 7d</span>
+                    <span>{overview.data ? `${formatBytes(overview.data.output_bytes_7d)} in 7d` : 'Output total unavailable'}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <Clock className="h-4 w-4 text-blue-500" />
-                    <span>{overview.data?.oldest_queued_at ? `Oldest ${formatDistanceToNow(new Date(overview.data.oldest_queued_at), { addSuffix: true })}` : 'No backlog'}</span>
+                    <span>{overview.data ? (overview.data.oldest_queued_at ? `Oldest ${formatDistanceToNow(new Date(overview.data.oldest_queued_at), { addSuffix: true })}` : 'Healthy-empty queue') : 'Backlog status unavailable'}</span>
                   </div>
                 </CardContent>
               </Card>

@@ -105,8 +105,8 @@ import {
 import { queueManualAdvance } from "./manualAdvanceActions.ts";
 import { captureEdgeException, initSentryEdge } from "../_shared/sentry.ts";
 
-const DEPLOY_SHA = Deno.env.get('DEPLOY_GIT_SHA') ?? 'unknown';
-const DEPLOY_TIME = Deno.env.get('DEPLOY_TIME') ?? new Date().toISOString();
+const DEPLOY_SHA = Deno.env.get('DEPLOY_GIT_SHA')?.trim() || 'unknown';
+const DEPLOY_TIME = Deno.env.get('DEPLOY_TIME')?.trim() || 'unknown';
 initSentryEdge();
 
 function makeCorsHeaders(req?: Request): Record<string, string> {

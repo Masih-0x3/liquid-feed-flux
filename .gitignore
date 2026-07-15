@@ -32,6 +32,7 @@ supabase/.temp/
 
 # Local analysis and generated media artifacts
 .codegraph/
+.diffui/
 reports/
 __pycache__/
 *.py[cod]

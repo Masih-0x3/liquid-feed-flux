@@ -18,7 +18,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { invokeAdminRetry } from '@/api/adminRetry';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Activity, Brain, MessageSquare, Eye, Code, Sparkles, Send, Shield, Loader2, Filter, AtSign, ChevronDown, Info, Film } from 'lucide-react';
+import { Activity, AlertTriangle, Brain, MessageSquare, Eye, Code, Sparkles, Send, Shield, Loader2, Filter, AtSign, ChevronDown, Info, Film } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   useSettingsData, useSaveSettings, openaiModels, messagePlaceholders, promptPlaceholders,
@@ -92,6 +92,36 @@ function SettingsPanelFallback() {
   );
 }
 
+function SettingsSectionUnavailable({
+  title,
+  description,
+  onRetry,
+  isRetrying,
+}: {
+  title: string;
+  description: string;
+  onRetry: () => void;
+  isRetrying: boolean;
+}) {
+  return (
+    <Card className="glass-card border-amber-500/40">
+      <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex items-start gap-3">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
+          <div>
+            <h2 className="font-semibold text-glass-foreground">{title} is temporarily unavailable</h2>
+            <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+          </div>
+        </div>
+        <Button variant="outline" size="sm" onClick={onRetry} disabled={isRetrying}>
+          {isRetrying ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+          Retry
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function Settings() {
   const { toast } = useToast();
   const location = useLocation();
@@ -130,6 +160,11 @@ export default function Settings() {
   const ts = translationSettings ?? settings?.translation_prompt;
   const tgs = telegramSettings ?? settings?.telegram_config;
   const mt = messageTemplate ?? settings?.message_template;
+  const unavailableSections = [
+    !ts ? 'Translation' : null,
+    !mt ? 'Messages' : null,
+    !tgs ? 'Telegram' : null,
+  ].filter(Boolean) as string[];
 
   if (settingsQuery.isLoading) {
     return (
@@ -139,11 +174,12 @@ export default function Settings() {
     );
   }
 
-  if (!ts || !tgs || !mt) return null;
-
-  const selectedModel = openaiModels.find(m => m.id === ts.model);
-  const cappedTranslationMaxTokens = clampOpenAiCompletionTokens(ts.max_completion_tokens, 1000);
-  const saveTranslationPrompt = () => saveMutation.mutate({ key: 'translation_prompt', value: prepareTranslationSettingsForSave(ts) });
+  const selectedModel = ts ? openaiModels.find(m => m.id === ts.model) : undefined;
+  const cappedTranslationMaxTokens = clampOpenAiCompletionTokens(ts?.max_completion_tokens, 1000);
+  const saveTranslationPrompt = () => {
+    if (!ts) return;
+    saveMutation.mutate({ key: 'translation_prompt', value: prepareTranslationSettingsForSave(ts) });
+  };
 
   const getPlaceholderValue = (key: string, tweet: Record<string, unknown>) => {
     const accounts = tweet?.accounts as Record<string, unknown> | undefined;
@@ -167,10 +203,10 @@ export default function Settings() {
       case '{original_text}': return (tweet?.text_original as string) || 'Sample original text';
       case '{author_handle}': return (accounts?.handle as string) || '@sample';
       case '{author_name}': return (accounts?.display_name as string) || 'Sample Author';
-      case '{source_link}': return mt.include_source_link ? `<a href="${(tweet?.url as string) || '#'}">${mt.source_link_text}</a>` : '';
+      case '{source_link}': return mt?.include_source_link ? `<a href="${(tweet?.url as string) || '#'}">${mt.source_link_text}</a>` : '';
       case '{published_date}': return tweet?.tweeted_at ? new Date(tweet.tweeted_at as string).toLocaleDateString('fa-IR') : '\u06F1\u06F4\u06F0\u06F4/\u06F6/\u06F1\u06F2';
       case '{published_time}': return tweet?.tweeted_at ? new Date(tweet.tweeted_at as string).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }) : '\u06F2\u06F1:\u06F3\u06F5';
-      case '{hashtags}': return mt.custom_hashtags;
+      case '{hashtags}': return mt?.custom_hashtags ?? '';
       case '{media_info}': return (tweet?.has_media as boolean) ? '\u{1F4F8} \u062A\u0635\u0648\u06CC\u0631' : '';
       default: return key;
     }
@@ -179,6 +215,7 @@ export default function Settings() {
   const renderMessagePreview = () => {
     const sampleTweet = sampleTweets[selectedSample];
     if (!sampleTweet) return '';
+    if (!mt) return '';
     return messagePlaceholders.reduce((tpl, p) => tpl.replace(new RegExp(p.key.replace(/[{}]/g, '\\$&'), 'g'), getMessagePlaceholderValue(p.key, sampleTweet)), mt.template);
   };
 
@@ -189,12 +226,46 @@ export default function Settings() {
         <p className="text-muted-foreground mt-1">Configure your pipeline integrations and translation prompts</p>
       </div>
 
+      {(settingsQuery.isError || unavailableSections.length > 0) && (
+        <Alert className="border-amber-500/40 bg-amber-500/10">
+          <AlertTriangle className="h-4 w-4 text-amber-500" />
+          <AlertTitle>Some settings could not be loaded</AlertTitle>
+          <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <span>
+              {unavailableSections.length > 0
+                ? `${unavailableSections.join(', ')} ${unavailableSections.length === 1 ? 'is' : 'are'} unavailable. Other settings remain usable.`
+                : 'The settings request failed. Retry to restore the latest configuration.'}
+            </span>
+            <Button variant="outline" size="sm" onClick={() => settingsQuery.refetch()} disabled={settingsQuery.isFetching} className="w-fit">
+              {settingsQuery.isFetching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Retry settings
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
+
       <Tabs value={settingsTab} onValueChange={(v) => goToSettingsTab(v as SettingsTabId)} className="w-full">
-        <TabsList className="flex h-auto w-full justify-start gap-1 overflow-x-auto p-1">
-          <TabsTrigger value="translation" className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><Brain className="w-4 h-4" />Translation</TabsTrigger>
+        <div className="grid gap-2 sm:hidden">
+          <Label htmlFor="settings-section">Settings section</Label>
+          <Select value={settingsTab} onValueChange={(value) => goToSettingsTab(value as SettingsTabId)}>
+            <SelectTrigger id="settings-section" className="glass-input"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="translation" disabled={!ts}>Translation{!ts ? ' (unavailable)' : ''}</SelectItem>
+              <SelectItem value="filter">Scoring</SelectItem>
+              <SelectItem value="messages" disabled={!mt}>Messages{!mt ? ' (unavailable)' : ''}</SelectItem>
+              <SelectItem value="telegram" disabled={!tgs}>Telegram{!tgs ? ' (unavailable)' : ''}</SelectItem>
+              <SelectItem value="x-automation">X Automation</SelectItem>
+              <SelectItem value="video-rendering">Video</SelectItem>
+              <SelectItem value="enrichment">Enrichment</SelectItem>
+              <SelectItem value="observability">Observability</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <TabsList className="hidden h-auto w-full justify-start gap-1 overflow-x-auto p-1 sm:flex" aria-label="Settings sections">
+          <TabsTrigger value="translation" disabled={!ts} className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><Brain className="w-4 h-4" />Translation</TabsTrigger>
           <TabsTrigger value="filter" className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><Filter className="w-4 h-4" />Scoring</TabsTrigger>
-          <TabsTrigger value="messages" className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><MessageSquare className="w-4 h-4" />Messages</TabsTrigger>
-          <TabsTrigger value="telegram" className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><Send className="w-4 h-4" />Telegram</TabsTrigger>
+          <TabsTrigger value="messages" disabled={!mt} className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><MessageSquare className="w-4 h-4" />Messages</TabsTrigger>
+          <TabsTrigger value="telegram" disabled={!tgs} className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><Send className="w-4 h-4" />Telegram</TabsTrigger>
           <TabsTrigger value="x-automation" className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><AtSign className="w-4 h-4" />X Automation</TabsTrigger>
           <TabsTrigger value="video-rendering" className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><Film className="w-4 h-4" />Video</TabsTrigger>
           <TabsTrigger value="enrichment" className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><Sparkles className="w-4 h-4" />Enrichment</TabsTrigger>
@@ -203,6 +274,8 @@ export default function Settings() {
 
         {/* Translation Tab */}
         <TabsContent value="translation" className="space-y-6">
+          {ts ? (
+            <>
           <Card className="glass-card">
             <CardHeader>
               <CardTitle className="flex items-center text-glass-foreground"><Sparkles className="w-5 h-5 mr-2" />AI Model Selection</CardTitle>
@@ -235,7 +308,7 @@ export default function Settings() {
                   </div>
                 )}
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label>{selectedModel?.useMaxCompletionTokens ? 'Max Completion Tokens' : 'Max Tokens'}</Label>
                   <Input type="number" min="1" max={completionTokenMax(selectedModel?.maxTokens, 4096)} value={cappedTranslationMaxTokens} onChange={(e) => setTranslationSettings({ ...ts, max_completion_tokens: parseOpenAiCompletionTokens(e.target.value, 1000) })} className="glass-input" />
@@ -285,7 +358,7 @@ export default function Settings() {
                   </Button>
                 </CollapsibleTrigger>
                 <CollapsibleContent className="space-y-4 pt-4">
-                  <div className="grid grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                     {selectedModel?.supportsTopP && (
                       <div className="space-y-2">
                         <Label>Top P</Label>
@@ -299,7 +372,7 @@ export default function Settings() {
                       </>
                     )}
                   </div>
-                  <div className="grid grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                     {selectedModel?.supportsSeed && (
                       <div className="space-y-2">
                         <Label>Seed (optional)</Label>
@@ -402,7 +475,7 @@ export default function Settings() {
                     </Select>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div className="space-y-2">
                       <Label>Max Completion Tokens</Label>
                       <Input type="number" min={1} max={completionTokenMax(scoringModel?.maxTokens, 16000)} value={cappedScoringMaxTokens} onChange={(e) => updateScoring({ max_completion_tokens: parseOpenAiCompletionTokens(e.target.value, 2000) })} className="glass-input" />
@@ -509,7 +582,7 @@ export default function Settings() {
                   <Label htmlFor="user_prompt_template">User Prompt Template</Label>
                   <div className="flex items-center gap-2"><Eye className="w-4 h-4" /><span className="text-sm text-muted-foreground">Available Placeholders</span></div>
                 </div>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   {promptPlaceholders.map(p => (
                     <Button key={p.key} variant="outline" size="sm" onClick={() => insertPlaceholder(p.key, 'user_prompt_template', ts.user_prompt_template, (v) => setTranslationSettings({ ...ts, user_prompt_template: v }))} className="justify-start h-auto p-3">
                       <div className="text-left"><div className="font-mono text-xs text-primary">{p.key}</div><div className="text-xs text-muted-foreground">{p.description}</div></div>
@@ -587,6 +660,15 @@ export default function Settings() {
               sampleTweets={sampleTweets}
             />
           </Suspense>
+            </>
+          ) : (
+            <SettingsSectionUnavailable
+              title="Translation settings"
+              description="The translation configuration was not returned, so this editor is disabled until the latest settings load succeeds."
+              onRetry={() => settingsQuery.refetch()}
+              isRetrying={settingsQuery.isFetching}
+            />
+          )}
         </TabsContent>
 
         {/* Content Filter Tab */}
@@ -629,16 +711,27 @@ export default function Settings() {
             <StoryMemoryCard
               initial={settings?.story_memory as Partial<import('@/components/settings/StoryMemoryCard').StoryMemoryConfig> | undefined}
             />
-            <ContentFilterSettings
-              initialConfig={settings?.content_filter as ContentFilterConfig | undefined}
-              translationSettings={ts}
-              onTranslationSettingsChange={setTranslationSettings}
-            />
+            {ts ? (
+              <ContentFilterSettings
+                initialConfig={settings?.content_filter as ContentFilterConfig | undefined}
+                translationSettings={ts}
+                onTranslationSettingsChange={setTranslationSettings}
+              />
+            ) : (
+              <SettingsSectionUnavailable
+                title="Translation-dependent scoring controls"
+                description="The scoring prompt and classifier schema require translation settings, which are not available from the latest response. Independent filter controls remain available."
+                onRetry={() => settingsQuery.refetch()}
+                isRetrying={settingsQuery.isFetching}
+              />
+            )}
             <LearnedSignalsCard />
           </Suspense>
         </TabsContent>
 
         <TabsContent value="messages" className="space-y-6">
+          {mt ? (
+            <>
           <Card className="glass-card">
             <CardHeader>
               <CardTitle className="flex items-center text-glass-foreground"><MessageSquare className="w-5 h-5 mr-2" />Telegram Message Template</CardTitle>
@@ -650,7 +743,7 @@ export default function Settings() {
                   <Label htmlFor="message_template">Message Template</Label>
                   <div className="flex items-center gap-2"><Eye className="w-4 h-4" /><span className="text-sm text-muted-foreground">Available Placeholders</span></div>
                 </div>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   {messagePlaceholders.map(p => (
                     <Button key={p.key} variant="outline" size="sm" onClick={() => insertPlaceholder(p.key, 'message_template', mt.template, (v) => setMessageTemplate({ ...mt, template: v }))} className="justify-start h-auto p-3">
                       <div className="text-left"><div className="font-mono text-xs text-primary">{p.key}</div><div className="text-xs text-muted-foreground">{p.description}</div></div>
@@ -662,11 +755,11 @@ export default function Settings() {
               <Separator />
               <div className="space-y-4">
                 <Label className="text-base font-medium">Message Options</Label>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <Label className="flex items-center gap-2"><input type="checkbox" checked={mt.include_source_link} onChange={(e) => setMessageTemplate({ ...mt, include_source_link: e.target.checked })} className="rounded" />Include Source Link</Label>
                   <Label className="flex items-center gap-2"><input type="checkbox" checked={mt.include_media_caption} onChange={(e) => setMessageTemplate({ ...mt, include_media_caption: e.target.checked })} className="rounded" />Include Media Caption</Label>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div className="space-y-2"><Label>Source Link Text</Label><Input value={mt.source_link_text} onChange={(e) => setMessageTemplate({ ...mt, source_link_text: e.target.value })} className="glass-input" /></div>
                   <div className="space-y-2"><Label>Custom Hashtags</Label><Input value={mt.custom_hashtags} onChange={(e) => setMessageTemplate({ ...mt, custom_hashtags: e.target.value })} className="glass-input" /></div>
                 </div>
@@ -721,10 +814,21 @@ export default function Settings() {
               </div>
             </CardContent>
           </Card>
+            </>
+          ) : (
+            <SettingsSectionUnavailable
+              title="Message settings"
+              description="The message-template configuration was not returned. The remaining settings sections are still available."
+              onRetry={() => settingsQuery.refetch()}
+              isRetrying={settingsQuery.isFetching}
+            />
+          )}
         </TabsContent>
 
         {/* Telegram Tab */}
         <TabsContent value="telegram" className="space-y-6">
+          {tgs ? (
+            <>
           <Card className="glass-card">
             <CardHeader>
               <CardTitle className="flex items-center text-glass-foreground"><Send className="w-5 h-5 mr-2" />Telegram Configuration</CardTitle>
@@ -752,6 +856,15 @@ export default function Settings() {
               <Button onClick={() => saveMutation.mutate({ key: 'telegram_config', value: tgs })} disabled={saveMutation.isPending} className="bg-gradient-primary hover:opacity-90 text-white w-full">Save Telegram Config</Button>
             </CardContent>
           </Card>
+            </>
+          ) : (
+            <SettingsSectionUnavailable
+              title="Telegram settings"
+              description="The Telegram configuration was not returned. Retry when the integration is available again."
+              onRetry={() => settingsQuery.refetch()}
+              isRetrying={settingsQuery.isFetching}
+            />
+          )}
         </TabsContent>
 
         {/* X Automation Tab */}

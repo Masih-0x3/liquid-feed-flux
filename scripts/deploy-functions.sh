@@ -119,7 +119,7 @@ if [[ "$DRY_RUN" == "1" ]]; then
     printf ' %q' npx supabase "${args[@]}"
     printf '\n'
   done
-  echo "==> Dry run: would set DEPLOY_GIT_SHA=$SHA on $PROJECT_REF after all selected deploys succeed"
+  echo "==> Dry run: would set DEPLOY_GIT_SHA=$SHA and DEPLOY_TIME=<UTC timestamp> on $PROJECT_REF after all selected deploys succeed"
   echo "==> Dry run complete. No secrets or functions changed."
   exit 0
 fi
@@ -135,7 +135,8 @@ for fn in "${FUNCTIONS[@]}"; do
   npx supabase "${args[@]}"
 done
 
-echo "==> Setting DEPLOY_GIT_SHA=$SHA on $PROJECT_REF"
-npx supabase secrets set DEPLOY_GIT_SHA="$SHA" --project-ref "$PROJECT_REF"
+DEPLOY_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+echo "==> Setting release metadata for SHA=$SHA at $DEPLOY_TIME on $PROJECT_REF"
+npx supabase secrets set DEPLOY_GIT_SHA="$SHA" DEPLOY_TIME="$DEPLOY_TIME" --project-ref "$PROJECT_REF"
 
-echo "==> All done. SHA=$SHA"
+echo "==> All done. SHA=$SHA DEPLOY_TIME=$DEPLOY_TIME"

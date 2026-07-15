@@ -110,6 +110,7 @@ export function ManualVideoIntakePanel() {
   const detail = useManualVideoIntakeDetail({ intakeId: activeIntakeId, enabled: Boolean(activeIntakeId) });
   const snapshot = detail.data?.ok !== false ? detail.data : null;
   const intake = snapshot?.intake ?? selectedFromList;
+  const detailUnavailable = Boolean(detail.isError || detail.data?.ok === false);
 
   const completedRenders = useMemo(
     () => (snapshot?.renders ?? []).filter((row) => row.status === 'completed' && row.output_storage_path),
@@ -229,6 +230,18 @@ export function ManualVideoIntakePanel() {
                 <div className="flex min-h-28 items-center justify-center">
                   <Loader2 className="h-5 w-5 animate-spin text-primary" />
                 </div>
+              ) : list.isError ? (
+                <div className="flex min-h-28 flex-col items-center justify-center gap-3 p-4 text-center text-sm">
+                  <AlertTriangle className="h-5 w-5 text-destructive" />
+                  <div>
+                    <p className="font-medium text-glass-foreground">Manual intake list is unavailable</p>
+                    <p className="mt-1 text-muted-foreground">{list.error instanceof Error ? list.error.message : 'This is not an empty intake list.'}</p>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={() => void list.refetch()} disabled={list.isFetching}>
+                    {list.isFetching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                    Retry
+                  </Button>
+                </div>
               ) : rows.length === 0 ? (
                 <div className="p-5 text-sm text-muted-foreground">No manual intakes yet.</div>
               ) : (
@@ -297,6 +310,8 @@ export function ManualVideoIntakePanel() {
                       size="sm"
                       onClick={() => cancelIntake.mutate({ intake_id: intake.id })}
                       disabled={cancelIntake.isPending || intake.status === 'posted' || intake.status === 'canceled'}
+                      aria-label="Cancel manual intake"
+                      title="Cancel manual intake"
                     >
                       {cancelIntake.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
                     </Button>
@@ -310,6 +325,20 @@ export function ManualVideoIntakePanel() {
                   </div>
                 ) : (
                   <>
+                    {detailUnavailable && (
+                      <Alert variant="destructive">
+                        <AlertTriangle className="h-4 w-4" />
+                        <AlertTitle>Manual intake details are unavailable</AlertTitle>
+                        <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          <span>{detail.error instanceof Error ? detail.error.message : detail.data?.error || 'Showing only last-known intake list data until details can be reloaded.'}</span>
+                          <Button size="sm" variant="outline" onClick={() => void detail.refetch()} disabled={detail.isFetching} className="w-fit">
+                            {detail.isFetching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                            Retry details
+                          </Button>
+                        </AlertDescription>
+                      </Alert>
+                    )}
+
                     {(intake.last_error || safeString(safety.lookup_warning)) && (
                       <Alert variant="destructive">
                         <AlertTriangle className="h-4 w-4" />
@@ -371,9 +400,9 @@ export function ManualVideoIntakePanel() {
                         </div>
                         {completedRenders.length > 1 && (
                           <div className="grid gap-1">
-                            <Label>Render Selection</Label>
+                            <Label htmlFor="manual-render-selection">Render Selection</Label>
                             <Select value={selectedRenderId} onValueChange={setSelectedRenderId}>
-                              <SelectTrigger><SelectValue /></SelectTrigger>
+                              <SelectTrigger id="manual-render-selection"><SelectValue /></SelectTrigger>
                               <SelectContent>
                                 {completedRenders.map((row) => (
                                   <SelectItem key={row.id} value={row.id}>{renderLabel(row)}</SelectItem>
@@ -427,12 +456,16 @@ export function ManualVideoIntakePanel() {
                             </div>
                           </div>
                           {overrideChecked && (
-                            <Textarea
-                              value={overrideReason}
-                              onChange={(event) => setOverrideReason(event.target.value)}
-                              placeholder="Reason"
-                              className="min-h-20"
-                            />
+                            <div className="grid gap-1">
+                              <Label htmlFor="manual-duplicate-override-reason">Reason for override</Label>
+                              <Textarea
+                                id="manual-duplicate-override-reason"
+                                value={overrideReason}
+                                onChange={(event) => setOverrideReason(event.target.value)}
+                                placeholder="Explain why this duplicate should be posted"
+                                className="min-h-20"
+                              />
+                            </div>
                           )}
                           <div className="flex justify-end">
                             <Button
