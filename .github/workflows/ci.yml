@@ -18,6 +18,8 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run check:function-inventory
+      - run: npm run check:migration-baseline
+      - run: npm run test:migration-baseline
       - run: npm run lint:functions
       - run: npm run check:functions
       - run: npm run check:strict

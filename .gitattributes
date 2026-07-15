@@ -1,0 +1,5 @@
+# Preserve reviewed historical migration evidence byte-for-byte.
+supabase/migration-history/20250903140000_rpc_pipeline_status_and_retry.sql -text
+supabase/migrations/20250904033120_add_core_pipeline_columns.sql -text
+supabase/migrations/20250904033146_rpc_pipeline_status_and_retry.sql -text
+supabase/migrations/20250905010114_telegram_analytics.sql -text whitespace=-trailing-space

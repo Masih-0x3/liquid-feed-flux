@@ -1,0 +1,1917 @@
+{
+  "schema_version": "xot-schema-privilege-diff-v1",
+  "observed_at": "2026-07-14T10:48:00Z",
+  "methodology": {
+    "generator": "scripts/build-schema-privilege-diff.mjs",
+    "generator_version": 1,
+    "tool_versions": {
+      "node": "22.23.1",
+      "pg_dump": "Supabase CLI 2.109.1"
+    },
+    "canonicalization_contract": "normalize CRLF to LF; remove only blank lines, whole-line SQL comments, GRANT, REVOKE, and ALTER DEFAULT PRIVILEGES; preserve every retained byte including quoted content"
+  },
+  "source": {
+    "replay": {
+      "sha256": "6871e7d3a6a7fa10f5020da3cefed942b536946f6cb74171391eaf9f5fbff3ce",
+      "lines": 4888,
+      "bytes": 184405
+    },
+    "production": {
+      "sha256": "22463e4173f21c7ad2e1da82d474237c04c6a3872513f4ce73a5eeb741d8ec44",
+      "lines": 4906,
+      "bytes": 183628
+    }
+  },
+  "non_privilege_schema": {
+    "replay_sha256": "3467c722833038deb89235eb8d7b2d97e70f19c19d2eb4fef59188dffb46ba0b",
+    "production_sha256": "3467c722833038deb89235eb8d7b2d97e70f19c19d2eb4fef59188dffb46ba0b",
+    "expected_empty": true,
+    "excluded_from_this_hash": [
+      "comments",
+      "blank lines",
+      "GRANT",
+      "REVOKE",
+      "ALTER DEFAULT PRIVILEGES"
+    ]
+  },
+  "assessment": {
+    "status": "blocked_pending_sr_rls_01_role_matrix",
+    "interpretation": "production_broader is a syntactic grant comparison, not by itself proof of exploitability; RLS, function security mode, and API exposure still require role-specific testing",
+    "required_roles": [
+      "anon",
+      "authenticated_viewer",
+      "authenticated_admin",
+      "service_role",
+      "renderer"
+    ],
+    "required_surfaces": [
+      "REST CRUD",
+      "RPC",
+      "Realtime",
+      "Storage"
+    ],
+    "known_same_version_source_divergences": [
+      "20260515080625",
+      "20260515084409",
+      "20260515104839",
+      "20260516021358"
+    ]
+  },
+  "default_privilege_assessment": {
+    "status": "blocked_pending_sr_rls_01_explicit_disposition",
+    "replay_clauses": 9,
+    "production_clauses": 10,
+    "common_clauses": 3,
+    "replay_only": 6,
+    "production_only": 7,
+    "production_future_object_blast_radius": [
+      "ALL on future public tables for anon",
+      "ALL on future public tables for authenticated",
+      "ALL on future public tables for service_role",
+      "ALL on future public sequences for anon",
+      "ALL on future public sequences for authenticated",
+      "ALL on future public sequences for service_role",
+      "ALL on future public functions for service_role"
+    ],
+    "required_resolution": "review and explicitly replace or approve every production-only default privilege before any subsequent object-creating migration"
+  },
+  "privileges": {
+    "replay_grant_records": 156,
+    "production_grant_records": 167,
+    "replay_revoke_records": 39,
+    "production_revoke_records": 39,
+    "differing_records": 105,
+    "production_broader_records": 105,
+    "replay_broader_records": 0,
+    "different_records": 0,
+    "differences": [
+      {
+        "statement": "grant",
+        "object_type": "function",
+        "object_name": "\"public\".\"_cron_internal_headers\"()",
+        "grantee": "service_role",
+        "replay_privileges": [],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "function",
+        "object_name": "\"public\".\"calculate_growth_rate\"(\"p_chat_id\" \"text\", \"p_days\" integer)",
+        "grantee": "anon",
+        "replay_privileges": [],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "function",
+        "object_name": "\"public\".\"calculate_growth_rate\"(\"p_chat_id\" \"text\", \"p_days\" integer)",
+        "grantee": "authenticated",
+        "replay_privileges": [],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "function",
+        "object_name": "\"public\".\"calculate_growth_rate\"(\"p_chat_id\" \"text\", \"p_days\" integer)",
+        "grantee": "service_role",
+        "replay_privileges": [],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "function",
+        "object_name": "\"public\".\"get_top_performing_posts\"(\"p_limit\" integer)",
+        "grantee": "anon",
+        "replay_privileges": [],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "function",
+        "object_name": "\"public\".\"get_top_performing_posts\"(\"p_limit\" integer)",
+        "grantee": "authenticated",
+        "replay_privileges": [],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "function",
+        "object_name": "\"public\".\"get_top_performing_posts\"(\"p_limit\" integer)",
+        "grantee": "service_role",
+        "replay_privileges": [],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "function",
+        "object_name": "\"public\".\"invoke_x_poster_if_enabled\"()",
+        "grantee": "service_role",
+        "replay_privileges": [],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "function",
+        "object_name": "\"public\".\"update_updated_at_column\"()",
+        "grantee": "anon",
+        "replay_privileges": [],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "function",
+        "object_name": "\"public\".\"update_updated_at_column\"()",
+        "grantee": "authenticated",
+        "replay_privileges": [],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "function",
+        "object_name": "\"public\".\"update_updated_at_column\"()",
+        "grantee": "service_role",
+        "replay_privileges": [],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"accounts\"",
+        "grantee": "anon",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "DELETE",
+          "INSERT",
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE",
+          "UPDATE"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"accounts\"",
+        "grantee": "authenticated",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"accounts\"",
+        "grantee": "service_role",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"dead_letter_jobs\"",
+        "grantee": "anon",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "DELETE",
+          "INSERT",
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE",
+          "UPDATE"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"dead_letter_jobs\"",
+        "grantee": "authenticated",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"dead_letter_jobs\"",
+        "grantee": "service_role",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"deliveries\"",
+        "grantee": "anon",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "DELETE",
+          "INSERT",
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE",
+          "UPDATE"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"deliveries\"",
+        "grantee": "authenticated",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"deliveries\"",
+        "grantee": "service_role",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"digests\"",
+        "grantee": "anon",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "DELETE",
+          "INSERT",
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE",
+          "UPDATE"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"digests\"",
+        "grantee": "authenticated",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"digests\"",
+        "grantee": "service_role",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"feedback_events\"",
+        "grantee": "anon",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "DELETE",
+          "INSERT",
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE",
+          "UPDATE"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"feedback_events\"",
+        "grantee": "authenticated",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"feedback_events\"",
+        "grantee": "service_role",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"feeds\"",
+        "grantee": "anon",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "DELETE",
+          "INSERT",
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE",
+          "UPDATE"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"feeds\"",
+        "grantee": "authenticated",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"feeds\"",
+        "grantee": "service_role",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"jobs\"",
+        "grantee": "anon",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "DELETE",
+          "INSERT",
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE",
+          "UPDATE"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"jobs\"",
+        "grantee": "authenticated",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"jobs\"",
+        "grantee": "service_role",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"manual_video_intakes\"",
+        "grantee": "anon",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"manual_video_intakes\"",
+        "grantee": "authenticated",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "SELECT",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"media\"",
+        "grantee": "anon",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "DELETE",
+          "INSERT",
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE",
+          "UPDATE"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"media\"",
+        "grantee": "authenticated",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"media\"",
+        "grantee": "service_role",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"moderation_events\"",
+        "grantee": "anon",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "DELETE",
+          "INSERT",
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE",
+          "UPDATE"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"moderation_events\"",
+        "grantee": "authenticated",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"moderation_events\"",
+        "grantee": "service_role",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"pipeline_events\"",
+        "grantee": "anon",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "DELETE",
+          "INSERT",
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE",
+          "UPDATE"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"pipeline_events\"",
+        "grantee": "authenticated",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"pipeline_events\"",
+        "grantee": "service_role",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"posts\"",
+        "grantee": "anon",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "DELETE",
+          "INSERT",
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE",
+          "UPDATE"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"posts\"",
+        "grantee": "authenticated",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"posts\"",
+        "grantee": "service_role",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"settings\"",
+        "grantee": "anon",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "DELETE",
+          "INSERT",
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE",
+          "UPDATE"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"settings\"",
+        "grantee": "authenticated",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"settings\"",
+        "grantee": "service_role",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"story_pair_blocklist\"",
+        "grantee": "anon",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "DELETE",
+          "INSERT",
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE",
+          "UPDATE"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"story_pair_blocklist\"",
+        "grantee": "authenticated",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"story_pair_blocklist\"",
+        "grantee": "service_role",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"story_signatures\"",
+        "grantee": "anon",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "DELETE",
+          "INSERT",
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE",
+          "UPDATE"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"story_signatures\"",
+        "grantee": "authenticated",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"story_signatures\"",
+        "grantee": "service_role",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"telegram_channel_current\"",
+        "grantee": "anon",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "DELETE",
+          "INSERT",
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE",
+          "UPDATE"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"telegram_channel_current\"",
+        "grantee": "authenticated",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"telegram_channel_current\"",
+        "grantee": "service_role",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"telegram_channel_stats\"",
+        "grantee": "anon",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "DELETE",
+          "INSERT",
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE",
+          "UPDATE"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"telegram_channel_stats\"",
+        "grantee": "authenticated",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"telegram_channel_stats\"",
+        "grantee": "service_role",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"telegram_daily_stats\"",
+        "grantee": "anon",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "DELETE",
+          "INSERT",
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE",
+          "UPDATE"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"telegram_daily_stats\"",
+        "grantee": "authenticated",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"telegram_daily_stats\"",
+        "grantee": "service_role",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"telegram_member_events\"",
+        "grantee": "anon",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "DELETE",
+          "INSERT",
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE",
+          "UPDATE"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"telegram_member_events\"",
+        "grantee": "authenticated",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"telegram_member_events\"",
+        "grantee": "service_role",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"telegram_member_growth\"",
+        "grantee": "anon",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "DELETE",
+          "INSERT",
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE",
+          "UPDATE"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"telegram_member_growth\"",
+        "grantee": "authenticated",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"telegram_member_growth\"",
+        "grantee": "service_role",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"telegram_message_analytics\"",
+        "grantee": "anon",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "DELETE",
+          "INSERT",
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE",
+          "UPDATE"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"telegram_message_analytics\"",
+        "grantee": "authenticated",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"telegram_message_analytics\"",
+        "grantee": "service_role",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"telegram_message_performance\"",
+        "grantee": "anon",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "DELETE",
+          "INSERT",
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE",
+          "UPDATE"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"telegram_message_performance\"",
+        "grantee": "authenticated",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"telegram_message_performance\"",
+        "grantee": "service_role",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"threads\"",
+        "grantee": "anon",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "DELETE",
+          "INSERT",
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE",
+          "UPDATE"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"threads\"",
+        "grantee": "authenticated",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"threads\"",
+        "grantee": "service_role",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"user_roles\"",
+        "grantee": "anon",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "DELETE",
+          "INSERT",
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE",
+          "UPDATE"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"user_roles\"",
+        "grantee": "authenticated",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"user_roles\"",
+        "grantee": "service_role",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"video_render_feedback\"",
+        "grantee": "anon",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"video_render_feedback\"",
+        "grantee": "authenticated",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "SELECT",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"video_renderer_heartbeats\"",
+        "grantee": "anon",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"video_renderer_heartbeats\"",
+        "grantee": "authenticated",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "SELECT",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"video_renders\"",
+        "grantee": "anon",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"video_renders\"",
+        "grantee": "authenticated",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "SELECT",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"x_deliveries\"",
+        "grantee": "anon",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "DELETE",
+          "INSERT",
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE",
+          "UPDATE"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"x_deliveries\"",
+        "grantee": "authenticated",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"x_deliveries\"",
+        "grantee": "service_role",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"x_deliveries_safe\"",
+        "grantee": "anon",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "DELETE",
+          "INSERT",
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE",
+          "UPDATE"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"x_deliveries_safe\"",
+        "grantee": "authenticated",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "SELECT",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"x_deliveries_safe\"",
+        "grantee": "service_role",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"x_follower_changes\"",
+        "grantee": "anon",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "DELETE",
+          "INSERT",
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE",
+          "UPDATE"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"x_follower_changes\"",
+        "grantee": "authenticated",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"x_follower_changes\"",
+        "grantee": "service_role",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"x_follower_snapshots\"",
+        "grantee": "anon",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "DELETE",
+          "INSERT",
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE",
+          "UPDATE"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"x_follower_snapshots\"",
+        "grantee": "authenticated",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"x_follower_snapshots\"",
+        "grantee": "service_role",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"x_followers_cache\"",
+        "grantee": "anon",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "DELETE",
+          "INSERT",
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE",
+          "UPDATE"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"x_followers_cache\"",
+        "grantee": "authenticated",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"x_followers_cache\"",
+        "grantee": "service_role",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"x_non_followback_reviews\"",
+        "grantee": "anon",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      },
+      {
+        "statement": "grant",
+        "object_type": "table",
+        "object_name": "\"public\".\"x_non_followback_reviews\"",
+        "grantee": "service_role",
+        "replay_privileges": [
+          "MAINTAIN",
+          "REFERENCES",
+          "TRIGGER",
+          "TRUNCATE"
+        ],
+        "production_privileges": [
+          "ALL"
+        ],
+        "classification": "production_broader"
+      }
+    ],
+    "default_privileges": {
+      "replay": [
+        "ALTER DEFAULT PRIVILEGES FOR ROLE \"postgres\" IN SCHEMA \"public\" GRANT ALL ON FUNCTIONS TO \"postgres\";",
+        "ALTER DEFAULT PRIVILEGES FOR ROLE \"postgres\" IN SCHEMA \"public\" GRANT ALL ON SEQUENCES TO \"postgres\";",
+        "ALTER DEFAULT PRIVILEGES FOR ROLE \"postgres\" IN SCHEMA \"public\" GRANT ALL ON TABLES TO \"postgres\";",
+        "ALTER DEFAULT PRIVILEGES FOR ROLE \"postgres\" IN SCHEMA \"public\" GRANT REFERENCES,TRIGGER,TRUNCATE,MAINTAIN ON TABLES TO \"anon\";",
+        "ALTER DEFAULT PRIVILEGES FOR ROLE \"postgres\" IN SCHEMA \"public\" GRANT REFERENCES,TRIGGER,TRUNCATE,MAINTAIN ON TABLES TO \"authenticated\";",
+        "ALTER DEFAULT PRIVILEGES FOR ROLE \"postgres\" IN SCHEMA \"public\" GRANT REFERENCES,TRIGGER,TRUNCATE,MAINTAIN ON TABLES TO \"service_role\";",
+        "ALTER DEFAULT PRIVILEGES FOR ROLE \"postgres\" IN SCHEMA \"public\" GRANT UPDATE ON SEQUENCES TO \"anon\";",
+        "ALTER DEFAULT PRIVILEGES FOR ROLE \"postgres\" IN SCHEMA \"public\" GRANT UPDATE ON SEQUENCES TO \"authenticated\";",
+        "ALTER DEFAULT PRIVILEGES FOR ROLE \"postgres\" IN SCHEMA \"public\" GRANT UPDATE ON SEQUENCES TO \"service_role\";"
+      ],
+      "production": [
+        "ALTER DEFAULT PRIVILEGES FOR ROLE \"postgres\" IN SCHEMA \"public\" GRANT ALL ON FUNCTIONS TO \"postgres\";",
+        "ALTER DEFAULT PRIVILEGES FOR ROLE \"postgres\" IN SCHEMA \"public\" GRANT ALL ON FUNCTIONS TO \"service_role\";",
+        "ALTER DEFAULT PRIVILEGES FOR ROLE \"postgres\" IN SCHEMA \"public\" GRANT ALL ON SEQUENCES TO \"anon\";",
+        "ALTER DEFAULT PRIVILEGES FOR ROLE \"postgres\" IN SCHEMA \"public\" GRANT ALL ON SEQUENCES TO \"authenticated\";",
+        "ALTER DEFAULT PRIVILEGES FOR ROLE \"postgres\" IN SCHEMA \"public\" GRANT ALL ON SEQUENCES TO \"postgres\";",
+        "ALTER DEFAULT PRIVILEGES FOR ROLE \"postgres\" IN SCHEMA \"public\" GRANT ALL ON SEQUENCES TO \"service_role\";",
+        "ALTER DEFAULT PRIVILEGES FOR ROLE \"postgres\" IN SCHEMA \"public\" GRANT ALL ON TABLES TO \"anon\";",
+        "ALTER DEFAULT PRIVILEGES FOR ROLE \"postgres\" IN SCHEMA \"public\" GRANT ALL ON TABLES TO \"authenticated\";",
+        "ALTER DEFAULT PRIVILEGES FOR ROLE \"postgres\" IN SCHEMA \"public\" GRANT ALL ON TABLES TO \"postgres\";",
+        "ALTER DEFAULT PRIVILEGES FOR ROLE \"postgres\" IN SCHEMA \"public\" GRANT ALL ON TABLES TO \"service_role\";"
+      ]
+    }
+  },
+  "disposition": {
+    "status": "blocked_pending_sr_rls_01",
+    "reason": "structure parity does not authorize accepting broader production grants; role matrix and authenticated workflow proof are required"
+  }
+}
