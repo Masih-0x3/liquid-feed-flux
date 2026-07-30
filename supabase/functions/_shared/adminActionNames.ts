@@ -1,6 +1,7 @@
 export const ADMIN_ACTION_NAMES = [
   'version',
   'save_settings',
+  'get_recent_author_stats',
   'edit_translation',
   'retry_step',
   'reprocess',
