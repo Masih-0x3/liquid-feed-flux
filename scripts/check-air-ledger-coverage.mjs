@@ -57,6 +57,25 @@ function assertContract({ plan, ledgerText, packageJson, ci }, label = "current 
       (!row.deployment_state || typeof row.deployment_state !== "object")) {
       fail(`${label}: ${id} latest disposition lacks local/release state evidence`);
     }
+    if (!row.source_discovery || typeof row.source_discovery !== "object" ||
+      !Array.isArray(row.source_discovery.affected_paths) || row.source_discovery.affected_paths.length === 0) {
+      fail(`${label}: ${id} latest disposition lacks source-discovery proof`);
+    }
+    if (!Array.isArray(row.scope_completed) || row.scope_completed.length === 0) {
+      fail(`${label}: ${id} latest disposition lacks completed-scope proof`);
+    }
+    if (!row.adversarial_review || typeof row.adversarial_review !== "object") {
+      fail(`${label}: ${id} latest disposition lacks adversarial-review proof`);
+    }
+    if (!row.validation || typeof row.validation !== "object") {
+      fail(`${label}: ${id} latest disposition lacks validation proof`);
+    }
+    if (!Array.isArray(row.not_closed) || row.not_closed.length === 0) {
+      fail(`${label}: ${id} latest disposition lacks remaining-risk proof`);
+    }
+    if (!row.deployment_state || typeof row.deployment_state !== "object") {
+      fail(`${label}: ${id} latest disposition lacks deployment-state proof`);
+    }
     const disposition = row.air_dispositions?.[id];
     if (!disposition || typeof disposition !== "object" || Array.isArray(disposition)) {
       fail(`${label}: ${id} latest disposition lacks an explicit owner/evidence/date record`);
@@ -188,6 +207,10 @@ if (process.env.MUTATION_TEST === "1") {
     ...input,
     ledgerText: mutateLatestRowField(input.ledgerText, "AIR-001", "evidence_tier", null),
   }), "missing evidence tier split mutant");
+  assertRejects((input) => ({
+    ...input,
+    ledgerText: mutateLatestRowField(input.ledgerText, "AIR-001", "validation", null),
+  }), "missing validation proof mutant");
 }
 
 console.log(
