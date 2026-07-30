@@ -77,6 +77,16 @@ function assertContract({ plan, ledgerText, packageJson, ci }, label = "current 
     if (typeof rollbackReceipt !== "string" || !rollbackReceipt.trim()) {
       fail(`${label}: ${id} latest disposition lacks a rollback/kill-switch receipt`);
     }
+    const evidenceTier = row.evidence_tier;
+    if (!evidenceTier || typeof evidenceTier !== "object" || Array.isArray(evidenceTier) ||
+      !Array.isArray(evidenceTier.achieved) || !Array.isArray(evidenceTier.deferred)) {
+      fail(`${label}: ${id} latest disposition lacks an explicit achieved/deferred evidence-tier split`);
+    }
+    const knownTiers = new Set(["T0", "T1", "T2", "T3", "T4"]);
+    if ([...evidenceTier.achieved, ...evidenceTier.deferred].some((tier) =>
+      typeof tier !== "string" || !knownTiers.has(tier))) {
+      fail(`${label}: ${id} latest disposition contains an unknown evidence tier`);
+    }
   }
 
   const packageData = JSON.parse(packageJson);
@@ -174,6 +184,10 @@ if (process.env.MUTATION_TEST === "1") {
     ...input,
     ledgerText: mutateLatestRowField(input.ledgerText, "AIR-001", "rollback_kill_receipt", ""),
   }), "missing rollback receipt mutant");
+  assertRejects((input) => ({
+    ...input,
+    ledgerText: mutateLatestRowField(input.ledgerText, "AIR-001", "evidence_tier", null),
+  }), "missing evidence tier split mutant");
 }
 
 console.log(
