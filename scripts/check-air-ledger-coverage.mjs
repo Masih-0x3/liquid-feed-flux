@@ -73,6 +73,10 @@ function assertContract({ plan, ledgerText, packageJson, ci }, label = "current 
     if (typeof disposition.deadline !== "string" || !disposition.deadline.trim()) {
       fail(`${label}: ${id} latest disposition lacks an owner deadline`);
     }
+    const rollbackReceipt = row.rollback_kill_receipt ?? row.kill_switch_receipt ?? row.deployment_state?.rollback;
+    if (typeof rollbackReceipt !== "string" || !rollbackReceipt.trim()) {
+      fail(`${label}: ${id} latest disposition lacks a rollback/kill-switch receipt`);
+    }
   }
 
   const packageData = JSON.parse(packageJson);
@@ -166,6 +170,10 @@ if (process.env.MUTATION_TEST === "1") {
     ...input,
     ledgerText: mutateLatestDispositionField(input.ledgerText, "AIR-001", "deadline", ""),
   }), "missing owner deadline mutant");
+  assertRejects((input) => ({
+    ...input,
+    ledgerText: mutateLatestRowField(input.ledgerText, "AIR-001", "rollback_kill_receipt", ""),
+  }), "missing rollback receipt mutant");
 }
 
 console.log(
