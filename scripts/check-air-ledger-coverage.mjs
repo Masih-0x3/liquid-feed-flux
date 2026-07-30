@@ -70,6 +70,9 @@ function assertContract({ plan, ledgerText, packageJson, ci }, label = "current 
     if (typeof disposition.evidence_date !== "string" || !disposition.evidence_date.trim()) {
       fail(`${label}: ${id} latest disposition lacks an evidence date`);
     }
+    if (typeof disposition.deadline !== "string" || !disposition.deadline.trim()) {
+      fail(`${label}: ${id} latest disposition lacks an owner deadline`);
+    }
   }
 
   const packageData = JSON.parse(packageJson);
@@ -159,6 +162,10 @@ if (process.env.MUTATION_TEST === "1") {
     ...input,
     ledgerText: mutateLatestDispositionField(input.ledgerText, "AIR-001", "required_evidence", ""),
   }), "missing required evidence mutant");
+  assertRejects((input) => ({
+    ...input,
+    ledgerText: mutateLatestDispositionField(input.ledgerText, "AIR-001", "deadline", ""),
+  }), "missing owner deadline mutant");
 }
 
 console.log(
