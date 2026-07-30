@@ -4,6 +4,7 @@ import {
   isStorageObjectNotFoundError,
   repairStaleMediaObject,
   StaleMediaObjectError,
+  staleMediaRepairIdempotencyKey,
   staleMediaObjectErrorForDownload,
 } from "./staleMediaRepair.ts";
 
@@ -97,7 +98,7 @@ Deno.test("repairStaleMediaObject clears guarded media pointer and queues downlo
   const job = jobInsert.value as Record<string, unknown>;
   assertEquals(job.type, "download_media");
   assertEquals((job.payload as Record<string, unknown>).repair, "stale_media_object");
-  assertStringIncludes(String(job.idempotency_key), "download_media:stale_storage:tweet-1:media-1:");
+  assertEquals(job.idempotency_key, staleMediaRepairIdempotencyKey("tweet-1", "media-1", "2026/6/tweet_0.mp4"));
 
   const eventInsert = supabase.calls.find((call) => call.table === "pipeline_events" && call.op === "insert");
   assert(eventInsert);

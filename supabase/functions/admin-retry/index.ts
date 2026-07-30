@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
+import { rssWebhookInternalAuthHeaders } from "../_shared/internalAuth.ts";
 import { captureEdgeException, initSentryEdge } from "../_shared/sentry.ts";
 
 const corsHeaders = {
@@ -33,21 +34,11 @@ async function requireAdmin(req: Request): Promise<{ userId: string } | Response
     });
   }
 
-  // Check admin role using service client (bypasses RLS)
-  const serviceClient = createClient<any, any>(
-    Deno.env.get('SUPABASE_URL') ?? '',
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+  const { data: isAdmin, error: roleError } = await supabaseAuth.rpc(
+    'current_user_is_admin'
   );
 
-  const { data: roleData } = await serviceClient
-    .from('user_roles')
-    .select('role')
-    .eq('user_id', data.user.id)
-    .eq('role', 'admin')
-    .limit(1)
-    .maybeSingle();
-
-  if (!roleData) {
+  if (roleError || isAdmin !== true) {
     return new Response(JSON.stringify({ error: 'Forbidden: admin role required' }), {
       status: 403,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -55,6 +46,48 @@ async function requireAdmin(req: Request): Promise<{ userId: string } | Response
   }
 
   return { userId: data.user.id };
+}
+
+function safeAdminRetryErrorCode(error: unknown): string {
+  const message = error instanceof Error ? error.message.trim() : "";
+  const match = message.match(/^([a-z][a-z0-9_]{1,96})$/);
+  return match?.[1] ?? "admin_retry_failed";
+}
+
+type AdminRetryPipelineWriter = {
+  from(table: string): {
+    insert(rows: Record<string, unknown> | Record<string, unknown>[]): PromiseLike<{
+      error?: unknown | null;
+    }>;
+  };
+};
+
+// Pipeline events are observational; never let their failure change the
+// already-authoritative job response, but do make loss visible with a stable
+// diagnostic and never forward the database exception text.
+async function recordAdminRetryPipelineEvents(
+  supabase: unknown,
+  rows: Record<string, unknown> | Record<string, unknown>[],
+): Promise<void> {
+  try {
+    const writer = supabase as AdminRetryPipelineWriter;
+    const { error: pipelineEventError } = await writer
+      .from('pipeline_events')
+      .insert(rows);
+    if (pipelineEventError) {
+      console.warn(JSON.stringify({
+        function: 'admin-retry',
+        action: 'pipeline_event_insert_failed',
+        error: 'admin_retry_pipeline_event_insert_failed',
+      }));
+    }
+  } catch (_e) {
+    console.warn(JSON.stringify({
+      function: 'admin-retry',
+      action: 'pipeline_event_insert_failed',
+      error: 'admin_retry_pipeline_event_insert_failed',
+    }));
+  }
 }
 
 serve(async (req) => {
@@ -130,18 +163,14 @@ serve(async (req) => {
         });
       }
 
-      try {
-        await supabase
-          .from('pipeline_events')
-          .insert({
-            subject_type: 'post',
-            subject_id: tweet_id,
-            step: 'deliver',
-            status: 'queued',
-            started_at: new Date().toISOString(),
-            meta: { source: 'admin-retry', admin_user: authResult.userId }
-          });
-      } catch (_e) {}
+      await recordAdminRetryPipelineEvents(supabase, {
+        subject_type: 'post',
+        subject_id: tweet_id,
+        step: 'deliver',
+        status: 'queued',
+        started_at: new Date().toISOString(),
+        meta: { source: 'admin-retry', admin_user: authResult.userId }
+      });
 
       return new Response(JSON.stringify({ 
         success: true, 
@@ -191,20 +220,18 @@ serve(async (req) => {
           });
         }
 
-        try {
-          const uniqueSubjects = Array.from(new Set((failedDeliveries || []).map(d => d.subject_id)));
-          if (uniqueSubjects.length > 0) {
-            const rows = uniqueSubjects.map(sid => ({
-              subject_type: 'post',
-              subject_id: sid,
-              step: 'deliver',
-              status: 'queued',
-              started_at: new Date().toISOString(),
-              meta: { source: 'admin-retry', admin_user: authResult.userId }
-            }));
-            await supabase.from('pipeline_events').insert(rows);
-          }
-        } catch (_e) {}
+        const uniqueSubjects = Array.from(new Set((failedDeliveries || []).map(d => d.subject_id)));
+        if (uniqueSubjects.length > 0) {
+          const rows = uniqueSubjects.map(sid => ({
+            subject_type: 'post',
+            subject_id: sid,
+            step: 'deliver',
+            status: 'queued',
+            started_at: new Date().toISOString(),
+            meta: { source: 'admin-retry', admin_user: authResult.userId }
+          }));
+          await recordAdminRetryPipelineEvents(supabase, rows);
+        }
       }
 
       return new Response(JSON.stringify({ 
@@ -292,18 +319,25 @@ serve(async (req) => {
         pubDate: new Date().toISOString()
       };
 
+      const validationPayload = { data: { items_new: [testRSSItem] }, validate_only: true };
+      const rawWebhookBody = JSON.stringify(validationPayload);
       const webhookResponse = await supabase.functions.invoke('webhooks-rssapp', {
-        body: { items_new: [testRSSItem], test: true }
+        // The signing-only path must authenticate these exact bytes.
+        body: rawWebhookBody,
+        // Do not set Content-Type here: the installed Functions client only
+        // transmits a string body when it chooses the header itself. The
+        // webhook parses the signed JSON string independent of MIME metadata.
+        headers: await rssWebhookInternalAuthHeaders(rawWebhookBody),
       });
 
       if (webhookResponse.error) {
-        throw new Error(`Webhook test failed: ${webhookResponse.error.message}`);
+        throw new Error('admin_retry_webhook_test_failed');
       }
 
       return new Response(JSON.stringify({ 
         success: true, 
-        message: 'Test webhook completed',
-        data: webhookResponse.data 
+        validation_only: true,
+        message: 'Webhook authentication and payload validation completed; no post or job was created.',
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -357,8 +391,9 @@ serve(async (req) => {
     });
 
   } catch (error) {
-    console.error(JSON.stringify({ function: 'admin-retry', action: 'error', error: (error as Error).message }));
-    await captureEdgeException(error, {
+    const errorCode = safeAdminRetryErrorCode(error);
+    console.error(JSON.stringify({ function: 'admin-retry', action: 'error', error: errorCode }));
+    await captureEdgeException(new Error(errorCode), {
       functionName: "admin-retry",
       action: "error",
       request: req,

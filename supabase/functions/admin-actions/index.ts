@@ -52,6 +52,7 @@ import {
 } from "./videoRenderActions.ts";
 import { getXApiSummary } from "./xApiSummary.ts";
 import { saveSettingsAdminAction } from "./settings.ts";
+import { getRecentAuthorStatsAdminAction } from "./authorStats.ts";
 import {
   approveEnrichmentAdminAction,
   enrichPostAdminAction,
@@ -105,12 +106,22 @@ import {
 } from "./sideEffects.ts";
 import { queueManualAdvance } from "./manualAdvanceActions.ts";
 import { captureEdgeException, initSentryEdge } from "../_shared/sentry.ts";
+import {
+  isRssWebhookPayloadError,
+  parseBoundedAdminActionJson,
+  readBoundedRssWebhookBody,
+  rssWebhookPayloadErrorStatus,
+} from "../_shared/rssWebhookPayloadPolicy.ts";
+import { isAdminActionName } from "../_shared/adminActionNames.ts";
+import type { SupabaseAdminClient } from "./types.ts";
 
 const DEPLOY_SHA = Deno.env.get('DEPLOY_GIT_SHA') ?? 'unknown';
 const DEPLOY_TIME = Deno.env.get('DEPLOY_TIME') ?? new Date().toISOString();
 initSentryEdge();
 
-function makeCorsHeaders(req?: Request): Record<string, string> {
+type CorsHeaders = Readonly<Record<string, string>>;
+
+function makeCorsHeaders(req: Request): CorsHeaders {
   const configuredOrigins = (Deno.env.get('ALLOWED_CORS_ORIGIN') ?? '')
     .split(',')
     .map((origin) => origin.trim())
@@ -125,19 +136,25 @@ function makeCorsHeaders(req?: Request): Record<string, string> {
     'http://127.0.0.1:8080',
     'http://localhost:8080',
   ]);
-  const origin = req?.headers.get('Origin') ?? '';
-  const fallbackOrigin = configuredOrigins[0] ?? 'https://xot.iraneyes.com';
-  return {
-    'Access-Control-Allow-Origin': origin && allowedOrigins.has(origin) ? origin : fallbackOrigin,
+
+  const origin = req.headers.get('Origin');
+  const varyHeader = {
     'Vary': 'Origin',
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   };
+
+  if (!origin || !allowedOrigins.has(origin)) {
+    return Object.freeze(varyHeader);
+  }
+
+  return Object.freeze({
+    ...varyHeader,
+    'Access-Control-Allow-Origin': origin,
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  });
 }
 
-let corsHeaders = makeCorsHeaders();
-
 // Validate JWT and check admin role
-async function requireAdmin(req: Request): Promise<{ userId: string } | Response> {
+async function requireAdmin(req: Request, corsHeaders: CorsHeaders): Promise<{ userId: string } | Response> {
   const authHeader = req.headers.get('Authorization');
   if (!authHeader?.startsWith('Bearer ')) {
     return new Response(JSON.stringify({ error: 'Unauthorized: missing token' }), {
@@ -159,20 +176,11 @@ async function requireAdmin(req: Request): Promise<{ userId: string } | Response
     });
   }
 
-  const serviceClient = createClient<any, any>(
-    Deno.env.get('SUPABASE_URL') ?? '',
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+  const { data: isAdmin, error: roleError } = await supabaseAuth.rpc(
+    'current_user_is_admin'
   );
 
-  const { data: roleData } = await serviceClient
-    .from('user_roles')
-    .select('role')
-    .eq('user_id', data.user.id)
-    .eq('role', 'admin')
-    .limit(1)
-    .maybeSingle();
-
-  if (!roleData) {
+  if (roleError || isAdmin !== true) {
     return new Response(JSON.stringify({ error: 'Forbidden: admin role required' }), {
       status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
@@ -181,50 +189,72 @@ async function requireAdmin(req: Request): Promise<{ userId: string } | Response
   return { userId: data.user.id };
 }
 
-function jsonResponse(body: unknown, status = 200) {
+function createJsonResponse(body: unknown, status: number, corsHeaders: CorsHeaders) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
 }
 
-// deno-lint-ignore no-explicit-any
-async function runTranslationOnlyForAdmin(supabase: any, tweetId: string) {
+function asAdminActionBody(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+async function runTranslationOnlyForAdmin(supabase: SupabaseAdminClient, tweetId: string) {
   return await runTranslationOnly(supabase, tweetId, {
     insertAdminPipelineEvent,
     recordFeedback,
   });
 }
 
-// deno-lint-ignore no-explicit-any
-serve(async (req) => {
-  corsHeaders = makeCorsHeaders(req);
+serve(async (req: Request): Promise<Response> => {
+  const corsHeaders = makeCorsHeaders(req);
+  const jsonResponse = (body: unknown, status = 200) => createJsonResponse(body, status, corsHeaders);
+
   if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, { headers: { ...corsHeaders } });
   }
 
   let actionForSentry: string | undefined;
   try {
-    const rawText = await req.text();
-    let body: any = {};
-    try { body = rawText ? JSON.parse(rawText) : {}; } catch (e) {
-      console.error('[admin-actions] body parse failed', { rawText: rawText.slice(0, 200), err: (e as Error).message });
-    }
-    const { action } = body;
-    actionForSentry = typeof action === 'string' ? action : undefined;
-
-    const authResult = await requireAdmin(req);
+    const authResult = await requireAdmin(req, corsHeaders);
     if (authResult instanceof Response) return authResult;
+
+    let body: Record<string, unknown>;
+    try {
+      const boundedBody = await readBoundedRssWebhookBody(req);
+      const parsedBody = parseBoundedAdminActionJson(boundedBody.text);
+      const candidateBody = asAdminActionBody(parsedBody);
+      if (!candidateBody) {
+        return jsonResponse({ error: 'Invalid admin action body', code: 'admin_action_body_invalid' }, 400);
+      }
+      body = candidateBody;
+    } catch (error: unknown) {
+      if (isRssWebhookPayloadError(error)) {
+        return jsonResponse(
+          { error: 'Invalid admin action body', code: 'admin_action_body_invalid' },
+          rssWebhookPayloadErrorStatus(error),
+        );
+      }
+      return jsonResponse({ error: 'Invalid admin action body', code: 'admin_action_body_read_failed' }, 400);
+    }
+
+    const requestedAction = body.action;
+    if (typeof requestedAction !== 'string' || requestedAction.trim().length === 0) {
+      return jsonResponse({ error: 'Missing action parameter', code: 'admin_action_missing' }, 400);
+    }
+    if (!isAdminActionName(requestedAction)) {
+      return jsonResponse({ error: 'Unknown admin action', code: 'admin_action_unknown' }, 400);
+    }
+
+    const action = requestedAction;
+    actionForSentry = action;
 
     const supabase = createClient<any, any>(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
-
-    if (!action) {
-      console.error('[admin-actions] missing action', { rawText: rawText.slice(0, 200), contentType: req.headers.get('content-type') });
-      return jsonResponse({ error: 'Missing action parameter', received: rawText.slice(0, 200) }, 400);
-    }
 
     switch (action) {
       case 'version': {
@@ -234,6 +264,11 @@ serve(async (req) => {
       // ===== Settings =====
       case 'save_settings': {
         const result = await saveSettingsAdminAction(supabase, body);
+        return jsonResponse(result.body, result.status);
+      }
+
+      case 'get_recent_author_stats': {
+        const result = await getRecentAuthorStatsAdminAction(supabase, body);
         return jsonResponse(result.body, result.status);
       }
 
@@ -624,16 +659,21 @@ serve(async (req) => {
       }
 
       default:
-        return jsonResponse({ error: `Unknown action: ${action}` }, 400);
+        return jsonResponse({ error: 'Unknown admin action', code: 'admin_action_unknown' }, 400);
     }
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    console.error('Admin action error:', message);
-    await captureEdgeException(error, {
-      functionName: "admin-actions",
-      action: actionForSentry ?? "handler",
-      request: req,
-    });
-    return jsonResponse({ error: message }, 500);
+  } catch {
+    const code = 'admin_action_handler_failed';
+    const action = actionForSentry ?? 'handler';
+    console.error('[admin-actions] handler failed', { code, action });
+    try {
+      await captureEdgeException(new Error(code), {
+        functionName: "admin-actions",
+        action,
+        request: req,
+      });
+    } catch {
+      console.error('[admin-actions] error capture failed', { code });
+    }
+    return jsonResponse({ error: 'Admin action failed', code }, 500);
   }
 });

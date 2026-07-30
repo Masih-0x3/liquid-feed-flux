@@ -51,8 +51,35 @@ export function isProcessedRenderStoragePath(storagePath: string): boolean {
   return storagePath.startsWith("processed/");
 }
 
+export function staleMediaRepairIdempotencyKey(
+  tweetId: string,
+  mediaId: string | null,
+  storagePath: string,
+): string {
+  return `download_media:stale_storage:${tweetId}:${mediaId ?? storagePath}`;
+}
+
+type StaleMediaRepairQueryResult = {
+  data?: unknown;
+  error?: { message?: string } | null;
+};
+
+type StaleMediaRepairQueryBuilder = PromiseLike<StaleMediaRepairQueryResult> & {
+  select(columns: string): StaleMediaRepairQueryBuilder;
+  in(column: string, values: unknown[]): StaleMediaRepairQueryBuilder;
+  filter(column: string, operator: string, value: unknown): StaleMediaRepairQueryBuilder;
+  limit(value: number): StaleMediaRepairQueryBuilder;
+  update(values: Record<string, unknown>): StaleMediaRepairQueryBuilder;
+  eq(column: string, value: unknown): StaleMediaRepairQueryBuilder;
+  insert(values: Record<string, unknown>): PromiseLike<StaleMediaRepairQueryResult>;
+};
+
+type StaleMediaRepairSupabaseClient = {
+  from(table: string): StaleMediaRepairQueryBuilder;
+};
+
 export async function repairStaleMediaObject(
-  supabase: any,
+  supabase: StaleMediaRepairSupabaseClient,
   params: {
     tweetId: string;
     mediaId: string | null;
@@ -64,34 +91,20 @@ export async function repairStaleMediaObject(
   const now = new Date().toISOString();
   let mediaCleared = false;
 
-  if (params.mediaId) {
-    const { error } = await supabase
-      .from("media")
-      .update({
-        storage_path: null,
-        downloaded_at: null,
-        file_size: null,
-        mime_type: null,
-      })
-      .eq("id", params.mediaId)
-      .eq("storage_path", params.storagePath);
-    if (error) throw new Error(`stale media clear failed: ${error.message ?? "unknown error"}`);
-    mediaCleared = true;
+  const { data: pendingRepairs, error: pendingRepairError } = await supabase
+    .from("jobs")
+    .select("id")
+    .in("type", ["resolve_media", "download_media"])
+    .in("status", ["pending", "running"])
+    .filter("payload->>tweet_id", "eq", params.tweetId)
+    .limit(1);
+  if (pendingRepairError) {
+    throw new Error("stale_media_pending_check_failed");
   }
-
-  let hasPendingRepair = false;
-  try {
-    const { data } = await supabase
-      .from("jobs")
-      .select("id")
-      .in("type", ["resolve_media", "download_media"])
-      .in("status", ["pending", "running"])
-      .filter("payload->>tweet_id", "eq", params.tweetId)
-      .limit(1);
-    hasPendingRepair = Array.isArray(data) && data.length > 0;
-  } catch (_e) {
-    hasPendingRepair = false;
+  if (!Array.isArray(pendingRepairs)) {
+    throw new Error("stale_media_pending_check_invalid_response");
   }
+  const hasPendingRepair = Array.isArray(pendingRepairs) && pendingRepairs.length > 0;
 
   let downloadQueued = false;
   if (!hasPendingRepair) {
@@ -105,17 +118,35 @@ export async function repairStaleMediaObject(
         stale_storage_path: params.storagePath,
       },
       status: "pending",
-      idempotency_key:
-        `download_media:stale_storage:${params.tweetId}:${params.mediaId ?? params.storagePath}:${Date.now()}`,
+      idempotency_key: staleMediaRepairIdempotencyKey(
+        params.tweetId,
+        params.mediaId,
+        params.storagePath,
+      ),
       next_run_at: now,
       priority: params.priority ?? 12,
     });
-    if (error) throw new Error(`stale media download enqueue failed: ${error.message ?? "unknown error"}`);
+    if (error) throw new Error("stale_media_download_enqueue_failed");
     downloadQueued = true;
   }
 
+  if (params.mediaId) {
+    const { error } = await supabase
+      .from("media")
+      .update({
+        storage_path: null,
+        downloaded_at: null,
+        file_size: null,
+        mime_type: null,
+      })
+      .eq("id", params.mediaId)
+      .eq("storage_path", params.storagePath);
+    if (error) throw new Error("stale_media_clear_failed");
+    mediaCleared = true;
+  }
+
   try {
-    await supabase.from("pipeline_events").insert({
+    const { error: pipelineEventError } = await supabase.from("pipeline_events").insert({
       subject_type: "post",
       subject_id: params.tweetId,
       step: "download_media",
@@ -132,7 +163,19 @@ export async function repairStaleMediaObject(
         download_queued: downloadQueued,
       },
     });
+    if (pipelineEventError) {
+      console.warn(JSON.stringify({
+        function: "stale-media-repair",
+        action: "pipeline_event_insert_failed",
+        error: "stale_media_pipeline_event_insert_failed",
+      }));
+    }
   } catch (_e) {
+    console.warn(JSON.stringify({
+      function: "stale-media-repair",
+      action: "pipeline_event_insert_failed",
+      error: "stale_media_pipeline_event_insert_failed",
+    }));
   }
 
   return { mediaCleared, downloadQueued };

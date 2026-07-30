@@ -47,11 +47,53 @@ function getCreds() {
   return { ck, cs, at, ats };
 }
 
-// deno-lint-ignore no-explicit-any
-async function getSelfId(supabase: any, creds: { ck: string; cs: string; at: string; ats: string }): Promise<string> {
-  const { data: setting } = await supabase.from('settings').select('value').eq('key', 'x_self_id').maybeSingle();
-  const cached = (setting?.value as { id?: string } | null)?.id;
-  if (cached) return cached;
+const FOLLOWER_ERROR_CODE = /^[a-z][a-z0-9]*(?:_[a-z0-9]+){1,10}$/;
+
+function safeFollowerErrorCode(error: unknown, fallback = 'x_followers_snapshot_failed'): string {
+  const message = error instanceof Error
+    ? error.message.trim()
+    : typeof error === 'string'
+    ? error.trim()
+    : '';
+  return message.length >= 3 && message.length <= 96 && FOLLOWER_ERROR_CODE.test(message)
+    ? message
+    : fallback;
+}
+
+function followerHttpErrorCode(operation: string, status: unknown): string {
+  const numericStatus = typeof status === 'number' && Number.isInteger(status) && status >= 400 && status <= 599
+    ? status
+    : null;
+  return numericStatus === null ? `${operation}_request_failed` : `${operation}_http_${numericStatus}`;
+}
+
+type FollowerQueryResult = {
+  data?: unknown;
+  error?: unknown;
+};
+
+type FollowerQueryBuilder = PromiseLike<FollowerQueryResult> & {
+  select(columns: string): FollowerQueryBuilder;
+  eq(column: string, value: unknown): FollowerQueryBuilder;
+  maybeSingle(): PromiseLike<FollowerQueryResult>;
+  upsert(value: Record<string, unknown>, options?: Record<string, unknown>): PromiseLike<FollowerQueryResult>;
+};
+
+type FollowerSupabaseClient = {
+  from(table: string): FollowerQueryBuilder;
+};
+
+function asFollowerRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+async function getSelfId(supabase: FollowerSupabaseClient, creds: { ck: string; cs: string; at: string; ats: string }): Promise<string> {
+  const { data: setting, error: settingError } = await supabase.from('settings').select('value').eq('key', 'x_self_id').maybeSingle();
+  if (settingError) throw new Error('x_self_id_read_failed');
+  const cached = asFollowerRecord(asFollowerRecord(setting).value).id;
+  if (typeof cached === 'string' && cached.length > 0) return cached;
 
   const url = 'https://api.x.com/2/users/me';
   const auth = await oauthHeader('GET', url, {}, creds.ck, creds.cs, creds.at, creds.ats);
@@ -63,19 +105,29 @@ async function getSelfId(supabase: any, creds: { ck: string; cs: string; at: str
     endpoint: url,
     method: 'GET',
   }, resp);
-  if (!resp.ok) throw new Error(`users/me failed: HTTP ${resp.status}: ${text.slice(0, 300)}`);
+  if (!resp.ok) throw new Error(followerHttpErrorCode('x_followers_users_me', resp.status));
   const parsed = JSON.parse(text) as { data?: { id?: string; username?: string; name?: string } };
   const id = parsed.data?.id;
   if (!id) throw new Error('users/me returned no id');
 
-  await supabase.from('settings').upsert(
+  const { error: selfIdCacheError } = await supabase.from('settings').upsert(
     { key: 'x_self_id', value: { id, username: parsed.data?.username, name: parsed.data?.name, cached_at: new Date().toISOString() }, updated_at: new Date().toISOString() },
     { onConflict: 'key' }
   );
+  if (selfIdCacheError) throw new Error('x_self_id_cache_write_failed');
   return id;
 }
 
 interface FollowerUser { id: string; username?: string; name?: string; profile_image_url?: string }
+
+function isFollowerUser(value: unknown): value is FollowerUser {
+  return Boolean(
+    value &&
+      typeof value === 'object' &&
+      typeof (value as { id?: unknown }).id === 'string' &&
+      (value as { id: string }).id.trim().length > 0,
+  );
+}
 
 function myXDisabledResponse() {
   return new Response(JSON.stringify(MY_X_DISABLED_RESPONSE), {
@@ -84,8 +136,7 @@ function myXDisabledResponse() {
   });
 }
 
-// deno-lint-ignore no-explicit-any
-async function fetchUserPage(supabase: any, userId: string, endpoint: 'followers' | 'following', paginationToken: string | null, creds: { ck: string; cs: string; at: string; ats: string }): Promise<{ users: FollowerUser[]; nextToken: string | null; status: number; errorText?: string }> {
+async function fetchUserPage(supabase: unknown, userId: string, endpoint: 'followers' | 'following', paginationToken: string | null, creds: { ck: string; cs: string; at: string; ats: string }): Promise<{ users: FollowerUser[]; nextToken: string | null; status: number; errorText?: string }> {
   const baseUrl = `https://api.x.com/2/users/${userId}/${endpoint}`;
   const qp: Record<string, string> = {
     'max_results': '1000',
@@ -105,22 +156,29 @@ async function fetchUserPage(supabase: any, userId: string, endpoint: 'followers
     userId,
     error: resp.ok ? null : `${endpoint} HTTP ${resp.status}`,
   }, resp);
-  if (!resp.ok) return { users: [], nextToken: null, status: resp.status, errorText: text.slice(0, 500) };
+  if (!resp.ok) return { users: [], nextToken: null, status: resp.status, errorText: followerHttpErrorCode(`x_followers_${endpoint}`, resp.status) };
 
   const parsed = JSON.parse(text) as { data?: FollowerUser[]; meta?: { next_token?: string } };
-  return { users: parsed.data ?? [], nextToken: parsed.meta?.next_token ?? null, status: resp.status };
+  if (!Array.isArray(parsed.data) || !parsed.data.every(isFollowerUser)) {
+    throw new Error(`${endpoint}_response_invalid_data`);
+  }
+  const nextToken = parsed.meta?.next_token;
+  if (nextToken !== undefined && nextToken !== null && typeof nextToken !== 'string') {
+    throw new Error(`${endpoint}_response_invalid_pagination`);
+  }
+  return { users: parsed.data, nextToken: nextToken ?? null, status: resp.status };
 }
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
 
+  const authErr = await requireInternalAuth(req, corsHeaders);
+  if (authErr) return authErr;
+
   const supabase = createClient<any, any>(
     Deno.env.get('SUPABASE_URL') ?? '',
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
   );
-
-  const authErr = await requireInternalAuth(req, supabase, corsHeaders);
-  if (authErr) return authErr;
 
   let body: { trigger?: string; force?: boolean; dry_run?: boolean; include_following?: boolean } = {};
   try { body = await req.json(); } catch { /* empty body OK for cron */ }
@@ -130,7 +188,8 @@ serve(async (req) => {
   const includeFollowing = body.include_following !== false;
 
   try {
-    const { data: controlsRow } = await supabase.from('settings').select('value').eq('key', 'x_api_controls').maybeSingle();
+    const { data: controlsRow, error: controlsError } = await supabase.from('settings').select('value').eq('key', 'x_api_controls').maybeSingle();
+    if (controlsError) throw new Error('x_api_controls_read_failed');
     const controls = (controlsRow?.value ?? {}) as Record<string, unknown>;
     if (!isMyXEnabled(controls)) return myXDisabledResponse();
 
@@ -138,12 +197,13 @@ serve(async (req) => {
       ? controls.follower_snapshot_stale_minutes
       : 60;
 
-    const { data: latestSnap } = await supabase
+    const { data: latestSnap, error: latestSnapshotError } = await supabase
       .from('x_follower_snapshots')
       .select('id, taken_at, status, follower_count, following_count, api_calls_used')
       .order('taken_at', { ascending: false })
       .limit(1)
       .maybeSingle();
+    if (latestSnapshotError) throw new Error('follower_snapshot_latest_read_failed');
 
     const latestAgeMs = latestSnap?.taken_at ? Date.now() - new Date(latestSnap.taken_at as string).getTime() : null;
     const latestIsFresh = latestAgeMs !== null && latestAgeMs < staleMinutes * 60 * 1000;
@@ -180,12 +240,14 @@ serve(async (req) => {
 
     // Daily-cap guard for cron only
     if (trigger === 'cron') {
-      const { data: recent } = await supabase
+      const { data: recent, error: recentSnapshotError } = await supabase
         .from('x_follower_snapshots')
         .select('id, taken_at, status')
         .gte('taken_at', new Date(Date.now() - 23 * 60 * 60 * 1000).toISOString())
         .order('taken_at', { ascending: false })
         .limit(1);
+      if (recentSnapshotError) throw new Error('follower_snapshot_daily_cap_read_failed');
+      if (!Array.isArray(recent)) throw new Error('follower_snapshot_daily_cap_result_invalid');
       if (recent && recent.length > 0) {
         return new Response(JSON.stringify({ skipped: true, reason: 'daily_cap', last_snapshot: recent[0] }), {
           status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -195,7 +257,7 @@ serve(async (req) => {
 
     const creds = getCreds();
     if (!creds) {
-      return new Response(JSON.stringify({ error: 'TWITTER_* secrets missing' }), {
+      return new Response(JSON.stringify({ error: 'twitter_credentials_missing' }), {
         status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
@@ -208,7 +270,7 @@ serve(async (req) => {
       .insert({ trigger, status: 'partial', follower_count: 0, follower_ids: [], following_ids: [], following_count: 0, pages_fetched: 0, api_calls_used: 0 })
       .select()
       .single();
-    if (snapErr || !snapRow) throw new Error(`snapshot insert failed: ${snapErr?.message}`);
+    if (snapErr || !snapRow) throw new Error('follower_snapshot_insert_failed');
     const snapshotId = snapRow.id as string;
 
     const allIds: string[] = [];
@@ -275,12 +337,15 @@ serve(async (req) => {
       }));
       for (let i = 0; i < rows.length; i += 500) {
         const chunk = rows.slice(i, i + 500);
-        await supabase.from('x_followers_cache').upsert(chunk, { onConflict: 'user_id' });
+        const { error: cacheUpsertError } = await supabase
+          .from('x_followers_cache')
+          .upsert(chunk, { onConflict: 'user_id' });
+        if (cacheUpsertError) throw new Error('followers_cache_upsert_failed');
       }
     }
 
     if (halted) {
-      await supabase.from('x_follower_snapshots').update({
+      const { error: partialSnapshotError } = await supabase.from('x_follower_snapshots').update({
         status: 'partial',
         follower_count: allIds.length,
         follower_ids: allIds,
@@ -289,8 +354,9 @@ serve(async (req) => {
         pages_fetched: pages + followingPages,
         api_calls_used: apiCalls,
         next_token: pageToken ?? followingToken,
-        error: `${halted.reason}${halted.status ? ` HTTP ${halted.status}` : ''}: ${(halted.error ?? '').slice(0, 300)}`,
+        error: safeFollowerErrorCode(halted.reason, 'follower_snapshot_partial'),
       }).eq('id', snapshotId);
+      if (partialSnapshotError) throw new Error('follower_snapshot_partial_update_failed');
 
       return new Response(JSON.stringify({
         snapshot_id: snapshotId, status: 'partial', halted: halted.reason, follower_count: allIds.length,
@@ -299,7 +365,7 @@ serve(async (req) => {
     }
 
     // Mark complete
-    await supabase.from('x_follower_snapshots').update({
+    const { error: completeSnapshotError } = await supabase.from('x_follower_snapshots').update({
       status: 'complete',
       follower_count: allIds.length,
       follower_ids: allIds,
@@ -309,9 +375,10 @@ serve(async (req) => {
       api_calls_used: apiCalls,
       next_token: null,
     }).eq('id', snapshotId);
+    if (completeSnapshotError) throw new Error('follower_snapshot_complete_update_failed');
 
     // Diff against previous COMPLETE snapshot (excluding this one)
-    const { data: prevSnap } = await supabase
+    const { data: prevSnap, error: prevSnapshotError } = await supabase
       .from('x_follower_snapshots')
       .select('id, follower_ids')
       .eq('status', 'complete')
@@ -319,6 +386,7 @@ serve(async (req) => {
       .order('taken_at', { ascending: false })
       .limit(1)
       .maybeSingle();
+    if (prevSnapshotError) throw new Error('follower_snapshot_baseline_read_failed');
 
     let unfollowedCount = 0;
     let followedCount = 0;
@@ -368,7 +436,10 @@ serve(async (req) => {
 
       if (changeRows.length > 0) {
         for (let i = 0; i < changeRows.length; i += 500) {
-          await supabase.from('x_follower_changes').insert(changeRows.slice(i, i + 500));
+          const { error: changesInsertError } = await supabase
+            .from('x_follower_changes')
+            .insert(changeRows.slice(i, i + 500));
+          if (changesInsertError) throw new Error('follower_changes_insert_failed');
         }
       }
       unfollowedCount = unfollowed.length;
@@ -390,13 +461,15 @@ serve(async (req) => {
     }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (e) {
-    console.error('x-followers-snapshot error', e);
-    await captureEdgeException(e, {
+    const errorCode = safeFollowerErrorCode(e);
+    const safeError = new Error(errorCode);
+    console.error('x-followers-snapshot error', errorCode);
+    await captureEdgeException(safeError, {
       functionName: "x-followers-snapshot",
       action: "error",
       request: req,
     });
-    return new Response(JSON.stringify({ error: (e as Error).message }), {
+    return new Response(JSON.stringify({ error: errorCode }), {
       status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
