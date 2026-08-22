@@ -70,5 +70,8 @@ test("configured bearer token reaches route validation", async () => {
   });
 
   assert.equal(response.status, 400);
-  assert.deepEqual(response.payload, { error: "render_id is required" });
+  assert.deepEqual(response.payload, {
+    error: "render_id is required",
+    code: "renderer_request_render_id_required",
+  });
 });

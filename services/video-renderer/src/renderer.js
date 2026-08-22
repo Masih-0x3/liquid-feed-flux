@@ -7,6 +7,7 @@ import { createObservedOpenAIFetch, finishWorkflowRun, startWorkflowRun } from "
 import { analyzeRemovableWatermarks, cleanupTranscriptSegments, detectLanguageFromTranscription, translateSegments } from "./openai.js";
 import { decidePreflightBlock, decideWatermarkOnlyBlock, delogoRegionsFromWatermarkOnly, evaluateDelogoPlan, normalizeLanguage, normalizeWatermarkOnlyDecision, recoverDelogoRegions, runOptionalOcr, runVisualPreflight, scoreWatermarkSignals, selectDelogoRegions, selectTargetLanguage, subtitlePlacementFromVision, visionFromWatermarkOnly } from "./preflight.js";
 import { resolveRenderEffects } from "./renderEffects.js";
+import { assertRenderTerminalAccepted, claimFenceFor, createRenderLeaseController, processedPathFor, removeStaleGenerationOutput, RenderClaimLostError } from "./renderLease.js";
 import { applyRenderSettings, loadRenderSettingsOrDefault } from "./settings.js";
 import { hasUsableSubtitleText, sanitizeSubtitleSegments, segmentsToAss, segmentsToSrt, splitLongSubtitleSegments } from "./subtitles.js";
 import { transcribeAudio } from "./transcription.js";
@@ -19,6 +20,19 @@ export function createSupabase(config) {
   });
 }
 
+/**
+ * Production cleanup seam for a renderer-owned per-row working directory.
+ *
+ * Removes the exact owned root recursively. It never touches the parent
+ * directory or any sibling path, so an unrelated sentinel that lives beside the
+ * owned root is preserved. Behaviourally identical to the recursive rm() call
+ * it replaces, but factored out so E2 tests can exercise the real production
+ * cleanup path rather than re-implementing it with a direct rm.
+ */
+export async function removeOwnedWorkdir(workdir) {
+  await rm(workdir, { recursive: true, force: true });
+}
+
 async function measure(metrics, name, fn) {
   const started = Date.now();
   try {
@@ -26,14 +40,6 @@ async function measure(metrics, name, fn) {
   } finally {
     metrics[`${name}_ms`] = Date.now() - started;
   }
-}
-
-function processedPathFor(row, renderVersion) {
-  const now = new Date();
-  const yyyy = String(now.getUTCFullYear());
-  const mm = String(now.getUTCMonth() + 1).padStart(2, "0");
-  const safeTweetId = String(row.tweet_id).replace(/[^A-Za-z0-9_-]/g, "_");
-  return `processed/${renderVersion}/${yyyy}/${mm}/${safeTweetId}/${row.id}.mp4`;
 }
 
 async function writeBlobToFile(blob, path) {
@@ -57,16 +63,20 @@ async function maybeInvokePostingFunctions(supabase, rpcResult, tweetId) {
   }
 }
 
-export async function recordRenderFailure(supabase, { renderId, error, metrics }) {
+export async function recordRenderFailure(supabase, { row, rendererId, error, metrics }) {
   const message = error instanceof Error ? error.message : String(error);
+  const fence = claimFenceFor(row);
   try {
     const { data, error: rpcError } = await supabase.rpc("fail_video_render", {
-      p_render_id: renderId,
+      p_render_id: fence.renderId,
+      p_worker_id: rendererId,
+      p_claim_token: fence.claimToken,
+      p_claim_generation: fence.claimGeneration,
       p_error: message,
       p_metrics: metrics,
     });
     if (rpcError) throw rpcError;
-    return data;
+    return assertRenderTerminalAccepted(data, row, "fail");
   } catch (failError) {
     console.warn("fail_video_render failed:", failError instanceof Error ? failError.message : String(failError));
     return null;
@@ -289,15 +299,21 @@ function probeFrameRate(probe) {
   return Number.isFinite(direct) && direct > 0 ? direct : 30;
 }
 
-async function blockRender({ supabase, row, reason, preflight, metrics }) {
+async function blockRender({ supabase, row, rendererId, lease, reason, preflight, metrics }) {
+  lease.assertCurrent();
+  const fence = claimFenceFor(row);
   const { data, error } = await supabase.rpc("block_video_render", {
-    p_render_id: row.id,
+    p_render_id: fence.renderId,
+    p_worker_id: rendererId,
+    p_claim_token: fence.claimToken,
+    p_claim_generation: fence.claimGeneration,
     p_reason: reason,
     p_preflight: preflight,
     p_metrics: metrics,
   });
   if (error) throw error;
-  await maybeInvokePostingFunctions(supabase, data, row.tweet_id);
+  const terminal = assertRenderTerminalAccepted(data, row, "block");
+  await maybeInvokePostingFunctions(supabase, terminal, row.tweet_id);
   return {
     ok: true,
     blocked: true,
@@ -343,6 +359,7 @@ async function renderAndComplete({
   supabase,
   row,
   config,
+  lease,
   source,
   inputPath,
   outputPath,
@@ -432,7 +449,7 @@ async function renderAndComplete({
       });
       const label = `${useOpenCvDelogo ? "opencv_render" : "render"}_crf_${quality.crf}`;
       const startedEncode = Date.now();
-      await runCommand(renderCommand, { label });
+      await runCommand(renderCommand, { label, stage: "render" });
       outputBytes = await readFile(outputPath);
       const attempt = {
         crf: quality.crf,
@@ -450,10 +467,11 @@ async function renderAndComplete({
       throw new Error(`rendered output ${outputBytes.byteLength} bytes exceeds max output bytes ${config.maxOutputBytes}`);
     }
     outputStoragePath = processedPathFor(row, config.renderVersion);
+    lease.assertCurrent();
     await measure(metrics, "upload", async () => {
       const { error } = await supabase.storage.from(config.bucket).upload(outputStoragePath, outputBytes, {
         contentType: "video/mp4",
-        upsert: true,
+        upsert: false,
       });
       if (error) throw new Error(`upload ${outputStoragePath}: ${error.message}`);
     });
@@ -469,8 +487,13 @@ async function renderAndComplete({
     })
     : null;
   metrics.total_ms = Date.now() - started;
+  lease.assertCurrent();
+  const fence = claimFenceFor(row);
   const { data, error } = await supabase.rpc("complete_video_render", {
-    p_render_id: row.id,
+    p_render_id: fence.renderId,
+    p_worker_id: config.rendererId,
+    p_claim_token: fence.claimToken,
+    p_claim_generation: fence.claimGeneration,
     p_output_storage_path: outputStoragePath,
     p_output_file_size: outputBytes?.byteLength ?? null,
     p_persian_srt: persianSrt,
@@ -486,7 +509,21 @@ async function renderAndComplete({
     p_preflight: nextPreflight,
   });
   if (error) throw error;
-  await maybeInvokePostingFunctions(supabase, data, row.tweet_id);
+  let terminal;
+  try {
+    terminal = assertRenderTerminalAccepted(data, row, "complete");
+  } catch (terminalError) {
+    if (terminalError instanceof RenderClaimLostError && outputStoragePath) {
+      await removeStaleGenerationOutput({
+        supabase,
+        bucket: config.bucket,
+        outputStoragePath,
+        metrics,
+      });
+    }
+    throw terminalError;
+  }
+  await maybeInvokePostingFunctions(supabase, terminal, row.tweet_id);
 
   return {
     ok: true,
@@ -530,15 +567,15 @@ async function maybeRunVisionPreflight({ inputPath, workingDir, config, prefligh
     inspectionPath: join(workingDir, `vision-inspection-${index + 1}.jpg`),
     seekSeconds,
   }));
-  await measure(metrics, "contact_sheet", () => runCommand(buildContactSheetCommand(inputPath, contactSheetPath), { label: "contact_sheet" }));
+  await measure(metrics, "contact_sheet", () => runCommand(buildContactSheetCommand(inputPath, contactSheetPath), { label: "contact_sheet", stage: "analysis" }));
   await measure(metrics, "vision_frames", () => Promise.all(frameSpecs.map((frame) => runCommand(buildFrameSampleCommand(inputPath, frame.path, {
     seekSeconds: frame.seekSeconds,
     width: config.watermarkVisionFrameWidth,
-  }), { label: `vision_frame_${frame.seekSeconds}` }))));
+  }), { label: `vision_frame_${frame.seekSeconds}`, stage: "analysis" }))));
   await measure(metrics, "vision_inspection_sheets", () => Promise.all(frameSpecs.map((frame) => runCommand(buildWatermarkInspectionSheetCommand(frame.path, frame.inspectionPath, {
     tileWidth: config.watermarkInspectionTileWidth,
     tileHeight: config.watermarkInspectionTileHeight,
-  }), { label: `vision_inspection_${frame.seekSeconds}` }))));
+  }), { label: `vision_inspection_${frame.seekSeconds}`, stage: "analysis" }))));
   const ocr = await measure(metrics, "local_ocr", () => runOptionalOcr(contactSheetPath, {
     tesseractLang: config.tesseractLang,
   }));
@@ -680,6 +717,11 @@ export async function processRenderRow({ supabase, row, config }) {
   const enhancedAudioPath = join(workingDir, "audio.enhanced.mp3");
   const earlyAudioPath = join(workingDir, "audio.early.mp3");
   const outputPath = join(workingDir, "rendered.mp4");
+  const renderLease = createRenderLeaseController({
+    supabase,
+    row,
+    rendererId: runtimeConfig.rendererId,
+  }).start();
 
   try {
     await mkdir(workingDir, { recursive: true });
@@ -718,7 +760,15 @@ export async function processRenderRow({ supabase, row, config }) {
         blocked: true,
         block_reason: preflight.block.reason ?? null,
       };
-      return await blockRender({ supabase, row, reason: preflight.block.reason, preflight, metrics });
+      return await blockRender({
+        supabase,
+        row,
+        rendererId: runtimeConfig.rendererId,
+        lease: renderLease,
+        reason: preflight.block.reason,
+        preflight,
+        metrics,
+      });
     }
 
     if (!hasAudioStream(probe)) {
@@ -734,6 +784,7 @@ export async function processRenderRow({ supabase, row, config }) {
         supabase,
         row,
         config: runtimeConfig,
+        lease: renderLease,
         source,
         inputPath,
         outputPath,
@@ -744,7 +795,7 @@ export async function processRenderRow({ supabase, row, config }) {
       });
     }
 
-    await measure(metrics, "audio_extract", () => runCommand(buildAudioExtractCommand(inputPath, audioPath), { label: "audio_extract" }));
+    await measure(metrics, "audio_extract", () => runCommand(buildAudioExtractCommand(inputPath, audioPath), { label: "audio_extract", stage: "analysis" }));
 
     const contextText = subtitleContextText({ postContext, preflight });
     const transcription = await transcribeWithEnhancedAudioRetry({
@@ -771,8 +822,8 @@ export async function processRenderRow({ supabase, row, config }) {
         durationMs: metrics.duration_ms,
         contextText,
       },
-      runEnhancedAudioExtract: (command) => measure(metrics, "audio_extract_enhanced", () => runCommand(command, { label: "audio_extract_enhanced" })),
-      runEarlyAudioExtract: (command) => measure(metrics, "audio_extract_early", () => runCommand(command, { label: "audio_extract_early" })),
+      runEnhancedAudioExtract: (command) => measure(metrics, "audio_extract_enhanced", () => runCommand(command, { label: "audio_extract_enhanced", stage: "analysis" })),
+      runEarlyAudioExtract: (command) => measure(metrics, "audio_extract_early", () => runCommand(command, { label: "audio_extract_early", stage: "analysis" })),
       runTranscription: (options, label) => measure(metrics, label, () => transcribeAudio(options)),
     });
     metrics.transcription_provider = transcription.provider ?? runtimeConfig.transcriptionProvider;
@@ -800,6 +851,7 @@ export async function processRenderRow({ supabase, row, config }) {
         supabase,
         row,
         config: runtimeConfig,
+        lease: renderLease,
         source,
         inputPath,
         outputPath,
@@ -823,6 +875,7 @@ export async function processRenderRow({ supabase, row, config }) {
         supabase,
         row,
         config: runtimeConfig,
+        lease: renderLease,
         source,
         inputPath,
         outputPath,
@@ -880,6 +933,7 @@ export async function processRenderRow({ supabase, row, config }) {
         supabase,
         row,
         config: runtimeConfig,
+        lease: renderLease,
         source,
         inputPath,
         outputPath,
@@ -938,6 +992,7 @@ export async function processRenderRow({ supabase, row, config }) {
       supabase,
       row,
       config: runtimeConfig,
+      lease: renderLease,
       source,
       inputPath,
       outputPath,
@@ -968,15 +1023,17 @@ export async function processRenderRow({ supabase, row, config }) {
       total_ms: metrics.total_ms ?? null,
     };
     const data = await recordRenderFailure(supabase, {
-      renderId: row.id,
+      row,
+      rendererId: runtimeConfig.rendererId,
       error,
       metrics,
     });
     await maybeInvokePostingFunctions(supabase, data, row.tweet_id);
     throw error;
   } finally {
+    await renderLease.stop();
     await finishWorkflowRun(supabase, workflowRunKey, workflowStatus, workflowMetadata).catch(() => null);
-    await rm(workingDir, { recursive: true, force: true }).catch(() => null);
+    await removeOwnedWorkdir(workingDir).catch(() => null);
   }
 }
 
@@ -1074,7 +1131,7 @@ export async function runPreflightForRenderId({ supabase, renderId, config }) {
       await finishWorkflowRun(supabase, workflowRunKey, workflowStatus, workflowMetadata).catch(() => null);
     }
     if (!runtimeConfig.keepPreflightWorkdir) {
-      await rm(workingDir, { recursive: true, force: true }).catch(() => null);
+      await removeOwnedWorkdir(workingDir).catch(() => null);
     }
   }
 }

@@ -1,5 +1,19 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  parseRenderConcurrency,
+  parseRenderShutdownGraceMs,
+} from "./rendererCapacity.js";
+
+export {
+  DEFAULT_RENDER_CONCURRENCY,
+  DEFAULT_RENDER_SHUTDOWN_GRACE_MS,
+  MAX_RENDER_CONCURRENCY,
+  MAX_RENDER_SHUTDOWN_GRACE_MS,
+  MIN_RENDER_SHUTDOWN_GRACE_MS,
+  parseRenderConcurrency,
+  parseRenderShutdownGraceMs,
+} from "./rendererCapacity.js";
 
 export const DEFAULT_RENDER_VERSION = "persian-subtitles-masihh-v1";
 export const DEFAULT_TESSERACT_LANG = "eng+fas+ara+heb";
@@ -122,6 +136,8 @@ export function loadServerRuntimeFromEnv(env = process.env) {
     port: numberFromEnv(env.PORT, 8787),
     pollIntervalMs: positiveInterval(env.POLL_INTERVAL_MS, 5000, 1000),
     heartbeatIntervalMs: positiveInterval(env.HEARTBEAT_INTERVAL_MS, 30000, 5000),
+    renderConcurrency: parseRenderConcurrency(env.RENDER_CONCURRENCY),
+    shutdownGraceMs: parseRenderShutdownGraceMs(env.RENDER_SHUTDOWN_GRACE_MS),
     version: env.npm_package_version || "0.1.0",
   };
 }

@@ -10,6 +10,7 @@ services:
       PORT: "8787"
       WORK_DIR: /tmp/xot-video-renderer
       RENDER_CONCURRENCY: "1"
+      RENDER_SHUTDOWN_GRACE_MS: "30000"
     ports:
       - "127.0.0.1:8797:8787"
     volumes:
@@ -20,6 +21,7 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+    stop_grace_period: 35s
 
 volumes:
   xot-video-renderer-tmp:

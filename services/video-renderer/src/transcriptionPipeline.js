@@ -84,7 +84,7 @@ async function rescueEarlyTranscriptGap({
   enabled = true,
   minFirstCueStartSeconds = 8,
   windowSeconds = 14,
-  runEarlyAudioExtract = (command) => runCommand(command, { label: "audio_extract_early" }),
+  runEarlyAudioExtract = (command) => runCommand(command, { label: "audio_extract_early", stage: "analysis" }),
   runTranscription = (options) => transcribeAudio(options),
 } = {}) {
   if (enabled === false || !earlyAudioPath || !inputPath) return transcription;
@@ -115,8 +115,8 @@ export async function transcribeWithEnhancedAudioRetry({
   earlyTranscriptRescueEnabled = true,
   earlyTranscriptMinFirstCueStartSeconds = 8,
   earlyTranscriptWindowSeconds = 14,
-  runEnhancedAudioExtract = (command) => runCommand(command, { label: "audio_extract_enhanced" }),
-  runEarlyAudioExtract = (command) => runCommand(command, { label: "audio_extract_early" }),
+  runEnhancedAudioExtract = (command) => runCommand(command, { label: "audio_extract_enhanced", stage: "analysis" }),
+  runEarlyAudioExtract = (command) => runCommand(command, { label: "audio_extract_early", stage: "analysis" }),
   runTranscription = (options) => transcribeAudio(options),
 } = {}) {
   const first = await runTranscription({ ...transcriptionOptions, audioPath }, "transcription");

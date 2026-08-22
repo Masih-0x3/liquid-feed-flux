@@ -27,6 +27,7 @@ DEEPGRAM_API_KEY=...
 VIDEO_RENDERER_TOKEN=...
 PORT=8787
 RENDER_CONCURRENCY=1
+RENDER_SHUTDOWN_GRACE_MS=30000
 TRANSCRIPTION_PROVIDER=deepgram
 DEEPGRAM_MODEL=nova-3
 DEEPGRAM_LANGUAGE_FALLBACKS=multi,en,fa,he,ar
@@ -58,6 +59,38 @@ OPENCV_INPAINT_FEATHER=0
 `POST /v1/render` and `POST /v1/preflight`. When it is missing or blank, those
 routes return `401` and Edge callers should leave the row for poller-only
 processing instead of making an unauthenticated request.
+
+Authenticated dispatch accepts only JSON with `render_id` and the existing
+optional `tweet_id` and `source` fields. The service rejects unsupported
+content encodings/types, invalid UTF-8, unsupported JSON shape, declared or
+streamed bodies above 64 KiB, and bodies fragmented into more than 256 chunks
+before capacity acquisition or a database claim. Input errors use stable
+`400`, `413`, or `415` JSON responses and never echo the supplied body.
+Those fixed source limits must be checked against observed production request
+sizes before any change; they are not a substitute for proxy/slow-client
+runtime validation.
+
+`RENDER_CONCURRENCY` is one shared, non-queuing capacity limit for HTTP render,
+HTTP preflight, and polling. It defaults to `1` and rejects a saturated HTTP
+request before it claims a render, with `429` and `Retry-After`. Values outside
+the conservative source range `1` to `4` fail at startup. On `SIGTERM` or
+`SIGINT`, the service stops new claims, clears poll/heartbeat timers, closes the
+listener, and waits up to `RENDER_SHUTDOWN_GRACE_MS` (default `30000`) for active
+work to drain. A grace timeout is reported as an incomplete drain; it is not a
+claim that a child process was safely aborted.
+
+Production `src` ffmpeg, ffprobe, OpenCV, and Tesseract commands use one managed
+runner: fixed source deadlines of 60 seconds for probes, 180 seconds for analysis,
+120 seconds for OCR, and 30 minutes for rendering; 10 seconds of `SIGTERM` grace;
+then `SIGKILL` plus a five-second forced-settle bound. Captured text stdout is
+limited to 256 KiB, stderr retains only its final 64 KiB, and binary stdout is
+limited to 32 MiB. Raw stderr is never added to a managed error message; only a
+bounded byte-count diagnostic is retained. Shutdown asks registered command groups to stop before it
+observes capacity drain and latches the runner so a later stage rejects before
+spawning. Callers may also pass an `AbortSignal` to the runner. These are
+source-level containment limits, not evidence
+that a particular host killed every descendant or has adequate CPU, memory, PID,
+or temporary-storage limits; tune them only after measured host/runtime evidence.
 
 The transcription path is Deepgram-first. The renderer extracts normal mono
 16 kHz audio and sends that to Deepgram. Only when Deepgram returns no timed
@@ -103,6 +136,9 @@ Run locally:
 npm --prefix services/video-renderer test
 npm --prefix services/video-renderer start
 ```
+
+The root `npm run check:renderer-process-runner` command is a no-process source
+contract using fake child streams. It does not run ffmpeg, OCR, or the renderer.
 
 Run on the Ubuntu renderer with Docker Compose from the repo checkout:
 

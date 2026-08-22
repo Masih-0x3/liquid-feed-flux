@@ -76,6 +76,8 @@ test("loads server runtime separately from render config", () => {
   const runtime = loadServerRuntimeFromEnv({
     VIDEO_RENDERER_TOKEN: "  dispatch-token  ",
     PORT: "9000",
+    RENDER_CONCURRENCY: "2",
+    RENDER_SHUTDOWN_GRACE_MS: "45000",
     POLL_INTERVAL_MS: "10",
     HEARTBEAT_INTERVAL_MS: "20",
     npm_package_version: "0.2.0",
@@ -85,6 +87,8 @@ test("loads server runtime separately from render config", () => {
   assert.equal(runtime.port, 9000);
   assert.equal(runtime.pollIntervalMs, 1000);
   assert.equal(runtime.heartbeatIntervalMs, 5000);
+  assert.equal(runtime.renderConcurrency, 2);
+  assert.equal(runtime.shutdownGraceMs, 45000);
   assert.equal(runtime.version, "0.2.0");
 });
 
@@ -107,4 +111,21 @@ test("blank numeric env values keep defaults", () => {
   assert.equal(runtime.port, 8787);
   assert.equal(runtime.pollIntervalMs, 5000);
   assert.equal(runtime.heartbeatIntervalMs, 30000);
+  assert.equal(runtime.renderConcurrency, 1);
+  assert.equal(runtime.shutdownGraceMs, 30000);
+});
+
+test("fails closed for invalid renderer capacity and shutdown grace", () => {
+  assert.throws(
+    () => loadServerRuntimeFromEnv({ RENDER_CONCURRENCY: "0" }),
+    /RENDER_CONCURRENCY/,
+  );
+  assert.throws(
+    () => loadServerRuntimeFromEnv({ RENDER_CONCURRENCY: "5" }),
+    /RENDER_CONCURRENCY/,
+  );
+  assert.throws(
+    () => loadServerRuntimeFromEnv({ RENDER_SHUTDOWN_GRACE_MS: "999" }),
+    /RENDER_SHUTDOWN_GRACE_MS/,
+  );
 });
