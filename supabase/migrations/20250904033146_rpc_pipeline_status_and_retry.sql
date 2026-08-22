@@ -55,12 +55,9 @@ begin
   insert into public.jobs(type, payload, status, next_run_at)
   values(job_type, jsonb_build_object('tweet_id', tweet_id, 'subject_type', 'post', 'subject_id', tweet_id), 'pending', now());
 
-  -- queue pipeline event for visibility
   insert into public.pipeline_events(subject_type, subject_id, step, status, started_at, meta)
   values('post', tweet_id, step, 'queued', now(), jsonb_build_object('source','rpc.retry_step'));
 
   return true;
 end;
 $$;
-
-

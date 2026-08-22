@@ -117,9 +117,14 @@ function parseRssAppSignatureHeader(header: string): ParsedRssAppSignature | nul
 
 async function hmacSha256Hex(secret: string, value: string | Uint8Array): Promise<string> {
   const encoder = new TextEncoder();
+  const toArrayBuffer = (bytes: Uint8Array): ArrayBuffer => {
+    const buffer = new ArrayBuffer(bytes.byteLength);
+    new Uint8Array(buffer).set(bytes);
+    return buffer;
+  };
   const key = await crypto.subtle.importKey(
     'raw',
-    encoder.encode(secret),
+    toArrayBuffer(encoder.encode(secret)),
     { name: 'HMAC', hash: 'SHA-256' },
     false,
     ['sign'],
@@ -127,7 +132,7 @@ async function hmacSha256Hex(secret: string, value: string | Uint8Array): Promis
   const signature = await crypto.subtle.sign(
     'HMAC',
     key,
-    typeof value === 'string' ? encoder.encode(value) : value,
+    toArrayBuffer(typeof value === 'string' ? encoder.encode(value) : value),
   );
   return Array.from(new Uint8Array(signature)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
