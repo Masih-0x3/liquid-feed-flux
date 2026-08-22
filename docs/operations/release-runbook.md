@@ -2,12 +2,41 @@
 
 This runbook is the production gate for XOT frontend, Supabase Edge Functions, database migrations, and renderer-related releases.
 
+## Active Safety Hold — Cleanup Disabled (2026-07-14)
+
+Operator notice: [`phase0-containment-notice.md`](./phase0-containment-notice.md) is the concise handoff and must remain aligned with this hold.
+
+Production cleanup is intentionally paused while AIR-001/AIR-065 are remediated. This is a safety containment, not a scheduler outage.
+
+- Supabase project: `jzirqfzzvlbxwfzndaer`.
+- `invoke-db-cleanup-daily` is job `17`, schedule `0 3 * * *`, currently `active=false`.
+- `invoke-media-cleanup-6h` is job `19`, schedule `0 */6 * * *`, currently `active=false`.
+- Keep the entire DB cleanup job paused: the current `cleanup_old_data` RPC deletes old `media` rows, and `db-cleanup` also invokes path-blind media cleanup.
+- Do not manually invoke non-dry `db-cleanup`, `media-cleanup`, or the `media-processor` `cleanup_old_media` action during the hold.
+- Do not invoke `public.cleanup_old_data(integer, integer)` directly through SQL, PostgREST, a service-role client, or any operator script. The Phase 0 Edge guards do not protect that privileged database RPC; this prohibition remains an operational control until a database-side gate or privilege redesign lands after SR-MIG-01.
+- Scope the Phase 0 containment claim precisely: the paused schedules stop the known automated callers, and the source candidate gates the three application Edge entry points. It does not make the underlying legacy RPC or storage-path cleanup intrinsically safe.
+- Dry-run inventory remains allowed when it is bounded and performs zero writes.
+- The Phase 0 source candidate adds fail-closed mutation guards named `DB_CLEANUP_MUTATIONS_ENABLED` and `MEDIA_CLEANUP_MUTATIONS_ENABLED`. Until a production deployment receipt is recorded below, treat the paused cron jobs—not those undeployed guards—as the live control.
+- During the hold, both guard values must remain absent or anything other than the exact lowercase string `true`. Setting either value to `true` authorizes the corresponding legacy mutation path and is prohibited until its reference-safe replacement passes the required canary gate.
+- Monitor database growth while retention cleanup is paused. At containment, the database was `331,754,643 / 500,000,000` bytes.
+
+Verify the hold:
+
+```bash
+npx supabase db query --linked \
+  "select jobid, jobname, schedule, active from cron.job where jobname in ('invoke-media-cleanup-6h','invoke-db-cleanup-daily') order by jobname;"
+```
+
+Do not reactivate either schedule merely to clear an accumulated backlog. Reactivation is permitted only after BR-MEDIA-03 passes reference-aware dry-run, fault, shadow, and bounded canary evidence. The retained rollback form is `cron.alter_job(job_id := <jobid>, active := true)`, followed by exact schedule and run verification; job `17` and job `19` must be reviewed independently.
+
 ## Release Rules
 
-- Release from a clean `main` checkout unless an emergency override is explicitly recorded.
-- Do not deploy from `codex/*` cleanup or feature branches.
+- Production releases use a clean `main` checkout. Phase 2 Preview checks use
+  the designated Preview branch from the identity tuple.
+- Do not deploy production from `codex/*` cleanup or feature branches.
 - Do not run `supabase db push` while migration history drift is unresolved.
-- Run `npm run check:release-state` before and after release.
+- Run `scripts/check-release-state.sh` with explicit `--target` and `--mode`
+  before and after any authorized release; Phase 2 uses Preview `render` only.
 - Record every production release in the ledger section below.
 - Keep Vercel frontend release, Supabase function deploy, and Supabase migration application as separate steps with verification between them.
 
@@ -46,12 +75,21 @@ For every production release, record:
    git rev-parse origin/main
    test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
    ```
-5. Run release-state inventory:
+5. Run the non-network Preview release-state render with the complete Preview
+   identity tuple. Phase 2 does not run an inferred or production target:
    ```bash
-   npm run check:release-state
+   XOT_ENVIRONMENT=preview \
+   SUPABASE_PROJECT_REF="${PREVIEW_SUPABASE_PROJECT_REF}" \
+   SUPABASE_URL="https://${PREVIEW_SUPABASE_PROJECT_REF}.supabase.co/" \
+   XOT_PREVIEW_BRANCH="${PREVIEW_BRANCH}" \
+   VERCEL_DEPLOYMENT_TARGET=preview \
+   XOT_PREVIEW_ORIGIN="${PREVIEW_ORIGIN}" \
+   ./scripts/check-release-state.sh --target preview --mode render
    ```
 6. Run the full local validation gate:
    ```bash
+   npm run check:runtime-contract
+   npm run test:runtime-contract
    npm run lint
    npm run check:function-inventory
    npm run lint:functions
@@ -64,55 +102,61 @@ For every production release, record:
    npm run build
    npm --prefix services/video-renderer test
    ```
+   The runtime check freezes the current matrix and prints the effective local
+   Node/npm versions. After the Vercel build, capture the matching prebuild line
+   from deployment logs. A successful build on a different, unreviewed major is
+   not runtime approval; follow [`runtime-contract.md`](./runtime-contract.md).
 7. Dry-run function deploy preflight:
    ```bash
+   # Use the same complete Preview identity tuple as step 5.
+   XOT_ENVIRONMENT=preview \
+   SUPABASE_PROJECT_REF="${PREVIEW_SUPABASE_PROJECT_REF}" \
+   SUPABASE_URL="https://${PREVIEW_SUPABASE_PROJECT_REF}.supabase.co/" \
+   XOT_PREVIEW_BRANCH="${PREVIEW_BRANCH}" \
+   VERCEL_DEPLOYMENT_TARGET=preview \
+   XOT_PREVIEW_ORIGIN="${PREVIEW_ORIGIN}" \
    DEPLOY_FUNCTIONS_DRY_RUN=1 ./scripts/deploy-functions.sh
    ```
+   Phase 2 permits this dry run only. A real function deploy belongs to Phase
+   5 or later after hosted Preview identity and staging gates pass.
 8. If the release changes a function auth mode, internal token path, RSS webhook auth path, or required Edge secret, review and update [`function-auth-matrix.md`](./function-auth-matrix.md) in the same branch.
 
-## Supabase Function Deploy
+## Supabase Function Deploy (Phase 5+, owner-controlled)
 
 The deploy script deploys all selected functions first, then stamps the full Git SHA into the Edge Function secret `DEPLOY_GIT_SHA` after every selected function deploy succeeds. This keeps the release marker from getting ahead of deployed function code.
 
-Normal production deploy:
+The current wrapper is Preview-only and fail-closed. Phase 2 has no real
+function deploy, and production deployment is later and owner-controlled. Do
+not use a bypass flag; non-main deployment bypasses are not supported.
 
-```bash
-./scripts/deploy-functions.sh
-```
-
-Deploy selected functions:
+When Phase 5+ authorizes a real Preview deploy, first provide the complete
+Preview identity tuple shown in the pre-release checklist, then select
+functions if needed:
 
 ```bash
 ./scripts/deploy-functions.sh admin-actions worker x-poster
 ```
 
-The script refuses to deploy when:
+By default, the script refuses to deploy when:
 
 - The working tree has uncommitted changes.
-- The current branch is not `main`.
-- Local `main` does not match `origin/main`.
+- The current branch does not match the declared Preview branch.
 - A selected function is missing `verify_jwt` in `supabase/config.toml`.
 - A `verify_jwt` value is not exactly `true` or `false`.
 - A selected function is missing `supabase/functions/<name>/index.ts`.
 
 The script validates deploy shape, not full auth semantics. Use [`function-auth-matrix.md`](./function-auth-matrix.md) to review expected callers, secrets, and compatibility modes before promoting auth-sensitive function changes.
 
-Emergency overrides must be recorded in the release ledger.
+Phase 2 does not use a dirty-worktree override, and there is no non-main
+bypass. A real deploy must use the designated Preview branch and a clean
+worktree; any production deploy remains a separate owner-controlled release
+decision.
 
-```bash
-DEPLOY_ALLOW_DIRTY=1 ./scripts/deploy-functions.sh
-DEPLOY_ALLOW_NON_MAIN=1 ./scripts/deploy-functions.sh
-```
+## Vercel Deploy (Phase 5+, then production owner-controlled)
 
-Use both together only if production is down, both blockers are intentional, and the rollback/fix has already been reviewed:
-
-```bash
-DEPLOY_ALLOW_DIRTY=1 DEPLOY_ALLOW_NON_MAIN=1 ./scripts/deploy-functions.sh
-```
-
-## Vercel Deploy
-
-Vercel production should deploy from GitHub `main`, not from a local cleanup branch.
+Phase 2 does not deploy Vercel. The protected Preview deployment belongs to
+Phase 5; production is later and owner-controlled. Do not promote Preview to
+production from this Phase 2 runbook slice.
 
 After Vercel marks the deployment ready, record:
 
@@ -132,21 +176,81 @@ Both should return `HTTP/2 200`, matching ETags, and the security headers from `
 
 ## Supabase Migration Release
 
-Do not apply migrations until Phase 3 migration trust repair has produced a reviewed plan.
+Do not apply migrations until Phase 1 migration trust has passed SR-MIG-01 and
+the fail-closed release gate. A passing offline inventory check is not migration
+release approval.
 
 Before applying migrations:
 
-1. Compare local and remote migration history:
+1. Validate the immutable 210-side observation and the separate current 107-file
+   source inventory:
+   ```bash
+   npm run check:migration-baseline
+   ```
+   The final release invocation must also supply a fresh protected remote export,
+   both reviewed schema dumps, the freshly generated production types, and its
+   typed evidence receipt:
+   ```bash
+   node scripts/check-migration-baseline.mjs --release-gate \
+     --remote-json /secure/path/xot-remote-migrations.json \
+     --replay-schema /secure/path/xot-replay-public-schema.sql \
+     --production-schema /secure/path/xot-production-public-schema.sql \
+     --production-types /secure/path/xot-production-types.ts \
+     --types-receipt /secure/path/xot-production-types-receipt.json
+   ```
+   These protected inputs must be freshly captured from the reviewed project;
+   checked-in manifest values are not accepted as their own proof.
+   Every resolved owner/gate receipt must also reference a repository-relative
+   typed JSON evidence package. The validator verifies its hash, scans decoded
+   and raw content for credential patterns, checks the entry/gate-specific
+   claims, regenerates schema grants and revokes plus the other privilege facts
+   from the supplied dumps, and verifies each required gate check against a
+   typed, hash-verified artifact. `candidate.reviewed_git_sha` must be the direct
+   parent of a clean evidence-only commit; that evidence commit may change only
+   the migration manifest and schema/privilege receipt. The validator compares
+   the evidence manifest with the reviewed parent and rejects changes to the
+   project/anchor facts, source inventory, historical entry facts, dispositions,
+   blocker definitions, or protected input contract. Only review/closure state
+   and explicitly evidence-derived hashes may advance in that commit.
+
+   Typed gate JSON is an integrity envelope, not a cryptographic signature and
+   not independent authentication of GitHub, Supabase, or a restore target. The
+   security boundary is a branch-protected PR approved by the named database,
+   security, and release owners after they open the referenced provider run,
+   restore, log-query, and role-matrix evidence. Reject locally authored or
+   unverifiable gate artifacts even when their hashes and schemas pass. Provider
+   run IDs, reviewed SHA, timestamps, and source links must be checked against
+   the provider before the evidence commit is approved.
+2. Compare local and remote migration history:
    ```bash
    SUPABASE_TELEMETRY_DISABLED=1 npx supabase migration list --linked
    ```
-2. Confirm there are no unreviewed local-only migrations.
-3. Confirm production schema diff is understood.
-4. Apply only reviewed migrations.
-5. Re-run:
+3. Confirm every manifest entry has database-owner approval. Non-lexical
+   normalized hashes are diagnostic only and cannot approve an entry.
+4. Obtain a clean, no-egress empty-database replay receipt. Historical cron and
+   `pg_net` definitions must be blocked or redirected to a local no-op target,
+   and production Edge logs must show no replay traffic.
+5. Confirm PITR/equivalent recovery readiness with a successful disposable
+   restore-drill receipt.
+6. Confirm the full schema, policy, grant, function, index, and generated-type
+   diff is expected-empty or explicitly approved. Resolve the missing remote
+   body for `20260516050042` and all security privilege divergences with reviewed
+   forward-only migrations.
+7. Run the complete release command shown in step 1 against a fresh protected
+   remote migration export and matching schema/type evidence. Never
+   commit that export because historical statements may contain credentials.
+   Its envelope must declare `export_contract` as
+   `xot-remote-migration-snapshot-v1`, the exact `project_ref`, a `captured_at`
+   timestamp less than six hours old, source/query metadata, and one unique row
+   for every expected remote version:
+8. Apply only the reviewed forward migration set. Broad `db push`, timestamp-only
+   history repair, and replaying restored historical sources against production
+   remain prohibited.
+9. Re-run:
    ```bash
    SUPABASE_TELEMETRY_DISABLED=1 npx supabase migration list --linked
-   npm run check:release-state
+   ./scripts/check-release-state.sh --target preview --mode render
+   npm run check:migration-baseline
    ```
 
 ## Post-Release Smoke Checks
@@ -174,12 +278,12 @@ Frontend rollback:
 Function rollback:
 
 1. Check the prior release ledger entry for the previous Git SHA.
-2. Check out that SHA in a clean worktree. This is intentionally detached or non-`main`, so the non-main override is required and must be recorded in the ledger.
-3. Run:
-   ```bash
-   DEPLOY_ALLOW_NON_MAIN=1 ./scripts/deploy-functions.sh
-   ```
-4. Confirm `DEPLOY_GIT_SHA` matches the rollback SHA.
+2. A Phase 2 rollback is not a deploy action. The current wrapper has no
+   non-main bypass and is Preview-only; any Phase 5+ Preview rollback requires
+   the designated Preview branch, the complete identity tuple, and owner
+   approval.
+3. Production rollback is later and owner-controlled. Record the approved
+   target SHA and confirm `DEPLOY_GIT_SHA` after the authorized deploy.
 
 Migration rollback:
 
@@ -189,7 +293,9 @@ Migration rollback:
 Secret/config rollback:
 
 - Restore previous values from the release ledger or password manager.
-- Re-run `npm run check:release-state`.
+- Re-run the explicit target/mode release-state command for the authorized
+  environment; do not invoke `npm run check:release-state` without
+  `--target` and `--mode`.
 
 ## Release Ledger
 

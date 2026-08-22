@@ -25,6 +25,33 @@ function withFixture(callback) {
   }
 }
 
+function withFullInventoryFixture(callback) {
+  const root = mkdtempSync(join(tmpdir(), "xot-supply-inventory-contract-"));
+  try {
+    for (const path of [
+      ".github/workflows/ci.yml",
+      "package.json",
+      "package-lock.json",
+      "deno.lock",
+      "services/video-renderer/package.json",
+      "services/video-renderer/package-lock.json",
+      "services/video-renderer/Dockerfile",
+      "docs/operations/supply-chain-exceptions.json",
+      "docs/plans/2026-08-11-xot-e8d-local-supply-build-inventory.json",
+      "scripts/check-supply-chain-contract.mjs",
+      "scripts/check-supply-chain-contract.test.mjs",
+      "scripts/build-e8-local-supply-build-inventory.test.mjs",
+      "scripts/check-vite-env.mjs",
+      "scripts/check-vite-env.test.mjs",
+    ]) cpSync(join(REPO_ROOT, path), join(root, path), { recursive: true });
+    cpSync(join(REPO_ROOT, "src"), join(root, "src"), { recursive: true });
+    cpSync(join(REPO_ROOT, "supabase/functions"), join(root, "supabase/functions"), { recursive: true });
+    return callback(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
 test("the committed supply-chain source contract is internally consistent", () => {
   const result = validateSupplyChainContract({ now: Date.parse("2026-07-24T00:00:00Z") });
   assert.deepEqual(result.errors, []);
@@ -296,3 +323,86 @@ test("current scan receipt metadata cannot use an unreviewed source or status", 
   assert.ok(errors.some((error) => error.includes("root_production_audit must be explicitly passed or failed")));
   assert.ok(errors.some((error) => error.includes("renderer_production_audit must be explicitly passed or failed")));
 }));
+
+for (const surface of ["root_npm", "renderer_npm", "deno", "docker", "ci", "exceptions", "vite_env"]) {
+  test(`independent checker rejects ${surface} inventory omission`, () => withFullInventoryFixture((root) => {
+    const path = join(root, "docs/plans/2026-08-11-xot-e8d-local-supply-build-inventory.json");
+    const inventory = JSON.parse(readFileSync(path, "utf8"));
+    delete inventory.surfaces[surface];
+    writeFileSync(path, `${JSON.stringify(inventory, null, 2)}\n`);
+    assert.ok(validateSupplyChainContract({ root }).errors.some((error) => error.includes(`${surface} coverage/hash binding`)));
+  }));
+}
+
+test("independent checker rejects secret/env value fields", () => withFullInventoryFixture((root) => {
+  const path = join(root, "docs/plans/2026-08-11-xot-e8d-local-supply-build-inventory.json");
+  const inventory = JSON.parse(readFileSync(path, "utf8"));
+  inventory.surfaces.vite_env.env_values = { VITE_SUPABASE_URL: "https://private.invalid" };
+  writeFileSync(path, `${JSON.stringify(inventory, null, 2)}\n`);
+  assert.ok(validateSupplyChainContract({ root }).errors.some((error) => error.includes("secret/env value fields are prohibited")));
+}));
+
+test("independent checker rejects a stale Vite public allowlist", () => withFullInventoryFixture((root) => {
+  const path = join(root, "docs/plans/2026-08-11-xot-e8d-local-supply-build-inventory.json");
+  const inventory = JSON.parse(readFileSync(path, "utf8"));
+  inventory.surfaces.vite_env.public_allowlist = inventory.surfaces.vite_env.public_allowlist.filter((name) => name !== "VITE_SUPABASE_PROJECT_ID");
+  writeFileSync(path, `${JSON.stringify(inventory, null, 2)}\n`);
+  assert.ok(validateSupplyChainContract({ root }).errors.some((error) => error.includes("vite_env coverage/hash binding")));
+}));
+
+for (const [label, mutation] of [
+  ["extra literal", (source) => source.replace("  ...OPTIONAL_VITE_ENV_NAMES,\n]);", "  ...OPTIONAL_VITE_ENV_NAMES,\n  \"VITE_INJECTED\",\n]);")],
+  ["removed declaration spread", (source) => source.replace("  ...OPTIONAL_VITE_ENV_NAMES,\n]);", "]);")],
+  ["duplicate literal", (source) => source.replace("  ...OPTIONAL_VITE_ENV_NAMES,\n]);", "  ...OPTIONAL_VITE_ENV_NAMES,\n  \"VITE_SUPABASE_URL\",\n]);")],
+  ["unknown literal", (source) => source.replace("  ...OPTIONAL_VITE_ENV_NAMES,\n]);", "  ...OPTIONAL_VITE_ENV_NAMES,\n  \"VITE_UNKNOWN\",\n]);")],
+  ["composition spread drift", (source) => source.replace("  ...REQUIRED_VITE_ENV_NAMES,\n  ...OPTIONAL_VITE_ENV_NAMES,", "  ...OPTIONAL_VITE_ENV_NAMES,\n  ...REQUIRED_VITE_ENV_NAMES,")],
+]) {
+  test(`independent checker rejects ${label} after inventory regeneration`, () => withFullInventoryFixture((root) => {
+    const checkerPath = join(root, "scripts/check-vite-env.mjs");
+    writeFileSync(checkerPath, mutation(readFileSync(checkerPath, "utf8")));
+    const errors = validateSupplyChainContract({ root }).errors;
+    assert.ok(errors.some((error) => error.includes("independent source projection failed closed") && /composition|exactly nine|public env contract/i.test(error)));
+  }));
+}
+
+for (const path of ["scripts/check-vite-env.mjs", "scripts/check-vite-env.test.mjs"]) {
+  test(`independent checker rejects omitted ${path} source binding`, () => withFullInventoryFixture((root) => {
+    const inventoryPath = join(root, "docs/plans/2026-08-11-xot-e8d-local-supply-build-inventory.json");
+    const inventory = JSON.parse(readFileSync(inventoryPath, "utf8"));
+    inventory.source_files = inventory.source_files.filter((entry) => entry.path !== path);
+    writeFileSync(inventoryPath, `${JSON.stringify(inventory, null, 2)}\n`);
+    assert.ok(validateSupplyChainContract({ root }).errors.some((error) => error.includes("source-file coverage/hash binding")));
+  }));
+}
+
+test("independent checker rejects a missing JSR lock package for a scoped subpath", () => withFullInventoryFixture((root) => {
+  const lockPath = join(root, "deno.lock");
+  const lock = JSON.parse(readFileSync(lockPath, "utf8"));
+  delete lock.jsr["@supabase/functions-js@2.105.4"];
+  writeFileSync(lockPath, `${JSON.stringify(lock, null, 2)}\n`);
+  const errors = validateSupplyChainContract({ root }).errors;
+  assert.ok(errors.some((error) => error.includes("Deno source import missing lock integrity")));
+}));
+
+for (const [path, value] of [
+  ["status", "AUDITED"],
+  ["release", "OPEN"],
+  ["release_gate", "OPEN"],
+  ["no_live_contact", false],
+  ["evidence.external_scans", "passed"],
+  ["evidence.waivers", "completed"],
+  ["evidence.sbom", "AUDITED"],
+  ["evidence.image_scan", "passed"],
+  ["evidence.audit_fetches", "completed"],
+  ["evidence.dependency_update", "passed"],
+]) {
+  test(`independent checker rejects claim inflation ${path}`, () => withFullInventoryFixture((root) => {
+    const inventoryPath = join(root, "docs/plans/2026-08-11-xot-e8d-local-supply-build-inventory.json");
+    const inventory = JSON.parse(readFileSync(inventoryPath, "utf8"));
+    const [section, field] = path.split(".");
+    if (field) inventory[section][field] = value;
+    else inventory[section] = value;
+    writeFileSync(inventoryPath, `${JSON.stringify(inventory, null, 2)}\n`);
+    assert.ok(validateSupplyChainContract({ root }).errors.some((error) => error.includes("claims must remain conservative") || error.includes("must remain") || error.includes("no_live_contact")));
+  }));
+}

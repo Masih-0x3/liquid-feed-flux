@@ -1,8 +1,43 @@
 #!/usr/bin/env node
 
-import { existsSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+const LOCAL_SUPPLY_INVENTORY_PATH = "docs/plans/2026-08-11-xot-e8d-local-supply-build-inventory.json";
+const INVENTORY_SOURCE_PATHS = [
+  "package.json", "package-lock.json", "services/video-renderer/package.json",
+  "services/video-renderer/package-lock.json", "deno.lock", "services/video-renderer/Dockerfile",
+  ".github/workflows/ci.yml", "docs/operations/supply-chain-exceptions.json",
+  "scripts/check-supply-chain-contract.mjs", "scripts/check-supply-chain-contract.test.mjs",
+  "scripts/build-e8-local-supply-build-inventory.test.mjs",
+  "scripts/check-vite-env.mjs", "scripts/check-vite-env.test.mjs",
+];
+const VITE_ENV_CONTRACT_PATH = "scripts/check-vite-env.mjs";
+const INVENTORY_IMPORT_RE = /(?:^\s*import\s+|from\s+|import\s*\(\s*)(['"`])((?:https:\/\/|npm:|jsr:)[^'"`]+)\1/gm;
+const INVENTORY_VITE_RE = /import\.meta\.env\.(VITE_[A-Z0-9_]+)/g;
+
+function declaredViteNames(source, declaration) {
+  const match = source.match(new RegExp(`const ${declaration} = Object\\.freeze\\(\\[([\\s\\S]*?)\\]\\);`));
+  if (!match) throw new Error(`Vite public env contract declaration is missing: ${declaration}`);
+  return [...match[1].matchAll(/"(VITE_[A-Z0-9_]+)"/g)].map((entry) => entry[1]);
+}
+
+function publicViteAllowlist(source) {
+  const required = declaredViteNames(source, "REQUIRED_VITE_ENV_NAMES");
+  const optional = declaredViteNames(source, "OPTIONAL_VITE_ENV_NAMES");
+  const exportMatch = source.match(/export const PUBLIC_VITE_ENV_NAMES = Object\.freeze\(\[([\s\S]*?)\]\);/);
+  if (!exportMatch) throw new Error("Vite public env export composition is missing");
+  const composition = exportMatch[1].split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => line.replace(/,$/, ""));
+  const expectedComposition = ["...REQUIRED_VITE_ENV_NAMES", "...OPTIONAL_VITE_ENV_NAMES"];
+  if (JSON.stringify(composition) !== JSON.stringify(expectedComposition)) {
+    throw new Error("Vite public env export composition must be exactly the required and optional declaration spreads");
+  }
+  const names = [...required, ...optional].sort();
+  if (names.length !== 9 || new Set(names).size !== names.length) throw new Error("Vite public env contract must derive exactly nine unique names");
+  return names;
+}
 
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -35,9 +70,9 @@ const WAIVER_COLLECTIONS = [
   "license_waivers",
 ];
 const REVIEWED_INVENTORY_COUNTS = Object.freeze({
-  rootPackageEntries: 647,
+  rootPackageEntries: 654,
   rendererPackageEntries: 32,
-  denoRemoteImports: 13,
+  denoRemoteImports: 41,
 });
 const REVIEWED_WAIVER_IDS = Object.freeze({
   production_waivers: [],
@@ -298,6 +333,241 @@ function validateExceptionLedger(root, errors, now) {
   return { waiverCount, status: ledger.status };
 }
 
+function inventorySha256(value) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function inventoryPath(root, path) {
+  if (typeof path !== "string" || !path || path.startsWith("/") || path.split(/[\\/]/).includes("..")) {
+    throw new Error(`invalid repository path ${path}`);
+  }
+  const absoluteRoot = resolve(root);
+  const absolute = resolve(absoluteRoot, path);
+  if (absolute !== absoluteRoot && !absolute.startsWith(`${absoluteRoot}/`)) throw new Error(`path outside repository ${path}`);
+  const stat = lstatSync(absolute);
+  if (stat.isSymbolicLink()) throw new Error(`symlink is not permitted ${path}`);
+  const realRoot = realpathSync(absoluteRoot);
+  const realTarget = realpathSync(absolute);
+  if (realTarget !== realRoot && !realTarget.startsWith(`${realRoot}/`)) throw new Error(`path resolves outside repository ${path}`);
+  return absolute;
+}
+
+function inventoryText(root, path) {
+  return readFileSync(inventoryPath(root, path), "utf8");
+}
+
+function inventoryHashFile(root, path) {
+  return inventorySha256(readFileSync(inventoryPath(root, path)));
+}
+
+function inventorySourceFile(root, path) {
+  return { path, sha256: inventoryHashFile(root, path) };
+}
+
+function inventoryJson(root, path) {
+  return JSON.parse(inventoryText(root, path));
+}
+
+function inventoryWalk(root, directory) {
+  inventoryPath(root, directory);
+  return readdirSync(join(root, directory), { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name);
+    inventoryPath(root, path);
+    if (entry.isSymbolicLink()) throw new Error(`symlink is not permitted ${path}`);
+    return entry.isDirectory() ? inventoryWalk(root, path) : [path];
+  }).sort((a, b) => a.localeCompare(b));
+}
+
+function inventoryPackageRef(ref) {
+  const at = ref.indexOf("@", ref.startsWith("@") ? 1 : 0);
+  return at <= 0 ? { name: ref, version: null } : { name: ref.slice(0, at), version: ref.slice(at + 1).split("_", 1)[0] };
+}
+
+function inventoryPackageName(path) {
+  if (path === "") return "";
+  const marker = "node_modules/";
+  const index = path.lastIndexOf(marker);
+  return index >= 0 ? path.slice(index + marker.length) : path;
+}
+
+function inventoryPackages(root, lockPath) {
+  const lock = inventoryJson(root, lockPath);
+  const sourceHash = inventoryHashFile(root, lockPath);
+  return Object.entries(lock.packages ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([path, metadata]) => ({
+    name: path === "" ? lock.name : inventoryPackageName(path),
+    path,
+    version_or_ref: metadata.version ?? lock.version ?? null,
+    integrity_or_source_hash: metadata.integrity ?? null,
+    source_file_sha256: sourceHash,
+  }));
+}
+
+function inventoryDeno(root) {
+  const lock = inventoryJson(root, "deno.lock");
+  const sourceHash = inventoryHashFile(root, "deno.lock");
+  const packageEntries = (section, prefix) => Object.entries(lock[section] ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([ref, metadata]) => {
+    const parsed = inventoryPackageRef(ref);
+    return { name: parsed.name, path: `${prefix}:${ref}`, version_or_ref: parsed.version, integrity_or_source_hash: metadata?.integrity ?? null, source_file_sha256: sourceHash };
+  });
+  return {
+    lock,
+    npm_packages: packageEntries("npm", "npm"),
+    jsr_packages: packageEntries("jsr", "jsr"),
+    remote_imports: Object.entries(lock.remote ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([specifier, checksum]) => ({ name: specifier, path: specifier, version_or_ref: specifier, integrity_or_source_hash: checksum, source_file_sha256: sourceHash })),
+  };
+}
+
+function inventorySourceImports(root, deno) {
+  const files = inventoryWalk(root, "supabase/functions").filter((path) => /\.(?:ts|tsx|js|jsx)$/.test(path));
+  const refs = new Map();
+  for (const path of files) {
+    for (const match of inventoryText(root, path).matchAll(INVENTORY_IMPORT_RE)) {
+      const paths = refs.get(match[2]) ?? [];
+      paths.push(path);
+      refs.set(match[2], paths);
+    }
+  }
+  const integrity = (specifier) => {
+    if (specifier.startsWith("https://")) return deno.lock.remote?.[specifier] ?? null;
+    const ref = specifier.replace(/^(?:npm:|jsr:)/, "");
+    if (specifier.startsWith("npm:")) {
+      if (deno.lock.npm?.[ref]?.integrity) return deno.lock.npm[ref].integrity;
+      const at = ref.lastIndexOf("@");
+      const slash = at >= 0 ? ref.indexOf("/", at) : -1;
+      const base = slash > at ? ref.slice(0, slash) : ref;
+      return Object.entries(deno.lock.npm ?? {}).find(([key]) => key.startsWith(`${base}_`))?.[1]?.integrity ?? null;
+    }
+    if (specifier.startsWith("jsr:")) {
+      const match = Object.entries(deno.lock.jsr ?? {}).find(([key]) => {
+        const at = key.indexOf("@", key.startsWith("@") ? 1 : 0);
+        const packageName = at > 0 ? key.slice(0, at) : key;
+        return ref === packageName || ref.startsWith(`${packageName}/`);
+      });
+      return match?.[1]?.integrity ?? null;
+    }
+    return null;
+  };
+  return [...refs.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([specifier, paths]) => {
+    const ordered = paths.sort();
+    const lockIntegrity = integrity(specifier);
+    if (!lockIntegrity) throw new Error(`Deno source import missing lock integrity: ${specifier}`);
+    return { name: specifier, path: ordered.join(","), version_or_ref: specifier, integrity_or_source_hash: lockIntegrity, source_file_sha256: inventorySha256(ordered.map((path) => `${path}:${inventoryHashFile(root, path)}`).join("\n")) };
+  });
+}
+
+function inventoryDocker(root) {
+  const path = "services/video-renderer/Dockerfile";
+  const source = inventoryText(root, path);
+  const sourceHash = inventoryHashFile(root, path);
+  const baseImages = [...source.matchAll(/^FROM\s+(\S+)\s*$/gm)].map((match) => ({ name: match[1].split("@")[0], path, version_or_ref: match[1].includes("@") ? match[1].slice(match[1].indexOf("@") + 1) : match[1], integrity_or_source_hash: null, source_file_sha256: sourceHash }));
+  const aptBlock = source.match(/apt-get install -y --no-install-recommends\s+([\s\S]*?)\n\s*&& rm -rf/m)?.[1] ?? "";
+  const aptPackages = aptBlock.split(/\r?\n/).map((line) => line.replace(/\\\s*$/, "").trim()).filter(Boolean).map((name) => ({ name, path, version_or_ref: null, integrity_or_source_hash: null, source_file_sha256: sourceHash }));
+  return { source_file: { path, sha256: sourceHash }, base_images: baseImages, apt_packages: aptPackages };
+}
+
+function inventoryCi(root) {
+  const path = ".github/workflows/ci.yml";
+  const sourceHash = inventoryHashFile(root, path);
+  const actionRefs = [...inventoryText(root, path).matchAll(/^\s*- uses:\s*([^\s#]+)\s*$/gm)].map((match) => {
+    const at = match[1].lastIndexOf("@");
+    return { name: at > 0 ? match[1].slice(0, at) : match[1], path, version_or_ref: at > 0 ? match[1].slice(at + 1) : null, integrity_or_source_hash: null, source_file_sha256: sourceHash };
+  });
+  return { source_file: { path, sha256: sourceHash }, action_refs: actionRefs };
+}
+
+function inventoryExceptions(root) {
+  const path = "docs/operations/supply-chain-exceptions.json";
+  const ledger = inventoryJson(root, path);
+  const sourceHash = inventoryHashFile(root, path);
+  const waiverIds = Object.fromEntries(["production_waivers", "development_build_waivers", "license_waivers"].map((collection) => [collection, (ledger[collection] ?? []).map((waiver) => ({ name: waiver?.id ?? null, path: `${path}#${collection}`, version_or_ref: null, integrity_or_source_hash: null, source_file_sha256: sourceHash }))]));
+  return { source_file: { path, sha256: sourceHash }, status: ledger.status ?? null, waiver_ids: waiverIds };
+}
+
+function inventoryVite(root) {
+  const files = ["index.html", "vite.config.ts", ...inventoryWalk(root, "src")].filter((path) => /\.(?:html|ts|tsx|js|jsx)$/.test(path) && existsSync(join(root, path)));
+  const names = new Map();
+  const sourceFiles = [];
+  for (const path of files) {
+    const found = [...inventoryText(root, path).matchAll(INVENTORY_VITE_RE)].map((match) => match[1]);
+    if (!found.length) continue;
+    sourceFiles.push(inventorySourceFile(root, path));
+    for (const name of found) names.set(name, [...(names.get(name) ?? []), path]);
+  }
+  const contractSource = inventoryText(root, VITE_ENV_CONTRACT_PATH);
+  const publicAllowlist = publicViteAllowlist(contractSource);
+  const contractPaths = [...new Set([...sourceFiles.map(({ path }) => path), VITE_ENV_CONTRACT_PATH])].sort();
+  return {
+    source_files: contractPaths.map((path) => inventorySourceFile(root, path)),
+    public_allowlist: publicAllowlist,
+    variable_names: publicAllowlist.map((name) => {
+      const paths = [...new Set([...(names.get(name) ?? []), VITE_ENV_CONTRACT_PATH])].sort();
+      return { name, path: paths.join(","), version_or_ref: null, integrity_or_source_hash: null, source_file_sha256: inventorySha256(paths.map((path) => `${path}:${inventoryHashFile(root, path)}`).join("\n")) };
+    }),
+  };
+}
+
+export function independentInventorySurfaces(root) {
+  const deno = inventoryDeno(root);
+  const sourceImports = inventorySourceImports(root, deno);
+  const denoSourceFiles = [...new Set(sourceImports.flatMap((entry) => entry.path.split(",")))].sort().map((path) => inventorySourceFile(root, path));
+  const vite = inventoryVite(root);
+  const sourceFiles = [...INVENTORY_SOURCE_PATHS.map((path) => inventorySourceFile(root, path)), ...denoSourceFiles, ...vite.source_files]
+    .filter((entry, index, entries) => entries.findIndex((candidate) => candidate.path === entry.path) === index)
+    .sort((a, b) => a.path.localeCompare(b.path));
+  return {
+    source_files: sourceFiles,
+    root_npm: { package_manifest: inventorySourceFile(root, "package.json"), lockfile: inventorySourceFile(root, "package-lock.json"), package_entries: inventoryPackages(root, "package-lock.json").length, packages: inventoryPackages(root, "package-lock.json") },
+    renderer_npm: { package_manifest: inventorySourceFile(root, "services/video-renderer/package.json"), lockfile: inventorySourceFile(root, "services/video-renderer/package-lock.json"), package_entries: inventoryPackages(root, "services/video-renderer/package-lock.json").length, packages: inventoryPackages(root, "services/video-renderer/package-lock.json") },
+    deno: { lockfile: inventorySourceFile(root, "deno.lock"), npm_packages: deno.npm_packages, jsr_packages: deno.jsr_packages, remote_imports: deno.remote_imports, source_imports: sourceImports },
+    docker: inventoryDocker(root),
+    ci: inventoryCi(root),
+    exceptions: inventoryExceptions(root),
+    vite_env: vite,
+  };
+}
+
+function validateInventoryNoSecretFields(value, path = "inventory") {
+  const errors = [];
+  const prohibited = /(?:^|_)(?:value|values|raw|secret|secrets|token|tokens|password|passwords|credential|credentials|authorization|bearer|api[_-]?key|private[_-]?key)(?:$|_)/i;
+  const visit = (node, currentPath) => {
+    if (!node || typeof node !== "object") return;
+    for (const [key, child] of Object.entries(node)) {
+      if (prohibited.test(key) && key !== "version_or_ref") errors.push(`secret/env value fields are prohibited: ${currentPath}.${key}`);
+      visit(child, `${currentPath}.${key}`);
+    }
+  };
+  visit(value, path);
+  return errors;
+}
+
+function validateLocalSupplyBuildInventory(root, errors) {
+  let inventory;
+  try {
+    inventory = JSON.parse(readFileSync(join(root, LOCAL_SUPPLY_INVENTORY_PATH), "utf8"));
+  } catch (error) {
+    errors.push(`local supply/build inventory must be readable JSON: ${error instanceof Error ? error.message : String(error)}`);
+    return;
+  }
+  errors.push(...validateInventoryNoSecretFields(inventory));
+  if (inventory?.schema !== "xot-e8d-local-supply-build-inventory-v1") errors.push("local supply/build inventory schema is not reviewed");
+  if (inventory?.status !== "ACCEPTED_LOCAL_T0_T1") errors.push("local supply/build inventory status must remain ACCEPTED_LOCAL_T0_T1");
+  if (inventory?.release !== "CLOSED" || inventory?.release_gate !== "CLOSED") errors.push("local supply/build inventory release must remain CLOSED");
+  if (inventory?.exception_state !== "awaiting_fresh_scan_evidence") errors.push("local supply/build inventory exception state must remain awaiting_fresh_scan_evidence");
+  if (inventory?.no_live_contact !== true) errors.push("local supply/build inventory no_live_contact must remain true");
+  if (inventory?.evidence?.external_scans !== "deferred" || inventory?.evidence?.waivers !== "deferred") errors.push("local supply/build inventory external evidence must remain deferred");
+  const expectedEvidence = { tier: "T0/T1", external_scans: "deferred", waivers: "deferred", audit_fetches: "not_run", sbom: "not_run", image_scan: "not_run", dependency_update: "not_run" };
+  if (JSON.stringify(inventory?.evidence) !== JSON.stringify(expectedEvidence)) errors.push("local supply/build inventory external evidence claims must remain conservative and non-audited");
+  try {
+    const expected = independentInventorySurfaces(root);
+    if (JSON.stringify(inventory?.source_files) !== JSON.stringify(expected.source_files)) errors.push("local supply/build inventory source-file coverage/hash binding differs from repository");
+    for (const surface of ["root_npm", "renderer_npm", "deno", "docker", "ci", "exceptions", "vite_env"]) {
+      if (JSON.stringify(inventory?.surfaces?.[surface]) !== JSON.stringify(expected[surface])) errors.push(`local supply/build inventory ${surface} coverage/hash binding differs from repository`);
+    }
+  } catch (error) {
+    errors.push(`local supply/build inventory independent source projection failed closed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 export function validateSupplyChainContract({ root = REPO_ROOT, now = Date.now() } = {}) {
   const errors = [];
   validateCi(root, errors);
@@ -310,6 +580,7 @@ export function validateSupplyChainContract({ root = REPO_ROOT, now = Date.now()
   assertCondition(errors, denoLock.remoteImports === REVIEWED_INVENTORY_COUNTS.denoRemoteImports, "Deno remote-import inventory must match the reviewed manifest");
   const rendererDockerBase = validateRendererDockerfile(root, errors);
   const exceptionLedger = validateExceptionLedger(root, errors, now);
+  validateLocalSupplyBuildInventory(root, errors);
   return { errors, rootLock, rendererLock, denoLock, rendererDockerBase, exceptionLedger };
 }
 

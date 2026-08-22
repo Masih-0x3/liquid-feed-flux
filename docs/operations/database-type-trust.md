@@ -1,12 +1,152 @@
 # XOT Database And Supabase Type Trust
 
-Date: 2026-06-14
+Current evidence date: 2026-07-14
 
-Branch: `codex/xot-cleanup-24-database-type-trust`
+Candidate branch: `codex/xot-sr-mig-01`
 
-This document records the current database migration and generated type trust state. It is intentionally read-only: no migration was pushed, no migration history was repaired, and checked-in generated types were not overwritten in this phase.
+This document separates the current blocked Phase 1 evidence from the historical
+2026-06-14 snapshot. No migration was pushed, no remote migration history was
+repaired, and checked-in generated types were not overwritten.
 
-## Verdict
+## Current Verdict
+
+Do not run `supabase db push`, `supabase migration repair`, or any broad linked
+schema command from this repository. SR-MIG-01 and the Phase 1 release gate are
+blocked.
+
+The repository now has an immutable manifest of the original observation and a
+separate candidate source inventory:
+
+- Original observation: 105 local entries plus 105 remote entries, or 210
+  historical side entries across 185 unique versions.
+- Current candidate source: 107 active migration files. The old executable
+  `20250903140000` alias is archived, and source matching the remote body modulo
+  one terminal LF for remote versions
+  `20250904033120`, `20250904033146`, and `20250905010114` is restored.
+- Evidence strength: 118 side entries are raw-hash-proven; 92 remain pending
+  database-owner review. Non-lexical normalized hashes are diagnostic only and
+  are never treated as semantic proof.
+
+The candidate replay reached `20260703013000` twice and produced the expected 12
+prerequisite columns, five indexes, current 20-column pipeline RPC, and a rolled
+back retry probe. That proves the candidate can construct the public schema. It
+does **not** provide an accepted replay receipt: outbound isolation was not
+proven, and two production-gateway `worker` requests returned HTTP 401 at
+`2026-07-14T10:09:01.913Z` and `2026-07-14T10:10:01.044Z`. Their timing matches
+the disposable replay cron cadence, but source IP was not available, so the
+attribution is an inference. The local Supabase stack is stopped and must not be
+restarted until egress is blocked or all network jobs are routed to a local
+no-op target.
+
+## Current Diff And Type Evidence
+
+- Public structure excluding comments and privileges has an expected-empty
+  canonical diff between replay and production.
+- Privileges do not match: 105 grant records are broader in production. This
+  includes authenticated/anon access on operational tables and public analytics
+  RPCs, so SR-RLS-01 role-matrix review is mandatory.
+- Default privileges also diverge independently: replay has 9 clauses,
+  production has 10, only 3 are common, 6 are replay-only, and 7 are
+  production-only. The production-only defaults grant broad access on future
+  public tables and sequences to `anon`, `authenticated`, and `service_role`,
+  plus future functions to `service_role`. Their blast radius includes every
+  later object created by `postgres`; each clause requires explicit SR-RLS-01
+  disposition before another object-creating migration may ship.
+- Four same-version pairs are explicitly classified as security privilege
+  divergences, not serialization differences: `20260515080625`,
+  `20260515084409`, `20260515104839`, and `20260516021358`.
+- Remote version `20260516050042` contains no source statements. Its local grant
+  effects match the live snapshot, but body equivalence is unprovable.
+- Replay-generated and production-generated TypeScript structures match except
+  for the production PostgREST `14.5` metadata header. The checked-in
+  `src/integrations/supabase/types.ts` is still stale (1,672 lines versus 2,817
+  production-generated lines) and must not be replaced until the baseline is
+  approved.
+
+Evidence artifacts:
+
+- `docs/plans/2026-07-14-xot-migration-equivalence-manifest.json`
+- `docs/plans/2026-07-14-xot-schema-privilege-diff.json`
+- `scripts/build-migration-equivalence-manifest.mjs`
+- `scripts/build-schema-privilege-diff.mjs`
+- `scripts/check-migration-baseline.mjs`
+
+The manifest records the original observation anchor separately from the
+candidate branch base, along with tool versions and hashes for the protected
+local inventory, candidate inventory, and uncommitted remote export. Its 118
+raw-hash pairs carry an automated deterministic reviewer receipt; the other 92
+entries name the database owner as the pending reviewer. Rebuild it only from an
+immutable copy of the observed source, the current candidate, and a protected
+remote export:
+
+```bash
+node scripts/build-migration-equivalence-manifest.mjs \
+  /path/to/immutable-observed-migrations \
+  /path/to/candidate-migrations \
+  /secure/path/xot-remote-migrations.json \
+  docs/plans/2026-07-14-xot-migration-equivalence-manifest.json
+```
+
+The generated file must reproduce byte-for-byte before review. The protected
+remote export is evidence input and must never be added to Git.
+
+The schema/privilege receipt is independently reproducible from the two
+protected `pg_dump` artifacts. Its canonical structure hash removes only blank
+lines, whole-line comments, and privilege statements; it preserves every other
+byte, including quoted and dollar-quoted content. The receipt separately records
+direct grants and default privileges rather than collapsing them into schema
+parity.
+
+`npm run check:migration-baseline` validates the immutable inventory and current
+source hashes offline. It may pass while accurately reporting release blockers.
+`npm run check:migration-release` is the fail-closed release mode and is expected
+to fail until every gate is closed. A future green result also requires the
+protected replay/production dumps to regenerate the committed canonical schema,
+grant, classification, and default-privilege facts exactly; a matching raw hash
+alone is insufficient. This includes `GRANT` and `REVOKE` statements on schemas,
+tables, functions, and sequences. Typed owner/gate evidence packages and their
+required check artifacts are hash-verified, secret-scanned, and checked against
+their specific entries/gates. The reviewed code commit must be the direct parent
+of a clean evidence-only commit containing only the manifest and privilege
+receipt changes. The validator freezes the immutable manifest projection against
+that parent, including project/anchors, active source inventory, historical body
+facts and hashes, dispositions, and blocker definitions.
+
+Gate JSON proves integrity and binding after capture; it does not authenticate an
+external provider by itself. Final release trust therefore also requires the
+named database/security/release owners to verify the referenced GitHub run,
+Supabase logs and backups, restore target, and role/type evidence through a
+branch-protected review. An author-created JSON assertion is not release proof.
+
+## Blocking Gates And Required Resolution
+
+1. **Replay egress:** rerun from a clean database with a captured no-egress or
+   loopback-only receipt; verify production Edge logs receive no replay calls.
+2. **Restore readiness:** enable PITR or approve an equivalent recovery contract,
+   then complete a disposable-project restore drill and retain validation output.
+3. **Owner review:** review all 92 pending entries with body-aware or
+   statement-aware evidence. Normalized hashes alone cannot close a disposition.
+4. **Missing body:** recover `20260516050042` source or approve a new forward-only
+   migration that reasserts the intended restrictive grants.
+5. **Privilege drift:** run the anon, viewer, authenticated-admin, service-role,
+   and renderer matrix; author a forward-only privilege migration after review.
+6. **Hosted CI:** GitHub Actions must execute successfully; the current account
+   billing/spending failure occurs before checkout and is not a test result.
+7. **Types:** only after the exact schema baseline is approved, regenerate linked
+   and replay types, require byte/structural parity, then replace the checked-in
+   file in a dedicated reviewed slice.
+
+The restored historical files make clean construction possible, but they do not
+make Supabase CLI history parity safe. Renamed historical versions remain
+divergent from the linked ledger, so timestamp-only repair is prohibited.
+
+## Historical 2026-06-14 Snapshot
+
+Historical branch: `codex/xot-cleanup-24-database-type-trust`
+
+The remainder of this file is retained as the earlier read-only snapshot.
+
+### Historical Verdict
 
 Do not run `supabase db push` from this repository yet.
 
