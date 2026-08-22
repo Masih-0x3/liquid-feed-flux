@@ -55,12 +55,13 @@ export async function queueManualAdvance(
 ): Promise<{ queued: string; reason?: string }> {
   const insertAdminPipelineEvent = deps.insertAdminPipelineEvent ??
     defaultInsertAdminPipelineEvent;
-  const { data: post } = await table(supabase, "posts")
+  const { data: post, error: postError } = await table(supabase, "posts")
     .select(
       "tweet_id, text_translated, translated_at, is_truncated, hydrated_at, enrich_status",
     )
     .eq("tweet_id", tweetId)
     .maybeSingle();
+  if (postError) throw postError;
   const postRecord = asRecord(post);
   if (!post) return { queued: "none", reason: "post_not_found" };
   if (!postRecord.text_translated && !postRecord.translated_at) {
@@ -76,10 +77,14 @@ export async function queueManualAdvance(
     return { queued: "hydrate", reason: result.reason };
   }
 
-  const { data: enrichCfgRow } = await table(supabase, "settings")
+  const { data: enrichCfgRow, error: enrichCfgError } = await table(supabase, "settings")
     .select("value")
     .eq("key", "enrichment_config")
     .maybeSingle();
+  if (enrichCfgError) throw enrichCfgError;
+  if (enrichCfgRow !== null && (typeof enrichCfgRow !== "object" || Array.isArray(enrichCfgRow))) {
+    throw new Error("manual_advance_enrichment_config_invalid_response");
+  }
   const enrichCfg = normalizeEnrichmentConfig(
     (asRecord(enrichCfgRow).value ?? { enabled: false }) as Partial<
       EnrichmentConfig
@@ -90,7 +95,7 @@ export async function queueManualAdvance(
     postRecord.enrich_status !== "approved" &&
     postRecord.enrich_status !== "skipped"
   ) {
-    await table(supabase, "jobs").upsert({
+    const { error: enrichJobError } = await table(supabase, "jobs").upsert({
       type: "enrich",
       payload: { tweet_id: tweetId, source: "manual_score" },
       status: "pending",
@@ -103,13 +108,14 @@ export async function queueManualAdvance(
       last_error: null,
       attempts: 0,
     }, { onConflict: "idempotency_key", ignoreDuplicates: false });
+    if (enrichJobError) throw enrichJobError;
     await insertAdminPipelineEvent(supabase, tweetId, "enrich", "queued", {
       source: "manual_score",
     });
     return { queued: "enrich" };
   }
 
-  await table(supabase, "jobs").upsert({
+  const { error: deliverJobError } = await table(supabase, "jobs").upsert({
     type: "deliver",
     payload: { tweet_id: tweetId, source: "manual_score" },
     status: "pending",
@@ -122,22 +128,26 @@ export async function queueManualAdvance(
     last_error: null,
     attempts: 0,
   }, { onConflict: "idempotency_key", ignoreDuplicates: false });
-  const { data: pendingDeliveries } = await table(supabase, "deliveries")
+  if (deliverJobError) throw deliverJobError;
+  const { data: pendingDeliveries, error: pendingDeliveriesError } = await table(supabase, "deliveries")
     .select("id")
     .eq("subject_type", "post")
     .eq("subject_id", tweetId)
     .eq("status", "pending")
     .limit(1);
+  if (pendingDeliveriesError) throw pendingDeliveriesError;
+  if (!Array.isArray(pendingDeliveries)) throw new Error("manual_advance_pending_delivery_invalid_response");
   if (
     !pendingDeliveries ||
     (pendingDeliveries as { length?: number }).length === 0
   ) {
-    await table(supabase, "deliveries").insert({
+    const { error: deliveryInsertError } = await table(supabase, "deliveries").insert({
       subject_type: "post",
       subject_id: tweetId,
       status: "pending",
       attempts: 0,
     });
+    if (deliveryInsertError) throw deliveryInsertError;
   }
   await insertAdminPipelineEvent(supabase, tweetId, "deliver", "queued", {
     source: "manual_score",

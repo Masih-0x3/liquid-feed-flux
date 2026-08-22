@@ -16,6 +16,7 @@ type FakeCall = {
   op: string;
   columns?: string;
   column?: string;
+  operator?: string;
   value?: unknown;
   values?: unknown[];
 };
@@ -113,6 +114,10 @@ function fakeMonitoringSupabase(options: FakeMonitoringSupabaseOptions = {}) {
       },
       eq(column: string, value: unknown) {
         calls.push({ table, op: "eq", column, value });
+        return builder;
+      },
+      filter(column: string, operator: string, value: unknown) {
+        calls.push({ table, op: "filter", column, operator, value });
         return builder;
       },
       gte(column: string, value: unknown) {
@@ -310,6 +315,23 @@ Deno.test("getMonitoringEntries falls back when optional monitoring columns are 
     ),
     true,
   );
+});
+
+Deno.test("getMonitoringEntries bounds exact-entry job state to its tweet id", async () => {
+  const supabase = fakeMonitoringSupabase();
+  const result = await getMonitoringEntries(supabase, {
+    tweet_id: "t1",
+    filter: "all",
+    limit: 1,
+  });
+  const jobPayloadFilter = supabase.calls.find((call) =>
+    call.table === "jobs" && call.op === "filter" &&
+    call.column === "payload->>tweet_id"
+  );
+
+  assertEquals(result.success, true);
+  assertEquals(jobPayloadFilter?.operator, "eq");
+  assertEquals(jobPayloadFilter?.value, "t1");
 });
 
 Deno.test("getMonitoringEntries preserves x-delivery status filter row id order", async () => {

@@ -2,6 +2,17 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
 import { rssWebhookInternalAuthHeaders } from "../_shared/internalAuth.ts";
 import { captureEdgeException, initSentryEdge } from "../_shared/sentry.ts";
+import {
+  ExternalPostingBlockedError,
+  requireExternalPosting,
+} from "../_shared/externalPostingGuard.ts";
+import { resolveCurrentUserRole, type AppRole } from "../_shared/appRole.ts";
+import {
+  adminRetryActionError,
+  ADMIN_RETRY_INBOUND_INGEST_ACTION,
+  classifyAdminRetryAction,
+  isAdminRetryAction,
+} from "./adminRetryPolicy.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': Deno.env.get('ALLOWED_CORS_ORIGIN') ?? 'https://liquid-feed-flux.lovable.app',
@@ -9,8 +20,10 @@ const corsHeaders = {
 };
 initSentryEdge();
 
-// Helper: validate JWT and check admin role
-async function requireAdmin(req: Request): Promise<{ userId: string } | Response> {
+// Validate JWT and resolve the caller-bound canonical role.
+async function requireAuthenticatedAppRole(
+  req: Request,
+): Promise<{ userId: string; role: AppRole; authClient: any } | Response> {
   const authHeader = req.headers.get('Authorization');
   if (!authHeader?.startsWith('Bearer ')) {
     return new Response(JSON.stringify({ error: 'Unauthorized: missing token' }), {
@@ -34,18 +47,42 @@ async function requireAdmin(req: Request): Promise<{ userId: string } | Response
     });
   }
 
-  const { data: isAdmin, error: roleError } = await supabaseAuth.rpc(
-    'current_user_is_admin'
-  );
-
-  if (roleError || isAdmin !== true) {
-    return new Response(JSON.stringify({ error: 'Forbidden: admin role required' }), {
+  const role = await resolveCurrentUserRole(supabaseAuth);
+  if (!role || role !== "admin") {
+    return new Response(JSON.stringify({
+      error: 'Forbidden: admin role required',
+      code: 'admin_role_required',
+    }), {
       status: 403,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 
-  return { userId: data.user.id };
+  return { userId: data.user.id, role, authClient: supabaseAuth };
+}
+
+function lockedResponse(reason: string): Response {
+  return new Response(JSON.stringify({
+    success: false,
+    locked: true,
+    code: "external_posting_blocked",
+    reason,
+  }), {
+    status: 200,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
+}
+
+async function requireRetryPostingGuard(supabase: any): Promise<Response | null> {
+  try {
+    await requireExternalPosting(supabase);
+    return null;
+  } catch (error) {
+    if (error instanceof ExternalPostingBlockedError) {
+      return lockedResponse(error.reason);
+    }
+    return lockedResponse("controls_unavailable");
+  }
 }
 
 function safeAdminRetryErrorCode(error: unknown): string {
@@ -96,8 +133,8 @@ serve(async (req) => {
   }
 
   try {
-    // Require admin auth for all actions
-    const authResult = await requireAdmin(req);
+    // Require admin auth for all actions.
+    const authResult = await requireAuthenticatedAppRole(req);
     if (authResult instanceof Response) return authResult;
 
     const supabase = createClient<any, any>(
@@ -106,7 +143,21 @@ serve(async (req) => {
     );
 
     const body = await req.json();
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return new Response(JSON.stringify({ success: false, error: "Invalid request body" }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
     const { delivery_id, action, tweet_id, post, template, settings } = body;
+    if (!isAdminRetryAction(action)) {
+      const invalid = adminRetryActionError(action);
+      return new Response(JSON.stringify(invalid.body), {
+        status: invalid.status,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    const actionClass = classifyAdminRetryAction(action);
 
     console.log(JSON.stringify({ function: 'admin-retry', action: action || 'retry_delivery', admin_user: authResult.userId }));
 
@@ -121,6 +172,9 @@ serve(async (req) => {
           status: 400
         });
       }
+
+      const locked = await requireRetryPostingGuard(supabase);
+      if (locked) return locked;
 
       const { data: postData, error: postError } = await supabase
         .from('posts')
@@ -183,6 +237,9 @@ serve(async (req) => {
 
     // Handle retry failed deliveries action
     if (action === 'retry_failed_deliveries') {
+      const locked = await requireRetryPostingGuard(supabase);
+      if (locked) return locked;
+
       const { data: failedDeliveries, error: deliveryError } = await supabase
         .from('deliveries')
         .select('*')
@@ -243,7 +300,7 @@ serve(async (req) => {
     }
 
     // Handle test template action
-    if (action === 'test_template') {
+    if (actionClass === "telegram_provider_write") {
       if (!post || !template) {
         return new Response(JSON.stringify({ 
           success: false, 
@@ -283,6 +340,9 @@ serve(async (req) => {
         .replace(/{media_info}/g, post.has_media ? '📸 تصویر' : '');
 
       const telegramUrl = `https://api.telegram.org/bot${botToken}/sendMessage`;
+
+      const locked = await requireRetryPostingGuard(supabase);
+      if (locked) return locked;
       
       const telegramResponse = await fetch(telegramUrl, {
         method: 'POST',
@@ -309,7 +369,7 @@ serve(async (req) => {
     }
 
     // Handle test webhook action
-    if (action === 'test_webhook') {
+    if (action === ADMIN_RETRY_INBOUND_INGEST_ACTION && actionClass === "inbound_rss_ingest") {
       const testRSSItem = {
         guid: `test-tweet-${Date.now()}`,
         title: 'Breaking: Major tech announcement today',
@@ -347,6 +407,9 @@ serve(async (req) => {
     if (!delivery_id) {
       throw new Error('delivery_id is required');
     }
+
+    const locked = await requireRetryPostingGuard(supabase);
+    if (locked) return locked;
 
     const { data: delivery, error: deliveryError } = await supabase
       .from('deliveries')

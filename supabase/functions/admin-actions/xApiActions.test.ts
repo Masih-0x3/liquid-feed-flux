@@ -19,6 +19,7 @@ type FakeCall = {
 
 type FakeConfig = {
   settings?: Record<string, unknown>;
+  runtimeControls?: Record<string, unknown>;
 };
 
 function fakeSupabase(config: FakeConfig = {}) {
@@ -27,6 +28,15 @@ function fakeSupabase(config: FakeConfig = {}) {
     x_api_controls: { my_x_enabled: true, verify_cache_minutes: 15 },
     x_self_id: {},
     ...(config.settings ?? {}),
+  };
+  const runtimeControls = config.runtimeControls ?? {
+    singleton_id: true,
+    environment: "production",
+    dedupe_enabled: true,
+    translation_enabled: true,
+    posting_mode: "enabled",
+    updated_at: "2026-01-01T00:00:00.000Z",
+    updated_by: null,
   };
   const client: SupabaseAdminClient & { calls: FakeCall[] } = {
     calls,
@@ -41,6 +51,7 @@ function fakeSupabase(config: FakeConfig = {}) {
             ? { data: { value: settings[key] } }
             : { data: [] };
         }
+        if (tableName === "runtime_controls") return { data: [runtimeControls] };
         return {};
       };
       const builder = {
@@ -94,6 +105,7 @@ function deps(
   responseBody: unknown = {
     data: { id: "u1", username: "masih", name: "Masih" },
   },
+  envOverrides: Record<string, string> = {},
 ) {
   const calls = {
     fetches: [] as Array<Record<string, unknown>>,
@@ -104,6 +116,9 @@ function deps(
     TWITTER_CONSUMER_SECRET: "cs",
     TWITTER_ACCESS_TOKEN: "at",
     TWITTER_ACCESS_TOKEN_SECRET: "ats",
+    XOT_ENVIRONMENT: "production",
+    ALLOW_EXTERNAL_POSTING: "true",
+    ...envOverrides,
   };
   const actionDeps: XApiActionDeps = {
     readEnv: (key) => env[key],
@@ -270,6 +285,32 @@ Deno.test("send test tweet posts JSON body and returns created id", async () => 
   );
 });
 
+Deno.test("Preview blocks direct X test tweet before provider fetch", async () => {
+  const supabase = fakeSupabase({
+    runtimeControls: {
+      singleton_id: true,
+      environment: "preview",
+      dedupe_enabled: false,
+      translation_enabled: false,
+      posting_mode: "blocked",
+      updated_at: "2026-01-01T00:00:00.000Z",
+      updated_by: null,
+    },
+  });
+  const { deps: actionDeps, calls } = deps(undefined, {
+    XOT_ENVIRONMENT: "preview",
+    ALLOW_EXTERNAL_POSTING: "true",
+  });
+  const result = await sendTestTweetAdminAction(supabase, { text: "hello" }, actionDeps);
+  assertEquals(result.body, {
+    ok: false,
+    locked: true,
+    code: "external_posting_blocked",
+    reason: "preview_environment",
+  });
+  assertEquals(calls.fetches, []);
+});
+
 Deno.test("test hydrate tweet validates numeric id and reads note tweet fields", async () => {
   const supabase = fakeSupabase();
   const { deps: actionDeps, calls } = deps({
@@ -298,8 +339,5 @@ Deno.test("test hydrate tweet validates numeric id and reads note tweet fields",
     text: "short",
     lang: "en",
     note_tweet: "long note",
-    raw: {
-      data: { text: "short", lang: "en", note_tweet: { text: "long note" } },
-    },
   });
 });

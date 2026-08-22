@@ -236,9 +236,20 @@ export function validateSettingsValue(
       if (
         v.max_posts_per_run !== undefined &&
         (typeof v.max_posts_per_run !== "number" ||
+          !Number.isSafeInteger(v.max_posts_per_run) ||
           v.max_posts_per_run < 1 ||
           v.max_posts_per_run > 20)
       ) return "x_posting_config.max_posts_per_run must be 1-20";
+      const nonNegativeQuotaConfig = ["daily_budget", "min_spacing_minutes"];
+      for (const f of nonNegativeQuotaConfig) {
+        const value = v[f];
+        if (
+          value !== undefined &&
+          (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0)
+        ) {
+          return `x_posting_config.${f} must be a non-negative whole number`;
+        }
+      }
       const strs: Array<[string, number]> = [["post_template", 1000], [
         "leading_emoji",
         32,
@@ -279,14 +290,16 @@ export function validateSettingsValue(
         ["posts_per_day", 1, 10000],
         ["monthly_post_budget", 1, 1000000],
         ["media_uploads_per_day", 1, 10000],
+        ["hydrations_per_day", 1, 10000],
       ];
       for (const [f, min, max] of nums) {
+        const value = v[f];
         if (
-          v[f] !== undefined &&
-          (typeof v[f] !== "number" || (v[f] as number) < min ||
-            (v[f] as number) > max)
+          value !== undefined &&
+          (typeof value !== "number" || !Number.isSafeInteger(value) || value < min ||
+            value > max)
         ) {
-          return `x_rate_limits.${f} must be ${min}-${max}`;
+          return `x_rate_limits.${f} must be a whole number ${min}-${max}`;
         }
       }
       break;
@@ -514,7 +527,7 @@ export function validateSettingsValue(
       try {
         normalizeScoringPolicy(v);
       } catch (e) {
-        return `invalid scoring_policy: ${(e as Error).message}`;
+        return "invalid scoring_policy";
       }
       break;
     }
@@ -652,11 +665,42 @@ export async function saveSettingsAdminAction(
   let valueToSave = value;
   if (key === "x_posting_config" && value && typeof value === "object") {
     const settings = supabase.from("settings") as SettingsQueryBuilder;
-    const { data: prev } = await settings.select("value").eq(
+    const { data: prev, error: previousSettingsError } = await settings.select("value").eq(
       "key",
       "x_posting_config",
     ).maybeSingle();
-    const prevCfg = (prev?.value ?? {}) as Record<string, unknown>;
+    if (previousSettingsError) {
+      return {
+        body: {
+          error: "x_posting_config_previous_read_failed",
+          code: "x_posting_config_previous_read_failed",
+        },
+        status: 503,
+      };
+    }
+    if (prev !== null && prev !== undefined &&
+      (typeof prev !== "object" || Array.isArray(prev) || !("value" in prev))) {
+      return {
+        body: {
+          error: "x_posting_config_previous_invalid_response",
+          code: "x_posting_config_previous_invalid_response",
+        },
+        status: 503,
+      };
+    }
+    const previousValue = prev?.value;
+    if (previousValue !== undefined &&
+      (previousValue === null || typeof previousValue !== "object" ||
+        Array.isArray(previousValue))) {
+      return {
+        body: {
+          error: "x_posting_config_previous_invalid_response",
+          code: "x_posting_config_previous_invalid_response",
+        },
+        status: 503,
+      };
+    }
+    const prevCfg = (previousValue ?? {}) as Record<string, unknown>;
     const nextCfg = value as Record<string, unknown>;
 
     if (shouldRestampXPostingStart(prevCfg, nextCfg)) {

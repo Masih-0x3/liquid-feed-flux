@@ -105,6 +105,11 @@ import {
   recordFeedback,
 } from "./sideEffects.ts";
 import { queueManualAdvance } from "./manualAdvanceActions.ts";
+import {
+  getAdminOperationStatus,
+  isSupportedAdminOperationId,
+  validateAdminOperationIdentity,
+} from "./adminOperation.ts";
 import { captureEdgeException, initSentryEdge } from "../_shared/sentry.ts";
 import {
   isRssWebhookPayloadError,
@@ -113,6 +118,9 @@ import {
   rssWebhookPayloadErrorStatus,
 } from "../_shared/rssWebhookPayloadPolicy.ts";
 import { isAdminActionName } from "../_shared/adminActionNames.ts";
+import { isReadOnlyAdminActionName } from "../_shared/adminActionNames.ts";
+import { resolveCurrentUserRole, type AppRole } from "../_shared/appRole.ts";
+import { fetchRuntimeControls } from "../_shared/runtimeControls.ts";
 import type { SupabaseAdminClient } from "./types.ts";
 
 const DEPLOY_SHA = Deno.env.get('DEPLOY_GIT_SHA') ?? 'unknown';
@@ -153,8 +161,12 @@ function makeCorsHeaders(req: Request): CorsHeaders {
   });
 }
 
-// Validate JWT and check admin role
-async function requireAdmin(req: Request, corsHeaders: CorsHeaders): Promise<{ userId: string } | Response> {
+// Validate JWT and resolve the caller-bound canonical application role.
+// The service-role client is created only after this check succeeds.
+async function requireAuthenticatedAppRole(
+  req: Request,
+  corsHeaders: CorsHeaders,
+): Promise<{ userId: string; role: AppRole; authClient: any } | Response> {
   const authHeader = req.headers.get('Authorization');
   if (!authHeader?.startsWith('Bearer ')) {
     return new Response(JSON.stringify({ error: 'Unauthorized: missing token' }), {
@@ -176,17 +188,36 @@ async function requireAdmin(req: Request, corsHeaders: CorsHeaders): Promise<{ u
     });
   }
 
-  const { data: isAdmin, error: roleError } = await supabaseAuth.rpc(
-    'current_user_is_admin'
-  );
-
-  if (roleError || isAdmin !== true) {
-    return new Response(JSON.stringify({ error: 'Forbidden: admin role required' }), {
+  const role = await resolveCurrentUserRole(supabaseAuth);
+  if (!role) {
+    return new Response(JSON.stringify({
+      error: 'Forbidden: canonical application role required',
+      code: 'app_role_forbidden',
+    }), {
       status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 
-  return { userId: data.user.id };
+  return { userId: data.user.id, role, authClient: supabaseAuth };
+}
+
+// Keep the stable entrypoint seam. Role resolution remains in the shared
+// canonical helper above.
+async function requireAdmin(
+  req: Request,
+  corsHeaders: CorsHeaders,
+): Promise<{ userId: string; role: AppRole; authClient: any } | Response> {
+  return await requireAuthenticatedAppRole(req, corsHeaders);
+}
+
+function forbiddenReadOnlyAction(corsHeaders: CorsHeaders): Response {
+  return new Response(JSON.stringify({
+    error: 'Forbidden: admin role required',
+    code: 'admin_role_required',
+  }), {
+    status: 403,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
 }
 
 function createJsonResponse(body: unknown, status: number, corsHeaders: CorsHeaders) {
@@ -199,6 +230,17 @@ function createJsonResponse(body: unknown, status: number, corsHeaders: CorsHead
 function asAdminActionBody(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
+}
+
+export function isExactRuntimeControlsUpdateBody(body: Record<string, unknown>): boolean {
+  const keys = Object.keys(body).sort();
+  return keys.length === 3 &&
+    keys[0] === "action" &&
+    keys[1] === "dedupe_enabled" &&
+    keys[2] === "translation_enabled" &&
+    body.action === "update_runtime_controls" &&
+    typeof body.dedupe_enabled === "boolean" &&
+    typeof body.translation_enabled === "boolean";
 }
 
 async function runTranslationOnlyForAdmin(supabase: SupabaseAdminClient, tweetId: string) {
@@ -251,6 +293,20 @@ serve(async (req: Request): Promise<Response> => {
     const action = requestedAction;
     actionForSentry = action;
 
+    if (authResult.role === "read_only" && !isReadOnlyAdminActionName(action)) {
+      return forbiddenReadOnlyAction(corsHeaders);
+    }
+
+    if (action === "reprocess" || action === "hydrate_post") {
+      const tweetId = typeof body.tweet_id === "string" ? body.tweet_id : "";
+      if (!validateAdminOperationIdentity(action, tweetId, body.operation_id)) {
+        return jsonResponse({
+          error: "Invalid admin operation identity",
+          code: "admin_operation_identity_invalid",
+        }, 400);
+      }
+    }
+
     const supabase = createClient<any, any>(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
@@ -259,6 +315,55 @@ serve(async (req: Request): Promise<Response> => {
     switch (action) {
       case 'version': {
         return jsonResponse({ ok: true, sha: DEPLOY_SHA, deployed_at: DEPLOY_TIME });
+      }
+
+      case 'get_runtime_controls': {
+        try {
+          const controls = await fetchRuntimeControls(supabase);
+          return jsonResponse({ ok: true, controls });
+        } catch {
+          return jsonResponse({
+            ok: false,
+            error: 'runtime_controls_unavailable',
+            code: 'runtime_controls_unavailable',
+          }, 503);
+        }
+      }
+
+      case 'update_runtime_controls': {
+        if (!isExactRuntimeControlsUpdateBody(body)) {
+          return jsonResponse({
+            ok: false,
+            error: 'only action, dedupe_enabled, and translation_enabled are accepted',
+            code: 'runtime_controls_input_invalid',
+          }, 400);
+        }
+        const dedupeEnabled = body.dedupe_enabled;
+        const translationEnabled = body.translation_enabled;
+        const { error: updateError } = await authResult.authClient.rpc(
+          'update_runtime_controls',
+          {
+            p_dedupe_enabled: dedupeEnabled,
+            p_translation_enabled: translationEnabled,
+          },
+        );
+        if (updateError) {
+          return jsonResponse({
+            ok: false,
+            error: 'runtime_controls_update_failed',
+            code: 'runtime_controls_update_failed',
+          }, 503);
+        }
+        try {
+          const controls = await fetchRuntimeControls(supabase);
+          return jsonResponse({ ok: true, controls });
+        } catch {
+          return jsonResponse({
+            ok: false,
+            error: 'runtime_controls_unavailable',
+            code: 'runtime_controls_unavailable',
+          }, 503);
+        }
       }
 
       // ===== Settings =====
@@ -287,7 +392,11 @@ serve(async (req: Request): Promise<Response> => {
       // ===== Reprocess (full re-run) =====
       case 'reprocess': {
         const result = await reprocessAdminAction(supabase, body, recordFeedback);
-        return jsonResponse(result.body, result.status);
+        const operation = await getAdminOperationStatus(supabase, body.operation_id as string);
+        return jsonResponse({
+          ...(result.body as Record<string, unknown>),
+          ...operation,
+        }, result.status);
       }
 
       // ===== Cancel pending/running jobs =====
@@ -356,10 +465,12 @@ serve(async (req: Request): Promise<Response> => {
       }
 
       case 'get_x_api_summary': {
-        return jsonResponse(await getXApiSummary(supabase, body, {
+        const result = await getXApiSummary(supabase, body, {
           recordAdminXApiAttempt,
           recordXApiEvent,
-        }));
+          role: authResult.role,
+        });
+        return jsonResponse(result, typeof result.status === "number" ? result.status : 200);
       }
 
       case 'get_video_render_config': {
@@ -403,6 +514,10 @@ serve(async (req: Request): Promise<Response> => {
       }
 
       case 'manual_video_intake_get': {
+        if (authResult.role === "read_only" &&
+          (body.refresh_dedupe === true || body.queue_render === true)) {
+          return forbiddenReadOnlyAction(corsHeaders);
+        }
         const result = await manualVideoIntakeGetAdminAction(supabase, body, {
           runTranslationOnly: runTranslationOnlyForAdmin,
           insertAdminPipelineEvent,
@@ -494,7 +609,21 @@ serve(async (req: Request): Promise<Response> => {
 
       case 'hydrate_post': {
         const result = await hydratePostAdminAction(supabase, body, { insertAdminPipelineEvent });
-        return jsonResponse(result.body, result.status);
+        const operation = await getAdminOperationStatus(supabase, body.operation_id as string);
+        return jsonResponse({
+          ...(result.body as Record<string, unknown>),
+          ...operation,
+        }, result.status);
+      }
+
+      case 'get_admin_operation_status': {
+        if (!isSupportedAdminOperationId(body.operation_id)) {
+          return jsonResponse({
+            error: "Invalid admin operation identity",
+            code: "admin_operation_identity_invalid",
+          }, 400);
+        }
+        return jsonResponse(await getAdminOperationStatus(supabase, body.operation_id));
       }
 
       case 'get_post_pipeline_status': {

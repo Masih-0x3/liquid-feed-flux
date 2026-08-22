@@ -31,6 +31,7 @@ export type IgnoreMonitoringItemResult = {
     jobs: number;
   };
   error?: string;
+  partial_update?: boolean;
 };
 
 export type InsertAdminPipelineEventFn = (
@@ -58,11 +59,20 @@ function table(supabase: SupabaseAdminClient, name: string): TableQueryBuilder {
   return supabase.from(name) as TableQueryBuilder;
 }
 
-function errorMessage(error: unknown): string {
-  if (error && typeof error === "object" && "message" in error) {
-    return String((error as { message?: unknown }).message ?? error);
+function validateRowsWithIds(
+  data: unknown,
+  invalidResponse: string,
+  invalidRow: string,
+): string | null {
+  if (!Array.isArray(data)) return invalidResponse;
+  for (const row of data) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) {
+      return invalidRow;
+    }
+    const id = (row as Record<string, unknown>).id;
+    if (typeof id !== "string" || id.trim().length === 0) return invalidRow;
   }
-  return String(error);
+  return null;
 }
 
 export function normalizeMonitoringIgnoreReason(
@@ -96,11 +106,7 @@ export async function closeJobsForIgnoredTweet(
   };
 
   const collect = (data: unknown) => {
-    for (
-      const row of (Array.isArray(data) ? data : []) as Array<
-        Record<string, unknown>
-      >
-    ) {
+    for (const row of data as Array<Record<string, unknown>>) {
       const id = String(row.id ?? "");
       if (!id || seen.has(id)) continue;
       seen.add(id);
@@ -114,7 +120,13 @@ export async function closeJobsForIgnoredTweet(
       .filter(`payload->>${field}`, "eq", value)
       .in("status", ["pending", "running", "failed"])
       .select("id, type");
-    if (error) return errorMessage(error);
+    if (error) return "monitoring_ignore_jobs_update_failed";
+    const shapeError = validateRowsWithIds(
+      data,
+      "monitoring_ignore_jobs_invalid_response",
+      "monitoring_ignore_jobs_invalid_row",
+    );
+    if (shapeError) return shapeError;
     collect(data);
     return null;
   };
@@ -144,7 +156,19 @@ export async function closeJobsForIgnoredTweet(
       .ilike("idempotency_key", `%${escaped}%`)
       .in("status", ["pending", "running", "failed"])
       .select("id, type");
-    if (error) return { count: rows.length, rows, error: errorMessage(error) };
+    if (error) {
+      return {
+        count: rows.length,
+        rows,
+        error: "monitoring_ignore_jobs_update_failed",
+      };
+    }
+    const shapeError = validateRowsWithIds(
+      data,
+      "monitoring_ignore_jobs_invalid_response",
+      "monitoring_ignore_jobs_invalid_row",
+    );
+    if (shapeError) return { count: rows.length, rows, error: shapeError };
     collect(data);
   }
 
@@ -167,11 +191,19 @@ export async function ignoreMonitoringItemInternal(
     };
   }
 
-  const { data: post } = await table(supabase, "posts")
+  const { data: post, error: postError } = await table(supabase, "posts")
     .select("tweet_id, dedupe_status")
     .eq("tweet_id", tweetId)
     .maybeSingle();
-  if (!post || typeof post !== "object") {
+  if (postError) {
+    return {
+      ok: false,
+      tweet_id: tweetId,
+      ignored: false,
+      error: "monitoring_ignore_post_read_failed",
+    };
+  }
+  if (!post || typeof post !== "object" || Array.isArray(post)) {
     return {
       ok: false,
       tweet_id: tweetId,
@@ -201,7 +233,7 @@ export async function ignoreMonitoringItemInternal(
       ok: false,
       tweet_id: tweetId,
       ignored: false,
-      error: errorMessage(postErr),
+      error: "monitoring_ignore_post_update_failed",
     };
   }
 
@@ -220,8 +252,16 @@ export async function ignoreMonitoringItemInternal(
       ok: false,
       tweet_id: tweetId,
       ignored: false,
-      error: errorMessage(xErr),
+      error: "monitoring_ignore_x_deliveries_update_failed",
     };
+  }
+  const xShapeError = validateRowsWithIds(
+    xRows,
+    "monitoring_ignore_x_deliveries_invalid_response",
+    "monitoring_ignore_x_deliveries_invalid_row",
+  );
+  if (xShapeError) {
+    return { ok: false, tweet_id: tweetId, ignored: false, error: xShapeError };
   }
 
   const { data: deliveryRows, error: deliveryErr } = await table(
@@ -242,7 +282,20 @@ export async function ignoreMonitoringItemInternal(
       ok: false,
       tweet_id: tweetId,
       ignored: false,
-      error: errorMessage(deliveryErr),
+      error: "monitoring_ignore_deliveries_update_failed",
+    };
+  }
+  const deliveryShapeError = validateRowsWithIds(
+    deliveryRows,
+    "monitoring_ignore_deliveries_invalid_response",
+    "monitoring_ignore_deliveries_invalid_row",
+  );
+  if (deliveryShapeError) {
+    return {
+      ok: false,
+      tweet_id: tweetId,
+      ignored: false,
+      error: deliveryShapeError,
     };
   }
 
@@ -267,8 +320,17 @@ export async function ignoreMonitoringItemInternal(
     feedback_note: reason,
     feedback_at: now,
   });
-  await deps.recordFeedback(supabase, tweetId, "admin_ignore", 0, { reason })
-    .catch(() => {});
+  try {
+    await deps.recordFeedback(supabase, tweetId, "admin_ignore", 0, { reason });
+  } catch (error) {
+    return {
+      ok: false,
+      tweet_id: tweetId,
+      ignored: false,
+      error: "monitoring_ignore_feedback_write_failed",
+      partial_update: true,
+    };
+  }
   await deps.insertAdminPipelineEvent(
     supabase,
     tweetId,

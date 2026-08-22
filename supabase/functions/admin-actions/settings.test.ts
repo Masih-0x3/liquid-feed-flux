@@ -31,6 +31,26 @@ Deno.test("settings validator rejects invalid shapes without touching storage", 
     validateSettingsValue("x_posting_config", { max_posts_per_run: 21 }),
     "x_posting_config.max_posts_per_run must be 1-20",
   );
+  assertEquals(
+    validateSettingsValue("x_posting_config", { max_posts_per_run: 1.5 }),
+    "x_posting_config.max_posts_per_run must be 1-20",
+  );
+  assertEquals(
+    validateSettingsValue("x_posting_config", { daily_budget: 1.5 }),
+    "x_posting_config.daily_budget must be a non-negative whole number",
+  );
+  assertEquals(
+    validateSettingsValue("x_posting_config", { min_spacing_minutes: -1 }),
+    "x_posting_config.min_spacing_minutes must be a non-negative whole number",
+  );
+  assertEquals(
+    validateSettingsValue("x_rate_limits", { posts_per_hour: 1.5 }),
+    "x_rate_limits.posts_per_hour must be a whole number 1-1000",
+  );
+  assertEquals(
+    validateSettingsValue("x_rate_limits", { hydrations_per_day: 1.5 }),
+    "x_rate_limits.hydrations_per_day must be a whole number 1-10000",
+  );
 });
 
 Deno.test("settings validator accepts minimal known setting payloads", () => {
@@ -45,6 +65,18 @@ Deno.test("settings validator accepts minimal known setting payloads", () => {
       require_media: false,
       max_candidate_age_minutes: 30,
       max_posts_per_run: 1,
+      daily_budget: 2,
+      min_spacing_minutes: 5,
+    }),
+    null,
+  );
+  assertEquals(
+    validateSettingsValue("x_rate_limits", {
+      posts_per_hour: 20,
+      posts_per_day: 100,
+      monthly_post_budget: 2500,
+      media_uploads_per_day: 200,
+      hydrations_per_day: 400,
     }),
     null,
   );

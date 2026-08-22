@@ -3,6 +3,7 @@ import {
   bulkReprocessAdminAction,
   cancelPendingJobsAdminAction,
   editTranslationAdminAction,
+  postThreadAdminAction,
   reconcileStuckJobsAdminAction,
   reprocessAdminAction,
   retryStepAdminAction,
@@ -54,7 +55,17 @@ function fakeSupabase(
           options?: Record<string, unknown>,
         ) {
           calls.push({ op: "upsert", table: tableName, value, args: options });
-          return Promise.resolve({});
+          const upsertBuilder = {
+            select() { return upsertBuilder; },
+            maybeSingle() { return Promise.resolve({ data: { id: "job-1" }, error: null }); },
+            then<TResult1 = { error?: unknown }, TResult2 = never>(
+              onfulfilled?: ((value: { error?: unknown }) => TResult1 | PromiseLike<TResult1>) | null,
+              _onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+            ): PromiseLike<TResult1 | TResult2> {
+              return Promise.resolve({ error: null }).then(onfulfilled ?? ((value) => value as TResult1));
+            },
+          };
+          return upsertBuilder;
         },
         eq(column: string, value: unknown) {
           calls.push({ op: "eq", table: tableName, column, value });
@@ -152,7 +163,10 @@ Deno.test("reprocess queues operator-priority jobs", async () => {
     call.op === "upsert" && call.table === "jobs"
   );
 
-  assertEquals(result.body, { success: true, message: "Reprocess job queued" });
+  assertEquals(result.body, {
+    success: true,
+    message: "Reprocess job queued. Existing media will be preserved until staged media refresh is available.",
+  });
   assertEquals((upsert?.value as Record<string, unknown>).priority, 20);
   assertEquals(feedbackCalls, [{
     tweetId: "t1",
@@ -174,7 +188,7 @@ Deno.test("bulk reprocess trims and de-duplicates tweet ids", async () => {
     success: true,
     requested: 5,
     queued: 2,
-    message: "2 reprocess job(s) queued",
+    message: "2 reprocess job(s) queued. Existing media will be preserved until staged media refresh is available.",
   });
   assertEquals(
     (upsert?.value as Array<Record<string, unknown>>).map((job) =>
@@ -190,10 +204,49 @@ Deno.test("bulk reprocess trims and de-duplicates tweet ids", async () => {
   );
 });
 
+Deno.test("reprocess input is bounded before it can queue work", async () => {
+  const feedback: RecordFeedbackFn = async () => {};
+  const single = await reprocessAdminAction(fakeSupabase(), {
+    tweet_id: "   ",
+  }, feedback);
+  assertEquals(single, {
+    body: { error: "tweet_id is required" },
+    status: 400,
+  });
+
+  const supabase = fakeSupabase();
+  const bulk = await bulkReprocessAdminAction(supabase, {
+    tweet_ids: Array.from({ length: 101 }, (_, index) => `t${index}`),
+  });
+  assertEquals(bulk, {
+    body: { error: "tweet_ids may contain at most 100 items" },
+    status: 400,
+  });
+  assertEquals(supabase.calls, []);
+});
+
+Deno.test("thread delivery is fail-closed until an ordered delivery consumer exists", async () => {
+  const supabase = fakeSupabase();
+
+  const result = await postThreadAdminAction(supabase, { thread_id: "thread-1" });
+
+  assertEquals(result, {
+    body: {
+      success: false,
+      error: "thread_delivery_unavailable",
+      code: "thread_delivery_unavailable",
+    },
+    status: 409,
+  });
+  assertEquals(supabase.calls, []);
+});
+
 Deno.test("cancel pending jobs summarizes canceled rows by type", async () => {
-  const supabase = fakeSupabase([{ type: "translate" }, { type: "translate" }, {
-    type: "deliver",
-  }]);
+  const supabase = fakeSupabase([
+    { id: "job-1", type: "translate" },
+    { id: "job-2", type: "translate" },
+    { id: "job-3", type: "deliver" },
+  ]);
   const result = await cancelPendingJobsAdminAction(supabase, {
     include_running: false,
     types: ["translate"],

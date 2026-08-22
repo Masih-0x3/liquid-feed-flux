@@ -1,43 +1,6 @@
 import type { SupabaseAdminClient } from "./types.ts";
-
-export function getPayloadTweetId(payload: unknown): string | null {
-  if (!payload || typeof payload !== "object") return null;
-  const value = (payload as Record<string, unknown>).tweet_id;
-  return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-export function tweetReferenceVariants(value: unknown): string[] {
-  if (typeof value !== "string" || !value.trim()) return [];
-  const raw = value.trim();
-  const variants = new Set<string>([raw]);
-  const statusMatch = raw.match(/(?:status|statuses)\/(\d{5,})/);
-  const numeric = statusMatch?.[1] ?? (/^\d{5,}$/.test(raw) ? raw : null);
-  if (numeric) {
-    variants.add(numeric);
-    variants.add(`https://twitter.com/i/status/${numeric}`);
-    variants.add(`https://twitter.com/status/${numeric}`);
-    variants.add(`https://x.com/i/status/${numeric}`);
-    variants.add(`https://x.com/status/${numeric}`);
-  }
-  return [...variants];
-}
-
-export function jobReferenceValues(row: Record<string, unknown>): string[] {
-  const values = new Set<string>();
-  const payload = row.payload && typeof row.payload === "object" ? row.payload as Record<string, unknown> : {};
-  for (const key of ["tweet_id", "target_tweet_id", "post_id", "url", "src_url"]) {
-    const value = payload[key];
-    if (typeof value === "string" && value.trim()) {
-      tweetReferenceVariants(value).forEach((variant) => values.add(variant));
-    }
-  }
-  const idempotency = typeof row.idempotency_key === "string" ? row.idempotency_key : "";
-  const statusMatch = idempotency.match(/(?:status|statuses)\/(\d{5,})/);
-  const numericMatch = idempotency.match(/(^|[:/])(\d{10,})(?=[:/]|$)/);
-  const numeric = statusMatch?.[1] ?? numericMatch?.[2] ?? null;
-  if (numeric) tweetReferenceVariants(numeric).forEach((variant) => values.add(variant));
-  return [...values];
-}
+import { getPayloadTweetId, jobReferenceValues, tweetReferenceVariants } from "./tweetReferences.ts";
+export { getPayloadTweetId, jobReferenceValues, tweetReferenceVariants } from "./tweetReferences.ts";
 
 export function isTerminalSkippedPost(post: Record<string, unknown> | null | undefined): boolean {
   if (!post) return false;
@@ -82,6 +45,27 @@ export async function loadPostsByJobReferences(
   if (tweetError) throw tweetError;
   if (urlError) throw urlError;
 
+  const checkedPosts = (
+    value: unknown,
+    label: string,
+  ): Array<Record<string, unknown>> => {
+    if (!Array.isArray(value)) {
+      throw new Error(`${label}_invalid_response`);
+    }
+    return value.map((post) => {
+      if (!post || typeof post !== "object" || Array.isArray(post)) {
+        throw new Error(`${label}_invalid_row`);
+      }
+      const row = post as Record<string, unknown>;
+      if (typeof row.tweet_id !== "string" || !row.tweet_id.trim()) {
+        throw new Error(`${label}_invalid_row`);
+      }
+      return row;
+    });
+  };
+  const tweetPosts = checkedPosts(byTweet, "monitoring_posts_by_tweet");
+  const urlPosts = checkedPosts(byUrl, "monitoring_posts_by_url");
+
   const addPost = (post: Record<string, unknown>) => {
     for (const key of ["tweet_id", "url"]) {
       const value = post[key];
@@ -91,8 +75,8 @@ export async function loadPostsByJobReferences(
       }
     }
   };
-  for (const post of (byTweet ?? []) as Array<Record<string, unknown>>) addPost(post);
-  for (const post of (byUrl ?? []) as Array<Record<string, unknown>>) addPost(post);
+  for (const post of tweetPosts) addPost(post);
+  for (const post of urlPosts) addPost(post);
   return postByRef;
 }
 

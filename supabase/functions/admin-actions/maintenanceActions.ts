@@ -56,6 +56,18 @@ function nowMs(deps?: Pick<MaintenanceDeps, "now">): number {
   return (deps?.now?.() ?? new Date()).getTime();
 }
 
+function boundedHttpStatus(value: unknown): number {
+  const status = typeof value === "number" ? value : Number(value);
+  return Number.isInteger(status) && status >= 100 && status <= 599 ? status : 0;
+}
+
+function maintenanceFailureCode(operation: string, status?: unknown): string {
+  const boundedStatus = boundedHttpStatus(status);
+  return boundedStatus > 0
+    ? `${operation}_http_${boundedStatus}`
+    : `${operation}_request_failed`;
+}
+
 export async function dryRunOldMediaCleanupAdminAction(
   supabase: FunctionInvokerClient,
   body: Record<string, unknown>,
@@ -93,9 +105,29 @@ export async function summarizeStaleXPendingAdminAction(
     .order("created_at", { ascending: true })
     .limit(500);
   if (error) throw error;
-  const rows = Array.isArray(data)
-    ? data as Array<Record<string, unknown>>
-    : [];
+  if (!Array.isArray(data)) {
+    return {
+      body: { ok: false, error: "stale_x_pending_invalid_response" },
+      status: 503,
+    };
+  }
+  const rows: Array<Record<string, unknown>> = [];
+  for (const row of data) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) {
+      return {
+        body: { ok: false, error: "stale_x_pending_invalid_row" },
+        status: 503,
+      };
+    }
+    const id = (row as Record<string, unknown>).id;
+    if (typeof id !== "string" || id.trim().length === 0) {
+      return {
+        body: { ok: false, error: "stale_x_pending_invalid_row" },
+        status: 503,
+      };
+    }
+    rows.push(row as Record<string, unknown>);
+  }
   const ids = rows.map((row) => row.id);
   if (close && ids.length > 0) {
     const { error: updErr } = await table(supabase, "x_deliveries")
@@ -139,21 +171,41 @@ export async function rescoreRecentAdminAction(
     return {
       body: {
         ok: false,
-        error: (fetchErr as { message?: string }).message,
+        error: "rescore_posts_read_failed",
       },
-      status: 500,
+      status: 503,
     };
   }
-  const rows = Array.isArray(posts)
-    ? posts as Array<Record<string, unknown>>
-    : [];
+  if (!Array.isArray(posts)) {
+    return {
+      body: { ok: false, error: "rescore_posts_invalid_response" },
+      status: 503,
+    };
+  }
+  const rows: Array<Record<string, unknown>> = [];
+  for (const post of posts) {
+    if (!post || typeof post !== "object" || Array.isArray(post)) {
+      return {
+        body: { ok: false, error: "rescore_posts_invalid_row" },
+        status: 503,
+      };
+    }
+    const tweetId = (post as Record<string, unknown>).tweet_id;
+    if (typeof tweetId !== "string" || tweetId.trim().length === 0) {
+      return {
+        body: { ok: false, error: "rescore_posts_invalid_row" },
+        status: 503,
+      };
+    }
+    rows.push(post as Record<string, unknown>);
+  }
   const targets = rows.filter((post) =>
     !onlyMissing || post.score_axes == null
   );
   let queued = 0;
   const stamp = nowMs(deps);
   for (const post of targets) {
-    const tweetId = post.tweet_id as string;
+    const tweetId = (post.tweet_id as string).trim();
     const { error } = await table(supabase, "jobs").upsert({
       type: "translate",
       payload: { tweet_id: tweetId, force_rescore: true },
@@ -162,7 +214,20 @@ export async function rescoreRecentAdminAction(
       idempotency_key: `translate:rescore:${tweetId}:${stamp}`,
       next_run_at: nowIso(deps),
     }, { onConflict: "idempotency_key", ignoreDuplicates: true });
-    if (!error) queued++;
+    if (error) {
+      return {
+        body: {
+          ok: false,
+          error: "rescore_enqueue_failed",
+          scanned: rows.length,
+          matched: targets.length,
+          queued,
+          hours,
+        },
+        status: 503,
+      };
+    }
+    queued++;
   }
   return {
     body: {
@@ -194,7 +259,19 @@ export async function getPostPipelineStatusAdminAction(
     tweet_ids: tweetIds,
   });
   if (error) throw error;
-  return { body: { success: true, statuses: data ?? [] } };
+  if (!Array.isArray(data)) {
+    return {
+      body: { success: false, error: "post_pipeline_status_invalid_response" },
+      status: 503,
+    };
+  }
+  if (data.some((row) => !row || typeof row !== "object" || Array.isArray(row))) {
+    return {
+      body: { success: false, error: "post_pipeline_status_invalid_row" },
+      status: 503,
+    };
+  }
+  return { body: { success: true, statuses: data } };
 }
 
 export async function runFollowersSnapshotAdminAction(
@@ -202,10 +279,11 @@ export async function runFollowersSnapshotAdminAction(
   body: Record<string, unknown>,
   deps: Pick<MaintenanceDeps, "readEnv" | "fetchImpl"> = {},
 ): Promise<AdminActionResponse> {
-  const { data: controlsRow } = await table(supabase, "settings")
+  const { data: controlsRow, error: controlsError } = await table(supabase, "settings")
     .select("value")
     .eq("key", "x_api_controls")
     .maybeSingle();
+  if (controlsError) throw controlsError;
   const controls = ((controlsRow as Record<string, unknown> | null)?.value ??
     {}) as Record<string, unknown>;
   if (!isMyXEnabled(controls)) {
@@ -214,6 +292,9 @@ export async function runFollowersSnapshotAdminAction(
 
   const supabaseUrl = readEnv("SUPABASE_URL", deps);
   const serviceKey = readEnv("SUPABASE_SERVICE_ROLE_KEY", deps);
+  if (!supabaseUrl || !serviceKey) {
+    return { body: { ok: false, error: "followers_snapshot_config_missing" }, status: 503 };
+  }
   const force = body.force === true;
   const dryRun = body.dry_run === true;
   const includeFollowing = body.include_following !== false;
@@ -239,20 +320,20 @@ export async function runFollowersSnapshotAdminAction(
     try {
       parsed = JSON.parse(text);
     } catch {
-      parsed = text;
+      parsed = {};
     }
     if (!resp.ok) {
       return {
         body: {
           ok: false,
-          error: `snapshot ${resp.status}: ${text.slice(0, 300)}`,
-          raw: parsed,
+          error: maintenanceFailureCode("followers_snapshot", resp.status),
         },
+        status: 502,
       };
     }
     return { body: { ok: true, ...(parsed as Record<string, unknown>) } };
-  } catch (e) {
-    return { body: { ok: false, error: (e as Error).message } };
+  } catch {
+    return { body: { ok: false, error: "followers_snapshot_request_failed" }, status: 502 };
   }
 }
 
@@ -260,10 +341,11 @@ export async function resetLearnedBiasesAdminAction(
   supabase: SupabaseAdminClient,
   deps: Pick<MaintenanceDeps, "now"> = {},
 ): Promise<AdminActionResponse> {
-  await table(supabase, "settings").upsert({
+  const { error } = await table(supabase, "settings").upsert({
     key: "learned_biases",
     value: { author_bias: {}, tag_bias: {}, keyword_bias: {} },
     updated_at: nowIso(deps),
   }, { onConflict: "key" });
+  if (error) throw error;
   return { body: { success: true, message: "Learned biases reset" } };
 }

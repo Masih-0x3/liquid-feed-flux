@@ -255,7 +255,7 @@ Deno.test("dashboard summary degrades instead of throwing when the base RPC fail
       unknown
     >;
 
-    assertEquals(dashboard.dashboard_error, "base RPC unavailable");
+    assertEquals(dashboard.dashboard_error, "dashboard_query_failed");
     assertEquals(dashboard.ops_status, {
       severity: "critical",
       primary_issue: "Dashboard base summary is degraded",

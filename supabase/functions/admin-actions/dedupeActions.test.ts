@@ -28,10 +28,20 @@ type FakeConfig = {
   posts?: Array<Record<string, unknown>>;
   rpcData?: unknown;
   rpcError?: unknown;
+  runtimeControls?: Record<string, unknown>;
 };
 
 function fakeSupabase(config: FakeConfig = {}) {
   const calls: FakeCall[] = [];
+  const runtimeControls = config.runtimeControls ?? {
+    singleton_id: true,
+    environment: "production",
+    dedupe_enabled: true,
+    translation_enabled: true,
+    posting_mode: "enabled",
+    updated_at: "2026-06-29T00:00:00.000Z",
+    updated_by: null,
+  };
   const client: SupabaseAdminClient & { calls: FakeCall[] } = {
     calls,
     from(tableName: string) {
@@ -46,6 +56,7 @@ function fakeSupabase(config: FakeConfig = {}) {
         if (tableName === "settings") {
           return { data: { value: config.settings ?? {} } };
         }
+        if (tableName === "runtime_controls") return { data: [runtimeControls] };
         return {};
       };
       const builder = {
@@ -172,6 +183,40 @@ Deno.test("run dedupe validates tweet id before querying", async () => {
   assertEquals(supabase.calls, []);
 });
 
+Deno.test("paused dedupe returns stable zero-count status before post or job writes", async () => {
+  const supabase = fakeSupabase({
+    runtimeControls: {
+      singleton_id: true,
+      environment: "preview",
+      dedupe_enabled: false,
+      translation_enabled: false,
+      posting_mode: "blocked",
+      updated_at: "2026-06-29T00:00:00.000Z",
+      updated_by: null,
+    },
+  });
+  const result = await runDedupeAdminAction(supabase, { tweet_id: "t1" });
+  assertEquals(result as Record<string, unknown>, {
+    ok: true,
+    paused: true,
+    status: "paused",
+    reason: "dedupe_disabled",
+    dedupe_enabled: false,
+    translation_enabled: false,
+    retained: 0,
+    enqueued: 0,
+    tweet_id: "t1",
+    count: 0,
+  });
+  assertEquals(supabase.calls.some((call) => call.op === "update" || call.op === "upsert"), false);
+});
+
+Deno.test("malformed runtime controls fail closed before dedupe work", async () => {
+  const supabase = fakeSupabase({ runtimeControls: { environment: "preview" } });
+  const result = await runDedupeAdminAction(supabase, { tweet_id: "t1" });
+  assertEquals(result, { ok: false, error: "runtime_controls_unavailable" });
+});
+
 Deno.test("run dedupe marks pending and queues translation when requested", async () => {
   const supabase = fakeSupabase({
     settings: { enabled: true },
@@ -207,6 +252,9 @@ Deno.test("run dedupe marks pending and queues translation when requested", asyn
   });
 
   assertEquals(result.ok, true);
+  if (!("tweet_id" in result) || !("config_enabled" in result)) {
+    throw new Error("expected dedupe result");
+  }
   assertEquals(result.tweet_id, "t1");
   assertEquals(result.config_enabled, true);
   assertEquals(gateCalls[0].options, {
@@ -282,6 +330,9 @@ Deno.test("backfill dedupe queues jobs and marks posts pending", async () => {
     now: () => new Date("2026-01-02T00:00:00.000Z"),
   });
 
+  if (!("max" in result) || !("queued" in result)) {
+    throw new Error("expected backfill result");
+  }
   assertEquals(result.max, 2000);
   assertEquals(result.queued, 2);
   assertEquals(
@@ -323,6 +374,9 @@ Deno.test("audit duplicate candidates clamps inputs and summarizes proposed stat
       match_limit: 5000,
     },
   });
+  if (!("proposed" in result) || !("count" in result)) {
+    throw new Error("expected candidate audit result");
+  }
   assertEquals(result.proposed, { duplicate: 2, coverage_gap: 1, unknown: 1 });
   assertEquals(result.count, 4);
 });

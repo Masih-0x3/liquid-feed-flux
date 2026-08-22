@@ -255,7 +255,6 @@ Deno.test("translation-only preview uses request settings and returns the existi
       usage: { total_tokens: 5 },
       duration_ms: 0,
       used_filter: false,
-      raw: { usage: { total_tokens: 5 } },
     },
   });
 });
@@ -594,9 +593,9 @@ Deno.test("runTranslationOnly records failed event when OpenAI fails", async () 
   });
 
   assertEquals(result.ok, false);
-  assertEquals(result.error, "OpenAI 429: rate limited");
+  assertEquals(result.error, "openai_http_429");
   assertEquals(events[0].status, "failed");
-  assertEquals(events[0].error, "OpenAI 429");
+  assertEquals(events[0].error, "openai_http_429");
 });
 
 Deno.test("rescore post v2 branch forces scorePostV2 and preserves legacy response", async () => {

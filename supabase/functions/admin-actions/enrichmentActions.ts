@@ -51,7 +51,6 @@ export type DispatchWorkerForManualEnrichFn = () => Promise<{
   ok: boolean;
   status?: number;
   processed?: number;
-  message?: string;
   error?: string;
 }>;
 
@@ -116,11 +115,50 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function errorMessage(error: unknown): string {
-  if (error && typeof error === "object" && "message" in error) {
-    return String((error as { message?: unknown }).message ?? error);
+function boundedHttpStatus(value: unknown): number {
+  const status = typeof value === "number" ? value : Number(value);
+  return Number.isInteger(status) && status >= 100 && status <= 599 ? status : 0;
+}
+
+function enrichDispatchErrorCode(status?: unknown): string {
+  const boundedStatus = boundedHttpStatus(status);
+  return boundedStatus > 0
+    ? `enrich_worker_http_${boundedStatus}`
+    : "enrich_worker_request_failed";
+}
+
+type SafeWorkerDispatchResult = {
+  ok: boolean;
+  status?: number;
+  processed?: number;
+  error?: string;
+};
+
+function normalizeWorkerDispatchResult(value: unknown): SafeWorkerDispatchResult {
+  const record = asRecord(value);
+  const status = boundedHttpStatus(record.status);
+  const processed = typeof record.processed === "number" &&
+      Number.isSafeInteger(record.processed) && record.processed >= 0
+    ? Math.min(record.processed, 1000)
+    : undefined;
+  if (record.ok !== true) {
+    const error = typeof record.error === "string" &&
+        /^enrich_worker_(?:config_missing|request_failed|http_[1-5][0-9]{2})$/.test(
+          record.error,
+        )
+      ? record.error
+      : "enrich_worker_request_failed";
+    return {
+      ok: false,
+      ...(status > 0 ? { status } : {}),
+      error,
+    };
   }
-  return String(error);
+  return {
+    ok: true,
+    ...(status > 0 ? { status } : {}),
+    ...(processed !== undefined ? { processed } : {}),
+  };
 }
 
 export async function updateLatestPostEnrichment(
@@ -128,20 +166,21 @@ export async function updateLatestPostEnrichment(
   tweetId: string,
   patch: Record<string, unknown>,
 ) {
-  const { data } = await table(supabase, "post_enrichments")
+  const { data, error: lookupError } = await table(supabase, "post_enrichments")
     .select("id")
     .eq("post_id", tweetId)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
+  if (lookupError) throw lookupError;
 
   const row = asRecord(data);
   if (!row.id) return;
 
-  await table(supabase, "post_enrichments")
+  const { error: updateError } = await table(supabase, "post_enrichments")
     .update(patch)
     .eq("id", row.id)
-    .then(() => null, () => null);
+  if (updateError) throw updateError;
 }
 
 export async function dispatchWorkerForManualEnrich(
@@ -150,7 +189,7 @@ export async function dispatchWorkerForManualEnrich(
   const supabaseUrl = readEnv("SUPABASE_URL", deps);
   const serviceKey = readEnv("SUPABASE_SERVICE_ROLE_KEY", deps);
   if (!supabaseUrl || !serviceKey) {
-    return { ok: false, error: "missing Supabase URL or service role key" };
+    return { ok: false, error: "enrich_worker_config_missing" };
   }
 
   try {
@@ -174,15 +213,13 @@ export async function dispatchWorkerForManualEnrich(
     try {
       parsed = JSON.parse(text) as Record<string, unknown>;
     } catch {
-      parsed = { message: text.slice(0, 300) };
+      parsed = {};
     }
     if (!resp.ok) {
       return {
         ok: false,
-        status: resp.status,
-        error: typeof parsed.error === "string"
-          ? parsed.error
-          : text.slice(0, 300),
+        status: boundedHttpStatus(resp.status) || 502,
+        error: enrichDispatchErrorCode(resp.status),
       };
     }
     return {
@@ -191,10 +228,9 @@ export async function dispatchWorkerForManualEnrich(
       processed: typeof parsed.processed === "number"
         ? parsed.processed
         : undefined,
-      message: typeof parsed.message === "string" ? parsed.message : undefined,
     };
-  } catch (e) {
-    return { ok: false, error: (e as Error).message };
+  } catch {
+    return { ok: false, error: "enrich_worker_request_failed" };
   }
 }
 
@@ -206,10 +242,11 @@ export async function approveEnrichmentAdminAction(
   const tweetId = body.tweet_id as string | undefined;
   if (!tweetId) return { body: { error: "tweet_id is required" }, status: 400 };
 
-  await table(supabase, "posts").update({ enrich_status: "approved" }).eq(
+  const { error: postUpdateError } = await table(supabase, "posts").update({ enrich_status: "approved" }).eq(
     "tweet_id",
     tweetId,
   );
+  if (postUpdateError) throw postUpdateError;
   await updateLatestPostEnrichment(supabase, tweetId, {
     status: "approved",
     approved_at: nowIso(deps),
@@ -238,10 +275,11 @@ export async function rejectEnrichmentAdminAction(
   const tweetId = body.tweet_id as string | undefined;
   if (!tweetId) return { body: { error: "tweet_id is required" }, status: 400 };
 
-  await table(supabase, "posts").update({ enrich_status: "rejected" }).eq(
+  const { error: postUpdateError } = await table(supabase, "posts").update({ enrich_status: "rejected" }).eq(
     "tweet_id",
     tweetId,
   );
+  if (postUpdateError) throw postUpdateError;
   await updateLatestPostEnrichment(supabase, tweetId, {
     status: "rejected",
     rejected_at: nowIso(deps),
@@ -302,9 +340,11 @@ export async function generateVoiceProfileAdminAction(
     guide: typeof body.guide === "string" ? body.guide : undefined,
     updated_at: stamp,
   });
-  const { data: rows } = await table(supabase, "settings")
+  const { data: rows, error: settingsError } = await table(supabase, "settings")
     .select("key, value")
     .in("key", ["enrichment_config", "voice_samples"]);
+  if (settingsError) throw settingsError;
+  if (!Array.isArray(rows)) throw new Error("voice_profile_settings_invalid_response");
   const settings = new Map(
     ((Array.isArray(rows) ? rows : []) as Array<Record<string, unknown>>).map((
       row,
@@ -368,7 +408,7 @@ export async function generateVoiceProfileAdminAction(
     });
     aiCallRecorded = true;
 
-    await table(supabase, "settings").upsert([
+    const { error: settingsUpsertError } = await table(supabase, "settings").upsert([
       { key: "voice_guide", value: guide, updated_at: stamp },
       {
         key: "personal_voice_profile",
@@ -376,6 +416,7 @@ export async function generateVoiceProfileAdminAction(
         updated_at: stamp,
       },
     ], { onConflict: "key" });
+    if (settingsUpsertError) throw settingsUpsertError;
 
     await finishWorkflowRun(supabase, workflowRunKey, "completed", {
       ...metadata,
@@ -529,7 +570,7 @@ export async function enrichPostAdminAction(
     }
   }
 
-  await table(supabase, "posts").update({
+  const { error: resetPostError } = await table(supabase, "posts").update({
     enrich_status: "pending",
     background_context: null,
     editorial_commentary: null,
@@ -555,6 +596,7 @@ export async function enrichPostAdminAction(
     enrich_tokens: null,
     enrich_duration_ms: null,
   }).eq("tweet_id", tweetId);
+  if (resetPostError) throw resetPostError;
 
   const stamp = nowIso(deps);
   const { error: jobErr } = await table(supabase, "jobs").upsert({
@@ -574,9 +616,10 @@ export async function enrichPostAdminAction(
     source: "manual_enrich_post",
     translation_preflight: translation?.ok === true,
   });
-  const workerDispatch = deps.dispatchWorkerForManualEnrich
+  const workerDispatchRaw = deps.dispatchWorkerForManualEnrich
     ? await deps.dispatchWorkerForManualEnrich()
     : await dispatchWorkerForManualEnrich(deps);
+  const workerDispatch = normalizeWorkerDispatchResult(workerDispatchRaw);
   if (!workerDispatch.ok) {
     await deps.insertAdminPipelineEvent(
       supabase,
@@ -600,7 +643,6 @@ export async function enrichPostAdminAction(
       {
         source: "manual_enrich_post",
         processed: workerDispatch.processed,
-        message: workerDispatch.message,
       },
     );
   }

@@ -7,6 +7,12 @@ import {
   postForJob,
 } from "./readHelpers.ts";
 import { getFoglampBudgetSettings } from "../_shared/observability.ts";
+import {
+  cronCadenceSeconds,
+  estimateMonthlyRuns,
+  percentUsed,
+} from "./dashboardResourceMetrics.ts";
+export { cronCadenceSeconds, estimateMonthlyRuns, percentUsed };
 
 const DEFAULT_STORAGE_LIMIT_BYTES = 100_000_000_000;
 
@@ -19,12 +25,20 @@ export function num(value: unknown, fallback = 0): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  if (error && typeof error === "object" && "message" in error) {
-    return String((error as { message?: unknown }).message);
+function errorMessage(_error: unknown): string {
+  return "dashboard_query_failed";
+}
+
+function checkedDashboardRows(
+  value: unknown,
+  section: string,
+): Array<Record<string, unknown>> {
+  if (!Array.isArray(value) || value.some((row) =>
+    !row || typeof row !== "object" || Array.isArray(row)
+  )) {
+    throw new Error(`${section}_invalid_response`);
   }
-  return String(error);
+  return value as Array<Record<string, unknown>>;
 }
 
 function logDashboardFallback(section: string, error: unknown) {
@@ -54,7 +68,7 @@ export async function checkedDashboardRowsQuery(
 ): Promise<DashboardRowsResult> {
   const result = await value;
   if (result.error) throw result.error;
-  return result;
+  return { data: checkedDashboardRows(result.data, "dashboard_rows"), error: null };
 }
 
 function emptyDashboardRowsResult(): DashboardRowsResult {
@@ -143,7 +157,7 @@ async function loadDashboardPosts(
     .order("created_at", { ascending: false })
     .limit(10000);
   if (error) throw error;
-  return (data ?? []) as Record<string, unknown>[];
+  return checkedDashboardRows(data, "dashboard_posts");
 }
 
 export function queueLaneForType(type: string): "fast" | "model" | "delivery" {
@@ -317,7 +331,7 @@ async function loadOpenAiUsageSummary(supabase: any, since: string) {
     .limit(5000);
   if (error) throw error;
   return summarizeOpenAiUsageJobs(
-    (data ?? []) as Array<Record<string, unknown>>,
+    checkedDashboardRows(data, "dashboard_openai_usage"),
     24,
   );
 }
@@ -406,9 +420,9 @@ async function loadProcessObservabilitySummary(
   if (callError) throw callError;
   if (budgetError) throw budgetError;
 
-  const runs = (runRows ?? []) as Array<Record<string, unknown>>;
-  const calls = (callRows ?? []) as Array<Record<string, unknown>>;
-  const budgets = (budgetRows ?? []) as Array<Record<string, unknown>>;
+  const runs = checkedDashboardRows(runRows, "dashboard_workflow_runs");
+  const calls = checkedDashboardRows(callRows, "dashboard_ai_call_ledger");
+  const budgets = checkedDashboardRows(budgetRows, "dashboard_budget_ledger");
   const settings = getFoglampBudgetSettings();
   const durationSummary = summarizeDurations(
     calls.map((row) => {
@@ -501,8 +515,8 @@ async function loadDashboardQueueBreakdown(
   if (error) throw error;
   if (activeError) throw activeError;
 
-  const rows = (jobs ?? []) as Array<Record<string, unknown>>;
-  const activeRows = (activeJobs ?? []) as Array<Record<string, unknown>>;
+  const rows = checkedDashboardRows(jobs, "dashboard_jobs");
+  const activeRows = checkedDashboardRows(activeJobs, "dashboard_active_jobs");
   const postByRef = await loadPostsByJobReferences(
     supabase,
     rows.filter((row) => row.status === "failed"),
@@ -691,7 +705,7 @@ async function loadDashboardXLocalUsage(
   ]);
   if (xError) throw xError;
 
-  const deliveries = (xRows ?? []) as Array<Record<string, unknown>>;
+  const deliveries = checkedDashboardRows(xRows, "dashboard_x_deliveries");
   const latestDeliveries = latestXDeliveriesByPost(deliveries);
   const posts24h = new Set(
     deliveries.filter((row) => row.status === "posted").map((row) =>
@@ -710,7 +724,7 @@ async function loadDashboardXLocalUsage(
   if (eventError && !isMissingSchemaError(eventError)) throw eventError;
   const eventsAvailable = !eventError;
   const events = eventsAvailable
-    ? (eventRows ?? []) as Array<Record<string, unknown>>
+    ? checkedDashboardRows(eventRows, "dashboard_x_api_events")
     : [];
   const attempts = events.length;
   const counted = events.filter((row) => row.request_counted !== false).length;
@@ -828,36 +842,6 @@ function latestEventTimestampBySubject(
   return latest;
 }
 
-export function estimateMonthlyRuns(schedule: unknown): number {
-  const value = String(schedule ?? "").trim();
-  if (value === "* * * * *") return 43_200;
-  if (value === "*/2 * * * *") return 21_600;
-  if (value === "*/10 * * * *") return 4_320;
-  if (/^0 \*\/6 \* \* \*$/.test(value)) return 120;
-  if (/^0 \d+ \* \* \*$/.test(value)) return 30;
-  if (/^0 \d+ \* \* [0-6]$/.test(value)) return 4;
-  return 30;
-}
-
-export function cronCadenceSeconds(schedule: unknown): number | null {
-  const value = String(schedule ?? "").trim();
-  if (value === "* * * * *") return 60;
-  if (value === "*/2 * * * *") return 120;
-  if (value === "*/10 * * * *") return 600;
-  const everySeconds = value.match(/^\*\/(\d+) \* \* \* \* \*$/);
-  if (everySeconds) return Number(everySeconds[1]);
-  const everyMinutes = value.match(/^\*\/(\d+) \* \* \* \*$/);
-  if (everyMinutes) return Number(everyMinutes[1]) * 60;
-  return null;
-}
-
-export function percentUsed(used: number, limit: number): number | null {
-  if (!Number.isFinite(used) || !Number.isFinite(limit) || limit <= 0) {
-    return null;
-  }
-  return Math.round((used / limit) * 1000) / 10;
-}
-
 async function loadPerformanceWindow(supabase: any, windowHours: number) {
   const since = new Date(Date.now() - windowHours * 60 * 60 * 1000)
     .toISOString();
@@ -871,9 +855,9 @@ async function loadPerformanceWindow(supabase: any, windowHours: number) {
     throw postsRes.error;
   }
 
-  const posts = ((postsRes.error ? [] : postsRes.data) ?? []) as Array<
-    Record<string, unknown>
-  >;
+  const posts = postsRes.error
+    ? []
+    : checkedDashboardRows(postsRes.data, "dashboard_performance_posts");
   const [
     { data: deliveries, error: deliveryError },
     { data: xDeliveries, error: xError },
@@ -904,17 +888,20 @@ async function loadPerformanceWindow(supabase: any, windowHours: number) {
   if (deliveryError) throw deliveryError;
   if (xError) throw xError;
   if (scoreError) throw scoreError;
+  const deliveryRows = checkedDashboardRows(deliveries, "dashboard_performance_deliveries");
+  const xDeliveryRows = checkedDashboardRows(xDeliveries, "dashboard_performance_x_deliveries");
+  const scoreEventRows = checkedDashboardRows(scoreEvents, "dashboard_performance_score_events");
 
   const telegramByTweet = latestTimestampBySubject(
-    (deliveries ?? []) as Array<Record<string, unknown>>,
+    deliveryRows,
     "subject_id",
   );
   const xByTweet = latestTimestampBySubject(
-    (xDeliveries ?? []) as Array<Record<string, unknown>>,
+    xDeliveryRows,
     "post_id",
   );
   const scoreByTweet = latestEventTimestampBySubject(
-    (scoreEvents ?? []) as Array<Record<string, unknown>>,
+    scoreEventRows,
     "subject_id",
   );
 
@@ -1054,7 +1041,7 @@ export async function getSystemPerformanceSummary(supabase: any) {
     resources: resourceRes.error && isMissingSchemaError(resourceRes.error)
       ? normalizeResourceUsage({
         available: false,
-        error: resourceRes.error.message,
+        error: "system_resource_usage_unavailable",
       })
       : normalizeResourceUsage(resourceRes.data),
   };
@@ -1090,7 +1077,7 @@ async function loadScoringTuningSummary(supabase: any) {
   let regionalAuto24h = 0;
   let globalPilotReview24h = 0;
   let globalTunedAuto24h = 0;
-  for (const event of scoreEventsRes.data ?? []) {
+  for (const event of checkedDashboardRows(scoreEventsRes.data, "dashboard_scoring_events")) {
     const meta = event.meta && typeof event.meta === "object"
       ? event.meta as Record<string, unknown>
       : {};
@@ -1120,11 +1107,12 @@ async function loadScoringTuningSummary(supabase: any) {
     }
   }
 
+  const feedbackRows = checkedDashboardRows(feedbackRes.data, "dashboard_feedback_events");
   const manualScoreOverrides24h =
-    (feedbackRes.data ?? []).filter((row: Record<string, unknown>) =>
+    feedbackRows.filter((row: Record<string, unknown>) =>
       row.action === "manual_score"
     ).length;
-  const manualFeedback24h = (feedbackRes.data ?? []).length;
+  const manualFeedback24h = feedbackRows.length;
   return {
     regional_auto_24h: regionalAuto24h,
     global_pilot_review_24h: globalPilotReview24h,
@@ -1141,8 +1129,11 @@ export async function getEnhancedDashboardSummary(supabase: any) {
   const { data: base, error } = await supabase.rpc("get_dashboard_summary");
   if (error) logDashboardFallback("base_summary", error);
 
+  if (base && (typeof base !== "object" || Array.isArray(base))) {
+    logDashboardFallback("base_summary", new Error("dashboard_base_invalid_response"));
+  }
   const dashboard =
-    (base && typeof base === "object"
+    (base && typeof base === "object" && !Array.isArray(base)
       ? base
       : degradedDashboardBase(error)) as Record<string, unknown>;
   const metrics =
@@ -1218,7 +1209,7 @@ export async function getEnhancedDashboardSummary(supabase: any) {
       loadDashboardXLocalUsage(supabase, dashboard, since),
       (error) => ({
         available: false,
-        error: errorMessage(error),
+        error: "dashboard_x_local_usage_unavailable",
         source: "dashboard_fallback",
         attempts_24h: num(metrics.x_api_calls_24h),
         counted_attempts_24h: num(metrics.x_api_calls_24h),
@@ -1238,7 +1229,7 @@ export async function getEnhancedDashboardSummary(supabase: any) {
       loadOpenAiUsageSummary(supabase, since),
       (error) => ({
         available: false,
-        error: errorMessage(error),
+        error: "dashboard_openai_usage_unavailable",
       }),
     ),
     withDashboardFallback(
@@ -1249,12 +1240,12 @@ export async function getEnhancedDashboardSummary(supabase: any) {
         error: errorMessage(error),
       }),
     ),
-    getSystemPerformanceSummary(supabase).catch((error) => ({
+    getSystemPerformanceSummary(supabase).catch(() => ({
       success: false,
-      error: error instanceof Error ? error.message : String(error),
+      error: "dashboard_system_performance_unavailable",
     })),
-    loadScoringTuningSummary(supabase).catch((error) => ({
-      error: error instanceof Error ? error.message : String(error),
+    loadScoringTuningSummary(supabase).catch(() => ({
+      error: "dashboard_scoring_tuning_unavailable",
       regional_auto_24h: 0,
       global_pilot_review_24h: 0,
       global_tuned_auto_24h: 0,

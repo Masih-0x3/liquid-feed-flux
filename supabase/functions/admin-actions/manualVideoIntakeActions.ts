@@ -2,8 +2,23 @@ import { buildXPostText, type XPostTextConfig } from "../_shared/xPostText.ts";
 import { normalizeVideoRenderConfigValue } from "../_shared/videoRenderConfig.ts";
 import { selectSourceVideo, type VideoRenderRow } from "../_shared/videoRenderGate.ts";
 import type { XMediaRow } from "../_shared/mediaSelection.ts";
+import {
+  fetchReviewedRemoteJson,
+  filterReviewedRemoteMediaItems,
+  MAX_REMOTE_MEDIA_CANDIDATES_PER_POST,
+  type RemoteMediaDnsResolver,
+} from "../_shared/remoteMediaPolicy.ts";
 import { xOauthHeader, recordAdminXApiAttempt } from "./xApiActions.ts";
 import { runDedupeAdminAction } from "./dedupeActions.ts";
+import {
+  ExternalPostingBlockedError,
+  requireExternalPosting,
+} from "../_shared/externalPostingGuard.ts";
+import {
+  fetchRuntimeControls,
+  type RuntimeControlsQueryClient,
+  type RuntimeControls,
+} from "../_shared/runtimeControls.ts";
 import type {
   AdminActionResponse,
   SupabaseAdminClient,
@@ -74,10 +89,98 @@ export type InsertAdminPipelineEventFn = (
 export type ManualVideoIntakeDeps = {
   runTranslationOnly?: RunTranslationOnlyFn;
   insertAdminPipelineEvent: InsertAdminPipelineEventFn;
+  requireExternalPosting?: (supabase: SupabaseAdminClient) => Promise<void>;
   fetchImpl?: FetchFn;
+  resolveDns?: RemoteMediaDnsResolver;
   readEnv?: (key: string) => string | undefined;
   now?: () => Date;
 };
+
+async function loadManualRuntimeControls(
+  supabase: SupabaseAdminClient,
+): Promise<RuntimeControls> {
+  return await fetchRuntimeControls(runtimeControlsClient(supabase));
+}
+
+function runtimeControlsClient(
+  supabase: SupabaseAdminClient,
+): RuntimeControlsQueryClient {
+  return {
+    from: () => {
+      const query = supabase.from("runtime_controls") as {
+        select: (columns: "*") => PromiseLike<QueryResult>;
+      };
+      return { select: (columns: "*") => query.select(columns) };
+    },
+  };
+}
+
+function pausedManualResponse(
+  controls: RuntimeControls,
+  extra: Record<string, unknown> = {},
+): AdminActionResponse {
+  return {
+    body: {
+      ok: true,
+      paused: true,
+      status: "paused",
+      reason: "runtime_control_paused",
+      dedupe_enabled: controls.dedupe_enabled,
+      translation_enabled: controls.translation_enabled,
+      retained: 0,
+      enqueued: 0,
+      ...extra,
+    },
+    status: 200,
+  };
+}
+
+async function requireManualControls(
+  supabase: SupabaseAdminClient,
+  extra: Record<string, unknown> = {},
+): Promise<{ controls: RuntimeControls } | AdminActionResponse> {
+  try {
+    const controls = await loadManualRuntimeControls(supabase);
+    if (!controls.dedupe_enabled || !controls.translation_enabled) {
+      return pausedManualResponse(controls, extra);
+    }
+    return { controls };
+  } catch {
+    return {
+      body: {
+        ok: false,
+        error: "runtime_controls_unavailable",
+        code: "runtime_controls_unavailable",
+      },
+      status: 503,
+    };
+  }
+}
+
+function manualExternalPostingOptions(deps: ManualVideoIntakeDeps): {
+  environment: unknown;
+  allowExternalPosting: unknown;
+} {
+  const env = deps.readEnv ?? ((key: string) => Deno.env.get(key));
+  return {
+    environment: env("XOT_ENVIRONMENT"),
+    allowExternalPosting: env("ALLOW_EXTERNAL_POSTING"),
+  };
+}
+
+async function runManualExternalPostingGuard(
+  supabase: SupabaseAdminClient,
+  deps: ManualVideoIntakeDeps,
+): Promise<void> {
+  if (deps.requireExternalPosting) {
+    await deps.requireExternalPosting(supabase);
+    return;
+  }
+  await requireExternalPosting(
+    runtimeControlsClient(supabase),
+    manualExternalPostingOptions(deps),
+  );
+}
 
 type ParsedXPostUrl = {
   tweetId: string;
@@ -138,13 +241,6 @@ function asRows(value: unknown): Array<Record<string, unknown>> {
     : [];
 }
 
-function errorMessage(error: unknown): string {
-  if (error && typeof error === "object" && "message" in error) {
-    return String((error as { message?: unknown }).message ?? error);
-  }
-  return String(error);
-}
-
 function nowIso(deps?: Pick<ManualVideoIntakeDeps, "now">): string {
   return (deps?.now?.() ?? new Date()).toISOString();
 }
@@ -203,7 +299,7 @@ function isVideoLikeType(value: unknown): boolean {
 
 function pickBestVariant(media: Record<string, unknown>): string | null {
   const variants = Array.isArray(media.variants)
-    ? media.variants as Array<Record<string, unknown>>
+    ? media.variants.slice(0, MAX_REMOTE_MEDIA_CANDIDATES_PER_POST) as Array<Record<string, unknown>>
     : [];
   const videoVariants = variants.filter((variant) => {
     const url = typeof variant.url === "string" ? variant.url : "";
@@ -223,7 +319,7 @@ function normalizeXApiMetadata(
   const includes = asRecord(root.includes);
   const noteTweet = asRecord(data.note_tweet);
   const users = asRows(includes.users);
-  const media = asRows(includes.media);
+  const media = asRows(includes.media).slice(0, MAX_REMOTE_MEDIA_CANDIDATES_PER_POST);
   const author = users.find((user) => user.id === data.author_id) ?? users[0];
   const text = typeof noteTweet.text === "string"
     ? noteTweet.text
@@ -285,26 +381,23 @@ async function fetchTweetFromXApi(
     "media.fields": "type,url,preview_image_url,duration_ms,width,height,variants",
   };
   const query = new URLSearchParams(queryParams).toString();
-  const resp = await (deps.fetchImpl ?? fetch)(`${baseUrl}?${query}`, {
-    headers: {
-      Authorization: await xOauthHeader("GET", baseUrl, queryParams, ck, cs, at, ats),
+  const { body, response } = await fetchReviewedRemoteJson(
+    "x_api",
+    `${baseUrl}?${query}`,
+    {
+      authorization: await xOauthHeader("GET", baseUrl, queryParams, ck, cs, at, ats),
+      fetchImpl: deps.fetchImpl ?? fetch,
+      resolveDns: deps.resolveDns,
     },
-  });
+  );
   await recordAdminXApiAttempt(supabase, {
     action: "manual_video_intake_lookup",
     endpoint: baseUrl,
     method: "GET",
     tweetId: parsedUrl.tweetId,
     estimatedBillableUnit: "post_read",
-  }, resp);
-  const text = await resp.text();
-  let body: unknown = null;
-  try {
-    body = text ? JSON.parse(text) : null;
-  } catch {
-    body = text;
-  }
-  if (!resp.ok) {
+  }, response);
+  if (!response.ok) {
     return {
       text: null,
       authorHandle: parsedUrl.handle,
@@ -312,7 +405,7 @@ async function fetchTweetFromXApi(
       createdAt: null,
       mediaRows: [],
       source: "url_only",
-      warning: `x_api_${resp.status}: ${text.slice(0, 240)}`,
+      warning: `x_api_${response.status}`,
     };
   }
   return normalizeXApiMetadata(parsedUrl, body);
@@ -320,20 +413,36 @@ async function fetchTweetFromXApi(
 
 async function fetchTweetFromProxy(
   parsedUrl: ParsedXPostUrl,
-  deps: Pick<ManualVideoIntakeDeps, "fetchImpl"> = {},
+  deps: Pick<ManualVideoIntakeDeps, "fetchImpl" | "resolveDns"> = {},
 ): Promise<ResolvedTweetMetadata | null> {
   const handle = parsedUrl.handle;
   if (!handle) return null;
   const fetchImpl = deps.fetchImpl ?? fetch;
-  const endpoints: Array<{ source: "proxy"; url: string }> = [
-    { source: "proxy", url: `https://api.fxtwitter.com/${handle}/status/${parsedUrl.tweetId}` },
-    { source: "proxy", url: `https://api.vxtwitter.com/${handle}/status/${parsedUrl.tweetId}` },
+  const endpoints: Array<{
+    provider: "fxtwitter" | "vxtwitter";
+    source: "proxy";
+    url: string;
+  }> = [
+    {
+      provider: "fxtwitter",
+      source: "proxy",
+      url: `https://api.fxtwitter.com/${handle}/status/${parsedUrl.tweetId}`,
+    },
+    {
+      provider: "vxtwitter",
+      source: "proxy",
+      url: `https://api.vxtwitter.com/${handle}/status/${parsedUrl.tweetId}`,
+    },
   ];
   for (const endpoint of endpoints) {
     try {
-      const resp = await fetchImpl(endpoint.url);
-      if (!resp.ok) continue;
-      const json = asRecord(await resp.json());
+      const { body, response } = await fetchReviewedRemoteJson(
+        endpoint.provider,
+        endpoint.url,
+        { fetchImpl, resolveDns: deps.resolveDns },
+      );
+      if (!response.ok) continue;
+      const json = asRecord(body);
       const tweet = asRecord(json.tweet || json);
       const author = asRecord(tweet.author || json.user);
       const text = typeof tweet.text === "string"
@@ -368,14 +477,14 @@ async function resolveTweetMetadata(
   parsedUrl: ParsedXPostUrl,
   deps: ManualVideoIntakeDeps,
 ): Promise<ResolvedTweetMetadata> {
-  const fromX = await fetchTweetFromXApi(supabase, parsedUrl, deps).catch((error) => ({
+  const fromX = await fetchTweetFromXApi(supabase, parsedUrl, deps).catch(() => ({
     text: null,
     authorHandle: parsedUrl.handle,
     lang: null,
     createdAt: null,
     mediaRows: [],
     source: "url_only" as const,
-    warning: `x_api_error:${(error as Error).message}`,
+    warning: "x_api_fetch_failed",
   }));
   if (fromX?.text || fromX?.mediaRows.length) return fromX;
   const fromProxy = await fetchTweetFromProxy(parsedUrl, deps);
@@ -489,7 +598,12 @@ async function upsertResolvedMedia(
   rows: ResolvedTweetMetadata["mediaRows"],
 ): Promise<number> {
   if (rows.length === 0) return 0;
-  const mediaRows = await Promise.all(rows.map(async (row) => ({
+  const { accepted } = filterReviewedRemoteMediaItems(
+    rows.map((row) => ({ row, url: row.src_url })),
+  );
+  const reviewedRows = accepted.map(({ row }) => row);
+  if (reviewedRows.length === 0) return 0;
+  const mediaRows = await Promise.all(reviewedRows.map(async (row, index) => ({
     tweet_id: tweetId,
     kind: row.kind,
     src_url: row.src_url,
@@ -497,7 +611,7 @@ async function upsertResolvedMedia(
     width: row.width,
     height: row.height,
     duration_ms: row.duration_ms,
-    ordering: row.ordering,
+    ordering: index,
     storage_path: null,
     downloaded_at: null,
     file_size: null,
@@ -594,10 +708,14 @@ async function maybeQueueRender(
   if (existingRenderId) return existingRenderId;
   const source = selectSourceVideo(mediaRows as XMediaRow[]);
   if (!source?.id) return null;
-  const { data: cfgRow } = await table(supabase, "settings")
+  const { data: cfgRow, error: cfgError } = await table(supabase, "settings")
     .select("value")
     .eq("key", "video_render_config")
     .maybeSingle();
+  if (cfgError) throw cfgError;
+  if (cfgRow !== null && (typeof cfgRow !== "object" || Array.isArray(cfgRow))) {
+    throw new Error("manual_video_render_config_invalid_response");
+  }
   const cfg = normalizeVideoRenderConfigValue(asRecord(cfgRow).value);
   if (cfg.mode === "disabled") return null;
   const { data: renderId, error } = await supabase.rpc("enqueue_video_render", {
@@ -608,11 +726,12 @@ async function maybeQueueRender(
   });
   if (error) throw error;
   if (renderId) {
-    await table(supabase, "manual_video_intakes").update({
+    const { error: intakeUpdateError } = await table(supabase, "manual_video_intakes").update({
       selected_render_id: String(renderId),
       status: "render_queued",
       last_error: null,
     }).eq("id", intake.id);
+    if (intakeUpdateError) throw intakeUpdateError;
     await deps.insertAdminPipelineEvent(supabase, String(intake.tweet_id), "manual_intake", "queued", {
       action: "render_queued",
       render_id: String(renderId),
@@ -658,10 +777,14 @@ function duplicateBlocked(flags: Record<string, unknown>, intake: Record<string,
 async function loadXPostingConfig(
   supabase: SupabaseAdminClient,
 ): Promise<Record<string, unknown>> {
-  const { data } = await table(supabase, "settings").select("value").eq(
+  const { data, error } = await table(supabase, "settings").select("value").eq(
     "key",
     "x_posting_config",
   ).maybeSingle();
+  if (error) throw error;
+  if (data !== null && (typeof data !== "object" || Array.isArray(data))) {
+    throw new Error("manual_x_posting_config_invalid_response");
+  }
   return asRecord(asRecord(data).value);
 }
 
@@ -720,13 +843,17 @@ async function latestXDelivery(
   supabase: SupabaseAdminClient,
   tweetId: string,
 ): Promise<Record<string, unknown> | null> {
-  const { data } = await table(supabase, "x_deliveries")
+  const { data, error } = await table(supabase, "x_deliveries")
     .select("status, x_tweet_id, skip_reason, last_error, claim_expires_at, posted_at, created_at")
     .eq("post_id", tweetId)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  return data && typeof data === "object" ? data as Record<string, unknown> : null;
+  if (error) throw error;
+  if (data !== null && (!data || typeof data !== "object" || Array.isArray(data))) {
+    throw new Error("manual_x_delivery_invalid_response");
+  }
+  return data ? data as Record<string, unknown> : null;
 }
 
 async function refreshDedupeFlags(
@@ -739,13 +866,14 @@ async function refreshDedupeFlags(
       dry_run: true,
       force: true,
     });
+    const duplicateResult = "result" in result ? result.result : undefined;
     return {
       ok: result.ok,
-      result: result.result,
-      blocked: asRecord(result.result).status === "duplicate",
+      result: duplicateResult,
+      blocked: asRecord(duplicateResult).status === "duplicate",
     };
-  } catch (error) {
-    return { ok: false, error: errorMessage(error) };
+  } catch {
+    return { ok: false, error: "manual_dedupe_refresh_failed" };
   }
 }
 
@@ -773,7 +901,12 @@ async function assembleSnapshot(
   supabase: SupabaseAdminClient,
   intake: Record<string, unknown>,
   deps: ManualVideoIntakeDeps,
-  options: { runDedupe?: boolean; queueRender?: boolean; updateStatus?: boolean } = {},
+  options: {
+    runDedupe?: boolean;
+    queueRender?: boolean;
+    updateStatus?: boolean;
+    selectedRenderId?: string | null;
+  } = {},
 ) {
   const tweetId = String(intake.tweet_id);
   const [post, mediaRows, renderRows, xDelivery] = await Promise.all([
@@ -785,10 +918,11 @@ async function assembleSnapshot(
 
   if (options.queueRender) {
     await maybeQueueRender(supabase, intake, mediaRows, deps).catch(async (error) => {
-      await table(supabase, "manual_video_intakes").update({
-        last_error: errorMessage(error),
+      const { error: intakeFailureUpdateError } = await table(supabase, "manual_video_intakes").update({
+        last_error: "manual_render_queue_failed",
         status: "failed",
       }).eq("id", intake.id);
+      if (intakeFailureUpdateError) throw intakeFailureUpdateError;
     });
   }
 
@@ -799,9 +933,15 @@ async function assembleSnapshot(
   const sourceMedia = mediaRows.find((row) =>
     row.storage_path && String(row.mime_type ?? "").startsWith("video/")
   ) ?? mediaRows[0] ?? null;
-  const outputRender = refreshedRenderRows.find((row) =>
+  const completedOutputRenders = refreshedRenderRows.filter((row) =>
     row.status === "completed" && row.output_storage_path
-  ) ?? latestRender;
+  );
+  const requestedRenderId = typeof options.selectedRenderId === "string"
+    ? options.selectedRenderId.trim()
+    : "";
+  const outputRender = requestedRenderId
+    ? completedOutputRenders.find((row) => String(row.id) === requestedRenderId) ?? null
+    : completedOutputRenders[0] ?? null;
   const sourceSignedUrl = await signedTempMediaUrl(supabase, sourceMedia?.storage_path);
   const outputSignedUrl = await signedTempMediaUrl(supabase, outputRender?.output_storage_path);
   const draft = typeof intake.caption_draft === "string" && intake.caption_draft.trim()
@@ -844,19 +984,22 @@ async function assembleSnapshot(
       status: nextStatus,
       safety_flags: safetyFlags,
       ...(draft && !intake.caption_draft ? { caption_draft: draft } : {}),
-      ...(outputRender?.id && !intake.selected_render_id ? { selected_render_id: outputRender.id } : {}),
       ...(xDelivery?.status === "posted" && xDelivery.x_tweet_id
         ? { posted_x_tweet_id: xDelivery.x_tweet_id, posted_at: xDelivery.posted_at ?? nowIso(deps) }
         : {}),
     };
-    const { data } = await table(supabase, "manual_video_intakes")
+    const { data, error: intakeSnapshotUpdateError } = await table(supabase, "manual_video_intakes")
       .update(patch)
       .eq("id", intake.id)
       .select(
         "id, tweet_id, source_url, source_handle, created_by, status, caption_draft, caption_edited, selected_render_id, safety_flags, duplicate_override, duplicate_override_reason, posted_x_tweet_id, posted_at, last_error, blocks_auto_delivery, created_at, updated_at",
       )
       .maybeSingle();
-    updatedIntake = asRecord(data) || intake;
+    if (intakeSnapshotUpdateError) throw intakeSnapshotUpdateError;
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      throw new Error("manual_intake_snapshot_update_invalid_response");
+    }
+    updatedIntake = data as Record<string, unknown>;
   }
 
   const effectiveCaption = typeof updatedIntake.caption_edited === "string" &&
@@ -872,6 +1015,7 @@ async function assembleSnapshot(
     renders: refreshedRenderRows,
     latest_render: latestRender,
     preview: {
+      render_id: typeof outputRender?.id === "string" ? outputRender.id : null,
       source_signed_url: sourceSignedUrl,
       output_signed_url: outputSignedUrl,
       subtitle_text: outputRender?.translated_srt ?? outputRender?.persian_srt ?? null,
@@ -899,6 +1043,11 @@ export async function manualVideoIntakeCreateAdminAction(
   if (!parsed) {
     return { body: { ok: false, error: "A valid x.com or twitter.com status URL is required" }, status: 400 };
   }
+
+  const controlsResult = await requireManualControls(supabase, {
+    action: "manual_video_intake_create",
+  });
+  if ("body" in controlsResult) return controlsResult;
 
   const { data: existingRows, error: existingError } = await table(supabase, "manual_video_intakes")
     .select(
@@ -955,11 +1104,12 @@ export async function manualVideoIntakeCreateAdminAction(
 
   if (deps.runTranslationOnly) {
     const translated = await deps.runTranslationOnly(supabase, parsed.tweetId)
-      .catch((translationError) => ({ ok: false, error: errorMessage(translationError) }));
+      .catch(() => ({ ok: false, error: "translation_request_failed" }));
     if (!translated.ok) {
-      await table(supabase, "manual_video_intakes").update({
-        last_error: `translation_failed:${translated.error}`,
-      }).eq("id", intake.id);
+      const { error: translationFailureUpdateError } = await table(supabase, "manual_video_intakes").update({
+          last_error: "translation_failed",
+        }).eq("id", intake.id);
+      if (translationFailureUpdateError) throw translationFailureUpdateError;
     }
   }
 
@@ -983,13 +1133,20 @@ export async function manualVideoIntakeGetAdminAction(
   body: Record<string, unknown>,
   deps: ManualVideoIntakeDeps,
 ): Promise<AdminActionResponse> {
+  if (body.refresh_dedupe === true || body.queue_render === true) {
+    const controlsResult = await requireManualControls(supabase, {
+      action: "manual_video_intake_get",
+    });
+    if ("body" in controlsResult) return controlsResult;
+  }
   const intake = await loadIntakeByIdOrTweet(supabase, body);
   if (!intake) return { body: { ok: false, error: "manual intake not found" }, status: 404 };
   return {
     body: await assembleSnapshot(supabase, intake, deps, {
       runDedupe: body.refresh_dedupe === true,
-      queueRender: body.queue_render !== false,
-      updateStatus: true,
+      queueRender: body.queue_render === true,
+      updateStatus: false,
+      selectedRenderId: typeof body.render_id === "string" ? body.render_id : null,
     }),
   };
 }
@@ -1016,13 +1173,19 @@ export async function manualVideoIntakeRefreshAdminAction(
 ): Promise<AdminActionResponse> {
   const intake = await loadIntakeByIdOrTweet(supabase, body);
   if (!intake) return { body: { ok: false, error: "manual intake not found" }, status: 404 };
+  const controlsResult = await requireManualControls(supabase, {
+    action: "manual_video_intake_refresh",
+    intake_id: intake.id,
+  });
+  if ("body" in controlsResult) return controlsResult;
   if (deps.runTranslationOnly) {
     const post = await loadPost(supabase, String(intake.tweet_id));
     if (!post?.text_translated) {
-      await deps.runTranslationOnly(supabase, String(intake.tweet_id)).catch(async (error) => {
-        await table(supabase, "manual_video_intakes").update({
-          last_error: `translation_failed:${errorMessage(error)}`,
+      await deps.runTranslationOnly(supabase, String(intake.tweet_id)).catch(async () => {
+        const { error: refreshFailureUpdateError } = await table(supabase, "manual_video_intakes").update({
+          last_error: "translation_failed",
         }).eq("id", intake.id);
+        if (refreshFailureUpdateError) throw refreshFailureUpdateError;
       });
     }
   }
@@ -1075,6 +1238,11 @@ export async function manualVideoIntakeSetDuplicateOverrideAdminAction(
   if (enabled && !reason) {
     return { body: { ok: false, error: "duplicate override reason is required" }, status: 400 };
   }
+  const controlsResult = await requireManualControls(supabase, {
+    action: "manual_video_intake_set_duplicate_override",
+    intake_id: intake.id,
+  });
+  if ("body" in controlsResult) return controlsResult;
   const { error } = await table(supabase, "manual_video_intakes").update({
     duplicate_override: enabled,
     duplicate_override_reason: enabled ? reason : null,
@@ -1123,36 +1291,95 @@ export async function manualVideoIntakePostAdminAction(
   if (body.confirm_manual_post !== true) {
     return { body: { ok: false, error: "confirm_manual_post is required" }, status: 400 };
   }
-  const snapshot = await assembleSnapshot(supabase, intake, deps, {
-    runDedupe: true,
-    queueRender: true,
-    updateStatus: true,
-  });
-  const caption = String(asRecord(snapshot.caption).effective ?? "").trim();
-  if (!caption) return { body: { ok: false, error: "caption is required before posting" }, status: 400 };
-  const selectedRenderId = typeof body.render_id === "string"
-    ? body.render_id.trim()
-    : typeof snapshot.intake.selected_render_id === "string"
-    ? snapshot.intake.selected_render_id
-    : typeof asRecord(snapshot.latest_render).id === "string"
-    ? String(asRecord(snapshot.latest_render).id)
-    : "";
-  if (!selectedRenderId) return { body: { ok: false, error: "completed render is required before posting" }, status: 400 };
 
-  await table(supabase, "manual_video_intakes").update({
-    status: "post_requested",
-    last_error: null,
-  }).eq("id", snapshot.intake.id);
-  await deps.insertAdminPipelineEvent(supabase, String(snapshot.intake.tweet_id), "manual_intake", "queued", {
-    action: "post_requested",
-    intake_id: snapshot.intake.id,
-    render_id: selectedRenderId,
+  // This is the first side-effect boundary. Keep the breaker before the
+  // snapshot, state transition, audit event, and x-poster invoke.
+  try {
+    await runManualExternalPostingGuard(supabase, deps);
+  } catch (error) {
+    if (error instanceof ExternalPostingBlockedError) {
+      return {
+        body: {
+          ok: false,
+          locked: true,
+          code: "external_posting_blocked",
+          reason: error.reason,
+        },
+        status: 200,
+      };
+    }
+    throw error;
+  }
+
+  const controlsResult = await requireManualControls(supabase, {
+    action: "manual_video_intake_post",
+    intake_id: intake.id,
   });
+  if ("body" in controlsResult) return controlsResult;
 
   const supabaseUrl = readEnv("SUPABASE_URL", deps).replace(/\/+$/, "");
   const svcKey = readEnv("SUPABASE_SERVICE_ROLE_KEY", deps);
   if (!supabaseUrl || !svcKey) {
-    return { body: { ok: false, error: "SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is not configured" }, status: 200 };
+    return { body: { ok: false, error: "manual posting is unavailable: server configuration is incomplete" }, status: 503 };
+  }
+
+  const selectedRenderId = typeof body.render_id === "string" ? body.render_id.trim() : "";
+  if (!selectedRenderId) return { body: { ok: false, error: "render_id is required before posting" }, status: 400 };
+
+  const snapshot = await assembleSnapshot(supabase, intake, deps, {
+    runDedupe: true,
+    queueRender: false,
+    updateStatus: false,
+    selectedRenderId,
+  });
+  const caption = String(asRecord(snapshot.caption).effective ?? "").trim();
+  if (!caption) return { body: { ok: false, error: "caption is required before posting" }, status: 400 };
+  const requestedCaption = typeof body.caption === "string" ? body.caption.trim() : "";
+  if (!requestedCaption) return { body: { ok: false, error: "saved caption confirmation is required before posting" }, status: 400 };
+  if (requestedCaption !== caption) {
+    return { body: { ok: false, error: "caption snapshot is stale; save or reload before posting" }, status: 409 };
+  }
+  const selectedRender = asRows(snapshot.renders).find((row) =>
+    String(row.id ?? "") === selectedRenderId &&
+    row.status === "completed" &&
+    typeof row.output_storage_path === "string" &&
+    row.output_storage_path.length > 0
+  );
+  if (!selectedRender) {
+    return { body: { ok: false, error: "selected render is not a completed output" }, status: 409 };
+  }
+  const safety = asRecord(snapshot.safety);
+  if (safety.x_posting_enabled !== true || safety.x_allow_video !== true) {
+    return { body: { ok: false, error: "X video posting is disabled" }, status: 409 };
+  }
+  if (safety.duplicate_blocked === true && snapshot.intake.duplicate_override !== true) {
+    return { body: { ok: false, error: "duplicate override is required before posting" }, status: 409 };
+  }
+  if (safety.caption_too_long === true) {
+    return { body: { ok: false, error: "saved caption exceeds the X limit" }, status: 409 };
+  }
+  if (snapshot.intake.status === "posted" || safety.existing_x_status === "posted") {
+    return { body: { ok: false, error: "this manual intake is already posted" }, status: 409 };
+  }
+
+  // Re-check directly before the provider dispatch. Keep all durable
+  // post-request state after this boundary so a late breaker cannot leave a
+  // misleading queued state or audit event behind.
+  try {
+    await runManualExternalPostingGuard(supabase, deps);
+  } catch (error) {
+    if (error instanceof ExternalPostingBlockedError) {
+      return {
+        body: {
+          ok: false,
+          locked: true,
+          code: "external_posting_blocked",
+          reason: error.reason,
+        },
+        status: 200,
+      };
+    }
+    throw error;
   }
 
   const resp = await (deps.fetchImpl ?? fetch)(`${supabaseUrl}/functions/v1/x-poster`, {
@@ -1170,19 +1397,45 @@ export async function manualVideoIntakePostAdminAction(
       dispatch_source: "manual_video_intake",
     }),
   });
+  if (!resp.ok) {
+    const status = Number.isInteger(resp.status) && resp.status >= 100 && resp.status <= 599
+      ? resp.status
+      : 0;
+    const { error: postFailureUpdateError } = await table(supabase, "manual_video_intakes").update({
+      status: "failed",
+      last_error: `x-poster_http_${status}`,
+    }).eq("id", snapshot.intake.id);
+    if (postFailureUpdateError) throw postFailureUpdateError;
+    return {
+      body: { ok: false, error: "x-poster request failed", code: "x_poster_http_failure" },
+      status: 502,
+    };
+  }
   const rawText = await resp.text();
   let parsed: unknown = rawText;
   try {
     parsed = rawText ? JSON.parse(rawText) : {};
   } catch {
-    // Keep raw text.
+    // Retain the raw value only for local shape validation; never return it.
   }
-  if (!resp.ok) {
-    await table(supabase, "manual_video_intakes").update({
-      status: "failed",
-      last_error: `x-poster ${resp.status}: ${rawText.slice(0, 500)}`,
-    }).eq("id", snapshot.intake.id);
-    return { body: { ok: false, error: `x-poster ${resp.status}`, raw: parsed }, status: 200 };
+  const responseRecord = parsed && typeof parsed === "object" && !Array.isArray(parsed)
+    ? parsed as Record<string, unknown>
+    : null;
+  if (responseRecord?.ok !== true) {
+    return {
+      body: { ok: false, error: "x-poster did not confirm posting", code: "x_poster_unconfirmed" },
+      status: 502,
+    };
   }
-  return { body: { ok: true, result: parsed } };
+  const { error: requestStateError } = await table(supabase, "manual_video_intakes").update({
+    status: "post_requested",
+    last_error: null,
+  }).eq("id", snapshot.intake.id);
+  if (requestStateError) throw requestStateError;
+  await deps.insertAdminPipelineEvent(supabase, String(snapshot.intake.tweet_id), "manual_intake", "queued", {
+    action: "post_requested",
+    intake_id: snapshot.intake.id,
+    render_id: selectedRenderId,
+  });
+  return { body: { ok: true, posted: true } };
 }
