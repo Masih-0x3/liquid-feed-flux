@@ -3482,7 +3482,7 @@
     },
     "estimates": {
       "optimisticHours": 115.25,
-      "likelyHours": 215.80000000000015,
+      "likelyHours": 215.8,
       "conservativeHours": 428
     },
     "horizons": {
