@@ -41,6 +41,8 @@ interface MonitoringRowProps {
   onInspectDuplicateMatch: (tweetId: string) => MaybePromise<void>;
   onRunDedupe: (entry: MonitoringEntry) => void;
   onClearDuplicate: (entry: MonitoringEntry) => void;
+  readOnly: boolean;
+  mutationDisabledTitle?: string;
 }
 
 function entryAuthor(entry: MonitoringEntry) {
@@ -88,6 +90,8 @@ function DuplicateClusterPanel({
   onOpenManualScore,
   onRunDedupe,
   onClearDuplicate,
+  readOnly,
+  mutationDisabledTitle,
 }: Pick<
   MonitoringRowProps,
   | 'entry'
@@ -98,6 +102,8 @@ function DuplicateClusterPanel({
   | 'onOpenManualScore'
   | 'onRunDedupe'
   | 'onClearDuplicate'
+  | 'readOnly'
+  | 'mutationDisabledTitle'
 >) {
   return (
     <MonitoringDuplicateClusterPanel
@@ -109,6 +115,8 @@ function DuplicateClusterPanel({
       onOpenManualScore={onOpenManualScore}
       onRunDedupe={onRunDedupe}
       onClearDuplicate={onClearDuplicate}
+      readOnly={readOnly}
+      mutationDisabledTitle={mutationDisabledTitle}
     />
   );
 }
@@ -127,6 +135,8 @@ export function MonitoringMobileCard({
   onInspectDuplicateMatch,
   onRunDedupe,
   onClearDuplicate,
+  readOnly,
+  mutationDisabledTitle,
 }: MonitoringRowProps) {
   const stage = monitoringStage(entry);
   const decision = formatDecisionReason(entry.decision_reason);
@@ -184,6 +194,8 @@ export function MonitoringMobileCard({
         onOpenManualScore={onOpenManualScore}
         onRunDedupe={onRunDedupe}
         onClearDuplicate={onClearDuplicate}
+        readOnly={readOnly}
+        mutationDisabledTitle={mutationDisabledTitle}
       />
 
       <div className="grid grid-cols-2 gap-2 text-xs min-[520px]:grid-cols-4">
@@ -225,7 +237,14 @@ export function MonitoringMobileCard({
         <Button variant="outline" size="sm" className="h-9" onClick={() => onOpenDetails(entry.tweet_id)}>
           Details
         </Button>
-        <Button variant="outline" size="sm" className="h-9" onClick={() => onOpenManualScore(entry)}>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-9"
+          disabled={readOnly}
+          title={readOnly ? mutationDisabledTitle : undefined}
+          onClick={() => { if (!readOnly) onOpenManualScore(entry); }}
+        >
           Score
         </Button>
         {renderRowActions(entry, true)}
@@ -248,6 +267,8 @@ export function MonitoringTableEntryRows({
   onInspectDuplicateMatch,
   onRunDedupe,
   onClearDuplicate,
+  readOnly,
+  mutationDisabledTitle,
 }: MonitoringRowProps) {
   const stage = monitoringStage(entry);
   const decision = formatDecisionReason(entry.decision_reason);
@@ -335,6 +356,8 @@ export function MonitoringTableEntryRows({
               onOpenManualScore={onOpenManualScore}
               onRunDedupe={onRunDedupe}
               onClearDuplicate={onClearDuplicate}
+              readOnly={readOnly}
+              mutationDisabledTitle={mutationDisabledTitle}
             />
           </TableCell>
         </TableRow>

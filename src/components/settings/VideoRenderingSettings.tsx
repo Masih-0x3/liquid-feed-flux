@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, Film, Loader2, Save, Settings2, Shield, Wand2 } from 'lucide-react';
+import { AlertTriangle, Film, Loader2, RefreshCw, Save, Settings2, Shield, Wand2 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -24,6 +24,60 @@ function numberValue(value: number | undefined, fallback: number): number {
   return Number.isFinite(Number(value)) ? Number(value) : fallback;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function hasFiniteNumbers(value: Record<string, unknown>, keys: string[]): boolean {
+  return keys.every((key) => typeof value[key] === 'number' && Number.isFinite(value[key]));
+}
+
+function hasStrings(value: Record<string, unknown>, keys: string[]): boolean {
+  return keys.every((key) => typeof value[key] === 'string');
+}
+
+function isOneOf(value: unknown, allowed: readonly string[]): boolean {
+  return typeof value === 'string' && allowed.includes(value);
+}
+
+function isVideoRenderConfig(value: unknown): value is VideoRenderConfigValue {
+  if (!isRecord(value)
+    || typeof value.enabled !== 'boolean'
+    || !hasStrings(value, ['render_version', 'transcription_model', 'translation_model', 'vision_model'])
+    || !hasFiniteNumbers(value, ['retention_hours'])
+    || !isOneOf(value.mode, ['disabled', 'shadow', 'enabled'])
+    || !isOneOf(value.failure_policy, ['post_original', 'block'])
+    || !isOneOf(value.transcription_provider, ['deepgram', 'openai'])
+    || !isOneOf(value.target_language_rule, ['fa_except_fa_to_en'])
+    || !(value.renderer_url === null || typeof value.renderer_url === 'string')) {
+    return false;
+  }
+
+  const subtitle = value.subtitle_style;
+  const delogo = value.delogo;
+  const watermark = value.watermark;
+  return isRecord(subtitle)
+    && hasStrings(subtitle, ['text_color', 'background_color'])
+    && hasFiniteNumbers(subtitle, ['font_scale', 'max_width_pct', 'bottom_padding_pct', 'collision_gap_pct'])
+    && isRecord(delogo)
+    && isOneOf(delogo.vision_mode, ['off', 'auto', 'always'])
+    && isOneOf(delogo.engine, ['opencv', 'ffmpeg'])
+    && hasFiniteNumbers(delogo, [
+      'max_regions',
+      'max_single_area_ratio',
+      'max_total_area_ratio',
+      'opencv_radius',
+      'opencv_kernel',
+      'opencv_dilate_iterations',
+      'opencv_feather',
+    ])
+    && isRecord(watermark)
+    && isOneOf(watermark.apply_when, ['subtitle_track', 'modified', 'always', 'never'])
+    && typeof watermark.multiple === 'boolean'
+    && typeof watermark.cover_delogo === 'boolean'
+    && hasFiniteNumbers(watermark, ['opacity', 'top_right_opacity', 'cover_opacity', 'cover_padding_pct']);
+}
+
 export default function VideoRenderingSettings() {
   const configQuery = useVideoRenderConfig();
   const overview = useVideoRenderOverview();
@@ -31,10 +85,11 @@ export default function VideoRenderingSettings() {
   const [draft, setDraft] = useState<VideoRenderConfigValue | null>(null);
 
   useEffect(() => {
-    if (configQuery.data?.config && !draft) setDraft(cloneConfig(configQuery.data.config));
+    const config = configQuery.data?.config;
+    if (isVideoRenderConfig(config) && !draft) setDraft(cloneConfig(config));
   }, [configQuery.data?.config, draft]);
 
-  if (configQuery.isLoading || !draft) {
+  if (configQuery.isLoading) {
     return (
       <Card className="glass-card">
         <CardContent className="flex min-h-48 items-center justify-center">
@@ -44,11 +99,33 @@ export default function VideoRenderingSettings() {
     );
   }
 
+  if (configQuery.isError || configQuery.error || !draft) {
+    return (
+      <Card className="glass-card border-destructive/40">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-glass-foreground">
+            <AlertTriangle className="h-5 w-5 text-destructive" />
+            Video rendering settings are unavailable
+          </CardTitle>
+          <CardDescription>
+            An authoritative renderer configuration could not be loaded. Changes remain disabled until it is available.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button type="button" variant="outline" onClick={() => { void configQuery.refetch(); }} disabled={configQuery.isFetching}>
+            {configQuery.isFetching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+            Retry loading settings
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
   const set = (patch: Partial<VideoRenderConfigValue>) => setDraft({ ...draft, ...patch });
   const setSubtitle = (patch: Partial<VideoRenderConfigValue['subtitle_style']>) => set({ subtitle_style: { ...draft.subtitle_style, ...patch } });
   const setDelogo = (patch: Partial<VideoRenderConfigValue['delogo']>) => set({ delogo: { ...draft.delogo, ...patch } });
   const setWatermark = (patch: Partial<VideoRenderConfigValue['watermark']>) => set({ watermark: { ...draft.watermark, ...patch } });
-  const onlineHeartbeat = overview.data?.heartbeats?.[0];
+  const rendererHealth = overview.data?.renderer_health;
 
   return (
     <div className="space-y-6">
@@ -301,7 +378,7 @@ export default function VideoRenderingSettings() {
               </div>
               <div className="flex items-center justify-between rounded-md border bg-muted/20 p-3">
                 <span>Heartbeat</span>
-                <Badge variant="outline">{onlineHeartbeat?.status ?? 'none'}</Badge>
+                <Badge variant="outline">{rendererHealth?.state ?? 'unknown'}</Badge>
               </div>
               <div className="flex items-center justify-between rounded-md border bg-muted/20 p-3">
                 <span>Queued</span>

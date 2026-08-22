@@ -1,4 +1,5 @@
 import { invokeAdminAction } from "@/api/adminActions";
+import { invokeAdminOperation, reconcileAdminOperation } from "@/api/adminOperationClient";
 import type { MonitoringEntry } from "@/hooks/useMonitoringData";
 import { shortText } from "@/lib/monitoringViewModel";
 
@@ -76,14 +77,19 @@ export async function adminRetryStep(tweetId: string, step: string) {
 }
 
 export async function adminHydratePost(tweetId: string) {
-  return invokeAdminAction<{ ok: boolean; queued?: boolean; reason?: string; error?: string }>(
+  return invokeAdminOperation<{ ok?: boolean; queued?: boolean; reason?: string }>(
     { action: 'hydrate_post', tweet_id: tweetId },
-    { failureMessage: 'Hydrate failed' },
   );
 }
 
 export async function adminReprocess(tweetId: string) {
-  await invokeAdminAction({ action: 'reprocess', tweet_id: tweetId });
+  return invokeAdminOperation<{ success?: boolean; message?: string }>(
+    { action: 'reprocess', tweet_id: tweetId },
+  );
+}
+
+export async function adminReconcileOperation(operationId: string) {
+  return reconcileAdminOperation(operationId);
 }
 
 export async function adminReprocessBatch(tweetIds: string[]) {
@@ -288,7 +294,7 @@ export function actionDescription(action: PendingAction | null) {
     case 'rescore':
       return 'Runs the current scoring prompt again and may update the deliver/skip decision.';
     case 'reprocess':
-      return 'Queues a full pipeline rerun for this post.';
+      return 'Queues a pipeline re-evaluation. Existing media is preserved and is not refreshed until the staged media path is available.';
     case 'hydrate':
       return 'Queues one X read for full tweet text unless an equivalent hydrate job is already pending.';
     case 'clear_dup':
@@ -312,7 +318,7 @@ export function actionDescription(action: PendingAction | null) {
 
 export function bulkActionDescription(action: BulkAction, count: number) {
   if (action === 'bulk_reprocess') {
-    return 'Queues full pipeline reruns for the selected posts in one action.';
+    return 'Queues pipeline re-evaluation for the selected posts. Existing media is preserved and is not refreshed until the staged media path is available.';
   }
   return 'Marks each selected post as reviewed/ignored, closes failed or pending X rows, closes failed/pending Telegram rows, and cancels pending/running/failed jobs without calling Telegram or X.';
 }

@@ -26,6 +26,8 @@ interface MonitoringFiltersProps {
   onBulkReprocess: () => void;
   onBulkIgnore: () => void;
   onClearSelection: () => void;
+  readOnly: boolean;
+  mutationDisabledTitle?: string;
 }
 
 export function MonitoringFilters({
@@ -42,6 +44,8 @@ export function MonitoringFilters({
   onBulkReprocess,
   onBulkIgnore,
   onClearSelection,
+  readOnly,
+  mutationDisabledTitle,
 }: MonitoringFiltersProps) {
   return (
     <CardHeader className="p-3">
@@ -78,11 +82,23 @@ export function MonitoringFilters({
         </Button>
         {selectedCount > 0 && (
           <>
-            <Button size="sm" variant="outline" onClick={onBulkReprocess}>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={readOnly}
+              title={readOnly ? mutationDisabledTitle : undefined}
+              onClick={() => { if (!readOnly) onBulkReprocess(); }}
+            >
               <RotateCcw className="w-3 h-3 mr-2" />
               Mass reprocess
             </Button>
-            <Button size="sm" variant="destructive" onClick={onBulkIgnore}>
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={readOnly}
+              title={readOnly ? mutationDisabledTitle : undefined}
+              onClick={() => { if (!readOnly) onBulkIgnore(); }}
+            >
               <Ban className="w-3 h-3 mr-2" />
               Mass ignore
             </Button>

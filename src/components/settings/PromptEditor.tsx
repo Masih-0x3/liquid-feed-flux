@@ -58,21 +58,21 @@ export function PromptEditor({
 
   return (
     <div className="space-y-2">
-      <div className="relative rounded-md border border-border bg-background/40 overflow-hidden">
+      <div className="relative overflow-hidden rounded-md border border-border bg-background/40 transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 focus-within:ring-offset-background">
         <Textarea
           id={id}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
           spellCheck={false}
-          className={cn(textareaClass, 'border-0 rounded-none focus-visible:ring-0 focus-visible:ring-offset-0')}
+          className={cn(textareaClass, 'border-0 rounded-none')}
           style={{ height: `${minHeight}px`, maxHeight: '70vh', overflow: 'auto' }}
         />
         <div className="absolute top-2 right-2 flex items-center gap-1 opacity-70 hover:opacity-100 transition-opacity">
-          <Button type="button" size="icon" variant="ghost" className="h-7 w-7 bg-background/80 backdrop-blur" onClick={copy} title="Copy">
+          <Button type="button" size="icon" variant="ghost" className="h-7 w-7 bg-background/80 backdrop-blur" onClick={copy} title="Copy" aria-label="Copy prompt">
             {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
           </Button>
-          <Button type="button" size="icon" variant="ghost" className="h-7 w-7 bg-background/80 backdrop-blur" onClick={() => setFullscreen(true)} title="Expand">
+          <Button type="button" size="icon" variant="ghost" className="h-7 w-7 bg-background/80 backdrop-blur" onClick={() => setFullscreen(true)} title="Expand" aria-label="Expand prompt editor">
             <Maximize2 className="w-3.5 h-3.5" />
           </Button>
         </div>

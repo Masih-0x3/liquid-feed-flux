@@ -1,23 +1,24 @@
 import { ReactNode, useCallback, useEffect, useRef, useState } from 'react';
-import { Navigate, NavLink, useLocation } from 'react-router-dom';
+import { Navigate, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { navigationItems } from './navigation';
 import { VersionBanner } from './VersionBanner';
 import { BrandLogo } from './BrandLogo';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, LogOut, ShieldAlert } from 'lucide-react';
+import { Loader2, LockKeyhole, LogOut, RefreshCw, ShieldAlert } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface AppLayoutProps {
-  children: ReactNode;
+  children?: ReactNode;
 }
 
 export function AppLayout({ children }: AppLayoutProps) {
-  const { user, loading, role, isAdmin, signOut } = useAuth();
+  const { user, status, authError, role, isAdmin, signOut, refreshSession } = useAuth();
   const { toast } = useToast();
   const location = useLocation();
   const [headerState, setHeaderState] = useState({ docked: false, hidden: false });
+  const [retryingAuth, setRetryingAuth] = useState(false);
   const mainRef = useRef<HTMLElement | null>(null);
   const lastScrollTopRef = useRef(0);
   const hideTimerRef = useRef<number | null>(null);
@@ -150,7 +151,16 @@ export function AppLayout({ children }: AppLayoutProps) {
     }
   };
 
-  if (loading || (user && role === null)) {
+  const handleAuthRetry = async () => {
+    setRetryingAuth(true);
+    try {
+      await refreshSession();
+    } finally {
+      setRetryingAuth(false);
+    }
+  };
+
+  if (status === 'booting' || status === 'authenticated-role-loading') {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="glass-panel p-8 rounded-2xl">
@@ -160,12 +170,33 @@ export function AppLayout({ children }: AppLayoutProps) {
     );
   }
 
-  if (!user) {
+  if (status === 'degraded') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background p-4">
+        <div className="glass-panel max-w-md space-y-4 rounded-2xl p-8 text-center">
+          <ShieldAlert className="mx-auto h-12 w-12 text-destructive" />
+          <div className="space-y-2">
+            <h2 className="text-xl font-display font-semibold text-glass-foreground">Authentication needs attention</h2>
+            <p className="text-sm text-muted-foreground">
+              {authError?.message ?? 'We could not verify access to the XOT Panel.'}
+            </p>
+          </div>
+          <Button type="button" onClick={handleAuthRetry} disabled={retryingAuth} className="w-full">
+            <RefreshCw className={`mr-2 h-4 w-4 ${retryingAuth ? 'animate-spin' : ''}`} />
+            {retryingAuth ? 'Retrying authentication…' : 'Retry authentication'}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (status === 'unauthenticated' || !user) {
     return <Navigate to="/auth" replace />;
   }
 
-  // Block access if user has no admin role
-  if (!isAdmin) {
+  const isReadOnly = role === 'read_only';
+
+  if (status === 'denied' || (!isAdmin && !isReadOnly)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="glass-panel p-8 rounded-2xl text-center space-y-4 max-w-md">
@@ -174,6 +205,10 @@ export function AppLayout({ children }: AppLayoutProps) {
           <p className="text-muted-foreground text-sm">
             Your account does not have admin access. Contact your administrator to request access.
           </p>
+          <Button type="button" variant="outline" onClick={handleSignOut}>
+            <LogOut className="mr-2 h-4 w-4" />
+            Sign out
+          </Button>
         </div>
       </div>
     );
@@ -181,11 +216,23 @@ export function AppLayout({ children }: AppLayoutProps) {
 
   return (
     <div className="relative flex h-svh min-h-svh w-full overflow-hidden bg-background">
+      {isReadOnly && (
+        <div
+          role="status"
+          aria-label="Read-only access"
+          className="fixed inset-x-0 top-0 z-[60] flex min-h-8 items-center justify-center gap-2 border-b border-amber-400/30 bg-amber-500/10 px-3 py-1.5 text-center text-xs font-medium text-amber-100 backdrop-blur-glass"
+        >
+          <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-amber-300" aria-hidden="true" />
+          <span>Read-only access</span>
+          <span className="font-normal text-amber-100/75">Viewing only. Changes are disabled.</span>
+        </div>
+      )}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {/* Header */}
         <header
           className={cn(
-            'fixed inset-x-0 top-0 z-50 flex justify-center px-3 py-2 transition-transform duration-300 ease-out motion-reduce:transform-none motion-reduce:transition-none sm:px-5',
+            'fixed inset-x-0 z-50 flex justify-center px-3 py-2 transition-transform duration-300 ease-out motion-reduce:transform-none motion-reduce:transition-none sm:px-5',
+            isReadOnly ? 'top-8' : 'top-0',
             headerState.hidden ? '-translate-y-[calc(100%+0.75rem)]' : 'translate-y-0'
           )}
           onFocusCapture={revealHeader}
@@ -234,6 +281,14 @@ export function AppLayout({ children }: AppLayoutProps) {
             </nav>
 
             <div className="flex min-w-0 items-center justify-end gap-2">
+              <div
+                role="status"
+                aria-label="Posting status"
+                className="hidden items-center gap-1.5 rounded border border-amber-400/30 bg-amber-500/10 px-2 py-1 text-[11px] font-medium text-amber-100 sm:flex"
+              >
+                <LockKeyhole className="h-3 w-3 text-amber-300" aria-hidden="true" />
+                Posting locked in Preview
+              </div>
               <div className="hidden min-w-0 xl:flex">
                 <VersionBanner />
               </div>
@@ -255,11 +310,14 @@ export function AppLayout({ children }: AppLayoutProps) {
         {/* Main Content */}
         <main
           ref={mainRef}
-          className="flex-1 overflow-auto overflow-x-hidden px-2 pb-24 pt-20 sm:px-5 sm:pb-6 sm:pt-[5.5rem]"
+          className={cn(
+            'flex-1 overflow-auto overflow-x-hidden px-2 pb-24 sm:px-5 sm:pb-6',
+            isReadOnly ? 'pt-28 sm:pt-[7.5rem]' : 'pt-20 sm:pt-[5.5rem]',
+          )}
           onScroll={handleMainScroll}
         >
           <div className={`mx-auto w-full ${isWideOpsRoute ? 'max-w-none' : 'max-w-7xl'}`}>
-            {children}
+            {children ?? <Outlet />}
           </div>
         </main>
       </div>

@@ -153,7 +153,7 @@ export default function XPostingConfig({ initial }: Props) {
     setDryRunLoading(true);
     setDryRunResult(null);
     try {
-      const data = await invokeAdminAction<{ results?: unknown[] }>({ action: 'dry_run_x_post' });
+      const data = await invokeAdminAction<{ results?: Array<Record<string, unknown>> }>({ action: 'dry_run_x_post' });
       setDryRunResult(data);
       toast({ title: 'Dry-run complete', description: `${data?.results?.length ?? 0} candidates evaluated.` });
     } catch (e) {
@@ -354,9 +354,9 @@ export default function XPostingConfig({ initial }: Props) {
                 <div className="flex gap-2 items-center">
                   <Badge variant={r.status === 'dry_run' ? 'default' : 'secondary'}>{String(r.status)}</Badge>
                   <code>{String(r.tweet_id)}</code>
-                  {r.reason && <span className="text-muted-foreground">— {String(r.reason)}</span>}
+                  {typeof r.reason === 'string' && r.reason.length > 0 && <span className="text-muted-foreground">— {r.reason}</span>}
                 </div>
-                {r.preview_text && <div className="whitespace-pre-wrap p-2 bg-background/50 rounded">{String(r.preview_text)}</div>}
+                {typeof r.preview_text === 'string' && r.preview_text.length > 0 && <div className="whitespace-pre-wrap p-2 bg-background/50 rounded">{r.preview_text}</div>}
               </div>
             ))}
           </div>

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invokeAdminAction } from "@/api/adminActions";
+import { invokeAdminOperation, reconcileAdminOperation } from "@/api/adminOperationClient";
 import {
   adminApproveEnrichment,
   adminCancelPendingJobs,
@@ -11,7 +12,9 @@ import {
   adminIgnoreMonitoringItem,
   adminIgnoreMonitoringItems,
   adminRecordScoreFeedback,
+  adminReprocess,
   adminReprocessBatch,
+  adminReconcileOperation,
   adminRejectEnrichment,
   adminRescorePost,
   adminRetryXPost,
@@ -24,12 +27,20 @@ import {
 vi.mock("@/api/adminActions", () => ({
   invokeAdminAction: vi.fn(),
 }));
+vi.mock("@/api/adminOperationClient", () => ({
+  invokeAdminOperation: vi.fn(),
+  reconcileAdminOperation: vi.fn(),
+}));
 
 const invokeAdminActionMock = vi.mocked(invokeAdminAction);
+const invokeAdminOperationMock = vi.mocked(invokeAdminOperation);
+const reconcileAdminOperationMock = vi.mocked(reconcileAdminOperation);
 
 describe("monitoring action wrappers", () => {
   beforeEach(() => {
     invokeAdminActionMock.mockReset();
+    invokeAdminOperationMock.mockReset();
+    reconcileAdminOperationMock.mockReset();
   });
 
   it("maps scoring feedback to the expected default reason tags", () => {
@@ -38,6 +49,14 @@ describe("monitoring action wrappers", () => {
     expect(defaultReasonTag("should_skip", "direct_focus")).toBe("should_skip");
     expect(defaultReasonTag("wrong_relevance_class", "adjacent")).toBe("wrong_class");
     expect(defaultReasonTag("correct_deliver", "direct_focus")).toBe("direct_focus");
+  });
+
+  it("reconciles an unknown operation without invoking the mutation again", async () => {
+    const response = { operation_id: "reprocess:tweet-7", operation_status: "committed" as const };
+    reconcileAdminOperationMock.mockResolvedValueOnce(response);
+    await expect(adminReconcileOperation("reprocess:tweet-7")).resolves.toEqual(response);
+    expect(reconcileAdminOperationMock).toHaveBeenCalledWith("reprocess:tweet-7");
+    expect(invokeAdminOperationMock).not.toHaveBeenCalled();
   });
 
   it("sends manual score payloads through the central admin client", async () => {
@@ -85,15 +104,26 @@ describe("monitoring action wrappers", () => {
   });
 
   it("passes through typed responses for single-post pipeline actions", async () => {
-    const hydrate = { ok: true, queued: false, reason: "existing hydrate job" };
+    const hydrate = {
+      operation_id: "hydrate:manual_monitoring:tweet-6",
+      operation_status: "still_running" as const,
+      data: { ok: true, queued: false, reason: "existing hydrate job" },
+    };
+    const reprocess = {
+      operation_id: "reprocess:tweet-7",
+      operation_status: "still_running" as const,
+      data: { success: true, message: "Reprocess job queued. Existing media will be preserved until staged media refresh is available." },
+    };
     const retryX = { ok: true, status: "posted", x_tweet_id: "12345" };
     const rescore = { ok: true, final_score: 17, decision: "deliver", decision_reason: "direct focus" };
     const translate = { ok: true, translated: "translated text", model: "gpt-5-mini" };
     const dedupe = { ok: true, result: { status: "unique", reason: "no close match", dup_of_tweet_id: null } };
     const clearDup = { success: true };
 
-    invokeAdminActionMock
+    invokeAdminOperationMock
       .mockResolvedValueOnce(hydrate)
+      .mockResolvedValueOnce(reprocess);
+    invokeAdminActionMock
       .mockResolvedValueOnce(retryX)
       .mockResolvedValueOnce(rescore)
       .mockResolvedValueOnce(translate)
@@ -101,43 +131,47 @@ describe("monitoring action wrappers", () => {
       .mockResolvedValueOnce(clearDup);
 
     await expect(adminHydratePost("tweet-6")).resolves.toEqual(hydrate);
-    await expect(adminRetryXPost("tweet-7")).resolves.toEqual(retryX);
-    await expect(adminRescorePost("tweet-8")).resolves.toEqual(rescore);
-    await expect(adminTranslatePost("tweet-9")).resolves.toEqual(translate);
-    await expect(adminRunDedupe("tweet-10")).resolves.toEqual(dedupe);
-    await expect(adminClearDup("tweet-11", "tweet-12")).resolves.toEqual(clearDup);
+    await expect(adminReprocess("tweet-7")).resolves.toEqual(reprocess);
+    await expect(adminRetryXPost("tweet-8")).resolves.toEqual(retryX);
+    await expect(adminRescorePost("tweet-9")).resolves.toEqual(rescore);
+    await expect(adminTranslatePost("tweet-10")).resolves.toEqual(translate);
+    await expect(adminRunDedupe("tweet-11")).resolves.toEqual(dedupe);
+    await expect(adminClearDup("tweet-12", "tweet-13")).resolves.toEqual(clearDup);
 
-    expect(invokeAdminActionMock).toHaveBeenNthCalledWith(
+    expect(invokeAdminOperationMock).toHaveBeenNthCalledWith(
       1,
       { action: "hydrate_post", tweet_id: "tweet-6" },
-      { failureMessage: "Hydrate failed" },
+    );
+    expect(invokeAdminOperationMock).toHaveBeenNthCalledWith(
+      2,
+      { action: "reprocess", tweet_id: "tweet-7" },
+    );
+    expect(invokeAdminActionMock).toHaveBeenNthCalledWith(
+      1,
+      { action: "retry_x_post", tweet_id: "tweet-8" },
     );
     expect(invokeAdminActionMock).toHaveBeenNthCalledWith(
       2,
-      { action: "retry_x_post", tweet_id: "tweet-7" },
+      { action: "rescore_post", tweet_id: "tweet-9" },
     );
     expect(invokeAdminActionMock).toHaveBeenNthCalledWith(
       3,
-      { action: "rescore_post", tweet_id: "tweet-8" },
-    );
-    expect(invokeAdminActionMock).toHaveBeenNthCalledWith(
-      4,
-      { action: "translate_post", tweet_id: "tweet-9", mode: "translation_only" },
+      { action: "translate_post", tweet_id: "tweet-10", mode: "translation_only" },
       { failureMessage: "Translation failed" },
     );
     expect(invokeAdminActionMock).toHaveBeenNthCalledWith(
-      5,
+      4,
       {
         action: "run_dedupe",
-        tweet_id: "tweet-10",
+        tweet_id: "tweet-11",
         force: true,
         enqueue_next: true,
       },
       { failureMessage: "Duplicate check failed" },
     );
     expect(invokeAdminActionMock).toHaveBeenNthCalledWith(
-      6,
-      { action: "clear_dup", tweet_id: "tweet-11", related_tweet_id: "tweet-12" },
+      5,
+      { action: "clear_dup", tweet_id: "tweet-12", related_tweet_id: "tweet-13" },
     );
   });
 

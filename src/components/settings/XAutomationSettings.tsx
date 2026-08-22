@@ -35,6 +35,45 @@ const SECRET_KEYS = [
 ] as const;
 
 const DEFAULT_TEST_TWEET = 'Test tweet from automation pipeline ✅ — please ignore.';
+const GENERIC_SUPABASE_DASHBOARD_URL = 'https://supabase.com/dashboard';
+const SUPABASE_PROJECT_REF_RE = /^[a-z0-9]{20}$/;
+const SUPABASE_HOST_RE = /^([a-z0-9]{20})\.supabase\.co$/;
+
+/**
+ * Build a dashboard link from the same public identity used by the Supabase
+ * client. A malformed or mismatched identity must never select a project.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function getSupabaseDashboardUrl(projectRef: unknown, supabaseUrl: unknown): string {
+  const ref = typeof projectRef === 'string' ? projectRef.trim() : '';
+  if (!SUPABASE_PROJECT_REF_RE.test(ref)) return GENERIC_SUPABASE_DASHBOARD_URL;
+
+  const rawUrl = typeof supabaseUrl === 'string' ? supabaseUrl.trim() : '';
+  if (rawUrl) {
+    try {
+      const parsed = new URL(rawUrl);
+      const hostMatch = SUPABASE_HOST_RE.exec(parsed.hostname.toLowerCase());
+      const isSafeSupabaseUrl = parsed.protocol === 'https:'
+        && parsed.username === ''
+        && parsed.password === ''
+        && parsed.port === ''
+        && (parsed.pathname === '' || parsed.pathname === '/')
+        && parsed.search === ''
+        && parsed.hash === ''
+        && hostMatch?.[1] === ref;
+      if (!isSafeSupabaseUrl) return GENERIC_SUPABASE_DASHBOARD_URL;
+    } catch {
+      return GENERIC_SUPABASE_DASHBOARD_URL;
+    }
+  }
+
+  return `https://supabase.com/dashboard/project/${ref}/settings/functions`;
+}
+
+const supabaseDashboardUrl = getSupabaseDashboardUrl(
+  import.meta.env.VITE_SUPABASE_PROJECT_ID,
+  import.meta.env.VITE_SUPABASE_URL,
+);
 
 export default function XAutomationSettings({ twitterHydration, xPostingConfig, xRateLimits, xApiControls }: Props) {
   const { data: monthlyCount } = useXMonthlyPostsCount();
@@ -50,12 +89,12 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
   const [tweetText, setTweetText] = useState(DEFAULT_TEST_TWEET);
   const [replyTo, setReplyTo] = useState('');
   const [sendLoading, setSendLoading] = useState(false);
-  const [tweetResult, setTweetResult] = useState<{ ok: boolean; tweet_id?: string; response?: unknown; error?: string } | null>(null);
+  const [tweetResult, setTweetResult] = useState<{ ok: boolean; tweet_id?: string; error?: string } | null>(null);
   const [lastSendAt, setLastSendAt] = useState<number>(0);
 
   const [hydrateId, setHydrateId] = useState('');
   const [hydrateLoading, setHydrateLoading] = useState(false);
-  const [hydrateResult, setHydrateResult] = useState<{ ok: boolean; text?: string; note_tweet?: string; lang?: string; raw?: unknown; error?: string } | null>(null);
+  const [hydrateResult, setHydrateResult] = useState<{ ok: boolean; text?: string; note_tweet?: string; lang?: string; error?: string } | null>(null);
 
   const [backfillLoading, setBackfillLoading] = useState(false);
   const [backfillResult, setBackfillResult] = useState<{ ok: boolean; dry_run?: boolean; scanned?: number; matched?: number; queued?: number; skipped_existing?: number; excluded_by_gate?: number; max?: number; hours?: number; error?: string } | null>(null);
@@ -222,7 +261,7 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
               Refresh usage
             </Button>
             <Button onClick={refreshStatus} disabled={statusLoading} variant="ghost" size="sm">Refresh status</Button>
-            <a href="https://supabase.com/dashboard/project/jzirqfzzvlbxwfzndaer/settings/functions" target="_blank" rel="noreferrer" className="text-xs text-primary inline-flex items-center hover:underline">
+            <a href={supabaseDashboardUrl} target="_blank" rel="noreferrer" className="text-xs text-primary inline-flex items-center hover:underline">
               Manage secrets <ExternalLink className="w-3 h-3 ml-1" />
             </a>
           </div>
@@ -392,12 +431,6 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
               ) : (
                 <div className="flex items-start gap-2"><XCircle className="w-4 h-4 text-destructive mt-0.5" /><span>{tweetResult.error || 'Unknown error'}</span></div>
               )}
-              {tweetResult.response !== undefined && (
-                <details className="text-xs">
-                  <summary className="cursor-pointer text-muted-foreground">Response payload</summary>
-                  <pre className="mt-1 p-2 bg-background rounded overflow-x-auto">{JSON.stringify(tweetResult.response, null, 2)}</pre>
-                </details>
-              )}
             </div>
           )}
         </CardContent>
@@ -440,12 +473,6 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
                 </>
               ) : (
                 <div className="flex items-start gap-2"><XCircle className="w-4 h-4 text-destructive mt-0.5" /><span>{hydrateResult.error || 'Unknown error'}</span></div>
-              )}
-              {hydrateResult.raw !== undefined && (
-                <details className="text-xs">
-                  <summary className="cursor-pointer text-muted-foreground">Raw response</summary>
-                  <pre className="mt-1 p-2 bg-background rounded overflow-x-auto">{JSON.stringify(hydrateResult.raw, null, 2)}</pre>
-                </details>
               )}
             </div>
           )}

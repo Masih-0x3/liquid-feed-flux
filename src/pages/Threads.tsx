@@ -1,13 +1,12 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { supabase } from '@/integrations/supabase/client';
-import { invokeAdminAction } from '@/api/adminActions';
 import { useToast } from '@/hooks/use-toast';
-import { Link2, Eye, Send, Loader2, MessageSquare } from 'lucide-react';
+import { Link2, Eye, Loader2, MessageSquare } from 'lucide-react';
 
 interface Thread {
   id: string;
@@ -25,13 +24,26 @@ interface Post {
   created_at: string;
 }
 
+interface ThreadPostsState {
+  threadId: string | null;
+  posts: Post[];
+  loading: boolean;
+  error: boolean;
+}
+
 export default function Threads() {
   const { toast } = useToast();
   const [threads, setThreads] = useState<Thread[]>([]);
   const [selectedThread, setSelectedThread] = useState<Thread | null>(null);
-  const [threadPosts, setThreadPosts] = useState<Post[]>([]);
+  const [threadPostsState, setThreadPostsState] = useState<ThreadPostsState>({
+    threadId: null,
+    posts: [],
+    loading: false,
+    error: false,
+  });
   const [loading, setLoading] = useState(true);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const previewRequestRef = useRef(0);
 
   const fetchThreads = useCallback(async () => {
     try {
@@ -52,7 +64,14 @@ export default function Threads() {
   useEffect(() => { fetchThreads(); }, [fetchThreads]);
 
   const fetchThreadPosts = async (thread: Thread) => {
-    if (!thread.tweet_ids?.length) return;
+    const requestId = ++previewRequestRef.current;
+    setThreadPostsState({ threadId: thread.id, posts: [], loading: true, error: false });
+    if (!thread.tweet_ids?.length) {
+      if (previewRequestRef.current === requestId) {
+        setThreadPostsState({ threadId: thread.id, posts: [], loading: false, error: false });
+      }
+      return;
+    }
     try {
       const { data, error } = await supabase
         .from('posts')
@@ -60,24 +79,27 @@ export default function Threads() {
         .in('tweet_id', thread.tweet_ids)
         .order('created_at', { ascending: true });
       if (error) throw error;
-      setThreadPosts(data || []);
+      if (previewRequestRef.current !== requestId) return;
+      setThreadPostsState({ threadId: thread.id, posts: (data as Post[]) || [], loading: false, error: false });
     } catch {
+      if (previewRequestRef.current !== requestId) return;
+      setThreadPostsState({ threadId: thread.id, posts: [], loading: false, error: true });
       toast({ title: 'Error loading thread posts', variant: 'destructive' });
     }
   };
 
-  const handlePreview = async (thread: Thread) => {
+  const handlePreview = (thread: Thread) => {
     setSelectedThread(thread);
     setIsPreviewOpen(true);
-    await fetchThreadPosts(thread);
+    void fetchThreadPosts(thread);
   };
 
-  const handlePostThread = async (threadId: string) => {
-    try {
-      await invokeAdminAction({ action: 'post_thread', thread_id: threadId });
-      toast({ title: 'Thread queued for delivery' });
-    } catch {
-      toast({ title: 'Error posting thread', variant: 'destructive' });
+  const handlePreviewOpenChange = (open: boolean) => {
+    setIsPreviewOpen(open);
+    if (!open) {
+      previewRequestRef.current += 1;
+      setSelectedThread(null);
+      setThreadPostsState({ threadId: null, posts: [], loading: false, error: false });
     }
   };
 
@@ -90,6 +112,12 @@ export default function Threads() {
   const assembleThreadBody = (posts: Post[]) =>
     posts.map((p, i) => `${i + 1}. ${p.text_translated || p.text_original}`).join('\n\n');
 
+  const hasMatchingThreadPosts = Boolean(
+    selectedThread && threadPostsState.threadId === selectedThread.id,
+  );
+  const threadPosts = hasMatchingThreadPosts ? threadPostsState.posts : [];
+  const previewLoading = Boolean(selectedThread) && (!hasMatchingThreadPosts || threadPostsState.loading);
+  const previewError = hasMatchingThreadPosts && threadPostsState.error;
   return (
     <div className="space-y-6 animate-fade-in-up">
       <div className="flex items-center justify-between">
@@ -144,9 +172,7 @@ export default function Threads() {
                         <Button size="sm" variant="ghost" onClick={() => handlePreview(thread)} className="glass-button h-8 w-8 p-0">
                           <Eye className="w-3 h-3" />
                         </Button>
-                        <Button size="sm" variant="ghost" onClick={() => handlePostThread(thread.id)} className="glass-button h-8 w-8 p-0 text-success hover:bg-success/20">
-                          <Send className="w-3 h-3" />
-                        </Button>
+                        <Badge variant="outline" className="text-muted-foreground">Delivery unavailable</Badge>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -163,18 +189,32 @@ export default function Threads() {
         </CardContent>
       </Card>
 
-      <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
+      <Dialog open={isPreviewOpen} onOpenChange={handlePreviewOpenChange}>
         <DialogContent className="glass-panel border-glass-border max-w-2xl max-h-[80vh] overflow-hidden">
           <DialogHeader>
             <DialogTitle className="text-glass-foreground">
               Thread Preview - @{selectedThread?.accounts?.handle}
             </DialogTitle>
             <DialogDescription>
-              Preview of assembled thread content ({threadPosts.length} posts)
+              {previewLoading ? 'Loading thread posts…' : `Preview of assembled thread content (${threadPosts.length} posts)`}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 overflow-y-auto max-h-96">
-            {threadPosts.length > 0 ? (
+            {previewLoading ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2" />
+                <p>Loading thread posts...</p>
+              </div>
+            ) : previewError ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <p className="mb-3">Thread posts could not be loaded.</p>
+                {selectedThread && (
+                  <Button type="button" variant="outline" onClick={() => { void fetchThreadPosts(selectedThread); }}>
+                    Retry loading posts
+                  </Button>
+                )}
+              </div>
+            ) : threadPosts.length > 0 ? (
               <>
                 <div className="space-y-3">
                   <h4 className="font-medium text-glass-foreground">Individual Posts:</h4>
@@ -195,17 +235,13 @@ export default function Threads() {
                     <pre className="whitespace-pre-wrap text-sm text-glass-foreground">{assembleThreadBody(threadPosts)}</pre>
                   </div>
                 </div>
-                <div className="flex space-x-2 pt-4">
-                  <Button onClick={() => selectedThread && handlePostThread(selectedThread.id)} className="bg-gradient-primary hover:opacity-90 text-white flex-1">
-                    <Send className="w-4 h-4 mr-2" />
-                    Post Thread
-                  </Button>
+                <div className="rounded-md border border-border/60 bg-muted/30 p-3 text-sm text-muted-foreground" role="status">
+                  Thread delivery is unavailable until ordered delivery is implemented. This preview does not queue a message.
                 </div>
               </>
             ) : (
               <div className="text-center py-8 text-muted-foreground">
-                <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2" />
-                <p>Loading thread posts...</p>
+                <p>No posts are available for this thread.</p>
               </div>
             )}
           </div>

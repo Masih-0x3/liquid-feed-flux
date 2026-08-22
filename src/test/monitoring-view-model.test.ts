@@ -194,6 +194,8 @@ describe("monitoring action copy helpers", () => {
   it("returns stable titles and descriptions for bulk actions", () => {
     expect(bulkActionTitle("bulk_reprocess", 3)).toBe("Reprocess 3 post(s)?");
     expect(bulkActionTitle("bulk_ignore", 2)).toBe("Ignore 2 post(s)?");
+    expect(actionDescription({ type: "reprocess", entry: entry({}) })).toContain("Existing media is preserved");
+    expect(bulkActionDescription("bulk_reprocess", 3)).toContain("Existing media is preserved");
     expect(bulkActionDescription("bulk_ignore", 2)).toContain("without calling Telegram or X");
     expect(actionContextText(null, { type: "bulk_ignore", tweetIds: ["1", "2"] })).toBe("2 post IDs selected");
   });

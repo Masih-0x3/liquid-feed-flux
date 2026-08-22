@@ -11,25 +11,61 @@ import { BrandLogo } from '@/components/layout/BrandLogo';
 import { Mail, Lock, Loader2 } from 'lucide-react';
 
 export default function AuthPage() {
-  const { user, signIn, loading: authLoading } = useAuth();
+  const { signIn, status, authError, refreshSession } = useAuth();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
+  const [retryingAuth, setRetryingAuth] = useState(false);
   const [formData, setFormData] = useState({
     email: '',
     password: '',
   });
 
-  // Redirect if already authenticated
-  if (user && !authLoading) {
+  if (status === 'authorised' || status === 'denied') {
     return <Navigate to="/" replace />;
   }
 
-  if (authLoading) {
+  if (status === 'booting' || status === 'authenticated-role-loading') {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="glass-panel p-8 rounded-2xl">
           <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto" />
         </div>
+      </div>
+    );
+  }
+
+  const handleAuthRetry = async () => {
+    setRetryingAuth(true);
+    try {
+      await refreshSession();
+    } finally {
+      setRetryingAuth(false);
+    }
+  };
+
+  if (status === 'degraded') {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4 bg-background">
+        <Card className="glass-card w-full max-w-md border-destructive/40">
+          <CardHeader className="text-center">
+            <CardTitle className="text-xl font-display">Authentication needs attention</CardTitle>
+            <CardDescription>
+              {authError?.message ?? 'We could not verify access to the XOT Panel.'}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button type="button" onClick={handleAuthRetry} disabled={retryingAuth} className="w-full">
+              {retryingAuth ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Retrying authentication…
+                </>
+              ) : (
+                'Retry authentication'
+              )}
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     );
   }
@@ -60,17 +96,7 @@ export default function AuthPage() {
     setLoading(true);
     
     try {
-      const timeoutError = {
-        name: 'AuthTimeoutError',
-        message: 'Supabase Auth is not responding. Please try again after the backend recovers.',
-        status: 504,
-      } as Awaited<ReturnType<typeof signIn>>['error'];
-      const { error } = await Promise.race([
-        signIn(email, password),
-        new Promise<Awaited<ReturnType<typeof signIn>>>((resolve) => {
-          setTimeout(() => resolve({ error: timeoutError }), 20000);
-        }),
-      ]);
+      const { error } = await signIn(email, password);
       
       if (error) {
         toast({
@@ -103,14 +129,14 @@ export default function AuthPage() {
         <div className="text-center space-y-3">
           <BrandLogo className="mx-auto h-32 w-32 shadow-2xl shadow-primary/20 ring-1 ring-glass-border sm:h-40 sm:w-40" />
           <h1 className="text-3xl font-display font-bold text-glass-foreground">XOT Panel</h1>
-          <p className="text-muted-foreground">Admin access to your RSS → OpenAI → Telegram pipeline</p>
+          <p className="text-muted-foreground">Secure access to your RSS → OpenAI → Telegram pipeline</p>
         </div>
 
         {/* Auth Form */}
         <Card className="glass-card border-glass-border">
           <CardHeader className="text-center">
             <CardTitle className="text-xl font-display">Access Panel</CardTitle>
-            <CardDescription>Sign in to manage your RSS pipeline</CardDescription>
+            <CardDescription>Sign in to view and manage your RSS pipeline</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSignIn} className="space-y-4">
@@ -157,7 +183,7 @@ export default function AuthPage() {
                     Signing in...
                   </>
                 ) : (
-                  'Admin Sign In'
+                  'Sign In'
                 )}
               </Button>
             </form>
@@ -165,7 +191,7 @@ export default function AuthPage() {
         </Card>
 
         <p className="text-center text-sm text-muted-foreground">
-          Secure admin access powered by Supabase
+          Secure access powered by Supabase
         </p>
       </div>
     </div>

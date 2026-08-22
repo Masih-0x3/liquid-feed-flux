@@ -94,6 +94,7 @@ export interface ManualVideoSnapshot {
   renders: ManualVideoRenderRow[];
   latest_render: ManualVideoRenderRow | null;
   preview: {
+    render_id: string | null;
     source_signed_url: string | null;
     output_signed_url: string | null;
     subtitle_text: string | null;
@@ -131,15 +132,17 @@ export function useManualVideoIntakeList() {
 export function useManualVideoIntakeDetail(input: {
   intakeId?: string | null;
   tweetId?: string | null;
+  renderId?: string | null;
   enabled?: boolean;
 }) {
   return useQuery({
-    queryKey: ['manual-video-intakes', 'detail', input.intakeId ?? '', input.tweetId ?? ''],
+    queryKey: ['manual-video-intakes', 'detail', input.intakeId ?? '', input.tweetId ?? '', input.renderId ?? ''],
     queryFn: () => invokeAdminAction<ManualVideoSnapshot>({
       action: 'manual_video_intake_get',
       intake_id: input.intakeId ?? undefined,
       tweet_id: input.tweetId ?? undefined,
-      refresh_dedupe: true,
+      render_id: input.renderId ?? undefined,
+      refresh_dedupe: false,
     }),
     enabled: input.enabled !== false && Boolean(input.intakeId || input.tweetId),
     staleTime: 5_000,
@@ -244,7 +247,7 @@ export function usePostManualVideoIntake() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   return useMutation({
-    mutationFn: (input: { intake_id: string; render_id: string; caption: string }) => invokeAdminAction<{ ok: boolean; result?: unknown; error?: string }>({
+    mutationFn: (input: { intake_id: string; render_id: string; caption: string }) => invokeAdminAction<{ ok: boolean; posted?: boolean; error?: string; code?: string }>({
       action: 'manual_video_intake_post',
       intake_id: input.intake_id,
       render_id: input.render_id,

@@ -36,6 +36,12 @@ function pctColor(pct: number) {
   return 'text-success';
 }
 
+function wholeLimit(value: string, min: number, max: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return min;
+  return Math.min(max, Math.max(min, Math.trunc(parsed)));
+}
+
 export default function XRateLimits({ initial, monthlyPostsCount = 0 }: Props) {
   const save = useSaveSettings();
   const { data: xApiSummary } = useXApiSummary(24);
@@ -94,29 +100,29 @@ export default function XRateLimits({ initial, monthlyPostsCount = 0 }: Props) {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <Label htmlFor="posts_per_hour">Posts / hour</Label>
-            <Input id="posts_per_hour" type="number" min={1} max={1000} value={cfg.posts_per_hour}
-              onChange={(e) => update({ posts_per_hour: Math.max(1, Number(e.target.value) || 1) })} className="glass-input" />
+            <Input id="posts_per_hour" type="number" min={1} max={1000} step={1} value={cfg.posts_per_hour}
+              onChange={(e) => update({ posts_per_hour: wholeLimit(e.target.value, 1, 1000) })} className="glass-input" />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="posts_per_day">Posts / day</Label>
-            <Input id="posts_per_day" type="number" min={1} max={10000} value={cfg.posts_per_day}
-              onChange={(e) => update({ posts_per_day: Math.max(1, Number(e.target.value) || 1) })} className="glass-input" />
+            <Input id="posts_per_day" type="number" min={1} max={10000} step={1} value={cfg.posts_per_day}
+              onChange={(e) => update({ posts_per_day: wholeLimit(e.target.value, 1, 10000) })} className="glass-input" />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="monthly_budget">Monthly post budget</Label>
-            <Input id="monthly_budget" type="number" min={1} max={1000000} value={cfg.monthly_post_budget}
-              onChange={(e) => update({ monthly_post_budget: Math.max(1, Number(e.target.value) || 1) })} className="glass-input" />
+            <Input id="monthly_budget" type="number" min={1} max={1000000} step={1} value={cfg.monthly_post_budget}
+              onChange={(e) => update({ monthly_post_budget: wholeLimit(e.target.value, 1, 1000000) })} className="glass-input" />
             <p className="text-xs text-muted-foreground">Your configured monthly write budget. Keep this aligned with the cap shown in X Developer Console.</p>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="media_uploads_per_day">Media uploads / day</Label>
-            <Input id="media_uploads_per_day" type="number" min={1} max={10000} value={cfg.media_uploads_per_day}
-              onChange={(e) => update({ media_uploads_per_day: Math.max(1, Number(e.target.value) || 1) })} className="glass-input" />
+            <Input id="media_uploads_per_day" type="number" min={1} max={10000} step={1} value={cfg.media_uploads_per_day}
+              onChange={(e) => update({ media_uploads_per_day: wholeLimit(e.target.value, 1, 10000) })} className="glass-input" />
           </div>
           <div className="space-y-1.5 sm:col-span-2">
             <Label htmlFor="hydrations_per_day">Tweet hydrations / day (X API reads)</Label>
-            <Input id="hydrations_per_day" type="number" min={1} max={10000} value={cfg.hydrations_per_day}
-              onChange={(e) => update({ hydrations_per_day: Math.max(1, Number(e.target.value) || 1) })} className="glass-input" />
+            <Input id="hydrations_per_day" type="number" min={1} max={10000} step={1} value={cfg.hydrations_per_day}
+              onChange={(e) => update({ hydrations_per_day: wholeLimit(e.target.value, 1, 10000) })} className="glass-input" />
             <p className="text-xs text-muted-foreground">Daily cap on X API reads used to hydrate truncated high-scoring tweets.</p>
           </div>
         </div>

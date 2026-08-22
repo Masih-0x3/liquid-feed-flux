@@ -90,6 +90,7 @@ import {
   adminRejectEnrichment,
   adminReprocess,
   adminReprocessBatch,
+  adminReconcileOperation,
   adminRescorePost,
   adminRetryStep,
   adminRetryXPost,
@@ -111,6 +112,7 @@ import {
   toneClass,
 } from "@/lib/monitoringViewModel";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "@/contexts/AuthContext";
 
 const SCORING_REASON_TAGS: Array<{ value: ScoringFeedbackReasonTag; label: string }> = [
   { value: 'regional_escalation', label: 'Regional escalation' },
@@ -137,10 +139,17 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
   return debounced;
 }
 
+interface TimelineState {
+  tweetId: string | null;
+  events: PipelineEvent[];
+  loading: boolean;
+  error: boolean;
+}
+
 export default function Monitoring() {
   const [searchParams] = useSearchParams();
   const initialFilter = (() => {
-    const raw = searchParams.get('filter')?.replaceAll('-', '_');
+    const raw = searchParams.get('filter')?.replace(/-/g, '_');
     return FILTERS.some((item) => item.value === raw) ? raw as MonitoringFilter : 'all';
   })();
   const [filter, setFilter] = useState<MonitoringFilter>(initialFilter);
@@ -151,10 +160,17 @@ export default function Monitoring() {
   const [editedContent, setEditedContent] = useState('');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerTweetId, setDrawerTweetId] = useState<string | null>(null);
-  const [timeline, setTimeline] = useState<PipelineEvent[]>([]);
+  const [timelineState, setTimelineState] = useState<TimelineState>({
+    tweetId: null,
+    events: [],
+    loading: false,
+    error: false,
+  });
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [pendingBulkAction, setPendingBulkAction] = useState<PendingBulkAction | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
+  const [unknownOperation, setUnknownOperation] = useState<string | null>(null);
+  const [reconcilingOperation, setReconcilingOperation] = useState(false);
   const [manualEntry, setManualEntry] = useState<MonitoringEntry | null>(null);
   const [manualScore, setManualScore] = useState('');
   const [manualReasonTag, setManualReasonTag] = useState<ScoringFeedbackReasonTag | ''>('');
@@ -167,27 +183,18 @@ export default function Monitoring() {
   const [expandedClusters, setExpandedClusters] = useState<Set<string>>(() => new Set());
   const pollRefs = useRef<Map<string, { interval: ReturnType<typeof setInterval>; timeout: ReturnType<typeof setTimeout> }>>(new Map());
   const autoOpenedTweetRef = useRef<string | null>(null);
+  const timelineRequestRef = useRef(0);
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { isAdmin, role } = useAuth();
+  const readOnly = role === 'read_only' && !isAdmin;
+  const mutationDisabledTitle = readOnly ? 'Read-only access: this action is disabled.' : undefined;
 
   const { entries, isLoading, hasNextPage, fetchNextPage, isFetchingNextPage, isFetching, error } = useMonitoringDataSearchWithScore(filter, debouncedSearch, scoreBucket);
   const { data: overview } = useMonitoringOverview(24);
   const { data: xSummary } = useXApiSummary(24);
 
-  const { data: deliverThreshold = 14 } = useQuery({
-    queryKey: ['active-threshold'],
-    queryFn: async () => {
-      const [{ data: act }, { data: profs }] = await Promise.all([
-        supabase.from('settings').select('value').eq('key', 'active_profile_id').maybeSingle(),
-        supabase.from('settings').select('value').eq('key', 'editorial_profiles').maybeSingle(),
-      ]);
-      const activeId = (act?.value as { id?: string } | null)?.id;
-      const profiles = ((profs?.value as { profiles?: Array<{ id: string; threshold: number }> } | null)?.profiles) ?? [];
-      const active = profiles.find((p) => p.id === activeId);
-      return active?.threshold ?? 14;
-    },
-    staleTime: 60_000,
-  });
+  const deliverThreshold = overview?.threshold ?? 14;
 
   const { data: xPostingEnabled = false } = useQuery({
     queryKey: ['x-posting-enabled'],
@@ -210,6 +217,14 @@ export default function Monitoring() {
     () => moderationEntries.find((entry) => entry.tweet_id === drawerTweetId) ?? entries.find((entry) => entry.tweet_id === drawerTweetId) ?? null,
     [entries, moderationEntries, drawerTweetId],
   );
+  const hasMatchingTimeline = Boolean(
+    drawerTweetId && timelineState.tweetId === drawerTweetId,
+  );
+  const timeline = hasMatchingTimeline ? timelineState.events : [];
+  const timelineLoading = Boolean(
+    drawerOpen && drawerTweetId && (!hasMatchingTimeline || timelineState.loading),
+  );
+  const timelineError = hasMatchingTimeline && timelineState.error;
   const { data: xDiagnostic, isFetching: xDiagnosticLoading } = useQuery({
     queryKey: ['x-posting-diagnostic', drawerTweetId],
     queryFn: () => adminGetXPostingDiagnostic(drawerTweetId as string),
@@ -224,7 +239,7 @@ export default function Monitoring() {
     const nextSearch = searchParams.get('search') ?? '';
     setSearchTerm((current) => current === nextSearch ? current : nextSearch);
 
-    const rawFilter = searchParams.get('filter')?.replaceAll('-', '_');
+    const rawFilter = searchParams.get('filter')?.replace(/-/g, '_');
     if (rawFilter && FILTERS.some((item) => item.value === rawFilter)) {
       setFilter((current) => current === rawFilter ? current : rawFilter as MonitoringFilter);
     }
@@ -309,9 +324,26 @@ export default function Monitoring() {
     });
   };
 
+  const closeDetails = useCallback(() => {
+    timelineRequestRef.current += 1;
+    setDrawerOpen(false);
+    setDrawerTweetId(null);
+    setTimelineState({ tweetId: null, events: [], loading: false, error: false });
+  }, []);
+
+  const handleDrawerOpenChange = useCallback((open: boolean) => {
+    if (open) {
+      setDrawerOpen(true);
+      return;
+    }
+    closeDetails();
+  }, [closeDetails]);
+
   const openDetails = useCallback(async (tweetId: string) => {
+    const requestId = ++timelineRequestRef.current;
     setDrawerTweetId(tweetId);
     setDrawerOpen(true);
+    setTimelineState({ tweetId, events: [], loading: true, error: false });
     try {
       const { data, error: timelineError } = await supabase
         .from('pipeline_events')
@@ -320,9 +352,11 @@ export default function Monitoring() {
         .eq('subject_id', tweetId)
         .order('started_at', { ascending: false });
       if (timelineError) throw timelineError;
-      setTimeline((data as PipelineEvent[]) || []);
+      if (timelineRequestRef.current !== requestId) return;
+      setTimelineState({ tweetId, events: (data as PipelineEvent[]) || [], loading: false, error: false });
     } catch {
-      setTimeline([]);
+      if (timelineRequestRef.current !== requestId) return;
+      setTimelineState({ tweetId, events: [], loading: false, error: true });
     }
   }, []);
 
@@ -340,6 +374,7 @@ export default function Monitoring() {
   }, [debouncedSearch, entries, openDetails, searchParams]);
 
   const handleSaveEdit = async () => {
+    if (!isAdmin) return;
     if (!editingEntry) return;
     try {
       await adminEditTranslation(editingEntry, editedContent);
@@ -353,14 +388,14 @@ export default function Monitoring() {
   };
 
   const handleTestEnrich = async (tweetId: string) => {
+    if (!isAdmin) return;
     if (enrichingTweetIds.has(tweetId)) {
       toast({ title: 'Enrichment already running', description: 'The draft is still being generated for this post.' });
       return;
     }
     cleanupPoll(tweetId);
     setEnrichingTweetIds((prev) => new Set(prev).add(tweetId));
-    setDrawerTweetId(tweetId);
-    setDrawerOpen(true);
+    void openDetails(tweetId);
     try {
       const data = await adminEnrichPost(tweetId);
       if (!data?.ok) throw new Error(data?.error ?? 'Failed to queue enrichment');
@@ -381,8 +416,7 @@ export default function Monitoring() {
         if (post && post.enrich_status !== 'pending') {
           cleanupPoll(tweetId);
           if (post.enrich_status === 'awaiting_approval') {
-            setDrawerTweetId(tweetId);
-            setDrawerOpen(true);
+            void openDetails(tweetId);
           }
           invalidate();
           toast({
@@ -402,6 +436,7 @@ export default function Monitoring() {
   };
 
   const openManualScore = (entry: MonitoringEntry) => {
+    if (!isAdmin) return;
     const currentScore = decisionScore(entry);
     setManualEntry(entry);
     setManualScore(currentScore == null ? '' : String(currentScore));
@@ -412,6 +447,7 @@ export default function Monitoring() {
   };
 
   const handleManualSubmit = async () => {
+    if (!isAdmin) return;
     if (!manualEntry) return;
     const score = Number(manualScore);
     if (!Number.isInteger(score) || score < 1 || score > 20) {
@@ -440,6 +476,7 @@ export default function Monitoring() {
   };
 
   const handleFeedback = async (entry: MonitoringEntry, feedback: AudienceFeedback, expectedAudienceClass?: AudienceClassValue | '') => {
+    if (!isAdmin) return;
     const key = `${entry.tweet_id}:${feedback}`;
     setFeedbackLoading(key);
     try {
@@ -454,6 +491,7 @@ export default function Monitoring() {
   };
 
   const handleEnrichmentFeedback = async (entry: MonitoringEntry, feedback: EnrichmentFeedback) => {
+    if (!isAdmin) return;
     const key = `${entry.tweet_id}:enrich:${feedback}`;
     setFeedbackLoading(key);
     try {
@@ -468,6 +506,7 @@ export default function Monitoring() {
   };
 
   const handleSelectEnrichmentVariant = async (entry: MonitoringEntry, variant: string) => {
+    if (!isAdmin) return;
     const key = `${entry.tweet_id}:variant:${variant}`;
     setFeedbackLoading(key);
     try {
@@ -482,6 +521,7 @@ export default function Monitoring() {
   };
 
   const confirmAction = async () => {
+    if (!isAdmin) return;
     if (!pendingAction) return;
     const entry = pendingAction.entry;
     setActionLoading(true);
@@ -512,13 +552,47 @@ export default function Monitoring() {
         }
         case 'reprocess':
           if (!entry) throw new Error('Missing post');
-          await adminReprocess(entry.tweet_id);
-          toast({ title: 'Reprocess queued' });
+          {
+            const result = await adminReprocess(entry.tweet_id);
+            if (result.operation_status === 'unknown') {
+              setUnknownOperation(result.operation_id);
+              toast({
+                title: 'Reprocess outcome unknown — do not retry',
+                description: `Reconcile operation ${result.operation_id} before submitting again.`,
+                variant: 'destructive',
+              });
+              break;
+            }
+            if (result.operation_status === 'failed') {
+              throw new Error(result.error || 'Reprocess failed');
+            }
+            toast({
+              title: result.operation_status === 'committed' ? 'Reprocess already completed' : 'Reprocess queued',
+              description: result.data?.message,
+            });
+          }
           break;
         case 'hydrate': {
           if (!entry) throw new Error('Missing post');
           const res = await adminHydratePost(entry.tweet_id);
-          toast({ title: res.queued === false ? 'Hydration already queued' : 'Hydration queued', description: res.reason });
+          if (res.operation_status === 'unknown') {
+            setUnknownOperation(res.operation_id);
+            toast({
+              title: 'Hydration outcome unknown — do not retry',
+              description: `Reconcile operation ${res.operation_id} before submitting again.`,
+              variant: 'destructive',
+            });
+            break;
+          }
+          if (res.operation_status === 'failed') {
+            throw new Error(res.error || 'Hydrate failed');
+          }
+          toast({
+            title: res.operation_status === 'committed'
+              ? 'Hydration already completed'
+              : res.data?.queued === false ? 'Hydration already queued' : 'Hydration queued',
+            description: res.data?.reason,
+          });
           break;
         }
         case 'translate': {
@@ -547,8 +621,7 @@ export default function Monitoring() {
             description: closed ? `Closed ${closed.x_deliveries ?? 0} X row(s), ${closed.deliveries ?? 0} delivery row(s), ${closed.jobs ?? 0} job(s).` : undefined,
           });
           if (drawerTweetId === entry.tweet_id) {
-            setDrawerOpen(false);
-            setDrawerTweetId(null);
+            closeDetails();
           }
           break;
         }
@@ -583,6 +656,7 @@ export default function Monitoring() {
   };
 
   const confirmBulkAction = async () => {
+    if (!isAdmin) return;
     if (!pendingBulkAction) return;
     const tweetIds = pendingBulkAction.tweetIds;
     setActionLoading(true);
@@ -595,7 +669,7 @@ export default function Monitoring() {
         const data = await adminReprocessBatch(tweetIds);
         toast({
           title: 'Reprocess queued',
-          description: `${data?.queued ?? data?.requested ?? tweetIds.length} post(s) queued`,
+          description: data?.message ?? `${data?.queued ?? data?.requested ?? tweetIds.length} post(s) queued`,
         });
       } else {
         const data = await adminIgnoreMonitoringItems(tweetIds);
@@ -615,8 +689,7 @@ export default function Monitoring() {
         }
       }
       if (drawerTweetId && tweetIds.includes(drawerTweetId)) {
-        setDrawerOpen(false);
-        setDrawerTweetId(null);
+        closeDetails();
       }
       clearSelection();
       invalidate();
@@ -651,22 +724,22 @@ export default function Monitoring() {
         <DropdownMenuItem onClick={() => openDetails(entry.tweet_id)}>
           Details <ChevronRight className="w-3 h-3 ml-2" />
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => setPendingAction({ type: 'translate', entry })}>
+        <DropdownMenuItem disabled={readOnly} title={mutationDisabledTitle} onClick={() => { if (isAdmin) setPendingAction({ type: 'translate', entry }); }}>
           <MessageSquare className="w-3 h-3 mr-2" />Get translation
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => openManualScore(entry)}>
+        <DropdownMenuItem disabled={readOnly} title={mutationDisabledTitle} onClick={() => openManualScore(entry)}>
           <SlidersHorizontal className="w-3 h-3 mr-2" />Manual score
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => setPendingAction({ type: 'force_telegram', entry })}>
+        <DropdownMenuItem disabled={readOnly} title={mutationDisabledTitle} onClick={() => { if (isAdmin) setPendingAction({ type: 'force_telegram', entry }); }}>
           <Send className="w-3 h-3 mr-2" />Force Telegram
         </DropdownMenuItem>
-        <DropdownMenuItem disabled={!xPostingEnabled} onClick={() => setPendingAction({ type: 'force_x', entry })}>
+        <DropdownMenuItem disabled={readOnly || !xPostingEnabled} title={mutationDisabledTitle} onClick={() => { if (isAdmin) setPendingAction({ type: 'force_x', entry }); }}>
           <Twitter className="w-3 h-3 mr-2" />Post plain to X
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => setPendingAction({ type: 'hydrate', entry })}>
+        <DropdownMenuItem disabled={readOnly} title={mutationDisabledTitle} onClick={() => { if (isAdmin) setPendingAction({ type: 'hydrate', entry }); }}>
           <Sparkles className="w-3 h-3 mr-2" />Hydrate
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => setPendingAction({ type: 'run_dedupe', entry })}>
+        <DropdownMenuItem disabled={readOnly} title={mutationDisabledTitle} onClick={() => { if (isAdmin) setPendingAction({ type: 'run_dedupe', entry }); }}>
           <Ban className="w-3 h-3 mr-2" />Run duplicate check
         </DropdownMenuItem>
         {entry.has_media && (
@@ -674,26 +747,65 @@ export default function Monitoring() {
             <Film className="w-3 h-3 mr-2" />Review video render
           </DropdownMenuItem>
         )}
-        <DropdownMenuItem onClick={() => setPendingAction({ type: 'rescore', entry })}>
+        <DropdownMenuItem disabled={readOnly} title={mutationDisabledTitle} onClick={() => { if (isAdmin) setPendingAction({ type: 'rescore', entry }); }}>
           <Star className="w-3 h-3 mr-2" />Re-score
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => setPendingAction({ type: 'reprocess', entry })}>
+        <DropdownMenuItem disabled={readOnly} title={mutationDisabledTitle} onClick={() => { if (isAdmin) setPendingAction({ type: 'reprocess', entry }); }}>
           <RotateCcw className="w-3 h-3 mr-2" />Reprocess
         </DropdownMenuItem>
         {entry.dup_of_tweet_id && (
-          <DropdownMenuItem onClick={() => setPendingAction({ type: 'clear_dup', entry })}>
+          <DropdownMenuItem disabled={readOnly} title={mutationDisabledTitle} onClick={() => { if (isAdmin) setPendingAction({ type: 'clear_dup', entry }); }}>
             <Check className="w-3 h-3 mr-2" />Clear duplicate
           </DropdownMenuItem>
         )}
-        <DropdownMenuItem onClick={() => setPendingAction({ type: 'ignore', entry })}>
+        <DropdownMenuItem disabled={readOnly} title={mutationDisabledTitle} onClick={() => { if (isAdmin) setPendingAction({ type: 'ignore', entry }); }}>
           <Ban className="w-3 h-3 mr-2" />Ignore / remove
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
 
+  const reconcileUnknownOperation = async () => {
+    if (!isAdmin) return;
+    if (!unknownOperation) return;
+    setReconcilingOperation(true);
+    try {
+      const result = await adminReconcileOperation(unknownOperation);
+      if (result.operation_status === 'committed') {
+        toast({ title: 'Operation committed', description: unknownOperation });
+        setUnknownOperation(null);
+      } else if (result.operation_status === 'failed') {
+        toast({ title: 'Operation failed', description: result.error || unknownOperation, variant: 'destructive' });
+        setUnknownOperation(null);
+      } else if (result.operation_status === 'still_running') {
+        toast({ title: 'Operation still running', description: 'Check again before submitting another mutation.' });
+      } else {
+        toast({ title: 'Operation remains unknown — do not retry', description: unknownOperation, variant: 'destructive' });
+      }
+    } catch (error) {
+      toast({ title: 'Reconciliation failed — do not retry', description: error instanceof Error ? error.message : 'Status could not be read.', variant: 'destructive' });
+    } finally {
+      setReconcilingOperation(false);
+    }
+  };
+
   return (
     <div className="w-full space-y-3 p-0">
+      {unknownOperation && (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="mt-0.5 h-4 w-4 text-destructive" />
+            <span>Outcome unknown for operation <code>{unknownOperation}</code>. Reconcile before submitting again.</span>
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" title={mutationDisabledTitle} disabled={readOnly || reconcilingOperation} onClick={() => void reconcileUnknownOperation()}>
+              {reconcilingOperation ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Reconcile outcome
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setUnknownOperation(null)}>Dismiss</Button>
+          </div>
+        </div>
+      )}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="min-w-0">
           <h1 className="text-2xl sm:text-3xl font-bold">Content Monitoring</h1>
@@ -708,11 +820,11 @@ export default function Monitoring() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               {counts.stale_x_pending_24h > 0 && (
-                <DropdownMenuItem onClick={() => setPendingAction({ type: 'close_stale_x' })}>
+                <DropdownMenuItem disabled={readOnly} title={mutationDisabledTitle} onClick={() => { if (isAdmin) setPendingAction({ type: 'close_stale_x' }); }}>
                   <Clock className="w-3 h-3 mr-2" />Close stale X pending
                 </DropdownMenuItem>
               )}
-              <DropdownMenuItem className="text-destructive" onClick={() => setPendingAction({ type: 'cancel_jobs' })}>
+              <DropdownMenuItem disabled={readOnly} title={mutationDisabledTitle} className="text-destructive" onClick={() => { if (isAdmin) setPendingAction({ type: 'cancel_jobs' }); }}>
                 <Ban className="w-3 h-3 mr-2" />Cancel pending jobs
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -723,6 +835,12 @@ export default function Monitoring() {
           </Button>
         </div>
       </div>
+
+      {readOnly && (
+        <div role="note" className="rounded-md border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+          Read-only access. Editorial mutations, retries, and maintenance actions are disabled. Monitoring data and status remain available.
+        </div>
+      )}
 
       {!xPostingEnabled && (
         <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
@@ -748,9 +866,11 @@ export default function Monitoring() {
           visibleCount={visibleTweetIds.length}
           isAllVisibleSelected={isAllVisibleSelected}
           onToggleSelectAllVisible={() => toggleSelectAllVisible(!isAllVisibleSelected)}
-          onBulkReprocess={() => setPendingBulkAction({ type: 'bulk_reprocess', tweetIds: [...selectedTweetIds] })}
-          onBulkIgnore={() => setPendingBulkAction({ type: 'bulk_ignore', tweetIds: [...selectedTweetIds] })}
+          onBulkReprocess={() => { if (isAdmin) setPendingBulkAction({ type: 'bulk_reprocess', tweetIds: [...selectedTweetIds] }); }}
+          onBulkIgnore={() => { if (isAdmin) setPendingBulkAction({ type: 'bulk_ignore', tweetIds: [...selectedTweetIds] }); }}
           onClearSelection={clearSelection}
+          readOnly={readOnly}
+          mutationDisabledTitle={mutationDisabledTitle}
         />
         <CardContent className="p-0">
           {isLoading ? (
@@ -776,8 +896,10 @@ export default function Monitoring() {
                     onOpenManualScore={openManualScore}
                     onToggleCluster={toggleCluster}
                     onInspectDuplicateMatch={inspectDuplicateMatch}
-                    onRunDedupe={(targetEntry) => setPendingAction({ type: 'run_dedupe', entry: targetEntry })}
-                    onClearDuplicate={(targetEntry) => setPendingAction({ type: 'clear_dup', entry: targetEntry })}
+                    onRunDedupe={(targetEntry) => { if (isAdmin) setPendingAction({ type: 'run_dedupe', entry: targetEntry }); }}
+                    onClearDuplicate={(targetEntry) => { if (isAdmin) setPendingAction({ type: 'clear_dup', entry: targetEntry }); }}
+                    readOnly={readOnly}
+                    mutationDisabledTitle={mutationDisabledTitle}
                   />
                 ))}
               </div>
@@ -831,8 +953,10 @@ export default function Monitoring() {
                         onOpenManualScore={openManualScore}
                         onToggleCluster={toggleCluster}
                         onInspectDuplicateMatch={inspectDuplicateMatch}
-                        onRunDedupe={(targetEntry) => setPendingAction({ type: 'run_dedupe', entry: targetEntry })}
-                        onClearDuplicate={(targetEntry) => setPendingAction({ type: 'clear_dup', entry: targetEntry })}
+                        onRunDedupe={(targetEntry) => { if (isAdmin) setPendingAction({ type: 'run_dedupe', entry: targetEntry }); }}
+                        onClearDuplicate={(targetEntry) => { if (isAdmin) setPendingAction({ type: 'clear_dup', entry: targetEntry }); }}
+                        readOnly={readOnly}
+                        mutationDisabledTitle={mutationDisabledTitle}
                       />
                     ))}
                 </TableBody>
@@ -853,21 +977,27 @@ export default function Monitoring() {
 
       <MonitoringDetailDrawer
         open={drawerOpen}
-        onOpenChange={setDrawerOpen}
+        onOpenChange={handleDrawerOpenChange}
         tweetId={drawerTweetId}
         entry={selectedEntry}
         timeline={timeline}
+        timelineLoading={timelineLoading}
+        timelineError={timelineError}
+        onRetryTimeline={() => {
+          if (drawerTweetId) void openDetails(drawerTweetId);
+        }}
         deliverThreshold={deliverThreshold}
         xPostingEnabled={xPostingEnabled}
-        xDiagnostic={xDiagnostic}
+        xDiagnostic={xDiagnostic ?? undefined}
         xDiagnosticLoading={xDiagnosticLoading}
         editingEntry={editingEntry}
         editedContent={editedContent}
         enrichingTweetIds={enrichingTweetIds}
         feedbackLoading={feedbackLoading}
         onInspectDuplicateMatch={inspectDuplicateMatch}
-        onRequestAction={setPendingAction}
+        onRequestAction={(action) => { if (isAdmin) setPendingAction(action); }}
         onStartEditTranslation={(entry) => {
+          if (!isAdmin) return;
           setEditingEntry(entry.tweet_id);
           setEditedContent(entry.text_translated || entry.text_original);
         }}
@@ -882,6 +1012,8 @@ export default function Monitoring() {
         onScoreFeedback={handleFeedback}
         onEnrichmentFeedback={handleEnrichmentFeedback}
         onSelectEnrichmentVariant={handleSelectEnrichmentVariant}
+        readOnly={readOnly}
+        mutationDisabledTitle={mutationDisabledTitle}
       />
 
       <Dialog open={!!manualEntry} onOpenChange={(open) => !open && setManualEntry(null)}>

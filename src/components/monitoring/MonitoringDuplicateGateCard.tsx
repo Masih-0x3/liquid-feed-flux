@@ -14,11 +14,15 @@ import { MonitoringDedupeBadge } from "@/components/monitoring/MonitoringStatusB
 interface MonitoringDuplicateGateCardProps {
   entry: MonitoringEntry;
   onRunDedupe: (entry: MonitoringEntry) => void;
+  readOnly: boolean;
+  mutationDisabledTitle?: string;
 }
 
 export function MonitoringDuplicateGateCard({
   entry,
   onRunDedupe,
+  readOnly,
+  mutationDisabledTitle,
 }: MonitoringDuplicateGateCardProps) {
   if (!entry.dedupe_status && !entry.dup_of_tweet_id) return null;
 
@@ -27,7 +31,13 @@ export function MonitoringDuplicateGateCard({
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between gap-2">
           <CardTitle className="text-sm">Duplicate Gate</CardTitle>
-          <Button size="sm" variant="outline" onClick={() => onRunDedupe(entry)}>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={readOnly}
+            title={readOnly ? mutationDisabledTitle : undefined}
+            onClick={() => { if (!readOnly) onRunDedupe(entry); }}
+          >
             <Ban className="w-3 h-3 mr-1.5" />Run
           </Button>
         </div>

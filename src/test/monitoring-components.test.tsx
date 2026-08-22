@@ -199,7 +199,7 @@ describe("monitoring duplicate evidence", () => {
       duplicate_of: duplicateTarget({ coverage_state: "not_covered", x_state: "none" }),
     });
 
-    render(<MonitoringDuplicateGateCard entry={duplicate} onRunDedupe={onRunDedupe} />);
+    render(<MonitoringDuplicateGateCard entry={duplicate} onRunDedupe={onRunDedupe} readOnly={false} />);
 
     expect(screen.getByText("Duplicate Gate")).toBeInTheDocument();
     expect(screen.getByText("canonical is uncovered")).toBeInTheDocument();
@@ -293,6 +293,7 @@ describe("monitoring duplicate evidence", () => {
           onOpenManualScore={onOpenManualScore}
           onRunDedupe={onRunDedupe}
           onClearDuplicate={onClearDuplicate}
+          readOnly={false}
         />
       </div>,
     );
@@ -340,6 +341,7 @@ describe("monitoring row renderers", () => {
         onInspectDuplicateMatch={vi.fn()}
         onRunDedupe={onRunDedupe}
         onClearDuplicate={onClearDuplicate}
+        readOnly={false}
       />,
     );
 
@@ -384,6 +386,7 @@ describe("monitoring row renderers", () => {
             onInspectDuplicateMatch={vi.fn()}
             onRunDedupe={vi.fn()}
             onClearDuplicate={vi.fn()}
+            readOnly={false}
           />
         </tbody>
       </table>,
@@ -503,6 +506,7 @@ describe("monitoring detail drawer", () => {
         onScoreFeedback={onScoreFeedback}
         onEnrichmentFeedback={vi.fn()}
         onSelectEnrichmentVariant={vi.fn()}
+        readOnly={false}
       />,
     );
 
@@ -637,6 +641,21 @@ describe("monitoring process trace map", () => {
     expect(screen.getAllByText("Manual enrich").length).toBeGreaterThan(0);
     expect(screen.getByText(/waiting\/manual/i)).toBeInTheDocument();
     expect(container.querySelector(".xot-hud-list .xot-hud-diamond.run")).toBeNull();
+    expect(container.querySelector(".xot-hud-wf-bar.run")).toBeNull();
+  });
+
+  it("renders pending HUD stages as waiting rather than active or completed", () => {
+    const waiting = entry({
+      delivery_decision: "deliver",
+      translation_job_status: "pending",
+    });
+
+    const { container } = render(<MonitoringProcessTraceMap traceMap={buildProcessTraceMap(waiting)} />);
+
+    const pendingChip = container.querySelector(".xot-hud-chip.status-pending");
+    expect(pendingChip).toHaveTextContent("Translate");
+    expect(pendingChip).toHaveTextContent("Pending");
+    expect(container.querySelector(".xot-hud-chip.used")).toBeNull();
     expect(container.querySelector(".xot-hud-wf-bar.run")).toBeNull();
   });
 

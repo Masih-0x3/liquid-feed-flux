@@ -1,4 +1,4 @@
-import { invokeAdminAction } from '@/api/adminActions';
+import { invokeAdminRead } from '@/api/adminActions';
 
 export interface MonitoringEntry {
   tweet_id: string;
@@ -298,6 +298,7 @@ export type MonitoringFilter =
 
 export interface MonitoringOverview {
   window_hours: number;
+  threshold: number;
   counts: {
     needs_attention: number;
     failed_stuck: number;
@@ -361,6 +362,13 @@ export interface MonitoringFetchParams {
   scoreBucket: ScoreBucket;
 }
 
+export interface MonitoringEntryFetchParams {
+  tweetId: string;
+  filter: MonitoringFilter;
+  search: string;
+  scoreBucket: ScoreBucket;
+}
+
 const PAGE_SIZE = 50;
 
 export function sanitizeMonitoringSearch(search: string): string {
@@ -373,7 +381,7 @@ export async function fetchMonitoringEntries({
   search,
   scoreBucket,
 }: MonitoringFetchParams): Promise<MonitoringPage> {
-  const data = await invokeAdminAction<{ success?: boolean; error?: string; entries?: unknown[]; next_cursor?: unknown }>({
+  const data = await invokeAdminRead<{ success?: boolean; error?: string; entries?: unknown[]; next_cursor?: unknown }>({
     action: 'get_monitoring_entries',
     filter,
     search: sanitizeMonitoringSearch(search) || undefined,
@@ -389,4 +397,39 @@ export async function fetchMonitoringEntries({
     };
   }
   throw new Error(data?.error ?? 'Monitoring entries unavailable');
+}
+
+/**
+ * Rehydrate one authoritative entry for a Realtime cache patch. The backend
+ * applies the same filter/search/score-bucket semantics as the parent query,
+ * so a null result means the row no longer belongs in that cached view.
+ */
+export async function fetchMonitoringEntry({
+  tweetId,
+  filter,
+  search,
+  scoreBucket,
+}: MonitoringEntryFetchParams): Promise<MonitoringEntry | null> {
+  const exactTweetId = tweetId.trim();
+  if (!exactTweetId || exactTweetId.length > 128) {
+    throw new Error('Invalid monitoring tweet id');
+  }
+
+  const data = await invokeAdminRead<{ success?: boolean; error?: string; entries?: unknown[] }>({
+    action: 'get_monitoring_entries',
+    tweet_id: exactTweetId,
+    filter,
+    search: sanitizeMonitoringSearch(search) || undefined,
+    score_bucket: scoreBucket,
+    limit: 1,
+  });
+  if (data?.success && Array.isArray(data.entries)) {
+    const entry = data.entries.find((candidate) =>
+      typeof candidate === 'object' &&
+      candidate !== null &&
+      (candidate as { tweet_id?: unknown }).tweet_id === exactTweetId
+    );
+    return entry ? entry as MonitoringEntry : null;
+  }
+  throw new Error(data?.error ?? 'Monitoring entry unavailable');
 }

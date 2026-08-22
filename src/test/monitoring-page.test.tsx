@@ -24,6 +24,10 @@ vi.mock("@/hooks/use-toast", () => ({
   useToast: () => ({ toast: vi.fn() }),
 }));
 
+vi.mock("@/contexts/AuthContext", () => ({
+  useAuth: () => ({ isAdmin: true, role: "admin" }),
+}));
+
 function settingsQuery() {
   const query = {
     select: vi.fn(() => query),

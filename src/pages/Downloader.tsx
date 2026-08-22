@@ -5,7 +5,6 @@ import {
   AlertCircle,
   Video,
   Image as ImageIcon,
-  ExternalLink,
   Twitter,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -13,16 +12,15 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useToast } from "@/hooks/use-toast";
 import { invokeAdminAction } from "@/api/adminActions";
+import { useAuth } from "@/contexts/AuthContext";
 
 type MediaType = "video" | "gif" | "image";
 
 type ResolvedMedia = {
-  url: string;
   type: MediaType;
-  thumbnail_url?: string;
   /** e.g. "1280x720" */
   resolution?: string;
   /** kbps for videos, useful in filename */
@@ -34,7 +32,6 @@ type ResolvedMedia = {
 type TweetInfo = {
   user_name: string;
   user_screen_name: string;
-  user_profile_image_url?: string;
   tweetID: string;
   media: ResolvedMedia[];
 };
@@ -48,12 +45,14 @@ async function fetchTweet(username: string, id: string): Promise<TweetInfo> {
     { throwOnFailure: false },
   );
   if (!data?.success || !data?.tweet) {
-    throw new Error(data?.error || "Failed to fetch tweet. The post might be private, deleted, or rate-limited.");
+    throw new Error("Media metadata could not be resolved. The post may be private, deleted, or unavailable.");
   }
   return data.tweet as TweetInfo;
 }
 
 export default function Downloader() {
+  const { role } = useAuth();
+  const readOnly = role === "read_only";
   const { toast } = useToast();
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
@@ -84,30 +83,6 @@ export default function Downloader() {
     }
   };
 
-  const handleDownload = async (media: ResolvedMedia, index: number) => {
-    if (!tweetData) return;
-    const ext = media.type === "image" ? "jpg" : "mp4";
-    const resTag = media.resolution ? `_${media.resolution}` : "";
-    const filename = `x_${tweetData.user_screen_name}_${tweetData.tweetID}_${index}${resTag}.${ext}`;
-
-    try {
-      const response = await fetch(media.url);
-      if (!response.ok) throw new Error("Network response was not ok");
-      const blob = await response.blob();
-      const blobUrl = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = blobUrl;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(blobUrl);
-    } catch (err) {
-      console.warn("Direct blob download failed (likely CORS). Falling back to new tab.", err);
-      window.open(media.url, "_blank", "noopener,noreferrer");
-    }
-  };
-
   const mediaCount = tweetData?.media?.length ?? 0;
 
   return (
@@ -123,6 +98,11 @@ export default function Downloader() {
           Paste a link to an X post to extract its media at the highest available quality
           (original images, max-bitrate video variants).
         </p>
+        {readOnly && (
+          <p role="note" className="text-xs text-muted-foreground">
+            Read-only access: authorised media metadata reads remain available. No external media URL is opened here.
+          </p>
+        )}
       </div>
 
       <Card className="glass-card">
@@ -165,12 +145,6 @@ export default function Downloader() {
           <CardHeader>
             <div className="flex items-center gap-3">
               <Avatar>
-                {tweetData.user_profile_image_url ? (
-                  <AvatarImage
-                    src={tweetData.user_profile_image_url}
-                    alt={tweetData.user_name}
-                  />
-                ) : null}
                 <AvatarFallback>
                   <Twitter className="w-4 h-4" />
                 </AvatarFallback>
@@ -183,6 +157,12 @@ export default function Downloader() {
           </CardHeader>
           <CardContent>
             <div
+              role="status"
+              className="mb-4 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-muted-foreground"
+            >
+              Preview and download are temporarily unavailable until authorised media access is implemented. No remote media URL was opened.
+            </div>
+            <div
               className={`grid gap-4 ${
                 mediaCount > 1 ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1"
               }`}
@@ -191,25 +171,14 @@ export default function Downloader() {
                 const isVideo = media.type === "video" || media.type === "gif";
                 return (
                   <div
-                    key={`${media.url}-${index}`}
+                    key={`media-${index}`}
                     className="rounded-xl border border-glass-border bg-card overflow-hidden flex flex-col"
                   >
-                    <div className="relative bg-muted aspect-video">
-                      {isVideo ? (
-                        <video
-                          src={media.url}
-                          poster={media.thumbnail_url}
-                          controls
-                          className="w-full h-full object-contain bg-black"
-                        />
-                      ) : (
-                        <img
-                          src={media.url}
-                          alt={`Media ${index + 1}`}
-                          className="w-full h-full object-contain"
-                          loading="lazy"
-                        />
-                      )}
+                    <div className="relative flex aspect-video items-center justify-center bg-muted p-4">
+                      <div className="flex flex-col items-center gap-2 text-center text-sm text-muted-foreground">
+                        {isVideo ? <Video className="h-6 w-6" /> : <ImageIcon className="h-6 w-6" />}
+                        <span>Authorised preview unavailable</span>
+                      </div>
                       <div className="absolute top-2 right-2 flex flex-col items-end gap-1">
                         <Badge variant="secondary" className="flex items-center gap-1">
                           {isVideo ? (
@@ -228,22 +197,6 @@ export default function Downloader() {
                           </Badge>
                         )}
                       </div>
-                    </div>
-
-                    <div className="p-3 flex flex-col sm:flex-row gap-2">
-                      <Button
-                        onClick={() => handleDownload(media, index)}
-                        className="flex-1"
-                      >
-                        <Download className="w-4 h-4 mr-2" />
-                        Download File
-                      </Button>
-                      <Button variant="outline" asChild className="flex-1">
-                        <a href={media.url} target="_blank" rel="noopener noreferrer">
-                          <ExternalLink className="w-4 h-4 mr-2" />
-                          Open Direct Link
-                        </a>
-                      </Button>
                     </div>
                   </div>
                 );

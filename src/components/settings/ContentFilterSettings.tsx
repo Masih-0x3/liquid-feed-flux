@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useMemo, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -17,8 +17,12 @@ import {
   DEFAULT_SCORING_SYSTEM_PROMPT,
   DEFAULT_CLASSIFIER_TOOL_SCHEMA,
   type TranslationSettings,
+  useSaveSettings,
 } from '@/hooks/useSettingsData';
 import { useToast } from '@/hooks/use-toast';
+import { useQuery } from '@tanstack/react-query';
+import { invokeAdminAction } from '@/api/adminActions';
+import { useIncomingSettingsDraft } from '@/hooks/useIncomingSettingsDraft';
 
 const RECOMMENDED_IRAN_RUBRIC: ContentFilterConfig = {
   enabled: true,
@@ -30,9 +34,6 @@ const RECOMMENDED_IRAN_RUBRIC: ContentFilterConfig = {
   author_rules: {},
   editorial_guidelines: 'This channel covers Iran and the broader Middle East. Score on whether the SUBJECT MATTER touches Iran/Middle East — NOT on the framing or dateline. Polls, leaks, analyst reports, and foreign leadership rhetoric ABOUT Iran, the Iran war, or US-Iran relations are INDIRECT Iran-adjacent (cap 16) and should score 13–16 when they materially shift the public or political picture of an active Iran-related conflict. Only pure US/EU/China domestic news with NO Iran nexus should fall to 8 or below. When in doubt between two tiers, prefer the higher tier.',
 };
-import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
-import { useSaveSettings } from '@/hooks/useSettingsData';
 
 export interface ContentFilterConfig {
   enabled: boolean;
@@ -78,8 +79,34 @@ interface Props {
   onTranslationSettingsChange: (next: TranslationSettings) => void;
 }
 
+interface AuthorSampleRow {
+  handle: string;
+  count: number;
+}
+
+interface AuthorStatsResponse {
+  ok: true;
+  scope: 'recent_posts_sample';
+  sampled_posts: number;
+  limit: number;
+  authors: AuthorSampleRow[];
+}
+
 export default function ContentFilterSettings({ initialConfig, translationSettings, onTranslationSettingsChange }: Props) {
-  const [config, setConfig] = useState<ContentFilterConfig>({ ...defaultConfig, ...initialConfig });
+  const incomingConfig = useMemo(
+    () => ({ ...defaultConfig, ...initialConfig }),
+    [initialConfig],
+  );
+  const {
+    draft: config,
+    dirtyFields,
+    pendingFields,
+    hasPendingIncoming,
+    updateDraft: updateConfig,
+    reloadIncoming,
+    keepEditing,
+    markSaved,
+  } = useIncomingSettingsDraft(incomingConfig);
   const [newPriorityTopic, setNewPriorityTopic] = useState('');
   const [newLowPriorityTopic, setNewLowPriorityTopic] = useState('');
   const [authorOverridesOpen, setAuthorOverridesOpen] = useState(false);
@@ -92,52 +119,71 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
   const saveTranslationPrompt = () => saveMutation.mutate({ key: 'translation_prompt', value: ts });
 
   const applyRecommendedDefaults = async () => {
-    setConfig(RECOMMENDED_IRAN_RUBRIC);
+    const recommendedConfig: ContentFilterConfig = {
+      ...RECOMMENDED_IRAN_RUBRIC,
+      priority_topics: [...RECOMMENDED_IRAN_RUBRIC.priority_topics],
+      low_priority_topics: [...RECOMMENDED_IRAN_RUBRIC.low_priority_topics],
+      author_rules: { ...RECOMMENDED_IRAN_RUBRIC.author_rules },
+    };
+    updateConfig(recommendedConfig);
     try {
-      await saveMutation.mutateAsync({ key: 'content_filter', value: RECOMMENDED_IRAN_RUBRIC });
+      await saveMutation.mutateAsync({ key: 'content_filter', value: recommendedConfig });
+      markSaved(recommendedConfig);
       toast({ title: 'Recommended Iran-rubric defaults applied', description: 'Threshold 12 with updated guidelines.' });
     } catch (e) {
       // useSaveSettings already shows an error toast
     }
   };
 
-  useEffect(() => {
-    if (initialConfig) {
-      setConfig({ ...defaultConfig, ...initialConfig });
+  const saveContentFilter = async () => {
+    const savedConfig = config;
+    try {
+      await saveMutation.mutateAsync({ key: 'content_filter', value: savedConfig });
+      markSaved(savedConfig);
+    } catch {
+      // useSaveSettings already shows an error toast and keeps the draft dirty.
     }
-  }, [initialConfig]);
+  };
 
   const filterStatus = getFilterStatus(config);
   const filterMode = config.filter_mode || 'global';
+  const shouldLoadAuthors = filterStatus === 'active' &&
+    filterMode === 'granular' &&
+    authorOverridesOpen;
 
   const authorsQuery = useQuery({
-    queryKey: ['author-stats'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('posts')
-        .select('author_handle')
-        .not('author_handle', 'is', null);
-      if (error) throw error;
-      const counts: Record<string, number> = {};
-      for (const row of data || []) {
-        const handle = row.author_handle as string;
-        if (handle) counts[handle] = (counts[handle] || 0) + 1;
-      }
-      return Object.entries(counts)
-        .map(([handle, count]) => ({ handle, count }))
-        .sort((a, b) => b.count - a.count);
-    },
+    queryKey: ['content-filter-author-stats', 500],
+    queryFn: () => invokeAdminAction<AuthorStatsResponse>({
+      action: 'get_recent_author_stats',
+      limit: 500,
+    }),
+    enabled: shouldLoadAuthors,
     staleTime: 120_000,
   });
 
-  const authors = authorsQuery.data || [];
+  const visibleAuthors = useMemo(() => {
+    const sampledByHandle = new Map(
+      (authorsQuery.data?.authors ?? []).map((author) => [author.handle, author]),
+    );
+    const configuredHandles = Object.keys(config.author_rules).sort((left, right) => left.localeCompare(right));
+    const configuredAuthors = configuredHandles.map((handle) => (
+      sampledByHandle.get(handle) ?? { handle, count: 0 }
+    ));
+    const configuredHandleSet = new Set(configuredHandles);
+    const sampleAuthors = (authorsQuery.data?.authors ?? [])
+      .filter((author) => !configuredHandleSet.has(author.handle))
+      .slice(0, 50);
+    return [...configuredAuthors, ...sampleAuthors];
+  }, [authorsQuery.data?.authors, config.author_rules]);
+  const authorSampledPosts = authorsQuery.data?.sampled_posts ?? 0;
+  const authorSampleLimit = authorsQuery.data?.limit ?? 500;
 
   const addTopic = (type: 'priority' | 'low_priority') => {
     const value = type === 'priority' ? newPriorityTopic.trim() : newLowPriorityTopic.trim();
     if (!value) return;
     const key = type === 'priority' ? 'priority_topics' : 'low_priority_topics';
     if (!config[key].includes(value)) {
-      setConfig({ ...config, [key]: [...config[key], value] });
+      updateConfig({ ...config, [key]: [...config[key], value] });
     }
     if (type === 'priority') setNewPriorityTopic('');
     else setNewLowPriorityTopic('');
@@ -145,7 +191,7 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
 
   const removeTopic = (type: 'priority' | 'low_priority', topic: string) => {
     const key = type === 'priority' ? 'priority_topics' : 'low_priority_topics';
-    setConfig({ ...config, [key]: config[key].filter(t => t !== topic) });
+    updateConfig({ ...config, [key]: config[key].filter(t => t !== topic) });
   };
 
   const setAuthorRule = (handle: string, rule: string, threshold?: number) => {
@@ -155,7 +201,7 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
     } else {
       newRules[handle] = { rule, ...(threshold != null ? { threshold } : {}) };
     }
-    setConfig({ ...config, author_rules: newRules });
+    updateConfig({ ...config, author_rules: newRules });
   };
 
   const getAuthorRule = (handle: string) => {
@@ -192,12 +238,33 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
+          {hasPendingIncoming && (
+            <div role="alert" className="space-y-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm">
+              <div>
+                <p className="font-medium text-foreground">New saved settings available</p>
+                <p className="mt-1 text-muted-foreground">
+                  {dirtyFields.length} unsaved {dirtyFields.length === 1 ? 'setting has' : 'settings have'} local edits. Reload saved values to discard them, or keep editing before you save.
+                </p>
+                <p className="mt-1 text-muted-foreground">
+                  Compare changed fields: {pendingFields.length > 0 ? pendingFields.join(', ') : 'none; the saved snapshot matches this draft'}.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" size="sm" variant="outline" onClick={reloadIncoming}>
+                  Reload saved values
+                </Button>
+                <Button type="button" size="sm" variant="secondary" onClick={keepEditing}>
+                  Keep editing
+                </Button>
+              </div>
+            </div>
+          )}
           {/* 3-way status selector */}
           <div className="grid grid-cols-3 gap-3">
             {statusOptions.map(opt => (
               <button
                 key={opt.value}
-                onClick={() => setConfig(applyFilterStatus(config, opt.value))}
+                onClick={() => updateConfig(applyFilterStatus(config, opt.value))}
                 className={`p-4 rounded-lg border-2 text-left transition-all ${
                   filterStatus === opt.value
                     ? 'border-primary bg-primary/10'
@@ -242,7 +309,7 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
                 <Label className="text-base font-semibold">Filter Mode</Label>
                 <RadioGroup
                   value={filterMode}
-                  onValueChange={(v) => setConfig({ ...config, filter_mode: v as 'global' | 'granular' })}
+                  onValueChange={(v) => updateConfig({ ...config, filter_mode: v as 'global' | 'granular' })}
                   className="space-y-3"
                 >
                   <label className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all ${
@@ -287,7 +354,7 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
                 </div>
                 <Slider
                   value={[config.default_threshold]}
-                  onValueChange={([v]) => setConfig({ ...config, default_threshold: v })}
+                  onValueChange={([v]) => updateConfig({ ...config, default_threshold: v })}
                   min={1}
                   max={20}
                   step={1}
@@ -324,65 +391,79 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
                         <div className="flex items-center justify-center py-8">
                           <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
                         </div>
-                      ) : authors.length === 0 ? (
+                      ) : authorsQuery.isError ? (
+                        <div role="alert" className="space-y-3 rounded-md border border-destructive/40 p-4 text-sm">
+                          <p className="text-destructive">Could not load the bounded recent author sample.</p>
+                          <Button type="button" size="sm" variant="outline" onClick={() => void authorsQuery.refetch()}>
+                            Retry authors
+                          </Button>
+                        </div>
+                      ) : visibleAuthors.length === 0 ? (
                         <p className="text-sm text-muted-foreground text-center py-4">No authors found yet. They will appear as posts are ingested.</p>
                       ) : (
-                        <div className="rounded-md border">
-                          <Table>
-                            <TableHeader>
-                              <TableRow>
-                                <TableHead>Author</TableHead>
-                                <TableHead className="text-right">Posts</TableHead>
-                                <TableHead>Rule</TableHead>
-                                <TableHead>Threshold</TableHead>
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {authors.slice(0, 50).map(({ handle, count }) => {
-                                const rule = getAuthorRule(handle);
-                                return (
-                                  <TableRow key={handle}>
-                                    <TableCell className="font-mono text-sm">@{handle}</TableCell>
-                                    <TableCell className="text-right text-muted-foreground">{count.toLocaleString()}</TableCell>
-                                    <TableCell>
-                                      <Select value={rule} onValueChange={(v) => setAuthorRule(handle, v)}>
-                                        <SelectTrigger className="w-[180px]">
-                                          <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                          <SelectItem value="ai_scoring">Use AI scoring</SelectItem>
-                                          <SelectItem value="always_deliver">Always deliver</SelectItem>
-                                          <SelectItem value="always_skip">Always skip</SelectItem>
-                                          <SelectItem value="custom_threshold">Custom threshold</SelectItem>
-                                        </SelectContent>
-                                      </Select>
-                                    </TableCell>
-                                    <TableCell>
-                                      {rule === 'custom_threshold' ? (
-                                        <div className="flex items-center gap-2">
-                                          <Slider
-                                            value={[getAuthorThreshold(handle)]}
-                                            onValueChange={([v]) => setAuthorRule(handle, 'custom_threshold', v)}
-                                            min={1}
-                                            max={20}
-                                            step={1}
-                                            className="w-24"
-                                          />
-                                          <Badge variant="outline">{getAuthorThreshold(handle)}</Badge>
-                                        </div>
-                                      ) : rule === 'always_deliver' ? (
-                                        <Badge className="bg-green-500/20 text-green-400 border-green-500/30">All</Badge>
-                                      ) : rule === 'always_skip' ? (
-                                        <Badge className="bg-red-500/20 text-red-400 border-red-500/30">None</Badge>
-                                      ) : (
-                                        <span className="text-sm text-muted-foreground">Default ({config.default_threshold})</span>
-                                      )}
-                                    </TableCell>
-                                  </TableRow>
-                                );
-                              })}
-                            </TableBody>
-                          </Table>
+                        <div className="space-y-2">
+                          <p className="text-xs text-muted-foreground">
+                            Showing author counts from {authorSampledPosts.toLocaleString()} newest posts with an author handle (maximum {authorSampleLimit.toLocaleString()}). This is a bounded recent sample, not an all-time count.
+                          </p>
+                          <div className="rounded-md border">
+                            <Table>
+                              <TableHeader>
+                                <TableRow>
+                                  <TableHead>Author</TableHead>
+                                  <TableHead className="text-right">Posts in sample</TableHead>
+                                  <TableHead>Rule</TableHead>
+                                  <TableHead>Threshold</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {visibleAuthors.map(({ handle, count }) => {
+                                  const rule = getAuthorRule(handle);
+                                  return (
+                                    <TableRow key={handle}>
+                                      <TableCell className="font-mono text-sm">@{handle}</TableCell>
+                                      <TableCell className="text-right text-muted-foreground">
+                                        {count > 0 ? count.toLocaleString() : 'Not in sample'}
+                                      </TableCell>
+                                      <TableCell>
+                                        <Select value={rule} onValueChange={(v) => setAuthorRule(handle, v)}>
+                                          <SelectTrigger className="w-[180px]">
+                                            <SelectValue />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            <SelectItem value="ai_scoring">Use AI scoring</SelectItem>
+                                            <SelectItem value="always_deliver">Always deliver</SelectItem>
+                                            <SelectItem value="always_skip">Always skip</SelectItem>
+                                            <SelectItem value="custom_threshold">Custom threshold</SelectItem>
+                                          </SelectContent>
+                                        </Select>
+                                      </TableCell>
+                                      <TableCell>
+                                        {rule === 'custom_threshold' ? (
+                                          <div className="flex items-center gap-2">
+                                            <Slider
+                                              value={[getAuthorThreshold(handle)]}
+                                              onValueChange={([v]) => setAuthorRule(handle, 'custom_threshold', v)}
+                                              min={1}
+                                              max={20}
+                                              step={1}
+                                              className="w-24"
+                                            />
+                                            <Badge variant="outline">{getAuthorThreshold(handle)}</Badge>
+                                          </div>
+                                        ) : rule === 'always_deliver' ? (
+                                          <Badge className="bg-green-500/20 text-green-400 border-green-500/30">All</Badge>
+                                        ) : rule === 'always_skip' ? (
+                                          <Badge className="bg-red-500/20 text-red-400 border-red-500/30">None</Badge>
+                                        ) : (
+                                          <span className="text-sm text-muted-foreground">Default ({config.default_threshold})</span>
+                                        )}
+                                      </TableCell>
+                                    </TableRow>
+                                  );
+                                })}
+                              </TableBody>
+                            </Table>
+                          </div>
                         </div>
                       )}
                     </CollapsibleContent>
@@ -413,7 +494,7 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
           <CardContent className="space-y-4">
             <Textarea
               value={config.editorial_guidelines}
-              onChange={(e) => setConfig({ ...config, editorial_guidelines: e.target.value })}
+              onChange={(e) => updateConfig({ ...config, editorial_guidelines: e.target.value })}
               className="glass-input min-h-[120px]"
               placeholder="e.g., Prioritize anything related to Iran, the war, GCC countries, sanctions, and military developments..."
             />
@@ -549,8 +630,8 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
       {/* Action Buttons */}
       <div className="flex flex-col sm:flex-row gap-3">
         <Button
-          onClick={() => saveMutation.mutate({ key: 'content_filter', value: config })}
-          disabled={saveMutation.isPending}
+          onClick={() => { void saveContentFilter(); }}
+          disabled={saveMutation.isPending || hasPendingIncoming}
           className="bg-gradient-primary hover:opacity-90 text-white flex-1"
         >
           {saveMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Shield className="w-4 h-4 mr-2" />}
@@ -558,7 +639,7 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
         </Button>
         <Button
           onClick={applyRecommendedDefaults}
-          disabled={saveMutation.isPending}
+          disabled={saveMutation.isPending || hasPendingIncoming}
           variant="outline"
           className="sm:w-auto"
           title="Sets threshold to 12, replaces editorial guidelines with the bias-corrected version, and switches the OpenAI model to gpt-5.4-mini."

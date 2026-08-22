@@ -4,10 +4,11 @@ import {
   fetchDashboardProcessHud,
   normalizeDashboardProcessHud,
 } from "@/api/dashboardProcessHud";
-import { invokeAdminAction } from "@/api/adminActions";
+import { invokeAdminAction, invokeAdminRead } from "@/api/adminActions";
 
 vi.mock("@/api/adminActions", () => ({
   invokeAdminAction: vi.fn(),
+  invokeAdminRead: vi.fn(),
 }));
 
 function rpcSummary(overrides: Record<string, unknown> = {}) {
@@ -46,13 +47,15 @@ function rpcSummary(overrides: Record<string, unknown> = {}) {
 
 describe("dashboard data API", () => {
   const invokeAdminActionMock = vi.mocked(invokeAdminAction);
+  const invokeAdminReadMock = vi.mocked(invokeAdminRead);
 
   beforeEach(() => {
     invokeAdminActionMock.mockReset();
+    invokeAdminReadMock.mockReset();
   });
 
   it("uses admin-actions and normalizes dashboard rows", async () => {
-    invokeAdminActionMock.mockResolvedValueOnce({
+    invokeAdminReadMock.mockResolvedValueOnce({
       success: true,
       dashboard: rpcSummary({
         pipeline_counts: {
@@ -84,11 +87,11 @@ describe("dashboard data API", () => {
       primaryIssue: "Manual review backlog",
       recommendedRoute: "/monitoring?filter=manual_review",
     });
-    expect(invokeAdminActionMock).toHaveBeenCalledWith({ action: "get_dashboard_summary" });
+    expect(invokeAdminReadMock).toHaveBeenCalledWith({ action: "get_dashboard_summary" });
   });
 
   it("surfaces admin-action failures instead of falling back to direct RPC", async () => {
-    invokeAdminActionMock.mockResolvedValueOnce({ success: false, error: "edge function unavailable" });
+    invokeAdminReadMock.mockResolvedValueOnce({ success: false, error: "edge function unavailable" });
 
     await expect(fetchDashboardData()).rejects.toThrow("edge function unavailable");
   });

@@ -488,7 +488,6 @@ export interface PreviewTranslationResult {
   usage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null;
   duration_ms: number;
   used_filter: boolean;
-  raw?: unknown;
 }
 
 export async function previewTranslation(input: PreviewTranslationInput): Promise<PreviewTranslationResult> {

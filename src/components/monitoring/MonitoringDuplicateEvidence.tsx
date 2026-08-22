@@ -190,6 +190,8 @@ interface MonitoringDuplicateClusterPanelProps {
   onOpenManualScore: (entry: MonitoringEntry) => void;
   onRunDedupe: (entry: MonitoringEntry) => void;
   onClearDuplicate: (entry: MonitoringEntry) => void;
+  readOnly: boolean;
+  mutationDisabledTitle?: string;
 }
 
 export function MonitoringDuplicateClusterPanel({
@@ -201,6 +203,8 @@ export function MonitoringDuplicateClusterPanel({
   onOpenManualScore,
   onRunDedupe,
   onClearDuplicate,
+  readOnly,
+  mutationDisabledTitle,
 }: MonitoringDuplicateClusterPanelProps) {
   const cluster = entry.duplicate_cluster;
   if (!cluster || cluster.counts.total < 2 || !expandedClusters.has(cluster.cluster_id)) return null;
@@ -230,7 +234,7 @@ export function MonitoringDuplicateClusterPanel({
                   <div className="flex flex-wrap items-center gap-1.5">
                     <span className="font-mono text-[11px] text-muted-foreground">{member.tweet_id.slice(-10)}</span>
                     {member.is_canonical && <Badge className="bg-primary/15 text-primary border-primary/30 text-[10px]">canonical</Badge>}
-                    {member.dedupe_status && <Badge variant="outline" className="text-[10px]">{member.dedupe_status.replaceAll('_', ' ')}</Badge>}
+                    {member.dedupe_status && <Badge variant="outline" className="text-[10px]">{member.dedupe_status.replace(/_/g, ' ')}</Badge>}
                   </div>
                   <p className="mt-1 font-medium">{member.author_handle ? `@${member.author_handle}` : 'Unknown author'}</p>
                   {member.created_at && <p className="text-muted-foreground">{formatDistanceToNow(new Date(member.created_at), { addSuffix: true })}</p>}
@@ -259,14 +263,35 @@ export function MonitoringDuplicateClusterPanel({
                 )}
                 {fullEntry && (
                   <>
-                    <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" onClick={() => onRunDedupe(fullEntry)}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 px-2 text-[11px]"
+                      disabled={readOnly}
+                      title={readOnly ? mutationDisabledTitle : undefined}
+                      onClick={() => { if (!readOnly) onRunDedupe(fullEntry); }}
+                    >
                       Run duplicate check
                     </Button>
-                    <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" onClick={() => onOpenManualScore(fullEntry)}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 px-2 text-[11px]"
+                      disabled={readOnly}
+                      title={readOnly ? mutationDisabledTitle : undefined}
+                      onClick={() => { if (!readOnly) onOpenManualScore(fullEntry); }}
+                    >
                       Manual score
                     </Button>
                     {fullEntry.dup_of_tweet_id && (
-                      <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" onClick={() => onClearDuplicate(fullEntry)}>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 px-2 text-[11px]"
+                        disabled={readOnly}
+                        title={readOnly ? mutationDisabledTitle : undefined}
+                        onClick={() => { if (!readOnly) onClearDuplicate(fullEntry); }}
+                      >
                         Clear duplicate
                       </Button>
                     )}

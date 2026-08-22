@@ -1,9 +1,66 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback, useState } from 'react';
 import { invokeAdminAction } from '@/api/adminActions';
 import { useToast } from '@/hooks/use-toast';
+import {
+  beginVideoRenderRetry,
+  isVideoRenderRetryPending,
+  settleVideoRenderRetry,
+  type VideoRenderRetryInput,
+} from '@/lib/videoRenderRetryState';
+import {
+  beginVideoRenderFeedbackSave,
+  isVideoRenderFeedbackSavePending,
+  settleVideoRenderFeedbackSave,
+  type VideoRenderFeedbackTarget,
+} from '@/lib/videoRenderFeedbackState';
+import {
+  hasActiveVideoRenderRows,
+  isActiveVideoRenderStatus,
+  videoRenderPollingInterval,
+  videoRenderStatusesMayContainActive,
+  type VideoRendererHealthState,
+} from '@/lib/videoRenderPolling';
 
 export type VideoRenderMode = 'disabled' | 'shadow' | 'enabled';
 export type VideoRenderStatus = 'queued' | 'running' | 'completed' | 'failed' | 'blocked' | 'expired';
+export type VideoRenderDiagnostic = 'render_failed' | 'render_blocked';
+export interface VideoRenderTimingMetrics {
+  total_ms: number | null;
+  config_load_ms: number | null;
+  source_lookup_ms: number | null;
+  post_context_lookup_ms: number | null;
+  download_ms: number | null;
+  probe_ms: number | null;
+  preflight_visual_ms: number | null;
+  contact_sheet_ms: number | null;
+  vision_frames_ms: number | null;
+  vision_inspection_sheets_ms: number | null;
+  local_ocr_ms: number | null;
+  watermark_vision_ms: number | null;
+  delogo_recovery_ms: number | null;
+  audio_extract_ms: number | null;
+  audio_extract_enhanced_ms: number | null;
+  audio_extract_early_ms: number | null;
+  transcription_ms: number | null;
+  transcript_cleanup_ms: number | null;
+  translation_ms: number | null;
+  subtitle_generate_ms: number | null;
+  encode_ms: number | null;
+  upload_ms: number | null;
+}
+type VideoRenderRetryMutationInput = {
+  render_id?: string;
+  tweet_id?: string;
+};
+type VideoRenderFeedbackMutationInput = {
+  render_id: string;
+  render_version: string;
+  render_revision: number;
+  label: string;
+  note?: string;
+  metadata?: Record<string, unknown>;
+};
 
 export interface VideoRenderConfigValue {
   mode: VideoRenderMode;
@@ -48,16 +105,23 @@ export interface VideoRenderConfigValue {
 }
 
 export interface VideoRendererHeartbeat {
-  renderer_id: string;
-  status: string;
+  renderer_id: string | null;
+  status: 'online' | 'draining' | 'paused' | 'offline' | 'error' | 'unknown';
   version: string | null;
   render_version: string | null;
   running: number;
   processed: number;
   failed: number;
-  last_error: string | null;
-  last_seen_at: string;
-  metadata?: Record<string, unknown>;
+  last_seen_at: string | null;
+}
+
+export interface VideoRendererHealth {
+  state: VideoRendererHealthState;
+  server_observed_at: string | null;
+  last_seen_at: string | null;
+  age_ms: number | null;
+  renderer_id: string | null;
+  reported_status: VideoRendererHeartbeat['status'] | null;
 }
 
 export interface VideoRenderOverview {
@@ -70,6 +134,7 @@ export interface VideoRenderOverview {
   medians: { render_ms: number | null; total_ms: number | null };
   output_bytes_7d: number;
   heartbeats: VideoRendererHeartbeat[];
+  renderer_health: VideoRendererHealth;
 }
 
 export interface VideoRenderQueueRow {
@@ -79,16 +144,16 @@ export interface VideoRenderQueueRow {
   status: VideoRenderStatus;
   failure_policy: string;
   render_version: string;
-  output_storage_path: string | null;
+  render_revision: number;
   output_file_size: number | null;
   width: number | null;
   height: number | null;
   duration_ms: number | null;
   source_language: string | null;
   target_language: string | null;
-  metrics: Record<string, unknown> | null;
-  error: string | null;
-  block_reason: string | null;
+  metrics: VideoRenderTimingMetrics;
+  error: VideoRenderDiagnostic | null;
+  block_reason: VideoRenderDiagnostic | null;
   attempts: number;
   queued_at: string | null;
   started_at: string | null;
@@ -99,7 +164,6 @@ export interface VideoRenderQueueRow {
   reviewed_by: string | null;
   updated_at: string | null;
   created_at: string | null;
-  preflight: Record<string, unknown> | null;
   action_label: string;
   activity_at: string;
   post: {
@@ -114,9 +178,7 @@ export interface VideoRenderQueueRow {
   media: {
     id: string;
     kind: string | null;
-    storage_path: string | null;
     mime_type: string | null;
-    src_url: string | null;
     file_size: number | null;
     duration_ms: number | null;
     width: number | null;
@@ -128,29 +190,47 @@ export interface VideoRenderQueueRow {
 export interface VideoRenderDetail {
   ok: boolean;
   error?: string;
-  render: (VideoRenderQueueRow & {
+  render: (Omit<VideoRenderQueueRow, 'post' | 'media' | 'latest_feedback'> & {
     original_srt?: string | null;
     persian_srt?: string | null;
     translated_srt?: string | null;
     ass_subtitles?: string | null;
-    source_signed_url?: string | null;
-    output_signed_url?: string | null;
   }) | null;
-  post: Record<string, unknown> | null;
+  post: VideoRenderQueueRow['post'];
   media: VideoRenderQueueRow['media'];
-  feedback: Array<{ id: string; label: string; note: string | null; metadata?: Record<string, unknown>; created_at: string }>;
+  feedback: Array<{ id: string; label: string; note: string | null; created_at: string }>;
 }
 
-export function useVideoRenderOverview() {
+type VideoRenderPollingOptions = {
+  isVisible?: boolean;
+};
+
+export function useVideoRenderOverview(options: VideoRenderPollingOptions = {}) {
+  const isVisible = options.isVisible === true;
   return useQuery({
     queryKey: ['video-render-overview'],
     queryFn: () => invokeAdminAction<VideoRenderOverview>({ action: 'get_video_render_overview' }),
     staleTime: 15_000,
     retry: 1,
+    refetchInterval: (query) => {
+      const overview = query.state.data;
+      return videoRenderPollingInterval({
+        isVisible,
+        hasActiveRender: (overview?.counts?.queued ?? 0) > 0 || (overview?.counts?.running ?? 0) > 0,
+        rendererHealth: overview?.renderer_health?.state ?? 'unknown',
+        failureCount: query.state.fetchFailureCount,
+      });
+    },
+    refetchIntervalInBackground: false,
   });
 }
 
-export function useVideoRenderQueue(statuses?: VideoRenderStatus[], reviewState: 'unreviewed' | 'all' = 'unreviewed') {
+export function useVideoRenderQueue(
+  statuses?: VideoRenderStatus[],
+  reviewState: 'unreviewed' | 'all' = 'unreviewed',
+  options: VideoRenderPollingOptions = {},
+) {
+  const isVisible = options.isVisible === true;
   return useQuery({
     queryKey: ['video-render-queue', statuses?.join(',') ?? 'default', reviewState],
     queryFn: () => invokeAdminAction<{ ok: boolean; rows: VideoRenderQueueRow[] }>({
@@ -161,10 +241,28 @@ export function useVideoRenderQueue(statuses?: VideoRenderStatus[], reviewState:
     }),
     staleTime: 15_000,
     retry: 1,
+    refetchInterval: (query) => {
+      const rows = query.state.data?.rows;
+      return videoRenderPollingInterval({
+        isVisible,
+        hasActiveRender: Array.isArray(rows)
+          ? hasActiveVideoRenderRows(rows)
+          : videoRenderStatusesMayContainActive(statuses),
+        failureCount: query.state.fetchFailureCount,
+      });
+    },
+    refetchIntervalInBackground: false,
   });
 }
 
-export function useVideoRenderDetail(input: { renderId?: string | null; tweetId?: string | null; enabled?: boolean }) {
+export function useVideoRenderDetail(input: {
+  renderId?: string | null;
+  tweetId?: string | null;
+  status?: VideoRenderStatus | null;
+  enabled?: boolean;
+  isVisible?: boolean;
+}) {
+  const isVisible = input.isVisible === true;
   return useQuery({
     queryKey: ['video-render-detail', input.renderId ?? '', input.tweetId ?? ''],
     queryFn: () => invokeAdminAction<VideoRenderDetail>({
@@ -175,6 +273,17 @@ export function useVideoRenderDetail(input: { renderId?: string | null; tweetId?
     enabled: input.enabled !== false && Boolean(input.renderId || input.tweetId),
     staleTime: 10_000,
     retry: 1,
+    refetchInterval: (query) => {
+      const detail = query.state.data;
+      const status = detail?.render?.status ?? input.status;
+      return videoRenderPollingInterval({
+        isVisible,
+        hasActiveRender: isActiveVideoRenderStatus(status),
+        rendererHealth: detail ? null : 'unknown',
+        failureCount: query.state.fetchFailureCount,
+      });
+    },
+    refetchIntervalInBackground: false,
   });
 }
 
@@ -209,8 +318,8 @@ export function useUpdateVideoRenderConfig() {
 export function useRetryVideoRender() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  return useMutation({
-    mutationFn: (input: { render_id?: string; tweet_id?: string }) => invokeAdminAction<{ ok: boolean; render_id: string; tweet_id: string; mode: VideoRenderMode }>({
+  const retry = useMutation({
+    mutationFn: (input: VideoRenderRetryMutationInput) => invokeAdminAction<{ ok: boolean; render_id: string; tweet_id: string; mode: VideoRenderMode }>({
       action: 'retry_video_render',
       ...input,
     }),
@@ -224,6 +333,26 @@ export function useRetryVideoRender() {
       toast({ title: 'Could not queue video render', description: (error as Error).message, variant: 'destructive' });
     },
   });
+  const [pendingRetryKeys, setPendingRetryKeys] = useState<ReadonlyMap<string, number>>(
+    () => new Map(),
+  );
+
+  const mutate = useCallback((input: VideoRenderRetryMutationInput) => {
+    setPendingRetryKeys((pending) => beginVideoRenderRetry(pending, input));
+    void retry.mutateAsync(input)
+      .catch(() => undefined)
+      .finally(() => {
+        setPendingRetryKeys((pending) => settleVideoRenderRetry(pending, input));
+      });
+  }, [retry]);
+
+  const isPendingFor = useCallback(
+    (input: VideoRenderRetryInput) =>
+      isVideoRenderRetryPending(pendingRetryKeys, input),
+    [pendingRetryKeys],
+  );
+
+  return { ...retry, mutate, isPendingFor };
 }
 
 export function useSetVideoRenderReviewed() {
@@ -257,8 +386,8 @@ export function useSetVideoRenderReviewed() {
 export function useSaveVideoRenderFeedback() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  return useMutation({
-    mutationFn: (input: { render_id: string; label: string; note?: string; metadata?: Record<string, unknown> }) => invokeAdminAction({
+  const feedback = useMutation({
+    mutationFn: (input: VideoRenderFeedbackMutationInput) => invokeAdminAction({
       action: 'save_video_render_feedback',
       ...input,
     }),
@@ -268,7 +397,29 @@ export function useSaveVideoRenderFeedback() {
       toast({ title: 'Video feedback saved' });
     },
     onError: (error) => {
+      queryClient.invalidateQueries({ queryKey: ['video-render-queue'] });
+      queryClient.invalidateQueries({ queryKey: ['video-render-detail'] });
       toast({ title: 'Could not save feedback', description: (error as Error).message, variant: 'destructive' });
     },
   });
+  const [pendingFeedbackKeys, setPendingFeedbackKeys] = useState<ReadonlyMap<string, number>>(
+    () => new Map(),
+  );
+
+  const mutate = useCallback((input: VideoRenderFeedbackMutationInput) => {
+    setPendingFeedbackKeys((pending) => beginVideoRenderFeedbackSave(pending, input));
+    void feedback.mutateAsync(input)
+      .catch(() => undefined)
+      .finally(() => {
+        setPendingFeedbackKeys((pending) => settleVideoRenderFeedbackSave(pending, input));
+      });
+  }, [feedback]);
+
+  const isPendingFor = useCallback(
+    (input: VideoRenderFeedbackTarget) =>
+      isVideoRenderFeedbackSavePending(pendingFeedbackKeys, input),
+    [pendingFeedbackKeys],
+  );
+
+  return { ...feedback, mutate, isPendingFor };
 }
