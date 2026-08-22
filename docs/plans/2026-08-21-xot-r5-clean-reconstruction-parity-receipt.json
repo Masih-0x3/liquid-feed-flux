@@ -1,0 +1,59 @@
+{
+  "schema": "xot-r5-clean-reconstruction-parity-receipt-v1",
+  "status": "ACCEPTED_LOCAL_RECONSTRUCTION",
+  "repository": "/Users/stevmq/Finalized XOT",
+  "branch": "codex/xot-remediation-convergence",
+  "sourceCandidate": {
+    "sha": "7bd106e137b27ae6d55367520448724e60e313b6",
+    "tree": "db99c7ebddedd0aceaf16f70334dd7db8ae85271",
+    "worktreeStatus": "clean"
+  },
+  "reconstruction": {
+    "temporaryRoot": "/tmp/xot-r5-reconstruction.XtyF3m",
+    "removedAfterValidation": true,
+    "sha": "7bd106e137b27ae6d55367520448724e60e313b6",
+    "tree": "db99c7ebddedd0aceaf16f70334dd7db8ae85271",
+    "shaMatches": true,
+    "treeMatches": true,
+    "clean": true
+  },
+  "install": {
+    "root": "npm install --ignore-scripts --no-audit --no-fund",
+    "renderer": "npm --prefix services/video-renderer install --ignore-scripts --no-audit --no-fund",
+    "network": "normal npm registry only",
+    "reason": "offline cache lacked yaml@2.8.3",
+    "secrets": "none"
+  },
+  "matrix": {
+    "rootTests": "32 files / 202 passed",
+    "strictTypeScript": "PASS",
+    "airLedgerCoverage": "80/80 PASS",
+    "airLedgerMutation": "PASS",
+    "migrationTests": "77/77 passed",
+    "rendererTests": "202/202 passed",
+    "syntheticBuild": {
+      "status": "PASS",
+      "modules": 2504,
+      "outputFiles": 82,
+      "environment": "synthetic public Vite/Supabase/Sentry values",
+      "productionRefs": 0
+    },
+    "sourceAndReconstructionDiffCheck": "PASS",
+    "sourceAndReconstructionStatus": "clean"
+  },
+  "boundaries": {
+    "hostedCi": "not run",
+    "staging": "not contacted",
+    "browser": "not run",
+    "provider": "not contacted",
+    "database": "not contacted",
+    "deploy": "not run",
+    "releaseGate": "CLOSED"
+  },
+  "validation": {
+    "exactShaAndTreeParity": true,
+    "temporaryPathRemoved": true,
+    "sourceWorktreeRemainsClean": true,
+    "noProductSourceChanged": true
+  }
+}
