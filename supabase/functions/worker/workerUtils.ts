@@ -10,6 +10,31 @@ const DELIVERY_LANE_TYPES = new Set(["deliver"]);
 
 type JobLane = "fast" | "model" | "delivery";
 
+export {
+  formatMessageWithTemplate,
+  stripMarkdownToPlain,
+  extractNumericTweetId,
+  extractHandleFromUrl,
+} from "./tweetNormalizers.ts";
+
+/**
+ * Fetch size is a claim bound; these conservative execution caps are deliberately
+ * separate so a larger fast-only claim cannot become hidden provider fan-out.
+ */
+export const DEFAULT_LANE_CAPACITIES: Readonly<Record<JobLane, number>> = {
+  fast: 4,
+  model: 2,
+  delivery: 2,
+};
+
+export type LaneExecutionSnapshot = {
+  lane: JobLane;
+  lane_capacity: number;
+  lane_selected: number;
+  lane_executing: number;
+  lane_saturated: boolean;
+};
+
 type ExtractedMediaItem = {
   type: string;
   url: string;
@@ -29,6 +54,67 @@ export function jobLane(type: string): JobLane {
   if (MODEL_LANE_TYPES.has(type)) return "model";
   if (DELIVERY_LANE_TYPES.has(type)) return "delivery";
   return "fast";
+}
+
+export function laneCapacityFor(lane: JobLane): number {
+  return DEFAULT_LANE_CAPACITIES[lane];
+}
+
+/**
+ * Run the selected jobs with independent per-lane workers and preserve the input
+ * order in the all-settled result. A rejected handler is retained as a rejected
+ * result so one lane cannot abort accounting for the other lanes.
+ */
+export async function runJobsWithLaneCapacity<
+  TJob extends Record<string, unknown>,
+  TResult,
+>(
+  jobs: TJob[],
+  execute: (job: TJob, metrics: LaneExecutionSnapshot) => Promise<TResult> | TResult,
+): Promise<PromiseSettledResult<TResult>[]> {
+  const selected: Record<JobLane, number> = { fast: 0, model: 0, delivery: 0 };
+  const byLane: Record<JobLane, Array<{ job: TJob; index: number }>> = {
+    fast: [],
+    model: [],
+    delivery: [],
+  };
+  jobs.forEach((job, index) => {
+    const lane = jobLane(String(job.type ?? "unknown"));
+    selected[lane] += 1;
+    byLane[lane].push({ job, index });
+  });
+
+  const executing: Record<JobLane, number> = { fast: 0, model: 0, delivery: 0 };
+  const settled = new Array<PromiseSettledResult<TResult>>(jobs.length);
+  await Promise.all((Object.keys(byLane) as JobLane[]).map(async (lane) => {
+    const queue = byLane[lane];
+    const workerCount = Math.min(laneCapacityFor(lane), queue.length);
+    let cursor = 0;
+    await Promise.all(Array.from({ length: workerCount }, async () => {
+      while (cursor < queue.length) {
+        const item = queue[cursor++];
+        executing[lane] += 1;
+        const metrics: LaneExecutionSnapshot = {
+          lane,
+          lane_capacity: laneCapacityFor(lane),
+          lane_selected: selected[lane],
+          lane_executing: executing[lane],
+          lane_saturated: executing[lane] >= laneCapacityFor(lane),
+        };
+        try {
+          settled[item.index] = {
+            status: "fulfilled",
+            value: await execute(item.job, metrics),
+          };
+        } catch (reason) {
+          settled[item.index] = { status: "rejected", reason };
+        } finally {
+          executing[lane] -= 1;
+        }
+      }
+    }));
+  }));
+  return settled;
 }
 
 export function maxBatchSizeForJobTypes(jobTypes: string[] | null): number {
@@ -62,42 +148,6 @@ export function jobError(reason: unknown): Error {
     // Fall through to the string fallback.
   }
   return new Error(String(reason ?? "unknown_error"));
-}
-
-export function formatMessageWithTemplate(
-  post: Record<string, unknown>,
-  account: Record<string, unknown> | null,
-  messageTemplate: Record<string, unknown>,
-): string {
-  const placeholders: Record<string, string> = {
-    "{translated_text}": String(
-      post.text_translated || post.text_original || "",
-    ),
-    "{original_text}": String(post.text_original || ""),
-    "{author_handle}": String(account?.handle || ""),
-    "{author_name}": String(account?.display_name || ""),
-    "{source_link}": messageTemplate.include_source_link && post.url
-      ? `[${messageTemplate.source_link_text || "View original"}](${post.url})`
-      : "",
-    "{published_date}": post.tweeted_at
-      ? new Date(post.tweeted_at as string).toLocaleDateString("fa-IR")
-      : "",
-    "{published_time}": post.tweeted_at
-      ? new Date(post.tweeted_at as string).toLocaleTimeString("fa-IR", {
-        hour: "2-digit",
-        minute: "2-digit",
-      })
-      : "",
-    "{hashtags}": String(messageTemplate.custom_hashtags || ""),
-    "{media_info}": post.has_media ? "📸 تصویر" : "",
-  };
-
-  return Object.entries(placeholders).reduce((template, [key, value]) => {
-    return template.replace(
-      new RegExp(key.replace(/[{}]/g, "\\$&"), "g"),
-      value,
-    );
-  }, String(messageTemplate.template || "{translated_text}"));
 }
 
 export function finiteMediaNumber(value: unknown): number | null {
@@ -152,9 +202,18 @@ function timestampMs(value: unknown): number | null {
   return Number.isFinite(time) ? time : null;
 }
 
+const MAX_METRIC_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
+
 function nonNegativeMs(value: number | null): number | null {
   if (value == null || !Number.isFinite(value)) return null;
-  return Math.max(0, Math.round(value));
+  return Math.min(MAX_METRIC_DURATION_MS, Math.max(0, Math.round(value)));
+}
+
+function boundedAttempt(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    return null;
+  }
+  return Math.min(100_000, value);
 }
 
 export function jobTimingMeta(
@@ -172,10 +231,15 @@ export function jobTimingMeta(
     ? parseRetryAfterFromMessage(extra.error)
     : null;
   return {
+    ...extra,
     job_id: job.id ?? null,
     job_type: job.type ?? null,
     lane: jobLane(String(job.type ?? "unknown")),
-    attempts: job.attempts ?? null,
+    attempts: boundedAttempt(job.attempts),
+    retry_count: (() => {
+      const attempts = boundedAttempt(job.attempts);
+      return attempts == null ? null : Math.max(0, attempts - 1);
+    })(),
     priority: job.priority ?? null,
     queue_wait_ms: nonNegativeMs(
       createdMs == null ? null : queueReferenceMs - createdMs,
@@ -186,8 +250,11 @@ export function jobTimingMeta(
     worker_run_ms: state === "running" || state === "queued"
       ? null
       : nonNegativeMs(startedMs == null ? null : nowMs - startedMs),
-    retry_after_seconds: retryAfterSeconds,
-    ...extra,
+    retry_after_seconds: retryAfterSeconds ??
+      (typeof extra.retry_after_seconds === "number" &&
+          Number.isFinite(extra.retry_after_seconds)
+        ? Math.max(0, Math.min(86_400, Math.floor(extra.retry_after_seconds)))
+        : null),
   };
 }
 
@@ -245,30 +312,6 @@ export function isTelegramParseError(description: string): boolean {
     /parse_mode/i.test(description);
 }
 
-export function stripMarkdownToPlain(text: string): string {
-  if (!text) return text;
-  return text.replace(/[\\*_`\[\]()~>#+=|{}.!-]/g, " ")
-    .replace(/\s{2,}/g, " ")
-    .trim();
-}
-
-// Extract numeric tweet id from RSS guid/url. Twitter tweet IDs are 18-19 digit numbers.
-export function extractNumericTweetId(
-  rawTweetId: string,
-  url?: string | null,
-): string | null {
-  const candidates: string[] = [rawTweetId];
-  if (url) candidates.push(url);
-  for (const candidate of candidates) {
-    if (!candidate) continue;
-    const statusMatch = candidate.match(/status\/(\d{5,25})/);
-    if (statusMatch) return statusMatch[1];
-    const rawIdMatch = candidate.match(/(?:^|[^0-9])(\d{15,25})(?:$|[^0-9])/);
-    if (rawIdMatch) return rawIdMatch[1];
-  }
-  return null;
-}
-
 export function rmUpgradeImageUrl(url: string): string {
   try {
     const parsed = new URL(url);
@@ -290,37 +333,4 @@ export function rmPickBestVariant(
   );
   const pool = mp4s.length ? mp4s : variants;
   return [...pool].sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0))[0];
-}
-
-export function extractHandleFromUrl(
-  url: string | null | undefined,
-): string | null {
-  if (!url) return null;
-  try {
-    const parsed = new URL(url);
-    if (
-      !/(^|\.)twitter\.com$/i.test(parsed.hostname) &&
-      !/(^|\.)x\.com$/i.test(parsed.hostname)
-    ) {
-      return null;
-    }
-    const [handle, nextSegment] = parsed.pathname.split("/").filter(Boolean);
-    if (!handle || !/^[A-Za-z0-9_]+$/.test(handle)) return null;
-    if (!nextSegment) {
-      const reservedPaths = new Set([
-        "compose",
-        "explore",
-        "home",
-        "messages",
-        "notifications",
-        "search",
-        "settings",
-      ]);
-      return reservedPaths.has(handle.toLowerCase()) ? null : handle;
-    }
-    if (nextSegment.toLowerCase() === "status") return handle;
-  } catch {
-    // Invalid URLs do not provide a usable handle.
-  }
-  return null;
 }

@@ -1,4 +1,4 @@
-import { assert, assertEquals } from "jsr:@std/assert";
+import { assert, assertEquals, assertRejects } from "jsr:@std/assert";
 import { StaleMediaObjectError } from "../_shared/staleMediaRepair.ts";
 import { TELEGRAM_BOT_VIDEO_UPLOAD_MAX_BYTES } from "../_shared/telegramVideoLimits.ts";
 import { NonRetryableJobError } from "./jobLifecycle.ts";
@@ -6,6 +6,8 @@ import {
   computeAdaptiveSpacing,
   getMediaUrl,
   sendTelegramMedia,
+  sendTelegramPhotoFromStorage,
+  sendTelegramPhotoGroupFromStorage,
   sendTelegramVideoFromStorage,
 } from "./telegramDelivery.ts";
 
@@ -14,6 +16,8 @@ type FetchCall = {
   init?: RequestInit;
   body?: Record<string, unknown>;
 };
+
+const allowProviderCall = async () => {};
 
 function createStorageSupabase(options: {
   signedUrl?: string | null;
@@ -125,15 +129,17 @@ Deno.test("getMediaUrl returns signed storage URL when signing succeeds", async 
   }]);
 });
 
-Deno.test("getMediaUrl falls back to source URL when signing fails", async () => {
+Deno.test("getMediaUrl blocks raw source fallback when signing fails", async () => {
   const supabase = createStorageSupabase({ signedUrlThrows: true });
 
-  const url = await getMediaUrl(supabase, {
-    storage_path: "media/photo.jpg",
-    src_url: "https://origin.example/photo.jpg",
-  });
-
-  assertEquals(url, "https://origin.example/photo.jpg");
+  await assertRejects(
+    () => getMediaUrl(supabase, {
+      storage_path: "media/photo.jpg",
+      src_url: "https://origin.example/photo.jpg",
+    }),
+    Error,
+    "telegram_signed_media_url_unavailable",
+  );
 });
 
 Deno.test("sendTelegramMedia retries Markdown parse failures as plain text", async () => {
@@ -153,6 +159,7 @@ Deno.test("sendTelegramMedia retries Markdown parse failures as plain text", asy
       "chat",
       { audio: "https://example.com/audio.mp3" },
       "*bold* [source](https://x.com/post)",
+      allowProviderCall,
     );
 
     assertEquals(ids, ["42"]);
@@ -161,6 +168,169 @@ Deno.test("sendTelegramMedia retries Markdown parse failures as plain text", asy
     assertEquals(calls[0].body?.caption, "*bold* [source](https://x.com/post)");
     assertEquals(calls[1].body?.parse_mode, undefined);
     assertEquals(calls[1].body?.caption, "bold source https://x com/post");
+  });
+});
+
+Deno.test("sendTelegramPhotoFromStorage returns the fallback success id", async () => {
+  const supabase = createStorageSupabase({
+    downloadBlob: new Blob(["photo"], { type: "image/jpeg" }),
+  });
+
+  await withMockFetch([
+    {
+      status: 400,
+      body: { ok: false, description: "Bad Request: can't parse entities" },
+    },
+    { body: { ok: true, result: { message_id: 43 } } },
+  ], async (calls) => {
+    const ids = await sendTelegramPhotoFromStorage(
+      supabase,
+      "token",
+      "chat",
+      { id: "photo-1", storage_path: "media/photo.jpg", mime_type: "image/jpeg" },
+      "*caption*",
+      allowProviderCall,
+    );
+
+    assertEquals(ids, ["43"]);
+    assertEquals(calls.length, 2);
+  });
+});
+
+Deno.test("sendTelegramPhotoGroupFromStorage returns fallback success ids", async () => {
+  const supabase = createStorageSupabase({
+    downloadBlob: new Blob(["photo"], { type: "image/jpeg" }),
+  });
+
+  await withMockFetch([
+    {
+      status: 400,
+      body: { ok: false, description: "Bad Request: can't parse entities" },
+    },
+    { body: { ok: true, result: [{ message_id: 44 }, { message_id: 45 }] } },
+  ], async (calls) => {
+    const ids = await sendTelegramPhotoGroupFromStorage(
+      supabase,
+      "token",
+      "chat",
+      [
+        { id: "photo-1", storage_path: "media/photo-1.jpg", mime_type: "image/jpeg" },
+        { id: "photo-2", storage_path: "media/photo-2.jpg", mime_type: "image/jpeg" },
+      ],
+      "*caption*",
+      allowProviderCall,
+    );
+
+    assertEquals(ids, ["44", "45"]);
+    assertEquals(calls.length, 2);
+  });
+});
+
+Deno.test("sendTelegramVideoFromStorage returns the fallback success id", async () => {
+  const supabase = createStorageSupabase({
+    downloadBlob: new Blob(["video"], { type: "video/mp4" }),
+  });
+
+  await withMockFetch([
+    {
+      status: 400,
+      body: { ok: false, description: "Bad Request: can't parse entities" },
+    },
+    { body: { ok: true, result: { message_id: 46 } } },
+  ], async (calls) => {
+    const ids = await sendTelegramVideoFromStorage(
+      supabase,
+      "token",
+      "chat",
+      { id: "video-1", storage_path: "media/video.mp4", mime_type: "video/mp4" },
+      "*caption*",
+      allowProviderCall,
+    );
+
+    assertEquals(ids, ["46"]);
+    assertEquals(calls.length, 2);
+  });
+});
+
+Deno.test("sendTelegramMedia classifies a fallback rate limit from the final response", async () => {
+  await withMockFetch([
+    {
+      status: 400,
+      body: {
+        ok: false,
+        description: "Bad Request: can't parse entities",
+      },
+    },
+    {
+      status: 429,
+      body: {
+        ok: false,
+        description: "Too Many Requests: retry after 7",
+        parameters: { retry_after: 7 },
+      },
+    },
+  ], async (calls) => {
+    let thrown: unknown;
+    try {
+      await sendTelegramMedia(
+        "sendPhoto",
+        "token",
+        "chat",
+        { photo: "https://example.com/photo.jpg" },
+        "*caption*",
+        allowProviderCall,
+      );
+    } catch (error) {
+      thrown = error;
+    }
+
+    assertEquals(calls.length, 2);
+    assert(thrown instanceof Error);
+    assertEquals((thrown as Error).name, "TelegramRateLimitError");
+    assertEquals(
+      (thrown as { retryAfterSeconds?: number }).retryAfterSeconds,
+      7,
+    );
+    assert((thrown as Error).message.includes("retry after 7"));
+  });
+});
+
+Deno.test("sendTelegramMedia reports a fallback server error from the final response", async () => {
+  await withMockFetch([
+    {
+      status: 400,
+      body: {
+        ok: false,
+        description: "Bad Request: can't parse entities",
+      },
+    },
+    {
+      status: 500,
+      body: {
+        ok: false,
+        description: "Internal Server Error: final attempt failed",
+      },
+    },
+  ], async (calls) => {
+    let thrown: unknown;
+    try {
+      await sendTelegramMedia(
+        "sendPhoto",
+        "token",
+        "chat",
+        { photo: "https://example.com/photo.jpg" },
+        "*caption*",
+        allowProviderCall,
+      );
+    } catch (error) {
+      thrown = error;
+    }
+
+    assertEquals(calls.length, 2);
+    assert(thrown instanceof Error);
+    assertEquals((thrown as Error).name, "Error");
+    assert((thrown as Error).message.includes("status 500"));
+    assertEquals((thrown as Error).message.includes("final attempt failed"), false);
   });
 });
 
@@ -183,6 +353,7 @@ Deno.test("sendTelegramMedia throws TelegramRateLimitError with retry-after", as
         "chat",
         { photo: "https://example.com/photo.jpg" },
         "caption",
+        allowProviderCall,
       );
     } catch (error) {
       thrown = error;
@@ -214,6 +385,7 @@ Deno.test("sendTelegramVideoFromStorage rejects declared oversized videos before
         mime_type: "video/mp4",
       },
       "caption",
+      allowProviderCall,
     );
   } catch (error) {
     thrown = error;
@@ -244,6 +416,7 @@ Deno.test("sendTelegramVideoFromStorage throws repairable stale media error when
         mime_type: "video/mp4",
       },
       "caption",
+      allowProviderCall,
     );
   } catch (error) {
     thrown = error;
@@ -272,4 +445,51 @@ Deno.test("computeAdaptiveSpacing preserves current zero-or-fallback behavior", 
     await computeAdaptiveSpacing(createSpacingSupabase({ throws: true })),
     1500,
   );
+});
+
+Deno.test("Telegram provider callback blocks before the first request", async () => {
+  let guardCalls = 0;
+  await withMockFetch([], async (calls) => {
+    await assertRejects(
+      () => sendTelegramMedia(
+        "sendAudio",
+        "token",
+        "chat",
+        { audio: "https://example.com/audio.mp3" },
+        "caption",
+        async () => {
+          guardCalls += 1;
+          throw new Error("external_posting_blocked");
+        },
+      ),
+      Error,
+      "external_posting_blocked",
+    );
+    assertEquals(guardCalls, 1);
+    assertEquals(calls.length, 0);
+  });
+});
+
+Deno.test("Telegram parse retry calls the provider guard again", async () => {
+  let guardCalls = 0;
+  await withMockFetch([
+    { status: 400, body: { ok: false, description: "Bad Request: can't parse entities" } },
+  ], async (calls) => {
+    await assertRejects(
+      () => sendTelegramMedia(
+        "sendPhoto",
+        "token",
+        "chat",
+        { photo: "https://example.com/photo.jpg" },
+        "*caption*",
+        async () => {
+          guardCalls += 1;
+          if (guardCalls > 1) throw new Error("external_posting_blocked");
+        },
+      ),
+      Error,
+    );
+    assertEquals(guardCalls, 2);
+    assertEquals(calls.length, 1);
+  });
 });

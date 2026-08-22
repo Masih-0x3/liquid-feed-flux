@@ -15,6 +15,16 @@ type MediaCleanupClient = {
 
 type SupabaseClient = unknown;
 
+type MediaCleanupResult = {
+  deleted?: unknown;
+  failed?: unknown;
+  would_delete?: unknown;
+};
+
+function isMediaCleanupResult(value: unknown): value is MediaCleanupResult {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 function checkedMediaCleanupClient(client: unknown): MediaCleanupClient {
   if (!client || typeof client !== "object") {
     throw new Error("media_cleanup_client_invalid");
@@ -131,7 +141,7 @@ export function createMediaCleanupHandler(
         }));
         throw new Error("media_cleanup_invoke_failed");
       }
-      if (!data || typeof data !== "object" || Array.isArray(data)) {
+      if (!isMediaCleanupResult(data)) {
         throw new Error("media_cleanup_invalid_response");
       }
 

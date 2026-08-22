@@ -12,12 +12,55 @@ type TwitterCreds = {
 type HydrationSettings = {
   enabled: boolean;
   daily_budget: number;
+  available: boolean;
 };
 
 type HydratedTweetPatch = {
   fullText: string;
   updatePayload: Record<string, unknown>;
 };
+
+type HydrationQueryResult = {
+  data?: unknown;
+  error?: unknown;
+  count?: number | null;
+};
+
+type HydrationSettingsQuery = {
+  eq(column: string, value: unknown): HydrationSettingsQuery;
+  maybeSingle(): PromiseLike<HydrationQueryResult>;
+};
+
+type HydrationCountQuery = {
+  eq(column: string, value: unknown): HydrationCountQuery;
+  gte(column: string, value: unknown): PromiseLike<HydrationQueryResult>;
+};
+
+type HydrationSettingsClient = {
+  from(table: string): {
+    select(columns: string, options?: Record<string, unknown>): HydrationSettingsQuery;
+  };
+};
+
+type HydrationCountClient = {
+  from(table: string): {
+    select(columns: string, options?: Record<string, unknown>): HydrationCountQuery;
+  };
+};
+
+type SettingRecord = Record<string, unknown>;
+
+function parseSettingValue(row: unknown): SettingRecord | null | false {
+  if (row === null || row === undefined) return null;
+  if (typeof row !== "object" || Array.isArray(row) || !("value" in row)) {
+    return false;
+  }
+  const value = row.value;
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  return value as SettingRecord;
+}
 
 const HYDRATE_TEXT_ENCODER = new TextEncoder();
 
@@ -85,8 +128,7 @@ export async function hydrateOauthHeader(
 
 // Reads Twitter creds strictly from environment secrets.
 export async function getTwitterCreds(
-  // deno-lint-ignore no-explicit-any
-  _supabase: any,
+  _supabase: unknown,
 ): Promise<TwitterCreds | null> {
   const ck = Deno.env.get("TWITTER_CONSUMER_KEY") || "";
   const cs = Deno.env.get("TWITTER_CONSUMER_SECRET") || "";
@@ -98,8 +140,7 @@ export async function getTwitterCreds(
 
 // Record hydration X API attempts in the canonical x_api_events ledger.
 export async function recordXApiCall(
-  // deno-lint-ignore no-explicit-any
-  supabase: any,
+  supabase: unknown,
   errorMsg?: string | null,
   response?: Response | null,
   tweetId?: string | null,
@@ -128,53 +169,72 @@ export async function recordXApiCall(
 // - twitter_hydration.enabled (default true): master kill switch
 // - x_rate_limits.hydrations_per_day (default 100): max X reads per 24h for hydration
 export async function loadHydrationSettings(
-  // deno-lint-ignore no-explicit-any
-  supabase: any,
+  supabase: HydrationSettingsClient,
 ): Promise<HydrationSettings> {
   let enabled = true;
   let daily_budget = 100;
+  let available = true;
   try {
-    const { data: th } = await supabase.from("settings").select("value")
+    const { data: th, error: thError } = await supabase.from("settings").select("value")
       .eq("key", "twitter_hydration")
       .maybeSingle();
-    if (th?.value && typeof th.value === "object") {
-      const v = th.value as Record<string, unknown>;
-      if (v.enabled === false) enabled = false;
+    if (thError) available = false;
+    const twitterHydration = parseSettingValue(th);
+    if (twitterHydration === false) {
+      available = false;
+    } else if (
+      twitterHydration !== null &&
+      "enabled" in twitterHydration
+    ) {
+      if (typeof twitterHydration.enabled !== "boolean") {
+        available = false;
+      } else if (twitterHydration.enabled === false) {
+        enabled = false;
+      }
     }
-  } catch {
-    // keep default
-  }
+  } catch { available = false; }
   try {
-    const { data: rl } = await supabase.from("settings").select("value")
+    const { data: rl, error: rlError } = await supabase.from("settings").select("value")
       .eq("key", "x_rate_limits")
       .maybeSingle();
-    if (rl?.value && typeof rl.value === "object") {
-      const v = rl.value as Record<string, unknown>;
-      const n = Number(v.hydrations_per_day);
-      if (Number.isFinite(n) && n > 0) daily_budget = Math.floor(n);
+    if (rlError) available = false;
+    const rateLimits = parseSettingValue(rl);
+    if (rateLimits === false) {
+      available = false;
+    } else if (
+      rateLimits !== null &&
+      "hydrations_per_day" in rateLimits
+    ) {
+      if (
+        typeof rateLimits.hydrations_per_day !== "number" ||
+        !Number.isFinite(rateLimits.hydrations_per_day) ||
+        rateLimits.hydrations_per_day <= 0
+      ) {
+        available = false;
+      } else {
+        daily_budget = Math.floor(rateLimits.hydrations_per_day);
+      }
     }
-  } catch {
-    // keep default
-  }
-  return { enabled, daily_budget };
+  } catch { available = false; }
+  return { enabled, daily_budget, available };
 }
 
 // Count hydration X API calls in the last 24h. We use posts.hydrated_at with
 // hydration_source='x_api' (the only source that consumed an actual X read).
 export async function countDailyHydrationsUsed(
-  // deno-lint-ignore no-explicit-any
-  supabase: any,
-): Promise<number> {
+  supabase: HydrationCountClient,
+): Promise<number | null> {
   try {
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const { count } = await supabase
+    const { count, error } = await supabase
       .from("posts")
       .select("tweet_id", { count: "exact", head: true })
       .eq("hydration_source", "x_api")
       .gte("hydrated_at", since);
-    return Number(count || 0);
+    if (error || !Number.isSafeInteger(count) || count < 0) return null;
+    return count;
   } catch {
-    return 0;
+    return null;
   }
 }
 

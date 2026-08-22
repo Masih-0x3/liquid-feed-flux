@@ -3,6 +3,7 @@ import {
   claimXPostDelivery,
   completeXPostDelivery,
   failXPostDelivery,
+  markXPostDeliveryProviderStarted,
   normalizeXPostDeliveryClaim,
   xPostClaimRejection,
 } from "./xPostDeliveryClaim.ts";
@@ -38,12 +39,18 @@ Deno.test("normalizes claimed and rejected x post delivery claim payloads", () =
       reason: "claimed",
       existing_status: null,
       existing_x_tweet_id: null,
+      claim_generation: 2,
+      claim_state: "posting",
+      provider_started_at: "2026-06-17T00:00:05.000Z",
       claim_expires_at: "2026-06-17T00:00:00.000Z",
     }),
     {
       claimed: true,
       deliveryId: "d1",
       claimToken: "c1",
+      claimGeneration: 2,
+      claim_state: "posting",
+      providerStartedAt: "2026-06-17T00:00:05.000Z",
       reason: "claimed",
       existingStatus: null,
       existingXTweetId: null,
@@ -104,6 +111,7 @@ Deno.test("complete and fail x post delivery require the claim token", async () 
     await completeXPostDelivery(client, {
       deliveryId: "delivery-1",
       claimToken: "claim-1",
+      claimGeneration: 3,
       xTweetId: "x1",
       mediaCount: 1,
       mediaBytes: 42,
@@ -120,6 +128,7 @@ Deno.test("complete and fail x post delivery require the claim token", async () 
     await failXPostDelivery(client, {
       deliveryId: "delivery-1",
       claimToken: "claim-1",
+      claimGeneration: 3,
       error: "tweet 500",
       apiResponse: { error: "rate_limited" },
       skipReason: "x_api_retriable",
@@ -131,9 +140,61 @@ Deno.test("complete and fail x post delivery require the claim token", async () 
   assertEquals(calls[0].name, "complete_x_post_delivery");
   assertEquals(calls[0].args?.p_delivery_id, "delivery-1");
   assertEquals(calls[0].args?.p_claim_token, "claim-1");
+  assertEquals(calls[0].args?.p_claim_generation, 3);
   assertEquals(calls[1].name, "fail_x_post_delivery");
   assertEquals(calls[1].args?.p_delivery_id, "delivery-1");
   assertEquals(calls[1].args?.p_claim_token, "claim-1");
+  assertEquals(calls[1].args?.p_claim_generation, 3);
+});
+
+Deno.test("mark provider started records the durable boundary before provider calls", async () => {
+  const { calls, client } = fakeRpcClient({
+    mark_x_delivery_provider_started: true,
+  });
+
+  const ok = await markXPostDeliveryProviderStarted(client, {
+    deliveryId: "delivery-1",
+    claimToken: "claim-1",
+    claimGeneration: 4,
+  });
+
+  assertEquals(ok, true);
+  assertEquals(calls, [{
+    name: "mark_x_delivery_provider_started",
+    args: {
+      p_delivery_id: "delivery-1",
+      p_claim_token: "claim-1",
+      p_claim_generation: 4,
+    },
+  }]);
+});
+
+Deno.test("provider start marker rejects a missing or stale generation fence", async () => {
+  const { client } = fakeRpcClient({});
+  await assertRejects(
+    () => markXPostDeliveryProviderStarted(client, {
+      deliveryId: "delivery-1",
+      claimToken: "claim-1",
+      claimGeneration: 0,
+    }),
+    Error,
+    "mark_x_delivery_provider_started_failed",
+  );
+});
+
+Deno.test("provider start marker surfaces database errors", async () => {
+  const { client } = fakeRpcClient({
+    mark_x_delivery_provider_started: new Error("permission denied"),
+  });
+  await assertRejects(
+    () => markXPostDeliveryProviderStarted(client, {
+      deliveryId: "delivery-1",
+      claimToken: "claim-1",
+      claimGeneration: 1,
+    }),
+    Error,
+    "mark_x_delivery_provider_started_failed",
+  );
 });
 
 Deno.test("claim helper surfaces database errors", async () => {
@@ -144,6 +205,6 @@ Deno.test("claim helper surfaces database errors", async () => {
   await assertRejects(
     () => claimXPostDelivery(client, { postId: "t1", source: "cron" }),
     Error,
-    "claim_x_post_delivery: permission denied",
+    "claim_x_post_delivery_failed",
   );
 });

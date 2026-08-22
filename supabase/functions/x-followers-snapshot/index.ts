@@ -72,15 +72,18 @@ type FollowerQueryResult = {
   error?: unknown;
 };
 
-type FollowerQueryBuilder = PromiseLike<FollowerQueryResult> & {
-  select(columns: string): FollowerQueryBuilder;
-  eq(column: string, value: unknown): FollowerQueryBuilder;
+type FollowerFilterBuilder = {
+  eq(column: string, value: unknown): FollowerFilterBuilder;
   maybeSingle(): PromiseLike<FollowerQueryResult>;
+};
+
+type FollowerTableBuilder = {
+  select(columns: string): FollowerFilterBuilder;
   upsert(value: Record<string, unknown>, options?: Record<string, unknown>): PromiseLike<FollowerQueryResult>;
 };
 
 type FollowerSupabaseClient = {
-  from(table: string): FollowerQueryBuilder;
+  from(table: string): FollowerTableBuilder;
 };
 
 function asFollowerRecord(value: unknown): Record<string, unknown> {

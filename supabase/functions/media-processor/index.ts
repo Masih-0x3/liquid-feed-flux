@@ -53,6 +53,55 @@ type MediaProcessorSupabaseClient = {
   };
 };
 
+type MediaCleanupSupabaseClient = {
+  rpc(
+    name: string,
+    args?: Record<string, unknown>,
+  ): PromiseLike<{ data?: unknown; error?: unknown }>;
+  storage: {
+    from(bucket: string): {
+      remove(paths: string[]): PromiseLike<{ error?: unknown }>;
+    };
+  };
+  from(table: string): {
+    update(values: Record<string, unknown>): {
+      in(column: string, values: string[]): PromiseLike<unknown>;
+    };
+  };
+};
+
+function isMediaCleanupSupabaseClient(
+  value: unknown,
+): value is MediaCleanupSupabaseClient {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as {
+    rpc?: unknown;
+    storage?: unknown;
+    from?: unknown;
+  };
+  const storage = candidate.storage;
+  const storageFrom = storage && typeof storage === "object"
+    ? (storage as { from?: unknown }).from
+    : undefined;
+  if (
+    typeof candidate.rpc !== "function" ||
+    typeof candidate.from !== "function" ||
+    typeof storageFrom !== "function"
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function requireMediaCleanupSupabaseClient(
+  value: unknown,
+): MediaCleanupSupabaseClient {
+  if (!isMediaCleanupSupabaseClient(value)) {
+    throw new Error("media_cleanup_client_invalid");
+  }
+  return value;
+}
+
 const handler = createMediaProcessorHandler({
   corsHeaders,
   createSupabase: () => createClient<any, any>(
@@ -63,7 +112,12 @@ const handler = createMediaProcessorHandler({
   getEnv: (name) => Deno.env.get(name),
   downloadMediaForTweet,
   cleanupOldMedia: (supabase, dryRun, daysOld) =>
-    cleanupOldMedia(supabase, dryRun, daysOld, corsHeaders),
+    cleanupOldMedia(
+      requireMediaCleanupSupabaseClient(supabase),
+      dryRun,
+      daysOld,
+      corsHeaders,
+    ),
   getMediaInfo,
   captureException: captureEdgeException,
 });

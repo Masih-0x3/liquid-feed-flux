@@ -86,6 +86,15 @@ type RepairOptions = ReadabilityOptions & {
   parallelToolCalls?: boolean | null;
 };
 
+function readabilityProviderFailureCode(status: unknown): string {
+  const numericStatus = typeof status === "number" && Number.isInteger(status)
+    ? status
+    : null;
+  return numericStatus !== null && numericStatus >= 100 && numericStatus <= 599
+    ? `translation_readability_openai_http_${numericStatus}`
+    : "translation_readability_openai_request_failed";
+}
+
 const BIDI_CONTROL_RE = /[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
 const URL_RE = /\bhttps?:\/\/\S+/gi;
 const HANDLE_RE = /(^|\s)@\w+/g;
@@ -281,7 +290,7 @@ export async function repairTranslationReadability(
         initial,
         final: initial,
         repairStatus: "failed",
-        repairError: `OpenAI ${result.status}: ${result.rawText.slice(0, 500)}`,
+        repairError: readabilityProviderFailureCode(result.status),
         repairUsage: result.usage,
         repairEndpoint: result.endpoint,
       };
@@ -321,6 +330,7 @@ export async function repairTranslationReadability(
       repairEndpoint: result.endpoint,
     };
   } catch (error) {
+    void error;
     return {
       text: original,
       repaired: false,
@@ -328,7 +338,7 @@ export async function repairTranslationReadability(
       initial,
       final: initial,
       repairStatus: "failed",
-      repairError: (error as Error).message,
+      repairError: "translation_readability_openai_request_failed",
     };
   }
 }

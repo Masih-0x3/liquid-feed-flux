@@ -19,6 +19,30 @@ Deno.test("evaluateFinalDedupeGuard fails closed when final dedupe assertion thr
   assertEquals(decision.meta.reason, "dedupe_assertion_failed");
 });
 
+Deno.test("evaluateFinalDedupeGuard fails closed on an unknown assertion outcome", async () => {
+  const supabase = makeFakeSupabase();
+
+  const decision = await evaluateFinalDedupeGuard({
+    supabase,
+    tweetId: "newer",
+    storyMemory: { enabled: true, action: "skip" },
+    assertDuplicateState: async () => ({
+      checked: true,
+      blocked: false,
+      outcome: "unknown",
+      reason: "final_assertion_embedding_failed:provider unavailable",
+      result: null,
+    }),
+  });
+
+  assertEquals(decision.action, "fail");
+  assertEquals(decision.reason, "dedupe_assertion_failed");
+  if (decision.action !== "fail") {
+    throw new Error(`Expected a failed dedupe decision, got ${decision.action}`);
+  }
+  assertEquals(decision.error, "dedupe_assertion_unknown");
+});
+
 Deno.test("evaluateFinalDedupeGuard skips when final assertion blocks a duplicate", async () => {
   const supabase = makeFakeSupabase();
 
@@ -29,6 +53,7 @@ Deno.test("evaluateFinalDedupeGuard skips when final assertion blocks a duplicat
     assertDuplicateState: async () => ({
       checked: true,
       blocked: true,
+      outcome: "blocked",
       reason: "final_assertion_high_semantic_similarity:0.970",
       result: {
         dup_of_tweet_id: "older",
@@ -59,6 +84,7 @@ Deno.test("evaluateFinalDedupeGuard skips existing duplicate decisions", async (
     assertDuplicateState: async () => ({
       checked: true,
       blocked: false,
+      outcome: "allowed",
       reason: "already_checked",
       result: null,
     }),
@@ -79,6 +105,7 @@ Deno.test("evaluateFinalDedupeGuard fails closed when persisted dedupe state can
     assertDuplicateState: async () => ({
       checked: true,
       blocked: false,
+      outcome: "allowed",
       reason: "no_semantic_candidates",
       result: null,
     }),
@@ -86,6 +113,11 @@ Deno.test("evaluateFinalDedupeGuard fails closed when persisted dedupe state can
 
   assertEquals(decision.action, "fail");
   assertEquals(decision.reason, "dedupe_assertion_failed");
+  if (decision.action !== "fail") {
+    throw new Error(`Expected a failed dedupe decision, got ${decision.action}`);
+  }
+  assertEquals(decision.error, "dedupe_state_lookup_failed");
+  assertEquals(decision.error?.includes("database unavailable"), false);
 });
 
 function makeFakeSupabase(options: {

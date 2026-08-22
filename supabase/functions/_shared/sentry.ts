@@ -1,4 +1,4 @@
-import * as Sentry from "npm:@sentry/deno";
+import * as Sentry from "npm:@sentry/deno@10.58.0";
 
 let initialized = false;
 let enabled = false;
@@ -11,8 +11,8 @@ type CaptureContext = {
   extra?: Record<string, unknown>;
 };
 
-function readSampleRate(name: string, fallback: number): number {
-  const raw = Deno.env.get(name)?.trim();
+function readSampleRate(fallback: number): number {
+  const raw = Deno.env.get("SENTRY_TRACES_SAMPLE_RATE")?.trim();
   if (!raw) return fallback;
   const value = Number(raw);
   if (!Number.isFinite(value)) return fallback;
@@ -42,7 +42,7 @@ export function initSentryEdge(): boolean {
     defaultIntegrations: false,
     environment: Deno.env.get("SENTRY_ENVIRONMENT") ?? Deno.env.get("ENVIRONMENT") ?? "production",
     release: Deno.env.get("SENTRY_RELEASE") ?? Deno.env.get("DEPLOY_GIT_SHA") ?? undefined,
-    tracesSampleRate: readSampleRate("SENTRY_TRACES_SAMPLE_RATE", 0.1),
+    tracesSampleRate: readSampleRate(0.1),
   });
 
   return true;
@@ -69,7 +69,8 @@ export async function captureEdgeException(error: unknown, context: CaptureConte
 
 export function captureEdgeExceptionBackground(error: unknown, context: CaptureContext): void {
   const promise = captureEdgeException(error, context).catch((captureError) => {
-    console.error("sentry capture failed:", captureError instanceof Error ? captureError.message : String(captureError));
+    void captureError;
+    console.error("sentry_capture_failed");
   });
   const edgeRuntime = (globalThis as { EdgeRuntime?: { waitUntil?: (promise: Promise<unknown>) => void } }).EdgeRuntime;
   if (edgeRuntime?.waitUntil) {

@@ -152,6 +152,49 @@ function errorMessage(error: unknown): string {
   return String(error);
 }
 
+const OBSERVABILITY_ERROR_CODE = /^[a-z][a-z0-9]*(?:_[a-z0-9]+){1,8}$/;
+
+function safeObservabilityErrorCode(
+  error: unknown,
+  fallback: string,
+): string {
+  const message = errorMessage(error).trim();
+  return message.length >= 3 && message.length <= 96 &&
+      OBSERVABILITY_ERROR_CODE.test(message)
+    ? message
+    : fallback;
+}
+
+function boundedHttpStatus(value: unknown): number | null {
+  const status = typeof value === "number" ? value : Number(value);
+  return Number.isInteger(status) && status >= 100 && status <= 599
+    ? status
+    : null;
+}
+
+function openAIObservabilityErrorCode(response: NormalizedOpenAIResponse): string {
+  const raw = response.raw && typeof response.raw === "object"
+    ? response.raw as Record<string, unknown>
+    : null;
+  const rawError = raw?.error;
+  const candidate = rawError && typeof rawError === "object" && !Array.isArray(rawError)
+    ? recordValue(rawError).message ?? recordValue(rawError).code
+    : rawError;
+  const status = boundedHttpStatus(response.status);
+  return safeObservabilityErrorCode(
+    candidate,
+    status === null ? "openai_request_failed" : `openai_http_${status}`,
+  );
+}
+
+function providerObservabilityErrorCode(call: ObservedProviderCall): string {
+  const status = boundedHttpStatus(call.httpStatus);
+  return safeObservabilityErrorCode(
+    call.error,
+    status === null ? "provider_request_failed" : `provider_http_${status}`,
+  );
+}
+
 function safeNumber(value: unknown): number {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string" && value.trim()) {
@@ -272,13 +315,14 @@ async function safeWrite(
     if (result?.error) {
       console.warn("[observability] write failed", {
         label,
-        error: errorMessage(result.error),
+        error: "observability_write_failed",
       });
     }
   } catch (error) {
+    void error;
     console.warn("[observability] write threw", {
       label,
-      error: errorMessage(error),
+      error: "observability_write_threw",
     });
   }
 }
@@ -326,7 +370,9 @@ export async function finishWorkflowRun(
       asBuilder(supabase.from("workflow_runs")).update({
         status,
         ended_at: new Date().toISOString(),
-        last_error: error ? errorMessage(error).slice(0, 1000) : null,
+        last_error: error
+          ? safeObservabilityErrorCode(error, "workflow_failed")
+          : null,
         ...(metadata
           ? { metadata: sanitizeObservabilityMetadata(metadata) }
           : {}),
@@ -519,8 +565,7 @@ export async function recordObservedOpenAICall(
         started_at: call.startedAt.toISOString(),
         ended_at: call.endedAt.toISOString(),
         error_message: call.response?.ok === false
-          ? errorMessage(call.response.raw?.error ?? call.response.rawText)
-            .slice(0, 1000)
+          ? openAIObservabilityErrorCode(call.response)
           : null,
         foglamp_exported: call.foglampExported === true,
         foglamp_span_estimate: spanEstimate,
@@ -565,7 +610,9 @@ export async function recordObservedProviderCall(
         duration_ms: durationMs(call.startedAt, call.endedAt),
         started_at: call.startedAt.toISOString(),
         ended_at: call.endedAt.toISOString(),
-        error_message: call.error ? errorMessage(call.error).slice(0, 1000) : null,
+        error_message: call.error
+          ? providerObservabilityErrorCode(call)
+          : null,
         foglamp_exported: call.foglampExported === true,
         foglamp_span_estimate: spanEstimate,
         foglamp_skip_reason: call.foglampSkipReason ?? null,

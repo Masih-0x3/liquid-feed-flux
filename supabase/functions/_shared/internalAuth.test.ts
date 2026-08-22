@@ -1,14 +1,19 @@
 import { assertEquals } from "jsr:@std/assert";
 import {
+  readRssWebhookAuthMode,
   readRssWebhookToken,
+  requireInternalAuth,
   requireRssWebhookAuth,
   verifyRssAppWebhookSignature,
 } from "./internalAuth.ts";
+import {
+  readBoundedRssWebhookBody,
+} from "./rssWebhookPayloadPolicy.ts";
 
 async function signRssAppPayload(
   secret: string,
   timestamp: number,
-  rawBody: string,
+  rawBody: string | Uint8Array,
 ): Promise<string> {
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey(
@@ -21,12 +26,59 @@ async function signRssAppPayload(
   const digest = await crypto.subtle.sign(
     "HMAC",
     key,
-    encoder.encode(`${timestamp}.${rawBody}`),
+    typeof rawBody === "string"
+      ? encoder.encode(`${timestamp}.${rawBody}`)
+      : new Uint8Array([
+        ...encoder.encode(`${timestamp}.`),
+        ...rawBody,
+      ]),
   );
   return Array.from(new Uint8Array(digest)).map((byte) =>
     byte.toString(16).padStart(2, "0")
   ).join("");
 }
+
+Deno.test("requireInternalAuth is local, fail-closed, and accepts only reviewed credentials", async () => {
+  const corsHeaders = { "Access-Control-Allow-Origin": "https://xot.example" };
+  const options = {
+    sharedSecret: "shared-secret",
+    serviceRoleKey: "service-role-secret",
+  };
+
+  const sharedSecretResult = await requireInternalAuth(
+    new Request("https://example.test/functions/v1/worker", {
+      headers: { "x-internal-token": "shared-secret" },
+    }),
+    corsHeaders,
+    options,
+  );
+  assertEquals(sharedSecretResult, null);
+
+  const bearerResult = await requireInternalAuth(
+    new Request("https://example.test/functions/v1/worker", {
+      headers: { Authorization: "Bearer service-role-secret" },
+    }),
+    corsHeaders,
+    options,
+  );
+  assertEquals(bearerResult, null);
+
+  const missingResult = await requireInternalAuth(
+    new Request("https://example.test/functions/v1/worker"),
+    corsHeaders,
+    options,
+  );
+  assertEquals(missingResult?.status, 401);
+
+  const wrongSchemeResult = await requireInternalAuth(
+    new Request("https://example.test/functions/v1/worker", {
+      headers: { Authorization: "Basic service-role-secret" },
+    }),
+    corsHeaders,
+    options,
+  );
+  assertEquals(wrongSchemeResult?.status, 401);
+});
 
 Deno.test("readRssWebhookToken prefers header tokens", () => {
   const req = new Request("https://example.test/hook?token=query-token", {
@@ -90,12 +142,10 @@ Deno.test("requireRssWebhookAuth rejects query-only tokens", async () => {
   assertEquals(result?.status, 401);
 });
 
-Deno.test("requireRssWebhookAuth accepts header token through vault fallback", async () => {
+Deno.test("requireRssWebhookAuth does not fall back to the shared Vault token verifier", async () => {
   const supabase = {
     rpc(name: string, args: Record<string, unknown>) {
-      assertEquals(name, "verify_webhook_internal_token");
-      assertEquals(args, { p_token: "header-token" });
-      return Promise.resolve({ data: true, error: null });
+      throw new Error(`RSS auth must not call ${name} with ${JSON.stringify(args)}`);
     },
   };
 
@@ -108,6 +158,17 @@ Deno.test("requireRssWebhookAuth accepts header token through vault fallback", a
     {},
   );
 
+  assertEquals(result?.status, 401);
+});
+
+Deno.test("readRssWebhookAuthMode rejects malformed configured signatures before body buffering", () => {
+  const result = readRssWebhookAuthMode(
+    new Request("https://example.test/functions/v1/webhooks-rssapp", {
+      method: "POST",
+      headers: { "RSSApp-Signature": "not-a-valid-signature" },
+    }),
+    { signingSecret: "signing-secret" },
+  );
   assertEquals(result, null);
 });
 
@@ -147,6 +208,30 @@ Deno.test("verifyRssAppWebhookSignature rejects stale RSS.app signatures", async
   });
 
   assertEquals(result, false);
+});
+
+Deno.test("verifyRssAppWebhookSignature preserves an exact UTF-8 BOM body for HMAC", async () => {
+  const rawText = JSON.stringify({ id: "evt_bom", data: { items_new: [] } });
+  const rawBytes = new Uint8Array([0xef, 0xbb, 0xbf, ...new TextEncoder().encode(rawText)]);
+  const bounded = await readBoundedRssWebhookBody(
+    new Request("https://example.test/functions/v1/webhooks-rssapp", {
+      method: "POST",
+      body: rawBytes,
+    }),
+  );
+  const timestamp = 1716220800;
+  const signature = await signRssAppPayload("signing-secret", timestamp, bounded.bytes);
+
+  const result = await verifyRssAppWebhookSignature({
+    rawBody: bounded.text,
+    rawBodyBytes: bounded.bytes,
+    header: `t=${timestamp},v1=${signature}`,
+    signingSecret: "signing-secret",
+    nowMs: () => timestamp * 1000,
+  });
+
+  assertEquals(bounded.text, rawText);
+  assertEquals(result, true);
 });
 
 Deno.test("requireRssWebhookAuth accepts signed webhook without query-token telemetry", async () => {

@@ -6,10 +6,15 @@ import {
   rmFetchFromFx,
   rmFetchFromVx,
 } from "./mediaWorkflow.ts";
+import type { RemoteMediaDnsResolver } from "../_shared/remoteMediaPolicy.ts";
 
 type FetchCall = {
   input: string;
+  redirect?: RequestRedirect;
 };
+
+const publicDnsResolver: RemoteMediaDnsResolver = async (_hostname, recordType) =>
+  recordType === "A" ? ["93.184.216.34"] : ["2606:2800:220:1:248:1893:25c8:1946"];
 
 function response(body: Record<string, unknown>, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -23,8 +28,9 @@ function fetchSequence(responses: Response[]) {
   let index = 0;
   const fetchImpl = async (
     input: string | URL | Request,
+    init?: RequestInit,
   ): Promise<Response> => {
-    calls.push({ input: String(input) });
+    calls.push({ input: String(input), redirect: init?.redirect });
     return responses[index++] ?? response({}, 404);
   };
   return { calls, fetchImpl };
@@ -38,18 +44,18 @@ Deno.test("rmFetchFromFx picks best video variant and upgrades photos", async ()
           videos: [
             {
               type: "video",
-              url: "https://video.example/fallback.mp4",
+              url: "https://video.twimg.com/ext_tw_video/abc/vid/720x1280/fallback.mp4",
               width: 720,
               height: 1280,
               duration: 5.9,
               variants: [
                 {
-                  url: "https://video.example/low.mp4",
+                  url: "https://video.twimg.com/ext_tw_video/abc/vid/720x1280/low.mp4",
                   bitrate: 200_000,
                   content_type: "video/mp4",
                 },
                 {
-                  url: "https://video.example/high.mp4",
+                  url: "https://video.twimg.com/ext_tw_video/abc/vid/720x1280/high.mp4",
                   bitrate: 1_200_000,
                   content_type: "video/mp4",
                 },
@@ -69,15 +75,16 @@ Deno.test("rmFetchFromFx picks best video variant and upgrades photos", async ()
     }),
   ]);
 
-  const rows = await rmFetchFromFx("source", "123", fetchImpl);
+  const rows = await rmFetchFromFx("source", "123", fetchImpl, publicDnsResolver);
 
   assertEquals(calls, [{
     input: "https://api.fxtwitter.com/source/status/123",
+    redirect: "error",
   }]);
   assertEquals(rows, [
     {
       kind: "video",
-      url: "https://video.example/high.mp4",
+      url: "https://video.twimg.com/ext_tw_video/abc/vid/720x1280/high.mp4",
       width: 720,
       height: 1280,
       duration_ms: 5900,
@@ -97,7 +104,7 @@ Deno.test("rmFetchFromVx parses extended media and upgrades image URLs", async (
       media_extended: [
         {
           type: "gif",
-          url: "https://video.example/loop.mp4",
+          url: "https://video.twimg.com/ext_tw_video/abc/vid/720x1280/loop.mp4",
           duration_millis: 4200,
         },
         {
@@ -109,12 +116,12 @@ Deno.test("rmFetchFromVx parses extended media and upgrades image URLs", async (
     }),
   ]);
 
-  const rows = await rmFetchFromVx("source", "123", fetchImpl);
+  const rows = await rmFetchFromVx("source", "123", fetchImpl, publicDnsResolver);
 
   assertEquals(rows, [
     {
       kind: "gif",
-      url: "https://video.example/loop.mp4",
+      url: "https://video.twimg.com/ext_tw_video/abc/vid/720x1280/loop.mp4",
       duration_ms: 4200,
     },
     {
@@ -128,7 +135,7 @@ Deno.test("buildResolvedMediaRows clears stale storage metadata for resolved row
   const rows = await buildResolvedMediaRows("tweet-1", [
     {
       kind: "video",
-      url: "https://video.example/high.mp4",
+      url: "https://video.twimg.com/ext_tw_video/abc/vid/720x1280/high.mp4",
       width: 719.6,
       height: 1280.4,
       duration_ms: 5900.6,
@@ -143,7 +150,7 @@ Deno.test("buildResolvedMediaRows clears stale storage metadata for resolved row
   assertEquals(rows[0], {
     tweet_id: "tweet-1",
     kind: "video",
-    src_url: "https://video.example/high.mp4",
+    src_url: "https://video.twimg.com/ext_tw_video/abc/vid/720x1280/high.mp4",
     src_url_hash: rows[0].src_url_hash,
     width: 720,
     height: 1280,
@@ -160,6 +167,23 @@ Deno.test("buildResolvedMediaRows clears stale storage metadata for resolved row
   assertEquals(rows[1].downloaded_at, null);
   assertEquals(rows[1].file_size, null);
   assertEquals(rows[1].mime_type, null);
+});
+
+Deno.test("buildResolvedMediaRows excludes unreviewed proxy media URLs before persistence", async () => {
+  const rows = await buildResolvedMediaRows("tweet-1", [
+    {
+      kind: "video",
+      url: "https://video.example/internal-looking.mp4",
+    },
+    {
+      kind: "image",
+      url: "https://pbs.twimg.com/media/photo.jpg?format=jpg&name=orig",
+    },
+  ]);
+
+  assertEquals(rows.length, 1);
+  assertEquals(rows[0].src_url, "https://pbs.twimg.com/media/photo.jpg?format=jpg&name=orig");
+  assertEquals(rows[0].ordering, 0);
 });
 
 Deno.test("buildResolveMediaDownloadJob keeps per-invocation idempotency key", () => {

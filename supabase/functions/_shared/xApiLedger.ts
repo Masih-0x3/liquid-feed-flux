@@ -55,8 +55,52 @@ export function classifyXBillableUnit(endpoint: string, method = 'GET'): string 
   return 'api_request';
 }
 
-// deno-lint-ignore no-explicit-any
-export async function recordXApiEvent(supabase: any, input: XApiEventInput, response?: Response | null): Promise<void> {
+function safeXApiLedgerErrorCode(error: unknown): string {
+  const message = error instanceof Error ? error.message.trim() : '';
+  return message === 'x_api_event_insert_failed'
+    ? message
+    : 'x_api_event_insert_failed';
+}
+
+const SAFE_X_API_ERROR_CODE = /^[a-z][a-z0-9]*(?:_[a-z0-9]+){1,10}$/;
+
+function boundedXApiStatus(value: unknown): number | null {
+  const status = typeof value === 'number' ? value : Number(value);
+  return Number.isInteger(status) && status >= 400 && status <= 599
+    ? status
+    : null;
+}
+
+function safeXApiEventError(value: unknown, status?: unknown): string | null {
+  if (value == null || value === '') {
+    const boundedStatus = boundedXApiStatus(status);
+    return boundedStatus === null ? null : `x_api_http_${boundedStatus}`;
+  }
+  const message = value instanceof Error
+    ? value.message.trim()
+    : typeof value === 'string'
+    ? value.trim()
+    : '';
+  if (message.length >= 3 && message.length <= 96 && SAFE_X_API_ERROR_CODE.test(message)) {
+    return message;
+  }
+  const boundedStatus = boundedXApiStatus(status);
+  return boundedStatus === null ? 'x_api_request_failed' : `x_api_http_${boundedStatus}`;
+}
+
+type XApiLedgerClient = {
+  from(table: string): {
+    insert(values: Record<string, unknown>): PromiseLike<{ error?: unknown }>;
+  };
+};
+
+function checkedXApiLedgerClient(client: unknown): XApiLedgerClient | null {
+  if (!client || typeof client !== "object") return null;
+  const from = (client as { from?: unknown }).from;
+  return typeof from === "function" ? client as XApiLedgerClient : null;
+}
+
+export async function recordXApiEvent(supabase: unknown, input: XApiEventInput, response?: Response | null): Promise<void> {
   const headers = response ? extractXRateLimitHeaders(response.headers) : {
     rateLimitLimit: null,
     rateLimitRemaining: null,
@@ -66,7 +110,16 @@ export async function recordXApiEvent(supabase: any, input: XApiEventInput, resp
   const ok = input.ok ?? response?.ok ?? false;
 
   try {
-    await supabase.from('x_api_events').insert({
+    const ledger = checkedXApiLedgerClient(supabase);
+    if (!ledger) {
+      console.warn(JSON.stringify({
+        function: 'x-api-ledger',
+        action: 'event_insert_failed',
+        error: 'x_api_event_insert_failed',
+      }));
+      return;
+    }
+    const { error: eventInsertError } = await ledger.from('x_api_events').insert({
       source: input.source,
       source_action: input.sourceAction,
       endpoint: summarizeEndpoint(input.endpoint),
@@ -75,7 +128,7 @@ export async function recordXApiEvent(supabase: any, input: XApiEventInput, resp
       x_user_id: input.userId ?? null,
       http_status: status,
       ok,
-      error: input.error ? String(input.error).slice(0, 1000) : null,
+      error: safeXApiEventError(input.error, status),
       rate_limit_limit: headers.rateLimitLimit,
       rate_limit_remaining: headers.rateLimitRemaining,
       rate_limit_reset_at: headers.rateLimitResetAt,
@@ -83,7 +136,18 @@ export async function recordXApiEvent(supabase: any, input: XApiEventInput, resp
       request_counted: input.requestCounted !== false,
       metadata: input.metadata ?? {},
     });
-  } catch (e) {
-    console.warn('recordXApiEvent failed:', e instanceof Error ? e.message : String(e));
+    if (eventInsertError) {
+      console.warn(JSON.stringify({
+        function: 'x-api-ledger',
+        action: 'event_insert_failed',
+        error: safeXApiLedgerErrorCode(eventInsertError),
+      }));
+    }
+  } catch (error) {
+    console.warn(JSON.stringify({
+      function: 'x-api-ledger',
+      action: 'event_insert_failed',
+      error: safeXApiLedgerErrorCode(error),
+    }));
   }
 }

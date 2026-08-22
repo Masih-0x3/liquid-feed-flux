@@ -56,16 +56,15 @@ async function loadVideoRenderConfig(
   supabase: any,
 ): Promise<VideoRenderConfig> {
   try {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("settings")
       .select("value")
       .eq("key", "video_render_config")
       .maybeSingle();
+    if (error) throw error;
     return normalizeVideoRenderConfigValue(data?.value);
   } catch (_e) {
-    return normalizeVideoRenderConfigValue({
-      render_version: VIDEO_RENDER_VERSION,
-    });
+    throw new Error("video_render_config_read_failed");
   }
 }
 
@@ -96,8 +95,14 @@ async function loadVideoRenderDecision(
   ]);
   if (mediaRes.error) throw mediaRes.error;
   if (renderRes.error) throw renderRes.error;
-  const mediaRows = (mediaRes.data ?? []) as XMediaRow[];
-  const renderRows = (renderRes.data ?? []) as VideoRenderRow[];
+  if (!Array.isArray(mediaRes.data)) {
+    throw new Error("video_render_media_result_invalid");
+  }
+  if (!Array.isArray(renderRes.data)) {
+    throw new Error("video_render_result_invalid");
+  }
+  const mediaRows = mediaRes.data as XMediaRow[];
+  const renderRows = renderRes.data as VideoRenderRow[];
   return {
     mediaRows,
     decision: decideVideoRenderGate({
@@ -167,7 +172,9 @@ async function dispatchVideoRendererForTarget(
     signal: controller.signal,
   }).then(async (resp) => {
     if (!resp.ok) {
-      const text = await resp.text().catch(() => "");
+      const status = Number.isInteger(resp.status) && resp.status >= 100 && resp.status <= 599
+        ? resp.status
+        : 0;
       await insertPipelineEvent(
         supabase,
         "post",
@@ -176,7 +183,7 @@ async function dispatchVideoRendererForTarget(
         "failed",
         null,
         new Date().toISOString(),
-        `renderer ${resp.status}: ${text.slice(0, 300)}`,
+        `renderer_http_${status}`,
         meta,
       );
     }
@@ -189,7 +196,7 @@ async function dispatchVideoRendererForTarget(
       "failed",
       null,
       new Date().toISOString(),
-      error instanceof Error ? error.message : String(error),
+      "renderer_dispatch_failed",
       meta,
     )
   ).finally(() => clearTimeout(timeout));
@@ -265,7 +272,7 @@ export async function prepareVideoRenderGate(
   }
 
   if (decision.action === "wait_media") {
-    await supabase.from("jobs").upsert({
+    const { error: downloadQueueError } = await supabase.from("jobs").upsert({
       type: "download_media",
       payload: { tweet_id: tweetId, source: "video_render_gate" },
       status: "pending",
@@ -278,6 +285,9 @@ export async function prepareVideoRenderGate(
       last_error: null,
       attempts: 0,
     }, { onConflict: "idempotency_key", ignoreDuplicates: false });
+    if (downloadQueueError) {
+      throw new Error("video_render_download_enqueue_failed");
+    }
     await insertPipelineEvent(
       supabase,
       "post",
@@ -382,13 +392,9 @@ async function enqueueDeliverJob(
       lease_expires_at: null,
       last_error: null,
       attempts: 0,
-    }, { onConflict: "idempotency_key", ignoreDuplicates: !resetExisting });
+  }, { onConflict: "idempotency_key", ignoreDuplicates: !resetExisting });
   if (deliveryJobError) {
-    console.warn(
-      `${source}: failed to enqueue deliver:`,
-      deliveryJobError.message,
-    );
-    return false;
+    throw new Error("deliver_enqueue_failed");
   }
 
   await insertPipelineEvent(
@@ -402,24 +408,33 @@ async function enqueueDeliverJob(
     null,
     { source, next_run_at: nextRunAt },
   );
-  try {
-    const { data: existingDel } = await supabase
+  const { data: existingDel, error: existingDelError } = await supabase
       .from("deliveries")
       .select("id")
       .eq("subject_type", "post")
       .eq("subject_id", tweetId)
       .eq("status", "pending")
       .limit(1);
-    if (!existingDel || existingDel.length === 0) {
-      await supabase.from("deliveries").insert({
+  if (existingDelError) {
+    throw new Error("deliver_pending_receipt_read_failed");
+  }
+  if (!Array.isArray(existingDel) || existingDel.some((row: unknown) => {
+    if (!row || typeof row !== "object" || Array.isArray(row)) return true;
+    const id = (row as Record<string, unknown>).id;
+    return typeof id !== "string" || id.trim().length === 0;
+  })) {
+    throw new Error("deliver_pending_receipt_invalid_response");
+  }
+  if (existingDel.length === 0) {
+    const { error: pendingReceiptError } = await supabase.from("deliveries").insert({
         subject_type: "post",
         subject_id: tweetId,
         status: "pending",
         attempts: 0,
       });
+    if (pendingReceiptError) {
+      throw new Error("deliver_pending_receipt_write_failed");
     }
-  } catch (_e) {
-    // best-effort
   }
   return true;
 }
@@ -491,11 +506,24 @@ export async function markVideoRenderPosted(
 ): Promise<void> {
   const cfg = await loadVideoRenderConfig(supabase);
   try {
-    await supabase.rpc("mark_video_render_posted", {
+    const { error } = await supabase.rpc("mark_video_render_posted", {
       p_tweet_id: tweetId,
       p_retention_hours: cfg.retentionHours,
     });
+    if (error) {
+      console.warn(JSON.stringify({
+        function: "worker",
+        action: "video_render_posted_update_failed",
+        error: "video_render_posted_update_failed",
+        tweet_id: tweetId,
+      }));
+    }
   } catch (_e) {
-    // best-effort
+    console.warn(JSON.stringify({
+      function: "worker",
+      action: "video_render_posted_update_failed",
+      error: "video_render_posted_update_failed",
+      tweet_id: tweetId,
+    }));
   }
 }

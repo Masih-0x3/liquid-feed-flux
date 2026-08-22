@@ -5,6 +5,12 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1';
 import { requireInternalAuth } from '../_shared/internalAuth.ts';
+import {
+  checkExternalPosting,
+  requireExternalPosting,
+  type ExternalPostingGuardOptions,
+} from '../_shared/externalPostingGuard.ts';
+import type { RuntimeControlsQueryClient } from '../_shared/runtimeControls.ts';
 import { recordXApiEvent } from '../_shared/xApiLedger.ts';
 import { buildXPostText, isEnrichmentBlockingXPost, pickHashtags } from '../_shared/xPostText.ts';
 import { allowCompletedEnrichmentForPosting, doesEnrichmentBlockX, normalizeEnrichmentConfig } from '../_shared/enrich.ts';
@@ -41,6 +47,7 @@ import {
   claimXPostDelivery,
   completeXPostDelivery,
   failXPostDelivery,
+  markXPostDeliveryProviderStarted,
   xPostClaimRejection,
   type XPostDeliveryClaim,
 } from '../_shared/xPostDeliveryClaim.ts';
@@ -50,6 +57,11 @@ import {
   StaleMediaObjectError,
   staleMediaObjectErrorForDownload,
 } from '../_shared/staleMediaRepair.ts';
+import {
+  getXQuotaBlockReason,
+  X_POSTING_QUOTA_MAX,
+  X_QUOTA_UNAVAILABLE,
+} from '../_shared/xQuotaAdmission.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': Deno.env.get('ALLOWED_CORS_ORIGIN') ?? 'https://liquid-feed-flux.lovable.app',
@@ -132,8 +144,31 @@ const DEFAULT_LIMITS: RateLimits = {
 };
 const VIDEO_RENDER_VERSION = 'persian-subtitles-masihh-v1';
 
+/** Public provider seam. The guard is the last operation before network I/O. */
+export async function guardedExternalProviderFetch(
+  client: RuntimeControlsQueryClient,
+  input: RequestInfo | URL,
+  init?: RequestInit,
+  options: ExternalPostingGuardOptions = {},
+): Promise<Response> {
+  await requireExternalPosting(client, options);
+  return fetch(input, init);
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────
 function isRecord(v: unknown): v is Record<string, unknown> { return typeof v === 'object' && v !== null && !Array.isArray(v); }
+function isNonNegativeSafeInteger(v: unknown): v is number {
+  return typeof v === 'number' && Number.isSafeInteger(v) && v >= 0;
+}
+function isPositiveSafeInteger(v: unknown): v is number {
+  return isNonNegativeSafeInteger(v) && v > 0;
+}
+function isBoundedPositiveSafeInteger(v: unknown, max: number): v is number {
+  return isPositiveSafeInteger(v) && v <= max;
+}
+function isOptionalNonNegativeSafeInteger(v: unknown): boolean {
+  return v === undefined || (typeof v === 'number' && Number.isSafeInteger(v) && v >= 0);
+}
 
 type PreparedMediaUpload = {
   bytes: Uint8Array;
@@ -152,7 +187,7 @@ async function downloadMediaForUpload(
       id: row.id ?? null,
     });
     if (staleError) throw staleError;
-    throw new Error(`download ${storagePath}: ${error?.message || 'no blob'}`);
+    throw new Error('media_download_failed');
   }
   return {
     bytes: new Uint8Array(await blob.arrayBuffer()),
@@ -167,22 +202,46 @@ async function repairOriginalStaleMediaForX(
   source: string,
 ): Promise<boolean> {
   if (isProcessedRenderStoragePath(error.storagePath)) return false;
-  await repairStaleMediaObject(sb, {
-    tweetId,
-    mediaId: error.mediaId,
-    storagePath: error.storagePath,
-    source,
-  });
-  return true;
+  try {
+    await repairStaleMediaObject(sb, {
+      tweetId,
+      mediaId: error.mediaId,
+      storagePath: error.storagePath,
+      source,
+    });
+    return true;
+  } catch (_repairError) {
+    console.warn('[x-poster] stale media repair failed; preserving stable failure envelope', {
+      tweet_id: tweetId,
+      source,
+      error: 'stale_media_repair_failed',
+    });
+    return false;
+  }
 }
 
 // deno-lint-ignore no-explicit-any
 async function loadVideoRenderConfig(sb: any): Promise<VideoRenderConfig> {
+  const { data, error } = await sb.from('settings').select('value').eq('key', 'video_render_config').maybeSingle();
+  if (error) {
+    throw new Error('video_render_config_read_failed');
+  }
+  if (data !== null && (typeof data !== 'object' || Array.isArray(data))) {
+    throw new Error('video_render_config_invalid_response');
+  }
+  return normalizeVideoRenderConfigValue(data?.value);
+}
+
+// Retention cleanup runs after X has accepted the provider request. Its
+// configuration read must never rewrite an already-ambiguous provider result
+// into a second failure, so this helper is deliberately isolated from the
+// pre-provider gate above.
+// deno-lint-ignore no-explicit-any
+async function loadVideoRenderRetentionHours(sb: any): Promise<number> {
   try {
-    const { data } = await sb.from('settings').select('value').eq('key', 'video_render_config').maybeSingle();
-    return normalizeVideoRenderConfigValue(data?.value);
+    return (await loadVideoRenderConfig(sb)).retentionHours;
   } catch (_e) {
-    return normalizeVideoRenderConfigValue({ render_version: VIDEO_RENDER_VERSION });
+    return normalizeVideoRenderConfigValue({ render_version: VIDEO_RENDER_VERSION }).retentionHours;
   }
 }
 
@@ -195,7 +254,7 @@ async function insertVideoRenderPipelineEvent(
   meta: Record<string, unknown>,
 ): Promise<void> {
   try {
-    await sb.from('pipeline_events').insert({
+    const { error: pipelineEventError } = await sb.from('pipeline_events').insert({
       subject_type: 'post',
       subject_id: tweetId,
       step: 'video_render',
@@ -203,7 +262,47 @@ async function insertVideoRenderPipelineEvent(
       error,
       meta,
     });
-  } catch (_e) { /* best-effort */ }
+    if (pipelineEventError) {
+      console.warn(JSON.stringify({
+        function: 'x-poster',
+        action: 'video_pipeline_event_insert_failed',
+        error: 'video_pipeline_event_insert_failed',
+      }));
+    }
+  } catch (_e) {
+    console.warn(JSON.stringify({
+      function: 'x-poster',
+      action: 'video_pipeline_event_insert_failed',
+      error: 'video_pipeline_event_insert_failed',
+    }));
+  }
+}
+
+// deno-lint-ignore no-explicit-any
+async function markVideoRenderPostedBestEffort(
+  sb: any,
+  tweetId: string,
+  retentionHours: number,
+): Promise<void> {
+  try {
+    const { error: markPostedError } = await sb.rpc('mark_video_render_posted', {
+      p_tweet_id: tweetId,
+      p_retention_hours: retentionHours,
+    });
+    if (markPostedError) {
+      console.warn(JSON.stringify({
+        function: 'x-poster',
+        action: 'video_render_posted_update_failed',
+        error: 'video_render_posted_update_failed',
+      }));
+    }
+  } catch (_e) {
+    console.warn(JSON.stringify({
+      function: 'x-poster',
+      action: 'video_render_posted_update_failed',
+      error: 'video_render_posted_update_failed',
+    }));
+  }
 }
 
 // deno-lint-ignore no-explicit-any
@@ -232,11 +331,13 @@ async function dispatchVideoRendererForTarget(sb: any, renderId: string, tweetId
       signal: controller.signal,
     });
     if (!resp.ok) {
-      const text = await resp.text().catch(() => '');
-      await insertVideoRenderPipelineEvent(sb, tweetId, 'failed', `renderer ${resp.status}: ${text.slice(0, 300)}`, meta);
+      const status = Number.isInteger(resp.status) && resp.status >= 100 && resp.status <= 599
+        ? resp.status
+        : 0;
+      await insertVideoRenderPipelineEvent(sb, tweetId, 'failed', `renderer_http_${status}`, meta);
     }
   } catch (error) {
-    await insertVideoRenderPipelineEvent(sb, tweetId, 'failed', error instanceof Error ? error.message : String(error), meta);
+    await insertVideoRenderPipelineEvent(sb, tweetId, 'failed', 'renderer_dispatch_failed', meta);
   } finally {
     clearTimeout(timeout);
   }
@@ -257,11 +358,12 @@ async function gateXVideoRender(
     .eq('tweet_id', tweetId)
     .order('updated_at', { ascending: false });
   if (error) throw error;
+  if (!Array.isArray(renderRows)) throw new Error('x_poster_video_render_result_invalid');
 
   const decision = decideVideoRenderGate({
     tweetId,
     mediaRows,
-    renderRows: (renderRows ?? []) as VideoRenderRow[],
+    renderRows: renderRows as VideoRenderRow[],
     renderingEnabled: cfg.mode !== 'disabled',
   });
 
@@ -337,6 +439,16 @@ async function trimRollingWindow(arr: string[], windowMs: number): Promise<strin
 const VIDEO_CHUNK_BYTES = 4 * 1024 * 1024;      // 4MB chunks for APPEND
 const VIDEO_PROCESS_TIMEOUT_MS = 55 * 1000;     // total polling budget
 
+function safeXProviderHttpError(operation: string, status: unknown): string {
+  const safeOperation = /^[a-z][a-z0-9_]{1,40}$/.test(operation)
+    ? operation
+    : "request";
+  const numericStatus = typeof status === "number" && Number.isInteger(status) && status >= 100 && status <= 599
+    ? status
+    : 0;
+  return `x_provider_${safeOperation}_http_${numericStatus}`;
+}
+
 // ─── X media upload (image, simple base64) ───────────────────────────
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = '';
@@ -357,7 +469,7 @@ async function uploadImage(
   const b64 = bytesToBase64(bytes);
   const params: Record<string, string> = { media_data: b64 };
   const auth = await oauthHeader('POST', UPLOAD_URL, params, ck, cs, at, ats);
-  const resp = await fetch(UPLOAD_URL, {
+  const resp = await guardedExternalProviderFetch(sb, UPLOAD_URL, {
     method: 'POST',
     headers: { Authorization: auth, 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams(params),
@@ -372,7 +484,7 @@ async function uploadImage(
     error: resp.ok ? null : `media upload ${resp.status}`,
     estimatedBillableUnit: 'media_upload',
   }, resp);
-  if (!resp.ok) throw new Error(`media upload ${resp.status}: ${text.slice(0, 300)} (mime=${mime})`);
+  if (!resp.ok) throw new Error(safeXProviderHttpError('media_upload_image', resp.status));
   const json = JSON.parse(text);
   return String(json.media_id_string || json.media_id);
 }
@@ -391,7 +503,7 @@ async function uploadVideoChunked(
     media_category: 'tweet_video',
   };
   const initAuth = await oauthHeader('POST', UPLOAD_URL, initParams, ck, cs, at, ats);
-  const initResp = await fetch(UPLOAD_URL, {
+  const initResp = await guardedExternalProviderFetch(sb, UPLOAD_URL, {
     method: 'POST',
     headers: { Authorization: initAuth, 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams(initParams),
@@ -406,7 +518,7 @@ async function uploadVideoChunked(
     error: initResp.ok ? null : `video INIT ${initResp.status}`,
     estimatedBillableUnit: 'media_upload',
   }, initResp);
-  if (!initResp.ok) throw new Error(`video INIT ${initResp.status}: ${initText.slice(0, 300)}`);
+  if (!initResp.ok) throw new Error(safeXProviderHttpError('video_init', initResp.status));
   const initJson = JSON.parse(initText);
   const mediaId = String(initJson.media_id_string || initJson.media_id);
 
@@ -422,7 +534,7 @@ async function uploadVideoChunked(
     const chunkBuffer = new ArrayBuffer(chunk.byteLength);
     new Uint8Array(chunkBuffer).set(chunk);
     form.append('media', new Blob([chunkBuffer], { type: 'application/octet-stream' }));
-    const appendResp = await fetch(UPLOAD_URL, {
+    const appendResp = await guardedExternalProviderFetch(sb, UPLOAD_URL, {
       method: 'POST',
       headers: { Authorization: appendAuth },
       body: form,
@@ -438,14 +550,14 @@ async function uploadVideoChunked(
       estimatedBillableUnit: 'media_upload',
       metadata: { segment },
     }, appendResp);
-    if (!appendResp.ok) throw new Error(`video APPEND seg=${segment} ${appendResp.status}: ${appendText.slice(0, 300)}`);
+    if (!appendResp.ok) throw new Error(safeXProviderHttpError('video_append', appendResp.status));
     segment += 1;
   }
 
   // FINALIZE
   const finParams: Record<string, string> = { command: 'FINALIZE', media_id: mediaId };
   const finAuth = await oauthHeader('POST', UPLOAD_URL, finParams, ck, cs, at, ats);
-  const finResp = await fetch(UPLOAD_URL, {
+  const finResp = await guardedExternalProviderFetch(sb, UPLOAD_URL, {
     method: 'POST',
     headers: { Authorization: finAuth, 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams(finParams),
@@ -460,7 +572,7 @@ async function uploadVideoChunked(
     error: finResp.ok ? null : `video FINALIZE ${finResp.status}`,
     estimatedBillableUnit: 'media_upload',
   }, finResp);
-  if (!finResp.ok) throw new Error(`video FINALIZE ${finResp.status}: ${finText.slice(0, 300)}`);
+  if (!finResp.ok) throw new Error(safeXProviderHttpError('video_finalize', finResp.status));
   const finJson = JSON.parse(finText);
 
   // STATUS poll if async processing
@@ -468,7 +580,7 @@ async function uploadVideoChunked(
   const deadline = Date.now() + VIDEO_PROCESS_TIMEOUT_MS;
   while (processing && processing.state && processing.state !== 'succeeded') {
     if (processing.state === 'failed') {
-      throw new Error(`video processing failed: ${processing.error?.message || 'unknown'}`);
+      throw new Error('x_provider_video_processing_failed');
     }
     if (Date.now() > deadline) throw new Error('video processing timeout');
     const wait = Math.max(1, processing.check_after_secs ?? 2) * 1000;
@@ -476,7 +588,7 @@ async function uploadVideoChunked(
     const statusParams: Record<string, string> = { command: 'STATUS', media_id: mediaId };
     const qs = new URLSearchParams(statusParams).toString();
     const statusAuth = await oauthHeader('GET', UPLOAD_URL, statusParams, ck, cs, at, ats);
-    const statusResp = await fetch(`${UPLOAD_URL}?${qs}`, {
+    const statusResp = await guardedExternalProviderFetch(sb, `${UPLOAD_URL}?${qs}`, {
       method: 'GET',
       headers: { Authorization: statusAuth },
     });
@@ -490,7 +602,7 @@ async function uploadVideoChunked(
       error: statusResp.ok ? null : `video STATUS ${statusResp.status}`,
       estimatedBillableUnit: 'media_upload',
     }, statusResp);
-    if (!statusResp.ok) throw new Error(`video STATUS ${statusResp.status}: ${statusText.slice(0, 300)}`);
+    if (!statusResp.ok) throw new Error(safeXProviderHttpError('video_status', statusResp.status));
     const statusJson = JSON.parse(statusText);
     processing = statusJson.processing_info;
   }
@@ -508,7 +620,7 @@ async function postTweet(
   const body: Record<string, unknown> = { text };
   if (mediaIds.length > 0) body.media = { media_ids: mediaIds };
   const auth = await oauthHeader('POST', url, {}, ck, cs, at, ats);
-  const resp = await fetch(url, {
+  const resp = await guardedExternalProviderFetch(sb, url, {
     method: 'POST',
     headers: { Authorization: auth, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -526,17 +638,15 @@ async function postTweet(
     metadata: { media_count: mediaIds.length },
   }, resp);
   if (!resp.ok) {
-    const err = new Error(`tweet ${resp.status}: ${text2.slice(0, 400)}`);
+    const err = new Error(safeXProviderHttpError('post_tweet', resp.status));
     (err as { status?: number }).status = resp.status;
-    (err as { raw?: unknown }).raw = json;
     throw err;
   }
   const d = (json as { data?: { id?: string } }).data;
   const id = typeof d?.id === 'string' && /^\d+$/.test(d.id) ? d.id : '';
   if (!id) {
-    const err = new Error(`tweet 200 but missing data.id: ${text2.slice(0, 400)}`);
+    const err = new Error('x_provider_post_tweet_missing_id');
     (err as { status?: number }).status = 502;
-    (err as { raw?: unknown }).raw = json;
     throw err;
   }
   return { id, raw: json };
@@ -546,6 +656,37 @@ function cleanString(value: unknown, maxLength = 2000): string {
   return typeof value === 'string' ? value.trim().slice(0, maxLength) : '';
 }
 
+function safeManualFailureCode(reason: unknown): string {
+  const value = typeof reason === 'string' ? reason.trim() : '';
+  const match = value.match(/^([a-z][a-z0-9_]{1,80})/);
+  return match?.[1] ?? 'manual_failure';
+}
+
+function safeManualFailureMeta(meta: unknown): Record<string, unknown> {
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return {};
+  const source = meta as Record<string, unknown>;
+  const safe: Record<string, unknown> = {};
+  for (const key of ['render_id', 'media_id', 'dup_of_tweet_id']) {
+    const value = cleanString(source[key], 80);
+    if (value) safe[key] = value;
+  }
+  if (source.duplicate_gate === true) safe.duplicate_gate = true;
+  if (typeof source.x_api_ms === 'number' && Number.isFinite(source.x_api_ms)) {
+    safe.x_api_ms = Math.max(0, Math.min(600_000, Math.floor(source.x_api_ms)));
+  }
+  return safe;
+}
+
+function safeXPosterErrorCode(error: unknown, fallback = 'x_poster_failed'): string {
+  const message = error instanceof Error
+    ? error.message
+    : typeof error === 'string'
+    ? error
+    : '';
+  const match = message.trim().match(/^([a-z][a-z0-9_]{1,96})/);
+  return match?.[1] ?? fallback;
+}
+
 function xPosterJson(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -553,15 +694,23 @@ function xPosterJson(body: unknown, status = 200): Response {
   });
 }
 
+function quotaUnavailableResponse(): Response {
+  return xPosterJson({ ok: false, skipped: true, reason: X_QUOTA_UNAVAILABLE }, 503);
+}
+
 // deno-lint-ignore no-explicit-any
 async function updateManualIntake(sb: any, intakeId: string, patch: Record<string, unknown>): Promise<void> {
   try {
-    await sb.from('manual_video_intakes').update({
+    const { error: updateError } = await sb.from('manual_video_intakes').update({
       ...patch,
       updated_at: new Date().toISOString(),
     }).eq('id', intakeId);
+    if (updateError) {
+      throw new Error('manual_intake_persistence_failed');
+    }
   } catch (e) {
-    console.error('[x-poster] manual intake update failed', { intakeId, err: (e as Error).message });
+    console.error('[x-poster] manual intake update failed', { intakeId, err: safeXPosterErrorCode(e, 'manual_intake_update_failed') });
+    throw e;
   }
 }
 
@@ -571,15 +720,16 @@ async function completeManualFailure(
   input: {
     intakeId: string;
     tweetId: string;
-    status: 'blocked' | 'failed';
+    status: 'blocked' | 'failed' | 'ambiguous';
     reason: string;
     startedAt: number;
     meta?: Record<string, unknown>;
   },
 ): Promise<Response> {
+  const reasonCode = safeManualFailureCode(input.reason);
   await updateManualIntake(sb, input.intakeId, {
     status: input.status,
-    last_error: input.reason.slice(0, 1000),
+    last_error: reasonCode,
   });
   await insertXPipelineEvent(
     sb,
@@ -587,18 +737,18 @@ async function completeManualFailure(
     input.status === 'blocked' ? 'skipped' : 'failed',
     new Date(input.startedAt).toISOString(),
     new Date().toISOString(),
-    input.reason,
+    reasonCode,
     {
       dispatch_source: 'manual_video_intake',
       intake_id: input.intakeId,
-      reason: input.reason,
-      ...(input.meta ?? {}),
+      reason: reasonCode,
+      ...safeManualFailureMeta(input.meta),
     },
   );
   return xPosterJson({
     ok: false,
     status: input.status,
-    reason: input.reason,
+    reason: reasonCode,
     tweet_id: input.tweetId,
     intake_id: input.intakeId,
   });
@@ -651,6 +801,10 @@ async function assertObservedFinalDuplicateState(params: {
       callOpenAI: observedDedupeOpenAI(params.sb, workflowRunKey, metadata),
     });
 
+    if (result.outcome === 'unknown') {
+      throw new Error(`dedupe_assertion_unknown:${result.reason ?? 'unknown'}`);
+    }
+
     await finishWorkflowRun(
       params.sb,
       workflowRunKey,
@@ -698,7 +852,7 @@ async function handleManualVideoIntakePost(params: {
     .eq('id', manualIntakeId)
     .maybeSingle();
   if (intakeError) {
-    return xPosterJson({ ok: false, error: intakeError.message ?? 'manual intake lookup failed' }, 500);
+    return xPosterJson({ ok: false, error: 'manual_intake_lookup_failed' }, 500);
   }
   if (!intake) {
     return xPosterJson({ ok: false, error: 'manual intake not found' }, 404);
@@ -747,7 +901,7 @@ async function handleManualVideoIntakePost(params: {
     });
   }
 
-  const { data: latestX } = await params.sb
+  const { data: latestX, error: latestXError } = await params.sb
     .from('x_deliveries')
     .select('status, x_tweet_id, posted_at, created_at')
     .eq('post_id', tweetId)
@@ -755,6 +909,15 @@ async function handleManualVideoIntakePost(params: {
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
+  if (latestXError) {
+    return completeManualFailure(params.sb, {
+      intakeId: manualIntakeId,
+      tweetId,
+      status: 'failed',
+      reason: 'delivery_lookup_failed',
+      startedAt,
+    });
+  }
   if (latestX?.status === 'posted' && latestX.x_tweet_id) {
     await updateManualIntake(params.sb, manualIntakeId, {
       status: 'posted',
@@ -794,7 +957,7 @@ async function handleManualVideoIntakePost(params: {
       intakeId: manualIntakeId,
       tweetId,
       status: 'failed',
-      reason: `post_lookup_failed:${postError?.message ?? 'not_found'}`,
+      reason: 'post_lookup_failed',
       startedAt,
     });
   }
@@ -820,7 +983,7 @@ async function handleManualVideoIntakePost(params: {
         intakeId: manualIntakeId,
         tweetId,
         status: 'failed',
-        reason: `dedupe_assertion_failed:${(e as Error).message}`,
+        reason: 'dedupe_assertion_failed',
         startedAt,
       });
     }
@@ -855,11 +1018,29 @@ async function handleManualVideoIntakePost(params: {
     }
   }
 
-  const { data: mediaRows } = await params.sb.from('media')
+  const { data: mediaRows, error: mediaRowsError } = await params.sb.from('media')
     .select('id, storage_path, downloaded_at, mime_type, file_size, kind, duration_ms, src_url')
     .eq('tweet_id', tweetId)
     .order('ordering', { ascending: true });
-  const rawMediaRows = ((mediaRows as XMediaRow[] | null) ?? []);
+  if (mediaRowsError) {
+    return completeManualFailure(params.sb, {
+      intakeId: manualIntakeId,
+      tweetId,
+      status: 'failed',
+      reason: 'media_lookup_failed',
+      startedAt,
+    });
+  }
+  if (!Array.isArray(mediaRows)) {
+    return completeManualFailure(params.sb, {
+      intakeId: manualIntakeId,
+      tweetId,
+      status: 'failed',
+      reason: 'media_lookup_invalid_response',
+      startedAt,
+    });
+  }
+  const rawMediaRows = mediaRows as XMediaRow[];
 
   const { data: renderRow, error: renderError } = await params.sb
     .from('video_renders')
@@ -872,7 +1053,7 @@ async function handleManualVideoIntakePost(params: {
       intakeId: manualIntakeId,
       tweetId,
       status: 'blocked',
-      reason: `render_lookup_failed:${renderError?.message ?? 'not_found'}`,
+      reason: 'render_lookup_failed',
       startedAt,
       meta: { render_id: selectedRenderId },
     });
@@ -975,7 +1156,7 @@ async function handleManualVideoIntakePost(params: {
       intakeId: manualIntakeId,
       tweetId,
       status: 'failed',
-      reason: `media_upload_failed(video): ${(e as Error).message}`.slice(0, 500),
+      reason: safeXPosterErrorCode(e, 'media_upload_failed_video'),
       startedAt,
       meta: { render_id: selectedRenderId },
     });
@@ -1000,7 +1181,7 @@ async function handleManualVideoIntakePost(params: {
       intakeId: manualIntakeId,
       tweetId,
       status: 'failed',
-      reason: `claim_failed:${(e as Error).message}`,
+      reason: 'claim_failed',
       startedAt,
       meta: { render_id: selectedRenderId },
     });
@@ -1028,6 +1209,38 @@ async function handleManualVideoIntakePost(params: {
     });
   }
 
+  // Durable provider-start boundary: recorded BEFORE the first irreversible X
+  // provider call. If the durable marker cannot be written, the provider is never
+  // invoked (fail-closed). Once the provider may accept, a DB completion failure
+  // is ambiguous and must NOT be reported as success.
+  let providerStarted = false;
+  try {
+    providerStarted = await markXPostDeliveryProviderStarted(params.sb, {
+      deliveryId: deliveryClaim.deliveryId,
+      claimToken: deliveryClaim.claimToken,
+      claimGeneration: deliveryClaim.claimGeneration,
+    });
+  } catch (e) {
+    return completeManualFailure(params.sb, {
+      intakeId: manualIntakeId,
+      tweetId,
+      status: 'failed',
+      reason: safeXPosterErrorCode(e, 'provider_start_marker_failed'),
+      startedAt,
+      meta: { render_id: selectedRenderId },
+    });
+  }
+  if (!providerStarted) {
+    return completeManualFailure(params.sb, {
+      intakeId: manualIntakeId,
+      tweetId,
+      status: 'failed',
+      reason: 'provider_start_marker_rejected',
+      startedAt,
+      meta: { render_id: selectedRenderId },
+    });
+  }
+
   let mediaId = '';
   let mediaBytes = 0;
   try {
@@ -1043,24 +1256,30 @@ async function handleManualVideoIntakePost(params: {
     );
     mediaBytes = preparedVideo.bytes.length;
   } catch (e) {
-    const errMsg = `media_upload_failed(video): ${(e as Error).message}`.slice(0, 500);
+    const errMsg = safeXPosterErrorCode(e, 'media_upload_failed_video');
     try {
       await failXPostDelivery(params.sb, {
         deliveryId: deliveryClaim.deliveryId,
         claimToken: deliveryClaim.claimToken,
+        claimGeneration: deliveryClaim.claimGeneration,
         error: errMsg,
         mediaKind: 'video',
+        // provider_started_at is already durable. A media-upload failure can
+        // mean that X accepted part of the request, so let the RPC classify it
+        // as ambiguous. Never release it as a retryable pre-provider failure.
+        skipReason: null,
+        nextRetryAt: null,
       });
     } catch (failErr) {
-      console.error('[x-poster] manual fail_x_post_delivery failed (media)', { tweetId, err: (failErr as Error).message });
+      console.error('[x-poster] manual fail_x_post_delivery failed (media)', { tweetId, err: safeXPosterErrorCode(failErr, 'fail_x_post_delivery_failed') });
     }
     return completeManualFailure(params.sb, {
       intakeId: manualIntakeId,
       tweetId,
-      status: 'failed',
-      reason: errMsg,
+      status: 'ambiguous',
+      reason: 'x_media_provider_outcome_unknown',
       startedAt,
-      meta: { render_id: selectedRenderId },
+      meta: { render_id: selectedRenderId, provider_started: true },
     });
   }
 
@@ -1083,7 +1302,7 @@ async function handleManualVideoIntakePost(params: {
   } catch (e) {
     const xApiMs = Date.now() - xApiStartedAt;
     const status = (e as { status?: number }).status || 0;
-    const errMsg = (e as Error).message;
+    const errMsg = safeXPosterErrorCode(e, 'x_provider_post_tweet_failed');
     const isRetriable = status === 429 || status >= 500;
     captureEdgeExceptionBackground(e, {
       functionName: 'x-poster',
@@ -1100,8 +1319,9 @@ async function handleManualVideoIntakePost(params: {
       await failXPostDelivery(params.sb, {
         deliveryId: deliveryClaim.deliveryId,
         claimToken: deliveryClaim.claimToken,
+        claimGeneration: deliveryClaim.claimGeneration,
         error: errMsg,
-        apiResponse: (e as { raw?: unknown }).raw ?? null,
+        apiResponse: null,
         skipReason: isRetriable ? 'x_api_retriable' : null,
         nextRetryAt: isRetriable ? new Date(Date.now() + 15 * 60 * 1000).toISOString() : null,
         mediaCount: 1,
@@ -1109,7 +1329,7 @@ async function handleManualVideoIntakePost(params: {
         mediaKind: 'video',
       });
     } catch (failErr) {
-      console.error('[x-poster] manual fail_x_post_delivery failed (post)', { tweetId, err: (failErr as Error).message });
+      console.error('[x-poster] manual fail_x_post_delivery failed (post)', { tweetId, err: safeXPosterErrorCode(failErr, 'fail_x_post_delivery_failed') });
     }
     return completeManualFailure(params.sb, {
       intakeId: manualIntakeId,
@@ -1130,6 +1350,7 @@ async function handleManualVideoIntakePost(params: {
     deliveryWriteConfirmed = await completeXPostDelivery(params.sb, {
       deliveryId: deliveryClaim.deliveryId,
       claimToken: deliveryClaim.claimToken,
+      claimGeneration: deliveryClaim.claimGeneration,
       xTweetId: xId,
       mediaCount: 1,
       mediaBytes,
@@ -1141,7 +1362,7 @@ async function handleManualVideoIntakePost(params: {
     });
     if (!deliveryWriteConfirmed) deliveryWriteError = 'claim_completion_rejected';
   } catch (e) {
-    deliveryWriteError = (e as Error).message;
+    deliveryWriteError = safeXPosterErrorCode(e, 'claim_completion_failed');
     captureEdgeExceptionBackground(e, {
       functionName: 'x-poster',
       action: 'manual_claim_complete_error',
@@ -1166,25 +1387,20 @@ async function handleManualVideoIntakePost(params: {
     duplicate_override: duplicateOverride,
     delivery_write_confirmed: deliveryWriteConfirmed,
   });
-  const renderCfg = await loadVideoRenderConfig(params.sb);
-  try {
-    await params.sb.rpc('mark_video_render_posted', {
-      p_tweet_id: tweetId,
-      p_retention_hours: renderCfg.retentionHours,
-    });
-  } catch (_e) { /* best-effort */ }
+  const retentionHours = await loadVideoRenderRetentionHours(params.sb);
+  await markVideoRenderPostedBestEffort(params.sb, tweetId, retentionHours);
   await updateManualIntake(params.sb, manualIntakeId, {
-    status: 'posted',
+    status: deliveryWriteConfirmed ? 'posted' : 'ambiguous',
     posted_x_tweet_id: xId,
     posted_at: postedAt,
     selected_render_id: selectedRenderId,
-    blocks_auto_delivery: false,
+    blocks_auto_delivery: !deliveryWriteConfirmed,
     last_error: deliveryWriteError,
   });
 
   return xPosterJson({
-    ok: true,
-    status: 'posted',
+    ok: deliveryWriteConfirmed,
+    status: deliveryWriteConfirmed ? 'posted' : 'ambiguous',
     tweet_id: tweetId,
     intake_id: manualIntakeId,
     render_id: selectedRenderId,
@@ -1200,12 +1416,12 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   try {
+  const authErr = await requireInternalAuth(req, corsHeaders);
+  if (authErr) return authErr;
+
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
   const svcKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
   const sb = createClient<any, any>(supabaseUrl, svcKey);
-
-  const authErr = await requireInternalAuth(req, sb, corsHeaders);
-  if (authErr) return authErr;
 
   const body = await req.json().catch(() => ({} as Record<string, unknown>));
   const dryRun = body.dry_run === true;
@@ -1215,12 +1431,63 @@ Deno.serve(async (req) => {
   const forceRetry = body.force_retry === true || (onlyTweetId !== null && !dryRun);
   const claimTtlSeconds = typeof body.claim_ttl_seconds === 'number' ? body.claim_ttl_seconds : 1800;
 
+  // Entry guard is defense in depth. It runs before candidate/settings work and
+  // returns a stable locked result for Preview or any invalid control state.
+  const postingGuard = await checkExternalPosting(sb);
+  if (!postingGuard.allowed) {
+    return xPosterJson({
+      ok: false,
+      status: 'locked',
+      reason: 'external_posting_blocked',
+    });
+  }
+
   // Load settings
-  const { data: settingsRows } = await sb.from('settings').select('key, value')
-    .in('key', ['x_posting_config', 'x_rate_limits', 'enrichment_config', 'story_memory']);
-  const sm: Record<string, unknown> = Object.fromEntries((settingsRows || []).map((r) => [r.key, r.value]));
-  const cfg: PostingConfig = { ...DEFAULT_CFG, ...(isRecord(sm.x_posting_config) ? sm.x_posting_config : {}) } as PostingConfig;
-  const limits: RateLimits = { ...DEFAULT_LIMITS, ...(isRecord(sm.x_rate_limits) ? sm.x_rate_limits : {}) } as RateLimits;
+  let settingsRows: unknown = null;
+  let settingsError: unknown = null;
+  try {
+    const settingsResult = await sb.from('settings').select('key, value')
+      .in('key', ['x_posting_config', 'x_rate_limits', 'enrichment_config', 'story_memory']);
+    settingsRows = settingsResult?.data;
+    settingsError = settingsResult?.error;
+  } catch (_error) {
+    console.error('[x-poster] quota settings unavailable', { code: X_QUOTA_UNAVAILABLE });
+    return quotaUnavailableResponse();
+  }
+  if (settingsError !== null || !Array.isArray(settingsRows)) {
+    console.error('[x-poster] quota settings unavailable', { code: X_QUOTA_UNAVAILABLE });
+    return quotaUnavailableResponse();
+  }
+  if (settingsRows.some((row) => !isRecord(row) || typeof row.key !== 'string')) {
+    console.error('[x-poster] quota settings malformed', { code: X_QUOTA_UNAVAILABLE });
+    return quotaUnavailableResponse();
+  }
+  const sm: Record<string, unknown> = Object.fromEntries(settingsRows.map((row) => [row.key, row.value]));
+  const hasSetting = (key: string) => Object.prototype.hasOwnProperty.call(sm, key);
+  const rawPostingConfig = sm.x_posting_config;
+  const rawRateLimits = sm.x_rate_limits;
+  const requiredPostingQuotaFields: Array<[string, number]> = [
+    ['posts_per_hour', X_POSTING_QUOTA_MAX.posts_per_hour],
+    ['posts_per_day', X_POSTING_QUOTA_MAX.posts_per_day],
+    ['monthly_post_budget', X_POSTING_QUOTA_MAX.monthly_post_budget],
+    ['media_uploads_per_day', X_POSTING_QUOTA_MAX.media_uploads_per_day],
+  ];
+  if (
+    !hasSetting('x_posting_config') ||
+    !isRecord(rawPostingConfig) ||
+    typeof rawPostingConfig.enabled !== 'boolean' ||
+    !isOptionalNonNegativeSafeInteger(rawPostingConfig.daily_budget) ||
+    !isOptionalNonNegativeSafeInteger(rawPostingConfig.min_spacing_minutes) ||
+    (rawPostingConfig.max_posts_per_run !== undefined && !isBoundedPositiveSafeInteger(rawPostingConfig.max_posts_per_run, 20)) ||
+    !hasSetting('x_rate_limits') ||
+    !isRecord(rawRateLimits) ||
+    requiredPostingQuotaFields.some(([field, max]) => !isBoundedPositiveSafeInteger(rawRateLimits[field], max))
+  ) {
+    console.error('[x-poster] quota setting shape unavailable', { code: X_QUOTA_UNAVAILABLE });
+    return quotaUnavailableResponse();
+  }
+  const cfg: PostingConfig = { ...DEFAULT_CFG, ...rawPostingConfig } as PostingConfig;
+  const limits: RateLimits = { ...DEFAULT_LIMITS, ...rawRateLimits } as RateLimits;
   const enrichmentCfg = normalizeEnrichmentConfig(isRecord(sm.enrichment_config) ? sm.enrichment_config : { enabled: false });
   const duplicateGateCfg = normalizeDuplicateGateConfig(isRecord(sm.story_memory) ? sm.story_memory : { enabled: false });
   const allowCompletedEnrichment = allowCompletedEnrichmentForPosting(enrichmentCfg);
@@ -1248,33 +1515,86 @@ Deno.serve(async (req) => {
   const since1h = new Date(Date.now() - 60 * 60 * 1000).toISOString();
   const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const since30d = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
-  const [{ count: monthlyPosts }, { count: posts24hDb }, { count: posts1hDb }, { count: mediaUp24hDb }, { data: lastPostRows }] = await Promise.all([
-    sb.from('x_deliveries').select('*', { count: 'exact', head: true }).eq('status', 'posted').gte('created_at', since30d),
-    sb.from('x_deliveries').select('*', { count: 'exact', head: true }).eq('status', 'posted').gte('created_at', since24h),
-    sb.from('x_deliveries').select('*', { count: 'exact', head: true }).eq('status', 'posted').gte('created_at', since1h),
-    sb.from('x_deliveries').select('*', { count: 'exact', head: true }).eq('status', 'posted').gt('media_count', 0).gte('created_at', since24h),
-    sb.from('x_deliveries').select('created_at, posted_at').eq('status', 'posted').order('created_at', { ascending: false }).limit(1),
-  ]);
-  let posts24hCount = posts24hDb ?? 0;
-  let posts1hCount = posts1hDb ?? 0;
-  let mediaUp24hCount = mediaUp24hDb ?? 0;
-  const lastPostAt = lastPostRows?.[0]?.posted_at || lastPostRows?.[0]?.created_at || null;
-  let lastPostTimeMs = lastPostAt ? new Date(lastPostAt as string).getTime() : 0;
+  type QuotaQueryResult = {
+    data: unknown;
+    error: unknown;
+    count: number | null;
+  };
+  let quotaResults: QuotaQueryResult[] = [];
+  try {
+    quotaResults = await Promise.all([
+      sb.from('x_deliveries').select('*', { count: 'exact', head: true }).eq('status', 'posted').gte('created_at', since30d),
+      sb.from('x_deliveries').select('*', { count: 'exact', head: true }).eq('status', 'posted').gte('created_at', since24h),
+      sb.from('x_deliveries').select('*', { count: 'exact', head: true }).eq('status', 'posted').gte('created_at', since1h),
+      sb.from('x_deliveries').select('*', { count: 'exact', head: true }).eq('status', 'posted').gt('media_count', 0).gte('created_at', since24h),
+      sb.from('x_deliveries').select('created_at, posted_at').eq('status', 'posted').order('created_at', { ascending: false }).limit(1),
+    ]);
+  } catch (_error) {
+    console.error('[x-poster] quota reads unavailable', { code: X_QUOTA_UNAVAILABLE });
+    return quotaUnavailableResponse();
+  }
+  if (
+    quotaResults.length !== 5 ||
+    quotaResults.some((result) => result.error !== null)
+  ) {
+    console.error('[x-poster] quota reads unavailable', { code: X_QUOTA_UNAVAILABLE });
+    return quotaUnavailableResponse();
+  }
+  const [
+    monthlyQuota,
+    posts24hQuota,
+    posts1hQuota,
+    mediaUp24hQuota,
+    lastPostQuota,
+  ] = quotaResults;
+  const monthlyPosts = monthlyQuota.count;
+  const posts24hDb = posts24hQuota.count;
+  const posts1hDb = posts1hQuota.count;
+  const mediaUp24hDb = mediaUp24hQuota.count;
+  const lastPostRows = lastPostQuota.data;
+  if (
+    !Array.isArray(lastPostRows) ||
+    (lastPostRows[0] !== undefined && !isRecord(lastPostRows[0])) ||
+    !isNonNegativeSafeInteger(monthlyPosts) ||
+    !isNonNegativeSafeInteger(posts24hDb) ||
+    !isNonNegativeSafeInteger(posts1hDb) ||
+    !isNonNegativeSafeInteger(mediaUp24hDb)
+  ) {
+    console.error('[x-poster] quota history malformed', { code: X_QUOTA_UNAVAILABLE });
+    return quotaUnavailableResponse();
+  }
+  let posts24hCount = posts24hDb;
+  let posts1hCount = posts1hDb;
+  let monthlyPostsCount = monthlyPosts;
+  let mediaUp24hCount = mediaUp24hDb;
+  const latestPost = lastPostRows[0];
+  const lastPostAt = latestPost?.posted_at ?? latestPost?.created_at;
+  if (latestPost !== undefined && typeof lastPostAt !== 'string') {
+    console.error('[x-poster] quota history timestamp malformed', { code: X_QUOTA_UNAVAILABLE });
+    return quotaUnavailableResponse();
+  }
+  let lastPostTimeMs = latestPost === undefined ? 0 : new Date(lastPostAt).getTime();
 
   const quotaBlock = (): string | null => {
-    if (posts1hCount >= limits.posts_per_hour) return 'rate_limit_hour';
-    if (posts24hCount >= limits.posts_per_day) return 'rate_limit_day';
-    if ((monthlyPosts ?? 0) >= limits.monthly_post_budget) return 'rate_limit_month';
-    if (mediaUp24hCount >= limits.media_uploads_per_day) return 'rate_limit_media';
-    // Daily budget cap (anti-aggregator)
-    if (cfg.daily_budget && cfg.daily_budget > 0 && posts24hCount >= cfg.daily_budget) return 'daily_budget_reached';
-    // Minimum spacing between posts
-    if (cfg.min_spacing_minutes && cfg.min_spacing_minutes > 0 && lastPostTimeMs > 0) {
-      const minGapMs = cfg.min_spacing_minutes * 60 * 1000;
-      if (Date.now() - lastPostTimeMs < minGapMs) return 'min_spacing';
-    }
-    return null;
+    return getXQuotaBlockReason({
+      available: true,
+      nowMs: Date.now(),
+      limits,
+      config: cfg,
+      snapshot: {
+        posts1h: posts1hCount,
+        posts24h: posts24hCount,
+        posts30d: monthlyPostsCount,
+        mediaUploads24h: mediaUp24hCount,
+        lastPostTimeMs,
+      },
+    });
   };
+
+  if (quotaBlock() === X_QUOTA_UNAVAILABLE) {
+    console.error('[x-poster] quota admission unavailable', { code: X_QUOTA_UNAVAILABLE });
+    return quotaUnavailableResponse();
+  }
 
   const manualResponse = await handleManualVideoIntakePost({
     sb,
@@ -1299,7 +1619,13 @@ Deno.serve(async (req) => {
   const effectiveCutoff = [dedupeCutoff, freshnessCutoff, startFrom].filter((v): v is string => !!v).sort().at(-1) ?? freshnessCutoff;
   const maxPostsPerRun = Math.max(1, Math.min(20, Number(cfg.max_posts_per_run ?? 1) || 1));
 
-  const { data: existingRows } = await sb.from('x_deliveries').select('post_id').in('status', ['posting', 'posted', 'pending']).gte('created_at', dedupeCutoff);
+  const { data: existingRows, error: existingRowsError } = await sb.from('x_deliveries').select('post_id').in('status', ['posting', 'posted', 'pending']).gte('created_at', dedupeCutoff);
+  if (existingRowsError) {
+    throw new Error('x_poster_existing_delivery_read_failed');
+  }
+  if (!Array.isArray(existingRows)) {
+    throw new Error('x_poster_existing_delivery_result_invalid');
+  }
   const existing = new Set((existingRows || []).map((r) => r.post_id as string));
 
   let posts: Array<Record<string, unknown>> = [];
@@ -1311,12 +1637,15 @@ Deno.serve(async (req) => {
       target_tweet_id: targetTweetId,
     });
     if (!rpcRes.error) {
+      if (!Array.isArray(rpcRes.data)) {
+        throw new Error('x_poster_candidate_result_invalid');
+      }
       posts = ((rpcRes.data ?? []) as Array<Record<string, unknown>>).map((row) => ({
         ...row,
         accounts: { handle: row.account_handle },
       }));
     } else {
-      console.warn('[x-poster] get_x_post_candidates RPC unavailable, using fallback query', rpcRes.error.message);
+      console.warn('[x-poster] get_x_post_candidates RPC unavailable, using fallback query', { code: 'x_poster_candidate_rpc_unavailable' });
       let candidatesQ = sb.from('posts')
         .select('tweet_id, text_translated, text_original, author_handle, has_media, importance_score, final_score, base_score, learned_score, learned_delta, x_gate_score, learning_confidence, delivery_decision, decision_reason, url, is_truncated, hydrated_at, created_at, final_x_text, composed_post_text, post_format_hint, humanized_commentary, commentary_hook, commentary_question, narrative_callback, thread_continuation, enrich_status, dedupe_status, dup_of_tweet_id, dup_similarity, dedupe_reason, accounts!inner(handle)')
         .gte('created_at', effectiveCutoff)
@@ -1332,6 +1661,9 @@ Deno.serve(async (req) => {
         candidatesQ = candidatesQ.or(`enrich_status.is.null,enrich_status.in.(${allowedEnrichStatuses})`);
       }
       const fallbackRes = await candidatesQ.order('created_at', { ascending: false }).limit(rpcLimit);
+      if (!Array.isArray(fallbackRes.data) && !fallbackRes.error) {
+        throw new Error('x_poster_candidate_result_invalid');
+      }
       posts = (fallbackRes.data ?? []) as Array<Record<string, unknown>>;
       postsErr = fallbackRes.error;
     }
@@ -1340,12 +1672,15 @@ Deno.serve(async (req) => {
       .select('tweet_id, text_translated, text_original, author_handle, has_media, importance_score, final_score, delivery_decision, decision_reason, url, is_truncated, hydrated_at, created_at, final_x_text, composed_post_text, post_format_hint, humanized_commentary, commentary_hook, commentary_question, narrative_callback, thread_continuation, enrich_status, dedupe_status, dup_of_tweet_id, dup_similarity, dedupe_reason, accounts!inner(handle)')
       .eq('tweet_id', onlyTweetId)
       .limit(1);
+    if (!Array.isArray(forceRes.data) && !forceRes.error) {
+      throw new Error('x_poster_candidate_result_invalid');
+    }
     posts = (forceRes.data ?? []) as Array<Record<string, unknown>>;
     postsErr = forceRes.error;
   }
 
   if (postsErr) {
-    return new Response(JSON.stringify({ error: postsErr.message }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ error: 'x_poster_candidate_read_failed' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 
   const results: Array<Record<string, unknown>> = [];
@@ -1360,8 +1695,11 @@ Deno.serve(async (req) => {
         .eq('blocks_auto_delivery', true)
         .not('status', 'in', '(posted,canceled)');
       if (manualRowsError) {
-        console.warn('[x-poster] active manual intake filter failed', manualRowsError.message);
+        throw new Error('x_poster_manual_intake_read_failed');
       } else {
+        if (!Array.isArray(manualRows)) {
+          throw new Error('x_poster_manual_intake_result_invalid');
+        }
         for (const row of manualRows ?? []) {
           if (row?.tweet_id) activeManualIntakeTweets.add(String(row.tweet_id));
         }
@@ -1400,13 +1738,16 @@ Deno.serve(async (req) => {
       continue;
     }
 
-    const { data: latestX } = await sb
+    const { data: latestX, error: latestXError } = await sb
       .from('x_deliveries')
       .select('status, last_error, skip_reason, x_tweet_id, claim_expires_at')
       .eq('post_id', tweetId)
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
+    if (latestXError) {
+      throw new Error('x_poster_latest_delivery_read_failed');
+    }
     const latestXRecord = latestX as { status?: string; x_tweet_id?: string | null; claim_expires_at?: string | null } | null;
     const latestStatus = latestXRecord?.status;
 
@@ -1460,16 +1801,16 @@ Deno.serve(async (req) => {
         },
       });
     } catch (e) {
-      const error = (e as Error).message;
+      const error = safeXPosterErrorCode(e, 'dedupe_assertion_failed');
       if (!dryRun && latestStatus !== 'failed') {
         const { error: failErr } = await sb.from('x_deliveries').insert({
           post_id: tweetId,
           status: 'failed',
           skip_reason: 'dedupe_assertion_failed',
-          last_error: `dedupe_assertion_failed:${error}`.slice(0, 1000),
+          last_error: 'dedupe_assertion_failed',
           attempts: 0,
         });
-        if (failErr) console.error('[x-poster] x_deliveries insert failed (dedupe assertion)', { tweetId, err: failErr.message });
+        if (failErr) console.error('[x-poster] x_deliveries insert failed (dedupe assertion)', { tweetId, err: safeXPosterErrorCode(failErr, 'x_delivery_write_failed') });
       }
       results.push({
         tweet_id: tweetId,
@@ -1489,7 +1830,7 @@ Deno.serve(async (req) => {
           last_error: finalDuplicateAssertion.reason ?? 'duplicate_gate',
           attempts: 0,
         });
-        if (skipErr) console.error('[x-poster] x_deliveries insert skipped failed (final duplicate assertion)', { tweetId, err: skipErr.message });
+        if (skipErr) console.error('[x-poster] x_deliveries insert skipped failed (final duplicate assertion)', { tweetId, err: safeXPosterErrorCode(skipErr, 'x_delivery_write_failed') });
       }
       results.push({
         tweet_id: tweetId,
@@ -1512,7 +1853,7 @@ Deno.serve(async (req) => {
           last_error: duplicateSkipReason,
           attempts: 0,
         });
-        if (skipErr) console.error('[x-poster] x_deliveries insert skipped failed (duplicate gate)', { tweetId, err: skipErr.message });
+        if (skipErr) console.error('[x-poster] x_deliveries insert skipped failed (duplicate gate)', { tweetId, err: safeXPosterErrorCode(skipErr, 'x_delivery_write_failed') });
       }
       results.push({
         tweet_id: tweetId,
@@ -1525,10 +1866,16 @@ Deno.serve(async (req) => {
     }
 
     // Fetch media rows
-    const { data: mediaRows } = await sb.from('media')
+    const { data: mediaRows, error: mediaRowsError } = await sb.from('media')
       .select('id, storage_path, downloaded_at, mime_type, file_size, kind, duration_ms, src_url')
       .eq('tweet_id', tweetId)
       .order('ordering', { ascending: true });
+  if (mediaRowsError) {
+    throw new Error('x_poster_media_read_failed');
+  }
+  if (!Array.isArray(mediaRows)) {
+    throw new Error('x_poster_media_result_invalid');
+  }
 
     // Media-required gate: if a post is known to have media, X must not post
     // text-only. Telegram can fetch remote media URLs directly, but X requires
@@ -1536,13 +1883,19 @@ Deno.serve(async (req) => {
     // silently burning the post as text.
     const postAgeMs = Date.now() - new Date((post as { created_at: string }).created_at).getTime();
     const hasMediaFlag = (post as { has_media?: boolean }).has_media === true;
-    let mediaRowsForSelection = ((mediaRows as XMediaRow[] | null) ?? []);
+    let mediaRowsForSelection = mediaRows as XMediaRow[];
     const anyDownloaded = mediaRowsForSelection.some((m) => m.downloaded_at);
     if (hasMediaFlag && !anyDownloaded) {
-      const { data: pendingJobs } = await sb.from('jobs')
+      const { data: pendingJobs, error: pendingJobsError } = await sb.from('jobs')
         .select('id').in('type', ['resolve_media', 'download_media'])
         .in('status', ['pending', 'running'])
         .filter('payload->>tweet_id', 'eq', tweetId).limit(1);
+      if (pendingJobsError) {
+        throw new Error('x_poster_pending_media_read_failed');
+      }
+      if (!Array.isArray(pendingJobs)) {
+        throw new Error('x_poster_pending_media_result_invalid');
+      }
       if (pendingJobs && pendingJobs.length > 0) {
         results.push({ tweet_id: tweetId, status: 'deferred', reason: 'media_pending', age_ms: postAgeMs });
         console.log(`[x-poster] deferring ${tweetId}: media still resolving (age=${Math.round(postAgeMs/1000)}s)`);
@@ -1557,7 +1910,7 @@ Deno.serve(async (req) => {
           results.push({ tweet_id: tweetId, status: 'dry_run_deferred', reason: 'media_pending_self_heal_needed', age_ms: postAgeMs });
           continue;
         }
-        await sb.from('jobs').insert({
+        const { error: healDownloadError } = await sb.from('jobs').insert({
           type: 'download_media',
           payload: { tweet_id: tweetId },
           status: 'pending',
@@ -1565,6 +1918,9 @@ Deno.serve(async (req) => {
           next_run_at: new Date().toISOString(),
           priority: 12,
         });
+        if (healDownloadError) {
+          throw new Error('x_poster_download_heal_enqueue_failed');
+        }
         results.push({ tweet_id: tweetId, status: 'deferred', reason: 'media_pending_self_healed', age_ms: postAgeMs });
         console.log(`[x-poster] self-healed missing download for ${tweetId}, deferring`);
         continue;
@@ -1574,7 +1930,7 @@ Deno.serve(async (req) => {
         results.push({ tweet_id: tweetId, status: 'dry_run_deferred', reason: 'media_missing_self_heal_needed', age_ms: postAgeMs });
         continue;
       }
-      await sb.from('jobs').insert({
+      const { error: healResolveError } = await sb.from('jobs').insert({
         type: 'resolve_media',
         payload: { tweet_id: tweetId },
         status: 'pending',
@@ -1582,6 +1938,9 @@ Deno.serve(async (req) => {
         next_run_at: new Date().toISOString(),
         priority: 12,
       });
+      if (healResolveError) {
+        throw new Error('x_poster_resolve_heal_enqueue_failed');
+      }
       results.push({ tweet_id: tweetId, status: 'deferred', reason: 'media_missing_self_healed', age_ms: postAgeMs });
       console.log(`[x-poster] self-healed missing media rows for ${tweetId}, deferring`);
       continue;
@@ -1602,7 +1961,7 @@ Deno.serve(async (req) => {
             last_error: reason,
             attempts: 0,
           });
-          if (skipErr) console.error('[x-poster] x_deliveries insert skipped failed (video render)', { tweetId, err: skipErr.message });
+          if (skipErr) console.error('[x-poster] x_deliveries insert skipped failed (video render)', { tweetId, err: safeXPosterErrorCode(skipErr, 'x_delivery_write_failed') });
         }
         results.push({ tweet_id: tweetId, status: dryRun ? 'dry_run_skipped' : 'skipped', reason });
       } else {
@@ -1618,7 +1977,7 @@ Deno.serve(async (req) => {
     if (blocked) {
       if (!dryRun) {
         const { error: skipErr } = await sb.from('x_deliveries').insert({ post_id: tweetId, status: 'skipped', skip_reason: blocked });
-        if (skipErr) console.error('[x-poster] x_deliveries insert skipped failed', { tweetId, err: skipErr.message });
+        if (skipErr) console.error('[x-poster] x_deliveries insert skipped failed', { tweetId, err: safeXPosterErrorCode(skipErr, 'x_delivery_write_failed') });
       }
       results.push({ tweet_id: tweetId, status: 'skipped', reason: blocked });
       continue;
@@ -1656,18 +2015,21 @@ Deno.serve(async (req) => {
           last_error: 'Video posting is disabled in x_posting_config.allow_video',
           attempts: 0,
         });
-        if (skipErr) console.error('[x-poster] x_deliveries insert skipped failed (video disabled)', { tweetId, err: skipErr.message });
+        if (skipErr) console.error('[x-poster] x_deliveries insert skipped failed (video disabled)', { tweetId, err: safeXPosterErrorCode(skipErr, 'x_delivery_write_failed') });
         results.push({ tweet_id: tweetId, status: 'skipped', reason });
         console.warn(`[x-poster] skipping ${tweetId}: ${reason}`);
         continue;
       }
 
-      const { data: mediaJobs } = await sb.from('jobs')
+      const { data: mediaJobs, error: mediaJobsError } = await sb.from('jobs')
         .select('id')
         .in('type', ['resolve_media', 'download_media'])
         .in('status', ['pending', 'running'])
         .filter('payload->>tweet_id', 'eq', tweetId)
         .limit(1);
+      if (mediaJobsError) {
+        throw new Error('x_poster_pending_video_read_failed');
+      }
 
       if (mediaJobs && mediaJobs.length > 0) {
         results.push({ tweet_id: tweetId, status: 'deferred', reason, age_ms: postAgeMs });
@@ -1675,7 +2037,7 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      await sb.from('jobs').insert({
+      const { error: invalidVideoResolveError } = await sb.from('jobs').insert({
         type: 'resolve_media',
         payload: { tweet_id: tweetId },
         status: 'pending',
@@ -1683,6 +2045,9 @@ Deno.serve(async (req) => {
         next_run_at: new Date().toISOString(),
         priority: 12,
       });
+      if (invalidVideoResolveError) {
+        throw new Error('x_poster_invalid_video_enqueue_failed');
+      }
       results.push({ tweet_id: tweetId, status: 'deferred', reason: `${reason}_self_healed`, age_ms: postAgeMs });
       console.warn(`[x-poster] refused invalid video media for ${tweetId}; queued resolve_media (${reason})`);
       continue;
@@ -1701,7 +2066,7 @@ Deno.serve(async (req) => {
         last_error: `media_required:${reason}`,
         attempts: 1,
       });
-      if (skipErr) console.error('[x-poster] x_deliveries insert skipped failed (media required)', { tweetId, err: skipErr.message });
+      if (skipErr) console.error('[x-poster] x_deliveries insert skipped failed (media required)', { tweetId, err: safeXPosterErrorCode(skipErr, 'x_delivery_write_failed') });
       results.push({ tweet_id: tweetId, status: 'skipped', reason: `media_required:${reason}` });
       console.warn(`[x-poster] skipping text-only post for ${tweetId}: ${reason}`);
       continue;
@@ -1723,15 +2088,14 @@ Deno.serve(async (req) => {
             tweet_id: tweetId,
             status: 'deferred',
             reason: 'stale_media_repair_queued',
-            storage_path: e.storagePath,
             media_id: e.mediaId,
           });
-          console.warn(`[x-poster] deferred ${tweetId}: stale media object repair queued for ${e.storagePath}`);
+          console.warn(`[x-poster] deferred ${tweetId}: stale media object repair queued`);
           continue;
         }
-        const errMsg = `media_upload_failed(${sel.tier}): ${(e as Error).message}`.slice(0, 500);
+        const errMsg = safeXPosterErrorCode(e, `media_upload_failed_${sel.tier}`);
         results.push({ tweet_id: tweetId, status: 'failed', error: errMsg });
-        console.warn(`[x-poster] ${sel.tier} media preparation failed for ${tweetId}; not claiming delivery: ${(e as Error).message}`);
+        console.warn(`[x-poster] ${sel.tier} media preparation failed for ${tweetId}; not claiming delivery`, { code: errMsg });
         continue;
       }
     }
@@ -1745,7 +2109,7 @@ Deno.serve(async (req) => {
           ttlSeconds: claimTtlSeconds,
         });
       } catch (e) {
-        const errMsg = (e as Error).message;
+        const errMsg = safeXPosterErrorCode(e, 'claim_x_post_delivery_failed');
         await insertXPipelineEvent(sb, tweetId, 'failed', new Date(startedAt).toISOString(), new Date().toISOString(), errMsg, {
           candidate_reason: candidateReason,
           candidate_age_ms: candidateAgeMs,
@@ -1753,7 +2117,7 @@ Deno.serve(async (req) => {
           claim_error: true,
         });
         results.push({ tweet_id: tweetId, status: 'failed', reason: 'claim_failed', error: errMsg, candidate_reason: candidateReason, candidate_age_ms: candidateAgeMs, dispatch_source: dispatchSource });
-        console.error('[x-poster] claim_x_post_delivery failed', { tweetId, err: errMsg });
+        console.error('[x-poster] claim_x_post_delivery failed', { tweetId, code: errMsg });
         continue;
       }
       if (!deliveryClaim.claimed || !deliveryClaim.deliveryId || !deliveryClaim.claimToken) {
@@ -1773,28 +2137,66 @@ Deno.serve(async (req) => {
       }
     }
 
-    if (sel.tier !== 'text' && !dryRun) {
-      if (sel.tier === 'video') {
-        const durationMs = sel.items[0]?.duration_ms ?? null;
-        if (isOverAttemptedVideoDuration(durationMs)) {
-          const seconds = Math.round(durationMs / 1000);
-          const reason = `video_too_long_for_config:${seconds}s`;
-          const skipOk = deliveryClaim
-            ? await failXPostDelivery(sb, {
-              deliveryId: deliveryClaim.deliveryId!,
-              claimToken: deliveryClaim.claimToken!,
-              status: 'skipped',
-              error: `configured video duration cap is ${MAX_ATTEMPTED_VIDEO_DURATION_MS / 1000}s`,
-              skipReason: reason,
-              mediaKind: 'video',
-            })
-            : false;
-          if (!skipOk) console.error('[x-poster] x_deliveries claim release skipped failed (video duration)', { tweetId });
-          results.push({ tweet_id: tweetId, status: 'skipped', reason });
-          console.warn(`[x-poster] skipping ${tweetId}: ${reason}`);
-          continue;
-        }
+    if (!dryRun && sel.tier === 'video') {
+      const durationMs = sel.items[0]?.duration_ms ?? null;
+      if (isOverAttemptedVideoDuration(durationMs)) {
+        const seconds = Math.round(durationMs / 1000);
+        const reason = `video_too_long_for_config:${seconds}s`;
+        const skipOk = deliveryClaim
+          ? await failXPostDelivery(sb, {
+            deliveryId: deliveryClaim.deliveryId!,
+            claimToken: deliveryClaim.claimToken!,
+            claimGeneration: deliveryClaim.claimGeneration,
+            status: 'skipped',
+            error: `configured video duration cap is ${MAX_ATTEMPTED_VIDEO_DURATION_MS / 1000}s`,
+            skipReason: reason,
+            mediaKind: 'video',
+          })
+          : false;
+        if (!skipOk) console.error('[x-poster] x_deliveries claim release skip failed (video duration)', { tweetId });
+        results.push({ tweet_id: tweetId, status: 'skipped', reason });
+        console.warn(`[x-poster] skipping ${tweetId}: ${reason}`);
+        continue;
       }
+    }
+
+    // Durable provider-start boundary (batch, ALL tiers incl. text — SF2):
+    // recorded immediately before the first irreversible X provider call (media
+    // upload or tweet POST) for every non-dryRun delivery, text included. If the
+    // durable marker cannot be written the provider is NOT invoked; once the
+    // provider may accept a completion-DB failure is durable ambiguous, never
+    // success. Previously the text tier skipped this and could leave a stuck
+    // 'preparing' posting with no provider_start fence and no ambiguity.
+    if (!dryRun && deliveryClaim) {
+      let providerOk = false;
+      try {
+        providerOk = await markXPostDeliveryProviderStarted(sb, {
+          deliveryId: deliveryClaim.deliveryId,
+          claimToken: deliveryClaim.claimToken,
+          claimGeneration: deliveryClaim.claimGeneration,
+        });
+      } catch (providerErr) {
+        const failOk = await failXPostDelivery(sb, {
+          deliveryId: deliveryClaim.deliveryId,
+          claimToken: deliveryClaim.claimToken,
+          claimGeneration: deliveryClaim.claimGeneration,
+          error: safeXPosterErrorCode(providerErr, 'provider_start_marker_failed'),
+          skipReason: 'provider_boundary_failed',
+          mediaKind,
+        });
+        if (!failOk) console.error('[x-poster] provider-boundary fail release failed', { tweetId });
+        results.push({ tweet_id: tweetId, status: 'failed', error: 'provider_start_marker_failed' });
+        console.warn(`[x-poster] provider boundary marker failed for ${tweetId}; not posting`, { code: 'provider_start_marker_failed' });
+        continue;
+      }
+      if (!providerOk) {
+        results.push({ tweet_id: tweetId, status: 'failed', error: 'provider_start_marker_rejected' });
+        console.warn(`[x-poster] provider boundary marker rejected for ${tweetId}; not posting`, { code: 'provider_start_marker_rejected' });
+        continue;
+      }
+    }
+
+    if (sel.tier !== 'text' && !dryRun) {
       try {
         if (sel.tier === 'video') {
           const prepared = preparedMediaUploads[0];
@@ -1816,22 +2218,25 @@ Deno.serve(async (req) => {
           mediaKind = 'image';
         }
       } catch (e) {
-        const errMsg = `media_upload_failed(${sel.tier}): ${(e as Error).message}`.slice(0, 500);
+        const errMsg = safeXPosterErrorCode(e, `media_upload_failed_${sel.tier}`);
         try {
           const failOk = deliveryClaim
             ? await failXPostDelivery(sb, {
               deliveryId: deliveryClaim.deliveryId!,
               claimToken: deliveryClaim.claimToken!,
+              claimGeneration: deliveryClaim.claimGeneration,
               error: errMsg,
               mediaKind: sel.tier,
+              skipReason: null,
+              nextRetryAt: null,
             })
             : false;
           if (!failOk) console.error('[x-poster] x_deliveries claim release failed (media)', { tweetId });
         } catch (failErr) {
-          console.error('[x-poster] fail_x_post_delivery failed (media)', { tweetId, err: (failErr as Error).message });
+          console.error('[x-poster] fail_x_post_delivery failed (media)', { tweetId, err: safeXPosterErrorCode(failErr, 'fail_x_post_delivery_failed') });
         }
-        results.push({ tweet_id: tweetId, status: 'failed', error: errMsg });
-        console.warn(`[x-poster] ${sel.tier} upload failed for ${tweetId}; not posting text-only: ${(e as Error).message}`);
+        results.push({ tweet_id: tweetId, status: 'ambiguous', error: 'x_media_provider_outcome_unknown' });
+        console.warn(`[x-poster] ${sel.tier} upload outcome is ambiguous for ${tweetId}; not retrying`, { code: 'x_media_provider_outcome_unknown' });
         continue;
       }
     } else if (sel.tier !== 'text' && dryRun) {
@@ -1867,7 +2272,7 @@ Deno.serve(async (req) => {
     } catch (e) {
       const xApiMs = Date.now() - xApiStartedAt;
       const status = (e as { status?: number }).status || 0;
-      const errMsg = (e as Error).message;
+      const errMsg = safeXPosterErrorCode(e, 'x_provider_post_tweet_failed');
       const isRetriable = status === 429 || status >= 500;
       captureEdgeExceptionBackground(e, {
         functionName: "x-poster",
@@ -1888,8 +2293,9 @@ Deno.serve(async (req) => {
           ? await failXPostDelivery(sb, {
             deliveryId: deliveryClaim.deliveryId!,
             claimToken: deliveryClaim.claimToken!,
+            claimGeneration: deliveryClaim.claimGeneration,
             error: errMsg,
-            apiResponse: (e as { raw?: unknown }).raw ?? null,
+            apiResponse: null,
             skipReason: isRetriable ? 'x_api_retriable' : null,
             nextRetryAt: isRetriable ? new Date(Date.now() + 15 * 60 * 1000).toISOString() : null,
             mediaCount,
@@ -1899,7 +2305,7 @@ Deno.serve(async (req) => {
           : false;
         if (!failOk) console.error('[x-poster] x_deliveries claim release failed (post)', { tweetId });
       } catch (failErr) {
-        console.error('[x-poster] fail_x_post_delivery failed (post)', { tweetId, err: (failErr as Error).message });
+        console.error('[x-poster] fail_x_post_delivery failed (post)', { tweetId, err: safeXPosterErrorCode(failErr, 'fail_x_post_delivery_failed') });
       }
       await insertXPipelineEvent(sb, tweetId, 'failed', new Date(xApiStartedAt).toISOString(), new Date().toISOString(), errMsg, {
         x_api_ms: xApiMs,
@@ -1916,6 +2322,7 @@ Deno.serve(async (req) => {
     const latency = Date.now() - startedAt;
     posts24hCount += 1;
     posts1hCount += 1;
+    monthlyPostsCount += 1;
     lastPostTimeMs = Date.now();
     const postedAt = new Date().toISOString();
     let deliveryWriteConfirmed = false;
@@ -1925,6 +2332,7 @@ Deno.serve(async (req) => {
         ? await completeXPostDelivery(sb, {
           deliveryId: deliveryClaim.deliveryId!,
           claimToken: deliveryClaim.claimToken!,
+          claimGeneration: deliveryClaim.claimGeneration,
           xTweetId: xId,
           mediaCount,
           mediaBytes,
@@ -1937,7 +2345,7 @@ Deno.serve(async (req) => {
         : false;
       if (!deliveryWriteConfirmed) deliveryWriteError = 'claim_completion_rejected';
     } catch (e) {
-      deliveryWriteError = (e as Error).message;
+      deliveryWriteError = safeXPosterErrorCode(e, 'claim_completion_failed');
       captureEdgeExceptionBackground(e, {
         functionName: "x-poster",
         action: "claim_complete_error",
@@ -1963,22 +2371,18 @@ Deno.serve(async (req) => {
       dispatch_source: dispatchSource,
       delivery_write_confirmed: deliveryWriteConfirmed,
     });
-    const renderCfg = await loadVideoRenderConfig(sb);
-    try {
-      await sb.rpc('mark_video_render_posted', {
-        p_tweet_id: tweetId,
-        p_retention_hours: renderCfg.retentionHours,
-      });
-    } catch (_e) { /* best-effort */ }
-    results.push({ tweet_id: tweetId, status: 'posted', x_tweet_id: xId, latency_ms: latency, x_api_ms: xApiMs, candidate_reason: candidateReason, candidate_age_ms: candidateAgeMs, dispatch_source: dispatchSource, delivery_write_confirmed: deliveryWriteConfirmed });
+    const retentionHours = await loadVideoRenderRetentionHours(sb);
+    await markVideoRenderPostedBestEffort(sb, tweetId, retentionHours);
+    results.push({ tweet_id: tweetId, status: deliveryWriteConfirmed ? 'posted' : 'ambiguous', x_tweet_id: xId, latency_ms: latency, x_api_ms: xApiMs, candidate_reason: candidateReason, candidate_age_ms: candidateAgeMs, dispatch_source: dispatchSource, delivery_write_confirmed: deliveryWriteConfirmed });
   }
 
   return new Response(JSON.stringify({ ok: true, dry_run: dryRun, processed: results.length, results }), {
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
   } catch (error) {
-    console.error('[x-poster] fatal', error instanceof Error ? error.message : String(error));
-    await captureEdgeException(error, {
+    const fatalCode = safeXPosterErrorCode(error, 'x_poster_fatal');
+    console.error('[x-poster] fatal', { code: fatalCode });
+    await captureEdgeException(new Error(fatalCode), {
       functionName: "x-poster",
       action: "fatal",
       request: req,
@@ -2001,7 +2405,7 @@ async function insertXPipelineEvent(
   meta: Record<string, unknown>,
 ): Promise<void> {
   try {
-    await sb.from('pipeline_events').insert({
+    const { error: pipelineEventError } = await sb.from('pipeline_events').insert({
       subject_type: 'post',
       subject_id: tweetId,
       step: 'x_post',
@@ -2011,5 +2415,18 @@ async function insertXPipelineEvent(
       error,
       meta,
     });
-  } catch (_e) { /* best-effort */ }
+    if (pipelineEventError) {
+      console.warn(JSON.stringify({
+        function: 'x-poster',
+        action: 'pipeline_event_insert_failed',
+        error: 'x_pipeline_event_insert_failed',
+      }));
+    }
+  } catch (_e) {
+    console.warn(JSON.stringify({
+      function: 'x-poster',
+      action: 'pipeline_event_insert_failed',
+      error: 'x_pipeline_event_insert_failed',
+    }));
+  }
 }

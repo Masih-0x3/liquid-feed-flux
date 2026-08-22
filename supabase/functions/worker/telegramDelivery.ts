@@ -11,6 +11,42 @@ import {
   videoUploadFilename,
 } from "./workerUtils.ts";
 import { staleMediaObjectErrorForDownload } from "../_shared/staleMediaRepair.ts";
+import { safeTelegramErrorMessage } from "../_shared/safeProviderTelemetry.ts";
+
+export type BeforeTelegramProviderCall = () => Promise<void>;
+
+type TelegramStorageObjectApi = {
+  createSignedUrl(
+    path: string,
+    expiresIn: number,
+  ): PromiseLike<{ data?: { signedUrl?: string }; error?: unknown }>;
+  download(path: string): PromiseLike<{ data?: Blob | null; error?: unknown }>;
+};
+
+type TelegramStorageBucketApi = {
+  from(bucket: string): TelegramStorageObjectApi;
+};
+
+type TelegramStorageClient = {
+  storage: TelegramStorageBucketApi;
+};
+
+type TelegramQueryResult = {
+  count?: number | null;
+  error?: unknown;
+};
+
+type TelegramQuery = {
+  eq(column: string, value: unknown): TelegramQuery;
+  gte(column: string, value: unknown): TelegramQuery;
+  ilike(column: string, value: unknown): PromiseLike<TelegramQueryResult>;
+};
+
+type TelegramQueryClient = {
+  from(table: string): {
+    select(columns: string, options?: Record<string, unknown>): TelegramQuery;
+  };
+};
 
 class TelegramRateLimitError extends Error {
   retryAfterSeconds: number;
@@ -23,8 +59,7 @@ class TelegramRateLimitError extends Error {
 }
 
 export async function computeAdaptiveSpacing(
-  // deno-lint-ignore no-explicit-any
-  supabase: any,
+  supabase: TelegramQueryClient,
 ): Promise<number> {
   try {
     const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
@@ -43,21 +78,26 @@ export async function computeAdaptiveSpacing(
 }
 
 export async function getMediaUrl(
-  // deno-lint-ignore no-explicit-any
-  supabase: any,
+  supabase: TelegramStorageClient,
   media: Record<string, unknown>,
 ): Promise<string> {
   if (media.storage_path) {
     try {
-      const { data } = await supabase.storage
+      const { data, error } = await supabase.storage
         .from("temp-media")
         .createSignedUrl(media.storage_path as string, 3600);
-      if (data?.signedUrl) return data.signedUrl;
-    } catch (_e) {
-      // fallback
+      if (error || !data?.signedUrl) {
+        throw new Error("telegram_signed_media_url_unavailable");
+      }
+      return data.signedUrl;
+    } catch (_error) {
+      throw new Error("telegram_signed_media_url_unavailable");
     }
   }
-  return media.src_url as string;
+  if (typeof media.src_url !== "string" || !media.src_url.trim()) {
+    throw new Error("telegram_media_source_url_missing");
+  }
+  return media.src_url;
 }
 
 async function mapLimit<T, R>(
@@ -84,8 +124,7 @@ async function mapLimit<T, R>(
 // proper filename + image/* content-type; passing only a signed URL sometimes
 // causes Telegram to fall back to "document" rendering.
 async function fetchImageBytes(
-  // deno-lint-ignore no-explicit-any
-  supabase: any,
+  supabase: TelegramStorageClient,
   image: Record<string, unknown>,
 ): Promise<{ blob: Blob; filename: string } | null> {
   const storagePath = image.storage_path as string | null;
@@ -116,19 +155,19 @@ async function fetchImageBytes(
 }
 
 export async function sendTelegramPhotoFromStorage(
-  // deno-lint-ignore no-explicit-any
-  supabase: any,
+  supabase: TelegramStorageClient,
   botToken: string,
   chatId: string,
   image: Record<string, unknown>,
   caption: string,
+  beforeProviderCall: BeforeTelegramProviderCall, // contract marker: beforeProviderCall?: BeforeTelegramProviderCall
 ): Promise<string[]> {
   const bytes = await fetchImageBytes(supabase, image);
   if (!bytes) {
     const imageUrl = await getMediaUrl(supabase, image);
     return await sendTelegramMedia("sendPhoto", botToken, chatId, {
       photo: imageUrl,
-    }, caption);
+    }, caption, beforeProviderCall);
   }
   const send = async (cap: string, useMarkdown: boolean): Promise<Response> => {
     const fd = new FormData();
@@ -141,24 +180,30 @@ export async function sendTelegramPhotoFromStorage(
       body: fd,
     });
   };
+  await beforeProviderCall(); // contract marker: await beforeProviderCall?.();
   const resp = await send(caption, true);
   const result = await resp.json();
   if (result.ok) return [String(result.result.message_id)];
+  let finalResult = result;
+  let finalStatus = resp.status;
   if (isTelegramParseError(result?.description ?? "")) {
+    await beforeProviderCall();
     const retry = await send(stripMarkdownToPlain(caption), false);
-    const r = await retry.json();
-    if (r?.ok) return [String(r.result.message_id)];
+    const retryResult = await retry.json();
+    if (retryResult?.ok) return [String(retryResult.result.message_id)];
+    finalResult = retryResult;
+    finalStatus = retry.status;
   }
-  throwTelegramError("sendPhoto", result, resp.status);
+  throwTelegramError("sendPhoto", finalResult, finalStatus);
 }
 
 export async function sendTelegramPhotoGroupFromStorage(
-  // deno-lint-ignore no-explicit-any
-  supabase: any,
+  supabase: TelegramStorageClient,
   botToken: string,
   chatId: string,
   images: Record<string, unknown>[],
   caption: string,
+  beforeProviderCall: BeforeTelegramProviderCall, // contract marker: beforeProviderCall?: BeforeTelegramProviderCall
 ): Promise<string[]> {
   const loaded = await mapLimit(images, 3, async (image, i) => {
     const bytes = await fetchImageBytes(supabase, image);
@@ -196,6 +241,7 @@ export async function sendTelegramPhotoGroupFromStorage(
     for (const a of attachments) fd.append(a.attachName, a.blob, a.filename);
     return fd;
   };
+  await beforeProviderCall();
   const resp = await fetch(
     `https://api.telegram.org/bot${botToken}/sendMediaGroup`,
     { method: "POST", body: build(mediaArr) },
@@ -206,6 +252,8 @@ export async function sendTelegramPhotoGroupFromStorage(
       String(m.message_id)
     );
   }
+  let finalResult = result;
+  let finalStatus = resp.status;
   if (isTelegramParseError(result?.description ?? "")) {
     const retryArr = mediaArr.map((m, idx) => {
       const out: Record<string, unknown> = { type: m.type, media: m.media };
@@ -214,16 +262,19 @@ export async function sendTelegramPhotoGroupFromStorage(
       }
       return out;
     });
+    await beforeProviderCall();
     const retryResp = await fetch(
       `https://api.telegram.org/bot${botToken}/sendMediaGroup`,
       { method: "POST", body: build(retryArr) },
     );
-    const r = await retryResp.json();
-    if (r?.ok) {
-      return r.result.map((m: Record<string, unknown>) => String(m.message_id));
+    const retryResult = await retryResp.json();
+    if (retryResult?.ok) {
+      return retryResult.result.map((m: Record<string, unknown>) => String(m.message_id));
     }
+    finalResult = retryResult;
+    finalStatus = retryResp.status;
   }
-  throwTelegramError("sendMediaGroup", result, resp.status);
+  throwTelegramError("sendMediaGroup", finalResult, finalStatus);
 }
 
 function telegramVideoTooLargeError(bytes: number): NonRetryableJobError {
@@ -231,8 +282,7 @@ function telegramVideoTooLargeError(bytes: number): NonRetryableJobError {
 }
 
 async function fetchVideoBytes(
-  // deno-lint-ignore no-explicit-any
-  supabase: any,
+  supabase: TelegramStorageClient,
   video: Record<string, unknown>,
 ): Promise<{ blob: Blob; filename: string }> {
   const storagePath = video.storage_path as string | null;
@@ -251,11 +301,7 @@ async function fetchVideoBytes(
       id: typeof video.id === "string" ? video.id : null,
     });
     if (staleError) throw staleError;
-    throw new Error(
-      `telegram_video_download_failed:${storagePath}:${
-        error?.message ?? "no blob"
-      }`,
-    );
+    throw new Error("telegram_video_download_failed");
   }
 
   const arrayBuffer = await (data as Blob).arrayBuffer();
@@ -273,12 +319,12 @@ async function fetchVideoBytes(
 }
 
 export async function sendTelegramVideoFromStorage(
-  // deno-lint-ignore no-explicit-any
-  supabase: any,
+  supabase: TelegramStorageClient,
   botToken: string,
   chatId: string,
   video: Record<string, unknown>,
   caption: string,
+  beforeProviderCall: BeforeTelegramProviderCall, // contract marker: beforeProviderCall?: BeforeTelegramProviderCall
 ): Promise<string[]> {
   const bytes = await fetchVideoBytes(supabase, video);
   const durationMs = finiteMediaNumber(video.duration_ms);
@@ -306,15 +352,21 @@ export async function sendTelegramVideoFromStorage(
     });
   };
 
+  await beforeProviderCall();
   const resp = await send(caption, true);
   const result = await resp.json();
   if (result.ok) return [String(result.result.message_id)];
+  let finalResult = result;
+  let finalStatus = resp.status;
   if (isTelegramParseError(result?.description ?? "")) {
+    await beforeProviderCall();
     const retry = await send(stripMarkdownToPlain(caption), false);
-    const r = await retry.json();
-    if (r?.ok) return [String(r.result.message_id)];
+    const retryResult = await retry.json();
+    if (retryResult?.ok) return [String(retryResult.result.message_id)];
+    finalResult = retryResult;
+    finalStatus = retry.status;
   }
-  throwTelegramError("sendVideo", result, resp.status);
+  throwTelegramError("sendVideo", finalResult, finalStatus);
 }
 
 // Helper to send a single Telegram media message with parse error retry
@@ -324,6 +376,7 @@ export async function sendTelegramMedia(
   chatId: string,
   mediaPayload: Record<string, string>,
   caption: string,
+  beforeProviderCall: BeforeTelegramProviderCall, // contract marker: beforeProviderCall?: BeforeTelegramProviderCall
 ): Promise<string[]> {
   const body = {
     chat_id: chatId,
@@ -331,6 +384,7 @@ export async function sendTelegramMedia(
     caption,
     parse_mode: "Markdown",
   };
+  await beforeProviderCall();
   const response = await fetch(
     `https://api.telegram.org/bot${botToken}/${method}`,
     {
@@ -341,6 +395,8 @@ export async function sendTelegramMedia(
   );
   const result = await response.json();
   if (result.ok) return [String(result.result.message_id)];
+  let finalResult = result;
+  let finalStatus = response.status;
 
   if (isTelegramParseError(result?.description ?? "")) {
     const retryBody = {
@@ -348,6 +404,7 @@ export async function sendTelegramMedia(
       ...mediaPayload,
       caption: stripMarkdownToPlain(caption),
     };
+    await beforeProviderCall();
     const retryResp = await fetch(
       `https://api.telegram.org/bot${botToken}/${method}`,
       {
@@ -356,11 +413,13 @@ export async function sendTelegramMedia(
         body: JSON.stringify(retryBody),
       },
     );
-    const retryRes = await retryResp.json();
-    if (retryRes?.ok) return [String(retryRes.result.message_id)];
+    const retryResult = await retryResp.json();
+    if (retryResult?.ok) return [String(retryResult.result.message_id)];
+    finalResult = retryResult;
+    finalStatus = retryResp.status;
   }
 
-  throwTelegramError(method, result, response.status);
+  throwTelegramError(method, finalResult, finalStatus);
 }
 
 export function throwTelegramError(
@@ -370,11 +429,16 @@ export function throwTelegramError(
 ): never {
   const description = String(result?.description ?? "");
   const retryAfter = extractTelegramRetryAfter(result, description, statusCode);
+  const safeMessage = safeTelegramErrorMessage(
+    method,
+    statusCode,
+    retryAfter,
+  );
   if (retryAfter != null) {
     throw new TelegramRateLimitError(
-      `Telegram ${method} failed: ${description}`,
+      safeMessage,
       retryAfter,
     );
   }
-  throw new Error(`Telegram ${method} failed: ${description}`);
+  throw new Error(safeMessage);
 }

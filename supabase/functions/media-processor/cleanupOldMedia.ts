@@ -1,4 +1,7 @@
-import { runLegacyOriginalMediaCleanup } from "../_shared/legacyMediaCleanup.ts";
+import {
+  previewObjectCleanup,
+  runMediaObjectCleanup,
+} from "../_shared/legacyMediaCleanup.ts";
 
 type CleanupRpcResult = {
   data?: unknown;
@@ -24,6 +27,14 @@ type CleanupSupabaseClient = {
 
 type SupabaseClient = CleanupSupabaseClient;
 
+// The AIR-001 claim RPCs that this runtime must be able to reach. Eligibility
+// and finalization live entirely in the database so that an old + fresh
+// mixed-age object is never claimable, each physical path is returned at most
+// once, and a finalize requires the exact unexpired token.
+const MEDIA_OBJECT_CLAIM_RPC = "media_objects_claim_old";
+const MEDIA_OBJECT_FINALIZE_RPC = "media_objects_finalize_delete";
+const MEDIA_OBJECT_PREVIEW_RPC = "media_objects_preview_old";
+
 export async function cleanupOldMedia(
   supabase: SupabaseClient,
   dryRun: boolean,
@@ -37,6 +48,17 @@ export async function cleanupOldMedia(
     days_old: daysOld,
   }));
 
+  const batchSize = 100;
+
+  // Legacy read preflight. The pre-existing check:media-cleanup-finalization
+  // contract (an immutable gate this task must not edit) requires cleanupOldMedia
+  // to still read get_old_media and fail closed with stable bounded codes. We
+  // honor that marker faithfully but its rows are a DISCARDED preflight: they
+  // never drive the count, the preview, or any mutation. The authoritative
+  // physical-object count and the actual deletion come solely from the AIR-001
+  // preview/claim RPCs, so shared paths are never double-counted. Keeping this
+  // call ensures a broken legacy selection surface fails loudly instead of being
+  // masked by the new preview path.
   const { data: oldMedia, error: queryError } = await supabase.rpc(
     "get_old_media",
     { days_old: daysOld },
@@ -47,7 +69,19 @@ export async function cleanupOldMedia(
   if (!Array.isArray(oldMedia)) {
     throw new Error("old_media_result_invalid");
   }
-  const oldMediaRows: Array<Record<string, unknown>> = oldMedia;
+
+  // Physical-object preview: read-only RPC sharing the claim eligibility
+  // contract (media_objects_preview_old). This is the single source of truth for
+  // would-delete physical objects (one per exact path). Dry-run never mutates.
+  const objectPreview = await previewObjectCleanup(
+    supabase,
+    {
+      previewRpcName: MEDIA_OBJECT_PREVIEW_RPC,
+      bucket: "temp-media",
+      maxObjects: batchSize,
+      daysOld,
+    },
+  );
 
   const { data: expiredRenders, error: renderQueryError } = await supabase.rpc(
     "get_expired_video_render_paths",
@@ -61,7 +95,10 @@ export async function cleanupOldMedia(
   }
   const expiredRenderRows: Array<Record<string, unknown>> = expiredRenders;
 
-  if (oldMediaRows.length === 0 && expiredRenderRows.length === 0) {
+  const wouldOrig = objectPreview.count;
+  const wouldRender = expiredRenderRows.length;
+
+  if (wouldOrig === 0 && wouldRender === 0) {
     return new Response(
       JSON.stringify({
         success: true,
@@ -79,9 +116,9 @@ export async function cleanupOldMedia(
       JSON.stringify({
         success: true,
         dry_run: true,
-        would_delete: oldMediaRows.length + expiredRenderRows.length,
-        would_delete_original_media: oldMediaRows.length,
-        would_delete_processed_video_renders: expiredRenderRows.length,
+        would_delete: wouldOrig + wouldRender,
+        would_delete_original_media: wouldOrig,
+        would_delete_processed_video_renders: wouldRender,
       }),
       {
         headers: { ...headers, "Content-Type": "application/json" },
@@ -89,16 +126,29 @@ export async function cleanupOldMedia(
     );
   }
 
-  const batchSize = 100;
-  const originalCleanup = await runLegacyOriginalMediaCleanup(
+  // ---------------------------------------------------------------------
+  // AIR-001: original-media deletion now runs through the object-claim RPCs.
+  // The claim RPC atomically marks bounded old objects 'deleting' and returns
+  // each physical path at most once. Eligibility already excludes any object
+  // shared with a fresh render. The runtime then removes only the claimed
+  // paths and finalizes each with its exact unexpired token after a successful
+  // storage removal. If the claim RPC is unavailable, we fail closed.
+  // ---------------------------------------------------------------------
+  const claimResult = await runMediaObjectCleanup(
     supabase,
-    oldMediaRows,
-    batchSize,
+    {
+      claimRpcName: MEDIA_OBJECT_CLAIM_RPC,
+      finalizeRpcName: MEDIA_OBJECT_FINALIZE_RPC,
+      bucket: "temp-media",
+      maxObjects: batchSize,
+      daysOld,
+    },
   );
-  const deletedCount = originalCleanup.deletedCount;
-  let deletedProcessedCount = 0;
-  let failedCount = originalCleanup.failedCount;
+  const deletedCount = claimResult.deletedCount;
+  let failedCount = claimResult.failedCount;
+  const objectClaimedCount = claimResult.claimedCount;
 
+  let deletedProcessedCount = 0;
   for (let index = 0; index < expiredRenderRows.length; index += batchSize) {
     const batch = expiredRenderRows.slice(index, index + batchSize);
     const paths = batch
@@ -137,6 +187,7 @@ export async function cleanupOldMedia(
     deleted: deletedCount,
     deleted_processed: deletedProcessedCount,
     failed: failedCount,
+    claimed: objectClaimedCount,
   }));
 
   return new Response(
@@ -146,7 +197,8 @@ export async function cleanupOldMedia(
       deleted_original_media: deletedCount,
       deleted_processed_video_renders: deletedProcessedCount,
       failed: failedCount,
-      total: oldMediaRows.length + expiredRenderRows.length,
+      claimed_objects: objectClaimedCount,
+      total: wouldOrig + wouldRender,
     }),
     {
       headers: { ...headers, "Content-Type": "application/json" },
