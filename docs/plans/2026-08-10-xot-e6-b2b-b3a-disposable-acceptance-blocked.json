@@ -1,0 +1,517 @@
+{
+  "schema": "xot-e6-b2b-b3a-disposable-acceptance-blocked-receipt-v1",
+  "event": "e6_b2b_b3a_disposable_acceptance_blocked_local_t1",
+  "phase": "split-e6-disposable-t1-blocked-local-only",
+  "status": "BLOCKED_LOCAL_DISPOSABLE_T1_NOT_ACHIEVED",
+  "release": "CLOSED",
+  "releaseGate": "CLOSED",
+  "riskTier": "HIGH",
+  "airIds": [
+    "AIR-001",
+    "AIR-003",
+    "AIR-005"
+  ],
+  "brIds": [
+    "BR-MEDIA-01",
+    "BR-MEDIA-03",
+    "BR-JOB-01",
+    "BR-JOB-02"
+  ],
+  "repository": "/Users/stevmq/Finalized XOT",
+  "branch": "codex/xot-remediation-convergence",
+  "head": "0bd578856016c06a10890339f93aa13b82ecae48",
+  "gitHead": "0bd578856016c06a10890339f93aa13b82ecae48",
+  "directPlan": {
+    "path": "docs/plans/2026-08-08-xot-post-b4-execution-sequence.md",
+    "sha256": "24feff64abe2a221ca69cb9f52e1a03eb53d707ec024367fa8aa3e75cf0dea4c",
+    "section": "E6 - B2B/B3A Disposable Acceptance Repair",
+    "class": "local/disposable T1",
+    "targetTier": "T1 where the actual boundary is exercised",
+    "dependencies": [
+      "execution preflight",
+      "E5"
+    ],
+    "requiredEvidence": [
+      "mixed-age/shared-reference media claims and forced storage failure",
+      "stale job/X owner rejection, generation rotation, checked zero-row writes, and provider-start ambiguity",
+      "disposable PostgreSQL replay, no network, exact cleanup receipt"
+    ],
+    "stopConditions": [
+      "prior REWORK remains unaddressed",
+      "a stale owner succeeds",
+      "storage failure clears DB state",
+      "provider marker failure allows a call",
+      "evidence conflicts with immutable ledger rows"
+    ],
+    "deferred": [
+      "production schema",
+      "canary",
+      "provider evidence"
+    ]
+  },
+  "ledger": {
+    "path": "docs/plans/2026-07-14-xot-comprehensive-audit-remediation-implementation-ledger.jsonl",
+    "rowCount": 523,
+    "fullSha256": "16a15af79e01c9494e5a8950400552a860cda648980e0dde2c0ed4cf7a876f04",
+    "row523": {
+      "lineNoNewlineSha256": "5ac8b183552c95cbae9f13e83da39aad8d2ee5363fca817c1a8b6f9b096337e8",
+      "event": "e5_b2a_no_egress_runtime_closure_acceptance_isolated_t1_row523",
+      "status": "accepted_local_isolated_t1; release gate CLOSED",
+      "head": "0bd578856016c06a10890339f93aa13b82ecae48",
+      "currentReceiptPath": "docs/plans/2026-08-10-xot-e5-b2a-no-egress-runtime-closure.json",
+      "currentReceiptSha256": "c1061931d4f0970ef4d312d27818d9cc59729fcbc236981c41eb17285e9487c7",
+      "directPlanSha256": "24feff64abe2a221ca69cb9f52e1a03eb53d707ec024367fa8aa3e75cf0dea4c",
+      "predecessorRow": 522,
+      "predecessorRowNoNewlineSha256": "1485d8e42908d2f2f660936a34dd2b63d99b748dcd5020472bae3cb8daad1e5a",
+      "prefixThroughRow522Sha256": "2878e7d65c57966a701a3fccdf0b6d8d07565686847092d391593552b3a97971"
+    },
+    "chain": [
+      {
+        "row": 519,
+        "event": "e2_renderer_subprocess_containment_accepted_local_t0_t1_row519",
+        "lineNoNewlineSha256": "adb2c416778571d279ab5fbf4defa4a78d4ed795505d8182171dc823490f3056"
+      },
+      {
+        "row": 520,
+        "event": "e2_renderer_subprocess_containment_acceptance_provenance_correction_local_t0_t1_row520",
+        "lineNoNewlineSha256": "fbfb5e965a2f3af5add4c4eca8564b4fca42737c26ac603288814311aa251684",
+        "prefixThroughRow520Sha256": "d8db00ce221d61ae17b908ec52c519e134735be973622bb37569ea07610866af"
+      },
+      {
+        "row": 521,
+        "event": "e3_admin_mutation_operation_protocol_acceptance_local_t0_t1_row521",
+        "lineNoNewlineSha256": "6c5c961484dae017ed944096ec3f34fb07a31e2071c936e28c924039bb3fcb06"
+      },
+      {
+        "row": 522,
+        "event": "e4_job_lane_capacity_checked_write_acceptance_local_t0_t1_row522",
+        "lineNoNewlineSha256": "1485d8e42908d2f2f660936a34dd2b63d99b748dcd5020472bae3cb8daad1e5a",
+        "prefixThroughRow522Sha256": "2878e7d65c57966a701a3fccdf0b6d8d07565686847092d391593552b3a97971"
+      },
+      {
+        "row": 523,
+        "event": "e5_b2a_no_egress_runtime_closure_acceptance_isolated_t1_row523",
+        "lineNoNewlineSha256": "5ac8b183552c95cbae9f13e83da39aad8d2ee5363fca817c1a8b6f9b096337e8"
+      }
+    ],
+    "receiptRow": "none",
+    "appendOnly": true,
+    "releaseGate": "CLOSED",
+    "mutation": "No ledger row was appended or changed by this receipt authoring."
+  },
+  "predecessors": {
+    "e5": {
+      "path": "docs/plans/2026-08-10-xot-e5-b2a-no-egress-runtime-closure.json",
+      "sha256": "c1061931d4f0970ef4d312d27818d9cc59729fcbc236981c41eb17285e9487c7",
+      "schema": "xot-e5-b2a-no-egress-runtime-closure-receipt-v1",
+      "status": "ACCEPTED_LOCAL_ISOLATED_T1",
+      "supersession": "E6 does not rewrite or supersede E5; E5 remains the accepted row-523 predecessor."
+    },
+    "b2b": {
+      "path": "docs/plans/2026-08-06-xot-b2b-media-object-claims.json",
+      "sha256": "f3d0c743de35ba4dd3409e87b8496793850fa3974fd3ad394a5705ff0464835b",
+      "schema": "xot-b2b-media-object-claims-receipt-v1",
+      "status": "candidate-report-ready",
+      "phase": "author-rework",
+      "reviewVerdict": "REWORK",
+      "evidenceTier": "offline-source-model-only",
+      "achieved": "T0 + offline model/runtime/source contracts",
+      "deferred": [
+        "Deno runtime",
+        "live database replay",
+        "production types",
+        "owner/owner grant proof",
+        "production apply",
+        "hosted CI",
+        "live validation"
+      ],
+      "immutable": true
+    },
+    "b3a": {
+      "path": "docs/plans/2026-08-06-xot-b3a-job-x-claim-fencing.json",
+      "sha256": "e052db66e75ffd713bc5aded176d4ccf29bdca06ef661cb8ee60df3db67cf2a8",
+      "schema": "xot-b3-job-x-claim-fencing-receipt-v1",
+      "status": "review-ready-local-only",
+      "phase": "split-s4-review-ready",
+      "reviewVerdict": "not recorded",
+      "evidenceTier": "offline-source-model-only",
+      "achieved": "T0 + offline model/runtime/source contracts",
+      "deferred": [
+        "Deno runtime",
+        "live database replay",
+        "production types",
+        "owner/owner grant proof",
+        "production apply",
+        "hosted CI"
+      ],
+      "immutable": true,
+      "staleHistoricalMigrationSha256": "6df9270450f203c74fec1baf1145430edcc355075afa101b93f545384306c614",
+      "staleHistoricalMigrationPath": "supabase/migrations/20260806143000_b3_job_x_claim_fencing.sql",
+      "staleHistoricalMigrationNote": "Immutable old B3A receipt hash for the separate owning claim-fencing migration with the broken defaulted generation parameter; it is not the hash of 20260617224908_x_post_delivery_claims.sql and is not current acceptance evidence."
+    }
+  },
+  "currentCandidate": {
+    "pathCount": 5,
+    "totalLines": 1368,
+    "capsulePathCount": 4,
+    "capsuleLines": 719,
+    "migrationLines": 649,
+    "paths": [
+      {
+        "path": "supabase/migrations/20260806143000_b3_job_x_claim_fencing.sql",
+        "lines": 649,
+        "sha256": "024dc8569aa490d9050d63b4507e584a9ffba5cb255bc3df9e76e24a64b84ecd",
+        "role": "existing owning migration; minimally repaired B3A signature and grants"
+      },
+      {
+        "path": "supabase/functions/_shared/e6DisposableAcceptance.test.ts",
+        "lines": 132,
+        "sha256": "451a87ba803cd4d3ea83c1c0f80029a6ff430d5feaa577ebf0114a71623808ee",
+        "role": "application-boundary Deno capsule test; not provider proof"
+      },
+      {
+        "path": "scripts/e6-disposable-fixture.sql",
+        "lines": 180,
+        "sha256": "1dcb4c3e1484f6d707d5828a1521453e3912f343a207b1498e18f3c44da2b480",
+        "role": "disposable SQL fixture; never reached in a complete replay"
+      },
+      {
+        "path": "scripts/check-e6-disposable-acceptance-contract.mjs",
+        "lines": 145,
+        "sha256": "573c87511b0e4b9376de8cf11ccd263f156a6f2ac184a53b4d2cd5d20384379d",
+        "role": "static contract and mutation checker"
+      },
+      {
+        "path": "scripts/run-e6-disposable-acceptance.mjs",
+        "lines": 262,
+        "sha256": "c60fc80bab0543b9cf78baeb33208ce26a22493dfcf9db8d7ade7b92e3e428bb",
+        "role": "isolated runner; no successful migration/fixture path"
+      }
+    ],
+    "lineBound": {
+      "limit": 1500,
+      "withinLimit": true,
+      "note": "The four capsule files total 719 lines; the existing owning migration makes the five-path total 1368 lines."
+    }
+  },
+  "b3aSignatureRepair": {
+    "disposition": "STATIC_SOURCE_VERIFIED_PENDING_RUNTIME",
+    "oldBrokenSurface": {
+      "path": "supabase/migrations/20260617224908_x_post_delivery_claims.sql",
+      "signatures": "Old 10-argument complete_x_post_delivery and fail_x_post_delivery surfaces placed p_claim_generation bigint DEFAULT 0 before a required text parameter.",
+      "error": "input parameters after one with a default value must also have defaults",
+      "immutableHistoricalReceiptMigrationSha256": "31ae918df85bf5aa483b7de72033d0f7416392d3fb84454164aa8424938c57b2",
+      "immutableHistoricalReceiptMigrationNote": "Authoritative local hash for this historical x_post_delivery_claims migration; the old B3A receipt's 6df9270... hash belongs to the separate 20260806143000_b3_job_x_claim_fencing.sql migration."
+    },
+    "currentFix": {
+      "path": "supabase/migrations/20260806143000_b3_job_x_claim_fencing.sql",
+      "sha256": "024dc8569aa490d9050d63b4507e584a9ffba5cb255bc3df9e76e24a64b84ecd",
+      "completeFunction": "p_claim_generation bigint is required in position 3; p_x_tweet_id text follows; all subsequent parameters have defaults.",
+      "failFunction": "p_claim_generation bigint is also required and has no default.",
+      "oldOverloads": "The old 10-argument overloads are explicitly dropped before the repaired definitions.",
+      "sourceLocations": {
+        "dropOldOverloads": "approximately lines 472-479",
+        "completeDefinition": "block 5c, approximately lines 519-572",
+        "failDefinition": "block 5d, approximately lines 575-630",
+        "grantsAndRevokes": "approximately lines 639-644"
+      },
+      "securityAndGrants": "Static SECURITY DEFINER/search-path and GRANT/REVOKE contract review is green for the repaired signature; runtime ownership, owner/grant proof, and real migration execution remain pending.",
+      "adversarialFence": "The E6 checker requires the exact non-default required-generation form and rejects optional-generation mutants for both functions."
+    },
+    "acceptance": "No E6 source acceptance beyond the pending repair; static source verification is not T1 acceptance."
+  },
+  "validation": {
+    "staticGreenOnly": true,
+    "green": [
+      {
+        "command": "node --check scripts/run-e6-disposable-acceptance.mjs",
+        "result": "GREEN"
+      },
+      {
+        "command": "node --check scripts/check-e6-disposable-acceptance-contract.mjs",
+        "result": "GREEN"
+      },
+      {
+        "command": "npm run check:e6-disposable-acceptance",
+        "result": "GREEN"
+      },
+      {
+        "command": "MUTATION_TEST=1 npm run check:e6-disposable-acceptance",
+        "result": "GREEN"
+      },
+      {
+        "command": "git diff --check on all five current paths",
+        "result": "GREEN"
+      },
+      {
+        "command": "git diff --cached --quiet",
+        "result": "GREEN; staged index empty"
+      }
+    ],
+    "notAchieved": [
+      "full migration replay",
+      "SQL fixture assertions",
+      "real disposable-provider DDIC execution",
+      "Deno runtime assertions",
+      "exact success-path cleanup proof"
+    ],
+    "explicitNonAcceptance": {
+      "sql": "NOT_EXECUTED",
+      "deno": "NOT_EXECUTED",
+      "fullMigrationAcceptance": "NOT_ACHIEVED",
+      "sourceAcceptance": "NOT_ACCEPTED_BEYOND_PENDING_B3A_REPAIR"
+    }
+  },
+  "runnerContractStaticEvidence": {
+    "image": "public.ecr.aws/supabase/postgres@sha256:99b1729aeb0bac314445024fc149fbd39306170b61dd50800ccf180327ab3459",
+    "context": "orbstack",
+    "pull": "never",
+    "network": "none",
+    "restart": "no",
+    "password": "ephemeral randomBytes(48), POSTGRES_PASSWORD passthrough only",
+    "forbiddenRunnerOptions": [
+      "-p",
+      "-P",
+      "--publish",
+      "-v",
+      "--volume",
+      "--volumes-from"
+    ],
+    "readiness": "pg_isready followed by bounded two-consecutive-sample stableCatalogSample gate",
+    "scalarRead": "runPsqlScalar uses psql -At; cron.database_name and cron.launch_active_jobs checks are post-readiness",
+    "cleanup": "exact docker rm -f in finally with before/after ports, volumes, networks, and skillmap snapshots",
+    "staticDisposition": "Runner and checker contracts are statically green only; no successful runtime boundary was observed."
+  },
+  "attemptTimeline": [
+    {
+      "attempt": 1,
+      "configuration": "fixed/no-password bootstrap",
+      "result": "pg_isready timeout; exact cleanup completed"
+    },
+    {
+      "attempt": 2,
+      "configuration": "trust-only bootstrap",
+      "result": "pg_isready timeout; earlier status-based skillmap comparison differed, motivating exact ID/start/restart invariants"
+    },
+    {
+      "attempt": 3,
+      "configuration": "ephemeral cryptographic password with host readiness",
+      "result": "reached migration 1/117 (20250902164607_4824a25b-3b01-4499-8ddd-2dd4e191920b.sql, sha256 2eb3b40e...); initial error extraction was incomplete"
+    },
+    {
+      "attempt": 4,
+      "configuration": "ephemeral password with in-container readiness",
+      "result": "reached migration 7/117 (20250902214327_81b9307b-715e-41f2-98ff-60d3a2d9d3c9.sql, sha256 240c26c3...); replay failed before acceptance"
+    },
+    {
+      "attempt": 5,
+      "configuration": "extension-prelude variants",
+      "result": "pre-created pg_cron/pg_net caused early generic SQL failure; temporary cron/net stubs then failed at migration 2 with schema cron already exists"
+    },
+    {
+      "attempt": 6,
+      "configuration": "expanded stderr capture",
+      "result": "migration 1 failed with ERROR: could not open relation with OID 16674; exact cleanup and bounded skillmap invariant were clean"
+    },
+    {
+      "attempt": "later RCA/gate runs",
+      "configuration": "separately authorized correction and gate probes",
+      "result": "after B3A repair migration 5 reached OID 16978; scalar cron verification was corrected, then migration 2 lacked cron.database_name; both cron settings were added, then migration 1 reached OID 16661; a PID1 gate reported bash; stable OID polling saw changing GraphQL sequence/extension OIDs; reset/continue polling timed out with catalog_readiness_timeout previous=empty"
+    }
+  ],
+  "runtimeOutcome": {
+    "finalError": "E6_REPLAY_BLOCKED catalog_readiness_timeout previous=empty",
+    "readinessBoundSeconds": 180,
+    "acceptedCatalogSnapshots": 0,
+    "catalogChurn": {
+      "observed": true,
+      "graphqlSequenceOid": "16594 -> 16641",
+      "pgGraphqlExtensionOid": "16592 -> 16639",
+      "stableFields": "postmaster start time, graphql/extensions namespaces, and role OIDs",
+      "cause": "current cached pg_graphql bootstrap asynchronously drops/recreates graphql.seq_schema_version and pg_extension pg_graphql"
+    },
+    "cleanupInvariant": {
+      "container": "absent",
+      "mounts": [],
+      "xotContainers": 0,
+      "xotVolumes": 0,
+      "xotNetworks": 0,
+      "port8080": "unbound",
+      "skillmapUnchanged": true,
+      "skillmapInvariantBounded": true,
+      "reportedLine": "E6_CLEANUP container=absent mounts=[] xotContainers=0 xotVolumes=0 xotNetworks=0 port8080=unbound skillmapUnchanged=true skillmapInvariantBounded=true",
+      "limitation": "Observed after timeout; it does not prove success-path cleanup because no migration completed."
+    }
+  },
+  "rootBlocker": {
+    "summary": "The current cached 17.6.1.158 pg_graphql catalog/OID churn prevents stable bootstrap under the 180-second gate.",
+    "environment": "The current cached 17.6.1.158 image keeps changing graphql.seq_schema_version and pg_extension OIDs while bootstrap runs; this is an environmental/bootstrap blocker, not a source-contract defect.",
+    "historicalStack": "The historically successful 17.6.1.156 plus storage-api 1.68.1 exact digest/image/harness is not locally available or fully preserved.",
+    "availability": "Downloads and network access were not authorized; there is no deterministic cached path to the historical successful stack.",
+    "currentImageNuance": "The exact current image digest is cached and --pull=never makes source/isolation deterministic, but its bootstrap catalog remains nondeterministic; this is not the missing historical 17.6.1.156/storage-api path."
+  },
+  "storageEvidence": {
+    "status": "UNAVAILABLE",
+    "historicalB2BB3ADDIC": "Old B2B/B3A receipts provide offline source/model evidence only; no provider-backed storage image or owner/path parity proof was executed.",
+    "fixtureEvidence": "The fixture was never reached in a complete replay; its old claim path depends on media_objects_preview_old/media_objects_claim_old.",
+    "observedError": "ERROR: function public.media_objects_preview_old(unknown, integer, integer) does not exist",
+    "harnessBoundary": "The injected e6 application-boundary Deno storage test never calls a real provider and cannot establish storage-vs-owner originality.",
+    "effect": "Storage/provider parity remains a hard T1 blocker even if a database bootstrap is repaired."
+  },
+  "rcaEvidence": [
+    {
+      "handle": "/root/e6_replay_root_cause",
+      "finding": "B3A complete_x_post_delivery had p_claim_generation bigint DEFAULT 0 before required p_x_tweet_id; minimal owning-migration repair was made and fail_x_post_delivery generation is required too."
+    },
+    {
+      "path": "/tmp/xot-e6-rca-20260810-migration-114-recheck.log",
+      "finding": "ERROR: input parameters after one with a default value must also have defaults"
+    },
+    {
+      "path": "/tmp/xot-e6-rca-20260810-fixture-stderr.log",
+      "finding": "ERROR: function public.media_objects_preview_old(unknown, integer, integer) does not exist"
+    },
+    {
+      "path": "/tmp/xot-e6-rca-20260810-migration-stderr.log",
+      "finding": "ERROR: relation media_objects already exists"
+    }
+  ],
+  "cleanupAndState": {
+    "databaseApplied": false,
+    "providerContact": false,
+    "storageContact": false,
+    "networkProductContact": false,
+    "hostedCi": false,
+    "staging": false,
+    "deployment": false,
+    "live": false,
+    "staged": false,
+    "committed": false,
+    "pushed": false,
+    "dirtyWorktreePreserved": true,
+    "protectedArtifactsChanged": false,
+    "ledgerChangedByThisReceipt": false
+  },
+  "missingEvidenceAndNextResumePrerequisites": [
+    "A deterministic bootstrap or alternative usable image whose pg_graphql catalog stabilizes before the 180-second gate.",
+    "The historically successful 17.6.1.156 plus storage-api 1.68.1 exact digest/image/harness, or an authorized equivalent fully preserved locally.",
+    "A storage-parity seam proving real provider/object owner/path behavior for the historical B2B claim chain.",
+    "A complete migration replay followed by the SQL fixture assertions and the real Deno/runtime assertions.",
+    "Runtime ownership, owner/grant, schema/type, and security evidence for the repaired B3A functions.",
+    "PAT1, protected migrations/types, hosted CI, staging, provider, and live evidence remain deferred."
+  ],
+  "provenance": {
+    "author": {
+      "role": "Luna High implementation author for the five-path E6 capsule",
+      "identity": "not provided; no identity IDs invented",
+      "subagents": "none",
+      "doneclaimPath": "/tmp/xot-e6-author-doneclaim.md",
+      "doneclaimSha256": "99035cd4a71c13e7193252fbe4921447f831380108e9e2fac20195dba0299f7d"
+    },
+    "lunaFinal": {
+      "handle": "/root/e6_blocked_acceptance",
+      "verdict": "BLOCKED",
+      "scope": "final Luna T1 acceptance decision; no acceptance asserted"
+    },
+    "claudeFinal": {
+      "runId": "run_126b845ec732",
+      "taskId": "task_f2d734eacc2c",
+      "dispatchId": "ctx_c255d84ccbb8",
+      "route": "deepseek-v4-flash-0731, /effort ultracode (xhigh)",
+      "model": "deepseek-v4-flash-0731",
+      "effort": "ultracode",
+      "effortDisplay": "xhigh",
+      "verified": true,
+      "verdict": "REWORK",
+      "reviewRole": "Prepublication receipt review finding a historical-hash attribution defect; not a final receipt-integrity acceptance.",
+      "scope": "Underlying blocker and receipt reconciliation before finalization; E6 T1 acceptance is not asserted.",
+      "acceptanceAuthority": "none after rework",
+      "reportPath": "/tmp/xot-e6-blocked-receipt-claude-final.md",
+      "reportSha256": "7867e79a395a83313aef3109c8d67397549d39b849e36d69ee08e581f94daada",
+      "reportLineCount": 94,
+      "auditedPriorReceiptSha256": "2342efc22e4cf6068f6abadd8d87bec79d0bbe5b4871aef6f7d3a35f431c4828",
+      "selfBound": false,
+      "subagents": "none"
+    },
+    "coordinator": "/root",
+    "noInventedIds": true,
+    "reviewBasis": "Author doneclaim, RCA evidence, old B2B/B3A receipts, direct E6 plan, current five-path hashes, row-523/E5 chain, and prepublication Claude subject-matter/current-artifact reviews; no embedded review is current receipt-integrity acceptance."
+  },
+  "artifactEvidence": {
+    "doneclaim": {
+      "path": "/tmp/xot-e6-author-doneclaim.md",
+      "sha256": "99035cd4a71c13e7193252fbe4921447f831380108e9e2fac20195dba0299f7d"
+    },
+    "finalReview": {
+      "path": "/tmp/xot-e6-final-review.md",
+      "sha256": "672462a557c32c86921e0a3b6a2bb98119fe07fdcf02a6e6ee75788419f9f1f0",
+      "binding": "stale historical review only; does not bind the final runner and is not acceptance authority",
+      "stale": true,
+      "staleReason": "This review predates the final runner artifact and described it as 256 lines with SHA a564be38...; the current runner is 262 lines with SHA c60fc80b.... It is retained for chronology and is removed from current acceptance binding.",
+      "acceptanceAuthority": "none"
+    },
+    "prepublicationClaudeArtifactReview": {
+      "path": "/tmp/xot-e6-blocked-receipt-claude-audit.md",
+      "sha256": "494bdd3bfd5aab46819e7c9b29b1eab622faadfe0edd234ab30ea29c51778763",
+      "lineCount": 107,
+      "runId": "run_126b845ec732",
+      "taskId": "task_94231b62bc04",
+      "dispatchId": "ctx_6dca7a1fcc80",
+      "model": "deepseek-v4-flash-0731",
+      "effort": "ultracode",
+      "effortDisplay": "xhigh",
+      "verdict": "ACCEPT",
+      "reviewRole": "Prepublication subject-matter/current-artifact review of the underlying blocker; it audited an earlier receipt and is not current receipt-integrity acceptance.",
+      "binding": "prepublication only; not current receipt-integrity acceptance",
+      "acceptanceAuthority": "none",
+      "auditedPriorReceiptSha256": "e6621c4d0b64831799e373931c947e6ea4ff7eaf3766c6358ab3b087bae331f1",
+      "selfBound": false,
+      "subagents": "none"
+    }
+  },
+  "review": {
+    "lunaRework": {
+      "verdict": "REWORK",
+      "finding": "The bound prior Claude final-review artifact predates the final runner and claimed 256 lines with SHA a564be38..., while the current runner is 262 lines with SHA c60fc80b....",
+      "authority": "Independent Luna review of receipt provenance binding; it did not accept E6 T1.",
+      "identifiers": "No reviewer or run identifiers were provided; none invented."
+    },
+    "resolution": {
+      "action": "Corrected the historical hash attribution, recorded /tmp/xot-e6-blocked-receipt-claude-final.md as a prepublication REWORK review with its exact SHA, line count, route, and dispatch identifiers, and reclassified the earlier Claude artifact as prepublication subject-matter/current-artifact review only.",
+      "result": "Prepublication REWORK recorded and resolved in this receipt; E6 T1 remains not achieved and no E6 T1 acceptance is claimed.",
+      "statusPreserved": "BLOCKED_LOCAL_DISPOSABLE_T1_NOT_ACHIEVED",
+      "releasePreserved": "CLOSED"
+    }
+  },
+  "finalReceiptIntegrity": {
+    "acceptance": "EXTERNAL_POST_FINALIZATION_ONLY",
+    "status": "INTENTIONALLY_NOT_SELF_BOUND",
+    "selfBound": false,
+    "authority": "No embedded review in this receipt is current or final receipt-integrity acceptance authority.",
+    "finalReviewerBoundary": "The supplied Claude REWORK is prepublication; after external final reviewers, no receipt edits may follow. Any later correction requires a new explicitly authorized receipt and review cycle."
+  },
+  "rollback": {
+    "mode": "selective five-path rollback plus later append-only evidence correction",
+    "selectivePaths": [
+      "supabase/migrations/20260806143000_b3_job_x_claim_fencing.sql",
+      "supabase/functions/_shared/e6DisposableAcceptance.test.ts",
+      "scripts/e6-disposable-fixture.sql",
+      "scripts/check-e6-disposable-acceptance-contract.mjs",
+      "scripts/run-e6-disposable-acceptance.mjs"
+    ],
+    "receiptSupersession": "This blocked receipt can be superseded only by a later new receipt and append-only ledger entry after the missing prerequisites pass.",
+    "historyRewrite": "never",
+    "protectedArtifacts": "Do not rewrite the ledger, old B2B/B3A receipts, E5 receipt, or direct plan."
+  },
+  "residualsAndDeferrals": [
+    "PAT1",
+    "protected migration evidence",
+    "production schema and generated types",
+    "owner and owner-grant proof",
+    "hosted CI",
+    "staging",
+    "provider/storage parity",
+    "production/live acceptance"
+  ],
+  "noAcceptanceClaim": true
+}

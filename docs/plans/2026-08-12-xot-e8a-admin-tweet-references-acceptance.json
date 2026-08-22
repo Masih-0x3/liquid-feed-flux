@@ -1,0 +1,360 @@
+{
+  "schema": "xot-e8a-admin-tweet-references-acceptance-receipt-v1",
+  "event": "e8a_admin_tweet_references_acceptance",
+  "phase": "E8a admin tweet-reference pure module extraction",
+  "status": "ACCEPTED_PARTIAL_LOCAL_T0_T1",
+  "release": "CLOSED",
+  "releaseGate": "CLOSED",
+  "riskTier": "HIGH",
+  "repository": "/Users/stevmq/Finalized XOT",
+  "branch": "codex/xot-remediation-convergence",
+  "head": "0bd578856016c06a10890339f93aa13b82ecae48",
+  "observedAt": "2026-08-12",
+  "claimBoundary": "E8a T0 local pure-module source/static and T1 focused Vitest evidence only; Deno edge runtime, broader AIR-036 closure, hosted CI, build, browser, staging, deploy, live, production, owner, and external evidence are deferred.",
+  "directPlan": {
+    "path": "docs/plans/2026-08-08-xot-post-b4-execution-sequence.md",
+    "sha256": "24feff64abe2a221ca69cb9f52e1a03eb53d707ec024367fa8aa3e75cf0dea4c",
+    "bytes": 33797,
+    "lfLines": 440,
+    "section": "E8 - Post-Correctness Source Tranches / E8a",
+    "lines": "307-325",
+    "targetTier": "T0/T1 only",
+    "mapping": ["AIR-036", "BR-MOD-01", "BR-MOD-02", "FE-QUALITY-01"],
+    "requiredShape": "characterization first, then one pure module move per receipt",
+    "deferredByPlan": [
+      "browser paint, responsive, and operator proof",
+      "hosted scans and current-SHA CI",
+      "real build, staging, deploy, live, and production-equivalence artifact"
+    ]
+  },
+  "predecessor": {
+    "ledgerPath": "docs/plans/2026-07-14-xot-comprehensive-audit-remediation-implementation-ledger.jsonl",
+    "row": 540,
+    "rowNoNewlineSha256": "367b5d63ee6109a19e7d7fb3ecb22fa904b6cf36a570638c6cae390691aff227",
+    "rowBytes": 14190,
+    "prefixThroughRow540Sha256": "04d718e3a5267cb0e6885cecce7a440587d066198cdf4b4e5c27515aba7e59c5",
+    "prefixIncludesTrailingNewline": true,
+    "event": "e8a_dashboard_resource_metrics_partial_local_t0_t1_acceptance_row540"
+  },
+  "preExtraction": {
+    "status": "RED",
+    "command": "npx vitest run src/test/admin-tweet-references.test.ts",
+    "result": "FAIL before extraction; tweetReferences.ts was missing and the import failed with a missing-module error; 0 tests ran.",
+    "expectedFailure": "ERR_MODULE_NOT_FOUND for ../../supabase/functions/admin-actions/tweetReferences",
+    "accepted": true
+  },
+  "sourceBindings": [
+    {
+      "path": "supabase/functions/admin-actions/tweetReferences.ts",
+      "role": "new pure module containing getPayloadTweetId, tweetReferenceVariants, and jobReferenceValues",
+      "sha256": "e6348347f1416891a74126d3b8702bd1f110071f7b7a3b46fb652a5395006ce6",
+      "bytes": 1811,
+      "lfLines": 38,
+      "crlf": 0,
+      "finalLf": true
+    },
+    {
+      "path": "src/test/admin-tweet-references.test.ts",
+      "role": "new focused Vitest source, characterization, exact parity, inverse reconstruction, and mutation contract",
+      "sha256": "3bca4e4395d145ec9513c4b4b5f7fc4486dcf3e50a062c851ff95206029da413",
+      "bytes": 11146,
+      "lfLines": 226,
+      "crlf": 0,
+      "finalLf": true
+    },
+    {
+      "path": "supabase/functions/admin-actions/readHelpers.ts",
+      "role": "existing admin read-helper consumer with tweet-reference import/re-export seam and unrelated pre-existing correctness changes",
+      "sha256": "5616f0030f5484775ea0cbbe10cd0961bd1eae46c7dcdc4d8a264e362d295592",
+      "bytes": 4008,
+      "lfLines": 94,
+      "crlf": 0,
+      "finalLf": true
+    },
+    {
+      "path": "supabase/functions/admin-actions/readHelpers.test.ts",
+      "role": "pre-existing Deno read-helper test retained unchanged",
+      "sha256": "bdc7a47a55e343a4e58a784b0a6f71cc3cc19f0c719548f94e74f9998e2a4c3c",
+      "bytes": 2391,
+      "lfLines": 61,
+      "crlf": 0,
+      "finalLf": true,
+      "unchangedFromHead": true
+    }
+  ],
+  "checkerBindings": [
+    {
+      "path": "scripts/check-module-characterization-contract.mjs",
+      "role": "11-hotspot characterization source contract and mutation self-test",
+      "sha256": "b1a0f83c508688c721aad3b22d51309aff5d8f77dafb43bab002f90aaef86fd6",
+      "bytes": 4180,
+      "lfLines": 127
+    },
+    {
+      "path": "scripts/check-monitoring-realtime-contract.mjs",
+      "role": "monitoring realtime source contract and mutation self-test",
+      "sha256": "ee335f63d9d21924a06da628119ccf77e2da811745ad47b51008970eeff3435b",
+      "bytes": 37984,
+      "lfLines": 645
+    },
+    {
+      "path": "scripts/check-admin-actions-type-boundary-contract.mjs",
+      "role": "admin-actions type-boundary source contract and mutation self-test",
+      "sha256": "2a581781ead37f74fc9096bbb169abfd1d71ad7b6e04e5323784b8b8830a3c2c",
+      "bytes": 3335,
+      "lfLines": 94
+    }
+  ],
+  "scopeCompleted": [
+    "Moved getPayloadTweetId, tweetReferenceVariants, and jobReferenceValues from readHelpers.ts into tweetReferences.ts.",
+    "Preserved all three function declarations byte-for-byte against the fixed historical block and kept readHelpers.ts as the compatibility import/re-export seam.",
+    "Kept readHelpers.test.ts unchanged and recorded existing consumer/import evidence for monitoringReads.ts, monitoringMutations.ts, and dashboardSummaries.ts.",
+    "Added focused Vitest coverage for helper behavior, exact declaration hashes, compatibility imports/exports, inverse reconstruction, and fail-closed mutations.",
+    "This receipt accepts one pure admin tweet-reference helper family only and does not claim closure of the remaining AIR-036 hotspots."
+  ],
+  "architectureEvidence": {
+    "red": {
+      "status": "RED",
+      "evidence": "Before this slice, readHelpers.ts owned all three implementations and tweetReferences.ts did not exist; the focused Vitest import therefore failed with a missing module and 0 tests.",
+      "localNames": ["getPayloadTweetId", "tweetReferenceVariants", "jobReferenceValues"],
+      "missingSeam": "tweetReferences.ts was absent and readHelpers.ts had no compatibility import/re-export for this family"
+    },
+    "green": {
+      "status": "GREEN",
+      "evidence": "All three declarations match the fixed historical block byte-for-byte; readHelpers.ts imports and re-exports the same three names from ./tweetReferences.ts; focused normal and mutation Vitest both pass 5/5.",
+      "declarationHashes": {
+        "getPayloadTweetId": "fff361dbe53dd695e0c5dc1b683de805118b0151853bcba9dbc377d55d5a8412",
+        "tweetReferenceVariants": "a60c9ebc21f03a7438becb815b69b7c65b626a05e51123e66687fbd5ca9f314a",
+        "jobReferenceValues": "9a617ca1751d14debdb2e34b8a58ec27c17cd42c25541a307ec505bfc1c09849"
+      },
+      "historicalDeclarationBlockSha256": "e6348347f1416891a74126d3b8702bd1f110071f7b7a3b46fb652a5395006ce6",
+      "historicalDeclarationBlockWithLfSha256": "e6348347f1416891a74126d3b8702bd1f110071f7b7a3b46fb652a5395006ce6",
+      "compatibilityImportNames": ["getPayloadTweetId", "jobReferenceValues", "tweetReferenceVariants"],
+      "compatibilityReExportNames": ["getPayloadTweetId", "jobReferenceValues", "tweetReferenceVariants"]
+    },
+    "consumerImportEvidence": {
+      "status": "PASS",
+      "consumers": [
+        {
+          "path": "supabase/functions/admin-actions/monitoringReads.ts",
+          "importedNames": ["getPayloadTweetId", "isFailedJobActionable", "isMissingSchemaError", "loadPostsByJobReferences", "monitoringPolicyRuleKind", "postForJob"],
+          "via": "./readHelpers.ts"
+        },
+        {
+          "path": "supabase/functions/admin-actions/monitoringMutations.ts",
+          "importedNames": ["tweetReferenceVariants"],
+          "via": "./readHelpers.ts"
+        },
+        {
+          "path": "supabase/functions/admin-actions/dashboardSummaries.ts",
+          "importedNames": ["getPayloadTweetId", "isFailedJobActionable", "isMissingSchemaError", "loadPostsByJobReferences", "monitoringPolicyRuleKind", "postForJob"],
+          "via": "./readHelpers.ts"
+        },
+        {
+          "path": "supabase/functions/admin-actions/readHelpers.test.ts",
+          "importedNames": ["isFailedJobActionable", "isMissingSchemaError", "jobReferenceValues", "monitoringPolicyRuleKind", "tweetReferenceVariants"],
+          "via": "./readHelpers.ts",
+          "unchanged": true
+        }
+      ],
+      "focusedTestImport": {
+        "path": "src/test/admin-tweet-references.test.ts",
+        "module": "../../supabase/functions/admin-actions/tweetReferences"
+      }
+    }
+  },
+  "inverseReconstruction": {
+    "status": "EXACT_PASS",
+    "method": "Replace the two-line tweetReferences import/re-export seam in current readHelpers.ts with the fixed historical declaration block, preserving the current pre-existing read-helper changes.",
+    "reconstructedSha256": "1951c17397b37ca1eb383c901d1ccd6f296531f2a281c34ec6441a446077ddf3",
+    "reconstructedBytes": 5616,
+    "reconstructedLfLines": 131,
+    "matchesFixedHistoricalBaseline": true,
+    "functionParity": "3/3 declaration hashes exact",
+    "fixedHistoricalBlock": {
+      "sha256": "e6348347f1416891a74126d3b8702bd1f110071f7b7a3b46fb652a5395006ce6",
+      "declarations": ["getPayloadTweetId", "tweetReferenceVariants", "jobReferenceValues"]
+    }
+  },
+  "validation": {
+    "focusedVitestNormal": {
+      "command": "npx vitest run src/test/admin-tweet-references.test.ts",
+      "result": "PASS; 1 test file, 5 tests passed, exit 0"
+    },
+    "focusedVitestMutation": {
+      "command": "MUTATION_TEST=1 npx vitest run src/test/admin-tweet-references.test.ts",
+      "result": "PASS; 1 test file, 5 tests passed, exit 0; body, missing-re-export, and duplicate-implementation mutations fail closed"
+    },
+    "standaloneTypescript": {
+      "command": "npx tsc --noEmit --target ES2022 --module ESNext --moduleResolution Bundler --allowImportingTsExtensions --skipLibCheck --types node,vitest/globals supabase/functions/admin-actions/tweetReferences.ts src/test/admin-tweet-references.test.ts",
+      "result": "PASS; exit 0"
+    },
+    "moduleCharacterizationNormal": {
+      "command": "node scripts/check-module-characterization-contract.mjs",
+      "result": "PASS; MODULE_CHARACTERIZATION_SOURCE_CONTRACT_PASS files=11 reviewSignals=2 mutation=skipped"
+    },
+    "moduleCharacterizationMutation": {
+      "command": "MUTATION_TEST=1 node scripts/check-module-characterization-contract.mjs",
+      "result": "PASS; MODULE_CHARACTERIZATION_SOURCE_CONTRACT_PASS files=11 reviewSignals=2 mutation=pass"
+    },
+    "strict": {
+      "command": "npm run check:strict",
+      "result": "PASS; tsc --noEmit -p tsconfig.strict.json exit 0"
+    },
+    "monitoringRealtimeNormal": {
+      "command": "node scripts/check-monitoring-realtime-contract.mjs",
+      "result": "PASS; MONITORING_REALTIME_SOURCE_CONTRACT_PASS tables=6 maxStaleMs=15000 selfTest=skipped"
+    },
+    "monitoringRealtimeMutation": {
+      "command": "MUTATION_TEST=1 node scripts/check-monitoring-realtime-contract.mjs",
+      "result": "PASS; MONITORING_REALTIME_SOURCE_CONTRACT_PASS tables=6 maxStaleMs=15000 selfTest=pass"
+    },
+    "adminActionsBoundary": {
+      "command": "node scripts/check-admin-actions-type-boundary-contract.mjs",
+      "result": "PASS; ADMIN_ACTIONS_TYPE_BOUNDARY_SOURCE_CONTRACT_PASS typedBoundaries=2 selfTest=skipped"
+    },
+    "ownedFileEslint": {
+      "command": "npx eslint --no-ignore supabase/functions/admin-actions/tweetReferences.ts src/test/admin-tweet-references.test.ts",
+      "result": "PASS; exit 0"
+    },
+    "readHelpersEslint": {
+      "command": "npx eslint --no-ignore supabase/functions/admin-actions/readHelpers.ts",
+      "result": "BLOCKED/FAIL only on two pre-existing no-explicit-any errors at readHelpers.ts:42:32 and readHelpers.ts:43:32; no other diagnostics"
+    },
+    "scopedWhitespace": {
+      "command": "git diff --check -- supabase/functions/admin-actions/readHelpers.ts plus git diff --no-index --check /dev/null against tweetReferences.ts and admin-tweet-references.test.ts",
+      "result": "PASS; tracked diff exit 0; untracked comparisons returned expected exit 1 with no whitespace diagnostics"
+    },
+    "finalLf": {
+      "command": "explicit byte probe over all bound source, test, and checker files",
+      "result": "PASS; CRLF=0, final LF=true, blank final LF=false, and trailing whitespace=false for every bound file"
+    },
+    "stagedIndex": {
+      "command": "git diff --cached --quiet",
+      "result": "PASS; exit 0; staged index empty"
+    },
+    "denoEdgeTestRuntime": {
+      "command": "deno test --no-check supabase/functions/admin-actions/readHelpers.test.ts; deno check/deno fmt for the bound admin function files",
+      "result": "DEFERRED/BLOCKED; Deno executable unavailable in this environment; no Deno runtime, check, or format green result is claimed"
+    },
+    "authorInterruptionsAndProcessCleanup": {
+      "result": "PASS; no scoped orphan found and no cleanup signal required; no cleanup action was run"
+    }
+  },
+  "adversarialReviews": [
+    {
+      "route": "Claude Code via prior Zro route",
+      "requestedModel": "deepseek-v4-flash-0731",
+      "requestedReasoning": "xhigh",
+      "status": "BLOCKED_BEFORE_STARTUP",
+      "result": "Exact Claude DeepSeek review did not run for this slice; the prior route was blocked by auth-fetch failure before Claude startup, and no model/provider substitution was made.",
+      "accepted": false,
+      "superseded": false
+    },
+    {
+      "route": "Luna High receipt-author static verification",
+      "requestedModel": "GPT-5.6 Luna",
+      "requestedReasoning": "high",
+      "status": "ACCEPTED_FOR_SCOPED_RECEIPT",
+      "result": "Accepted the local T0/T1 boundary, red missing-module baseline, exact declaration parity, inverse reconstruction, consumer/import seam, focused Vitest normal/mutation 5/5, TypeScript, checker, lint, whitespace, final-LF, and staged-index evidence; Deno and higher-tier evidence remain deferred.",
+      "accepted": true,
+      "runtimeTelemetry": {
+        "identity": "unknown",
+        "model": "unknown",
+        "reasoning": "unknown",
+        "fast": "unknown",
+        "note": "Runtime identity/model telemetry was not exposed to this receipt author."
+      },
+      "subagentsUsed": false
+    }
+  ],
+  "airDispositions": {
+    "AIR-036": {
+      "status": "PARTIAL",
+      "localDisposition": "One pure admin tweet-reference helper family was extracted with exact declaration parity, compatibility seam, inverse reconstruction, consumer/import evidence, and focused Vitest T1 evidence.",
+      "deferred": "Remaining AIR-036 hotspots, Deno edge runtime, broader behavior traces, owner review, higher-tier evidence, and external release gates remain open.",
+      "ownerAssigned": false,
+      "deadlineAssigned": false
+    }
+  },
+  "achieved": ["T0 source/static", "T1 focused Vitest"],
+  "deferred": ["Deno edge runtime", "T2", "T3", "T4", "CI", "build", "browser", "staging", "deploy", "live", "production", "owner", "external"],
+  "notClaimed": [
+    "No Deno edge test, check, or format result; the executable is unavailable and no Deno green result is claimed.",
+    "No closure of AIR-036, BR-MOD-01, BR-MOD-02, or FE-QUALITY-01; only this pure admin tweet-reference slice is accepted.",
+    "No browser, responsive, accessibility, authenticated runtime, provider, database, network, Docker, hosted CI, full build, staging, deploy, live, production-equivalence, or owner-approval evidence.",
+    "No claim that the exact Claude DeepSeek review ran; the prior auth-fetch-blocked route was not substituted.",
+    "No ledger append, commit, push, deployment, or external mutation."
+  ],
+  "externalState": {
+    "network": false,
+    "provider": false,
+    "database": false,
+    "ci": false,
+    "staging": false,
+    "deploy": false,
+    "live": false,
+    "browser": false,
+    "docker": false,
+    "production": false,
+    "ownerDecision": false,
+    "ledgerAction": false
+  },
+  "worktree": {
+    "beforeReceipt": {
+      "statusFormat": "porcelain-v1 -uall sorted",
+      "totalEntries": 421,
+      "trackedOrModifiedEntries": 156,
+      "untrackedEntries": 265,
+      "stagedEntries": 0,
+      "sortedStatusSha256": "80e71a71457aaa79ed4baab674f2f437cd192bbd3d89eacf9610550bf7b8f0b9"
+    },
+    "afterReceipt": {
+      "statusFormat": "porcelain-v1 -uall sorted",
+      "totalEntries": 422,
+      "trackedOrModifiedEntries": 156,
+      "untrackedEntries": 266,
+      "delta": "one new untracked receipt path only",
+      "stagedEntries": 0,
+      "stagedIndexEmpty": true,
+      "receiptPathPresent": true
+    },
+    "preexistingDirtyWorkPreserved": true,
+    "otherFilesEdited": false,
+    "branch": "codex/xot-remediation-convergence",
+    "head": "0bd578856016c06a10890339f93aa13b82ecae48"
+  },
+  "ledger": {
+    "path": "docs/plans/2026-07-14-xot-comprehensive-audit-remediation-implementation-ledger.jsonl",
+    "appended": false,
+    "changed": false,
+    "predecessorRow": 540,
+    "appendDeferred": "Ledger append is a separate conductor-controlled step after receipt review."
+  },
+  "rollback_kill_receipt": "No rollback or kill action was authorized or run; source files, tests, checkers, ledger, and all pre-existing dirty work remain preserved. Any later rollback requires explicit review of this receipt file only.",
+  "receiptScope": {
+    "allowedPath": "docs/plans/2026-08-12-xot-e8a-admin-tweet-references-acceptance.json",
+    "newFileOnly": true,
+    "sourceFilesUnchangedAfterBinding": true,
+    "checkerFilesUnchangedAfterBinding": true,
+    "ledgerUnchanged": true,
+    "noCommit": true,
+    "noPush": true,
+    "noDeploy": true,
+    "noNetworkOrExternalMutation": true,
+    "noSecretsOrRawEnvironmentValues": true
+  },
+  "doneClaim": {
+    "status": "complete_for_scoped_local_t0_t1_receipt",
+    "receiptPath": "docs/plans/2026-08-12-xot-e8a-admin-tweet-references-acceptance.json",
+    "sourceBindingsRecorded": true,
+    "commandsAndResultsRecorded": true,
+    "deferralsRecorded": true,
+    "releaseAndReleaseGateClosed": true,
+    "receiptArtifact": {
+      "sha256": "89c2686ecacd56388c2e9ce99502a93a9473b63a7f4525fdd4dea18d786c5b27",
+      "bytes": 15505,
+      "hashScope": "canonical UTF-8 compact JSON payload with doneClaim.receiptArtifact omitted, followed by one LF"
+    }
+  }
+}

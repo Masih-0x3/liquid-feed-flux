@@ -1,0 +1,1641 @@
+{
+  "record_type": "xot_audit_unfinished_disposition",
+  "recorded_at": "2026-07-31T10:20:00Z",
+  "authority": "Current code, fresh read-only XOT production evidence, the implementation plan, and the append-only substantive ledger. This matrix does not replace deployment proof.",
+  "summary": {
+    "total_air_items": 80,
+    "counts": {
+      "deferred_database_and_cleanup_runtime": 1,
+      "source_implemented_forward_migration_and_runtime_deferred": 6,
+      "deferred_database_receipt_protocol": 1,
+      "source_implemented_runtime_or_release_evidence_deferred": 15,
+      "deferred_database_job_fencing": 1,
+      "source_implemented_higher_tier_validation_deferred": 37,
+      "deferred_isolated_network_validation": 1,
+      "production_baseline_captured_replay_deferred": 1,
+      "deferred_product_and_delivery_contract": 1,
+      "advisor_captured_index_changes_deferred": 1,
+      "deferred_renderer_lease_runtime": 1,
+      "deferred_cross_cutting_action_protocol": 1,
+      "deferred_post_correctness_modular_refactor": 1,
+      "deferred_browser_bundle_measurement": 1,
+      "deferred_browser_paint_review": 1,
+      "deferred_operator_ux_review": 1,
+      "closed_disproved_current_production": 1,
+      "deferred_hosted_supply_chain_scan": 1,
+      "deferred_authenticated_browser_matrix": 1,
+      "deferred_no_egress_ssrf_corpus": 1,
+      "deferred_masked_build_environment": 1,
+      "deferred_runtime_concurrency_matrix": 1,
+      "deferred_cleanup_canary_and_schedule_cutover": 1,
+      "deferred_durable_checkpoint_schema": 1,
+      "partial_type_trust_completed_residual_debt_deferred": 1
+    }
+  },
+  "rules": [
+    "closed means the audited condition is disproved or fully satisfied by current authoritative evidence",
+    "source implemented does not mean deployed or live verified",
+    "deferred entries name the missing work, owner, and exact next action",
+    "database/provider/browser/CI/deployment work is not performed by this source-only disposition"
+  ],
+  "entries": [
+    {
+      "audit_class": "P1 confirmed",
+      "issue": "Shared storage_path can be deleted from an old row while a fresh row still references it",
+      "owning_tasks": "BR-00, BR-MEDIA-01, BR-MEDIA-03",
+      "phase": "0,2",
+      "required_closure_evidence": "cleanup freeze receipt; mixed-age claim test; canary deletion invariant",
+      "air_id": "AIR-001",
+      "disposition": "deferred_database_and_cleanup_runtime",
+      "source_state": "tactical containment implemented; reference-aware object ownership saga remains unfinished",
+      "owner": "database and media lifecycle owner",
+      "next_action": "design the forward-only media ownership/claim schema, replay it on a disposable database, then run mixed-age reference and cleanup canary tests",
+      "latest_substantive_event": "sr_rel_00_br_00_phase0_containment_revalidated",
+      "latest_source_status": "accepted_partial_source_only_phase0_containment_revalidated_migration_blocked",
+      "prior_remaining_risks": [
+        "AIR-001/AIR-065 remain partial pending owner-approved protected migration evidence and higher-tier runtime/database/release proof.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P1 confirmed",
+      "issue": "Telegram external side effect is not atomically claimed/finalized",
+      "owning_tasks": "BR-TG-01, BR-JOB-01",
+      "phase": "3",
+      "required_closure_evidence": "concurrent/crash request-count and durable-state evidence",
+      "air_id": "AIR-002",
+      "disposition": "source_implemented_forward_migration_and_runtime_deferred",
+      "source_state": "source remediation exists, but its required forward migration is not applied in production",
+      "owner": "database and release owner",
+      "next_action": "include the owning forward migration in disposable replay, role/grant tests and the approved database release",
+      "latest_substantive_event": "sr_type_01_air_002_air_005_air_067_telegram_delivery_storage_boundary_narrowed",
+      "latest_source_status": "accepted_partial_source_only_telegram_delivery_storage_boundary_narrowed",
+      "prior_remaining_risks": [
+        "AIR-002 remains partial pending atomic provider claim/finalization, crash/concurrency request-count, stale-owner, and release-tier evidence.",
+        "AIR-005 remains partial pending stale-owner rejection, checked-write fault injection, queue/claim runtime evidence, and release review.",
+        "AIR-067 remains partial pending further suppression/reason inventory, Deno checks, renderer residuals, current-SHA CI, staging, browser UX, and release review.",
+        "The historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P1 confirmed",
+      "issue": "RSS webhook can acknowledge partial/failed persistence with HTTP 200",
+      "owning_tasks": "BR-WH-01, BR-WH-02",
+      "phase": "2",
+      "required_closure_evidence": "injected DB failure status; receipt/materialization invariant",
+      "air_id": "AIR-003",
+      "disposition": "deferred_database_receipt_protocol",
+      "source_state": "fail-closed webhook writes implemented; durable receipt/materialization identity remains unfinished",
+      "owner": "webhook and database reliability owner",
+      "next_action": "add a forward-only inbox/receipt identity and inject database failures before staging",
+      "latest_substantive_event": "sr_type_01_air_003_air_015_air_067_rss_webhook_item_boundaries_narrowed",
+      "latest_source_status": "accepted_partial_source_only_rss_webhook_item_boundaries_narrowed",
+      "prior_remaining_risks": [
+        "AIR-003 remains partial pending durable receipt/inbox identity, injected database-failure status, duplicate/replay acknowledgement, runtime, CI, staging, and release-tier evidence.",
+        "AIR-015 remains partial pending validate-only auth/behavior parity and live/staging negative/positive request receipts.",
+        "AIR-067 remains partial pending remaining Edge suppression/reason inventory, Deno checks, renderer residuals, current-SHA CI, staging, browser UX, and release review.",
+        "AIR-070 through AIR-073 remain partial pending deployed negative-auth, role/RLS, signed-auth/query-token, and current-SHA release evidence.",
+        "SR-MIG-01/BR-00 remain blocked on protected migration evidence and the active inventory/archive mismatch.",
+        "The historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P1 confirmed",
+      "issue": "Reprocess is destructive and effectively one-shot",
+      "owning_tasks": "BR-REPROCESS-01, BR-REPROCESS-02",
+      "phase": "3",
+      "required_closure_evidence": "repeat-run and forced-failure media-preservation evidence",
+      "air_id": "AIR-004",
+      "disposition": "source_implemented_runtime_or_release_evidence_deferred",
+      "source_state": "current source remediation and local contract evidence are present; higher-tier closure evidence remains outstanding",
+      "owner": "owning task and release owner",
+      "next_action": "run the plan's required runtime/provider/CI/staging evidence against the exact reviewed SHA",
+      "latest_substantive_event": "br_reprocess_01_air_004_reprocess_queue_fail_closed_revalidated",
+      "latest_source_status": "accepted_partial_source_only_reprocess_queue_fail_closed_revalidated_no_change",
+      "prior_remaining_risks": [
+        "AIR-004 requires deployed queue and non-destructive staging evidence for higher-tier closure.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P1 confirmed",
+      "issue": "Worker lifecycle writes are unchecked/unfenced",
+      "owning_tasks": "BR-JOB-01, BR-JOB-02",
+      "phase": "3",
+      "required_closure_evidence": "stale-token rejection and checked-write fault tests",
+      "air_id": "AIR-005",
+      "disposition": "deferred_database_job_fencing",
+      "source_state": "checked writes and locked_by tactical fencing implemented; durable claim token/generation across every transition remains unfinished",
+      "owner": "job lifecycle and database owner",
+      "next_action": "complete claim-token/generation schema and concurrent stale-owner fault fixtures",
+      "latest_substantive_event": "sr_type_01_air_002_air_005_air_067_telegram_delivery_storage_boundary_narrowed",
+      "latest_source_status": "accepted_partial_source_only_telegram_delivery_storage_boundary_narrowed",
+      "prior_remaining_risks": [
+        "AIR-002 remains partial pending atomic provider claim/finalization, crash/concurrency request-count, stale-owner, and release-tier evidence.",
+        "AIR-005 remains partial pending stale-owner rejection, checked-write fault injection, queue/claim runtime evidence, and release review.",
+        "AIR-067 remains partial pending further suppression/reason inventory, Deno checks, renderer residuals, current-SHA CI, staging, browser UX, and release review.",
+        "The historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P1 confirmed",
+      "issue": "Manual video preview can differ from selected published render",
+      "owning_tasks": "BR-RENDER-04, FE-MANUAL-01",
+      "phase": "4",
+      "required_closure_evidence": "two-render browser/payload/DB equality proof",
+      "air_id": "AIR-006",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "fe_api_01_air_006_admin_action_input_policy_revalidated",
+      "latest_source_status": "accepted_partial_source_only_admin_action_input_policy_revalidated_no_change",
+      "prior_remaining_risks": [
+        "AIR-006 requires deployed request-boundary and negative-input evidence for higher-tier closure.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P1 security confirmed",
+      "issue": "Operational video/intake tables allow broad authenticated reads",
+      "owning_tasks": "SR-RLS-01, FE-AUTH-01",
+      "phase": "1",
+      "required_closure_evidence": "anon/viewer/admin/service role matrix and authenticated browser",
+      "air_id": "AIR-007",
+      "disposition": "source_implemented_forward_migration_and_runtime_deferred",
+      "source_state": "source remediation exists, but its required forward migration is not applied in production",
+      "owner": "database and release owner",
+      "next_action": "include the owning forward migration in disposable replay, role/grant tests and the approved database release",
+      "latest_substantive_event": "sr_rls_01_video_render_policy_contract_mutation_acceptance",
+      "latest_source_status": "accepted_partial_source_only_video_render_rls_contract",
+      "prior_remaining_risks": [
+        "AIR-007/SR-RLS-01 remains partial pending protected database role/action, Realtime, Storage, cross-user, EXPLAIN, current-SHA CI, staging, and live evidence.",
+        "AIR-074 remains partial pending storage/grant matrix and protected runtime/staging/live proof.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P1 security confirmed",
+      "issue": "Remote media fetch is SSRF-capable and fully buffers input",
+      "owning_tasks": "BR-MEDIA-02, SR-INPUT-01, QA-02",
+      "phase": "2",
+      "required_closure_evidence": "controlled SSRF/size/stream/MIME test report",
+      "air_id": "AIR-008",
+      "disposition": "deferred_isolated_network_validation",
+      "source_state": "URL, size, MIME and redirect guards implemented; connection-level IP pinning and controlled SSRF proof remain unfinished",
+      "owner": "media security owner",
+      "next_action": "run the bounded SSRF/redirect/stream corpus in a no-egress isolated environment before deployment",
+      "latest_substantive_event": "br_media_02_air_008_air_026_air_027_remote_media_policy_revalidated",
+      "latest_source_status": "accepted_partial_source_only_remote_media_policy_revalidated_no_change",
+      "prior_remaining_risks": [
+        "AIR-008/AIR-026/AIR-027 require deployed SSRF-negative and transfer-budget evidence for higher-tier closure.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P1 release confirmed",
+      "issue": "Migration ledger diverges and generated type trust is weak",
+      "owning_tasks": "SR-MIG-01, SR-TYPE-01",
+      "phase": "1",
+      "required_closure_evidence": "210-entry disposition, clean replay/diff/type parity",
+      "air_id": "AIR-009",
+      "disposition": "production_baseline_captured_replay_deferred",
+      "source_state": "production inventory, schema fingerprints, live advisors and exact production types captured; disposable replay and approved forward migration application remain unfinished",
+      "owner": "database and release owner",
+      "next_action": "review the production-first artifact, replay the four unapplied forward migrations plus any approved advisor fix on a disposable database, then compare schema/policy/grant/type fingerprints",
+      "latest_substantive_event": "sr_mig_01_air_009_air_017_protected_baseline_adversarial_tests_revalidated",
+      "latest_source_status": "accepted_partial_source_only_protected_migration_gate_adversarial_tests_passed_blocked",
+      "prior_remaining_risks": [
+        "AIR-009/AIR-017 and SR-MIG-01 remain blocked pending owner-approved protected migration inventory/body/hash/archive evidence and reviewed-SHA closure.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 confirmed",
+      "issue": "Thread post action has no real ordered consumer contract",
+      "owning_tasks": "BR-THREAD-01, BR-TG-01",
+      "phase": "3",
+      "required_closure_evidence": "preview/revision/provider order and exactly-once proof",
+      "air_id": "AIR-010",
+      "disposition": "deferred_product_and_delivery_contract",
+      "source_state": "unsafe thread delivery is fail-closed/disabled; an ordered consumer and exactly-once product contract remain unfinished",
+      "owner": "product and delivery reliability owner",
+      "next_action": "decide whether thread posting remains disabled or receives a revision-bound ordered consumer, then implement and provider-test that decision",
+      "latest_substantive_event": "br_job_01_air_010_translation_routing_fail_closed_revalidated",
+      "latest_source_status": "accepted_partial_source_only_translation_routing_revalidated_no_change",
+      "prior_remaining_risks": [
+        "AIR-010 requires deployed translation routing and provider-negative evidence for higher-tier closure.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 confirmed",
+      "issue": "X quota reads fail open and are non-atomic",
+      "owning_tasks": "BR-X-01",
+      "phase": "3",
+      "required_closure_evidence": "last-slot concurrency and DB-failure zero-call proof",
+      "air_id": "AIR-011",
+      "disposition": "source_implemented_runtime_or_release_evidence_deferred",
+      "source_state": "current source remediation and local contract evidence are present; higher-tier closure evidence remains outstanding",
+      "owner": "owning task and release owner",
+      "next_action": "run the plan's required runtime/provider/CI/staging evidence against the exact reviewed SHA",
+      "latest_substantive_event": "br_x_01_air_011_air_059_x_api_credentials_read_revalidated",
+      "latest_source_status": "accepted_partial_source_only_x_api_credentials_read_revalidated_no_change",
+      "prior_remaining_risks": [
+        "AIR-011/AIR-059 require deployed secret-manager and provider-negative evidence for higher-tier closure.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 confirmed",
+      "issue": "Expired X claims cannot be safely reclaimed/reconciled",
+      "owning_tasks": "BR-X-02",
+      "phase": "3",
+      "required_closure_evidence": "pre-call reclaim and post-call ambiguity evidence",
+      "air_id": "AIR-012",
+      "disposition": "source_implemented_runtime_or_release_evidence_deferred",
+      "source_state": "current source remediation and local contract evidence are present; higher-tier closure evidence remains outstanding",
+      "owner": "owning task and release owner",
+      "next_action": "run the plan's required runtime/provider/CI/staging evidence against the exact reviewed SHA",
+      "latest_substantive_event": "br_x_02_air_012_air_013_x_poster_ambiguity_and_read_gates_revalidated",
+      "latest_source_status": "accepted_partial_source_only_x_poster_ambiguity_revalidated_no_change",
+      "prior_remaining_risks": [
+        "AIR-012/AIR-013 require deployed negative-read, ambiguity, and provider-boundary evidence for higher-tier closure.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 confirmed",
+      "issue": "X claim occurs after expensive duplicate/media/render work",
+      "owning_tasks": "BR-X-02",
+      "phase": "3",
+      "required_closure_evidence": "concurrent triggers perform preparation once",
+      "air_id": "AIR-013",
+      "disposition": "source_implemented_runtime_or_release_evidence_deferred",
+      "source_state": "current source remediation and local contract evidence are present; higher-tier closure evidence remains outstanding",
+      "owner": "owning task and release owner",
+      "next_action": "run the plan's required runtime/provider/CI/staging evidence against the exact reviewed SHA",
+      "latest_substantive_event": "br_x_02_air_012_air_013_x_poster_ambiguity_and_read_gates_revalidated",
+      "latest_source_status": "accepted_partial_source_only_x_poster_ambiguity_revalidated_no_change",
+      "prior_remaining_risks": [
+        "AIR-012/AIR-013 require deployed negative-read, ambiguity, and provider-boundary evidence for higher-tier closure.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 confirmed",
+      "issue": "Telegram fallback reports/classifies the wrong response",
+      "owning_tasks": "BR-TG-02",
+      "phase": "3",
+      "required_closure_evidence": "second-response 429/500/network fixtures",
+      "air_id": "AIR-014",
+      "disposition": "source_implemented_runtime_or_release_evidence_deferred",
+      "source_state": "current source remediation and local contract evidence are present; higher-tier closure evidence remains outstanding",
+      "owner": "owning task and release owner",
+      "next_action": "run the plan's required runtime/provider/CI/staging evidence against the exact reviewed SHA",
+      "latest_substantive_event": "br_tg_01_air_014_telegram_delivery_claim_and_fail_closed_revalidated",
+      "latest_source_status": "accepted_partial_source_only_telegram_delivery_claim_and_fail_closed_revalidated_no_change",
+      "prior_remaining_risks": [
+        "AIR-014 requires deployed claim/receipt race evidence for higher-tier closure.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 confirmed",
+      "issue": "test_webhook auth/behavior differs from real webhook",
+      "owning_tasks": "BR-WH-02, SR-AUTH-01",
+      "phase": "2",
+      "required_closure_evidence": "validate-only no-write/auth parity receipt",
+      "air_id": "AIR-015",
+      "disposition": "source_implemented_runtime_or_release_evidence_deferred",
+      "source_state": "current source remediation and local contract evidence are present; higher-tier closure evidence remains outstanding",
+      "owner": "owning task and release owner",
+      "next_action": "run the plan's required runtime/provider/CI/staging evidence against the exact reviewed SHA",
+      "latest_substantive_event": "sr_type_01_air_003_air_015_air_067_rss_webhook_item_boundaries_narrowed",
+      "latest_source_status": "accepted_partial_source_only_rss_webhook_item_boundaries_narrowed",
+      "prior_remaining_risks": [
+        "AIR-003 remains partial pending durable receipt/inbox identity, injected database-failure status, duplicate/replay acknowledgement, runtime, CI, staging, and release-tier evidence.",
+        "AIR-015 remains partial pending validate-only auth/behavior parity and live/staging negative/positive request receipts.",
+        "AIR-067 remains partial pending remaining Edge suppression/reason inventory, Deno checks, renderer residuals, current-SHA CI, staging, browser UX, and release review.",
+        "AIR-070 through AIR-073 remain partial pending deployed negative-auth, role/RLS, signed-auth/query-token, and current-SHA release evidence.",
+        "SR-MIG-01/BR-00 remain blocked on protected migration evidence and the active inventory/archive mismatch.",
+        "The historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 confirmed",
+      "issue": "admin-actions mutates module-global CORS headers",
+      "owning_tasks": "BR-ADM-01, SR-AUTH-01",
+      "phase": "3",
+      "required_closure_evidence": "interleaved-origin concurrency test",
+      "air_id": "AIR-016",
+      "disposition": "source_implemented_runtime_or_release_evidence_deferred",
+      "source_state": "current source remediation and local contract evidence are present; higher-tier closure evidence remains outstanding",
+      "owner": "owning task and release owner",
+      "next_action": "run the plan's required runtime/provider/CI/staging evidence against the exact reviewed SHA",
+      "latest_substantive_event": "br_adm_01_air_016_admin_feedback_persistence_revalidated",
+      "latest_source_status": "accepted_partial_source_only_admin_feedback_persistence_revalidated_no_change",
+      "prior_remaining_risks": [
+        "AIR-016 requires deployed persistence and authenticated UI evidence for higher-tier closure.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 confirmed",
+      "issue": "Live DB advisors show FK/index/RLS performance debt",
+      "owning_tasks": "SR-DBPERF-01, BR-DASH-01",
+      "phase": "6",
+      "required_closure_evidence": "advisor diff plus before/after query plans/metrics",
+      "air_id": "AIR-017",
+      "disposition": "advisor_captured_index_changes_deferred",
+      "source_state": "fresh production security/performance advisor evidence captured; index and RLS performance changes are not yet selected from plans/metrics",
+      "owner": "database performance owner",
+      "next_action": "capture representative EXPLAIN plans and workload metrics, then approve only evidence-backed indexes/policy rewrites in a forward migration",
+      "latest_substantive_event": "sr_mig_01_air_009_air_017_protected_baseline_adversarial_tests_revalidated",
+      "latest_source_status": "accepted_partial_source_only_protected_migration_gate_adversarial_tests_passed_blocked",
+      "prior_remaining_risks": [
+        "AIR-009/AIR-017 and SR-MIG-01 remain blocked pending owner-approved protected migration inventory/body/hash/archive evidence and reviewed-SHA closure.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 confirmed",
+      "issue": "Renderer leases lack renewal/fenced completion",
+      "owning_tasks": "BR-RENDER-01",
+      "phase": "4",
+      "required_closure_evidence": "long-render renewal and stale-owner rejection",
+      "air_id": "AIR-018",
+      "disposition": "deferred_renderer_lease_runtime",
+      "source_state": "source-side failure boundaries improved; renewal and stale-owner completion proof remain unfinished",
+      "owner": "renderer reliability owner",
+      "next_action": "implement or verify lease renewal/fenced completion and run a long-render stale-owner fixture",
+      "latest_substantive_event": "br_job_01_air_018_enrichment_admin_actions_revalidated",
+      "latest_source_status": "accepted_partial_source_only_enrichment_admin_actions_revalidated_no_change",
+      "prior_remaining_risks": [
+        "AIR-018 requires deployed admin-action and authenticated UI evidence for higher-tier closure.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 confirmed",
+      "issue": "Configured renderer concurrency is not globally enforced",
+      "owning_tasks": "BR-RENDER-02",
+      "phase": "4",
+      "required_closure_evidence": "combined HTTP/poller capacity test and shutdown receipt",
+      "air_id": "AIR-019",
+      "disposition": "source_implemented_runtime_or_release_evidence_deferred",
+      "source_state": "current source remediation and local contract evidence are present; higher-tier closure evidence remains outstanding",
+      "owner": "owning task and release owner",
+      "next_action": "run the plan's required runtime/provider/CI/staging evidence against the exact reviewed SHA",
+      "latest_substantive_event": "br_render_02_br_render_03_air_019_air_020_renderer_bounds_source_revalidation",
+      "latest_source_status": "accepted_partial_source_only_renderer_capacity_process_bounds",
+      "prior_remaining_risks": [
+        "AIR-019 remains partial pending combined HTTP/poller capacity, shutdown, and renderer runtime evidence tied to the current SHA.",
+        "AIR-020 remains partial pending hung-process kill/log/temp/container-limit proof and current-SHA CI/staging/live evidence.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 confirmed",
+      "issue": "Renderer subprocesses have no bounded timeout/output/process cleanup",
+      "owning_tasks": "BR-RENDER-03",
+      "phase": "4",
+      "required_closure_evidence": "hung-process kill/log/temp/container limit proof",
+      "air_id": "AIR-020",
+      "disposition": "source_implemented_runtime_or_release_evidence_deferred",
+      "source_state": "current source remediation and local contract evidence are present; higher-tier closure evidence remains outstanding",
+      "owner": "owning task and release owner",
+      "next_action": "run the plan's required runtime/provider/CI/staging evidence against the exact reviewed SHA",
+      "latest_substantive_event": "br_render_03_air_020_air_076_renderer_argument_boundary_adversarial_review",
+      "latest_source_status": "accepted_partial_source_only_command_boundary_review",
+      "prior_remaining_risks": [
+        "AIR-020 remains partial pending authorized host proof of actual descendant kill, container CPU/memory/pid/temp limits, and current-SHA runtime evidence.",
+        "AIR-076 remains partial pending authorized real HTTP/client behavior and deployment/runtime evidence.",
+        "No source-only result is promoted to CI, staging, deployment, live, or release-security closure.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 confirmed",
+      "issue": "Threads can render a stale response under a new selection",
+      "owning_tasks": "FE-RACE-01",
+      "phase": "5",
+      "required_closure_evidence": "A→B out-of-order browser/HAR test",
+      "air_id": "AIR-021",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "fe_race_visual_01_air_021_air_029_monitoring_realtime_revalidated",
+      "latest_source_status": "accepted_partial_source_only_monitoring_realtime_revalidated_no_change",
+      "prior_remaining_risks": [
+        "AIR-021/AIR-029 require authenticated browser/realtime and deployed evidence for higher-tier closure.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 confirmed",
+      "issue": "Monitoring can show stale timeline/detail for a new selection",
+      "owning_tasks": "FE-RACE-01, FE-MON-01",
+      "phase": "5,6",
+      "required_closure_evidence": "identity-keyed inversion test",
+      "air_id": "AIR-022",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "fe_race_visual_01_air_021_air_022_air_029_source_contract_revalidation",
+      "latest_source_status": "accepted_partial_source_only_selection_identity_realtime_gradient",
+      "prior_remaining_risks": [
+        "AIR-021 remains partial pending an A-to-B out-of-order browser/HAR fixture tied to the current SHA and authenticated route evidence.",
+        "AIR-022 remains partial pending identity-keyed Monitoring inversion/runtime and authenticated browser evidence.",
+        "AIR-029 remains partial pending production computed-style/screenshot, responsive visual proof, current-SHA CI, staging, and live evidence.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 confirmed",
+      "issue": "Monitoring threshold source drifts from backend scoring truth",
+      "owning_tasks": "FE-SCORE-01",
+      "phase": "5",
+      "required_closure_evidence": "settings/worker/Monitoring revision equality",
+      "air_id": "AIR-023",
+      "disposition": "source_implemented_runtime_or_release_evidence_deferred",
+      "source_state": "current source remediation and local contract evidence are present; higher-tier closure evidence remains outstanding",
+      "owner": "owning task and release owner",
+      "next_action": "run the plan's required runtime/provider/CI/staging evidence against the exact reviewed SHA",
+      "latest_substantive_event": "qa_01_air_023_air_024_monitoring_threshold_revalidated",
+      "latest_source_status": "accepted_partial_source_only_monitoring_threshold_revalidated_no_change",
+      "prior_remaining_risks": [
+        "AIR-023/AIR-024 require deployed threshold and authenticated browser evidence for higher-tier closure.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 confirmed",
+      "issue": "Settings exposes conflicting scoring control planes",
+      "owning_tasks": "FE-SCORE-01",
+      "phase": "5",
+      "required_closure_evidence": "one writer; legacy parity/cutover evidence",
+      "air_id": "AIR-024",
+      "disposition": "source_implemented_runtime_or_release_evidence_deferred",
+      "source_state": "current source remediation and local contract evidence are present; higher-tier closure evidence remains outstanding",
+      "owner": "owning task and release owner",
+      "next_action": "run the plan's required runtime/provider/CI/staging evidence against the exact reviewed SHA",
+      "latest_substantive_event": "qa_01_air_023_air_024_monitoring_threshold_revalidated",
+      "latest_source_status": "accepted_partial_source_only_monitoring_threshold_revalidated_no_change",
+      "prior_remaining_risks": [
+        "AIR-023/AIR-024 require deployed threshold and authenticated browser evidence for higher-tier closure.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 confirmed",
+      "issue": "Settings read failure becomes writable defaults/permanent spinner",
+      "owning_tasks": "FE-SETTINGS-01",
+      "phase": "5",
+      "required_closure_evidence": "401/500/timeout/malformed fail-closed browser tests",
+      "air_id": "AIR-025",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "fe_settings_01_air_025_settings_write_fail_closed_revalidated",
+      "latest_source_status": "accepted_partial_source_only_settings_write_fail_closed_revalidated_no_change",
+      "prior_remaining_risks": [
+        "AIR-025 requires authenticated deployed settings-write and rollback evidence for higher-tier closure.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 confirmed",
+      "issue": "Downloader direct fetch conflicts with deployed CSP",
+      "owning_tasks": "FE-MEDIA-01, BR-MEDIA-02, BR-MEDIA-04",
+      "phase": "5",
+      "required_closure_evidence": "production-CSP network and successful download proof",
+      "air_id": "AIR-026",
+      "disposition": "source_implemented_runtime_or_release_evidence_deferred",
+      "source_state": "current source remediation and local contract evidence are present; higher-tier closure evidence remains outstanding",
+      "owner": "owning task and release owner",
+      "next_action": "run the plan's required runtime/provider/CI/staging evidence against the exact reviewed SHA",
+      "latest_substantive_event": "br_media_02_air_008_air_026_air_027_remote_media_policy_revalidated",
+      "latest_source_status": "accepted_partial_source_only_remote_media_policy_revalidated_no_change",
+      "prior_remaining_risks": [
+        "AIR-008/AIR-026/AIR-027 require deployed SSRF-negative and transfer-budget evidence for higher-tier closure.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 confirmed",
+      "issue": "Signed media URL policy is inconsistent and video can render as img",
+      "owning_tasks": "BR-MEDIA-04, FE-MEDIA-01",
+      "phase": "2,5",
+      "required_closure_evidence": "role/expiry/MIME semantic-render browser proof",
+      "air_id": "AIR-027",
+      "disposition": "source_implemented_runtime_or_release_evidence_deferred",
+      "source_state": "current source remediation and local contract evidence are present; higher-tier closure evidence remains outstanding",
+      "owner": "owning task and release owner",
+      "next_action": "run the plan's required runtime/provider/CI/staging evidence against the exact reviewed SHA",
+      "latest_substantive_event": "br_media_02_air_008_air_026_air_027_remote_media_policy_revalidated",
+      "latest_source_status": "accepted_partial_source_only_remote_media_policy_revalidated_no_change",
+      "prior_remaining_risks": [
+        "AIR-008/AIR-026/AIR-027 require deployed SSRF-negative and transfer-budget evidence for higher-tier closure.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2/P3 confirmed",
+      "issue": "Chunk reload flag can become stale across deployments",
+      "owning_tasks": "FE-BUNDLE-01",
+      "phase": "7",
+      "required_closure_evidence": "two-build chunk-404 recovery fixture",
+      "air_id": "AIR-028",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "fe_bundle_01_air_028_chunk_reload_source_revalidation",
+      "latest_source_status": "accepted_partial_source_only_chunk_reload_recovery",
+      "prior_remaining_risks": [
+        "AIR-028 remains partial pending a two-build chunk-404 browser recovery fixture tied to the current SHA and release chain.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 live confirmed",
+      "issue": "bg-gradient-primary is undefined, breaking primary styling",
+      "owning_tasks": "FE-VISUAL-01",
+      "phase": "7",
+      "required_closure_evidence": "production computed-style screenshot",
+      "air_id": "AIR-029",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "fe_race_visual_01_air_021_air_029_monitoring_realtime_revalidated",
+      "latest_source_status": "accepted_partial_source_only_monitoring_realtime_revalidated_no_change",
+      "prior_remaining_risks": [
+        "AIR-021/AIR-029 require authenticated browser/realtime and deployed evidence for higher-tier closure.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 confirmed",
+      "issue": "Dashboard performs large fan-out/5k–10k hydration and duplicate scans",
+      "owning_tasks": "BR-DASH-01, FE-DASH-01, QA-03",
+      "phase": "6",
+      "required_closure_evidence": "bounded payload/query count and p95 evidence",
+      "air_id": "AIR-030",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "br_dash_01_air_030_manual_intake_persistence_revalidated",
+      "latest_source_status": "accepted_partial_source_only_manual_intake_persistence_revalidated_no_change",
+      "prior_remaining_risks": [
+        "AIR-030 requires deployed intake and authenticated browser evidence for higher-tier closure.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 confirmed",
+      "issue": "Hidden HUD starts six realtime subscriptions/work before useful paint",
+      "owning_tasks": "FE-DASH-02, FE-MON-01",
+      "phase": "6",
+      "required_closure_evidence": "zero hidden subscriptions; bounded active channel",
+      "air_id": "AIR-031",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "qa_01_frontend_suite_admin_read_mock_and_safe_webhook_test_repair",
+      "latest_source_status": "accepted_partial_source_only_bounded_dashboard_read_tests_repaired",
+      "prior_remaining_risks": [
+        "AIR-031/AIR-034/AIR-050 remain partial until their required current-SHA, browser, visual, and higher-tier evidence is available.",
+        "This test repair does not prove production bundle, authenticated browser, staging, deployment, or live behavior.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 confirmed",
+      "issue": "Admin action calls have no explicit deadlines/outcome semantics",
+      "owning_tasks": "FE-API-01, BR-DASH-02",
+      "phase": "5",
+      "required_closure_evidence": "blackhole/late-mutation reconciliation tests",
+      "air_id": "AIR-032",
+      "disposition": "deferred_cross_cutting_action_protocol",
+      "source_state": "read deadlines are implemented; mutation operation IDs, idempotency keys and unknown-outcome reconciliation remain unfinished",
+      "owner": "admin API and backend reliability owner",
+      "next_action": "design one shared mutation protocol before changing every action; validate blackhole and late-success cases",
+      "latest_substantive_event": "fe_api_01_air_032_read_deadline_boundary_source_slice_accepted",
+      "latest_source_status": "accepted_partial_source_only_read_deadline_boundary",
+      "prior_remaining_risks": [
+        "AIR-032/FE-API-01 remains partial: mutation action deadlines, operation/request IDs, idempotency keys, unknown-outcome reconciliation, blackhole/late-mutation evidence, and authenticated browser proof require backend support and higher-tier validation.",
+        "AIR-055/SR-BUILD-01 remains blocked by missing required Vite environment variables.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 confirmed",
+      "issue": "ContentFilter author control loads all handles/client-counts",
+      "owning_tasks": "FE-SETTINGS-02, FE-MON-01",
+      "phase": "5,6",
+      "required_closure_evidence": "bounded aggregate/search query and multi-handle proof",
+      "air_id": "AIR-033",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "fe_dash_02_air_033_air_038_air_040_dashboard_contract_revalidated",
+      "latest_source_status": "accepted_source_only_dashboard_contract_revalidated_no_change",
+      "prior_remaining_risks": [
+        "AIR-033/AIR-038/AIR-040 higher-tier runtime/browser/CI evidence remains outstanding.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 confirmed",
+      "issue": "Realtime invalidation is broad and query-amplifying",
+      "owning_tasks": "FE-MON-01, SR-RLS-01",
+      "phase": "6",
+      "required_closure_evidence": "event-burst targeted invalidation/query trace",
+      "air_id": "AIR-034",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "qa_01_frontend_suite_admin_read_mock_and_safe_webhook_test_repair",
+      "latest_source_status": "accepted_partial_source_only_monitoring_read_tests_repaired",
+      "prior_remaining_risks": [
+        "AIR-031/AIR-034/AIR-050 remain partial until their required current-SHA, browser, visual, and higher-tier evidence is available.",
+        "This test repair does not prove production bundle, authenticated browser, staging, deployment, or live behavior.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 confirmed",
+      "issue": "Strict TypeScript is partial and staged bare tsc can be ineffective",
+      "owning_tasks": "FE-QUALITY-01, SR-TYPE-01",
+      "phase": "7",
+      "required_closure_evidence": "all-src strict plus deliberate-error CI fixture",
+      "air_id": "AIR-035",
+      "disposition": "source_implemented_runtime_or_release_evidence_deferred",
+      "source_state": "current source remediation and local contract evidence are present; higher-tier closure evidence remains outstanding",
+      "owner": "owning task and release owner",
+      "next_action": "run the plan's required runtime/provider/CI/staging evidence against the exact reviewed SHA",
+      "latest_substantive_event": "fe_quality_01_air_035_strict_project_source_revalidation",
+      "latest_source_status": "accepted_partial_source_only_strict_project_contract",
+      "prior_remaining_risks": [
+        "AIR-035 remains partial pending deliberate-error blocking CI fixture and current-SHA hosted/release evidence.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P3 confirmed",
+      "issue": "Large worker/admin/X/renderer/dashboard/enrich/dedupe/page hotspots",
+      "owning_tasks": "BR-MOD-01, BR-MOD-02, FE-QUALITY-01",
+      "phase": "7",
+      "required_closure_evidence": "characterization parity and narrow-module ownership",
+      "air_id": "AIR-036",
+      "disposition": "deferred_post_correctness_modular_refactor",
+      "source_state": "critical boundaries were extracted, but broad hotspot decomposition remains intentionally unfinished",
+      "owner": "backend architecture owner",
+      "next_action": "resume narrow module extraction only after the migration/runtime correctness wave is stable, preserving characterization tests",
+      "latest_substantive_event": "br_mod_01_air_036_air_067_admin_actions_type_boundary_narrowed",
+      "latest_source_status": "accepted_partial_source_only_admin_actions_type_boundary_narrowed",
+      "prior_remaining_risks": [
+        "AIR-036 remains partial pending broader entrypoint decomposition and characterization traces.",
+        "AIR-067 remains partial pending further suppression/reason inventory, Deno checks, renderer residuals, current-SHA CI, staging, browser UX, and release review.",
+        "SR-MIG-01/BR-00 and the admin-role contract remain blocked on protected migration evidence and the active inventory/archive mismatch.",
+        "The historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P3 confirmed",
+      "issue": "Login/logo assets are unnecessarily heavy",
+      "owning_tasks": "FE-BUNDLE-01",
+      "phase": "7",
+      "required_closure_evidence": "transfer-size budget and visual parity",
+      "air_id": "AIR-037",
+      "disposition": "deferred_browser_bundle_measurement",
+      "source_state": "asset and route inventory exists; heavy-asset replacement and measured visual parity remain unfinished",
+      "owner": "frontend performance owner",
+      "next_action": "measure the reviewed production-like bundle and replace only proven heavy assets with screenshot parity",
+      "latest_substantive_event": "fe_bundle_visual_inventory_evidence_revalidation_air_037_air_049",
+      "latest_source_status": "deferred_source_only_evidence_gap_preserved",
+      "prior_remaining_risks": [
+        "AIR-037 requires measured route/image transfer budget and visual parity receipt tied to a reviewed SHA.",
+        "AIR-049 requires layer/paint comparison, hierarchy review, and responsive/browser evidence tied to a reviewed SHA.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P3 confirmed",
+      "issue": "Sentry/Replay adds avoidable initial bundle weight",
+      "owning_tasks": "FE-BUNDLE-01",
+      "phase": "7",
+      "required_closure_evidence": "manifest/coverage plus staging error receipt",
+      "air_id": "AIR-038",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "fe_bundle_01_air_038_sentry_lazy_contract_revalidated",
+      "latest_source_status": "accepted_partial_source_only_sentry_lazy_revalidated_no_change",
+      "prior_remaining_risks": [
+        "AIR-038 higher-tier bundle/runtime and staging telemetry evidence remains outstanding.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P3 confirmed",
+      "issue": "Radix chunk is eagerly/coarsely loaded",
+      "owning_tasks": "FE-BUNDLE-01",
+      "phase": "7",
+      "required_closure_evidence": "/auth coverage excludes route-only Radix",
+      "air_id": "AIR-039",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "fe_bundle_01_air_039_radix_boundary_adversarial_revalidation_no_change",
+      "latest_source_status": "partial_source_only_radix_provider_boundary_revalidated_no_change",
+      "prior_remaining_risks": [
+        "AIR-039 remains partial pending production auth-route bundle manifest/transfer proof and authenticated rendered tooltip/dialog parity.",
+        "No claim is made that route bytes or Radix transfer size improved beyond the source boundary.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P3 confirmed",
+      "issue": "Two toast systems are mounted/maintained",
+      "owning_tasks": "FE-BUNDLE-01",
+      "phase": "7",
+      "required_closure_evidence": "one toast stack and call-site parity",
+      "air_id": "AIR-040",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "fe_dash_02_air_033_air_038_air_040_dashboard_contract_revalidated",
+      "latest_source_status": "accepted_source_only_dashboard_contract_revalidated_no_change",
+      "prior_remaining_risks": [
+        "AIR-033/AIR-038/AIR-040 higher-tier runtime/browser/CI evidence remains outstanding.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P3/current verification",
+      "issue": "Node/Vercel/CI/renderer effective runtime contract may differ",
+      "owning_tasks": "SR-RUNTIME-01",
+      "phase": "1,7",
+      "required_closure_evidence": "real Vercel log, frozen matrix and isolated aligned-version receipt",
+      "air_id": "AIR-041",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "sr_runtime_01_air_041_air_042_air_080_ci_hash_reanchored_and_validated",
+      "latest_source_status": "accepted_partial_source_only_runtime_contract_ci_hash_reanchored_validated",
+      "prior_remaining_risks": [
+        "AIR-041/AIR-042/AIR-080 still require hosted CI/current-SHA, deployment/runtime, and release provenance evidence for higher-tier closure.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P3 confirmed",
+      "issue": "Supabase clients/imports span legacy and different resolved versions",
+      "owning_tasks": "SR-RUNTIME-01, SR-TYPE-01",
+      "phase": "1",
+      "required_closure_evidence": "one reviewed pinned contract and behavior tests",
+      "air_id": "AIR-042",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "sr_runtime_01_air_041_air_042_air_080_ci_hash_reanchored_and_validated",
+      "latest_source_status": "accepted_partial_source_only_runtime_contract_ci_hash_reanchored_validated",
+      "prior_remaining_risks": [
+        "AIR-041/AIR-042/AIR-080 still require hosted CI/current-SHA, deployment/runtime, and release provenance evidence for higher-tier closure.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P3 accessibility confirmed",
+      "issue": "Select/Slider/Switch controls lack accessible names",
+      "owning_tasks": "FE-A11Y-01",
+      "phase": "7",
+      "required_closure_evidence": "Accessibility Tree and axe/keyboard report",
+      "air_id": "AIR-043",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "fe_a11y_01_air_043_air_047_source_contract_revalidation",
+      "latest_source_status": "accepted_partial_source_only_accessibility_contracts",
+      "prior_remaining_risks": [
+        "AIR-043 remains partial pending authenticated accessibility-tree, axe/keyboard, focus, and responsive browser evidence.",
+        "AIR-044 remains partial pending label-control association audit in rendered markup and keyboard/screen-reader evidence.",
+        "AIR-045 remains partial pending keyboard focus screenshots/checklist across custom controls.",
+        "AIR-046 remains partial pending screen-reader/RTL mixed-content proof.",
+        "AIR-047 remains partial pending measured WCAG contrast and rendered screenshots across muted/NotFound surfaces.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P3 accessibility confirmed",
+      "issue": "Visual form labels are not always associated via htmlFor/id",
+      "owning_tasks": "FE-A11Y-01",
+      "phase": "7",
+      "required_closure_evidence": "label-control association audit",
+      "air_id": "AIR-044",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "fe_a11y_01_air_043_air_047_source_contract_revalidation",
+      "latest_source_status": "accepted_partial_source_only_accessibility_contracts",
+      "prior_remaining_risks": [
+        "AIR-043 remains partial pending authenticated accessibility-tree, axe/keyboard, focus, and responsive browser evidence.",
+        "AIR-044 remains partial pending label-control association audit in rendered markup and keyboard/screen-reader evidence.",
+        "AIR-045 remains partial pending keyboard focus screenshots/checklist across custom controls.",
+        "AIR-046 remains partial pending screen-reader/RTL mixed-content proof.",
+        "AIR-047 remains partial pending measured WCAG contrast and rendered screenshots across muted/NotFound surfaces.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P3 accessibility confirmed",
+      "issue": "PromptEditor/custom controls lack visible focus",
+      "owning_tasks": "FE-A11Y-01",
+      "phase": "7",
+      "required_closure_evidence": "keyboard focus screenshots/checklist",
+      "air_id": "AIR-045",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "fe_a11y_01_air_043_air_047_source_contract_revalidation",
+      "latest_source_status": "accepted_partial_source_only_accessibility_contracts",
+      "prior_remaining_risks": [
+        "AIR-043 remains partial pending authenticated accessibility-tree, axe/keyboard, focus, and responsive browser evidence.",
+        "AIR-044 remains partial pending label-control association audit in rendered markup and keyboard/screen-reader evidence.",
+        "AIR-045 remains partial pending keyboard focus screenshots/checklist across custom controls.",
+        "AIR-046 remains partial pending screen-reader/RTL mixed-content proof.",
+        "AIR-047 remains partial pending measured WCAG contrast and rendered screenshots across muted/NotFound surfaces.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P3 accessibility confirmed",
+      "issue": "Persian text lacks consistent lang/direction semantics",
+      "owning_tasks": "FE-A11Y-01",
+      "phase": "7",
+      "required_closure_evidence": "screen-reader/RTL mixed-content proof",
+      "air_id": "AIR-046",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "fe_a11y_01_air_043_air_047_source_contract_revalidation",
+      "latest_source_status": "accepted_partial_source_only_accessibility_contracts",
+      "prior_remaining_risks": [
+        "AIR-043 remains partial pending authenticated accessibility-tree, axe/keyboard, focus, and responsive browser evidence.",
+        "AIR-044 remains partial pending label-control association audit in rendered markup and keyboard/screen-reader evidence.",
+        "AIR-045 remains partial pending keyboard focus screenshots/checklist across custom controls.",
+        "AIR-046 remains partial pending screen-reader/RTL mixed-content proof.",
+        "AIR-047 remains partial pending measured WCAG contrast and rendered screenshots across muted/NotFound surfaces.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P3 visual/accessibility confirmed",
+      "issue": "NotFound/muted text contrast is insufficient/inconsistent",
+      "owning_tasks": "FE-A11Y-01, FE-VISUAL-01",
+      "phase": "7",
+      "required_closure_evidence": "measured WCAG contrast and screenshots",
+      "air_id": "AIR-047",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "fe_a11y_01_air_043_air_047_source_contract_revalidation",
+      "latest_source_status": "accepted_partial_source_only_accessibility_contracts",
+      "prior_remaining_risks": [
+        "AIR-043 remains partial pending authenticated accessibility-tree, axe/keyboard, focus, and responsive browser evidence.",
+        "AIR-044 remains partial pending label-control association audit in rendered markup and keyboard/screen-reader evidence.",
+        "AIR-045 remains partial pending keyboard focus screenshots/checklist across custom controls.",
+        "AIR-046 remains partial pending screen-reader/RTL mixed-content proof.",
+        "AIR-047 remains partial pending measured WCAG contrast and rendered screenshots across muted/NotFound surfaces.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P3 visual confirmed",
+      "issue": "glass-card utility imposes excess/double padding",
+      "owning_tasks": "FE-VISUAL-01",
+      "phase": "7",
+      "required_closure_evidence": "responsive/zoom no-overflow snapshots",
+      "air_id": "AIR-048",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "fe_visual_01_air_048_glass_card_padding_source_slice_accepted",
+      "latest_source_status": "accepted_partial_source_only_glass_card_padding",
+      "prior_remaining_risks": [
+        "AIR-048 remains partial pending rendered desktop/mobile/zoom no-overflow screenshots and visual hierarchy review.",
+        "AIR-049/AIR-050 remain separate visual/performance and dashboard-hierarchy obligations; no claim is made for them in this slice.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P3 visual/performance confirmed",
+      "issue": "Repeated blur/shadow/glass layers add paint and visual weight",
+      "owning_tasks": "FE-VISUAL-01, FE-DASH-02, QA-03",
+      "phase": "6,7",
+      "required_closure_evidence": "layer/paint comparison and hierarchy review",
+      "air_id": "AIR-049",
+      "disposition": "deferred_browser_paint_review",
+      "source_state": "visual layer inventory exists; blur/shadow/paint reduction remains unfinished",
+      "owner": "frontend performance and design owner",
+      "next_action": "capture layer/paint and responsive screenshots, then remove only redundant visual layers",
+      "latest_substantive_event": "fe_bundle_visual_inventory_evidence_revalidation_air_037_air_049",
+      "latest_source_status": "deferred_source_only_evidence_gap_preserved",
+      "prior_remaining_risks": [
+        "AIR-037 requires measured route/image transfer budget and visual parity receipt tied to a reviewed SHA.",
+        "AIR-049 requires layer/paint comparison, hierarchy review, and responsive/browser evidence tied to a reviewed SHA.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P3 UX confirmed",
+      "issue": "Dashboard repeats information and weakens first-viewport hierarchy",
+      "owning_tasks": "FE-DASH-02, FE-VISUAL-01",
+      "phase": "6,7",
+      "required_closure_evidence": "task-based operator review and viewport snapshots",
+      "air_id": "AIR-050",
+      "disposition": "deferred_operator_ux_review",
+      "source_state": "dashboard source boundaries improved; task-based first-viewport hierarchy review remains unfinished",
+      "owner": "product and frontend UX owner",
+      "next_action": "run desktop/mobile operator tasks on a SHA-tied preview and make only evidence-backed hierarchy changes",
+      "latest_substantive_event": "fe_visual_01_air_050_dashboard_hierarchy_source_adversarial_review_no_change",
+      "latest_source_status": "deferred_operator_visual_review_required",
+      "prior_remaining_risks": [
+        "AIR-050 remains deferred pending task-based operator review and desktop/mobile first-viewport screenshots proving hierarchy, repetition, and responsive behavior.",
+        "No rendered visual, contrast, paint, or accessibility claim is made from source contracts.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "Security candidate",
+      "issue": "digest_config may contain raw credentials",
+      "owning_tasks": "SR-SECRET-01",
+      "phase": "1",
+      "required_closure_evidence": "redacted key/type evidence; close/disprove or rotation receipt",
+      "air_id": "AIR-051",
+      "disposition": "closed_disproved_current_production",
+      "source_state": "current production contains no digest_config row; current source rejects credential-like keys and uses environment-only provider credentials",
+      "owner": "security and release owner",
+      "next_action": "retain the regression contract; reopen only if future database evidence shows a credential-bearing configuration",
+      "latest_substantive_event": "sr_secret_01_air_051_digest_env_boundary_revalidated",
+      "latest_source_status": "accepted_partial_source_only_digest_env_boundary_revalidated_candidate_preserved",
+      "prior_remaining_risks": [
+        "AIR-051 remains open as a security candidate until redacted database key/type evidence and owner disposition prove absence or provide rotation/revocation receipts.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "Coverage candidate",
+      "issue": "Docker/APT/Deno/remote-import supply chain lacks full scan proof",
+      "owning_tasks": "SR-SUPPLY-01, QA-02",
+      "phase": "7",
+      "required_closure_evidence": "SBOM and complete scan/waiver ledger",
+      "air_id": "AIR-052",
+      "disposition": "deferred_hosted_supply_chain_scan",
+      "source_state": "scan receipt contracts are implemented; complete SBOM, container, Deno and dependency scans remain unfinished",
+      "owner": "security and release owner",
+      "next_action": "run the complete scan matrix in hosted CI against the reviewed SHA and adjudicate every finding",
+      "latest_substantive_event": "sr_supply_01_air_052_air_078_scan_receipt_boundary_validated",
+      "latest_source_status": "accepted_source_only_supply_receipt_boundary_hardened_validated",
+      "prior_remaining_risks": [
+        "Hosted CI must rerun against the pushed reviewed SHA.",
+        "AIR-052/AIR-078 still require complete SBOM/audit receipts and owner waiver evidence if findings appear.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "Blocked validation",
+      "issue": "Authenticated route behavior/accessibility was not browser-verified",
+      "owning_tasks": "QA-04",
+      "phase": "8",
+      "required_closure_evidence": "role/state/route/viewport receipt tied to SHA",
+      "air_id": "AIR-053",
+      "disposition": "deferred_authenticated_browser_matrix",
+      "source_state": "auth route source contracts pass; authenticated role/state/viewport behavior remains unverified",
+      "owner": "QA and auth owner",
+      "next_action": "run the SHA-tied authenticated browser matrix in staging",
+      "latest_substantive_event": "fe_auth_01_air_053_auth_route_fail_closed_adversarial_revalidation_no_change",
+      "latest_source_status": "accepted_partial_source_only_auth_route_fail_closed_revalidated_no_change",
+      "prior_remaining_risks": [
+        "AIR-053 remains partial pending authenticated browser proof of redirects, role denial, degraded recovery, responsive auth UI, current-SHA CI, staging, and release review.",
+        "Static route/source contracts do not prove deployed identity-provider behavior or RLS enforcement.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "Intentional safety gap",
+      "issue": "Live SSRF exploitation was not and must not be run",
+      "owning_tasks": "BR-MEDIA-02, QA-02",
+      "phase": "2,8",
+      "required_closure_evidence": "controlled isolated corpus; boundary documented",
+      "air_id": "AIR-054",
+      "disposition": "deferred_no_egress_ssrf_corpus",
+      "source_state": "live exploitation remains intentionally prohibited; controlled isolation proof remains unfinished",
+      "owner": "security QA owner",
+      "next_action": "run only the documented no-egress SSRF corpus and retain request-count/network-denial evidence",
+      "latest_substantive_event": "br_media_02_air_026_air_027_air_054_media_access_containment_revalidated",
+      "latest_source_status": "accepted_partial_source_only_media_access_containment_revalidated_no_change",
+      "prior_remaining_risks": [
+        "AIR-026/AIR-027/AIR-054 require deployed signed-media and SSRF-negative evidence for higher-tier closure.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "Blocked validation",
+      "issue": "Local production build lacked required Vite environment",
+      "owning_tasks": "SR-BUILD-01",
+      "phase": "7,8",
+      "required_closure_evidence": "masked production-like build and deploy artifact",
+      "air_id": "AIR-055",
+      "disposition": "deferred_masked_build_environment",
+      "source_state": "build contract exists; a production-like build is blocked by missing required Vite environment values",
+      "owner": "build and release owner",
+      "next_action": "provide masked non-secret production-like build variables, then run build, route, source-map and artifact checks",
+      "latest_substantive_event": "sr_runtime_01_sr_build_01_runtime_ci_hash_reanchor_source_slice_accepted",
+      "latest_source_status": "accepted_partial_source_only_runtime_contract_hash_reanchor",
+      "prior_remaining_risks": [
+        "AIR-041/AIR-042 and SR-RUNTIME-01 remain partial pending current Vercel/renderer/Edge runtime receipts, aligned client/version evidence, current-SHA hosted CI, and deployment proof.",
+        "AIR-055/SR-BUILD-01 remains blocked by missing required Vite environment variables and pending masked production-like build, artifact/source-map, route, budget, and deployment evidence; no values were fabricated or written.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 supplemental confirmed",
+      "issue": "Video operations can appear healthy/stable without polling freshness",
+      "owning_tasks": "FE-VIDEO-01",
+      "phase": "4,5",
+      "required_closure_evidence": "fresh→stale and active→terminal browser recordings",
+      "air_id": "AIR-056",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "br_render_04_fe_video_01_sr_input_01_video_review_pipeline_receipt_boundary_source_slice_accepted",
+      "latest_source_status": "accepted_partial_source_only_video_review_pipeline_receipt_boundary",
+      "prior_remaining_risks": [
+        "AIR-056/AIR-062 remain partial pending protected render/review state fixtures, authenticated browser, renderer/runtime, current-SHA CI, staging, and live evidence.",
+        "AIR-068/AIR-075 remain partial pending complete video-review sink scans, protected runtime fixtures, current-SHA CI, staging, live evidence, and release review.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 supplemental confirmed",
+      "issue": "Settings invalidation can overwrite dirty drafts",
+      "owning_tasks": "FE-SETTINGS-02",
+      "phase": "5",
+      "required_closure_evidence": "dirty draft/refetch/concurrent conflict proof",
+      "air_id": "AIR-057",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "fe_settings_auth_route_video_air_057_air_060_air_061_air_063_source_revalidation",
+      "latest_source_status": "accepted_partial_source_only_frontend_state_boundaries",
+      "prior_remaining_risks": [
+        "AIR-057 remains partial pending dirty-draft/refetch/concurrent conflict browser proof and current-SHA release evidence.",
+        "AIR-060 remains partial pending authenticated role/timer fault matrix, no-protected-flash browser evidence, current-SHA CI, staging, and live proof.",
+        "AIR-061 remains partial pending authenticated navigation mount/request/timer count across every protected route.",
+        "AIR-063 remains partial pending A-to-B feedback isolation browser/runtime evidence.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 supplemental confirmed",
+      "issue": "Some destructive/external actions lack confirmation/idempotent UX",
+      "owning_tasks": "FE-SAFETY-01, FE-API-01",
+      "phase": "5",
+      "required_closure_evidence": "cancel zero-call and confirm one-operation proof",
+      "air_id": "AIR-058",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "fe_api_01_air_006_air_058_admin_action_client_errors_revalidated",
+      "latest_source_status": "accepted_partial_source_only_admin_action_error_boundary_revalidated_no_change",
+      "prior_remaining_risks": [
+        "AIR-006/AIR-058 require deployed response and negative-error-pattern evidence for higher-tier closure.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 supplemental confirmed",
+      "issue": "X attempts/usage are compared with post-budget units",
+      "owning_tasks": "BR-X-01, FE-SAFETY-01",
+      "phase": "3,5",
+      "required_closure_evidence": "UI label-to-ledger SQL reconciliation",
+      "air_id": "AIR-059",
+      "disposition": "source_implemented_runtime_or_release_evidence_deferred",
+      "source_state": "current source remediation and local contract evidence are present; higher-tier closure evidence remains outstanding",
+      "owner": "owning task and release owner",
+      "next_action": "run the plan's required runtime/provider/CI/staging evidence against the exact reviewed SHA",
+      "latest_substantive_event": "br_x_01_air_011_air_059_x_api_credentials_read_revalidated",
+      "latest_source_status": "accepted_partial_source_only_x_api_credentials_read_revalidated_no_change",
+      "prior_remaining_risks": [
+        "AIR-011/AIR-059 require deployed secret-manager and provider-negative evidence for higher-tier closure.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 supplemental mixed",
+      "issue": "Auth getSession/role/timer failures need one state machine; preserve role-null fail-closed behavior",
+      "owning_tasks": "FE-AUTH-01, SR-RLS-01",
+      "phase": "1,5",
+      "required_closure_evidence": "no protected flash/read across auth fault matrix",
+      "air_id": "AIR-060",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "fe_settings_auth_route_video_air_057_air_060_air_061_air_063_source_revalidation",
+      "latest_source_status": "accepted_partial_source_only_frontend_state_boundaries",
+      "prior_remaining_risks": [
+        "AIR-057 remains partial pending dirty-draft/refetch/concurrent conflict browser proof and current-SHA release evidence.",
+        "AIR-060 remains partial pending authenticated role/timer fault matrix, no-protected-flash browser evidence, current-SHA CI, staging, and live proof.",
+        "AIR-061 remains partial pending authenticated navigation mount/request/timer count across every protected route.",
+        "AIR-063 remains partial pending A-to-B feedback isolation browser/runtime evidence.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 supplemental confirmed",
+      "issue": "VersionBanner and route layout create redundant timers/remount work",
+      "owning_tasks": "FE-AUTH-01",
+      "phase": "5",
+      "required_closure_evidence": "mount/request count across navigation",
+      "air_id": "AIR-061",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "fe_settings_auth_route_video_air_057_air_060_air_061_air_063_source_revalidation",
+      "latest_source_status": "accepted_partial_source_only_frontend_state_boundaries",
+      "prior_remaining_risks": [
+        "AIR-057 remains partial pending dirty-draft/refetch/concurrent conflict browser proof and current-SHA release evidence.",
+        "AIR-060 remains partial pending authenticated role/timer fault matrix, no-protected-flash browser evidence, current-SHA CI, staging, and live proof.",
+        "AIR-061 remains partial pending authenticated navigation mount/request/timer count across every protected route.",
+        "AIR-063 remains partial pending A-to-B feedback isolation browser/runtime evidence.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 supplemental confirmed",
+      "issue": "Video retry pending state is global across rows",
+      "owning_tasks": "FE-VIDEO-01",
+      "phase": "5",
+      "required_closure_evidence": "concurrent row-action scope proof",
+      "air_id": "AIR-062",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "br_render_04_fe_video_01_sr_input_01_video_review_pipeline_receipt_boundary_source_slice_accepted",
+      "latest_source_status": "accepted_partial_source_only_video_review_pipeline_receipt_boundary",
+      "prior_remaining_risks": [
+        "AIR-056/AIR-062 remain partial pending protected render/review state fixtures, authenticated browser, renderer/runtime, current-SHA CI, staging, and live evidence.",
+        "AIR-068/AIR-075 remain partial pending complete video-review sink scans, protected runtime fixtures, current-SHA CI, staging, live evidence, and release review.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 supplemental confirmed",
+      "issue": "Video feedback draft is not reset/scoped to selected render",
+      "owning_tasks": "FE-VIDEO-01",
+      "phase": "5",
+      "required_closure_evidence": "A→B feedback isolation proof",
+      "air_id": "AIR-063",
+      "disposition": "source_implemented_forward_migration_and_runtime_deferred",
+      "source_state": "source remediation exists, but its required forward migration is not applied in production",
+      "owner": "database and release owner",
+      "next_action": "include the owning forward migration in disposable replay, role/grant tests and the approved database release",
+      "latest_substantive_event": "fe_settings_auth_route_video_air_057_air_060_air_061_air_063_source_revalidation",
+      "latest_source_status": "accepted_partial_source_only_frontend_state_boundaries",
+      "prior_remaining_risks": [
+        "AIR-057 remains partial pending dirty-draft/refetch/concurrent conflict browser proof and current-SHA release evidence.",
+        "AIR-060 remains partial pending authenticated role/timer fault matrix, no-protected-flash browser evidence, current-SHA CI, staging, and live proof.",
+        "AIR-061 remains partial pending authenticated navigation mount/request/timer count across every protected route.",
+        "AIR-063 remains partial pending A-to-B feedback isolation browser/runtime evidence.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 supplemental confirmed",
+      "issue": "Batch size, fan-out and lane capacity are conflated; writes can be unchecked",
+      "owning_tasks": "BR-JOB-02, BR-MOD-01",
+      "phase": "3,7",
+      "required_closure_evidence": "concurrency/queue/checked-write metrics",
+      "air_id": "AIR-064",
+      "disposition": "deferred_runtime_concurrency_matrix",
+      "source_state": "capacity/read/write source guards exist; queue/lane behavior remains unproven under concurrency",
+      "owner": "job runtime owner",
+      "next_action": "run bounded concurrent queue and checked-write fault fixtures against the reviewed schema",
+      "latest_substantive_event": "sr_auth_01_air_064_air_065_air_067_internal_edge_auth_db_cleanup_boundary_reverified",
+      "latest_source_status": "accepted_partial_source_only_internal_edge_auth_db_cleanup_boundary_reverified",
+      "prior_remaining_risks": [
+        "AIR-064/AIR-065 remain partial pending protected cleanup ownership and runtime/database evidence.",
+        "AIR-067 remains partial pending Deno, renderer, CI, staging, browser, and release evidence.",
+        "AIR-070 through AIR-074 remain partial pending deployed auth/RLS/provider evidence.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 supplemental confirmed",
+      "issue": "Media cleanup is invoked by both direct and nested schedules",
+      "owning_tasks": "BR-00, BR-MEDIA-03",
+      "phase": "0,2",
+      "required_closure_evidence": "one canonical schedule after safe canary",
+      "air_id": "AIR-065",
+      "disposition": "deferred_cleanup_canary_and_schedule_cutover",
+      "source_state": "duplicate destructive schedules are contained/paused; canonical schedule cutover remains unfinished",
+      "owner": "database operations owner",
+      "next_action": "after reference-aware cleanup is approved, run a safe canary and retain exactly one canonical schedule",
+      "latest_substantive_event": "sr_rel_00_br_00_phase0_containment_revalidated",
+      "latest_source_status": "accepted_partial_source_only_phase0_containment_revalidated_migration_blocked",
+      "prior_remaining_risks": [
+        "AIR-001/AIR-065 remain partial pending owner-approved protected migration evidence and higher-tier runtime/database/release proof.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 supplemental/candidate",
+      "issue": "Digest/thread multi-stage work can partially duplicate after interruption",
+      "owning_tasks": "BR-THREAD-01, BR-DIGEST-01",
+      "phase": "3",
+      "required_closure_evidence": "transition fault injection and one-output/job proof",
+      "air_id": "AIR-066",
+      "disposition": "deferred_durable_checkpoint_schema",
+      "source_state": "authoritative persistence errors fail closed; multi-stage run/output/enqueue checkpoints remain unfinished",
+      "owner": "digest and thread reliability owner",
+      "next_action": "add deterministic checkpoint identities in a forward migration and run interruption fault injection",
+      "latest_substantive_event": "br_digest_01_air_066_digest_persistence_contract_revalidated",
+      "latest_source_status": "accepted_partial_source_only_digest_persistence_revalidated_no_change",
+      "prior_remaining_risks": [
+        "AIR-066 requires transition fault-injection evidence proving one canonical digest and at-most-one downstream job across interruption points.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2/P3 supplemental confirmed",
+      "issue": "Deno/frontend strictness has many any/suppression/boundary gaps",
+      "owning_tasks": "SR-TYPE-01, FE-QUALITY-01",
+      "phase": "1,7",
+      "required_closure_evidence": "suppression ledger/reduction and strict checks",
+      "air_id": "AIR-067",
+      "disposition": "partial_type_trust_completed_residual_debt_deferred",
+      "source_state": "production types now match exactly and strict TypeScript passes; Edge suppression debt, Deno runtime checks and disposable-replay type parity remain unfinished",
+      "owner": "type quality and release owner",
+      "next_action": "after forward migrations replay, regenerate types again, run Deno checks, and reduce/document remaining suppressions",
+      "latest_substantive_event": "sr_type_01_air_001_air_067_stale_media_repair_disposition_reanchored",
+      "latest_source_status": "accepted_partial_source_only_stale_media_repair_disposition_reanchored",
+      "prior_remaining_risks": [
+        "AIR-001/AIR-067 still require deployed stale-media repair race/idempotency evidence, current-SHA CI, staging, and release review.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 security confirmed",
+      "issue": "Logs can expose signed/media URL query parameters",
+      "owning_tasks": "SR-INPUT-01, BR-MEDIA-02",
+      "phase": "2",
+      "required_closure_evidence": "log/Sentry secret-pattern negative scan",
+      "air_id": "AIR-068",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "sr_input_01_air_068_air_075_observability_redaction_revalidated",
+      "latest_source_status": "accepted_source_only_observability_redaction_revalidated_no_change",
+      "prior_remaining_risks": [
+        "Live/staging Sentry receipt and log-pattern scan remain required for higher-tier closure.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "P2 security/perf confirmed",
+      "issue": "Webhook item/media arrays and related queries are insufficiently bounded",
+      "owning_tasks": "SR-INPUT-01, BR-WH-01, BR-DASH-01",
+      "phase": "2,6",
+      "required_closure_evidence": "max-boundary and zero-unbounded-work tests",
+      "air_id": "AIR-069",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "br_media_02_sr_input_01_remote_media_reprocess_receipt_mutation_anchor_accepted",
+      "latest_source_status": "accepted_partial_source_only_remote_media_contract_mutation_anchor",
+      "prior_remaining_risks": [
+        "AIR-008/AIR-069 and BR-MEDIA-02 remain partial pending connection/IP-pinning runtime boundary, protected SSRF/size/MIME fault fixtures, object lifecycle, current-SHA CI, staging, and canary/live evidence.",
+        "AIR-068/AIR-075 remain partial pending complete media ingress/telemetry sink scans, protected runtime fixtures, current-SHA CI, staging, live evidence, and release review.",
+        "BR-MEDIA-01 atomic object/reference lifecycle and BR-MEDIA-04 authorized signed access remain unresolved.",
+        "Video-RLS mutation scan was not accepted in this slice because its long-running source scan was interrupted; the normal RLS contract passed.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "Preserve control",
+      "issue": "verify_jwt=false functions use fail-closed custom auth",
+      "owning_tasks": "SR-AUTH-01, QA-05",
+      "phase": "1,8",
+      "required_closure_evidence": "executable auth inventory/negative matrix",
+      "air_id": "AIR-070",
+      "disposition": "source_implemented_forward_migration_and_runtime_deferred",
+      "source_state": "source remediation exists, but its required forward migration is not applied in production",
+      "owner": "database and release owner",
+      "next_action": "include the owning forward migration in disposable replay, role/grant tests and the approved database release",
+      "latest_substantive_event": "sr_auth_01_air_070_air_072_admin_role_protected_migration_blocker_separated",
+      "latest_source_status": "accepted_partial_source_only_admin_role_entrypoint_verified_migration_evidence_blocked",
+      "prior_remaining_risks": [
+        "AIR-070/AIR-072 remain partial pending protected migration evidence, deployed role-RPC/ACL proof, negative-auth matrix, CI, staging, and release review.",
+        "SR-MIG-01/BR-00 remain blocked on protected migration evidence and inventory/archive mismatch.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "Preserve control",
+      "issue": "Ten sampled functions reject unauthenticated requests with 401",
+      "owning_tasks": "SR-AUTH-01, QA-05",
+      "phase": "1,8",
+      "required_closure_evidence": "live/staging negative request receipt",
+      "air_id": "AIR-071",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "sr_type_01_air_067_air_070_air_071_air_072_air_073_air_074_auth_boundary_suppression_reduction",
+      "latest_source_status": "accepted_partial_source_only_auth_boundary_revalidated_suppression_reduced",
+      "prior_remaining_risks": [
+        "AIR-067 remains partial pending Deno checks, suppression reason/expiry inventory, renderer residuals, current-SHA CI, staging, and release review.",
+        "AIR-070 through AIR-074 remain partial pending deployed auth/RLS/provider evidence.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "Preserve control",
+      "issue": "Admin JWT and role are checked before service client work",
+      "owning_tasks": "SR-AUTH-01, FE-AUTH-01, QA-05",
+      "phase": "1,8",
+      "required_closure_evidence": "reachability spy and role matrix",
+      "air_id": "AIR-072",
+      "disposition": "source_implemented_forward_migration_and_runtime_deferred",
+      "source_state": "source remediation exists, but its required forward migration is not applied in production",
+      "owner": "database and release owner",
+      "next_action": "include the owning forward migration in disposable replay, role/grant tests and the approved database release",
+      "latest_substantive_event": "sr_auth_01_air_070_air_072_admin_role_protected_migration_blocker_separated",
+      "latest_source_status": "accepted_partial_source_only_admin_role_entrypoint_verified_migration_evidence_blocked",
+      "prior_remaining_risks": [
+        "AIR-070/AIR-072 remain partial pending protected migration evidence, deployed role-RPC/ACL proof, negative-auth matrix, CI, staging, and release review.",
+        "SR-MIG-01/BR-00 remain blocked on protected migration evidence and inventory/archive mismatch.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "Preserve control",
+      "issue": "RSS HMAC/header auth rejects query-token fallback",
+      "owning_tasks": "SR-AUTH-01, BR-WH-02, QA-05",
+      "phase": "1,2,8",
+      "required_closure_evidence": "signed positive and query-token negative",
+      "air_id": "AIR-073",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "sr_type_01_air_067_air_070_air_071_air_072_air_073_air_074_auth_boundary_suppression_reduction",
+      "latest_source_status": "accepted_partial_source_only_auth_boundary_revalidated_suppression_reduced",
+      "prior_remaining_risks": [
+        "AIR-067 remains partial pending Deno checks, suppression reason/expiry inventory, renderer residuals, current-SHA CI, staging, and release review.",
+        "AIR-070 through AIR-074 remain partial pending deployed auth/RLS/provider evidence.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "Preserve control",
+      "issue": "temp-media is service-only and privileged RPC grants are revoked",
+      "owning_tasks": "SR-RLS-01, QA-05",
+      "phase": "1,8",
+      "required_closure_evidence": "grants/storage role matrix",
+      "air_id": "AIR-074",
+      "disposition": "source_implemented_forward_migration_and_runtime_deferred",
+      "source_state": "source remediation exists, but its required forward migration is not applied in production",
+      "owner": "database and release owner",
+      "next_action": "include the owning forward migration in disposable replay, role/grant tests and the approved database release",
+      "latest_substantive_event": "sr_type_01_air_067_air_070_air_071_air_072_air_073_air_074_auth_boundary_suppression_reduction",
+      "latest_source_status": "accepted_partial_source_only_auth_boundary_revalidated_suppression_reduced",
+      "prior_remaining_risks": [
+        "AIR-067 remains partial pending Deno checks, suppression reason/expiry inventory, renderer residuals, current-SHA CI, staging, and release review.",
+        "AIR-070 through AIR-074 remain partial pending deployed auth/RLS/provider evidence.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "Preserve control",
+      "issue": "No tracked secrets, obvious XSS, or unsafe shell construction found",
+      "owning_tasks": "SR-INPUT-01, SR-SUPPLY-01, QA-05",
+      "phase": "7,8",
+      "required_closure_evidence": "secret/sink/process scan and regression tests",
+      "air_id": "AIR-075",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "br_tg_01_air_014_air_075_telegram_error_redaction_revalidated",
+      "latest_source_status": "accepted_partial_source_only_telegram_error_redaction_revalidated_no_change",
+      "prior_remaining_risks": [
+        "AIR-014/AIR-075 require deployed negative-pattern and provider-error receipt evidence for higher-tier closure.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "Preserve control",
+      "issue": "Renderer uses bearer auth, loopback binding and non-root container",
+      "owning_tasks": "BR-RENDER-02, BR-RENDER-03, QA-05",
+      "phase": "4,8",
+      "required_closure_evidence": "container/network/auth runtime receipt",
+      "air_id": "AIR-076",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "br_render_03_air_020_air_076_renderer_argument_boundary_adversarial_review",
+      "latest_source_status": "accepted_partial_source_only_command_boundary_review",
+      "prior_remaining_risks": [
+        "AIR-020 remains partial pending authorized host proof of actual descendant kill, container CPU/memory/pid/temp limits, and current-SHA runtime evidence.",
+        "AIR-076 remains partial pending authorized real HTTP/client behavior and deployment/runtime evidence.",
+        "No source-only result is promoted to CI, staging, deployment, live, or release-security closure.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "Preserve control",
+      "issue": "CSP/HSTS/frame/nosniff/referrer headers are live",
+      "owning_tasks": "FE-MEDIA-01, SR-REL-01, QA-05",
+      "phase": "5,8",
+      "required_closure_evidence": "post-deploy header/CSP route checks",
+      "air_id": "AIR-077",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "sr_rel_01_air_077_security_headers_source_contract_revalidated",
+      "latest_source_status": "accepted_partial_source_only_security_headers_revalidated_no_change",
+      "prior_remaining_risks": [
+        "AIR-077 requires deployed/staging response-header evidence tied to the reviewed SHA for higher-tier closure.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "Preserve control",
+      "issue": "Root production npm audit has zero advisories",
+      "owning_tasks": "SR-SUPPLY-01, QA-05",
+      "phase": "7,8",
+      "required_closure_evidence": "root and renderer production audit receipts",
+      "air_id": "AIR-078",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "sr_supply_01_air_052_air_078_scan_receipt_boundary_validated",
+      "latest_source_status": "accepted_source_only_supply_receipt_boundary_hardened_validated",
+      "prior_remaining_risks": [
+        "Hosted CI must rerun against the pushed reviewed SHA.",
+        "AIR-052/AIR-078 still require complete SBOM/audit receipts and owner waiver evidence if findings appear.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "Preserve control",
+      "issue": "Sampled queue/X/render/Telegram invariants were healthy",
+      "owning_tasks": "BR-JOB-01, BR-TG-01, BR-X-02, BR-RENDER-01, QA-05",
+      "phase": "3,4,8",
+      "required_closure_evidence": "pre/post invariant comparison",
+      "air_id": "AIR-079",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "sr_input_01_br_x_diagnostics_and_hydration_error_boundary_source_slice_accepted",
+      "latest_source_status": "accepted_partial_source_only_x_diagnostics_hydration_error_boundary",
+      "prior_remaining_risks": [
+        "AIR-068/AIR-075/AIR-079 remain partial until remaining shared-provider/admin sinks, protected runtime fixtures, current-SHA CI, staging, live evidence, and release review exist.",
+        "Historical Supabase PAT alert #1 remains unresolved; no release-security closure is claimed."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    },
+    {
+      "audit_class": "Preserve control",
+      "issue": "Lazy routes, responsive Monitoring, overflow, reduced motion, noopener, manual X confirmation, Dashboard degraded states work",
+      "owning_tasks": "FE-MANUAL-01, FE-DASH-01, FE-DASH-02, FE-MON-01, FE-A11Y-01, FE-BUNDLE-01, QA-05",
+      "phase": "5-8",
+      "required_closure_evidence": "route/browser regression matrix",
+      "air_id": "AIR-080",
+      "disposition": "source_implemented_higher_tier_validation_deferred",
+      "source_state": "current source remediation/guard is present; closure requires build, browser, runtime, provider, CI, staging or live evidence",
+      "owner": "QA and release owner",
+      "next_action": "validate the required closure evidence against the exact reviewed SHA before production deployment",
+      "latest_substantive_event": "sr_runtime_01_air_041_air_042_air_080_ci_hash_reanchored_and_validated",
+      "latest_source_status": "accepted_partial_source_only_runtime_contract_ci_hash_reanchored_validated",
+      "prior_remaining_risks": [
+        "AIR-041/AIR-042/AIR-080 still require hosted CI/current-SHA, deployment/runtime, and release provenance evidence for higher-tier closure.",
+        "Historical Supabase PAT alert #1 and protected migration evidence remain release blockers."
+      ],
+      "deadline": "2026-08-15T00:00:00Z"
+    }
+  ]
+}

@@ -1,0 +1,338 @@
+{
+  "schema": "xot-e8b-brand-asset-optimization-acceptance-receipt-v1",
+  "event": "e8b_b1_brand_asset_optimization_acceptance",
+  "phase": "E8b/B1 local brand asset optimization and partial visual acceptance",
+  "status": "ACCEPTED_PARTIAL_LOCAL_ASSET_OPTIMIZATION_VISUAL_LIMITS_DEFERRED",
+  "release": "CLOSED",
+  "releaseGate": "CLOSED",
+  "riskTier": "HIGH",
+  "repository": "/Users/stevmq/Finalized XOT",
+  "branch": "codex/xot-remediation-convergence",
+  "head": "0bd578856016c06a10890339f93aa13b82ecae48",
+  "observedAt": "2026-08-11",
+  "claimBoundary": "B1 local/partial asset optimization and local visual evidence only; no production, hosted, deploy, provider, or higher-tier closure.",
+  "directPlan": {
+    "path": "docs/plans/2026-08-08-xot-post-b4-execution-sequence.md",
+    "sha256": "24feff64abe2a221ca69cb9f52e1a03eb53d707ec024367fa8aa3e75cf0dea4c",
+    "bytes": 33797,
+    "section": "E8 - Post-Correctness Source Tranches / E8b",
+    "lines": "307-325",
+    "targetTier": "T0/T1 only",
+    "deferredByPlan": [
+      "browser paint, responsive, and operator proof",
+      "hosted scans",
+      "real build and deploy artifact"
+    ]
+  },
+  "predecessor": {
+    "path": "docs/plans/2026-08-11-xot-e8b-bundle-asset-baseline.json",
+    "sha256": "872de30f6fe940ec1f416f147dc89cca02f4aae774b66cda2e19dab48222ffb1",
+    "bytes": 22270,
+    "schema": "xot-e8b-bundle-asset-baseline-receipt-v1",
+    "status": "ACCEPTED_LOCAL_BASELINE_ONLY"
+  },
+  "ledgerPredecessor": {
+    "path": "docs/plans/2026-07-14-xot-comprehensive-audit-remediation-implementation-ledger.jsonl",
+    "row": 531,
+    "rowNoNewlineSha256": "017b7abe34c6631c3e2d8752a91b649f8e53afd5c4bd82921866fb4e51d408ab",
+    "prefixThroughRow531Sha256": "4007273fe9b1b54b733de29e7c1ec136ee5bfc877d03782a5dcaabd2df3024c1",
+    "prefixIncludesTrailingNewline": true,
+    "event": "e8b_local_bundle_asset_baseline_partial_acceptance_row531",
+    "appendMade": false
+  },
+  "scope": {
+    "airIds": ["AIR-037"],
+    "supportingAirIds": ["AIR-038", "AIR-039", "AIR-040"],
+    "mapping": ["FE-BUNDLE-01"],
+    "optimization": "BrandLogo serves cwebp 1.6.0 lossless VP8L WebP derivatives with PNG fallbacks: full 320x320 from xot-logo.png and compact 64x64 from favicon.png.",
+    "behaviorBoundary": "Asset delivery and source references only; no route, auth, API, data, control-flow, or product semantics changed.",
+    "supportingContracts": "AIR-038 through AIR-040 are recorded only as unchanged supporting checks; this receipt does not close them."
+  },
+  "sourceBindings": [
+    {
+      "path": "src/components/layout/BrandLogo.tsx",
+      "role": "full/compact WebP picture source with direct PNG fallback and intrinsic dimensions",
+      "sha256": "70e92f26b15f7dad68d4935a78e2006cd6c015d3df130ddfc596e77d4aefd122",
+      "bytes": 898
+    },
+    {
+      "path": "scripts/check-asset-weight-characterization-contract.mjs",
+      "role": "asset manifest, PNG/WebP parser, source-linkage, byte-budget, and mutation checker",
+      "sha256": "9d7e111b2ac272bd0075545c138083f1f1e697f952abfe3172a4a6f69681b2b9",
+      "bytes": 21351
+    },
+    {
+      "path": "scripts/check-asset-weight-characterization-contract.test.mjs",
+      "role": "dedicated normal and fail-closed asset/container mutation tests",
+      "sha256": "146f6d4c45e3a0e28827f41b12b19f3137ef5abb3e2ff709cbbbf40987ff93e3",
+      "bytes": 5884
+    }
+  ],
+  "assets": {
+    "originals": [
+      {
+        "path": "public/xot-logo.png",
+        "sourceFor": "public/xot-logo-full.webp",
+        "format": "PNG",
+        "bytes": 179143,
+        "sha256": "9fa84c5d71ce0923cb656368a98e5304a93ec264aa87cd537cea559a1fe380e0",
+        "dimensions": "1200x1200",
+        "alpha": true
+      },
+      {
+        "path": "public/favicon.png",
+        "sourceFor": "public/xot-logo-compact.webp",
+        "format": "PNG",
+        "bytes": 54858,
+        "sha256": "d8d856631b7f8c25f86f43c16335b1b07c9d0d13a243a72e38654455a6bbbe90",
+        "dimensions": "512x512",
+        "alpha": true
+      },
+      {
+        "path": "public/apple-touch-icon.png",
+        "format": "PNG",
+        "bytes": 12327,
+        "sha256": "e971b79475d954f204356f9a979c4307f87b1206f2b1cf7df6a71d936d09ed89",
+        "dimensions": "180x180",
+        "alpha": true
+      }
+    ],
+    "derivatives": [
+      {
+        "path": "public/xot-logo-full.webp",
+        "sourcePath": "public/xot-logo.png",
+        "format": "WebP",
+        "container": "RIFF/WEBP",
+        "codec": "VP8L",
+        "lossless": true,
+        "alpha": true,
+        "dimensions": "320x320",
+        "bytes": 14086,
+        "sha256": "ff3627016536f5f08adc51f35fafbaddb7dd3c6661ad3ca69bbde7c154abe7c2",
+        "maxBytes": 89571,
+        "sourceSha256": "9fa84c5d71ce0923cb656368a98e5304a93ec264aa87cd537cea559a1fe380e0"
+      },
+      {
+        "path": "public/xot-logo-compact.webp",
+        "sourcePath": "public/favicon.png",
+        "format": "WebP",
+        "container": "RIFF/WEBP",
+        "codec": "VP8L",
+        "lossless": true,
+        "alpha": true,
+        "dimensions": "64x64",
+        "bytes": 2186,
+        "sha256": "f633e0d7b9576a7285ced8494fd6fa6415df5c76608b6a14365ae3c44a122629",
+        "maxBytes": 27429,
+        "sourceSha256": "d8d856631b7f8c25f86f43c16335b1b07c9d0d13a243a72e38654455a6bbbe90"
+      }
+    ],
+    "regeneration": {
+      "tool": "cwebp",
+      "version": "1.6.0",
+      "commands": [
+        "cwebp -quiet -m 6 -lossless -resize 320 320 public/xot-logo.png -o public/xot-logo-full.webp",
+        "cwebp -quiet -m 6 -lossless -resize 64 64 public/favicon.png -o public/xot-logo-compact.webp"
+      ],
+      "byteIdentical": true,
+      "sha256AndBytesMatchReviewedDerivatives": true
+    },
+    "pairComparison": {
+      "baselineBytes": 234001,
+      "optimizedBytes": 16272,
+      "savedBytes": 217729,
+      "reductionPercentExact": 93.04618356331811,
+      "reductionPercentReported": "93.05%",
+      "comparison": "xot-logo.png + favicon.png versus xot-logo-full.webp + xot-logo-compact.webp"
+    }
+  },
+  "implementation": {
+    "brandLogo": {
+      "fullSource": "/xot-logo-full.webp",
+      "compactSource": "/xot-logo-compact.webp",
+      "fullFallback": "/xot-logo.png",
+      "compactFallback": "/favicon.png",
+      "intrinsicDimensions": {
+        "full": "320x320",
+        "compact": "64x64"
+      },
+      "fallbackIntegrity": "direct PNG fallback retained in the img element for both full and compact modes"
+    },
+    "sourceContract": "Asset manifest, required references, exact byte/hash checks, dimensions, alpha, VP8L structure, source linkage, and mutation fail-closed behavior are bound to the live checker and dedicated test."
+  },
+  "validation": {
+    "assetCheckerNormal": {
+      "command": "node scripts/check-asset-weight-characterization-contract.mjs",
+      "result": "ASSET_WEIGHT_CHARACTERIZATION_SOURCE_CONTRACT_PASS assets=5 sourceFiles=3 reviewSignals=2 sizes={full-logo:179143,compact-logo:54858,apple-touch-icon:12327,full-logo-webp:14086,compact-logo-webp:2186} baselineBytes=234001 deliveredBytes=16272 reductionPercent=93.05 mutation=skipped"
+    },
+    "assetCheckerMutation": {
+      "command": "MUTATION_TEST=1 node scripts/check-asset-weight-characterization-contract.mjs",
+      "result": "ASSET_WEIGHT_CHARACTERIZATION_SOURCE_CONTRACT_PASS assets=5 sourceFiles=3 reviewSignals=2 baselineBytes=234001 deliveredBytes=16272 reductionPercent=93.05 mutation=pass"
+    },
+    "dedicatedAssetTest": {
+      "command": "node --test scripts/check-asset-weight-characterization-contract.test.mjs",
+      "result": "11 passed, 0 failed"
+    },
+    "focusedFrontend": {
+      "command": "npm test -- --run src/test/auth.test.tsx src/test/app-layout.test.tsx",
+      "result": "13 passed, 0 failed; expected AuthContext boundary diagnostic only"
+    },
+    "strict": {
+      "command": "npm run check:strict",
+      "result": "exit 0; tsc --noEmit -p tsconfig.strict.json"
+    },
+    "lint": {
+      "command": "npm run lint",
+      "result": "exit 0; 0 errors, 11 warnings"
+    },
+    "syntheticBuild": {
+      "environment": "synthetic public Vite environment; values not stored",
+      "result": "build passed; JavaScript transfer delta +0.0121%; CSS delta 0%; no chunk exceeded the +2% guard",
+      "network": "not used",
+      "artifact": "temporary local build only; no production/deploy artifact"
+    },
+    "scopedWhitespace": {
+      "command": "git diff --no-index --check /dev/null docs/plans/2026-08-11-xot-e8b-brand-asset-optimization-acceptance.json",
+      "result": "clean receipt whitespace; expected exit 1 for untracked-file comparison"
+    },
+    "stagedIndex": {
+      "command": "git diff --cached --quiet",
+      "result": "exit 0; staged index empty"
+    }
+  },
+  "visualQa": {
+    "status": "PARTIAL_PASS",
+    "route": "strict computer_use",
+    "requestedAssignedRoute": {
+      "model": "GPT-5.6 Sol",
+      "reasoning": "low",
+      "fast": true
+    },
+    "runtimeTelemetry": {
+      "identity": "unknown",
+      "model": "unknown",
+      "reasoning": "unknown",
+      "fast": "unknown",
+      "note": "Runtime identity and settings were not exposed; route is recorded from the supplied strict computer_use receipt."
+    },
+    "localAuth": {
+      "desktopViewport": "1875x768",
+      "narrowViewport": "768x897",
+      "authenticated": true,
+      "status": "passed at available desktop and narrow viewports"
+    },
+    "checks": {
+      "keyboardOrder": "pass",
+      "nativeEmptyValidation": "pass",
+      "fullBrandLogo": "pass",
+      "compactBrandLogo": "pass",
+      "directFallbackIntegrity": "pass",
+      "assetReferenceIntegrity": "pass"
+    },
+    "blocked": [
+      "true 390x844 viewport was blocked by the Browser minimum",
+      "authenticated AppLayout compact state remained unverified because the required true mobile/auth surface was unavailable"
+    ],
+    "ephemeralScreenshotEvidence": {
+      "paths": [],
+      "filesPresentAtAuthoring": false,
+      "hashesAndBytes": [],
+      "note": "No screenshot files remained in the local workspace at receipt authoring. Visual claims are bound to the strict computer_use QA result and do not depend on future screenshot persistence."
+    }
+  },
+  "runtimeCleanup": {
+    "devServerCommand": "npm run dev -- --host 127.0.0.1 --port 5173",
+    "devServerPid": "ephemeral PID; not retained after cleanup",
+    "cleanup": "complete",
+    "port5173": "unbound",
+    "temporaryServerArtifacts": "absent",
+    "qaTabs": "closed"
+  },
+  "independentReview": {
+    "role": "independent acceptance/security worker",
+    "requestedRoute": {
+      "model": "GPT-5.6 Luna",
+      "reasoning": "high",
+      "fast": "N/A"
+    },
+    "runtimeTelemetry": {
+      "identity": "unknown",
+      "model": "unknown",
+      "reasoning": "unknown",
+      "note": "Runtime identity, model, and reasoning telemetry were not exposed."
+    },
+    "subagentsUsed": false,
+    "sourceReviewOutputDisposition": "accepted",
+    "verdict": "ACCEPT",
+    "findings": [],
+    "scope": "B1 asset hashes/bytes, source references, exact reduction, checker/test evidence, conservative visual boundary, and deferrals",
+    "evidenceBoundary": "Independent acceptance is local source/evidence review only; no live, hosted, production, or provider proof is claimed."
+  },
+  "airDispositions": {
+    "AIR-037": {
+      "localDisposition": "B1 brand asset optimization accepted partially with exact local byte/hash/format/source-linkage evidence and partial local visual QA.",
+      "status": "PARTIAL",
+      "deferred": "B2 exact before/after comparison, heuristic contract, true mobile/auth/operator proof, higher visual tiers, production equivalence, and owner decision remain open.",
+      "ownerAssigned": false,
+      "deadlineAssigned": false
+    },
+    "AIR-038": {
+      "localDisposition": "supporting check unchanged",
+      "deferred": "prior AIR-038 evidence boundary remains unchanged"
+    },
+    "AIR-039": {
+      "localDisposition": "supporting check unchanged",
+      "deferred": "prior AIR-039 evidence boundary remains unchanged"
+    },
+    "AIR-040": {
+      "localDisposition": "supporting check unchanged",
+      "deferred": "prior AIR-040 evidence boundary remains unchanged"
+    }
+  },
+  "achieved": ["T0", "T1"],
+  "deferred": ["T2", "T3", "T4"],
+  "notClaimed": [
+    "No B2 exact comparison or heuristic contract; no AIR-037 closure.",
+    "True 390x844 and authenticated AppLayout compact visual proof remain blocked by Browser minimum/auth surface limits.",
+    "No production equivalence, hosted scan, CI, staging, deploy, live, provider, database, or external contact.",
+    "No route/control/auth/data semantics changed; no credentials or external correspondence were used.",
+    "No production or live asset replacement was performed.",
+    "No ledger append was made; row 531 and all prior rows remain immutable.",
+    "Receipt-only rollback is unauthorized; no rollback command was run."
+  ],
+  "externalState": {
+    "network": false,
+    "provider": false,
+    "database": false,
+    "ci": false,
+    "staging": false,
+    "deploy": false,
+    "live": false,
+    "browser": "local partial visual QA only",
+    "docker": false,
+    "productionEquivalence": false
+  },
+  "ledger": {
+    "path": "docs/plans/2026-07-14-xot-comprehensive-audit-remediation-implementation-ledger.jsonl",
+    "appended": false,
+    "changed": false,
+    "predecessorRow": 531,
+    "note": "No ledger append is made by this receipt."
+  },
+  "rollback": {
+    "path": "docs/plans/2026-08-11-xot-e8b-brand-asset-optimization-acceptance.json",
+    "scope": "this receipt file only under explicit review",
+    "command": null,
+    "authorized": false,
+    "sourceFiles": "not rollback-authorized",
+    "otherDirtyFiles": "not included and not to be reverted"
+  },
+  "receiptScope": {
+    "allowedPath": "docs/plans/2026-08-11-xot-e8b-brand-asset-optimization-acceptance.json",
+    "newFileOnly": true,
+    "sourceFilesUnchangedAfterBinding": true,
+    "ledgerUnchanged": true,
+    "noNetworkOrExternalMutation": true,
+    "noCredentialsOrExternalContact": true
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "schema": "xot-e10-sql-runtime-acceptance-receipt-v1",
+  "event": "e10_sql_runtime_acceptance_local_t1",
+  "phase": "e10-sql-runtime-local-only",
+  "status": "ACCEPTED_LOCAL_SQL_T1",
+  "release": "CLOSED",
+  "releaseGate": "CLOSED",
+  "riskTier": "high",
+  "repository": ".",
+  "branch": "codex/xot-remediation-convergence",
+  "noLiveContactDeclaration": true,
+  "noProductionDatabaseApplication": true,
+  "runtimeAcceptance": {
+    "tier": "T1",
+    "classification": "local disposable PostgreSQL replay with the E10 SQL assertion bundle",
+    "engine": "orbstack",
+    "image": "public.ecr.aws/supabase/postgres@sha256:99b1729aeb0bac314445024fc149fbd39306170b61dd50800ccf180327ab3459",
+    "imageCommand": [
+      "postgres",
+      "-D",
+      "/etc/postgresql"
+    ],
+    "migrationCount": 124,
+    "inventorySha256": "d6c31480f6d7c9e926be12bf0e555af9d34d74b07f2b4efa42f5e01f120a5b57",
+    "migrationSha256": "66729659d4573d1245ba3ee7845fb76fa7808ecb5bda74cb616916e0700518d7",
+    "acceptedRun": {
+      "command": "node scripts/run-e10-sql-boundary.mjs",
+      "captureExitCode": 0,
+      "durationMs": 23070,
+      "acceptedFinalRunOnly": true,
+      "captureParser": "exact single JSON stdout object",
+      "stdout": {
+        "schema": "xot-e10-sql-boundary-receipt-v1",
+        "status": "ACCEPTED_LOCAL_SQL_T1",
+        "context": "orbstack",
+        "image": "public.ecr.aws/supabase/postgres@sha256:99b1729aeb0bac314445024fc149fbd39306170b61dd50800ccf180327ab3459",
+        "imageCommand": [
+          "postgres",
+          "-D",
+          "/etc/postgresql"
+        ],
+        "migrationCount": 124,
+        "inventorySha256": "d6c31480f6d7c9e926be12bf0e555af9d34d74b07f2b4efa42f5e01f120a5b57",
+        "migrationSha256": "66729659d4573d1245ba3ee7845fb76fa7808ecb5bda74cb616916e0700518d7",
+        "container": "removed",
+        "cleanup": "removed",
+        "skillmapUnchanged": true,
+        "xotE10Unchanged": true,
+        "signal": null
+      }
+    }
+  },
+  "isolation": {
+    "localOnly": true,
+    "noExternalContact": true,
+    "noProductContact": true,
+    "noProductionContact": true,
+    "noProviderContact": true,
+    "noBrowserContact": true,
+    "noStagingContact": true,
+    "noDeploymentContact": true,
+    "noSecretMaterial": true,
+    "offlineNetwork": true,
+    "networkMode": "none",
+    "imagePull": "never",
+    "mounts": [],
+    "ports": []
+  },
+  "cleanup": {
+    "container": "removed",
+    "cleanup": "removed",
+    "postRun": {
+      "matchingContainers": 0,
+      "matchingVolumes": 0,
+      "matchingNetworks": 0,
+      "independentCheck": true
+    }
+  },
+  "resourceIntegrity": {
+    "skillmapCount": 10,
+    "skillmapIdsNamesStatesUnchanged": true,
+    "xotE10Unchanged": true
+  },
+  "claims": {
+    "externalContact": "not_claimed",
+    "productContact": "not_claimed",
+    "productionContact": "not_claimed",
+    "providerContact": "not_claimed",
+    "browserContact": "not_claimed",
+    "stagingContact": "not_claimed",
+    "deploymentContact": "not_claimed"
+  },
+  "evidence": {
+    "scripts/e10SqlBoundary.mjs": "669e6b02e5e8a2f09f10cfe886b0a135bbe17fc84cd7f216612cb401fd9be550",
+    "scripts/e10SqlBoundary.test.mjs": "392a0cd6871175cdf8331cae86bc7f3b94c1a79ec2b674468cff9c113175c322",
+    "scripts/run-e10-sql-boundary.mjs": "da27f50d0ec8e98ea2a841b86e9d1e469bfea88fa6e0562ac6d287e992bcc71d",
+    "supabase/migrations/20260812100000_e10_preview_runtime_controls_and_roles.sql": "66729659d4573d1245ba3ee7845fb76fa7808ecb5bda74cb616916e0700518d7",
+    "scripts/check-migration-baseline.mjs": "370ddf43885ab7e4c7c0c5459c7285ce0d77a6eb58fe0761f1923deb6c04feae",
+    "scripts/check-migration-baseline.test.mjs": "34f85551f5d436a0648264b27fa973cc6a75839eca328b34e962fd6dfa796c38",
+    "scripts/build-e10-preview-migration-boundary-receipt.mjs": "9918e70086bf6731a4df7191ccd7686af79073f6d7f60a10e9190015ab82dc08"
+  }
+}

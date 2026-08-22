@@ -1,0 +1,251 @@
+{
+  "schema": "xot-e10-phase1-local-acceptance-successor-v1",
+  "event": "e10_phase1_local_acceptance_successor_accepted",
+  "phase": "e10-phase1-local-only",
+  "status": "ACCEPTED_LOCAL_PHASE1",
+  "release": "CLOSED",
+  "releaseGate": "CLOSED",
+  "phase2Authorization": "UNAUTHORIZED_BY_E9_V4",
+  "repository": ".",
+  "branch": "codex/xot-remediation-convergence",
+  "head": "0bd578856016c06a10890339f93aa13b82ecae48",
+  "scope": {
+    "localOnly": true,
+    "noPush": true,
+    "noDeploy": true,
+    "noCloudMutation": true,
+    "noProviderContact": true,
+    "noProductionContact": true,
+    "noStagingContact": true,
+    "noBrowserContact": true,
+    "noExternalContact": true
+  },
+  "phase1Tasks": [
+    {
+      "id": "P1-01",
+      "name": "runtime_controls and canonical role migration",
+      "status": "ACCEPTED_LOCAL",
+      "evidence": [
+        "supabase/migrations/20260812100000_e10_preview_runtime_controls_and_roles.sql",
+        "docs/plans/2026-08-12-xot-e10-disposable-sql-runtime-acceptance.json"
+      ]
+    },
+    {
+      "id": "P1-02",
+      "name": "safe Preview defaults",
+      "status": "ACCEPTED_LOCAL",
+      "evidence": [
+        "supabase/functions/_shared/e10PreviewParityFoundation.test.ts",
+        "docs/plans/2026-08-12-xot-e10-disposable-sql-runtime-acceptance.json"
+      ]
+    },
+    {
+      "id": "P1-03",
+      "name": "shared role, control, and posting helpers",
+      "status": "ACCEPTED_LOCAL",
+      "evidence": [
+        "supabase/functions/_shared/appRole.ts",
+        "supabase/functions/_shared/runtimeControls.ts",
+        "supabase/functions/_shared/e10PreviewParityFoundation.test.ts"
+      ]
+    },
+    {
+      "id": "P1-04",
+      "name": "worker pause behavior",
+      "status": "ACCEPTED_LOCAL",
+      "evidence": [
+        "supabase/functions/_shared/runtimeControls.ts",
+        "docs/plans/2026-08-12-xot-e10-preview-migration-boundary.json"
+      ]
+    },
+    {
+      "id": "P1-05",
+      "name": "posting and delivery fail-closed boundary",
+      "status": "ACCEPTED_LOCAL",
+      "evidence": [
+        "supabase/functions/_shared/e10PreviewParityFoundation.test.ts",
+        "docs/plans/2026-08-12-xot-e10-preview-migration-boundary.json"
+      ]
+    },
+    {
+      "id": "P1-06",
+      "name": "dashboard toggle API",
+      "status": "ACCEPTED_LOCAL",
+      "evidence": [
+        "src/api/runtimeControls.ts",
+        "src/test/runtime-controls-api.test.ts"
+      ]
+    },
+    {
+      "id": "P1-07",
+      "name": "read-only posting lock UI",
+      "status": "ACCEPTED_LOCAL",
+      "evidence": [
+        "src/components/settings/RuntimeControlsPanel.tsx",
+        "src/test/runtime-controls.test.tsx"
+      ]
+    },
+    {
+      "id": "P1-08",
+      "name": "active canonical role references",
+      "status": "ACCEPTED_LOCAL",
+      "evidence": [
+        "supabase/functions/admin-actions/adminAccessPolicy.test.ts",
+        "supabase/functions/admin-actions/runtimeControlsRoute.test.ts",
+        "scripts/check-admin-role-auth-contract.mjs"
+      ]
+    },
+    {
+      "id": "P1-09",
+      "name": "local unit, SQL, function, and UI evidence",
+      "status": "ACCEPTED_LOCAL",
+      "evidence": [
+        "docs/plans/2026-08-12-xot-e10-disposable-sql-runtime-acceptance.json",
+        "scripts/e10SqlBoundary.test.mjs",
+        "src/test/runtime-controls-api.test.ts",
+        "src/test/runtime-controls.test.tsx",
+        "package.json",
+        "package-lock.json",
+        "deno.lock"
+      ]
+    }
+  ],
+  "validation": {
+    "npmTest": {
+      "status": "PASS",
+      "files": 31,
+      "tests": 198,
+      "command": "npm test"
+    },
+    "strictTypecheck": {
+      "status": "PASS",
+      "command": "npm run check:strict"
+    },
+    "lint": {
+      "status": "PASS",
+      "warnings": 10,
+      "errors": 0,
+      "command": "npm run lint"
+    },
+    "rendererTests": {
+      "status": "PASS",
+      "tests": 202,
+      "command": "npm --prefix services/video-renderer test"
+    },
+    "syntheticEnvironmentBuild": {
+      "status": "PASS",
+      "modules": 2504,
+      "distFiles": 82,
+      "command": "synthetic env build"
+    },
+    "localUiTests": {
+      "status": "PASS",
+      "files": 31,
+      "tests": 198,
+      "scope": "local unit and UI tests only",
+      "command": "npm test"
+    },
+    "sqlRuntime": {
+      "status": "ACCEPTED_LOCAL_SQL_T1",
+      "receipt": "docs/plans/2026-08-12-xot-e10-disposable-sql-runtime-acceptance.json",
+      "receiptSha256": "6504e08a814d93b02dfbfdf3b40a1227800261d4b4490590e92394d5373dd34d",
+      "independentAcceptance": true
+    },
+    "denoFunctionChecks": {
+      "status": "PASS",
+      "runtime": "local",
+      "version": "2.9.5",
+      "lockfileVersion": "5",
+      "lint": {
+        "status": "PASS",
+        "files": 153,
+        "errors": 0,
+        "command": "npm run lint:functions"
+      },
+      "check": {
+        "status": "PASS",
+        "entrypoints": 10,
+        "errors": 0,
+        "command": "npm run check:functions"
+      },
+      "typedTests": {
+        "status": "PASS",
+        "passed": 444,
+        "failed": 0,
+        "skipped": 0,
+        "command": "npm run test:functions"
+      },
+      "denoTestsClaimed": true,
+      "testsRun": true
+    },
+    "phase6AuthenticatedBrowserAcceptance": {
+      "status": "UNVERIFIED_LATER_PHASE",
+      "phase": "Phase 6",
+      "reason": "Authenticated Preview/browser acceptance is out of scope for Phase 1"
+    }
+  },
+  "blockers": [],
+  "excludedClaims": [
+    "hosted CI",
+    "staging or live Supabase",
+    "Vercel Preview",
+    "provider calls",
+    "deployment",
+    "production readiness",
+    "owner release",
+    "browser acceptance",
+    "external contact"
+  ],
+  "evidence": {
+    "supabase/migrations/20260812100000_e10_preview_runtime_controls_and_roles.sql": "66729659d4573d1245ba3ee7845fb76fa7808ecb5bda74cb616916e0700518d7",
+    "supabase/functions/_shared/appRole.ts": "1d966b8d5cbe9c5fdbb20bc231046fcf049d200534366b49306c9296542628d8",
+    "supabase/functions/_shared/runtimeControls.ts": "55a984a590daee7c7a66b337c7b418db2214ab1bda3009d7336c284fa4aea072",
+    "supabase/functions/_shared/e10PreviewParityFoundation.test.ts": "eb51d9eb0e1eab93badbb04b80009870d8e9bb1eaf0cf2f4702af339f0503747",
+    "supabase/functions/admin-actions/adminAccessPolicy.test.ts": "36bb5ea46eaf87f5734e0841fc3420688f2f790388fc31b2676f12a65b2957ea",
+    "supabase/functions/admin-actions/runtimeControlsRoute.test.ts": "a14f5e45f605c3889dddf594e9909f6dc80bc5a3de5c428bc0d48af6a59a577c",
+    "src/api/runtimeControls.ts": "6d652a6823dd6ab3922800f6fda678d218655b928e58b181992b4d5616530b8f",
+    "src/test/runtime-controls-api.test.ts": "25fe5268ad86b86ac1dabb917098ce374fc7fb3d2705dd10a8812e5e69d258da",
+    "src/test/runtime-controls.test.tsx": "88ff4f59d4bbb2fb231be43b2fcbf1692aa3e46027d5e97e19d6062cfd6cad3d",
+    "src/components/settings/RuntimeControlsPanel.tsx": "d693402582b2d19cf139f8bb70c897b325360aba174c8c0e74db8d0855256470",
+    "scripts/check-admin-role-auth-contract.mjs": "bc404e06eb36a832a51d6b1d2f8a785998ff54162e366a91692c7be0570c4769",
+    "scripts/e10SqlBoundary.mjs": "669e6b02e5e8a2f09f10cfe886b0a135bbe17fc84cd7f216612cb401fd9be550",
+    "scripts/e10SqlBoundary.test.mjs": "392a0cd6871175cdf8331cae86bc7f3b94c1a79ec2b674468cff9c113175c322",
+    "scripts/run-e10-sql-boundary.mjs": "da27f50d0ec8e98ea2a841b86e9d1e469bfea88fa6e0562ac6d287e992bcc71d",
+    "docs/plans/2026-08-12-xot-e10-disposable-sql-runtime-acceptance.json": "6504e08a814d93b02dfbfdf3b40a1227800261d4b4490590e92394d5373dd34d",
+    "docs/plans/2026-08-12-xot-e10-preview-migration-boundary.json": "f78dea0fc6b827bc051f64a351e8d6646964af33d00ab30801771db86f6b69bf",
+    "package.json": "98a7a06abd936090d187ebc32cf6f0af27e7bff131737eb39acfa941ef6eeb7a",
+    "package-lock.json": "7b118716717dc30280f3add2823b6f57ea1a9edc7a1581b727ba2680d88cd1b5",
+    "deno.lock": "3758b544b86276d58f2bdef9f2b77b4744e2e480bfe2a3fc729d907c801851c0"
+  },
+  "predecessor": {
+    "path": "docs/plans/2026-08-12-xot-e10-phase1-local-acceptance.json",
+    "sha256": "6359db00ddf235250a795deddae8313030d6d0e1ae722ca113092fb8c1f13ee9"
+  },
+  "supersession": {
+    "reason": "Accepted toast dependency cleanup and current-worktree evidence drift; predecessor remains immutable.",
+    "changedPaths": [
+      "package-lock.json",
+      "supabase/functions/webhooks-rssapp/index.ts",
+      "scripts/check-e8b-bundle-comparison-contract.test.mjs"
+    ],
+    "ledgerRow": 544,
+    "validation": [
+      "toast checker",
+      "E8B bundle checker and tests",
+      "B3B1 receipt checker"
+    ],
+    "evidenceTier": {
+      "achieved": [
+        "T0"
+      ],
+      "deferred": [
+        "T1",
+        "T2",
+        "T3",
+        "T4"
+      ]
+    },
+    "releaseState": "CLOSED"
+  }
+}
+

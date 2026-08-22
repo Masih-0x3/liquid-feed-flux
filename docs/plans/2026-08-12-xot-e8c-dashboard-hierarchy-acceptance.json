@@ -1,0 +1,311 @@
+{
+  "schema": "xot-e8c-dashboard-hierarchy-acceptance-receipt-v1",
+  "event": "e8c_dashboard_hierarchy_acceptance",
+  "phase": "E8c dashboard hierarchy local source/test contract",
+  "status": "ACCEPTED_PARTIAL_LOCAL_SOURCE_TEST_CONTRACT",
+  "release": "CLOSED",
+  "releaseGate": "CLOSED",
+  "riskTier": "HIGH",
+  "repository": "/Users/stevmq/Finalized XOT",
+  "branch": "codex/xot-remediation-convergence",
+  "head": "0bd578856016c06a10890339f93aa13b82ecae48",
+  "observedAt": "2026-08-12",
+  "claimBoundary": "E8c T0/T1 local Dashboard source and focused-test contract only; no rendered visual, browser, responsive, authenticated-runtime, operator, hosted, CI, build-artifact, staging, deploy, live, production-equivalence, or owner-approval claim.",
+  "directPlan": {
+    "path": "docs/plans/2026-08-08-xot-post-b4-execution-sequence.md",
+    "sha256": "24feff64abe2a221ca69cb9f52e1a03eb53d707ec024367fa8aa3e75cf0dea4c",
+    "bytes": 33797,
+    "section": "E8 - Post-Correctness Source Tranches / E8c",
+    "lines": "307-324",
+    "targetTier": "T0/T1 only",
+    "deferredByPlan": [
+      "browser paint, responsive, and operator proof",
+      "hosted scans",
+      "real build and deploy artifact"
+    ]
+  },
+  "governingImplementationPlan": {
+    "path": "docs/plans/2026-07-14-xot-comprehensive-audit-remediation-implementation-plan.md",
+    "sha256": "f1ae713eb82e5386050f7032faeda90d485f34abbee22b4b16dac29c95230b65",
+    "bytes": 148305,
+    "section": "FE-DASH-02 - On-demand HUD, unified status semantics, and first-viewport hierarchy",
+    "lines": "796-810"
+  },
+  "predecessor": {
+    "ledgerPath": "docs/plans/2026-07-14-xot-comprehensive-audit-remediation-implementation-ledger.jsonl",
+    "row": 534,
+    "rowNoNewlineSha256": "5185598c01aa75f1d6bf3f532dc6b15cb07ef6646440ea2be65074afada93850",
+    "prefixThroughRow534Sha256": "25ac393cafee5074e0a8f9fcd654b3fa33ff5ffc38985d3de5f1e0686de08df6",
+    "prefixIncludesTrailingNewline": true,
+    "event": "e8b_b2_receipt_whitespace_validation_correction_row534",
+    "rowBytes": 14601
+  },
+  "sourceBindings": [
+    {
+      "path": "src/pages/Dashboard.tsx",
+      "role": "task-first workflow cockpit, header/status semantics, native diagnostics disclosure, process HUD gating, and secondary tabs",
+      "sha256": "6abbeb353a3bc4d9546914f1094c17bcfba2089ba52f3bb5306e23f9c7f5079e",
+      "bytes": 54017,
+      "lfLines": 1075
+    },
+    {
+      "path": "src/test/dashboard.test.tsx",
+      "role": "focused Dashboard behavior and disclosure/HUD regression tests",
+      "sha256": "aa043a4358a2725c63d539cb9a2be4be7d6a96a7c012c91d140f504dbdc7c6e1",
+      "bytes": 25016,
+      "lfLines": 718
+    },
+    {
+      "path": "scripts/check-e8c-dashboard-hierarchy-contract.mjs",
+      "role": "fail-closed E8c source contract and mutation self-test",
+      "sha256": "f1869a7e644ff2eb16fea45cf47367a85699be507545bdf4dce1421cf59fe84e",
+      "bytes": 8784,
+      "lfLines": 151
+    }
+  ],
+  "scopeCompleted": [
+    "The first-viewport source contract places a task-first Workflow cockpit before the native diagnostics disclosure and secondary tabs, with current ingest, queue, delivery, latest workflow, and primary-exception CTA bindings.",
+    "The header owns the canonical Online/Offline and Updated semantics; duplicate Online/Offline/Updated status items and an empty status wrapper are rejected by source assertions.",
+    "Diagnostics is a native details disclosure closed by default. Its onToggle state path resets processHudOpen on close; Refresh only refetches the HUD while it is open.",
+    "Pipeline Funnel and X Cost Guard occur exactly once and remain inside the diagnostics disclosure.",
+    "Pipeline, X usage, and Controls secondary tab controls are each preserved exactly once within Tabs; no unsupported order claim is made.",
+    "The focused behavior test exercises the real open-HUD, close-Diagnostics, hidden-HUD, and Refresh path, plus cockpit, header, funnel, cost-guard, and secondary-tab behavior.",
+    "No route or control loss is claimed beyond these scoped source and focused-test assertions."
+  ],
+  "implementationReceipt": {
+    "red": {
+      "status": "RED",
+      "evidence": "The implementation receipt records the pre-fix focused Dashboard test failing four new-behavior assertions; this historical RED is not a claim that the current source still fails.",
+      "focusedTestFailureCount": 4,
+      "executionByThisReceipt": false
+    },
+    "green": {
+      "status": "GREEN",
+      "focusedDashboard": "15 passed, 0 failed",
+      "sourceContract": "normal and mutation contract pass",
+      "implementationDisposition": "P2 findings were reworked; current source/checker bindings below were independently rerun."
+    }
+  },
+  "validation": {
+    "focusedDashboard": {
+      "command": "npx vitest run --pool=forks --maxWorkers=1 --no-file-parallelism --testTimeout=20000 src/test/dashboard.test.tsx",
+      "result": "exit 0; 1 file passed; 15 tests passed; 0 failed; duration 4.92s"
+    },
+    "e8cCheckerNormal": {
+      "command": "node scripts/check-e8c-dashboard-hierarchy-contract.mjs",
+      "result": "exit 0; E8C_DASHBOARD_HIERARCHY_SOURCE_CONTRACT_PASS signals=4 disclosure=native details closed secondaryTabsAfterDisclosure=true mutation=skipped",
+      "replays": 2,
+      "replayOutputEqual": true
+    },
+    "e8cCheckerMutation": {
+      "command": "MUTATION_TEST=1 node scripts/check-e8c-dashboard-hierarchy-contract.mjs",
+      "result": "exit 0; E8C_DASHBOARD_HIERARCHY_SOURCE_CONTRACT_PASS signals=4 disclosure=native details closed secondaryTabsAfterDisclosure=true mutation=pass",
+      "subjects": 16,
+      "replays": 2,
+      "replayOutputEqual": true
+    },
+    "visualLayerNormal": {
+      "command": "node scripts/check-visual-layer-characterization-contract.mjs",
+      "result": "exit 0; VISUAL_LAYER_CHARACTERIZATION_SOURCE_CONTRACT_PASS files=8 reviewSignals=2 totals={glass:58,blur:7,shadow:19,filter:27} mutation=skipped; review signals src/index.css and src/components/layout/AppLayout.tsx",
+      "replays": 2,
+      "replayOutputEqual": true
+    },
+    "visualLayerMutation": {
+      "command": "MUTATION_TEST=1 node scripts/check-visual-layer-characterization-contract.mjs",
+      "result": "exit 0; VISUAL_LAYER_CHARACTERIZATION_SOURCE_CONTRACT_PASS files=8 reviewSignals=2 totals={glass:58,blur:7,shadow:19,filter:27} mutation=pass; review signals src/index.css and src/components/layout/AppLayout.tsx",
+      "replays": 2,
+      "replayOutputEqual": true
+    },
+    "strict": {
+      "command": "npm run check:strict",
+      "result": "exit 0; tsc --noEmit -p tsconfig.strict.json"
+    },
+    "targetedLint": {
+      "command": "npx eslint src/pages/Dashboard.tsx src/test/dashboard.test.tsx scripts/check-e8c-dashboard-hierarchy-contract.mjs",
+      "result": "exit 0; no output/errors"
+    },
+    "syntax": {
+      "command": "node --check scripts/check-e8c-dashboard-hierarchy-contract.mjs",
+      "result": "exit 0"
+    },
+    "trackedScopedDiff": {
+      "command": "git diff --check -- src/pages/Dashboard.tsx src/test/dashboard.test.tsx",
+      "result": "exit 0; clean"
+    },
+    "untrackedCheckerWhitespace": {
+      "command": "git diff --no-index --check /dev/null scripts/check-e8c-dashboard-hierarchy-contract.mjs",
+      "result": "exit 1; expected untracked-file comparison status; no whitespace diagnostic"
+    },
+    "untrackedCheckerFinalLf": {
+      "command": "explicit byte probe for scripts/check-e8c-dashboard-hierarchy-contract.mjs",
+      "result": "exit 0; 8784 bytes, 151 LF lines, CRLF=0, final LF=true, blank final LF=false, trailingSpace=false"
+    },
+    "stagedIndex": {
+      "command": "git diff --cached --quiet",
+      "result": "exit 0; staged index empty"
+    },
+    "sourceHashesAfterValidation": "All three source bindings retain the exact recorded SHA-256, bytes, and LF-line counts."
+  },
+  "mutationInventory": [
+    "missing cockpit name",
+    "missing ingest signal",
+    "missing delivery signal",
+    "missing primary CTA",
+    "diagnostics opens by default",
+    "wrong cockpit/disclosure/tab source order",
+    "process detail outside disclosure",
+    "limits detail outside disclosure",
+    "speed detail outside disclosure",
+    "resource detail outside disclosure",
+    "funnel moved outside disclosure",
+    "cost guard moved outside disclosure",
+    "missing HUD reset",
+    "duplicate Online status",
+    "unconditional status wrapper",
+    "empty status wrapper"
+  ],
+  "adversarialReviews": [
+    {
+      "taskId": "task_6d75e13dd23e",
+      "status": "REWORKED_REJECTED_IN_PART",
+      "disposition": "Useful source observations retained, but incorrect/refuted statements and its report's route/file claims are not accepted as final proof."
+    },
+    {
+      "taskId": "task_965186b1db33",
+      "status": "ACCEPTED_IN_PART",
+      "disposition": "Checker coverage findings were accepted in part; CI wiring was deferred/out of scope, and its secondary-tab order suggestion was later rejected as unsupported."
+    },
+    {
+      "taskId": "task_7d9d59c5fe21",
+      "status": "ACCEPTED_WITH_P2",
+      "disposition": "Final changed-diff review accepted the local evidence with one P2 overconstraint: hard-coded Pipeline/X/Controls order was stricter than FE-DASH-02."
+    },
+    {
+      "taskId": "task_cce023b02928",
+      "status": "ACCEPTED",
+      "disposition": "Corrected checker recheck accepted after removal of the unsupported tab-order assertion; scoped exact-once tab presence and hierarchy remained."
+    },
+    {
+      "reviewRoute": "Codex/Luna independent review",
+      "status": "REWORKED_THEN_ACCEPTED",
+      "disposition": "P2 findings were reworked; final Luna reviewer accepted after checker SHA f1869a7e644ff2eb16fea45cf47367a85699be507545bdf4dce1421cf59fe84e.",
+      "runtimeTelemetry": "identity/model/reasoning settings not exposed"
+    }
+  ],
+  "claudeRoute": {
+    "banner": "Claude Code 2.1.228, deepseek-v4-flash-0731, xhigh",
+    "taskId": "task_b44971a901fe",
+    "status": "REWORKED_ADVISORY_ONLY",
+    "disposition": "Blueprint/schema and claim-boundary advice was useful but too conservative, called runs/outcomes unknown, and is not acceptance evidence. The two internally reported Claude subagents are advisory only and not accepted as lifecycle proof."
+  },
+  "serializationRoute": {
+    "taskId": "task_729b647c971f",
+    "status": "REJECTED_LIFECYCLE_PROOF",
+    "disposition": "Its schema output may inform field shape, but the dispatch capability envelope was invalid; no lifecycle or validation result is accepted from it."
+  },
+  "airDispositions": {
+    "AIR-049": {
+      "status": "PARTIAL",
+      "localDisposition": "T0/T1 local source characterization and hierarchy contract only.",
+      "deferred": "Rendered layer/paint comparison, responsive visual review, browser evidence, hosted/CI evidence, staging/deploy/live proof, and owner decision.",
+      "ownerAssigned": false,
+      "deadlineAssigned": false
+    },
+    "AIR-050": {
+      "status": "PARTIAL",
+      "localDisposition": "T0/T1 task-first hierarchy source/test contract only.",
+      "deferred": "Task-based operator approval, desktop/mobile viewport snapshots, responsive/browser evidence, hosted/CI evidence, staging/deploy/live proof, and owner decision.",
+      "ownerAssigned": false,
+      "deadlineAssigned": false
+    }
+  },
+  "achieved": ["T0", "T1"],
+  "deferred": ["T2", "T3", "T4"],
+  "notClaimed": [
+    "No browser paint, responsive, accessibility, visual-performance, or operator review closure.",
+    "No authenticated runtime or live data/subscription/refetch proof.",
+    "No hosted CI, build/artifact, staging, deploy, live, production-equivalence, or owner-decision proof.",
+    "No closure of AIR-049 or AIR-050; both remain PARTIAL.",
+    "No route/control loss beyond the scoped source assertions; no broad route, auth, API, data, or product-semantics claim.",
+    "No network, provider, database, Docker, browser, CI, staging, deploy, live, production, commit, push, or external mutation.",
+    "No ledger append; predecessor row 534 and all prior rows remain immutable."
+  ],
+  "worktree": {
+    "beforeReceipt": {
+      "statusFormat": "porcelain-v1 -uall",
+      "totalEntries": 412,
+      "trackedEntries": 156,
+      "untrackedEntries": 256,
+      "stagedEntries": 0,
+      "sortedStatusSha256": "7302babe3c66b68b730ea25ce43db8d25318beff0d46b07de2c88900758d2578"
+    },
+    "afterReceipt": {
+      "statusFormat": "porcelain-v1 -uall",
+      "totalEntries": 413,
+      "trackedEntries": 156,
+      "untrackedEntries": 257,
+      "delta": "one new untracked receipt path only",
+      "sortedStatusSha256": "0cd3235c4fcd2649da3a8797504d379993c9065b09db87896cde4170fd30b670",
+      "stagedEntries": 0,
+      "stagedIndexEmpty": true,
+      "receiptPathPresent": true
+    },
+    "branch": "codex/xot-remediation-convergence",
+    "head": "0bd578856016c06a10890339f93aa13b82ecae48",
+    "preexistingDirtyWorkPreserved": true
+  },
+  "externalState": {
+    "network": false,
+    "provider": false,
+    "database": false,
+    "browser": false,
+    "operator": false,
+    "ci": false,
+    "staging": false,
+    "deploy": false,
+    "live": false,
+    "production": false,
+    "docker": false,
+    "productionEquivalence": false,
+    "ownerDecision": false,
+    "ledgerAction": false
+  },
+  "rollback": {
+    "scope": "this receipt file only under explicit review",
+    "authorized": false,
+    "command": null,
+    "sourceFiles": "not rollback-authorized",
+    "otherDirtyFiles": "not included and not to be reverted",
+    "ledger": "append-only; no historical rewrite"
+  },
+  "ledger": {
+    "path": "docs/plans/2026-07-14-xot-comprehensive-audit-remediation-implementation-ledger.jsonl",
+    "appended": false,
+    "changed": false,
+    "predecessorRow": 534
+  },
+  "receiptScope": {
+    "allowedPath": "docs/plans/2026-08-12-xot-e8c-dashboard-hierarchy-acceptance.json",
+    "newFileOnly": true,
+    "sourceFilesUnchangedAfterBinding": true,
+    "ledgerUnchanged": true,
+    "noCommit": true,
+    "noPush": true,
+    "noDeploy": true,
+    "noNetworkOrExternalMutation": true,
+    "noSecretsOrRawEnvironmentValues": true
+  },
+  "doneClaim": {
+    "status": "complete_for_scoped_local_receipt",
+    "receiptPath": "docs/plans/2026-08-12-xot-e8c-dashboard-hierarchy-acceptance.json",
+    "sourceBindingsRecorded": true,
+    "commandsAndResultsRecorded": true,
+    "deferralsRecorded": true,
+    "releaseAndReleaseGateClosed": true,
+    "receiptArtifact": {
+      "sha256": "eadb335303f48c32a3809712d79d62900a367fb22927ba5635df9345d5a6cec9",
+      "bytes": 12637,
+      "hashScope": "canonical UTF-8 compact JSON payload with doneClaim.receiptArtifact omitted, followed by one LF"
+    }
+  }
+}

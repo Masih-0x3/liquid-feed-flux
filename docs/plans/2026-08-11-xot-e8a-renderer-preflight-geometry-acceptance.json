@@ -1,0 +1,201 @@
+{
+  "schema": "xot-e8a-renderer-preflight-geometry-acceptance-receipt-v1",
+  "event": "e8a_renderer_preflight_geometry_acceptance",
+  "phase": "E8a - renderer preflight geometry pure module extraction",
+  "status": "ACCEPTED_PARTIAL_LOCAL_SOURCE_MODULE_SLICE",
+  "release": "CLOSED",
+  "releaseGate": "CLOSED",
+  "riskTier": "HIGH",
+  "repository": "/Users/stevmq/Finalized XOT",
+  "branch": "codex/xot-remediation-convergence",
+  "head": "0bd578856016c06a10890339f93aa13b82ecae48",
+  "observedAt": "2026-08-11",
+  "directPlan": {
+    "path": "docs/plans/2026-08-08-xot-post-b4-execution-sequence.md",
+    "sha256": "24feff64abe2a221ca69cb9f52e1a03eb53d707ec024367fa8aa3e75cf0dea4c",
+    "bytes": 33797,
+    "section": "E8 - Post-Correctness Source Tranches / E8a",
+    "lines": "307-325",
+    "targetTier": "T0/T1 only",
+    "deferredByPlan": [
+      "browser paint, responsive, and operator proof",
+      "hosted scans",
+      "real build and deploy artifact"
+    ]
+  },
+  "predecessor": {
+    "ledgerPath": "docs/plans/2026-07-14-xot-comprehensive-audit-remediation-implementation-ledger.jsonl",
+    "row": 528,
+    "rowNoNewlineSha256": "e1086473c141fd831909db5ce1ef7844e0bdf6578849c47fb1442d33a1414fa3",
+    "prefixThroughRow528Sha256": "4675ad0f543c1da42fc832702e0808601ea47949d3f18f4545e604eea55a5db1",
+    "prefixIncludesTrailingNewline": true,
+    "event": "e8d_local_supply_build_inventory_source_contract_acceptance_row528"
+  },
+  "sourceBindings": [
+    {
+      "path": "services/video-renderer/src/preflight.js",
+      "role": "renderer preflight orchestration and compatibility exports",
+      "sha256": "8ab38019ebb52afd3455d8c6867d5d10250a2b0609f74af8a7847ef0e9e34211",
+      "bytes": 82535
+    },
+    {
+      "path": "services/video-renderer/src/preflightGeometry.js",
+      "role": "extracted pure delogo geometry module",
+      "sha256": "b13ee76ca3e4b6aca8aa68dfa89f592bbff0b1cc197f02aa70083242a89a4fcf",
+      "bytes": 9030
+    },
+    {
+      "path": "services/video-renderer/test/preflightGeometry.test.js",
+      "role": "geometry characterization, architecture seam, and mutation tests",
+      "sha256": "0b665f80570286c2a2690ba06bc7a27611060c28692e5ce8cf4ca7dc98f33fc4",
+      "bytes": 5874
+    }
+  ],
+  "scope": {
+    "airIds": ["AIR-036"],
+    "mapping": ["BR-MOD-01", "BR-MOD-02", "FE-QUALITY-01"],
+    "extractedFamily": "delogo geometry: delogoRegionsFromVision, evaluateDelogoPlan, selectDelogoRegions, protectDelogoRegionsFromLowerText",
+    "architecture": "preflight.js imports and re-exports the four pure helpers from preflightGeometry.js; their implementations are no longer locally owned by preflight.js",
+    "behaviorBoundary": "pure geometry calculations and compatibility exports only",
+    "noBehaviorChange": "No OCR, process, error, ordering, pipeline, or renderer control semantics were changed by this E8a slice."
+  },
+  "architectureEvidence": {
+    "red": {
+      "status": "RED",
+      "evidence": "Before extraction, the preflight architecture seam was absent: preflight.js locally owned the four delogo geometry implementations and had no preflightGeometry.js import/export seam.",
+      "localNames": ["delogoRegionsFromVision", "evaluateDelogoPlan", "selectDelogoRegions", "protectDelogoRegionsFromLowerText"],
+      "missingSeam": "import/export from ./preflightGeometry.js was absent",
+      "guard": "The architecture characterization asserts the import/export seam and rejects local function, variable, class, alias, and import bindings for each geometry name."
+    },
+    "green": {
+      "status": "GREEN",
+      "focused52": "52 passed, 0 failed",
+      "full202": "202 passed, 0 failed",
+      "seam": "The four public preflight exports are reference-identical to the four preflightGeometry.js exports, and the architecture/mutation guards pass."
+    }
+  },
+  "validation": {
+    "rendererBoundary": {
+      "command": "npm run check:renderer-boundary-typecheck",
+      "result": "exit 0; tsc --noEmit -p tsconfig.renderer-boundary.json"
+    },
+    "moduleCharacterizationNormal": {
+      "command": "node scripts/check-module-characterization-contract.mjs",
+      "result": "MODULE_CHARACTERIZATION_SOURCE_CONTRACT_PASS files=11 reviewSignals=2 mutation=skipped",
+      "signals": ["supabase/functions/worker/index.ts", "services/video-renderer/src/preflight.js"]
+    },
+    "moduleCharacterizationMutation": {
+      "command": "MUTATION_TEST=1 node scripts/check-module-characterization-contract.mjs",
+      "result": "MODULE_CHARACTERIZATION_SOURCE_CONTRACT_PASS files=11 reviewSignals=2 mutation=pass",
+      "signals": ["supabase/functions/worker/index.ts", "services/video-renderer/src/preflight.js"]
+    },
+    "syntax": {
+      "command": "node --check services/video-renderer/src/preflight.js services/video-renderer/src/preflightGeometry.js services/video-renderer/test/preflightGeometry.test.js",
+      "result": "PASS: node --check exit 0 for each of the three bound source/test files"
+    },
+    "scopedWhitespace": {
+      "command": "git diff --no-index --check /dev/null docs/plans/2026-08-11-xot-e8a-renderer-preflight-geometry-acceptance.json",
+      "result": "clean receipt whitespace; expected exit 1 for untracked-file comparison"
+    },
+    "stagedIndex": {
+      "command": "git diff --cached --quiet",
+      "result": "exit 0; staged index empty"
+    }
+  },
+  "worktree": {
+    "beforeReceipt": {
+      "statusFormat": "porcelain-v1 -uall",
+      "totalEntries": 399,
+      "trackedEntries": 155,
+      "untrackedEntries": 244,
+      "stagedEntries": 0,
+      "sortedStatusSha256": "d7c35d59b70f0919ef749607132ed0b24d65347760b7a0eb56fc2585ae3bae5a"
+    },
+    "afterReceipt": {
+      "statusFormat": "porcelain-v1 -uall",
+      "totalEntries": 400,
+      "trackedEntries": 155,
+      "untrackedEntries": 245,
+      "delta": "one new untracked receipt path only",
+      "stagedEntries": 0,
+      "sortedStatusSha256": "5bca0642cdcf6d9c7bcbb76f62929cad8e2c24109d7d992b8f8a43a0927b6a8f"
+    },
+    "branch": "codex/xot-remediation-convergence",
+    "head": "0bd578856016c06a10890339f93aa13b82ecae48",
+    "stagedIndexEmpty": true,
+    "preexistingDirtyWorkPreserved": true,
+    "otherFilesEdited": false
+  },
+  "independentReview": {
+    "role": "independent acceptance/security worker",
+    "requestedAssignedRoute": {
+      "model": "GPT-5.6 Luna",
+      "reasoning": "high",
+      "fast": "N/A"
+    },
+    "runtimeTelemetry": {
+      "identity": "unknown",
+      "model": "unknown",
+      "reasoning": "unknown",
+      "note": "Runtime identity, model, and reasoning telemetry were not exposed."
+    },
+    "subagentsUsed": false,
+    "subagentTelemetry": "none",
+    "sourceReviewOutputDisposition": "accepted",
+    "verdict": "ACCEPT",
+    "findings": [],
+    "scope": "E8a receipt bindings, geometry architecture seam, local evidence, conservative claims, and deferrals",
+    "evidenceBoundary": "Source-review acceptance only; no runtime identity or model proof is claimed."
+  },
+  "airDispositions": {
+    "AIR-036": {
+      "localDisposition": "This delogo geometry family was extracted with local characterization and source-bound architecture evidence.",
+      "deferred": "Other AIR-036 hotspots, broader refactor, behavior traces, owner review, and higher-tier evidence remain open.",
+      "ownerAssigned": false,
+      "deadlineAssigned": false
+    }
+  },
+  "achieved": ["T0", "T1"],
+  "deferred": ["T2", "T3", "T4"],
+  "notClaimed": [
+    "No OCR or process semantics change, error semantics change, ordering semantics change, or renderer control/pipeline behavior change.",
+    "No closure of other AIR-036 hotspots, broad refactor, behavior-trace program, owner assignment, or higher-tier evidence.",
+    "No network, Docker, browser, CI, staging, deploy, live, provider, database, production-equivalence, hosted scan, or real build artifact evidence.",
+    "No module milestone closure; release gate remains CLOSED.",
+    "No ledger append."
+  ],
+  "externalState": {
+    "network": false,
+    "provider": false,
+    "database": false,
+    "ci": false,
+    "staging": false,
+    "deploy": false,
+    "live": false,
+    "browser": false,
+    "docker": false,
+    "productionEquivalence": false
+  },
+  "ledger": {
+    "path": "docs/plans/2026-07-14-xot-comprehensive-audit-remediation-implementation-ledger.jsonl",
+    "appended": false,
+    "changed": false,
+    "predecessorRow": 528,
+    "note": "No ledger append is made by this receipt."
+  },
+  "rollback": {
+    "path": "docs/plans/2026-08-11-xot-e8a-renderer-preflight-geometry-acceptance.json",
+    "scope": "this receipt file only under explicit review",
+    "command": null,
+    "authorized": false,
+    "sourceFiles": "not rollback-authorized",
+    "otherDirtyFiles": "not included and not to be reverted"
+  },
+  "receiptScope": {
+    "allowedPath": "docs/plans/2026-08-11-xot-e8a-renderer-preflight-geometry-acceptance.json",
+    "newFileOnly": true,
+    "sourceFilesUnchangedAfterBinding": true,
+    "ledgerUnchanged": true,
+    "noNetworkOrExternalMutation": true
+  }
+}

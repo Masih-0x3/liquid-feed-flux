@@ -1,0 +1,457 @@
+{
+  "schema": "xot-e5-b2a-no-egress-runtime-closure-receipt-v1",
+  "event": "e5_b2a_no_egress_runtime_closure_acceptance_local_isolated_t1",
+  "phase": "split-e5-isolated-t1-local-only",
+  "status": "ACCEPTED_LOCAL_ISOLATED_T1",
+  "riskTier": "high",
+  "airIds": [
+    "AIR-008",
+    "AIR-054"
+  ],
+  "brIds": [
+    "BR-MEDIA-02",
+    "SR-INPUT-01",
+    "QA-02"
+  ],
+  "repository": "/Users/stevmq/Finalized XOT",
+  "branch": "codex/xot-remediation-convergence",
+  "head": "0bd578856016c06a10890339f93aa13b82ecae48",
+  "directPlan": {
+    "path": "docs/plans/2026-08-08-xot-post-b4-execution-sequence.md",
+    "sha256": "24feff64abe2a221ca69cb9f52e1a03eb53d707ec024367fa8aa3e75cf0dea4c",
+    "section": "E5 - B2A No-Egress Runtime Closure",
+    "class": "local isolated T1",
+    "targetTier": "T1",
+    "stopConditions": [
+      "any DNS, network, provider, or production contact",
+      "test bypasses the real fetch policy boundary",
+      "incomplete teardown"
+    ]
+  },
+  "predecessors": {
+    "b2a": {
+      "path": "docs/plans/2026-08-06-xot-b2a-ssrf-zero-egress.json",
+      "receiptSha256": "525644ed3151506cdf5494f7cf60b2e6b0906a74ab7674289f0edf2a6a05485f",
+      "status": "candidate_local_offline_no_egress_evidence",
+      "airIds": [
+        "AIR-008",
+        "AIR-054"
+      ],
+      "supersession": "E5 adds isolated Deno T1 runtime evidence; the B2A receipt remains unchanged."
+    },
+    "e4": {
+      "path": "docs/plans/2026-08-10-xot-e4-job-lane-capacity-checked-write-closure.json",
+      "receiptSha256": "bcaaa00f3cd0ff860d2db1032a0e7b77695db72df9337d714c0e0a17931f1c87",
+      "schema": "xot-e4-job-lane-capacity-checked-write-closure-receipt-v1",
+      "status": "REVIEW_READY_LOCAL_T0_T1"
+    },
+    "e3": {
+      "path": "docs/plans/2026-08-10-xot-e3-admin-mutation-operation-protocol.json",
+      "receiptSha256": "71d5ab2ec75655a328bbf80ccdb933251ae404830fb0f3ca7f3d02d7e62c91ba",
+      "schema": "xot-e3-admin-mutation-operation-protocol-receipt-v1",
+      "status": "REVIEW_READY_LOCAL_T0_T1"
+    }
+  },
+  "ledger": {
+    "path": "docs/plans/2026-07-14-xot-comprehensive-audit-remediation-implementation-ledger.jsonl",
+    "currentRowCount": 522,
+    "currentFileSha256": "2878e7d65c57966a701a3fccdf0b6d8d07565686847092d391593552b3a97971",
+    "currentRow522": {
+      "event": "e4_job_lane_capacity_checked_write_acceptance_local_t0_t1_row522",
+      "lineNoNewlineSha256": "1485d8e42908d2f2f660936a34dd2b63d99b748dcd5020472bae3cb8daad1e5a",
+      "status": "accepted_local_t0_t1; release gate CLOSED"
+    },
+    "chain": [
+      {
+        "row": 519,
+        "event": "e2_renderer_subprocess_containment_accepted_local_t0_t1_row519",
+        "lineNoNewlineSha256": "adb2c416778571d279ab5fbf4defa4a78d4ed795505d8182171dc823490f3056"
+      },
+      {
+        "row": 520,
+        "event": "e2_renderer_subprocess_containment_acceptance_provenance_correction_local_t0_t1_row520",
+        "lineNoNewlineSha256": "fbfb5e965a2f3af5add4c4eca8564b4fca42737c26ac603288814311aa251684",
+        "prefixThroughRow520Sha256": "d8db00ce221d61ae17b908ec52c519e134735be973622bb37569ea07610866af"
+      },
+      {
+        "row": 521,
+        "event": "e3_admin_mutation_operation_protocol_acceptance_local_t0_t1_row521",
+        "lineNoNewlineSha256": "6c5c961484dae017ed944096ec3f34fb07a31e2071c936e28c924039bb3fcb06"
+      },
+      {
+        "row": 522,
+        "event": "e4_job_lane_capacity_checked_write_acceptance_local_t0_t1_row522",
+        "lineNoNewlineSha256": "1485d8e42908d2f2f660936a34dd2b63d99b748dcd5020472bae3cb8daad1e5a",
+        "fullFileSha256": "2878e7d65c57966a701a3fccdf0b6d8d07565686847092d391593552b3a97971"
+      }
+    ],
+    "state": "append_only_authority_current_522_rows; no E5 row appended",
+    "receiptRow": "none",
+    "releaseGate": "CLOSED"
+  },
+  "scope": {
+    "goal": "Close the locally actionable B2A no-egress evidence gap with a real exported remote-media policy boundary in isolated Deno T1, without live or global network contact.",
+    "pathLineCap": {
+      "ownedPathCount": 4,
+      "ownedLineCount": 837,
+      "pathCeiling": 30,
+      "lineCeiling": 1500,
+      "status": "PROVEN",
+      "lineCountAppliesTo": "new test/checker files; package and CI are pre-existing dirty files with focused E5 lines"
+    },
+    "sourceEdit": {
+      "made": false,
+      "path": "supabase/functions/_shared/remoteMediaPolicy.ts",
+      "sha256": "65aeb93b23c78bc8a140896bbe6df78140519ebb545e7fb6383663588c27182a",
+      "reason": "The existing exported policy remained fail-closed under the adversarial runtime contract; no concrete fail-open defect met the source-edit threshold."
+    },
+    "ownedArtifacts": [
+      {
+        "path": "supabase/functions/_shared/remoteMediaNoEgress.test.ts",
+        "sha256": "f0ebdced5afef293bf2ccc7df6cb658ab9843ec35165e5b7300834c6fd104a0d",
+        "entryState": "untracked"
+      },
+      {
+        "path": "scripts/check-remote-media-no-egress-contract.mjs",
+        "sha256": "e5bae4a6732c78b48e9817104d63d24d36e486e729cd198506652b47717cf3af",
+        "entryState": "untracked"
+      },
+      {
+        "path": "package.json",
+        "sha256": "2ceede25b2f95bf8233e49ed5160bff75cc72cdcc6993401c6b5a59339abbe7c",
+        "entryState": "tracked_dirty_preexisting"
+      },
+      {
+        "path": ".github/workflows/ci.yml",
+        "sha256": "4d62da3627eb35ccc99e77091c44071c7b66857da53185bb6bd009cef28b9dba",
+        "entryState": "tracked_dirty_preexisting"
+      }
+    ],
+    "protectedPolicyHashUnchanged": true
+  },
+  "validation": {
+    "red": [
+      {
+        "command": "npm exec --offline --yes deno -- test --deny-net --no-check supabase/functions/_shared/remoteMediaNoEgress.test.ts",
+        "exit": 1,
+        "result": "fixture compatibility failure because the first version called unavailable Deno.resources(); corrected without weakening policy source"
+      }
+    ],
+    "green": [
+      {
+        "command": "npx --offline --yes deno test --deny-net --no-check supabase/functions/_shared/remoteMediaNoEgress.test.ts",
+        "exit": 0,
+        "result": "3 passed, 0 failed (329ms)"
+      },
+      {
+        "command": "npm exec --offline --yes deno check supabase/functions/_shared/remoteMediaNoEgress.test.ts",
+        "exit": 0
+      },
+      {
+        "command": "npx --offline --yes deno lint supabase/functions/_shared/remoteMediaNoEgress.test.ts",
+        "exit": 0,
+        "result": "checked 1 file"
+      },
+      {
+        "command": "node --check scripts/check-remote-media-no-egress-contract.mjs",
+        "exit": 0
+      },
+      {
+        "command": "npx eslint scripts/check-remote-media-no-egress-contract.mjs",
+        "exit": 0
+      },
+      {
+        "command": "npm run check:strict",
+        "exit": 0
+      },
+      {
+        "command": "npm run check:remote-media-policy",
+        "exit": 0,
+        "result": "selfTest=skipped"
+      },
+      {
+        "command": "MUTATION_TEST=1 npm run check:remote-media-policy",
+        "exit": 0,
+        "result": "selfTest=pass"
+      },
+      {
+        "command": "node scripts/check-remote-media-no-egress-contract.mjs",
+        "exit": 0,
+        "result": "selfTest=skipped"
+      },
+      {
+        "command": "MUTATION_TEST=1 node scripts/check-remote-media-no-egress-contract.mjs",
+        "exit": 0,
+        "result": "selfTest=pass"
+      },
+      {
+        "command": "git diff --check -- package.json .github/workflows/ci.yml scripts/check-remote-media-no-egress-contract.mjs supabase/functions/_shared/remoteMediaNoEgress.test.ts",
+        "exit": 0
+      }
+    ],
+    "runtimePassCount": "3/3",
+    "noSourceEdit": true
+  },
+  "runtimeIsolation": {
+    "tier": "T1",
+    "localIsolated": true,
+    "testProcessFlag": "--deny-net",
+    "realExportedCapsuleCalls": [
+      "fetchReviewedRemoteMedia",
+      "fetchReviewedRemoteJson"
+    ],
+    "sharedCounters": {
+      "seam": "one shared countingFetch for every injected policy call",
+      "allowedFetches": "counted per call and asserted exactly where a happy/first-hop request is expected",
+      "forbiddenFetches": "counted by hostile target and asserted zero",
+      "globalEscapes": "throwing/counting sentinels; any native escape fails the test"
+    },
+    "nativeGuards": {
+      "globalThisFetch": "snapshotted, replaced with throwing/counting sentinel, restored in finally",
+      "DenoResolveDns": "snapshotted, replaced with throwing/counting sentinel, restored in finally",
+      "injectedResolverCallbacks": "did run inside the real policy boundary",
+      "nativeOrOsDns": "not run",
+      "nativeNetwork": "not run"
+    },
+    "teardown": {
+      "propertyDescriptors": "exact descriptors and identities for globalThis.fetch, Deno.resolveDns, setTimeout, and clearTimeout snapshotted and restored",
+      "resourceRegistry": "injected-resource registry asserted empty",
+      "readers": "stream readers released; cancellation counted on streamed overflow",
+      "abort": "slow-fixture abort listeners signal-bound and teardown asserted",
+      "timers": "created timer handles tracked and cleared; no orphan timer remains",
+      "ownedResources": "no listener-owning server, temporary directory, subprocess, socket, or native network resource"
+    },
+    "effects": {
+      "nativeDnsResolution": false,
+      "networkRequest": false,
+      "listener": false,
+      "server": false,
+      "osResource": false,
+      "productState": false,
+      "database": false,
+      "provider": false,
+      "browser": false,
+      "staging": false,
+      "commitPushDeploy": false
+    }
+  },
+  "hostileMatrix": {
+    "directMediaUrls": {
+      "count": 17,
+      "cases": [
+        "HTTP loopback",
+        "HTTPS loopback",
+        "HTTPS RFC1918 10/8",
+        "HTTPS RFC1918 172.16/12",
+        "HTTPS RFC1918 192.168/16",
+        "HTTPS metadata 169.254.169.254",
+        "HTTPS broadcast 255.255.255.255",
+        "decimal loopback 2130706433",
+        "hex loopback 0x7f000001",
+        "dotted-hex loopback 0x7f.0.0.1",
+        "abbreviated loopback 127.1",
+        "octal loopback 0177.0.0.1",
+        "IPv6 loopback [::1]",
+        "IPv6 link-local [fe80::1]",
+        "spoofed subdomain pbs.twimg.com.evil.example",
+        "invalid port",
+        "fragment"
+      ],
+      "forbiddenFetchCount": 0,
+      "allowedFetchCount": 0
+    },
+    "dns": {
+      "hostileTables": 2,
+      "cases": [
+        "allowed host resolves to loopback",
+        "allowed host resolves to RFC1918",
+        "allowed host resolves to IPv6 link-local",
+        "allowed host resolves to metadata IP",
+        "empty records",
+        "malformed records",
+        "resolver throws"
+      ],
+      "forbiddenFetchCount": 0,
+      "allowedFetchCount": 0
+    },
+    "redirects": {
+      "targets": [
+        "metadata/private",
+        "encoded loopback 2130706433",
+        "IPv6 link-local [fe80::1]"
+      ],
+      "firstHopAllowedFetchCount": 1,
+      "forbiddenSecondHopFetchCount": 0,
+      "boundedAllowedRedirectChainFetchCount": 4,
+      "boundedForbiddenFetchCount": 0
+    },
+    "rebindingRepresentation": {
+      "allowedFetchCount": 1,
+      "resolverCalls": 4,
+      "resolverInspections": 2,
+      "forbiddenFetchCount": 0,
+      "note": "The test represents the rebinding boundary and re-inspects DNS; it does not bind a native TLS connection to the inspected address."
+    },
+    "bodyAndTransport": {
+      "cases": [
+        "declared and streamed overflow",
+        "compressed encoding",
+        "media MIME mismatch",
+        "JSON MIME mismatch",
+        "media magic mismatch",
+        "simulated certificate/TLS failure",
+        "slow TTFB",
+        "slow body total timeout",
+        "JSON redirect",
+        "JSON size",
+        "JSON encoding",
+        "JSON timeout"
+      ],
+      "eachAllowedFetchCount": 1,
+      "eachForbiddenFetchCount": 0
+    },
+    "happyPaths": {
+      "mediaAllowedFetchCount": 1,
+      "jsonAllowedFetchCount": 1,
+      "forbiddenFetchCount": 0
+    }
+  },
+  "checker": {
+    "placement": "TypeScript AST placement requires real imported capsule calls in each owning Deno test",
+    "liveAssertions": [
+      "shared countingFetch is used for every injected policy call",
+      "allowed and forbidden counters increment live",
+      "zero forbidden assertions execute",
+      "descriptor, resource, reader, abort, and timer teardown executes",
+      "required hostile cases execute rather than existing only as tables"
+    ],
+    "rejectedDecoysAndMutations": [
+      "shadowed/local capsule functions",
+      "direct global fetch/DNS calls",
+      "dead-branch cases",
+      "socket/process imports",
+      "missing --deny-net",
+      "removed --deny-net",
+      "rewritten live zero assertion",
+      "removed forbidden counter increment",
+      "replaced shared seam",
+      "removed descriptor assertion",
+      "replaced live table-bound call",
+      "mutated real policy import"
+    ],
+    "mutationMode": "MUTATION_TEST=1 passed; each listed mutation rejected"
+  },
+  "context7DenoPermissionsEvidence": {
+    "libraryId": "/denoland/docs",
+    "sourceReputation": "High",
+    "permissionDocs": "https://github.com/denoland/docs/blob/main/runtime/reference/permissions.md",
+    "testDocs": "https://github.com/denoland/docs/blob/main/runtime/test/index.md",
+    "commandSemantics": "deno test --deny-net applies the documented Deno test permission model with all network access denied; the permissions page illustrates the equivalent deny-all flag and the test page confirms tests use the same model.",
+    "officialStatements": [
+      "Deno runs programs in a sandbox without network access by default unless permissions are granted.",
+      "--deny-net can explicitly deny all network access and disable permission prompts.",
+      "Deno tests use the same security permission model as scripts."
+    ],
+    "evidenceBoundary": "Context7 documentation supports the meaning of --deny-net and the default sandbox only; it is not runtime proof. Runtime proof is the recorded 3/3 local test run with --deny-net and the throwing/counting native guards."
+  },
+  "reviewProvenance": {
+    "authorDoneclaim": {
+      "path": "/tmp/xot-e5-author-doneclaim.md",
+      "sha256": "74c7dc8f282034ce3f7286b6d6ff6d9a44a2cf1b0c0b4b04a425cf0e7663fc41",
+      "status": "final local rework doneclaim; no receipt or ledger authored"
+    },
+    "implementation": {
+      "handle": "/root/e5_no_egress_implementation",
+      "requestedRoute": "GPT-5.6 Luna high",
+      "runtimeTelemetry": "unknown"
+    },
+    "independentLunaAcceptance": {
+      "handle": "/root/e5_independent_acceptance",
+      "verdict": "ACCEPT",
+      "scope": "local E5 isolated T1 runtime telemetry, hostile corpus, and teardown",
+      "requestedRoute": "GPT-5.6 Luna high",
+      "runtimeModelReasoningTelemetry": "unknown"
+    },
+    "claudeHostileCorpusInventory": {
+      "path": "/tmp/xot-e5-claude-inventory.md",
+      "sha256": "2dfc9b3562d1e88c834bfa1ec46b1d4f8a8057a1976c4488a80cb6d147de1226",
+      "route": "Claude Code via Orca; DeepSeek V4 Flash 0731; /effort ultracode (xhigh)",
+      "runId": "run_4c648a0d2de9",
+      "taskId": "task_17ce7fdf7a8e",
+      "dispatchId": "ctx_9afd4b977f7c",
+      "terminalId": "term_8555b9ef-c3e7-45bd-adbb-da10a0d9c798",
+      "corpusDisposition": "accepted static hostile-corpus inventory; no Claude T1 acceptance verdict claimed",
+      "routeNote": "Managed exact-effort launch was blocked by capability mismatch; exact fallback was verified and used without model or effort substitution."
+    },
+    "claudeFinalReviews": [
+      {
+        "runId": "run_2c67232fde74",
+        "taskId": "task_2601e642bac1",
+        "dispatchId": "ctx_49bc50f9fee8",
+        "terminalId": "term_972f504f-22c5-4bd4-9792-a7e7ceb26e71",
+        "result": "BLOCKED; no verdict"
+      },
+      {
+        "runId": "run_768bb0371db1",
+        "taskId": "task_cc0fb2fd3438",
+        "dispatchId": "ctx_abbb35c72287",
+        "terminalId": "term_771aedd2-19a4-4191-a269-759b1672cf09",
+        "result": "TIMEOUT; no verdict"
+      }
+    ],
+    "claudeNoAcceptanceClaim": true,
+    "coordinatorAuthority": "/root",
+    "receiptAuthor": {
+      "handle": "/root/e5_receipt_author",
+      "role": "receipt author",
+      "requestedRoute": "GPT-5.6 Luna high",
+      "runtimeTelemetry": "unknown"
+    },
+    "noInventedIdentityIds": true
+  },
+  "residualsAndDeferrals": [
+    "DNS-to-TLS TOCTOU/rebinding pinning remains unproven",
+    "CA/certificate pinning remains unproven",
+    "proxy/CONNECT control remains unproven",
+    "OS/container isolation beyond Deno remains unproven",
+    "hosted CI, T2 host/container, staging, live-service, and live exploit evidence are deferred or forbidden"
+  ],
+  "deploymentState": {
+    "local": "accepted_local_isolated_t1",
+    "server": "not run",
+    "database": "not run",
+    "browser": "not run",
+    "provider": "not contacted",
+    "networkProduct": "not contacted",
+    "staged": "no",
+    "committed": "no",
+    "pushed": "no",
+    "ci": "not run",
+    "staging": "not run",
+    "deployed": "no",
+    "live": "not run",
+    "dirtyWorktree": "preserved"
+  },
+  "rollback": {
+    "mode": "selective E5 source/artifact rollback plus later append-only evidence correction",
+    "newFilesToRemoveOnly": [
+      "supabase/functions/_shared/remoteMediaNoEgress.test.ts",
+      "scripts/check-remote-media-no-egress-contract.mjs"
+    ],
+    "exactPackageLinesToRemoveOnly": [
+      "package.json:27: \"check:remote-media-no-egress\": \"node scripts/check-remote-media-no-egress-contract.mjs\",",
+      "package.json:28: \"test:remote-media-no-egress\": \"npx --yes deno test --deny-net --no-check supabase/functions/_shared/remoteMediaNoEgress.test.ts\","
+    ],
+    "exactCiLinesToRemoveOnly": [
+      ".github/workflows/ci.yml:28: - run: npm run check:remote-media-no-egress",
+      ".github/workflows/ci.yml:29: - run: npm run test:remote-media-no-egress"
+    ],
+    "preserveUnrelatedDirtyChanges": true,
+    "appendOnlyEvidenceCorrection": true,
+    "noHistoryRewrite": true,
+    "noLedgerRow": true,
+    "receiptPreserved": true
+  },
+  "releaseGate": "CLOSED",
+  "receiptAuthoringNote": "This file is the only artifact authored by this receipt-author task. No older B2A receipt, ledger, source, test, checker, package, CI, or other file was edited; no stage, commit, push, deploy, network, DNS, browser, provider, database, or product-state action occurred."
+}

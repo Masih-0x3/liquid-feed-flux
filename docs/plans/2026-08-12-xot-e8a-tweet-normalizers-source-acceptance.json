@@ -1,0 +1,282 @@
+{
+  "schema": "xot-e8a-tweet-normalizers-source-acceptance-receipt-v1",
+  "event": "e8a_tweet_normalizers_source_acceptance",
+  "phase": "E8a tweet normalizers pure module extraction",
+  "status": "ACCEPTED_PARTIAL_LOCAL_SOURCE_T0",
+  "release": "CLOSED",
+  "releaseGate": "CLOSED",
+  "riskTier": "HIGH",
+  "repository": "/Users/stevmq/Finalized XOT",
+  "branch": "codex/xot-remediation-convergence",
+  "head": "0bd578856016c06a10890339f93aa13b82ecae48",
+  "observedAt": "2026-08-12",
+  "claimBoundary": "E8a T0 local pure-module source and static contract only; Deno runtime T1, broader AIR-036 closure, hosted CI, build, browser, staging, deploy, live, production-equivalence, and owner evidence are deferred.",
+  "directPlan": {
+    "path": "docs/plans/2026-08-08-xot-post-b4-execution-sequence.md",
+    "sha256": "24feff64abe2a221ca69cb9f52e1a03eb53d707ec024367fa8aa3e75cf0dea4c",
+    "bytes": 33797,
+    "lfLines": 440,
+    "section": "E8 - Post-Correctness Source Tranches / E8a",
+    "lines": "307-325",
+    "targetTier": "T0/T1 only",
+    "mapping": ["AIR-036", "BR-MOD-01", "BR-MOD-02", "FE-QUALITY-01"],
+    "requiredShape": "characterization first, then one pure module move per receipt",
+    "deferredByPlan": [
+      "browser paint, responsive, and operator proof",
+      "hosted scans and current-SHA CI",
+      "real build, staging, deploy, live, and production-equivalence artifact"
+    ]
+  },
+  "predecessor": {
+    "ledgerPath": "docs/plans/2026-07-14-xot-comprehensive-audit-remediation-implementation-ledger.jsonl",
+    "row": 537,
+    "rowNoNewlineSha256": "b06c908d480e86f3ef8978c07a27901a1723732c95fb6b1735268b68569f7e91",
+    "rowBytes": 9528,
+    "prefixThroughRow537Sha256": "3175946f22b407422733b8594b125b4b8cf72cdf11898fc999f370753e33c606",
+    "prefixIncludesTrailingNewline": true,
+    "event": "e8c_dashboard_hierarchy_air_coverage_claim_correction_row537"
+  },
+  "sourceBindings": [
+    {
+      "path": "supabase/functions/worker/workerUtils.ts",
+      "role": "existing worker utility compatibility re-export plus unrelated pre-existing dirty lane and timing work",
+      "sha256": "528784d33d31eaef4c86d81036343a81eb8c21be36bfe83201612b58bc644609",
+      "bytes": 10245,
+      "lfLines": 336,
+      "crlf": 0,
+      "finalLf": true
+    },
+    {
+      "path": "supabase/functions/worker/tweetNormalizers.ts",
+      "role": "new pure module containing the four extracted tweet/message normalizers",
+      "sha256": "0a9c0a8285fbc4821eb8d86d74310b2f88624b03bb8e5f88866f757dfb89c11f",
+      "bytes": 2991,
+      "lfLines": 92,
+      "crlf": 0,
+      "finalLf": true
+    },
+    {
+      "path": "supabase/functions/worker/tweetNormalizers.test.ts",
+      "role": "new focused Deno test source for the extracted pure module",
+      "sha256": "29cac728371508735ea38119306520b77c8458608c506287c5506ee3cc3220d5",
+      "bytes": 2071,
+      "lfLines": 61,
+      "crlf": 0,
+      "finalLf": true
+    }
+  ],
+  "checkerBindings": [
+    {
+      "path": "scripts/check-module-characterization-contract.mjs",
+      "role": "11-hotspot characterization source contract and mutation self-test",
+      "sha256": "b1a0f83c508688c721aad3b22d51309aff5d8f77dafb43bab002f90aaef86fd6",
+      "bytes": 4180,
+      "lfLines": 127
+    },
+    {
+      "path": "scripts/check-worker-lifecycle-contract.mjs",
+      "role": "worker lifecycle source contract and mutation self-test",
+      "sha256": "d2bbe14deb6f82acfaac5c3fd2806a6309430064759c452f08ab267efa9cb600",
+      "bytes": 44997,
+      "lfLines": 885
+    }
+  ],
+  "scopeCompleted": [
+    "Moved formatMessageWithTemplate, stripMarkdownToPlain, extractNumericTweetId, and extractHandleFromUrl from workerUtils.ts into tweetNormalizers.ts.",
+    "Preserved each of the four function declarations byte-for-byte against the HEAD workerUtils.ts source using the TypeScript parser.",
+    "Kept workerUtils.ts as the compatibility re-export seam; existing worker call sites remain outside this slice and pre-existing dirty changes were preserved.",
+    "Added focused Deno test source covering the extracted module without changing the existing workerUtils.test.ts dirty file.",
+    "This receipt does not claim closure of the other AIR-036 hotspots or a behavior change outside the four pure helpers."
+  ],
+  "architectureEvidence": {
+    "red": {
+      "status": "RED",
+      "evidence": "Before this slice, HEAD workerUtils.ts locally owned all four implementations and no tweetNormalizers.ts module existed.",
+      "localNames": ["formatMessageWithTemplate", "stripMarkdownToPlain", "extractNumericTweetId", "extractHandleFromUrl"],
+      "missingSeam": "tweetNormalizers.ts was absent and workerUtils.ts had no compatibility re-export for this family"
+    },
+    "green": {
+      "status": "GREEN",
+      "evidence": "The four declarations are byte-for-byte equal to their HEAD versions in the new module; workerUtils.ts exports the same four names from ./tweetNormalizers.ts; direct and compatibility transpiled runtime probes pass.",
+      "directTranspiledCases": 10,
+      "compatibilityReexportCases": 4
+    }
+  },
+  "validation": {
+    "typescriptParserTranspileImportResolution": {
+      "command": "node inline TypeScript parser/transpile/import-resolution probe for workerUtils.ts, tweetNormalizers.ts, and tweetNormalizers.test.ts",
+      "result": "PASS; 3 files parsed and transpiled with diagnostics=0; ./tweetNormalizers.ts import target resolved"
+    },
+    "functionBodyParity": {
+      "command": "node inline TypeScript AST comparison of four declarations from HEAD workerUtils.ts and tweetNormalizers.ts",
+      "result": "PASS; 4/4 declarations byte-for-byte equal"
+    },
+    "directTranspiledRuntime": {
+      "command": "node inline transpile-to-CommonJS probe executing tweetNormalizers.ts directly",
+      "result": "PASS; DIRECT_TRANSPILED_RUNTIME_PASS cases=10"
+    },
+    "compatibilityReexportRuntime": {
+      "command": "node inline transpile-to-CommonJS probe loading workerUtils.ts with ./tweetNormalizers.ts compatibility dependency",
+      "result": "PASS; COMPATIBILITY_REEXPORT_RUNTIME_PASS cases=4"
+    },
+    "moduleCharacterizationNormal": {
+      "command": "node scripts/check-module-characterization-contract.mjs",
+      "result": "exit 0; MODULE_CHARACTERIZATION_SOURCE_CONTRACT_PASS files=11 reviewSignals=2 mutation=skipped"
+    },
+    "moduleCharacterizationMutation": {
+      "command": "MUTATION_TEST=1 node scripts/check-module-characterization-contract.mjs",
+      "result": "exit 0; MODULE_CHARACTERIZATION_SOURCE_CONTRACT_PASS files=11 reviewSignals=2 mutation=pass"
+    },
+    "workerLifecycleNormal": {
+      "command": "npm run check:worker-lifecycle",
+      "result": "exit 0; WORKER_LIFECYCLE_SOURCE_CONTRACT_PASS transitions=5 reconciliation=fail-closed selfTest=skipped"
+    },
+    "workerLifecycleMutation": {
+      "command": "MUTATION_TEST=1 npm run check:worker-lifecycle",
+      "result": "exit 0; WORKER_LIFECYCLE_SOURCE_CONTRACT_PASS transitions=5 reconciliation=fail-closed selfTest=pass"
+    },
+    "denoFocusedTest": {
+      "command": "deno test --no-check supabase/functions/worker/tweetNormalizers.test.ts",
+      "result": "BLOCKED; zsh: command not found: deno; exit 127"
+    },
+    "denoCheck": {
+      "command": "deno check supabase/functions/worker/tweetNormalizers.ts supabase/functions/worker/tweetNormalizers.test.ts",
+      "result": "BLOCKED; Deno executable is unavailable in the environment; expected exit 127; not run to a green result"
+    },
+    "denoFmt": {
+      "command": "deno fmt --check supabase/functions/worker/tweetNormalizers.ts supabase/functions/worker/tweetNormalizers.test.ts",
+      "result": "BLOCKED; Deno executable is unavailable in the environment; expected exit 127; not run to a green result"
+    },
+    "scopedWhitespace": {
+      "command": "git diff --check -- supabase/functions/worker/workerUtils.ts plus git diff --no-index --check /dev/null against each new untracked file",
+      "result": "PASS; tracked diff clean; untracked comparisons returned expected exit 1 with no whitespace diagnostics"
+    },
+    "finalLf": {
+      "command": "explicit byte probe over tweetNormalizers.ts and tweetNormalizers.test.ts",
+      "result": "PASS; CRLF=0, final LF=true, blank final LF=false, trailing whitespace=false for both files"
+    },
+    "stagedIndex": {
+      "command": "git diff --cached --quiet",
+      "result": "exit 0; staged index empty"
+    },
+    "existingDirtyTestPreservation": {
+      "command": "git status/diff inspection for supabase/functions/worker/workerUtils.test.ts",
+      "result": "PASS for scope boundary; existing dirty modification remains visible and was not edited by this receipt author"
+    }
+  },
+  "adversarialReviews": [
+    {
+      "route": "Claude Code via Zro",
+      "requestedModel": "deepseek-v4-flash-0731",
+      "requestedReasoning": "xhigh",
+      "status": "BLOCKED_BEFORE_STARTUP",
+      "result": "Zro fetch/auth verification failed before Claude startup; no Claude banner, review output, or accepted adversarial evidence was received.",
+      "accepted": false,
+      "superseded": false
+    },
+    {
+      "route": "Luna High receipt-author static verification",
+      "requestedModel": "GPT-5.6 Luna",
+      "requestedReasoning": "high",
+      "status": "ACCEPTED_FOR_SCOPED_RECEIPT",
+      "result": "Accepted the source-only boundary and locally reproduced parser/transpile, direct helper, compatibility seam, characterization, lifecycle, whitespace, final-LF, and staged-index evidence; Deno runtime remains blocked.",
+      "accepted": true,
+      "runtimeTelemetry": {
+        "identity": "unknown",
+        "model": "unknown",
+        "reasoning": "unknown",
+        "note": "Runtime identity/model telemetry was not exposed to this receipt author."
+      },
+      "subagentsUsed": false
+    }
+  ],
+  "airDispositions": {
+    "AIR-036": {
+      "status": "PARTIAL",
+      "localDisposition": "One pure tweet/message normalizer family was extracted with source parity and static contract evidence.",
+      "deferred": "Remaining AIR-036 hotspots, Deno runtime T1, behavior traces, owner review, higher-tier evidence, and any broader refactor remain open.",
+      "ownerAssigned": false,
+      "deadlineAssigned": false
+    }
+  },
+  "achieved": ["T0 source/static slice"],
+  "deferred": ["T1 Deno runtime", "T2", "T3", "T4"],
+  "notClaimed": [
+    "No Deno test, Deno check, or Deno format result; the Deno executable was missing and each such route is blocked at exit 127.",
+    "No closure of AIR-036, BR-MOD-01, BR-MOD-02, or FE-QUALITY-01; only this pure-module slice is accepted.",
+    "No browser, responsive, accessibility, authenticated runtime, provider, database, network, Docker, hosted CI, build, staging, deploy, live, production-equivalence, or owner-approval evidence.",
+    "No claim that the blocked Claude DeepSeek adversarial route ran; no route substitution was made.",
+    "No ledger append, commit, push, deployment, or external mutation."
+  ],
+  "externalState": {
+    "network": false,
+    "provider": false,
+    "database": false,
+    "ci": false,
+    "staging": false,
+    "deploy": false,
+    "live": false,
+    "browser": false,
+    "docker": false,
+    "production": false,
+    "ownerDecision": false,
+    "ledgerAction": false
+  },
+  "worktree": {
+    "beforeReceipt": {
+      "statusFormat": "porcelain-v1 -uall sorted",
+      "totalEntries": 415,
+      "trackedOrModifiedEntries": 156,
+      "untrackedEntries": 259,
+      "stagedEntries": 0,
+      "sortedStatusSha256": "13d11420e3288bed94249eefa0a41d399ea4b85f6e514abac921bb741f067134"
+    },
+    "afterReceipt": {
+      "statusFormat": "porcelain-v1 -uall sorted",
+      "totalEntries": 416,
+      "trackedOrModifiedEntries": 156,
+      "untrackedEntries": 260,
+      "delta": "one new untracked receipt path only",
+      "stagedEntries": 0,
+      "stagedIndexEmpty": true,
+      "receiptPathPresent": true
+    },
+    "preexistingDirtyWorkPreserved": true,
+    "otherFilesEdited": false,
+    "branch": "codex/xot-remediation-convergence",
+    "head": "0bd578856016c06a10890339f93aa13b82ecae48"
+  },
+  "ledger": {
+    "path": "docs/plans/2026-07-14-xot-comprehensive-audit-remediation-implementation-ledger.jsonl",
+    "appended": false,
+    "changed": false,
+    "predecessorRow": 537,
+    "appendDeferred": "Ledger append is a separate conductor-controlled step after receipt review."
+  },
+  "rollback_kill_receipt": "No rollback or kill action was authorized or run; source files and all pre-existing dirty work remain preserved. Any later rollback requires explicit review of this receipt file only.",
+  "receiptScope": {
+    "allowedPath": "docs/plans/2026-08-12-xot-e8a-tweet-normalizers-source-acceptance.json",
+    "newFileOnly": true,
+    "sourceFilesUnchangedAfterBinding": true,
+    "checkerFilesUnchangedAfterBinding": true,
+    "ledgerUnchanged": true,
+    "noCommit": true,
+    "noPush": true,
+    "noDeploy": true,
+    "noNetworkOrExternalMutation": true,
+    "noSecretsOrRawEnvironmentValues": true
+  },
+  "doneClaim": {
+    "status": "complete_for_scoped_local_source_receipt",
+    "receiptPath": "docs/plans/2026-08-12-xot-e8a-tweet-normalizers-source-acceptance.json",
+    "sourceBindingsRecorded": true,
+    "commandsAndResultsRecorded": true,
+    "deferralsRecorded": true,
+    "releaseAndReleaseGateClosed": true,
+    "receiptArtifact": {
+      "sha256": "5672cea463fcc7fec42c5dc9754c010ebdfe37e7271db7fd2d04096a8a8f4179",
+      "bytes": 11618,
+      "hashScope": "canonical UTF-8 compact JSON payload with doneClaim.receiptArtifact omitted, followed by one LF"
+    }
+  }
+}

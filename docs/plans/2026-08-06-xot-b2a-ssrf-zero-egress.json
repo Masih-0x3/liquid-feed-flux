@@ -1,0 +1,151 @@
+{
+  "timestamp": "2026-08-06T12:10:00Z",
+  "event": "b2a_ssrf_zero_egress_evidence_candidate",
+  "phase": "2",
+  "task_id": "task_cccc2c314a29",
+  "dispatch_id": "ctx_8fe93a7395b0",
+  "predecessor": {
+    "task_id": "task_7209f1f97ad7",
+    "report_path": "/tmp/xot-b2-preflight.md"
+  },
+  "air_ids": ["AIR-008", "AIR-054"],
+  "risk_tier": "HIGH",
+  "status": "candidate_local_offline_no_egress_evidence",
+  "repo": "/Users/stevmq/Finalized XOT",
+  "branch": "codex/xot-remediation-convergence",
+  "baseline_head": "0bd578856016c06a10890339f93aa13b82ecae48",
+  "b0_inventory_anchor": {
+    "head": "0bd578856016c06a10890339f93aa13b82ecae48",
+    "branch": "codex/xot-remediation-convergence",
+    "expandedCounts": {
+      "deleted": 2,
+      "modified": 141,
+      "staged": 0,
+      "totalFileEntries": 304,
+      "tracked": 143,
+      "untracked": 161
+    },
+    "contractPathInInventory": true,
+    "contractInventoryStatus": "untracked (pre-existing 304-path dirty baseline, not authored as new here)"
+  },
+  "scope": {
+    "goal": "Close the locally actionable AIR-008/AIR-054 no-egress evidence gap: prove forbidden targets never reach the fetch request seam using only an injected/stub fetch and resolver. No URL contacted; no live/global network."
+  },
+  "rework": {
+    "task_id": "task_4b8f93a7fef9",
+    "dispatch_id": "ctx_c3f578e207e2",
+    "report_path": "/tmp/xot-b2a-review.md",
+    "verdict": "REWORK",
+    "f1_high": "Direct private IPv4 fetch-seam cases were previously asserted only at the HTTP scheme rejection boundary, not the HTTPS host boundary for 10/8, 172.16/12, 192.168/16, 169.254.169.254, 255.255.255.255. Reviewer independently proved the policy already blocks each via the exact-host allowlist (remote_media_url_host_blocked, fetch count 0) — an evidence-completeness gap, not a source bypass.",
+    "f2_low": "Direct HTTPS IPv6 link-local [fe80::1] fetch counter=0 case was missing (covered only at isPublicRemoteIpAddress/DNS-resolve levels). Reviewer probe: remote_media_url_host_blocked, count 0 — same evidence-completeness gap.",
+    "b2a_response": "Added direct HTTPS host-boundary counted cases for 127.0.0.1, 10.0.0.1, 172.16.0.1, 192.168.1.1, 169.254.169.254, 255.255.255.255, and [fe80::1], each asserting remote_media_url_host_blocked with request count 0; retained encoded decimal/hex/octal/abbreviated cases; added a redirect-to-[fe80::1] case asserting exactly one allowed first-hop fetch and zero forbidden second-hop fetches. No policy source change (policy already fail-closed before fetch)."
+  },
+  "allowed_writes": [
+    "scripts/check-remote-media-policy-contract.mjs",
+    "supabase/functions/_shared/remoteMediaPolicy.ts (ONLY if a new adversarial case proves a concrete fail-open bug; none was proven, so NOT edited)",
+    "docs/plans/2026-08-06-xot-b2a-ssrf-zero-egress.json (this receipt)"
+  ],
+  "actual_files_modified": [
+    "scripts/check-remote-media-policy-contract.mjs",
+    "docs/plans/2026-08-06-xot-b2a-ssrf-zero-egress.json"
+  ],
+  "actual_durable_writes": [
+    "scripts/check-remote-media-policy-contract.mjs",
+    "docs/plans/2026-08-06-xot-b2a-ssrf-zero-egress.json"
+  ],
+  "policy_source_edit": {
+    "made": false,
+    "reason": "WHATWG URL normalization already collapses all decimal/hex/octal/abbreviated loopback host forms (2130706433, 0x7f000001, 0x7f.0.0.1, 127.1, 0177.0.0.1) to 127.0.0.1, which is absent from the reviewed allowlist; [::1], fe80::1 (and all IPv6/link-local) are likewise excluded. Every encoded form is already rejected with a stable code (remote_media_url_host_blocked or scheme_blocked). Adding redundant source code would weaken, not harden, the allowlist invariant. No policy change required."
+  },
+  "executor_route": "Claude Code (DeepSeek V4 Flash 0731) via Orca, Ultracode/xhigh, dynamic workflows",
+  "node_runtime": "v22.23.1",
+  "no_live_contact_declaration": "TRUE — every forbidden-target assertion uses an injected counting fetchImpl that throws if ever invoked at the request seam and an injected stub resolveDns returning a concrete record set; no global/live fetch, no DNS query, no HTTP(S) request, no socket, no server, no Deno, no container, no provider call. Port 8080 confirmed unbound. Zero XOT Docker resources (0 xot containers/volumes/networks).",
+  "evidence_tier": {
+    "achieved": ["T0 (source)", "local offline automated test evidence"],
+    "not_achieved": ["T1 runtime disposable was not run (Deno absent on host)", "T2", "T3", "T4"],
+    "note": "T0 source inspection + a fully offline Node contract prove the forbidden-target request count is zero with injected stubs. No runtime/replay, no staging, no live, no production-equivalence evidence is claimed."
+  },
+  "case_matrix": [
+    { "case": "direct loopback 127.0.0.1", "url": "http://127.0.0.1/media.jpg", "code": "remote_media_url_scheme_blocked", "request_count": 0 },
+    { "case": "RFC1918 10.0.0.1", "url": "http://10.0.0.1/media.jpg", "code": "remote_media_url_scheme_blocked", "request_count": 0 },
+    { "case": "RFC1918 172.16.0.1", "url": "http://172.16.0.1/media.jpg", "code": "remote_media_url_scheme_blocked", "request_count": 0 },
+    { "case": "RFC1918 192.168.1.1", "url": "http://192.168.1.1/media.jpg", "code": "remote_media_url_scheme_blocked", "request_count": 0 },
+    { "case": "link-local/metadata 169.254.169.254", "url": "http://169.254.169.254/latest/meta-data", "code": "remote_media_url_scheme_blocked", "request_count": 0 },
+    { "case": "broadcast 255.255.255.255", "url": "http://255.255.255.255/x.jpg", "code": "remote_media_url_scheme_blocked", "request_count": 0 },
+    { "case": "decimal loopback 2130706433", "url": "https://2130706433/a.jpg", "code": "remote_media_url_host_blocked", "request_count": 0 },
+    { "case": "hex loopback 0x7f000001", "url": "https://0x7f000001/a.jpg", "code": "remote_media_url_host_blocked", "request_count": 0 },
+    { "case": "hex-dot 0x7f.0.0.1", "url": "https://0x7f.0.0.1/a.jpg", "code": "remote_media_url_host_blocked", "request_count": 0 },
+    { "case": "abbreviated 127.1", "url": "https://127.1/a.jpg", "code": "remote_media_url_host_blocked", "request_count": 0 },
+    { "case": "octal 0177.0.0.1", "url": "https://0177.0.0.1/a.jpg", "code": "remote_media_url_host_blocked", "request_count": 0 },
+    { "case": "IPv6 loopback [::1]", "url": "https://[::1]/a.jpg", "code": "remote_media_url_host_blocked", "request_count": 0 },
+    { "case": "subdomain spoof pbs.twimg.com.evil", "url": "https://pbs.twimg.com.evil.example/a.jpg", "code": "remote_media_url_host_blocked", "request_count": 0 },
+    { "case": "direct HTTPS loopback 127.0.0.1", "url": "https://127.0.0.1/a.jpg", "code": "remote_media_url_host_blocked", "request_count": 0 },
+    { "case": "direct HTTPS RFC1918 10.0.0.1", "url": "https://10.0.0.1/a.jpg", "code": "remote_media_url_host_blocked", "request_count": 0 },
+    { "case": "direct HTTPS RFC1918 172.16.0.1", "url": "https://172.16.0.1/a.jpg", "code": "remote_media_url_host_blocked", "request_count": 0 },
+    { "case": "direct HTTPS RFC1918 192.168.1.1", "url": "https://192.168.1.1/a.jpg", "code": "remote_media_url_host_blocked", "request_count": 0 },
+    { "case": "direct HTTPS link-local/metadata 169.254.169.254", "url": "https://169.254.169.254/latest/meta-data", "code": "remote_media_url_host_blocked", "request_count": 0 },
+    { "case": "direct HTTPS broadcast 255.255.255.255", "url": "https://255.255.255.255/a.jpg", "code": "remote_media_url_host_blocked", "request_count": 0 },
+    { "case": "direct HTTPS IPv6 link-local [fe80::1]", "url": "https://[fe80::1]/a.jpg", "code": "remote_media_url_host_blocked", "request_count": 0 },
+    { "case": "allowed host resolves to loopback", "url": "https://pbs.twimg.com/media/p-loopback.png", "code": "remote_dns_non_public", "request_count": 0 },
+    { "case": "allowed host resolves to RFC1918", "url": "https://pbs.twimg.com/media/p-private.png", "code": "remote_dns_non_public", "request_count": 0 },
+    { "case": "allowed host resolves to IPv6 link-local", "url": "https://pbs.twimg.com/media/p-v6linklocal.png", "code": "remote_dns_non_public", "request_count": 0 },
+    { "case": "allowed host resolves to metadata IP", "url": "https://video.twimg.com/x/p-metadata.png", "code": "remote_dns_non_public", "request_count": 0 },
+    { "case": "DNS empty records", "url": "https://pbs.twimg.com/media/dns-empty.png", "code": "remote_dns_no_records", "request_count": 0 },
+    { "case": "DNS resolver throws", "url": "https://pbs.twimg.com/media/dns-throw.png", "code": "remote_dns_resolution_failed", "request_count": 0 },
+    { "case": "redirect to metadata (from allowed first hop)", "url": "https://pbs.twimg.com/media/redirect-to-private.png", "code": "remote_media_url_host_blocked", "first_hop_fetch_count": 1, "forbidden_fetch_count": 0 },
+    { "case": "redirect to encoded loopback (2130706433)", "url": "https://pbs.twimg.com/media/redirect-to-encoded-private.png", "code": "remote_media_url_host_blocked", "first_hop_fetch_count": 1, "forbidden_fetch_count": 0 },
+    { "case": "redirect to IPv6 link-local [fe80::1] (from allowed first hop)", "url": "https://pbs.twimg.com/media/redirect-to-v6linklocal.png", "code": "remote_media_url_host_blocked", "first_hop_fetch_count": 1, "forbidden_fetch_count": 0 },
+    { "case": "HAPPY PATH allowed public DNS + public IP", "url": "https://pbs.twimg.com/media/allowed-zero-egress.png", "code": "success / image/png", "allowed_fetch_count": 1 }
+  ],
+  "request_count_proof": "For every forbidden target, a direct counting fetchImpl throws if ever reached and the assertion requires marks[key]===0 — i.e. the request never reaches the seam. Each direct private/RFC1918/link-local/metadata/broadcast/IPv6-non-global family is asserted at BOTH the http scheme boundary and the https host boundary (f1 HTTPS host-boundary). Redirect-to-private/encoded/IPv6-link-local cases assert exactly one first-hop fetch to the allowlisted public host and zero second-hop/forbidden fetches. The single happy-path asserts exactly one allowed fetch.",
+  "self_check_mutation": {
+    "mode": "MUTATION_TEST=1 npm run check:remote-media-policy",
+    "behavior": "pass (selfTest=pass exit 0)",
+    "note": "The repo self-test convention passes when the source contract still holds after the injected structural mutations; a breach would abort. The zero-egress corpus executes in BOTH normal and MUTATION modes (it is in the shared runtime body, not gated), so the forbidden-count==0 assertions are load-bearing and live when MUTATION_TEST is set. No policy source mutation was needed because no policy source change was made (the encoded-host gap was already closed by WHATWG normalization).",
+    "expectation_recorded": true
+  },
+  "commands_and_exit_codes": [
+    { "command": "git rev-parse --abbrev-ref HEAD", "exit": 0, "result": "codex/xot-remediation-convergence" },
+    { "command": "git rev-parse HEAD", "exit": 0, "result": "0bd578856016c06a10890339f93aa13b82ecae48" },
+    { "command": "node --check scripts/check-remote-media-policy-contract.mjs", "exit": 0 },
+    { "command": "npm run check:remote-media-policy", "exit": 0, "note": "selfTest=skipped (no MUTATION), corpus incl. new HTTPS host-boundary cases PASS" },
+    { "command": "MUTATION_TEST=1 npm run check:remote-media-policy", "exit": 0, "note": "selfTest=pass, structural mutations still fail-closed => assertions live incl. new HTTPS cases" },
+    { "command": "npm run check:air-ledger-coverage", "exit": 0, "note": "80/80, green (B1 line-503 supersession closed the prior AIR-009 governance gap)" },
+    { "command": "MUTATION_TEST=1 npm run check:air-ledger-coverage", "exit": 0, "note": "selfTest=pass, 80/80" },
+    { "command": "npm run check:strict", "exit": 0 },
+    { "command": "git diff --check -- scripts/check-remote-media-policy-contract.mjs docs/plans/2026-08-06-xot-b2a-ssrf-zero-egress.json", "exit": 0, "note": "clean" },
+    { "command": "git diff --cached --quiet (staged index)", "exit": 0, "note": "empty" },
+    { "command": "lsof -iTCP:8080 -sTCP:LISTEN", "exit": 1, "note": "8080 unbound" },
+    { "command": "docker ps -a xot grep count", "exit": 0, "note": "0 XOT resources" },
+    { "command": "docker ps -a skillmap grep count", "exit": 0, "note": "10 skillmap intact" }
+  ],
+  "ledger_coverage": {
+    "command": "npm run check:air-ledger-coverage (normal and MUTATION_TEST=1)",
+    "exit": 0,
+    "self_test": "normal selfTest=skipped; MUTATION_TEST=1 selfTest=pass; both airIds=80 latestDispositions=80",
+    "note": "The previously reported AIR-009/AIR-067 governance gap (lacks completed-scope/adversarial-review/deployment-state proof) was resolved by the append-only B1 supersession line 503. B2A authored no ledger writes and did not edit the ledger; this receipt documents the now-green state for the current dispatch."
+  },
+  "unresolved_gates": [
+    "Historical Supabase PAT alert #1 remains explicitly unresolved; no release-security closure claimed.",
+    "Protected migration / owner-review / schema-policy-grant / checked-in type parity / reviewed-SHA (107 manifest) remain UNRESOLVED; the release gate remains CLOSED.",
+    "Higher evidence tiers (T2 staging, T3 live-ro, T4 live-canary), CI, deployment, and live promotion remain deferred (not promoted).",
+    "Deno is not installed on the host; therefore deno test/check and disposable-local-integrated-replay T1 could not be rerun here. Recorded as honest current capability limit, not a failure of the offline evidence."
+  ],
+  "state_matrix": {
+    "local": "candidate offline evidence authored",
+    "staged": "no",
+    "committed": "no",
+    "pushed": "no",
+    "ci": "not run",
+    "staging": "not run",
+    "deployed": "no",
+    "live": "no contact"
+  },
+  "not_done_not_touched": [
+    "No migrations, manifest, archive/history, or generated types were modified.",
+    "No unrelated dirty baseline paths were modified.",
+    "No prior B0/B1 receipts were modified.",
+    "No server, Vite, browser, Deno, Docker, database, provider, network, CI, deploy, or live action was run.",
+    "The comprehensive ledger was NOT appended (author task)."
+  ]
+}

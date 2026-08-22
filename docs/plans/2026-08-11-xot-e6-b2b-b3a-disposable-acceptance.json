@@ -1,0 +1,405 @@
+{
+  "schema": "xot-e6-b2b-b3a-disposable-acceptance-receipt-v1",
+  "event": "e6_b2b_b3a_disposable_acceptance_repair_local_t1",
+  "phase": "split-e6-disposable-t1-local-only",
+  "status": "ACCEPTED_LOCAL_DISPOSABLE_T1",
+  "release": "CLOSED",
+  "releaseGate": "CLOSED",
+  "riskTier": "HIGH",
+  "timestamp": "2026-08-11T07:14:20Z",
+  "airIds": [
+    "AIR-001",
+    "AIR-003",
+    "AIR-005"
+  ],
+  "brIds": [
+    "BR-MEDIA-01",
+    "BR-MEDIA-03",
+    "BR-JOB-01",
+    "BR-JOB-02"
+  ],
+  "repository": "/Users/stevmq/Finalized XOT",
+  "branch": "codex/xot-remediation-convergence",
+  "head": "0bd578856016c06a10890339f93aa13b82ecae48",
+  "directPlan": {
+    "path": "docs/plans/2026-08-08-xot-post-b4-execution-sequence.md",
+    "sha256": "24feff64abe2a221ca69cb9f52e1a03eb53d707ec024367fa8aa3e75cf0dea4c",
+    "section": "E6 - B2B/B3A Disposable Acceptance Repair",
+    "class": "local/disposable T1",
+    "targetTier": "T1 where the actual boundary is exercised",
+    "dependencies": [
+      "execution preflight",
+      "E5"
+    ],
+    "requiredEvidence": [
+      "mixed-age/shared-reference media claims and forced storage failure",
+      "stale job/X owner rejection, generation rotation, checked zero-row writes, and provider-start ambiguity",
+      "disposable PostgreSQL replay, no network, and exact cleanup receipt"
+    ],
+    "deferred": [
+      "production schema",
+      "canary",
+      "provider evidence"
+    ]
+  },
+  "supersession": {
+    "path": "docs/plans/2026-08-10-xot-e6-b2b-b3a-disposable-acceptance-blocked.json",
+    "sha256": "be8485cc469be4d9f6a49c7fb1a605acc3a3f74d0e64b5458f78438ac5795ecf",
+    "status": "BLOCKED_LOCAL_DISPOSABLE_T1_NOT_ACHIEVED",
+    "immutable": true,
+    "effect": "This new receipt supplies the later successful local/disposable T1 evidence. The blocked predecessor remains unchanged and valid as the record of the earlier failed attempt."
+  },
+  "predecessors": {
+    "e5": {
+      "path": "docs/plans/2026-08-10-xot-e5-b2a-no-egress-runtime-closure.json",
+      "sha256": "c1061931d4f0970ef4d312d27818d9cc59729fcbc236981c41eb17285e9487c7",
+      "status": "ACCEPTED_LOCAL_ISOLATED_T1"
+    },
+    "b2b": {
+      "path": "docs/plans/2026-08-06-xot-b2b-media-object-claims.json",
+      "sha256": "f3d0c743de35ba4dd3409e87b8496793850fa3974fd3ad394a5705ff0464835b",
+      "status": "candidate-report-ready",
+      "reviewVerdict": "REWORK",
+      "evidenceTier": "offline-source-model-only",
+      "immutable": true,
+      "supersession": "E6 addresses the prior REWORK and adds the missing disposable PostgreSQL and application-boundary evidence without rewriting the old receipt."
+    },
+    "b3a": {
+      "path": "docs/plans/2026-08-06-xot-b3a-job-x-claim-fencing.json",
+      "sha256": "e052db66e75ffd713bc5aded176d4ccf29bdca06ef661cb8ee60df3db67cf2a8",
+      "status": "review-ready-local-only",
+      "reviewVerdict": "not recorded",
+      "evidenceTier": "offline-source-model-only",
+      "immutable": true,
+      "supersession": "E6 adds current disposable runtime acceptance and the ambiguity-history repairs without rewriting the old receipt."
+    }
+  },
+  "ledger": {
+    "path": "docs/plans/2026-07-14-xot-comprehensive-audit-remediation-implementation-ledger.jsonl",
+    "preappendRowCount": 523,
+    "preappendFullSha256": "16a15af79e01c9494e5a8950400552a860cda648980e0dde2c0ed4cf7a876f04",
+    "predecessorRow": {
+      "row": 523,
+      "event": "e5_b2a_no_egress_runtime_closure_acceptance_isolated_t1_row523",
+      "lineNoNewlineSha256": "5ac8b183552c95cbae9f13e83da39aad8d2ee5363fca817c1a8b6f9b096337e8",
+      "prefixThroughRow522Sha256": "2878e7d65c57966a701a3fccdf0b6d8d07565686847092d391593552b3a97971"
+    },
+    "receiptRow": "none at receipt authoring time",
+    "appendOnly": true,
+    "mutation": "No ledger row was appended or changed while this receipt was authored. A separately reviewed append-only row may bind this receipt later."
+  },
+  "artifactBindings": {
+    "protectedOriginals": [
+      {
+        "path": "supabase/migrations/20260806123000_media_object_cleanup_claims.sql",
+        "sha256": "f830ed38a7b190ef01aa747f5cefbb315963d304fd097154b35c293ad8abf4ef",
+        "newlineCount": 527,
+        "logicalLineCount": 528,
+        "state": "byte-exact unchanged; the intentional missing final newline is preserved"
+      },
+      {
+        "path": "supabase/migrations/20260806143000_b3_job_x_claim_fencing.sql",
+        "sha256": "024dc8569aa490d9050d63b4507e584a9ffba5cb255bc3df9e76e24a64b84ecd",
+        "lines": 649,
+        "state": "byte-exact unchanged"
+      }
+    ],
+    "forwardOnlySuccessors": [
+      {
+        "path": "supabase/migrations/20260808133000_b2b_media_object_deletion_token_uuid.sql",
+        "sha256": "b25a0f0367a5fe34783a29b0e2837d56fc89d5f1bff0e423ef0f1f87286eb364",
+        "lines": 21,
+        "purpose": "repair the B2B deletion token type to uuid"
+      },
+      {
+        "path": "supabase/migrations/20260808143000_b3a_reconcile_expired_job_claims_fix.sql",
+        "sha256": "a126f3f1268bd710bc420861974915eb7adbbae03ce94e7329eeb335ab1a3c20",
+        "lines": 61,
+        "purpose": "repair expired-job reconciliation while preserving fenced ownership"
+      },
+      {
+        "path": "supabase/migrations/20260808153000_b3a_fail_x_post_delivery_null_fix.sql",
+        "sha256": "c95c09cbfef0d7bc44a0640383f9ad4a23297701d75126d46155ab928a9b44b5",
+        "lines": 65,
+        "purpose": "replace an untyped all-NULL CASE with a typed-safe direct NULL assignment"
+      },
+      {
+        "path": "supabase/migrations/20260808163000_b3a_claim_x_ambiguous_retry_fix.sql",
+        "sha256": "ad4d0e56f652f7df0b5d40b8258643b099e76ea5cb51b8b4d9d42fe380184807",
+        "lines": 174,
+        "purpose": "prevent force retry of an ambiguous latest receipt"
+      },
+      {
+        "path": "supabase/migrations/20260808173000_b3a_claim_x_ambiguous_history_fix.sql",
+        "sha256": "74b69c207ef81d76fc6a0e800d9105c05aa61b69d4d8818ec252dc7ba29af555",
+        "lines": 186,
+        "purpose": "make the ambiguity/provider-start guard history-wide while retaining ordinary pre-provider force retry"
+      }
+    ],
+    "acceptanceCapsule": [
+      {
+        "path": "scripts/e6DisposableReadiness.mjs",
+        "sha256": "6611cf6771a5036e583ea364c27b5d33be85c196f6ce18679fcaa27740c0b444",
+        "lines": 224
+      },
+      {
+        "path": "scripts/e6DisposableReadiness.test.mjs",
+        "sha256": "41223682479eb986fa6b14cc912a52a34c8628dff62af79c038023c570d6791e",
+        "lines": 222
+      },
+      {
+        "path": "scripts/run-e6-disposable-acceptance.mjs",
+        "sha256": "c273d0f5004fc1571171bc42e76be79025e7151a775ec6c90174ee0711f51733",
+        "lines": 432
+      },
+      {
+        "path": "scripts/check-e6-disposable-acceptance-contract.mjs",
+        "sha256": "b9babde6b039bed4b5493d7ea3dfe951e3b04351b1e191bed47330146b10bd91",
+        "lines": 1017
+      },
+      {
+        "path": "scripts/e6-disposable-fixture.sql",
+        "sha256": "5668a18c260d1e6734236d03448afcbdf634065d8f3626bc145b9de28bba1804",
+        "lines": 297
+      },
+      {
+        "path": "supabase/functions/_shared/e6DisposableAcceptance.test.ts",
+        "sha256": "451a87ba803cd4d3ea83c1c0f80029a6ff430d5feaa577ebf0114a71623808ee",
+        "lines": 132
+      }
+    ]
+  },
+  "acceptedBehavior": {
+    "b2b": [
+      "Mixed-age media-object claims retain shared references and delete only rows owned by the current deletion token.",
+      "A forced storage failure is exercised through the application boundary and does not clear database references.",
+      "The disposable PostgreSQL fixture executes the real current RPC surface and validates the uuid deletion-token repair."
+    ],
+    "b3a": [
+      "Stale job and X owners/generations are rejected by checked zero-row writes.",
+      "Generation rotation displaces stale owners without allowing an old generation to complete or fail the claim.",
+      "A rejected provider-start marker permits zero provider calls at the application boundary.",
+      "Provider acceptance followed by completion-write uncertainty is reported as ambiguous/non-success, never success.",
+      "Any non-posted receipt history with claim_state ambiguous or provider_started_at non-null blocks force retry until explicit reconciliation, even when a newer ordinary failed row exists.",
+      "An ordinary failed/skipped receipt created before provider start remains force-retryable."
+    ],
+    "securitySurface": [
+      "Successor function bodies retain SECURITY DEFINER, closed search_path, and service-role-only grants in the disposable replay.",
+      "No production ownership, production grant, or production type-equivalence claim is made."
+    ]
+  },
+  "rootCauseAndRepairTrail": [
+    {
+      "finding": "The accepted fail_x_post_delivery body used claim_expires_at = CASE WHEN v_ambiguous THEN NULL ELSE NULL END; PostgreSQL resolved the all-NULL CASE as text and rejected assignment to timestamptz.",
+      "repair": "The 1530 successor uses a direct NULL assignment without modifying the protected original."
+    },
+    {
+      "finding": "force_retry could reclaim an ambiguous failed receipt.",
+      "repair": "The 1630 successor added an ambiguity gate before the force-retry path."
+    },
+    {
+      "finding": "provider_started_at can be non-null while claim_state is failed when the caller supplies a skip reason, and a newer ordinary receipt could mask older provider-started or ambiguous history.",
+      "repair": "The 1730 successor makes the guard history-wide over every non-posted receipt with claim_state ambiguous or provider_started_at non-null, while preserving ordinary pre-provider retry."
+    },
+    {
+      "finding": "The earlier 121-migration replay allowed Deno to emit Download lines.",
+      "repair": "The runner and checker now require npm --offline plus Deno --cached-only --frozen --deny-net in exact order. The final 122-migration run emitted no Download line and is the only accepted replay."
+    }
+  ],
+  "runtimeAcceptance": {
+    "tier": "T1",
+    "classification": "local disposable database/runtime plus actual application failure-ordering boundary with injected provider/storage effects",
+    "postgres": {
+      "image": "public.ecr.aws/supabase/postgres@sha256:99b1729aeb0bac314445024fc149fbd39306170b61dd50800ccf180327ab3459",
+      "imageAvailability": "exact digest already cached locally",
+      "context": "orbstack",
+      "clientVersion": "29.4.0",
+      "serverVersion": "29.4.0",
+      "pullPolicy": "--pull=never",
+      "network": "--network none",
+      "mounts": [],
+      "publishedPorts": [],
+      "port8080Before": "unbound",
+      "migrationCount": 122,
+      "configCmdExpected": [
+        "postgres",
+        "-D",
+        "/etc/postgresql"
+      ],
+      "configCmdPreservedBeforeStart": true,
+      "sqlFixtureExecuted": true
+    },
+    "deno": {
+      "version": "2.9.5",
+      "command": "npm exec --offline --yes deno -- test --cached-only --frozen --deny-net --no-check supabase/functions/_shared/e6DisposableAcceptance.test.ts",
+      "tests": "4 passed, 0 failed",
+      "downloadLines": 0,
+      "hostDependencyResolution": "cache-only and frozen",
+      "runtimeNetworkPermission": "denied"
+    },
+    "fullReplay": {
+      "command": "npm run test:e6-disposable-acceptance",
+      "exitCode": 0,
+      "passLine": "E6_DISPOSABLE_ACCEPTANCE_PASS image=public.ecr.aws/supabase/postgres@sha256:99b1729aeb0bac314445024fc149fbd39306170b61dd50800ccf180327ab3459 context=orbstack migrations=122 mount=[] port8080_before=unbound",
+      "cleanupLine": "E6_CLEANUP container=absent mounts=[] xotContainers=0 xotVolumes=0 xotNetworks=0 port8080=unbound skillmapUnchanged=true skillmapInvariantBounded=true"
+    },
+    "exactCleanup": {
+      "container": "absent",
+      "capturedMounts": [],
+      "xotContainers": 0,
+      "xotVolumes": 0,
+      "xotNetworks": 0,
+      "port8080After": "unbound",
+      "skillmapResourceInventoryUnchanged": true,
+      "boundedInvariant": true
+    }
+  },
+  "validation": {
+    "green": [
+      {
+        "command": "npm run check:e6-disposable-acceptance",
+        "result": "E6_DISPOSABLE_ACCEPTANCE_SOURCE_CONTRACT_PASS isolation=exact offline=required sqlAssertions=true appBoundary=true readiness=marker-stable-two-samples selfTest=skipped"
+      },
+      {
+        "command": "node scripts/check-e6-disposable-acceptance-contract.mjs --mutation-test",
+        "result": "pass; adversarial mutations rejected"
+      },
+      {
+        "command": "node --test scripts/e6DisposableReadiness.test.mjs",
+        "result": "15 passed, 0 failed"
+      },
+      {
+        "command": "npm exec --offline --yes deno -- test --cached-only --frozen --deny-net --no-check supabase/functions/_shared/e6DisposableAcceptance.test.ts",
+        "result": "4 passed, 0 failed; no Download output"
+      },
+      {
+        "command": "node --check scripts/e6DisposableReadiness.mjs && node --check scripts/run-e6-disposable-acceptance.mjs && node --check scripts/check-e6-disposable-acceptance-contract.mjs",
+        "result": "exit 0"
+      },
+      {
+        "command": "git diff --check",
+        "result": "clean"
+      },
+      {
+        "command": "git diff --cached --name-only",
+        "result": "empty staged index"
+      },
+      {
+        "command": "npm run test:e6-disposable-acceptance",
+        "result": "exit 0; 122 migrations; SQL fixture and Deno 4/4 passed; exact cleanup passed"
+      }
+    ],
+    "protectedOriginalsUnchanged": true,
+    "stopConditionsTriggered": [],
+    "acceptedReplay": "final 122-migration cache-only run only",
+    "excludedReplay": "The earlier 121-migration run is excluded because its Deno phase emitted Download lines."
+  },
+  "evidenceLimits": {
+    "t1Actual": [
+      "fresh local disposable PostgreSQL execution of all 122 current migrations",
+      "real current SQL/RPC assertions for the B2B/B3A database boundaries",
+      "real application helper/failure-ordering assertions with injected storage/provider effects",
+      "cache-only Deno runtime with network permission denied",
+      "exact local resource teardown"
+    ],
+    "notClaimed": [
+      "actual Supabase Storage provider or object-custody parity",
+      "actual X provider call or provider acceptance",
+      "production schema, ownership, grants, types, or migration history equivalence",
+      "hosted CI",
+      "staging",
+      "deployment",
+      "canary",
+      "production or live behavior",
+      "T2, T3, or T4 acceptance"
+    ]
+  },
+  "reviews": {
+    "independentTechnicalAcceptance": {
+      "handle": "/root/e6_readiness_independent_review",
+      "requestedRole": "independent acceptance reviewer",
+      "requestedModel": "GPT-5.6 Luna",
+      "requestedReasoning": "high",
+      "runtimeIdentityAndSettingsTelemetry": "unknown",
+      "verdict": "ACCEPT",
+      "findings": [],
+      "subagentsUsed": false,
+      "accepted": true
+    },
+    "claudeFinalReview": {
+      "runId": "run_f65d1144e726",
+      "taskId": "task_bd63a4aa6a16",
+      "dispatchId": "ctx_bfcc346a6be8",
+      "terminalHandle": "term_6d2ee89c-8a01-4482-9e43-2fa4b3c36bcd",
+      "route": "Claude Code DeepSeek V4 Flash 0731",
+      "effortCommand": "/effort ultracode",
+      "visibleEffortResult": "ultracode; xhigh + dynamic workflow orchestration",
+      "routeIdentityAndEffortVerified": true,
+      "requestedInternalSubagents": [
+        "SQL and migration-history lens",
+        "isolation and runner lens",
+        "evidence and receipt lens"
+      ],
+      "internalSubagentsActuallyUsed": false,
+      "execution": "BLOCKED",
+      "failure": "Inference gateway returned HTTP 500 through all 10 retries.",
+      "verdict": "NO_OUTPUT",
+      "outputAccepted": false,
+      "taskFinalStatus": "failed",
+      "substitution": "none"
+    },
+    "coordinator": {
+      "handle": "/root",
+      "role": "implementation coordinator and final acceptance authority",
+      "requiredModel": "GPT-5.6 Luna",
+      "requiredReasoning": "high",
+      "runtimeIdentityAndSettingsTelemetry": "unknown"
+    }
+  },
+  "documentationProvenance": {
+    "context7LibraryId": "/denoland/docs",
+    "topic": "Deno offline test isolation",
+    "resolvedBehavior": "--cached-only prevents dependency downloads; --deny-net denies runtime network access; --frozen prevents lockfile mutation",
+    "localVersion": "Deno 2.9.5",
+    "fallback": "local deno test --help confirmed the selected flags"
+  },
+  "deploymentState": {
+    "local": "accepted_local_disposable_t1",
+    "database": "temporary local disposable PostgreSQL only; removed",
+    "server": "not run",
+    "browser": "not run",
+    "provider": "not contacted",
+    "production": "not contacted",
+    "staged": "no",
+    "committed": "no",
+    "pushed": "no",
+    "ci": "not run",
+    "staging": "not run",
+    "deployed": "no",
+    "live": "not run",
+    "dirtyWorktree": "preserved"
+  },
+  "residualsAndDeferrals": [
+    "Production schema, ownership, grant, generated-type, and migration-history equivalence remain for E7 and higher tiers.",
+    "Actual storage-provider failure and object-custody evidence remain deferred.",
+    "Actual X provider acceptance/completion ambiguity evidence remains deferred.",
+    "Canary, hosted CI, staging, deployment, production, and live verification remain closed or deferred.",
+    "Claude Code final review produced no output because the exact DeepSeek route failed with HTTP 500; no substitute model or effort was used."
+  ],
+  "rollback": {
+    "mode": "selective successor/capsule correction plus later append-only evidence correction",
+    "protectedOriginals": "never rewrite the two protected original migrations",
+    "authorization": "remove or alter only E6 successor/capsule paths in an explicitly authorized workflow",
+    "ledger": "never rewrite a prior row; append a correcting row if later evidence overturns this local acceptance",
+    "releaseGate": "CLOSED"
+  },
+  "resourceState": {
+    "e6Container": "absent",
+    "e6Volumes": 0,
+    "e6Networks": 0,
+    "port8080": "unbound",
+    "taskOwnedDatabaseResources": "removed",
+    "stagedIndex": "empty",
+    "dirtyWorktree": "preserved"
+  }
+}

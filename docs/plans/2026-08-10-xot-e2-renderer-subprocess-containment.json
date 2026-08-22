@@ -1,0 +1,210 @@
+{
+  "schema": "xot-e2-renderer-subprocess-containment-receipt-v1",
+  "event": "e2-renderer-subprocess-containment-review-ready-local-only",
+  "phase": "split-e2-review-ready-local-only",
+  "status": "REVIEW_READY_LOCAL_T0_T1",
+  "riskTier": "high",
+  "airIds": [
+    "AIR-020"
+  ],
+  "brIds": [
+    "BR-RENDER-03"
+  ],
+  "repository": "/Users/stevmq/Finalized XOT",
+  "branch": "codex/xot-remediation-convergence",
+  "head": "0bd578856016c06a10890339f93aa13b82ecae48",
+  "plan": {
+    "path": "docs/plans/2026-08-08-xot-post-b4-execution-sequence.md",
+    "sha256": "24feff64abe2a221ca69cb9f52e1a03eb53d707ec024367fa8aa3e75cf0dea4c"
+  },
+  "predecessor": {
+    "path": "docs/plans/2026-08-09-xot-e1-renderer-capacity-shutdown.json",
+    "receiptSha256": "c1e575a0495508501199d42edfcddf7f6f55dd1614b08fb534a85a310872e902"
+  },
+  "ledger": {
+    "path": "docs/plans/2026-07-14-xot-comprehensive-audit-remediation-implementation-ledger.jsonl",
+    "preAppendRowCount": 518,
+    "preAppendFileSha256": "0640df34baf0022ea716adad8de90e2bdf4fa9636f17efa9733ccbccceaea5da",
+    "row518Event": "e1_renderer_capacity_shutdown_deadline_correction_accepted_local_t0_t1_row518",
+    "row518NoNewlineSha256": "0fad01df164679a26fd08fe19e84349190f968e38db1bd4d0c1723d9cbbe6308"
+  },
+  "ledgerState": "pending_append_acceptance",
+  "ledgerIsAuthority": "append-only ledger acceptance remains the authority; this E2 receipt is NOT ledger-accepted",
+  "reviewState": {
+    "status": "REVIEW_READY_LOCAL_T0_T1",
+    "ledgerAcceptance": "pending",
+    "independentLunaHighAcceptance": "assigned_route_requested_runtime_identity_unverified"
+  },
+  "noLiveContactDeclaration": true,
+  "noDatabaseApplication": true,
+  "noExternalWrite": true,
+  "isolation": "local loopback and local real child processes only; no external DB/provider/browser/CI/staging/deploy/live; no test container; no lingering E2 agent, managed child, or temp root after close",
+  "authoring": {
+    "routeOverride": "user-directed run-specific override: Claude Code DeepSeek V4 Flash 0731 /effort ultracode (xhigh) used for the E2 acceptance author and final clean validator instead of any nominal route; coordinator retained acceptance authority",
+    "finalCleanValidator": {
+      "taskId": "task_d7e66e8eac9a",
+      "dispatchId": "ctx_d22d35dc8137",
+      "banner": "DeepSeek V4 Flash 0731",
+      "effort": "ultracode xhigh",
+      "workerDone": "valid worker_done issued",
+      "note": "This final clean validator is the authoritative provenance source for the recorded hashes; no subagent wrote repo files; checker read-only."
+    },
+    "priorAttemptStatus": "stalled or invalid prior author/validation dispatches are recorded as NOT acceptance authority; no verdict is claimed from them",
+    "independentAcceptanceAgent": {
+      "path": "/root/e2_final_acceptance_b7",
+      "verdict": "ACCEPT",
+      "assignedRoute": "GPT-5.6 Luna high (assigned route requested)",
+      "runtimeIdentityNote": "runtime model/reasoning identity telemetry was not exposed, so the assigned route is requested but runtime identity unknown and not independently confirmed; coordinator retains acceptance authority"
+    },
+    "internalReviewerNote": "No internal Claude reviewer receipt is invented here. The internal reviewer's handle was unknown and its parent terminal closed before a surfaced verdict; no internal reviewer receipt/verdict is claimed.",
+    "attribution": [
+      {
+        "path": "services/video-renderer/src/processRunner.js",
+        "finalSha256": "0792202b677757328a824082286c5ca6fe28fdd637543618bf143e5c4d041516",
+        "note": "core managed runner seam: bounded child lifecycle, detached process-group TERM-to-KILL, forced settle, bounded stdout/stderr, abort+shutdown cancellation"
+      },
+      {
+        "path": "services/video-renderer/src/ffmpeg.js",
+        "finalSha256": "dd5cd1eb39a28404b0697e246bd6c3dfe6ace8cd0a3d3960ffa6bc5f58b6d218",
+        "note": "ffmpeg commands + OpenCV pipeline routed through runManagedCommand/runManagedPipeline; no direct child_process spawn import"
+      },
+      {
+        "path": "services/video-renderer/src/preflight.js",
+        "finalSha256": "cbab162d04b86017b46967fc073d4fd1d0b6c25f01f59dab846d4f6df1e1c037",
+        "note": "OCR/preflight commands routed through runManagedCommand; no direct spawn import; safe processFailureCode on failure"
+      }
+    ],
+    "note": "The wider dirty working tree is NOT claimed committed by this receipt. E2 subprocess-containment authorship centers on the managed runner seam and the render paths routed through it; only exact-hash evidence above is asserted."
+  },
+  "verifiedBehavior": {
+    "boundedChildLifecycle": "managed probe/analysis/ocr/render commands implement a bounded child lifecycle using process-group-capable detached spawning; termination begins with SIGTERM, escalates to SIGKILL, with bounded TERM grace and post-KILL settle",
+    "detachedProcessGroupSignal": "on Linux the runner signals the entire process group (processImpl.kill(-pid, signal)) so descendants share the leader's lifecycle",
+    "forcedSettle": "a child that never emits close (or an overflow/timeout path) is forced through TERM-to-KILL then a bounded forced settle so no managed child is left alive",
+    "descendantAndLeaderGone": "the group-escape fixture proves via direct live-poll assertions that both the SIGTERM-ignoring descendant PID is reaped AND the leader process group is gone after escalation",
+    "boundedStdoutStderr": "stdout is capped (text and binary stdout caps); stderr is capped to a tail; managed errors expose only bounded stderr-size diagnostics",
+    "noRawStderrLeakage": "managed errors carry a bounded stderrTailBytes and no raw stderr payload (no raw this.stderrTail assignment)",
+    "abortCancellation": "managed runners accept a caller AbortSignal, addEventListener('abort'), re-check after consumer spawn, and terminate the active child on cancellation (process_cancelled); external-signal and reentrant-abort fixtures prove cancellation on a real child",
+    "shutdownCancellation": "abortAllManagedProcesses('shutdown') requests cancellation of every active managed process and the MANAGED_PROCESS_SHUTDOWN_REQUESTED latch rejects any later subprocess stage before it spawns",
+    "synchronousRealChildEvidence": "runner tests capture a real child pid synchronously in the spawn seam (capture.pid = child.pid) and gate readiness on the actual readyFile marker via an awaited bounded waitForFileSync before the production timer starts, so PID/readiness evidence is real and deterministically ordered before the deadline",
+    "ownedTempCleanupPreservingSiblings": "both production cleanup paths route their per-row teardown through the shared removeOwnedWorkdir(workingDir) seam on the exact local workingDir, never a parent path, preserving an unrelated sibling sentinel"
+  },
+  "achieved": [
+    "bounded child lifecycle via shared managed runner across ffmpeg/preflight/render",
+    "Linux detached process-group SIGTERM-to-SIGKILL with post-KILL forced settle",
+    "descendant PID and leader process-group both provably gone (direct live-poll assertions)",
+    "bounded text stdout, binary stdout, and stderr-tail caps with no raw stderr leakage",
+    "external AbortSignal cancellation and shutdown abortAllManagedProcesses of active children",
+    "shutdown lock (+ MANAGED_PROCESS_SHUTDOWN_REQUESTED) rejects later subprocess stages",
+    "synchronous real-child PID/readiness capture before the bounded termination timer",
+    "owned per-row temp cleanup via the removeOwnedWorkdir seam that preserves an unrelated sibling sentinel",
+    "six decoy mutations rejected and lexer keyword/division/literal probes accepted by the checker mutation suite"
+  ],
+  "deferred": [
+    "ledger append-only acceptance (ledger remains authority)",
+    "independent runtime identity confirmation of the assigned acceptance route (telemetry NOT exposed)",
+    "T2 host/container CPU/memory/PID/temp limits",
+    "T2 representative healthy-render p95 latency",
+    "hosted CI",
+    "staging",
+    "deployment",
+    "live verification",
+    "commit/push of the wider dirty working tree",
+    "aggregate RLS/migration/type/owner/PAT gates"
+  ],
+  "noUnsupportedDeadlineDeclaration": true,
+  "evidenceTier": {
+    "achieved": [
+      "T0",
+      "T1"
+    ],
+    "deferred": [
+      "T2",
+      "T3",
+      "T4"
+    ],
+    "note": "T0 is the source contract (structural + mutation-driven checker in normal and mutation modes) plus boundary typecheck and diff/no-index/staged checks; T1 is bounded local renderer tests only (focused 12/12 and full 197/197). No host/container CPU/memory/PID/temp limits, no representative healthy-render p95, no hosted CI, staging, deployment, or live runtime."
+  },
+  "validation": {
+    "focused": "focused process-runner + temp-cleanup 12/12 passed",
+    "fullRendererSuite": "full renderer suite 197/197 passed",
+    "mutationChecker": "RENDERER_PROCESS_RUNNER_SOURCE_CONTRACT_PASS selfTest=pass (six decoy mutations rejected; lexer keyword/division/literal probes accepted)",
+    "boundaryTypecheck": "renderer boundary strict typecheck clean (tsc --noEmit -p tsconfig.renderer-boundary.json, exit 0)",
+    "diffCheck": "git diff --check clean",
+    "noIndexWhitespace": "checker receipt no-index whitespace (git diff --no-index --check /dev/null vs checker) clean; receipt flagged new-file only",
+    "stagedIndexEmpty": "staged index empty (zero files)",
+    "noOwnedProcessesOrTempRoots": "no liveSpawn / processRunner / node --test fixture processes remain; no owned temp roots remain",
+    "noProductionContact": true,
+    "isolation": "local only; no external DB/provider/network/browser/CI/staging/deploy/live"
+  },
+  "protectedEvidence": {
+    "checker": {
+      "path": "scripts/check-renderer-process-runner-contract.mjs",
+      "sha256": "b7fbcde71c3a729455e2d1c339455046f2dabe3b3399c47639b23595eafa9532"
+    },
+    "doneClaim": {
+      "path": "/tmp/xot-e2-checker-hardening-doneclaim.md",
+      "sha256": "d157cad8afcd1a798a2184c5318f275c2998152f0440b3bc04a9164e61c31419"
+    },
+    "processRunnerTest": {
+      "path": "services/video-renderer/test/processRunner.test.js",
+      "sha256": "52ea9ff0462c33d85da74509eb77f3cd9d8ddfeae80c6cd3b0bf99bc3738b468"
+    },
+    "processRunner": {
+      "path": "services/video-renderer/src/processRunner.js",
+      "sha256": "0792202b677757328a824082286c5ca6fe28fdd637543618bf143e5c4d041516"
+    },
+    "renderer": {
+      "path": "services/video-renderer/src/renderer.js",
+      "sha256": "03fcd59639148c853a3ec38c36c1874ce793d1d489bf2722729ee92bcad67bcc"
+    },
+    "processRunnerTempCleanup": {
+      "path": "services/video-renderer/test/processRunnerTempCleanup.test.js",
+      "sha256": "1e74b34086c49b9d4d44bad9fa64ab1287b3ec190d0e184207c1c0f08d3c8dcd"
+    },
+    "rendererPackage": {
+      "path": "services/video-renderer/package.json",
+      "sha256": "6a30dd045a20cf340271aa15a4b3f1de2be834770175da535f496f73d2f9d27c"
+    }
+  },
+  "reviewChronology": [
+    {
+      "step": "v1",
+      "note": "initial E2 author draft (prior stalled/invalid dispatch attempts excluded from acceptance authority)"
+    },
+    {
+      "step": "v2",
+      "note": "internal Claude reviewer handle unknown and parent closed before a surfaced verdict; no internal reviewer receipt/verdict claimed"
+    },
+    {
+      "step": "final",
+      "note": "final clean no-subagent validation task_d7e66e8eac9a / dispatch ctx_d22d35dc8137, banner DeepSeek V4 Flash 0731, /effort ultracode xhigh, valid worker_done — authoritative provenance for the verified gates and hashes"
+    }
+  ],
+  "rollback": {
+    "noStaging": true,
+    "noProd": true,
+    "noCommitKnown": true,
+    "noCommit": true,
+    "noDeploy": true,
+    "revertPaths": [
+      "services/video-renderer/src/processRunner.js",
+      "services/video-renderer/src/ffmpeg.js",
+      "services/video-renderer/src/preflight.js",
+      "services/video-renderer/src/preview.js",
+      "services/video-renderer/src/renderer.js"
+    ],
+    "thenAppendCorrection": true,
+    "neverRewriteLedgerHistory": true
+  },
+  "releaseGate": "CLOSED",
+  "evidence": {
+    "plan": "24feff64abe2a221ca69cb9f52e1a03eb53d707ec024367fa8aa3e75cf0dea4c",
+    "predicate": "c1e575a0495508501199d42edfcddf7f6f55dd1614b08fb534a85a310872e902",
+    "checker": "b7fbcde71c3a729455e2d1c339455046f2dabe3b3399c47639b23595eafa9532",
+    "processRunner": "0792202b677757328a824082286c5ca6fe28fdd637543618bf143e5c4d041516",
+    "renderer": "03fcd59639148c853a3ec38c36c1874ce793d1d489bf2722729ee92bcad67bcc",
+    "processRunnerTest": "52ea9ff0462c33d85da74509eb77f3cd9d8ddfeae80c6cd3b0bf99bc3738b468",
+    "processRunnerTempCleanup": "1e74b34086c49b9d4d44bad9fa64ab1287b3ec190d0e184207c1c0f08d3c8dcd",
+    "rendererPackage": "6a30dd045a20cf340271aa15a4b3f1de2be834770175da535f496f73d2f9d27c"
+  }
+}
