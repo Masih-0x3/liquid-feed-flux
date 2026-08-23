@@ -19,7 +19,7 @@
     "check:functions": "deno check supabase/functions/*/index.ts",
   "check:edge-suppressions": "node scripts/check-edge-suppression-contract.mjs",
   "check:vercel-branch-suppression": "node scripts/check-vercel-branch-suppression-contract.mjs",
-    "test:functions": "deno test supabase/functions",
+    "test:functions": "deno test --allow-read --allow-env --allow-net=0.0.0.0:8000 supabase/functions",
     "test:admin-operation": "npx --yes deno test --no-check supabase/functions/admin-actions/adminOperation.test.ts supabase/functions/admin-actions/adminOperationProtocol.test.ts",
     "check:vite-env": "node scripts/check-vite-env.mjs",
     "check:runtime-contract": "node scripts/check-runtime-contract.mjs",
