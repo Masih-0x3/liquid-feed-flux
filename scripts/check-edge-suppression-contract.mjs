@@ -44,7 +44,7 @@ function assertContract(source) {
   assert.equal(typeof deno.tasks?.["lint:functions"], "string", "Deno function lint task must remain defined");
   assert.equal(typeof deno.tasks?.["test:functions"], "string", "Deno function test task must remain defined");
   const packageJson = JSON.parse(source.packageJson);
-  assert.equal(packageJson.scripts?.["lint:functions"], "deno task lint:functions", "package Deno lint task must remain named");
+  assert.equal(packageJson.scripts?.["lint:functions"], "deno lint supabase/functions", "package Deno lint command must invoke the direct lint binary");
   assert.equal(packageJson.scripts?.["check:functions"], "deno task check:functions", "package Deno check task must remain named");
   assert.match(source.ci, /- run: npm run lint:functions\n/, "CI must run Deno lint");
   assert.match(source.ci, /- run: npm run check:functions\n/, "CI must run Deno check");
