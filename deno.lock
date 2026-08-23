@@ -71,7 +71,7 @@
     "npm:react-dom@^18.3.1": "18.3.1_react@18.3.1",
     "npm:react-hook-form@^7.61.1": "7.75.0_react@18.3.1",
     "npm:react-resizable-panels@^2.1.9": "2.1.9_react@18.3.1_react-dom@18.3.1__react@18.3.1",
-    "npm:react-router-dom@^6.30.1": "6.30.3_react@18.3.1_react-dom@18.3.1__react@18.3.1",
+    "npm:react-router-dom@^6.30.6": "6.30.6_react@18.3.1_react-dom@18.3.1__react@18.3.1",
     "npm:react@^18.3.1": "18.3.1",
     "npm:recharts@^2.15.4": "2.15.4_react@18.3.1_react-dom@18.3.1__react@18.3.1",
     "npm:tailwind-merge@^2.6.0": "2.6.1",
@@ -1524,8 +1524,8 @@
     "@radix-ui/rect@1.1.1": {
       "integrity": "sha512-HPwpGIzkl28mWyZqG52jiqDJ12waP11Pa1lGoiyUkIEuMLBP0oeK/C89esbXrxsky5we7dfd8U58nm0SgAWpVw=="
     },
-    "@remix-run/router@1.23.2": {
-      "integrity": "sha512-Ic6m2U/rMjTkhERIa/0ZtXJP17QUi2CbWE7cqx4J58M8aA3QTfW+2UlQ4psvTX9IO1RfNVhK3pcpdjej7L+t2w=="
+    "@remix-run/router@1.23.4": {
+      "integrity": "sha512-q7j5geK7xs3UJSdm9/iytUNclBnLmYx1EnSeCFXHPeutdqgIMeFeHtUZgS3EhlKxdBEAu8OwtJCwmLrEzpSs7Q=="
     },
     "@rolldown/binding-android-arm64@1.0.3": {
       "integrity": "sha512-454rs7jHngixp/NMxd5srYD57OnzSlZ/eFTETjORQHLwJG1lRtmNOJcBerZlfu4GjKqeq8aCCIQrMdHyhI51Hw==",
@@ -2718,6 +2718,7 @@
         "natural-compare",
         "optionator"
       ],
+      "deprecated": true,
       "bin": true
     },
     "espree@10.4.0": {
@@ -3671,8 +3672,8 @@
         "react-dom"
       ]
     },
-    "react-router-dom@6.30.3_react@18.3.1_react-dom@18.3.1__react@18.3.1": {
-      "integrity": "sha512-pxPcv1AczD4vso7G4Z3TKcvlxK7g7TNt3/FNGMhfqyntocvYKj+GCatfigGDjbLozC4baguJ0ReCigoDJXb0ag==",
+    "react-router-dom@6.30.6_react@18.3.1_react-dom@18.3.1__react@18.3.1": {
+      "integrity": "sha512-0RHKZz7wwffvkU+2MFVT2NnjK44ssLEV+m0CAJaS2Ksmorrwj7WxH00jO0SOCW26/tINUnJHToXblDs33I38YQ==",
       "dependencies": [
         "@remix-run/router",
         "react",
@@ -3680,8 +3681,8 @@
         "react-router"
       ]
     },
-    "react-router@6.30.3_react@18.3.1": {
-      "integrity": "sha512-XRnlbKMTmktBkjCLE8/XcZFlnHvr2Ltdr1eJX4idL55/9BbORzyZEaIkBFDhFGCEWBBItsVrDxwx3gnisMitdw==",
+    "react-router@6.30.6_react@18.3.1": {
+      "integrity": "sha512-5HfK7k5im7LTOB0EqCQmfvy4C13G92Ssj1VTmouTK3AJvyjKTnFuCV0vcMAD/JS+JC4DvDIBRrlAeJIFjh5VWg==",
       "dependencies": [
         "@remix-run/router",
         "react"
@@ -4409,7 +4410,7 @@
         "npm:react-dom@^18.3.1",
         "npm:react-hook-form@^7.61.1",
         "npm:react-resizable-panels@^2.1.9",
-        "npm:react-router-dom@^6.30.1",
+        "npm:react-router-dom@^6.30.6",
         "npm:react@^18.3.1",
         "npm:recharts@^2.15.4",
         "npm:tailwind-merge@^2.6.0",
