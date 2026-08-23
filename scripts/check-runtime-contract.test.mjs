@@ -38,10 +38,13 @@ test("the committed runtime freeze is internally consistent", () => {
 });
 
 test("Vite 8 minimum patch and deployment major fail closed", () => {
+  const expectedDeploymentMajor = JSON.parse(readFileSync(join(REPO_ROOT, "docs/operations/runtime-contract.json"), "utf8")).node.deployment_major;
+  const mismatchedDeploymentMajor = expectedDeploymentMajor === 20 ? 22 : expectedDeploymentMajor + 1;
+  const validDeploymentVersion = expectedDeploymentMajor === 20 ? "19.0" : "12.0";
   assert.ok(validateRuntimeContract({ actualNodeVersion: "20.18.9" }).errors.some((error) => error.includes("Vite 8 supported range")));
-  assert.ok(validateRuntimeContract({ actualNodeVersion: "22.12.0", requireDeploymentMajor: true }).errors.some((error) => error.includes("deployment/CI Node major")));
+  assert.ok(validateRuntimeContract({ actualNodeVersion: `${mismatchedDeploymentMajor}.12.0`, requireDeploymentMajor: true }).errors.some((error) => error.includes("deployment/CI Node major")));
   assert.ok(validateRuntimeContract({ actualNodeVersion: "20.19.0", actualNpmVersion: "11.0.0" }).errors.some((error) => error.includes("npm major")));
-  assert.deepEqual(validateRuntimeContract({ actualNodeVersion: "22.12.0" }).errors, []);
+  assert.deepEqual(validateRuntimeContract({ actualNodeVersion: `${expectedDeploymentMajor}.${validDeploymentVersion}` }).errors, []);
 });
 
 test("package engine drift is rejected", () => withFixture((root) => {
