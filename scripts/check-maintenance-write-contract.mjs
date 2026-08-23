@@ -201,11 +201,9 @@ function assertContract({ source, basic, xPosting, xApiSummary, packageJson, ci 
     "const { data: controlsRow, error: controlsError } = await table(supabase, \"settings\").select(",
     "if (controlsError) throw new Error(\"hydrate_backfill_controls_read_failed\");",
     "hydrate_backfill_posts_invalid_response",
-    "const { data: existingJob, error: existingJobError } = await table(supabase, \"jobs\")",
-    "if (existingJobError) {",
-    "hydrate_backfill_pending_job_read_failed",
-    "if (!Array.isArray(existingJob)) {",
-    "hydrate_backfill_pending_job_invalid_response",
+    "const { data: pending, error: pendingError } = await table(supabase, \"jobs\")",
+    "if (pendingError) throw pendingError;",
+    "hydrate_pending_jobs_invalid_response",
     '"hydrate_backfill_posts_read_failed"',
     '"hydrate_backfill_post_update_failed"',
     '"hydrate_backfill_enqueue_failed"',
@@ -417,15 +415,15 @@ if (process.env.MUTATION_TEST === "1") {
   assertRejects((source) => ({
     ...source,
     xPosting: source.xPosting.replace(
-      "if (existingJobError) {",
-      "if (false) {",
+      "if (pendingError) throw pendingError;",
+      "if (false) throw pendingError;",
     ),
   }), "truncated hydration pending-job read bypass");
   assertRejects((source) => ({
     ...source,
     xPosting: source.xPosting.replace(
-      "if (!Array.isArray(existingJob)) {",
-      "if (false) {",
+      'throw new Error("hydrate_pending_jobs_invalid_response");',
+      'throw new Error("hydrate_pending_jobs_shape_guard_removed");',
     ),
   }), "truncated hydration pending-job shape bypass");
   assertRejects((source) => ({

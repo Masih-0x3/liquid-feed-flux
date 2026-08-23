@@ -145,6 +145,7 @@ describe("monitoring action wrappers", () => {
     expect(invokeAdminOperationMock).toHaveBeenNthCalledWith(
       2,
       { action: "reprocess", tweet_id: "tweet-7" },
+      { failureMessage: "Reprocess failed" },
     );
     expect(invokeAdminActionMock).toHaveBeenNthCalledWith(
       1,

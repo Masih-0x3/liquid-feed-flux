@@ -54,7 +54,11 @@ const REQUIRED_CI_RUNS = [
 ];
 
 const REQUIRED_CI_PREFIX_BLOCKS = [
-  ["      - uses: actions/checkout@v4"],
+  [
+    "      - uses: actions/checkout@v4",
+    "        with:",
+    "          ref: ${{ github.event.pull_request.head.sha || github.sha }}",
+  ],
   [
     "      - uses: actions/setup-node@v4",
     "        with:",

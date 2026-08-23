@@ -85,6 +85,7 @@ export async function adminHydratePost(tweetId: string) {
 export async function adminReprocess(tweetId: string) {
   return invokeAdminOperation<{ success?: boolean; message?: string }>(
     { action: 'reprocess', tweet_id: tweetId },
+    { failureMessage: 'Reprocess failed' },
   );
 }
 

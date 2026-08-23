@@ -21,11 +21,12 @@ export type RuntimeControlsQueryClient = {
 };
 
 export class RuntimeControlsError extends Error {
-  readonly code = "runtime_controls_unavailable";
+  readonly code: "runtime_controls_unavailable";
 
   constructor() {
     super("runtime controls unavailable");
     this.name = "RuntimeControlsError";
+    this.code = "runtime_controls_unavailable";
   }
 }
 

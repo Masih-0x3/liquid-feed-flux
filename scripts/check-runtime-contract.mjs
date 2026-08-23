@@ -8,6 +8,7 @@ import ts from "typescript";
 
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const CONTRACT_PATH = "docs/operations/runtime-contract.json";
+export const PINNED_SUPABASE_CLI_VERSION = "2.111.0";
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 
@@ -240,7 +241,9 @@ function workflowRuntimeFacts(value, jobName, setupNodeAction) {
     setupBeforeRuns: setupIndex >= 0 && setupIndex < firstRequiredRunIndex,
     requiredPrefixMatches:
       steps[0]?.uses === "actions/checkout@v4"
-      && steps[0]?.isBareUses
+      && steps[0]?.meaningful.length === 3
+      && steps[0]?.meaningful[1]?.trim() === "with:"
+      && steps[0]?.meaningful[2]?.trim() === "ref: ${{ github.event.pull_request.head.sha || github.sha }}"
       && steps[1]?.uses === setupNodeAction
       && steps[1]?.meaningful.length === 4
       && steps[1]?.meaningful[1]?.trim() === "with:"
@@ -285,6 +288,8 @@ export function validateRuntimeContract({
 
   requireEqual(errors, "contract schema", contract.schema_version, "xot-runtime-contract-v1");
   requireEqual(errors, "contract status", contract.status, "current_divergence_frozen_upgrade_deferred");
+  requireEqual(errors, "Supabase CLI repository pin", contract.supabase_cli?.repository_pin, PINNED_SUPABASE_CLI_VERSION);
+  requireEqual(errors, "Supabase CLI CI pin command", ci.includes(`npx --yes supabase@${PINNED_SUPABASE_CLI_VERSION} --version`), true);
   requireEqual(errors, "root Node engine", rootPackage.engines?.node, contract.node.root_engine);
   requireEqual(errors, "root npm engine", rootPackage.engines?.npm, contract.node.root_npm_engine);
   requireEqual(errors, "root package manager", rootPackage.packageManager, contract.node.root_package_manager);

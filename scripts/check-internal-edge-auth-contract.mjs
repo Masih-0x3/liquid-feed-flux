@@ -96,6 +96,8 @@ const internalEntrypoints = Object.freeze({
       './xApiWorkflow.ts',
       './mediaWorkflow.ts',
       '../_shared/remoteMediaPolicy.ts',
+      '../_shared/runtimeControls.ts',
+      '../_shared/externalPostingGuard.ts',
       './scoringWorkflow.ts',
       './translateWorkflow.ts',
     ],
@@ -138,6 +140,8 @@ const internalEntrypoints = Object.freeze({
       '../_shared/xPostDeliveryClaim.ts',
       '../_shared/staleMediaRepair.ts',
       '../_shared/xQuotaAdmission.ts',
+      '../_shared/runtimeControls.ts',
+      '../_shared/externalPostingGuard.ts',
     ],
   },
   'x-followers-snapshot': {
@@ -315,7 +319,7 @@ const internalWrappers = Object.freeze({
         ],
       ],
     ],
-    allowedTopLevelFunctions: ['checkedMediaCleanupClient'],
+    allowedTopLevelFunctions: ['isMediaCleanupResult', 'checkedMediaCleanupClient'],
   },
 });
 
@@ -932,6 +936,23 @@ function matchesDependencyBinding(property, binding) {
     return (
       (typescript.isIdentifier(value) && value.text === 'cleanupOldMedia')
       || hasMatchingParameterPassThrough(value, 'cleanupOldMedia', 'corsHeaders')
+      || (
+        typescript.isArrowFunction(value)
+        && value.parameters.length === 3
+        && typescript.isCallExpression(value.body)
+        && typescript.isIdentifier(value.body.expression)
+        && value.body.expression.text === 'cleanupOldMedia'
+        && value.body.arguments.length === 4
+        && typescript.isCallExpression(value.body.arguments[0])
+        && typescript.isIdentifier(value.body.arguments[0].expression)
+        && value.body.arguments[0].expression.text === 'requireMediaCleanupSupabaseClient'
+        && value.body.arguments.slice(1, 3).every((argument, index) =>
+          typescript.isIdentifier(argument)
+          && typescript.isIdentifier(value.parameters[index + 1].name)
+          && argument.text === value.parameters[index + 1].name.text)
+        && typescript.isIdentifier(value.body.arguments[3])
+        && value.body.arguments[3].text === 'corsHeaders'
+      )
     );
   }
   return false;

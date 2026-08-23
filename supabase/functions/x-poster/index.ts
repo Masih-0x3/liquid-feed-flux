@@ -1520,7 +1520,7 @@ Deno.serve(async (req) => {
     error: unknown;
     count: number | null;
   };
-  let quotaResults: QuotaQueryResult[] = [];
+  let quotaResults: Array<Record<string, unknown>> = [];
   try {
     quotaResults = await Promise.all([
       sb.from('x_deliveries').select('*', { count: 'exact', head: true }).eq('status', 'posted').gte('created_at', since30d),
@@ -1528,7 +1528,7 @@ Deno.serve(async (req) => {
       sb.from('x_deliveries').select('*', { count: 'exact', head: true }).eq('status', 'posted').gte('created_at', since1h),
       sb.from('x_deliveries').select('*', { count: 'exact', head: true }).eq('status', 'posted').gt('media_count', 0).gte('created_at', since24h),
       sb.from('x_deliveries').select('created_at, posted_at').eq('status', 'posted').order('created_at', { ascending: false }).limit(1),
-    ]);
+    ]) as unknown as Array<Record<string, unknown>>;
   } catch (_error) {
     console.error('[x-poster] quota reads unavailable', { code: X_QUOTA_UNAVAILABLE });
     return quotaUnavailableResponse();

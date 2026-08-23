@@ -179,6 +179,8 @@ export async function loadHydrationSettings(
       .eq("key", "twitter_hydration")
       .maybeSingle();
     if (thError) available = false;
+    if (th && typeof th === "object" && "value" in th &&
+      (th.value === null || Array.isArray(th.value))) available = false;
     const twitterHydration = parseSettingValue(th);
     if (twitterHydration === false) {
       available = false;
@@ -198,6 +200,8 @@ export async function loadHydrationSettings(
       .eq("key", "x_rate_limits")
       .maybeSingle();
     if (rlError) available = false;
+    if (rl && typeof rl === "object" && "value" in rl &&
+      (rl.value === null || Array.isArray(rl.value))) available = false;
     const rateLimits = parseSettingValue(rl);
     if (rateLimits === false) {
       available = false;

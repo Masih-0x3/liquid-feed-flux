@@ -13,10 +13,11 @@
   },
   "currentCandidateOverrides": {},
   "evidenceOverrides": {
-    "supabase/functions/_shared/runtimeControls.ts": "55a984a590daee7c7a66b337c7b418db2214ab1bda3009d7336c284fa4aea072",
+    "supabase/functions/_shared/runtimeControls.ts": "69f9f63f044479601c5e3093c39125950b7e12cd49168e69f0ad4833d1cf87a6",
     "supabase/functions/_shared/e10PreviewParityFoundation.test.ts": "eb51d9eb0e1eab93badbb04b80009870d8e9bb1eaf0cf2f4702af339f0503747",
-    "package.json": "98a7a06abd936090d187ebc32cf6f0af27e7bff131737eb39acfa941ef6eeb7a",
-    "scripts/check-migration-baseline.mjs": "923c7ddf77fc9409d2ee234eb8855a87155fcc198ea8b7fd888b8b2470701ba7"
+    "package.json": "e8265f269963961aee58cd189597318920678eecee0d40f91f297f8284223dfd",
+    "scripts/check-migration-baseline.mjs": "923c7ddf77fc9409d2ee234eb8855a87155fcc198ea8b7fd888b8b2470701ba7",
+    ".github/workflows/ci.yml": "8fc80db92f3fe9ca303e5cde6a83d84a9137f138c2fff3528a752cdaeac01e50"
   },
   "supersession": {
     "reason": "Accepted successor after source and package metadata drift in later local work; predecessor remains immutable.",
@@ -24,7 +25,8 @@
       "supabase/functions/_shared/runtimeControls.ts",
       "supabase/functions/_shared/e10PreviewParityFoundation.test.ts",
       "package.json",
-      "scripts/check-migration-baseline.mjs"
+      "scripts/check-migration-baseline.mjs",
+      ".github/workflows/ci.yml"
     ],
     "ledgerRow": 544,
     "validation": [

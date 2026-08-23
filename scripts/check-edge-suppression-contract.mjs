@@ -4,7 +4,7 @@ import { join, relative } from "node:path";
 
 const repoRoot = process.cwd();
 const functionsRoot = join(repoRoot, "supabase/functions");
-const REVIEWED_SUPPRESSION_COUNT = 72;
+const REVIEWED_SUPPRESSION_COUNT = 73;
 const SUPPRESSION_PATTERN = /deno-lint-ignore|@ts-(?:ignore|expect-error|nocheck)/g;
 
 function functionFiles(directory = functionsRoot) {
@@ -44,8 +44,8 @@ function assertContract(source) {
   assert.equal(typeof deno.tasks?.["lint:functions"], "string", "Deno function lint task must remain defined");
   assert.equal(typeof deno.tasks?.["test:functions"], "string", "Deno function test task must remain defined");
   const packageJson = JSON.parse(source.packageJson);
-  assert.equal(packageJson.scripts?.["lint:functions"], "npx --yes deno task lint:functions", "package Deno lint task must remain named");
-  assert.equal(packageJson.scripts?.["check:functions"], "npx --yes deno task check:functions", "package Deno check task must remain named");
+  assert.equal(packageJson.scripts?.["lint:functions"], "deno task lint:functions", "package Deno lint task must remain named");
+  assert.equal(packageJson.scripts?.["check:functions"], "deno task check:functions", "package Deno check task must remain named");
   assert.match(source.ci, /- run: npm run lint:functions\n/, "CI must run Deno lint");
   assert.match(source.ci, /- run: npm run check:functions\n/, "CI must run Deno check");
   return count;

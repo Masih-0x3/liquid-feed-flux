@@ -19,6 +19,7 @@ type AdminOperationEnvelope<T> = {
 
 export type InvokeAdminOperationOptions = {
   timeoutMs?: number;
+  failureMessage?: string;
 };
 
 const OPERATION_DEADLINES: Record<string, number> = {
@@ -95,6 +96,12 @@ export async function invokeAdminOperation<T = unknown>(
     return readEnvelope<T>(response, operationId);
   } catch (error) {
     if (classifyUnknownTransport(error)) return unknownResult(operationId);
+    if (error instanceof AdminActionClientError && options.failureMessage) {
+      throw new AdminActionClientError(error.code, {
+        failureMessage: options.failureMessage,
+        status: error.status,
+      });
+    }
     throw error;
   }
 }

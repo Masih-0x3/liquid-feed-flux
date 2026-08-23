@@ -114,8 +114,8 @@ export async function reprocessAdminAction(
   recordFeedback: RecordFeedbackFn,
 ): Promise<AdminActionResponse> {
   const { tweet_id } = body;
-  const tweetId = normalizeSingleReprocessTweetId(tweet_id);
-  if (!tweetId) {
+  const tweetId = normalizeReprocessTweetId(tweet_id);
+  if (!tweetId || !/^[A-Za-z0-9_-]{1,128}$/.test(tweetId)) {
     return { body: { error: "tweet_id is required" }, status: 400 };
   }
   const idempotencyKey = `reprocess:${tweetId}`;

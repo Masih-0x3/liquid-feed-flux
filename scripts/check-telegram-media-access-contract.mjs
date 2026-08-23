@@ -53,6 +53,10 @@ function assertContract({ source, packageJson, ci }, label = "current source") {
   if (helper.includes("return media.src_url as string")) {
     fail(`${label}: stored media must not fall back to raw source URL`);
   }
+  const storedPathSection = section(helper, "if (media.storage_path)", "if (typeof media.src_url", `${label} stored media path`);
+  if (storedPathSection.includes("return media.src_url")) {
+    fail(`${label}: stored media must not fall back to raw source URL`);
+  }
   if (!helper.includes('throw new Error("telegram_media_source_url_missing");')) {
     fail(`${label}: source URL shape must be validated when no storage path exists`);
   }
@@ -98,7 +102,7 @@ if (process.env.MUTATION_TEST === "1") {
   }), "Telegram helper any parameter mutant");
   assertRejects((source) => ({
     ...source,
-    source: source.source.replace('throw new Error("telegram_signed_media_url_unavailable");', "return media.src_url;"),
+    source: source.source.replace('return data.signedUrl;', "return media.src_url;"),
   }), "stored media raw URL fallback mutant");
   assertRejects((source) => ({
     ...source,

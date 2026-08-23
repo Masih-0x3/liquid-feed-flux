@@ -11,6 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -24,6 +26,7 @@ jobs:
       - run: node scripts/check-runtime-contract.mjs
       - run: node --test scripts/check-runtime-contract.test.mjs
       - run: node --test scripts/check-supply-chain-contract.test.mjs
+      - run: npx --yes supabase@2.111.0 --version
       - run: npm run check:remote-media-policy
       - run: npm run check:remote-media-no-egress
       - run: npm run test:remote-media-no-egress
@@ -154,6 +157,7 @@ jobs:
       - run: npm run test:migration-baseline
       - run: npm run lint:functions
       - run: npm run check:functions
+      - run: npm run test:functions
       - run: npm run check:strict-project-contract
       - run: npm run check:module-characterization
       - run: npm run check:visual-layer-characterization

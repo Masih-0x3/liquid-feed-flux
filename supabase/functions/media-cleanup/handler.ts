@@ -141,6 +141,9 @@ export function createMediaCleanupHandler(
         }));
         throw new Error("media_cleanup_invoke_failed");
       }
+      if (!data || typeof data !== "object" || Array.isArray(data)) {
+        throw new Error("media_cleanup_invalid_response");
+      }
       if (!isMediaCleanupResult(data)) {
         throw new Error("media_cleanup_invalid_response");
       }

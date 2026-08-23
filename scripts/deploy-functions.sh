@@ -6,6 +6,7 @@ set -euo pipefail
 # deploy-capable command (including a fake npx used by tests).
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 IDENTITY_MODULE="$SCRIPT_DIR/preview-identity.mjs"
+SUPABASE_CLI=(npx --yes supabase@2.111.0)
 CONFIG_FILE="${SUPABASE_CONFIG_FILE:-supabase/config.toml}"
 DRY_RUN="${DEPLOY_FUNCTIONS_DRY_RUN:-0}"
 ALLOW_DIRTY="${DEPLOY_ALLOW_DIRTY:-0}"
@@ -147,7 +148,7 @@ if [[ "$DRY_RUN" == "1" ]]; then
     if [[ "$verify_jwt" == "false" ]]; then
       args+=(--no-verify-jwt)
     fi
-    printf '==> Dry run: would run npx supabase functions deploy %q --project-ref [masked-preview-ref]' "$fn"
+    printf '==> Dry run: would run npx --yes supabase@2.111.0 functions deploy %q --project-ref [masked-preview-ref]' "$fn"
     if [[ "$verify_jwt" == "false" ]]; then
       printf ' --no-verify-jwt'
     fi
@@ -166,10 +167,10 @@ for fn in "${FUNCTIONS[@]}"; do
   fi
 
   echo "==> Deploying $fn (verify_jwt=$verify_jwt)"
-  npx supabase "${args[@]}"
+  "${SUPABASE_CLI[@]}" "${args[@]}"
 done
 
 echo "==> Setting DEPLOY_GIT_SHA=[current-sha] on [preview-ref]"
-npx supabase secrets set DEPLOY_GIT_SHA="$SHA" --project-ref "$PROJECT_REF"
+"${SUPABASE_CLI[@]}" secrets set DEPLOY_GIT_SHA="$SHA" --project-ref "$PROJECT_REF"
 
 echo "==> All done. Preview deploy completed for current SHA."

@@ -25,12 +25,13 @@ export type ExternalPostingGuardOptions = {
 };
 
 export class ExternalPostingBlockedError extends Error {
-  readonly code = "external_posting_blocked";
+  readonly code: "external_posting_blocked";
   readonly reason: ExternalPostingBlockReason;
 
   constructor(reason: ExternalPostingBlockReason) {
     super("external posting is blocked");
     this.name = "ExternalPostingBlockedError";
+    this.code = "external_posting_blocked";
     this.reason = reason;
   }
 }

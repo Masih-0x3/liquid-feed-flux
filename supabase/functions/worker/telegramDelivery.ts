@@ -27,7 +27,7 @@ type TelegramStorageBucketApi = {
   from(bucket: string): TelegramStorageObjectApi;
 };
 
-type TelegramStorageClient = {
+type TelegramSupabaseClient = {
   storage: TelegramStorageBucketApi;
 };
 
@@ -78,7 +78,7 @@ export async function computeAdaptiveSpacing(
 }
 
 export async function getMediaUrl(
-  supabase: TelegramStorageClient,
+  supabase: TelegramSupabaseClient,
   media: Record<string, unknown>,
 ): Promise<string> {
   if (media.storage_path) {
@@ -124,7 +124,7 @@ async function mapLimit<T, R>(
 // proper filename + image/* content-type; passing only a signed URL sometimes
 // causes Telegram to fall back to "document" rendering.
 async function fetchImageBytes(
-  supabase: TelegramStorageClient,
+  supabase: TelegramSupabaseClient,
   image: Record<string, unknown>,
 ): Promise<{ blob: Blob; filename: string } | null> {
   const storagePath = image.storage_path as string | null;
@@ -155,7 +155,7 @@ async function fetchImageBytes(
 }
 
 export async function sendTelegramPhotoFromStorage(
-  supabase: TelegramStorageClient,
+  supabase: TelegramSupabaseClient,
   botToken: string,
   chatId: string,
   image: Record<string, unknown>,
@@ -198,7 +198,7 @@ export async function sendTelegramPhotoFromStorage(
 }
 
 export async function sendTelegramPhotoGroupFromStorage(
-  supabase: TelegramStorageClient,
+  supabase: TelegramSupabaseClient,
   botToken: string,
   chatId: string,
   images: Record<string, unknown>[],
@@ -282,7 +282,7 @@ function telegramVideoTooLargeError(bytes: number): NonRetryableJobError {
 }
 
 async function fetchVideoBytes(
-  supabase: TelegramStorageClient,
+  supabase: TelegramSupabaseClient,
   video: Record<string, unknown>,
 ): Promise<{ blob: Blob; filename: string }> {
   const storagePath = video.storage_path as string | null;
@@ -319,7 +319,7 @@ async function fetchVideoBytes(
 }
 
 export async function sendTelegramVideoFromStorage(
-  supabase: TelegramStorageClient,
+  supabase: TelegramSupabaseClient,
   botToken: string,
   chatId: string,
   video: Record<string, unknown>,

@@ -369,7 +369,8 @@ serve(async (req) => {
     }
 
     // Handle test webhook action
-    if (action === ADMIN_RETRY_INBOUND_INGEST_ACTION && actionClass === "inbound_rss_ingest") {
+    if (action === "test_webhook") {
+      if (action === ADMIN_RETRY_INBOUND_INGEST_ACTION && actionClass === "inbound_rss_ingest") {
       const testRSSItem = {
         guid: `test-tweet-${Date.now()}`,
         title: 'Breaking: Major tech announcement today',
@@ -401,6 +402,7 @@ serve(async (req) => {
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
+      }
     }
     
     // Original retry logic

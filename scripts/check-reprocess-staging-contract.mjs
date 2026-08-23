@@ -93,7 +93,7 @@ function validate(source) {
   assert.match(source.monitoringActions, /failureMessage: 'Reprocess failed'/, 'the operator client must present an explicit reprocess failure state');
   assert.match(source.monitoringActions, /Existing media is preserved and is not refreshed until the staged media path is available/, 'single reprocess confirmation must disclose preserved media');
   assert.match(source.monitoringActions, /Queues pipeline re-evaluation for the selected posts\. Existing media is preserved/, 'bulk reprocess confirmation must disclose preserved media');
-  assert.match(source.monitoringPage, /const result = await adminReprocess\(entry\.tweet_id\);[\s\S]{0,240}description: result\.message/, 'single reprocess toast must use the server truth message');
+  assert.match(source.monitoringPage, /const result = await adminReprocess\(entry\.tweet_id\);[\s\S]{0,1200}description: result\.data\?\.message/, 'single reprocess toast must use the server truth message');
   assert.match(source.monitoringPage, /description: data\?\.message \?\?/, 'bulk reprocess toast must use the server truth message');
   assert.match(source.monitoringActionsTest, /failureMessage: "Reprocess failed"/, 'frontend action fixture must cover the reprocess error contract');
   assert.match(source.monitoringViewModelTest, /Existing media is preserved/, 'frontend copy fixture must protect the staged-media disclosure');

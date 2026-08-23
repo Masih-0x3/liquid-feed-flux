@@ -83,7 +83,7 @@
     "vercel_ignore_path": ".vercelignore",
     "vercel_ignore_sha256": "abc295fdc2acda9d3430d70254bc2c93cf3ae324bad2d9b06141d9cd728405fa",
     "ci_workflow_path": ".github/workflows/ci.yml",
-    "ci_workflow_sha256": "cac61c0f514f8d72af25bf2065a43cc5c502417a69b45eb6bf47d27403a45a82",
+    "ci_workflow_sha256": "8fc80db92f3fe9ca303e5cde6a83d84a9137f138c2fff3528a752cdaeac01e50",
     "wrapper_path": "scripts/check-build-contract.mjs",
     "wrapper_sha256": "7959d9345395856258f9b79efe655dc57f5e14f3a67cb7ce3c87bf742313249d",
     "frontend_env_path": "scripts/check-vite-env.mjs",
@@ -136,8 +136,8 @@
   },
   "supabase_cli": {
     "observed_evidence_version": "2.109.1",
-    "repository_pin": null,
-    "status": "unfixed_release_blocker"
+    "repository_pin": "2.111.0",
+    "status": "pinned_ci_release_blocker"
   },
   "documentation": {
     "vite_node_requirement": "https://vite.dev/blog/announcing-vite8",

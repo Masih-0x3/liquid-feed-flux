@@ -10,7 +10,7 @@
   "source_files": [
     {
       "path": ".github/workflows/ci.yml",
-      "sha256": "cac61c0f514f8d72af25bf2065a43cc5c502417a69b45eb6bf47d27403a45a82"
+      "sha256": "8fc80db92f3fe9ca303e5cde6a83d84a9137f138c2fff3528a752cdaeac01e50"
     },
     {
       "path": "deno.lock",
@@ -26,7 +26,7 @@
     },
     {
       "path": "package.json",
-      "sha256": "98a7a06abd936090d187ebc32cf6f0af27e7bff131737eb39acfa941ef6eeb7a"
+      "sha256": "e8265f269963961aee58cd189597318920678eecee0d40f91f297f8284223dfd"
     },
     {
       "path": "scripts/build-e8-local-supply-build-inventory.test.mjs",
@@ -34,7 +34,7 @@
     },
     {
       "path": "scripts/check-supply-chain-contract.mjs",
-      "sha256": "03a27939bf3d5a6a33a7d0d2d2a2388bf43942ac576205575f1367e1ca21ba02"
+      "sha256": "83fc6576e66e2ed3b699a6b9ae6fd54cd878a16831736d26b75100335b8f210d"
     },
     {
       "path": "scripts/check-supply-chain-contract.test.mjs",
@@ -306,7 +306,7 @@
     },
     {
       "path": "supabase/functions/admin-retry/index.ts",
-      "sha256": "1ee5a4e82d1bda207e0285cf0a0fe59648ed419236aa7de068ba092e512721e0"
+      "sha256": "6c3bae0ee154c5dd67592f70fec8e268a37f79db78995ef1c64630ae61cbd627"
     },
     {
       "path": "supabase/functions/db-cleanup/index.ts",
@@ -374,7 +374,7 @@
     },
     {
       "path": "supabase/functions/x-poster/index.ts",
-      "sha256": "e8a230159f611ca77e25f75d95bea3c0486c2eb2997308173773aadfbabeb7b2"
+      "sha256": "a6cae0916f0fb8adb396c668c66f99b6adc6dc97181e59d512abd36b3a8802ad"
     },
     {
       "path": "supabase/functions/x-poster/providerGuard.test.ts",
@@ -385,7 +385,7 @@
     "root_npm": {
       "package_manifest": {
         "path": "package.json",
-        "sha256": "98a7a06abd936090d187ebc32cf6f0af27e7bff131737eb39acfa941ef6eeb7a"
+        "sha256": "e8265f269963961aee58cd189597318920678eecee0d40f91f297f8284223dfd"
       },
       "lockfile": {
         "path": "package-lock.json",
@@ -9826,21 +9826,21 @@
           "path": "supabase/functions/admin-actions/index.ts,supabase/functions/admin-retry/index.ts,supabase/functions/db-cleanup/index.ts,supabase/functions/digest-compiler/index.ts,supabase/functions/media-cleanup/index.ts,supabase/functions/media-processor/index.ts,supabase/functions/webhooks-rssapp/index.ts,supabase/functions/worker/index.ts,supabase/functions/x-followers-snapshot/index.ts",
           "version_or_ref": "https://deno.land/std@0.168.0/http/server.ts",
           "integrity_or_source_hash": "e99c1bee8a3f6571ee4cdeb2966efad465b8f6fe62bec1bdb59c1f007cc4d155",
-          "source_file_sha256": "ba13d1e2de9c13e79601e9f651326e241995867bc4e7e00b5a192571a55ba1a0"
+          "source_file_sha256": "58599cf8cb22ea10bf1097c1f516c093ef217bd8516692be62ac59e1607ed9df"
         },
         {
           "name": "https://esm.sh/@supabase/supabase-js@2.39.7",
           "path": "supabase/functions/admin-actions/index.ts,supabase/functions/admin-retry/index.ts,supabase/functions/db-cleanup/index.ts,supabase/functions/media-cleanup/index.ts,supabase/functions/media-processor/index.ts,supabase/functions/webhooks-rssapp/index.ts,supabase/functions/worker/index.ts,supabase/functions/x-followers-snapshot/index.ts",
           "version_or_ref": "https://esm.sh/@supabase/supabase-js@2.39.7",
           "integrity_or_source_hash": "5361671c958daa350e504d9975da64b2d6dc9e81390b985ccdafb2e3572e24e7",
-          "source_file_sha256": "ab22460533da3ac9ed645827bf79edcb48343423e36c55c7799f5cb9b3ff17f3"
+          "source_file_sha256": "9bc5bfd6e57055384adf27cdfe742894e39a31ae44bee4f53e4a97c5255b7aa2"
         },
         {
           "name": "https://esm.sh/@supabase/supabase-js@2.49.1",
           "path": "supabase/functions/digest-compiler/index.ts,supabase/functions/x-poster/index.ts",
           "version_or_ref": "https://esm.sh/@supabase/supabase-js@2.49.1",
           "integrity_or_source_hash": "947c71e163ca8bb5b538eccb5ee86fbc8da6bcb916a861586db5fad1af4701bb",
-          "source_file_sha256": "c224a39c74e14ee6632f758a6c2a2af4ab95b2b4af45a988dfbf4aaf9355a024"
+          "source_file_sha256": "3a5a8341dbfc0789ee60b62053475eda99bd1be740876e891637fb207591013e"
         },
         {
           "name": "jsr:@std/assert",
@@ -9997,7 +9997,7 @@
     "ci": {
       "source_file": {
         "path": ".github/workflows/ci.yml",
-        "sha256": "cac61c0f514f8d72af25bf2065a43cc5c502417a69b45eb6bf47d27403a45a82"
+        "sha256": "8fc80db92f3fe9ca303e5cde6a83d84a9137f138c2fff3528a752cdaeac01e50"
       },
       "action_refs": [
         {
@@ -10005,14 +10005,14 @@
           "path": ".github/workflows/ci.yml",
           "version_or_ref": "v4",
           "integrity_or_source_hash": null,
-          "source_file_sha256": "cac61c0f514f8d72af25bf2065a43cc5c502417a69b45eb6bf47d27403a45a82"
+          "source_file_sha256": "8fc80db92f3fe9ca303e5cde6a83d84a9137f138c2fff3528a752cdaeac01e50"
         },
         {
           "name": "actions/setup-node",
           "path": ".github/workflows/ci.yml",
           "version_or_ref": "v4",
           "integrity_or_source_hash": null,
-          "source_file_sha256": "cac61c0f514f8d72af25bf2065a43cc5c502417a69b45eb6bf47d27403a45a82"
+          "source_file_sha256": "8fc80db92f3fe9ca303e5cde6a83d84a9137f138c2fff3528a752cdaeac01e50"
         }
       ]
     },

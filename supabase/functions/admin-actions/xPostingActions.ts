@@ -1521,12 +1521,16 @@ export async function rehydrateRecentTruncatedAdminAction(
 
   for (const p of matches) {
     const tweetId = p.tweet_id as string;
-    const { data: existingJob, error: existingJobError } = await table(supabase, "jobs")
+    const { data: pending, error: pendingError } = await table(supabase, "jobs")
       .select("id")
       .eq("type", "hydrate_tweet")
       .in("status", ["pending", "running"])
       .filter("payload->>tweet_id", "eq", tweetId)
       .limit(1);
+    if (pendingError) throw pendingError;
+    if (!Array.isArray(pending)) throw new Error("hydrate_pending_jobs_invalid_response");
+    const existingJob = pending;
+    const existingJobError = pendingError;
     if (existingJobError) {
       throw new Error("hydrate_backfill_pending_job_read_failed");
     }
