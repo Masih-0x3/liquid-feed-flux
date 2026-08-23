@@ -171,6 +171,18 @@ test("Deno function gates bypass the task runner in fresh npm installs", () => w
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
   const errors = validateRuntimeContract({ root, actualNodeVersion: "20.19.0" }).errors;
   assert.ok(errors.some((error) => error.includes("Deno function lint script")));
+
+  value.scripts["lint:functions"] = "deno lint supabase/functions";
+  value.scripts["check:functions"] = "deno task check:functions";
+  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
+  const checkErrors = validateRuntimeContract({ root, actualNodeVersion: "20.19.0" }).errors;
+  assert.ok(checkErrors.some((error) => error.includes("Deno function check script")));
+
+  value.scripts["check:functions"] = "deno check supabase/functions/*/index.ts";
+  value.scripts["test:functions"] = "deno task test:functions";
+  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
+  const testErrors = validateRuntimeContract({ root, actualNodeVersion: "20.19.0" }).errors;
+  assert.ok(testErrors.some((error) => error.includes("Deno function test script")));
 }));
 
 test("CI must explicitly bootstrap the pinned Deno package after lifecycle suppression", () => withFixture((root) => {

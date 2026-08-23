@@ -45,7 +45,8 @@ function assertContract(source) {
   assert.equal(typeof deno.tasks?.["test:functions"], "string", "Deno function test task must remain defined");
   const packageJson = JSON.parse(source.packageJson);
   assert.equal(packageJson.scripts?.["lint:functions"], "deno lint supabase/functions", "package Deno lint command must invoke the direct lint binary");
-  assert.equal(packageJson.scripts?.["check:functions"], "deno task check:functions", "package Deno check task must remain named");
+  assert.equal(packageJson.scripts?.["check:functions"], "deno check supabase/functions/*/index.ts", "package Deno check command must invoke the direct check binary");
+  assert.equal(packageJson.scripts?.["test:functions"], "deno test supabase/functions", "package Deno test command must invoke the direct test binary");
   assert.match(source.ci, /- run: npm run lint:functions\n/, "CI must run Deno lint");
   assert.match(source.ci, /- run: npm run check:functions\n/, "CI must run Deno check");
   return count;
@@ -65,6 +66,14 @@ if (process.env.MUTATION_TEST === "1") {
     ...source,
     deno: source.deno.replace('"lint:functions": "deno lint supabase/functions",', ""),
   }), /Deno function lint task/, "Deno task omission mutation must fail");
+  assert.throws(() => assertContract({
+    ...source,
+    packageJson: source.packageJson.replace('"check:functions": "deno check supabase/functions/*/index.ts"', '"check:functions": "deno task check:functions"'),
+  }), /package Deno check command/, "Deno check runner mutation must fail");
+  assert.throws(() => assertContract({
+    ...source,
+    packageJson: source.packageJson.replace('"test:functions": "deno test supabase/functions"', '"test:functions": "deno task test:functions"'),
+  }), /package Deno test command/, "Deno test runner mutation must fail");
   assert.throws(() => assertContract({
     ...source,
     ci: source.ci.replace("      - run: npm run check:functions\n", ""),

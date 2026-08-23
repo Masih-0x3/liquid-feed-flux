@@ -26,7 +26,7 @@
     },
     {
       "path": "package.json",
-      "sha256": "1f73c383d1515b37e7f8599df61a75d3194ce703d39526b46235e9c067d3e5a0"
+      "sha256": "bb86ce4ff092780c80b11cd5deed688bc14dc10e4f4ae8e7941448b519925bfc"
     },
     {
       "path": "scripts/build-e8-local-supply-build-inventory.test.mjs",
@@ -385,7 +385,7 @@
     "root_npm": {
       "package_manifest": {
         "path": "package.json",
-        "sha256": "1f73c383d1515b37e7f8599df61a75d3194ce703d39526b46235e9c067d3e5a0"
+        "sha256": "bb86ce4ff092780c80b11cd5deed688bc14dc10e4f4ae8e7941448b519925bfc"
       },
       "lockfile": {
         "path": "package-lock.json",

@@ -410,6 +410,8 @@ export function validateRuntimeContract({
   requireEqual(errors, "runtime test script", rootPackage.scripts?.["test:runtime-contract"], "node --test scripts/check-runtime-contract.test.mjs");
   requireEqual(errors, "release-state check script", rootPackage.scripts?.["check:release-state"], "bash scripts/check-release-state.sh");
   requireEqual(errors, "Deno function lint script", rootPackage.scripts?.["lint:functions"], "deno lint supabase/functions");
+  requireEqual(errors, "Deno function check script", rootPackage.scripts?.["check:functions"], "deno check supabase/functions/*/index.ts");
+  requireEqual(errors, "Deno function test script", rootPackage.scripts?.["test:functions"], "deno test supabase/functions");
   requireEqual(errors, "CI Deno bootstrap command", contract.node.ci_deno_bootstrap_run, PINNED_DENO_BOOTSTRAP_RUN);
   if (!ci.includes(`      - run: ${PINNED_DENO_BOOTSTRAP_RUN}`)) {
     errors.push("CI Deno bootstrap command is missing or changed");
