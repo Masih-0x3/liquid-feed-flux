@@ -15,7 +15,7 @@
     "build": "node scripts/run-vite-build.mjs",
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
-    "lint:functions": "deno task lint:functions",
+    "lint:functions": "deno lint supabase/functions",
     "check:functions": "deno task check:functions",
   "check:edge-suppressions": "node scripts/check-edge-suppression-contract.mjs",
   "check:vercel-branch-suppression": "node scripts/check-vercel-branch-suppression-contract.mjs",

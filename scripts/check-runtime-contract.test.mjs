@@ -164,6 +164,23 @@ test("the CI guard prefix preflights registry policy, suppresses lifecycle scrip
   assert.ok(validateRuntimeContract({ root, actualNodeVersion: "20.19.0" }).errors.some((error) => error.includes("both direct supply preflight")));
 }));
 
+test("Deno function gates bypass the task runner in fresh npm installs", () => withFixture((root) => {
+  const path = join(root, "package.json");
+  const value = JSON.parse(readFileSync(path, "utf8"));
+  value.scripts["lint:functions"] = "deno task lint:functions";
+  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
+  const errors = validateRuntimeContract({ root, actualNodeVersion: "20.19.0" }).errors;
+  assert.ok(errors.some((error) => error.includes("Deno function lint script")));
+}));
+
+test("CI must explicitly bootstrap the pinned Deno package after lifecycle suppression", () => withFixture((root) => {
+  const path = join(root, ".github/workflows/ci.yml");
+  const original = readFileSync(path, "utf8");
+  writeFileSync(path, original.replace("      - run: npm rebuild --ignore-scripts=false deno\n", ""));
+  const errors = validateRuntimeContract({ root, actualNodeVersion: "20.19.0" }).errors;
+  assert.ok(errors.some((error) => error.includes("CI Deno bootstrap command")));
+}));
+
 test("coordinated declaration edits cannot split the Node matrix", () => withFixture((root) => {
   const contractPath = join(root, "docs/operations/runtime-contract.json");
   const contract = JSON.parse(readFileSync(contractPath, "utf8"));

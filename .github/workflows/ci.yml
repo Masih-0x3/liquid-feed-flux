@@ -26,6 +26,7 @@ jobs:
       - run: node scripts/check-runtime-contract.mjs
       - run: node --test scripts/check-runtime-contract.test.mjs
       - run: node --test scripts/check-supply-chain-contract.test.mjs
+      - run: npm rebuild --ignore-scripts=false deno
       - run: npx --yes supabase@2.111.0 --version
       - run: npm run check:remote-media-policy
       - run: npm run check:remote-media-no-egress

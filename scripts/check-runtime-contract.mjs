@@ -9,6 +9,7 @@ import ts from "typescript";
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const CONTRACT_PATH = "docs/operations/runtime-contract.json";
 export const PINNED_SUPABASE_CLI_VERSION = "2.111.0";
+export const PINNED_DENO_BOOTSTRAP_RUN = "npm rebuild --ignore-scripts=false deno";
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 
@@ -408,6 +409,11 @@ export function validateRuntimeContract({
   requireEqual(errors, "runtime check script", rootPackage.scripts?.["check:runtime-contract"], "node scripts/check-runtime-contract.mjs");
   requireEqual(errors, "runtime test script", rootPackage.scripts?.["test:runtime-contract"], "node --test scripts/check-runtime-contract.test.mjs");
   requireEqual(errors, "release-state check script", rootPackage.scripts?.["check:release-state"], "bash scripts/check-release-state.sh");
+  requireEqual(errors, "Deno function lint script", rootPackage.scripts?.["lint:functions"], "deno lint supabase/functions");
+  requireEqual(errors, "CI Deno bootstrap command", contract.node.ci_deno_bootstrap_run, PINNED_DENO_BOOTSTRAP_RUN);
+  if (!ci.includes(`      - run: ${PINNED_DENO_BOOTSTRAP_RUN}`)) {
+    errors.push("CI Deno bootstrap command is missing or changed");
+  }
 
   const expectedSelector = `${contract.node.deployment_major}.x`;
   requireEqual(errors, "deployment selector/major invariant", contract.node.deployment_selector, expectedSelector);
