@@ -168,12 +168,12 @@ jobs:
       - name: Validate frontend environment contract
         run: npm run check:vite-env
         env:
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
-          VITE_SUPABASE_PROJECT_ID: ${{ secrets.VITE_SUPABASE_PROJECT_ID }}
+          VITE_SUPABASE_URL: https://abcdefghijklmnopqrst.supabase.co
+          VITE_SUPABASE_PUBLISHABLE_KEY: eyJhbGciOiJIUzI1NiJ9.synthetic-public-payload.synthetic-signature
+          VITE_SUPABASE_PROJECT_ID: abcdefghijklmnopqrst
       - name: Build frontend
         run: npm run build
         env:
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
-          VITE_SUPABASE_PROJECT_ID: ${{ secrets.VITE_SUPABASE_PROJECT_ID }}
+          VITE_SUPABASE_URL: https://abcdefghijklmnopqrst.supabase.co
+          VITE_SUPABASE_PUBLISHABLE_KEY: eyJhbGciOiJIUzI1NiJ9.synthetic-public-payload.synthetic-signature
+          VITE_SUPABASE_PROJECT_ID: abcdefghijklmnopqrst

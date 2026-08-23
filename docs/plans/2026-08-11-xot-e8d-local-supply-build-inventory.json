@@ -10,7 +10,7 @@
   "source_files": [
     {
       "path": ".github/workflows/ci.yml",
-      "sha256": "124485aca02b86407f0d371a9544e1aa28a79a3875efc2762c7996a0c8c5d24f"
+      "sha256": "a66ba2cf52cbecb7dd01f3d6b8bde675f67230d1308f175c2ee584e55bd0a144"
     },
     {
       "path": "deno.lock",
@@ -9997,7 +9997,7 @@
     "ci": {
       "source_file": {
         "path": ".github/workflows/ci.yml",
-        "sha256": "124485aca02b86407f0d371a9544e1aa28a79a3875efc2762c7996a0c8c5d24f"
+        "sha256": "a66ba2cf52cbecb7dd01f3d6b8bde675f67230d1308f175c2ee584e55bd0a144"
       },
       "action_refs": [
         {
@@ -10005,14 +10005,14 @@
           "path": ".github/workflows/ci.yml",
           "version_or_ref": "v4",
           "integrity_or_source_hash": null,
-          "source_file_sha256": "124485aca02b86407f0d371a9544e1aa28a79a3875efc2762c7996a0c8c5d24f"
+          "source_file_sha256": "a66ba2cf52cbecb7dd01f3d6b8bde675f67230d1308f175c2ee584e55bd0a144"
         },
         {
           "name": "actions/setup-node",
           "path": ".github/workflows/ci.yml",
           "version_or_ref": "v4",
           "integrity_or_source_hash": null,
-          "source_file_sha256": "124485aca02b86407f0d371a9544e1aa28a79a3875efc2762c7996a0c8c5d24f"
+          "source_file_sha256": "a66ba2cf52cbecb7dd01f3d6b8bde675f67230d1308f175c2ee584e55bd0a144"
         }
       ]
     },

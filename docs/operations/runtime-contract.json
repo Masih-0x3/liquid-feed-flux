@@ -84,7 +84,7 @@
     "vercel_ignore_path": ".vercelignore",
     "vercel_ignore_sha256": "abc295fdc2acda9d3430d70254bc2c93cf3ae324bad2d9b06141d9cd728405fa",
     "ci_workflow_path": ".github/workflows/ci.yml",
-    "ci_workflow_sha256": "124485aca02b86407f0d371a9544e1aa28a79a3875efc2762c7996a0c8c5d24f",
+    "ci_workflow_sha256": "a66ba2cf52cbecb7dd01f3d6b8bde675f67230d1308f175c2ee584e55bd0a144",
     "wrapper_path": "scripts/check-build-contract.mjs",
     "wrapper_sha256": "7959d9345395856258f9b79efe655dc57f5e14f3a67cb7ce3c87bf742313249d",
     "frontend_env_path": "scripts/check-vite-env.mjs",
