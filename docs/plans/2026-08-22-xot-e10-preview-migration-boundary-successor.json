@@ -15,9 +15,9 @@
   "evidenceOverrides": {
     "supabase/functions/_shared/runtimeControls.ts": "69f9f63f044479601c5e3093c39125950b7e12cd49168e69f0ad4833d1cf87a6",
     "supabase/functions/_shared/e10PreviewParityFoundation.test.ts": "eb51d9eb0e1eab93badbb04b80009870d8e9bb1eaf0cf2f4702af339f0503747",
-    "package.json": "b2370aa44bef9e1d060b4a2680a62a0e51785cce6fffd38df39a45d7bceb524b",
+    "package.json": "1f73c383d1515b37e7f8599df61a75d3194ce703d39526b46235e9c067d3e5a0",
     "scripts/check-migration-baseline.mjs": "923c7ddf77fc9409d2ee234eb8855a87155fcc198ea8b7fd888b8b2470701ba7",
-    ".github/workflows/ci.yml": "8fc80db92f3fe9ca303e5cde6a83d84a9137f138c2fff3528a752cdaeac01e50"
+    ".github/workflows/ci.yml": "124485aca02b86407f0d371a9544e1aa28a79a3875efc2762c7996a0c8c5d24f"
   },
   "supersession": {
     "reason": "Accepted successor after source and package metadata drift in later local work; predecessor remains immutable.",

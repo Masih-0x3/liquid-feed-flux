@@ -10,7 +10,7 @@
   "source_files": [
     {
       "path": ".github/workflows/ci.yml",
-      "sha256": "8fc80db92f3fe9ca303e5cde6a83d84a9137f138c2fff3528a752cdaeac01e50"
+      "sha256": "124485aca02b86407f0d371a9544e1aa28a79a3875efc2762c7996a0c8c5d24f"
     },
     {
       "path": "deno.lock",
@@ -26,7 +26,7 @@
     },
     {
       "path": "package.json",
-      "sha256": "b2370aa44bef9e1d060b4a2680a62a0e51785cce6fffd38df39a45d7bceb524b"
+      "sha256": "1f73c383d1515b37e7f8599df61a75d3194ce703d39526b46235e9c067d3e5a0"
     },
     {
       "path": "scripts/build-e8-local-supply-build-inventory.test.mjs",
@@ -385,7 +385,7 @@
     "root_npm": {
       "package_manifest": {
         "path": "package.json",
-        "sha256": "b2370aa44bef9e1d060b4a2680a62a0e51785cce6fffd38df39a45d7bceb524b"
+        "sha256": "1f73c383d1515b37e7f8599df61a75d3194ce703d39526b46235e9c067d3e5a0"
       },
       "lockfile": {
         "path": "package-lock.json",
@@ -9997,7 +9997,7 @@
     "ci": {
       "source_file": {
         "path": ".github/workflows/ci.yml",
-        "sha256": "8fc80db92f3fe9ca303e5cde6a83d84a9137f138c2fff3528a752cdaeac01e50"
+        "sha256": "124485aca02b86407f0d371a9544e1aa28a79a3875efc2762c7996a0c8c5d24f"
       },
       "action_refs": [
         {
@@ -10005,14 +10005,14 @@
           "path": ".github/workflows/ci.yml",
           "version_or_ref": "v4",
           "integrity_or_source_hash": null,
-          "source_file_sha256": "8fc80db92f3fe9ca303e5cde6a83d84a9137f138c2fff3528a752cdaeac01e50"
+          "source_file_sha256": "124485aca02b86407f0d371a9544e1aa28a79a3875efc2762c7996a0c8c5d24f"
         },
         {
           "name": "actions/setup-node",
           "path": ".github/workflows/ci.yml",
           "version_or_ref": "v4",
           "integrity_or_source_hash": null,
-          "source_file_sha256": "8fc80db92f3fe9ca303e5cde6a83d84a9137f138c2fff3528a752cdaeac01e50"
+          "source_file_sha256": "124485aca02b86407f0d371a9544e1aa28a79a3875efc2762c7996a0c8c5d24f"
         }
       ]
     },
