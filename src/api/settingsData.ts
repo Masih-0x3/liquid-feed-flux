@@ -436,12 +436,34 @@ export async function fetchSettingsRows(keys: string[] = []): Promise<SettingsRo
   return (data || []) as SettingsRow[];
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+const PARTIAL_BASELINE_SETTING_KEYS = new Set([
+  'translation_prompt',
+  'telegram_config',
+  'message_template',
+]);
+
+function mergeSettingValue(key: string, stored: unknown, fallback: unknown): unknown {
+  if (isRecord(fallback)) {
+    if (!isRecord(stored)) return fallback;
+    return PARTIAL_BASELINE_SETTING_KEYS.has(key)
+      ? { ...fallback, ...stored }
+      : stored;
+  }
+  if (Array.isArray(fallback)) return Array.isArray(stored) ? stored : fallback;
+  return stored;
+}
+
 export async function fetchSettings() {
   const data = await fetchSettingsRows();
   const result = { ...defaults };
   data.forEach((s) => {
-    if (s.value && typeof s.value === 'object' && s.key in result) {
-      (result as Record<string, unknown>)[s.key] = s.value;
+    if (s.key in result) {
+      const settings = result as Record<string, unknown>;
+      settings[s.key] = mergeSettingValue(s.key, s.value, settings[s.key]);
     }
   });
   return result;

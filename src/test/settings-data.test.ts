@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchSettingsRows, previewTranslation, saveSetting } from "@/api/settingsData";
+import { fetchSettings, fetchSettingsRows, previewTranslation, saveSetting } from "@/api/settingsData";
 import { invokeAdminAction } from "@/api/adminActions";
 
 const mocks = vi.hoisted(() => ({
@@ -109,5 +109,66 @@ describe("settings data API", () => {
         presence_penalty: 0,
       },
     })).rejects.toThrow("preview unavailable");
+  });
+
+  it("merges a historical five-field translation_prompt row with nested defaults so missing fields survive", async () => {
+    mocks.from.mockReturnValueOnce({
+      select: vi.fn().mockResolvedValue({
+        data: [
+          {
+            key: "translation_prompt",
+            value: {
+              system_prompt: "Historical system prompt",
+              user_prompt_template: "{content}",
+              model: "gpt-4o",
+              temperature: 0.5,
+              max_completion_tokens: 500,
+            },
+          },
+        ],
+        error: null,
+      }),
+    });
+
+    const settings = await fetchSettings();
+
+    expect(settings.translation_prompt).toMatchObject({
+      system_prompt: "Historical system prompt",
+      user_prompt_template: "{content}",
+      model: "gpt-4o",
+      temperature: 0.5,
+      max_completion_tokens: 500,
+      top_p: 1,
+      frequency_penalty: 0,
+      presence_penalty: 0,
+    });
+    expect(settings.translation_prompt.scoring).toMatchObject({
+      model: "gpt-5.4-mini",
+      max_completion_tokens: 2000,
+    });
+  });
+
+  it("keeps baseline defaults when a stored setting has an incompatible container shape", async () => {
+    mocks.from.mockReturnValueOnce({
+      select: vi.fn().mockResolvedValue({
+        data: [
+          { key: "translation_prompt", value: [] },
+          { key: "telegram_config", value: "malformed" },
+          { key: "message_template", value: null },
+        ],
+        error: null,
+      }),
+    });
+
+    const settings = await fetchSettings();
+
+    expect(settings.translation_prompt).toMatchObject({
+      model: "gpt-4o-mini",
+      top_p: 1,
+      frequency_penalty: 0,
+      presence_penalty: 0,
+    });
+    expect(settings.telegram_config.parse_mode).toBe("Markdown");
+    expect(settings.message_template.template).toContain("{translated_text}");
   });
 });
