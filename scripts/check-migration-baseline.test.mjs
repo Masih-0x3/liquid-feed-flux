@@ -17,6 +17,8 @@ import {
   CURRENT_CANDIDATE_RUNTIME_STDOUT,
   CURRENT_CANDIDATE_MIGRATION_COUNT,
   CURRENT_CANDIDATE_INVENTORY_SHA256,
+  SUCCESSOR_CANDIDATE_RECEIPT_PATH,
+  SUCCESSOR_V1_CANDIDATE_RECEIPT_PATH,
   GATE_REQUIRED_CHECKS,
   HISTORICAL_B4_RECEIPT_PATH,
   HISTORICAL_B4_RECEIPT_CONTRACT,
@@ -243,6 +245,13 @@ function withCurrentTreeFixture(callback) {
     for (const filename of readdirSync(join(REPO_ROOT, "supabase/migrations"))) {
       cpSync(join(REPO_ROOT, "supabase/migrations", filename), join(fixtureMigrationsDir, filename));
     }
+    // Keep standalone current-candidate fixtures on the immutable pre-v2 body.
+    // The v2 chain test below explicitly restores the repaired source and binds
+    // it through the successor override.
+    writeFileSync(
+      join(fixtureMigrationsDir, "20260811090000_revoke_public_default_privileges.sql"),
+      execFileSync("git", ["-C", REPO_ROOT, "show", "HEAD:supabase/migrations/20260811090000_revoke_public_default_privileges.sql"], { encoding: "utf8" }),
+    );
     const receiptPath = join(root, CURRENT_CANDIDATE_RECEIPT_PATH);
     mkdirSync(dirname(receiptPath), { recursive: true });
     writeFileSync(receiptPath, `${JSON.stringify(buildCurrentReceipt(root), null, 2)}\n`);
@@ -783,6 +792,61 @@ test("successor baseline verifies the exact E7 predecessor hash binding", () =>
     assert.equal(result.checked, true);
     assert.equal(result.predecessorBinding.predecessorSha256, sha256(readFileSync(join(root, PREDECESSOR_RECEIPT_PATH))));
     assert.equal(result.activeCount, CURRENT_CANDIDATE_MIGRATION_COUNT);
+  }));
+
+test("successor-v2 resolves the immutable v2 -> v1 -> base chain", () =>
+  withCurrentTreeFixture((root) => {
+    for (const relativePath of [
+      SUCCESSOR_CANDIDATE_RECEIPT_PATH,
+      SUCCESSOR_V1_CANDIDATE_RECEIPT_PATH,
+      "supabase/migrations/20260811090000_revoke_public_default_privileges.sql",
+      "scripts/check-video-render-rls-contract.mjs",
+    ]) {
+      const destination = join(root, relativePath);
+      mkdirSync(dirname(destination), { recursive: true });
+      cpSync(join(REPO_ROOT, relativePath), destination);
+    }
+    cpSync(
+      join(REPO_ROOT, CURRENT_CANDIDATE_RECEIPT_PATH),
+      join(root, CURRENT_CANDIDATE_RECEIPT_PATH),
+    );
+    const result = validateCurrentCandidateSuccessorBaseline({ root });
+    assert.equal(result.checked, true, result.errors.join("; "));
+    assert.equal(result.activeCount, CURRENT_CANDIDATE_MIGRATION_COUNT);
+  }));
+
+test("successor-v2 rejects a changed successor-v1 predecessor hash", () =>
+  withCurrentTreeFixture((root) => {
+    for (const relativePath of [SUCCESSOR_CANDIDATE_RECEIPT_PATH, SUCCESSOR_V1_CANDIDATE_RECEIPT_PATH, "scripts/check-video-render-rls-contract.mjs"]) {
+      const destination = join(root, relativePath);
+      mkdirSync(dirname(destination), { recursive: true });
+      cpSync(join(REPO_ROOT, relativePath), destination);
+    }
+    const receiptPath = join(root, SUCCESSOR_CANDIDATE_RECEIPT_PATH);
+    const receipt = JSON.parse(readFileSync(receiptPath, "utf8"));
+    receipt.predecessor.sha256 = "0".repeat(64);
+    writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+    const result = validateCurrentCandidateSuccessorBaseline({ root });
+    assert.equal(result.checked, false);
+    assert.ok(result.errors.some((error) => error.includes("successor-v2 receipt predecessor SHA-256")));
+  }));
+
+test("successor-v2 rejects widened migration and evidence overrides", () =>
+  withCurrentTreeFixture((root) => {
+    for (const relativePath of [SUCCESSOR_CANDIDATE_RECEIPT_PATH, SUCCESSOR_V1_CANDIDATE_RECEIPT_PATH, "scripts/check-video-render-rls-contract.mjs"]) {
+      const destination = join(root, relativePath);
+      mkdirSync(dirname(destination), { recursive: true });
+      cpSync(join(REPO_ROOT, relativePath), destination);
+    }
+    const receiptPath = join(root, SUCCESSOR_CANDIDATE_RECEIPT_PATH);
+    const receipt = JSON.parse(readFileSync(receiptPath, "utf8"));
+    receipt.currentCandidateOverrides.migrationSha256Overrides["README.md"] = "0".repeat(64);
+    receipt.additionalEvidence["README.md"] = "0".repeat(64);
+    writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+    const result = validateCurrentCandidateSuccessorBaseline({ root });
+    assert.equal(result.checked, false);
+    assert.ok(result.errors.some((error) => error.includes("migration override path is not in the predecessor inventory")));
+    assert.ok(result.errors.some((error) => error.includes("additional evidence path is unexpected")));
   }));
 
 test("successor baseline fails when the declared predecessor hash does not match E7", () =>

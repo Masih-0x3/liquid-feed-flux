@@ -1,0 +1,60 @@
+{
+  "schema": "xot-p4-renderer-local-build-receipt-v1",
+  "phase": "P4-01-local-only",
+  "status": "LOCAL_IMAGE_ACCEPTED_REMOTE_GATES_OPEN",
+  "releaseGate": "CLOSED",
+  "repository": ".",
+  "branch": "codex/xot-full-closure-candidate",
+  "sourceCommit": "cf6e76bfec637d5e35635e1079357c70914ee6f3",
+  "image": {
+    "tag": "xot-video-renderer:cf6e76bfec63",
+    "localOciDigest": "sha256:256e9c8b3a2f692c2b4293c428073bd3b92ed4dd66ef0908c23bf29636a60864",
+    "architecture": "arm64",
+    "os": "linux",
+    "sizeBytes": 459812334,
+    "runtimeUser": "node",
+    "port": 8787,
+    "revisionLabel": "cf6e76bfec637d5e35635e1079357c70914ee6f3",
+    "healthcheck": "curl -fsS http://127.0.0.1:${PORT}/health",
+    "registryPublished": false,
+    "remoteRegistryDigest": null
+  },
+  "runtimeInventory": {
+    "node": "20.20.2",
+    "ffmpeg": "5.1.9-0+deb12u1",
+    "tesseract": "5.3.0",
+    "opencv": "4.6.0"
+  },
+  "verification": {
+    "rendererTests": "202 passed",
+    "focusedContracts": [
+      "renderer capacity PASS",
+      "renderer request policy PASS",
+      "renderer error boundary PASS",
+      "renderer process runner PASS",
+      "renderer boundary typecheck PASS"
+    ],
+    "productionDependencyAudit": "0 vulnerabilities",
+    "missingSecretStartup": "failed closed with SUPABASE_URL is required",
+    "dockerBuild": "PASS"
+  },
+  "claims": {
+    "localBuild": "verified",
+    "localRuntimeInventory": "verified",
+    "registryPush": "not_performed",
+    "hostCapacity": "not_verified",
+    "priorHostImage": "not_verified",
+    "deployment": "not_performed",
+    "liveHealth": "not_claimed",
+    "boundedRender": "not_performed"
+  },
+  "rollback": {
+    "local": "remove or retag the local image only",
+    "remote": "not_available_until_a_renderer_host_and_prior_digest_are_identified"
+  },
+  "notClosed": [
+    "P4-01 still needs a published immutable registry digest, current host capacity, prior image digest, and a remote rollback path.",
+    "P4-02 and P4-03 need renderer host access, staging-only configuration, deployment authority, one bounded render, resource evidence, and graceful drain evidence.",
+    "No registry, host, staging runtime, production system, PR #69, main branch, merge, or deployment was changed."
+  ]
+}

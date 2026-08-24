@@ -1,0 +1,216 @@
+{
+  "schema": "xot-e10-preview-migration-boundary-successor-v2",
+  "event": "e10_preview_migration_boundary_successor_preview_branch_t2_acceptance",
+  "phase": "preview-migration-boundary-branch-only",
+  "status": "ACCEPTED_PREVIEW_BRANCH_T2",
+  "release": "CLOSED",
+  "releaseGate": "CLOSED",
+  "repository": ".",
+  "branch": "codex/xot-full-closure-candidate",
+  "predecessor": {
+    "path": "docs/plans/2026-08-22-xot-e10-preview-migration-boundary-successor.json",
+    "sha256": "f354580a0fff9ee5eecd6a3ebcc9e80815fdb9a21fd0acfb5c383ade592d012c"
+  },
+  "currentCandidateOverrides": {
+    "migrationSha256Overrides": {
+      "supabase/migrations/20260811090000_revoke_public_default_privileges.sql": "fec67e19b6e47534e6b9c7cd7b6b33735fdf26cce74204c8d1e5862b4f8446e8"
+    },
+    "orderedInventorySha256": "50f1ffb611c62cdddb7f846002934c34d348e4af7a8f476369aa28814195d177"
+  },
+  "evidenceOverrides": {
+    "scripts/check-migration-baseline.mjs": "5bf5c4b730d6a6ab996d09efc2bb9b3b0ed0e7e9dfab9b3db2f1e539069b4a45",
+    "scripts/check-migration-baseline.test.mjs": "79938345d9784f0fdb7af387c8d144232ea54dcb3b0a3b70c9498a5de7f60283"
+  },
+  "additionalEvidence": {
+    "scripts/check-migration-baseline.test.mjs": "79938345d9784f0fdb7af387c8d144232ea54dcb3b0a3b70c9498a5de7f60283",
+    "scripts/check-video-render-rls-contract.mjs": "0ec5c3f3bfff860918e0a72dca866c25d4fca09acdbf177f85731193d1b82826"
+  },
+  "supersession": {
+    "reason": "Append-only successor binding the immutable successor-v1 to the repaired E7 migration contract and branch-only P3 staging evidence.",
+    "changedPaths": [
+      "supabase/migrations/20260811090000_revoke_public_default_privileges.sql",
+      "scripts/check-video-render-rls-contract.mjs",
+      "scripts/check-migration-baseline.mjs",
+      "scripts/check-migration-baseline.test.mjs",
+      "docs/plans/2026-08-24-xot-e10-preview-migration-boundary-successor-v2.json"
+    ],
+    "ledgerRow": 545,
+    "validation": [
+      "migration baseline normal and mutation checker",
+      "video-render RLS source and mutation contract",
+      "branch-only Supabase P3 acceptance evidence"
+    ],
+    "evidenceTier": {
+      "achieved": ["T0", "T1", "T2"],
+      "deferred": ["T3", "T4"]
+    },
+    "releaseState": "CLOSED"
+  },
+  "p3StagingEvidence": {
+    "projectRef": "umicnrtkpuzjwivmgnei",
+    "branchId": "2b2441ba-8cc6-4ee9-a8f8-d802a10d4ec4",
+    "parentProductionRef": "jzirqfzzvlbxwfzndaer",
+    "branchUrlHost": "umicnrtkpuzjwivmgnei.supabase.co",
+    "branchStatus": "FUNCTIONS_DEPLOYED",
+    "previewStatus": "ACTIVE_HEALTHY",
+    "withData": false,
+    "candidateMigrations": {
+      "count": 16,
+      "order": [
+        "video_render_feedback_revision",
+        "lock_down_video_render_raw_tables",
+        "add_current_user_is_admin_rpc",
+        "telegram_delivery_claims",
+        "media_object_cleanup_claims",
+        "b3_job_x_claim_fencing",
+        "b3b1_rss_webhook_receipts",
+        "b3b2_digest_checkpoints",
+        "b4_video_render_claim_fencing",
+        "b2b_media_object_deletion_token_uuid",
+        "b3a_reconcile_expired_job_claims_fix",
+        "b3a_fail_x_post_delivery_null_fix",
+        "b3a_claim_x_ambiguous_retry_fix",
+        "b3a_claim_x_ambiguous_history_fix",
+        "revoke_public_default_privileges",
+        "e10_preview_runtime_controls_and_roles"
+      ]
+    },
+    "runtimeControls": {
+      "rowCount": 1,
+      "environment": "preview",
+      "dedupeEnabled": false,
+      "translationEnabled": false,
+      "postingMode": "blocked",
+      "postingEnabledMutation": "rejected_by_preview_invariant"
+    },
+    "cron": {
+      "totalJobs": 0,
+      "activeJobs": 0,
+      "productionLikeJobs": 0,
+      "cloneResponses": 209,
+      "cloneResponseStatuses": [401]
+    },
+    "dataIsolation": {
+      "authUsers": 0,
+      "authIdentities": 0,
+      "storageObjects": 0,
+      "posts": 2000,
+      "deliveries": 800,
+      "xDeliveries": 600,
+      "mediaObjects": 80,
+      "videoRenders": 80,
+      "userRoles": 0,
+      "vaultSecretNamesOnly": ["WEBHOOK_SHARED_SECRET"],
+      "vaultValuesRead": false,
+      "storageBucket": {"id": "temp-media", "public": false},
+      "realtimePublicTables": [
+        "ai_call_ledger",
+        "deliveries",
+        "jobs",
+        "posts",
+        "workflow_runs",
+        "x_deliveries"
+      ],
+      "sanitizedFixture": {
+        "accounts": 1,
+        "posts": 2000,
+        "jobs": 1000,
+        "deliveries": 800,
+        "xDeliveries": 600,
+        "workflowRuns": 400,
+        "aiCallLedger": 400,
+        "media": 80,
+        "videoRenders": 80,
+        "pendingOrRunningJobs": 0,
+        "providerStartedRows": 0,
+        "storagePaths": 0,
+        "nonFixtureTargetRows": 0,
+        "source": "generated synthetic branch-only rows with xot-staging-fixture identifiers"
+      },
+      "removedNonFixtureRows": {
+        "jobs": 4,
+        "scope": "four exact preview-branch test rows only",
+        "productionChanged": false
+      }
+    },
+    "egressContainment": {
+      "function": "public.invoke_x_poster_if_enabled()",
+      "returns": "void",
+      "securityDefiner": true,
+      "searchPath": "",
+      "networkBody": "none",
+      "productionRefFunctions": 0,
+      "productionRefViews": 0,
+      "productionRefSettings": 0,
+      "productionRefCron": 0
+    },
+    "production": {
+      "status": "ACTIVE_HEALTHY",
+      "candidateMigrationNames": [],
+      "changedByThisWork": false,
+      "cronTotal": 6,
+      "cronActive": 4
+    },
+    "generatedTypes": {
+      "semanticStatus": "COMPATIBLE_WITH_FORMATTING_AND_METADATA_DRIFT",
+      "tablesMatched": 43,
+      "rowFieldsMatched": true,
+      "enumDrift": false,
+      "meaningfulDifference": "generated metadata and non-null current_user_role return versus checked-in nullable return; checked-in nullability matches SQL behavior"
+    },
+    "advisors": {
+      "security": {"total": 11, "info": 4, "warn": 7, "error": 0},
+      "performance": {"total": 123, "info": 113, "warn": 10, "error": 0},
+      "classification": "recommendations_and_intentional_rpc_warnings; no ERROR-level blocker returned"
+    },
+    "air017StagingEvidence": {
+      "tier": "T2_STAGING_ONLY",
+      "fixtureVolume": {
+        "posts": 2000,
+        "jobs": 1000,
+        "workflowRuns": 400,
+        "aiCallLedger": 400,
+        "videoRenders": 80
+      },
+      "plans": [
+        {"shape": "monitoring audience feed", "index": "idx_posts_audience_class", "rows": 50, "executionMs": 0.161},
+        {"shape": "pending job poll", "index": "idx_jobs_created_at_pending", "rows": 0, "executionMs": 0.248},
+        {"shape": "workflow timeline", "index": "idx_workflow_runs_tweet_started", "rows": 1, "executionMs": 0.103},
+        {"shape": "AI call timeline", "index": "idx_ai_call_ledger_workflow", "rows": 1, "executionMs": 0.086},
+        {"shape": "unreviewed render issues", "index": "idx_video_renders_unreviewed_issues", "rows": 50, "executionMs": 0.136}
+      ],
+      "bufferResult": "all representative plans used shared hits only; zero shared reads and zero temp reads/writes",
+      "decision": "DEFER_PRODUCTION_INDEX_OR_POLICY_CHANGE",
+      "reason": "staging plans are healthy but the synthetic volume cannot replace a current production workload window or named database-owner approval",
+      "productionGateClosed": false
+    },
+    "authRoleMatrix": {
+      "adminUsers": 0,
+      "readOnlyUsers": 0,
+      "status": "BLOCKED_OWNER_CONTROLLED_IDENTITIES",
+      "reason": "the connector exposes database operations but no supported Auth Admin user-creation route; direct auth.users insertion was not used"
+    },
+    "restoreEvidence": {
+      "ephemeralReplay": "VERIFIED",
+      "evidence": "branch rebase plus exact migration replay recovered the preview schema after two missing parent-history migrations",
+      "previewBackupOrPitr": "NOT_CLAIMED",
+      "productionBackupOrPitr": "OPEN_SEPARATE_T3_GATE",
+      "rollback": "delete and recreate the non-persistent branch, then replay the accepted migration boundary"
+    }
+  },
+  "claims": {
+    "productionSchema": "not_claimed",
+    "productionDeployment": "not_claimed",
+    "productionChanged": false,
+    "staging": "branch-only-verified",
+    "deployment": "not_claimed",
+    "liveVerification": "not_claimed"
+  },
+  "notClosed": [
+    "Owner-controlled admin and read_only Auth identities are not created; authenticated browser acceptance cannot start.",
+    "AIR-017 has T2 staging plans only; current production workload metrics and named database-owner approval remain open.",
+    "Preview branch replay is verified, but production backup/PITR and restore proof remain a separate T3 gate.",
+    "Hosted CI, deployment, live and production-equivalence gates remain outside this receipt.",
+    "Release gate remains CLOSED."
+  ]
+}

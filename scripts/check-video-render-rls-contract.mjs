@@ -124,7 +124,7 @@ const postLockdownMigrationDigests = new Map([
   ['20260808153000_b3a_fail_x_post_delivery_null_fix.sql', 'c95c09cbfef0d7bc44a0640383f9ad4a23297701d75126d46155ab928a9b44b5'],
   ['20260808163000_b3a_claim_x_ambiguous_retry_fix.sql', 'ad4d0e56f652f7df0b5d40b8258643b099e76ea5cb51b8b4d9d42fe380184807'],
   ['20260808173000_b3a_claim_x_ambiguous_history_fix.sql', '74b69c207ef81d76fc6a0e800d9105c05aa61b69d4d8818ec252dc7ba29af555'],
-  [e7MigrationName, '103e8c1a608b120d8945296385583814e748e92904882683cf0610e7a9130d7a'],
+  [e7MigrationName, 'fec67e19b6e47534e6b9c7cd7b6b33735fdf26cce74204c8d1e5862b4f8446e8'],
 ]);
 
 function read(path) {
@@ -1111,6 +1111,31 @@ function validateE7DefaultPrivilegesMigration(source, label) {
     /\b(?:alter|create)\s+role\b|\bset\s+(?:local\s+)?role\b|EXCEPTION\s+WHEN\s+(?:insufficient_privilege|others)\b/i,
     `${label}: E7 must not change roles, change execution role, or hide authority errors`,
   );
+  assert.match(
+    withoutComments,
+    /IF\s+pg_has_role\(current_user,\s*owner_name,\s*'USAGE'\)\s+THEN/i,
+    `${label}: controllable owners must be identified from current-role membership`,
+  );
+  assert.match(
+    withoutComments,
+    /ELSIF\s+owner_name\s*=\s*'supabase_admin'\s+THEN/i,
+    `${label}: only supabase_admin may use the provider-managed exception`,
+  );
+  assert.match(
+    withoutComments,
+    /RAISE\s+NOTICE\s+'E7 provider-managed default ACL owner skipped: %'/i,
+    `${label}: provider-managed exception must be visible`,
+  );
+  assert.match(
+    withoutComments,
+    /RAISE\s+EXCEPTION\s+'E7 cannot control browser default ACL owner: %'/i,
+    `${label}: arbitrary non-controllable owners must fail closed`,
+  );
+  assert.match(
+    withoutComments,
+    /USING\s+ERRCODE\s*=\s*'insufficient_privilege'/i,
+    `${label}: uncontrollable-owner failure must preserve an authorization error`,
+  );
 
   assert.match(withoutComments, /FOR\s+owner_name\s+IN[\s\S]*FROM\s+pg_default_acl\s+AS\s+defaults/i, `${label}: owner discovery must start from pg_default_acl`);
   assert.match(withoutComments, /JOIN\s+pg_roles\s+AS\s+owner_role[\s\S]*owner_role\.oid\s*=\s*defaults\.defaclrole/i, `${label}: owner discovery must resolve pg_roles`);
@@ -1133,8 +1158,10 @@ function validateE7DefaultPrivilegesMigration(source, label) {
     );
   }
   assert.doesNotMatch(withoutComments, /REVOKE[\s\S]*?FROM[^;]*\bservice_role\b/i, `${label}: service_role defaults remain explicitly deferred`);
-  assert.match(withoutComments, /offending_count[\s\S]*RAISE\s+EXCEPTION\s+'E7 browser default privileges remain/i, `${label}: terminal catalog assertion must raise on residual defaults`);
-  assert.match(withoutComments, /offending_count\s*<>\s*0/i, `${label}: terminal catalog assertion must require zero residual defaults`);
+  assert.match(withoutComments, /unsupported_owner_count\s*<>\s*0[\s\S]*RAISE\s+EXCEPTION\s+'E7 unsupported browser default privilege owner remains/i, `${label}: terminal assertion must reject arbitrary residual owners`);
+  assert.match(withoutComments, /controllable_count\s*<>\s*0[\s\S]*RAISE\s+EXCEPTION\s+'E7 browser default privileges remain for controllable owners/i, `${label}: terminal assertion must reject controllable residual defaults`);
+  assert.match(withoutComments, /pg_has_role\(current_user,\s*owner_role\.rolname,\s*'USAGE'\)/i, `${label}: terminal assertion must classify controllable residual owners`);
+  assert.match(withoutComments, /owner_role\.rolname\s*<>\s*'supabase_admin'/i, `${label}: terminal assertion must allow only the exact provider-managed residual owner`);
   assert.match(withoutComments, /FROM\s+pg_default_acl\s+AS\s+defaults[\s\S]*aclexplode\(defaults\.defaclacl\)/i, `${label}: terminal catalog assertion must inspect pg_default_acl`);
   const diagnosticAggregates = sqlFunctionCallBodies(withoutComments, 'string_agg');
   assert.ok(diagnosticAggregates.length > 0, `${label}: residual diagnostics must use string_agg`);
@@ -3896,9 +3923,41 @@ if (process.env.MUTATION_TEST === '1') {
     '20260808133000_b2b_media_object_deletion_token_uuid.sql',
     (migration) => migration.replace('USING deletion_token::uuid', 'USING deletion_token::text'),
   ));
-  expectRejected('E7 implicit owner', (source) => mutateE7(
+  expectRejected('E7 controllable-owner check removed', (source) => mutateE7(
     source,
-    (migration) => migration.replaceAll('      owner_name\n    );', "      'postgres'\n    );"),
+    (migration) => migration.replace(
+      "IF pg_has_role(current_user, owner_name, 'USAGE') THEN",
+      'IF true THEN',
+    ),
+  ));
+  expectRejected('E7 provider exception widened', (source) => mutateE7(
+    source,
+    (migration) => migration.replace(
+      "ELSIF owner_name = 'supabase_admin' THEN",
+      "ELSIF owner_name IN ('supabase_admin', 'postgres') THEN",
+    ),
+  ));
+  expectRejected('E7 arbitrary owner failure hidden', (source) => mutateE7(
+    source,
+    (migration) => migration.replace(
+      "RAISE EXCEPTION 'E7 cannot control browser default ACL owner: %', owner_name",
+      "RAISE NOTICE 'E7 cannot control browser default ACL owner: %', owner_name",
+    ),
+  ));
+  expectRejected('E7 unsupported residual check removed', (source) => mutateE7(
+    source,
+    (migration) => migration.replace('unsupported_owner_count <> 0', 'false'),
+  ));
+  expectRejected('E7 controllable residual check removed', (source) => mutateE7(
+    source,
+    (migration) => migration.replace('controllable_count <> 0', 'false'),
+  ));
+  expectRejected('E7 provider residual filter widened', (source) => mutateE7(
+    source,
+    (migration) => migration.replace(
+      "owner_role.rolname <> 'supabase_admin'",
+      "owner_role.rolname <> 'postgres'",
+    ),
   ));
   expectRejected('E7 hardcoded owner clause', (source) => mutateE7(
     source,
