@@ -1,6 +1,8 @@
 import { assertEquals } from "jsr:@std/assert";
+import type { SupabaseAdminClient } from "./types.ts";
 import {
   classifyVideoRendererHealth,
+  getVideoRenderDetail,
   latestTimestamp,
   normalizeVideoRenderIds,
   normalizeVideoRenderReviewState,
@@ -177,4 +179,93 @@ Deno.test("video render review ids accept one or many unique UUIDs", () => {
   assertEquals(normalizeVideoRenderIds({ render_id: ` ${first} ` }), [first]);
   assertEquals(normalizeVideoRenderIds({ render_ids: [first, second, first, "bad", null] }), [first, second]);
   assertEquals(normalizeVideoRenderIds({}), []);
+});
+
+type QueryResult = { data?: unknown; error?: unknown };
+
+function fakeVideoRenderQueryBuilder(
+  tableName: string,
+  capture: { postsSelectColumns?: string },
+) {
+  const baseRender = {
+    id: "render-1",
+    tweet_id: "tweet-1",
+    source_media_id: "media-1",
+    status: "completed",
+    failure_policy: "retry",
+    render_version: "v1",
+    render_revision: 1,
+    output_storage_path: null,
+    output_mime_type: null,
+    output_file_size: null,
+    width: null,
+    height: null,
+    duration_ms: null,
+    original_srt: null,
+    persian_srt: null,
+    translated_srt: null,
+    ass_subtitles: null,
+    source_language: null,
+    target_language: null,
+    preflight: null,
+    metrics: null,
+    error: null,
+    block_reason: null,
+    attempts: 1,
+    queued_at: null,
+    started_at: null,
+    completed_at: null,
+    failed_at: null,
+    blocked_at: null,
+    reviewed_at: null,
+    reviewed_by: null,
+    posted_at: null,
+    expires_at: null,
+    created_at: null,
+    updated_at: "2026-07-23T00:00:00.000Z",
+  };
+
+  const dataByTable: Record<string, unknown> = {
+    video_renders: [baseRender],
+    posts: null,
+    media: null,
+    video_render_feedback: [],
+  };
+
+  const builder: any = {
+    select: (columns: string) => {
+      if (tableName === "posts") capture.postsSelectColumns = columns;
+      return builder;
+    },
+    update: () => builder,
+    upsert: async () => ({ error: null }),
+    insert: () => builder,
+    eq: () => builder,
+    in: () => builder,
+    gte: () => builder,
+    is: () => builder,
+    order: () => builder,
+    limit: () => builder,
+    maybeSingle: async () => ({ data: dataByTable[tableName], error: null }),
+    single: async () => ({ data: null, error: null }),
+    then: (onfulfilled?: (value: QueryResult) => unknown, onrejected?: (reason: unknown) => unknown) => {
+      return Promise.resolve({ data: dataByTable[tableName], error: null }).then(onfulfilled, onrejected);
+    },
+  };
+
+  return builder;
+}
+
+function fakeSupabaseForDetail(capture: { postsSelectColumns?: string }): SupabaseAdminClient {
+  return {
+    from: (tableName: string) => fakeVideoRenderQueryBuilder(tableName, capture),
+    rpc: async () => ({ data: null, error: null }),
+  };
+}
+
+Deno.test("detail post projection does not select the unsupported x_tweet_id column", async () => {
+  const capture: { postsSelectColumns?: string } = {};
+  const result = await getVideoRenderDetail(fakeSupabaseForDetail(capture), { render_id: "render-1" });
+  assertEquals(result.ok, true);
+  assertEquals(capture.postsSelectColumns?.includes("x_tweet_id"), false);
 });

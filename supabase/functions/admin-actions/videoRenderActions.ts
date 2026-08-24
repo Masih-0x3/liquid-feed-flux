@@ -721,7 +721,7 @@ export async function getVideoRenderDetail(supabase: SupabaseAdminClient, body: 
   if (!render) return { ok: false, error: 'video render not found' };
 
   const [postRes, mediaRes, feedbackRes] = await Promise.all([
-    table(supabase, 'posts').select('tweet_id, text_original, text_translated, url, author_handle, created_at, delivery_decision, final_score, x_tweet_id').eq('tweet_id', render.tweet_id).maybeSingle(),
+    table(supabase, 'posts').select('tweet_id, text_original, text_translated, url, author_handle, created_at, delivery_decision, final_score').eq('tweet_id', render.tweet_id).maybeSingle(),
     table(supabase, 'media').select('id, kind, mime_type, file_size, duration_ms, width, height').eq('id', render.source_media_id).maybeSingle(),
     table(supabase, 'video_render_feedback').select('id, label, note, metadata, created_at, created_by').eq('render_id', render.id).order('created_at', { ascending: false }).limit(50),
   ]);
