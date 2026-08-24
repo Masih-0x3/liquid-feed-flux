@@ -19,10 +19,10 @@
   },
   "evidenceOverrides": {
     "scripts/check-migration-baseline.mjs": "5bf5c4b730d6a6ab996d09efc2bb9b3b0ed0e7e9dfab9b3db2f1e539069b4a45",
-    "scripts/check-migration-baseline.test.mjs": "79938345d9784f0fdb7af387c8d144232ea54dcb3b0a3b70c9498a5de7f60283"
+    "scripts/check-migration-baseline.test.mjs": "a0435bb0747b946588934f6e3a87bc0121b849b3a1c58df55db4534d8c58e411"
   },
   "additionalEvidence": {
-    "scripts/check-migration-baseline.test.mjs": "79938345d9784f0fdb7af387c8d144232ea54dcb3b0a3b70c9498a5de7f60283",
+    "scripts/check-migration-baseline.test.mjs": "a0435bb0747b946588934f6e3a87bc0121b849b3a1c58df55db4534d8c58e411",
     "scripts/check-video-render-rls-contract.mjs": "0ec5c3f3bfff860918e0a72dca866c25d4fca09acdbf177f85731193d1b82826"
   },
   "supersession": {
