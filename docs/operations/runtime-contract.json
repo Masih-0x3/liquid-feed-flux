@@ -88,7 +88,7 @@
     "wrapper_path": "scripts/check-build-contract.mjs",
     "wrapper_sha256": "7959d9345395856258f9b79efe655dc57f5e14f3a67cb7ce3c87bf742313249d",
     "frontend_env_path": "scripts/check-vite-env.mjs",
-    "frontend_env_sha256": "67aab2bd3de633fbf665bb88f069e195d0bea879907b888778316d21d75b8e87",
+    "frontend_env_sha256": "f73d3ca090b6f9ccee682ab6b92c07733a78bc32099e97676e067194b54a100a",
     "preview_identity_path": "scripts/preview-identity.mjs",
     "preview_identity_sha256": "a0c00c671978ab8858cc62ae4e59ba0fd8673a70257bc9caad43636d70238fe1",
     "build_output_identity_path": "scripts/check-build-output-identity.mjs",

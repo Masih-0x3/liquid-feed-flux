@@ -42,11 +42,11 @@
     },
     {
       "path": "scripts/check-vite-env.mjs",
-      "sha256": "67aab2bd3de633fbf665bb88f069e195d0bea879907b888778316d21d75b8e87"
+      "sha256": "f73d3ca090b6f9ccee682ab6b92c07733a78bc32099e97676e067194b54a100a"
     },
     {
       "path": "scripts/check-vite-env.test.mjs",
-      "sha256": "35c7ab95c2fdc20053bbf1e50755f456e66e27a297a5ce1cfaca4af5198fde95"
+      "sha256": "85dff275aff3d038a24365068c262eb767bf7b8bae461ef2eb73f91ab0c28d37"
     },
     {
       "path": "services/video-renderer/Dockerfile",
@@ -10032,7 +10032,7 @@
       "source_files": [
         {
           "path": "scripts/check-vite-env.mjs",
-          "sha256": "67aab2bd3de633fbf665bb88f069e195d0bea879907b888778316d21d75b8e87"
+          "sha256": "f73d3ca090b6f9ccee682ab6b92c07733a78bc32099e97676e067194b54a100a"
         },
         {
           "path": "src/App.tsx",
@@ -10076,63 +10076,63 @@
           "path": "scripts/check-vite-env.mjs,src/App.tsx,src/components/settings/ObservabilitySettings.tsx",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "75d36d5e76d42bb4c4595780fe83a41f837580cdaffdd2780f9abf1b51cdf2b0"
+          "source_file_sha256": "c632884a8d6e8a1e59c4fb8cd747454ad46d99cecd522100191b114e6ecafdd0"
         },
         {
           "name": "VITE_SENTRY_DSN",
           "path": "scripts/check-vite-env.mjs,src/instrument.ts",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "db8e3b1b94d0ef6ef0f56ff1176be87e20beec045b52958870144a9b4ca98d9e"
+          "source_file_sha256": "63384a662fb2ef74f0e32c5b6fef0bdf46d8fa24790ae15d3df667384990668a"
         },
         {
           "name": "VITE_SENTRY_ENVIRONMENT",
           "path": "scripts/check-vite-env.mjs,src/instrument.ts",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "db8e3b1b94d0ef6ef0f56ff1176be87e20beec045b52958870144a9b4ca98d9e"
+          "source_file_sha256": "63384a662fb2ef74f0e32c5b6fef0bdf46d8fa24790ae15d3df667384990668a"
         },
         {
           "name": "VITE_SENTRY_REPLAYS_ERROR_SAMPLE_RATE",
           "path": "scripts/check-vite-env.mjs,src/instrument.ts",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "db8e3b1b94d0ef6ef0f56ff1176be87e20beec045b52958870144a9b4ca98d9e"
+          "source_file_sha256": "63384a662fb2ef74f0e32c5b6fef0bdf46d8fa24790ae15d3df667384990668a"
         },
         {
           "name": "VITE_SENTRY_REPLAYS_SESSION_SAMPLE_RATE",
           "path": "scripts/check-vite-env.mjs,src/instrument.ts",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "db8e3b1b94d0ef6ef0f56ff1176be87e20beec045b52958870144a9b4ca98d9e"
+          "source_file_sha256": "63384a662fb2ef74f0e32c5b6fef0bdf46d8fa24790ae15d3df667384990668a"
         },
         {
           "name": "VITE_SENTRY_TRACES_SAMPLE_RATE",
           "path": "scripts/check-vite-env.mjs,src/instrument.ts",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "db8e3b1b94d0ef6ef0f56ff1176be87e20beec045b52958870144a9b4ca98d9e"
+          "source_file_sha256": "63384a662fb2ef74f0e32c5b6fef0bdf46d8fa24790ae15d3df667384990668a"
         },
         {
           "name": "VITE_SUPABASE_PROJECT_ID",
           "path": "scripts/check-vite-env.mjs,src/components/settings/XAutomationSettings.tsx,src/test/x-automation-settings.test.ts",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "2658164a9f638e505229d5e8d57bb173da226de5b43b286e403b77dac635255c"
+          "source_file_sha256": "3fdf6fa5faa796851fb8fb2de4dde1d107d0bb8a2654279537cd91eb956532ca"
         },
         {
           "name": "VITE_SUPABASE_PUBLISHABLE_KEY",
           "path": "scripts/check-vite-env.mjs,src/integrations/supabase/client.ts",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "eedaa3591c3cf1dfa7ff8dd7ece9c51d7d61f8f5ba870dce237aaf33d3c4a761"
+          "source_file_sha256": "c218f82dd5c7810e96260d1066e91f46c33f3bbfd0797c56dda984904307319e"
         },
         {
           "name": "VITE_SUPABASE_URL",
           "path": "scripts/check-vite-env.mjs,src/components/settings/XAutomationSettings.tsx,src/integrations/supabase/client.ts",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "77a583ca9abc29130944ebb87e0dfd737d1b28b8cf59030de7330d138b25923b"
+          "source_file_sha256": "ad95681256f980b5f4bf370b3debe32d61e786ca315f4bc90788540c45ae68e3"
         }
       ]
     }

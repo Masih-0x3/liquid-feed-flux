@@ -25,6 +25,32 @@ export const PUBLIC_VITE_ENV_NAMES = Object.freeze([
   ...OPTIONAL_VITE_ENV_NAMES,
 ]);
 
+/**
+ * Vercel injects these exact VITE_* names as platform-provided public metadata.
+ * They are not application config and are not required or validated as values.
+ * Any other VITE_VERCEL_ name remains unknown/secret-like and fail-closed.
+ */
+const VERCEL_SYSTEM_VITE_ENV_NAMES = Object.freeze([
+  "VITE_VERCEL_DEPLOYMENT_ID",
+  "VITE_VERCEL_ENV",
+  "VITE_VERCEL_GIT_COMMIT_AUTHOR_LOGIN",
+  "VITE_VERCEL_GIT_COMMIT_AUTHOR_NAME",
+  "VITE_VERCEL_GIT_COMMIT_MESSAGE",
+  "VITE_VERCEL_GIT_COMMIT_REF",
+  "VITE_VERCEL_GIT_COMMIT_SHA",
+  "VITE_VERCEL_GIT_PREVIOUS_SHA",
+  "VITE_VERCEL_GIT_PROVIDER",
+  "VITE_VERCEL_GIT_PULL_REQUEST_ID",
+  "VITE_VERCEL_GIT_REPO_ID",
+  "VITE_VERCEL_GIT_REPO_OWNER",
+  "VITE_VERCEL_GIT_REPO_SLUG",
+  "VITE_VERCEL_OBSERVABILITY_CLIENT_CONFIG",
+  "VITE_VERCEL_PROJECT_ID",
+  "VITE_VERCEL_PROJECT_PRODUCTION_URL",
+  "VITE_VERCEL_TARGET_ENV",
+  "VITE_VERCEL_URL",
+]);
+
 export const MAX_PUBLIC_VALUE_LENGTH = 4096;
 export const MAX_SUPABASE_URL_LENGTH = 256;
 export const MAX_PUBLISHABLE_KEY_SEGMENT_LENGTH = 2048;
@@ -33,6 +59,7 @@ export const MAX_SENTRY_DSN_USERNAME_LENGTH = 64;
 export const MAX_SENTRY_PROJECT_ID_LENGTH = 20;
 
 const PUBLIC_VITE_ENV_NAME_SET = new Set(PUBLIC_VITE_ENV_NAMES);
+const VERCEL_SYSTEM_VITE_ENV_NAME_SET = new Set(VERCEL_SYSTEM_VITE_ENV_NAMES);
 const PREVIEW_MODE_NAMES = Object.freeze([
   "XOT_ENVIRONMENT",
   "APP_ENVIRONMENT",
@@ -147,7 +174,7 @@ function presentViteNames(env) {
 export function validatePublicViteEnv(env = process.env) {
   const errors = [];
   const present = presentViteNames(env);
-  const unknown = present.filter((name) => !PUBLIC_VITE_ENV_NAME_SET.has(name));
+  const unknown = present.filter((name) => !PUBLIC_VITE_ENV_NAME_SET.has(name) && !VERCEL_SYSTEM_VITE_ENV_NAME_SET.has(name));
   const secretLike = unknown.filter((name) => SECRET_LIKE_PUBLIC_NAME_RE.test(name));
   const ordinaryUnknown = unknown.filter((name) => !SECRET_LIKE_PUBLIC_NAME_RE.test(name));
 
@@ -312,6 +339,11 @@ function syntheticValidEnv() {
 function runMutationSelfTest() {
   const valid = syntheticValidEnv();
   if (validatePublicViteEnv(valid).length > 0) throw new Error("valid synthetic public env was rejected");
+
+  const vercelAccepted = { ...valid };
+  for (const name of VERCEL_SYSTEM_VITE_ENV_NAMES) vercelAccepted[name] = "synthetic";
+  if (validatePublicViteEnv(vercelAccepted).length > 0) throw new Error("reviewed Vercel system Vite env name was rejected");
+
   const cases = [
     ["missing required", (() => { const env = { ...valid }; delete env.VITE_SUPABASE_URL; return env; })()],
     ["unknown public name", { ...valid, VITE_UNREVIEWED_PUBLIC_NAME: "synthetic" }],
@@ -319,6 +351,8 @@ function runMutationSelfTest() {
     ["malformed URL", { ...valid, VITE_SUPABASE_URL: "http://bad.invalid" }],
     ["malformed project id", { ...valid, VITE_SUPABASE_PROJECT_ID: "bad" }],
     ["malformed sample rate", { ...valid, VITE_SENTRY_TRACES_SAMPLE_RATE: "2" }],
+    ["unknown VITE_VERCEL name", { ...valid, VITE_VERCEL_UNREVIEWED_NAME: "synthetic" }],
+    ["secret-like VITE_VERCEL name", { ...valid, VITE_VERCEL_SECRET_TOKEN: "synthetic" }],
   ];
   for (const [label, env] of cases) {
     const errors = validatePublicViteEnv(env);

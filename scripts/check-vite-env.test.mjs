@@ -28,6 +28,27 @@ const sentry = {
   VITE_SENTRY_REPLAYS_ERROR_SAMPLE_RATE: "1",
 };
 
+const vercel = {
+  VITE_VERCEL_DEPLOYMENT_ID: "dpl_synthetic",
+  VITE_VERCEL_ENV: "preview",
+  VITE_VERCEL_GIT_COMMIT_AUTHOR_LOGIN: "synthetic-login",
+  VITE_VERCEL_GIT_COMMIT_AUTHOR_NAME: "Synthetic Author",
+  VITE_VERCEL_GIT_COMMIT_MESSAGE: "synthetic message",
+  VITE_VERCEL_GIT_COMMIT_REF: "syntheticref",
+  VITE_VERCEL_GIT_COMMIT_SHA: "syntheticsha",
+  VITE_VERCEL_GIT_PREVIOUS_SHA: "syntheticprevioussha",
+  VITE_VERCEL_GIT_PROVIDER: "github",
+  VITE_VERCEL_GIT_PULL_REQUEST_ID: "123",
+  VITE_VERCEL_GIT_REPO_ID: "456",
+  VITE_VERCEL_GIT_REPO_OWNER: "synthetic-owner",
+  VITE_VERCEL_GIT_REPO_SLUG: "synthetic-repo",
+  VITE_VERCEL_OBSERVABILITY_CLIENT_CONFIG: "synthetic-config",
+  VITE_VERCEL_PROJECT_ID: "prj_synthetic",
+  VITE_VERCEL_PROJECT_PRODUCTION_URL: "https://synthetic.vercel.app",
+  VITE_VERCEL_TARGET_ENV: "preview",
+  VITE_VERCEL_URL: "https://synthetic.vercel.app",
+};
+
 const previewIdentity = {
   XOT_ENVIRONMENT: "preview",
   SUPABASE_PROJECT_REF: "abcdefghijklmnopqrst",
@@ -48,6 +69,10 @@ function run(env = {}, options = {}) {
 
 function output(result) {
   return `${result.stdout}\n${result.stderr}`;
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 test("missing build-critical public Supabase variables fail closed", () => {
@@ -75,6 +100,54 @@ test("the known public allowlist accepts required and optional public names", ()
   const result = run({ ...required, ...sentry, VITE_FOGLAMP_HUD: "1" });
   assert.equal(result.status, 0, output(result));
   assert.match(result.stdout, /Frontend env contract OK/);
+});
+
+test("the exact reviewed Vercel system Vite names are accepted as platform metadata", () => {
+  const result = run({ ...required, ...sentry, VITE_FOGLAMP_HUD: "1", ...vercel });
+  assert.equal(result.status, 0, output(result));
+  assert.match(result.stdout, /Frontend env contract OK/);
+  for (const value of Object.values(vercel)) {
+    assert.doesNotMatch(output(result), new RegExp(escapeRegExp(value)));
+  }
+});
+
+test("Vercel system Vite names are not treated as required public env", () => {
+  const result = run({ ...vercel });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Missing required frontend env/);
+  assert.doesNotMatch(output(result), /VITE_VERCEL/);
+});
+
+test("unreviewed VITE_VERCEL_ names are rejected without accepting the whole prefix", () => {
+  const sentinel = "synthetic-unreviewed-9e4f";
+  const result = run({ ...required, VITE_VERCEL_UNREVIEWED_NAME: sentinel });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Unknown public Vite env/);
+  assert.match(result.stderr, /VITE_VERCEL_UNREVIEWED_NAME/);
+  assert.doesNotMatch(output(result), new RegExp(escapeRegExp(sentinel)));
+});
+
+for (const name of [
+  "VITE_VERCEL_API_KEY",
+  "VITE_VERCEL_SECRET",
+  "VITE_VERCEL_SERVICE_ROLE_KEY",
+  "VITE_VERCEL_AUTH_TOKEN",
+  "VITE_VERCEL_PASSWORD",
+]) {
+  test(`secret-like ${name} is rejected without accepting the whole VITE_VERCEL_ prefix`, () => {
+    const sentinel = "synthetic-secret-value-3a1b";
+    const result = run({ ...required, [name]: sentinel });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /secret-like public Vite env/i);
+    assert.match(result.stderr, new RegExp(name));
+    assert.doesNotMatch(output(result), new RegExp(escapeRegExp(sentinel)));
+  });
+}
+
+test("the checker mutation battery passes with reviewed Vercel system names", () => {
+  const result = run({ ...required, ...sentry, VITE_FOGLAMP_HUD: "1", ...vercel, MUTATION_TEST: "1" });
+  assert.equal(result.status, 0, output(result));
+  assert.match(output(result), /selfTest=pass/);
 });
 
 test("an explicit synthetic Preview tuple passes the Vite and identity contracts", () => {
