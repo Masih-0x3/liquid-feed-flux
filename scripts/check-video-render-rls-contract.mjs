@@ -3750,6 +3750,13 @@ const reviewedNonRawMigrationDigests = new Map([
   // This caller-bound, read-only role helper is reviewed by SR-AUTH-01. Keep
   // the exemption byte-locked so any future edit re-enters this RLS review.
   ['20260724183000_add_current_user_is_admin_rpc.sql', 'cedd28e0976f70bdff25ac2e3025c407fb27af4beff1d3ebc14f888be8a08602'],
+  // These newer migrations are covered by their dedicated delivery,
+  // activation-bridge, and renderer automation contracts. Keep each
+  // exemption byte-locked so an edit re-enters this RLS review.
+  ['20260825091418_v1_delivery_continuity_cutover.sql', '378acb7d9079c9b23bd780de8c092db860e89646ffbc06dd55eac2c5cbf8acaa'],
+  ['20260825104845_v1_delivery_cutover_settle_reason_prefix.sql', 'c509cbe64adb317781da026bdaf8c4e73508c8f8cbba24d05f4ff64f6edd5247'],
+  ['20260825220124_xot_v2_runtime_controls_activation_bridge.sql', '7d70aee49b5849f8b7df9e20c78a9d5d886a18eb4618a96ff9296afe81920910'],
+  ['20260825024826_render_only_automation_cutover.sql', '0a0e4e5039488e6f1996ba5bca7f4008d6f6f691863d6c8a4406df1e41e9b49f'],
 ]);
 
 const protectedAccessIdentifierPattern = new RegExp(
