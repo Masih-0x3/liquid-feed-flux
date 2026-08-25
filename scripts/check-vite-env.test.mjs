@@ -42,6 +42,7 @@ const vercel = {
   VITE_VERCEL_GIT_REPO_ID: "456",
   VITE_VERCEL_GIT_REPO_OWNER: "synthetic-owner",
   VITE_VERCEL_GIT_REPO_SLUG: "synthetic-repo",
+  VITE_VERCEL_BRANCH_URL: "xot-git-preview-masihs-projects.vercel.app",
   VITE_VERCEL_OBSERVABILITY_CLIENT_CONFIG: "synthetic-config",
   VITE_VERCEL_PROJECT_ID: "prj_synthetic",
   VITE_VERCEL_PROJECT_PRODUCTION_URL: "https://synthetic.vercel.app",
@@ -109,6 +110,45 @@ test("the exact reviewed Vercel system Vite names are accepted as platform metad
   for (const value of Object.values(vercel)) {
     assert.doesNotMatch(output(result), new RegExp(escapeRegExp(value)));
   }
+});
+
+test("a real Vercel-shaped Preview env can use VERCEL_ENV and branch URL metadata", () => {
+  const result = run({
+    ...required,
+    VERCEL_ENV: "preview",
+    VERCEL_BRANCH_URL: "xot-git-preview-masihs-projects.vercel.app",
+    VERCEL_GIT_COMMIT_REF: "preview/e10-p2",
+    SUPABASE_PROJECT_REF: "abcdefghijklmnopqrst",
+    SUPABASE_URL: "https://abcdefghijklmnopqrst.supabase.co/",
+  });
+  assert.equal(result.status, 0, output(result));
+  assert.match(result.stdout, /Frontend env contract OK/);
+  assert.doesNotMatch(output(result), /xot-git-preview|abcdefghijklmnopqrst/);
+});
+
+test("a branch URL with an explicit conflicting origin fails closed", () => {
+  const result = run({
+    ...required,
+    VERCEL_ENV: "preview",
+    VERCEL_BRANCH_URL: "xot-git-preview-masihs-projects.vercel.app",
+    SUPABASE_PROJECT_REF: "abcdefghijklmnopqrst",
+    SUPABASE_URL: "https://abcdefghijklmnopqrst.supabase.co/",
+    XOT_PREVIEW_BRANCH: "preview/e10-p2",
+    XOT_PREVIEW_ORIGIN: "https://other-preview.example.test/",
+  });
+  assert.notEqual(result.status, 0, output(result));
+  assert.match(output(result), /Preview identity/);
+  assert.doesNotMatch(output(result), /xot-git-preview|other-preview/);
+});
+
+test("production route remains canonical and does not accept a non-production identity", () => {
+  const result = run({
+    ...productionRequired,
+    VERCEL_ENV: "production",
+    SUPABASE_PROJECT_REF: "jzirqfzzvlbxwfzndaer",
+    SUPABASE_URL: "https://jzirqfzzvlbxwfzndaer.supabase.co/",
+  });
+  assert.equal(result.status, 0, output(result));
 });
 
 test("Vercel system Vite names are not treated as required public env", () => {

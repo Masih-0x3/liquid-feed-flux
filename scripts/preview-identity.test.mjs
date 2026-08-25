@@ -9,6 +9,7 @@ import test from "node:test";
 import {
   PRODUCTION_SUPABASE_PROJECT_REF,
   assertPreviewIdentity,
+  readPreviewIdentity,
   validatePreviewIdentity,
 } from "./preview-identity.mjs";
 
@@ -98,6 +99,58 @@ test("URL host supplied separately is accepted only when it matches the URL and 
   const result = validatePreviewIdentity({ ...VALID, supabaseUrlHost: "abcdefghijklmnopqrst.supabase.co" });
   assert.equal(result.ok, true);
   assert.equal(validatePreviewIdentity({ ...VALID, supabaseUrlHost: "zyxwvutsrqponmlkjihg.supabase.co" }).ok, false);
+});
+
+test("VERCEL_ENV=preview is a canonical environment alias and a host-only branch URL becomes an HTTPS origin", () => {
+  const input = {
+    VERCEL_ENV: "preview",
+    SUPABASE_PROJECT_REF: VALID.supabaseProjectRef,
+    SUPABASE_URL: VALID.supabaseUrl,
+    VERCEL_GIT_COMMIT_REF: VALID.previewBranch,
+    VERCEL_BRANCH_URL: "xot-git-preview-masihs-projects.vercel.app",
+  };
+  const result = validatePreviewIdentity(input);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(readPreviewIdentity(input).previewOrigin, "https://xot-git-preview-masihs-projects.vercel.app/");
+});
+
+for (const [label, branchUrl] of [
+  ["production Vercel host", "xot.vercel.app"],
+  ["production custom host", "xot.iraneyes.com"],
+  ["qualified URL", "https://xot-git-preview.vercel.app"],
+  ["credentials", "user:xot-git-preview.vercel.app"],
+  ["port", "xot-git-preview.vercel.app:443"],
+  ["path", "xot-git-preview.vercel.app/path"],
+  ["malformed", "not a host"],
+]) {
+  test(`branch URL ${label} fails closed`, () => {
+    const result = validatePreviewIdentity({
+      ...VALID,
+      previewOrigin: undefined,
+      VERCEL_BRANCH_URL: branchUrl,
+    });
+    assert.equal(result.ok, false);
+  });
+}
+
+test("conflicting branch URL aliases fail closed", () => {
+  const result = validatePreviewIdentity({
+    ...VALID,
+    previewOrigin: undefined,
+    VERCEL_BRANCH_URL: "xot-git-preview-masihs-projects.vercel.app",
+    VITE_VERCEL_BRANCH_URL: "xot-git-other-masihs-projects.vercel.app",
+  });
+  assert.equal(result.ok, false);
+  assert.ok(result.errorCodes.includes("previewOrigin.aliases_conflict"));
+});
+
+test("an explicit origin conflicts with a different branch URL", () => {
+  const result = validatePreviewIdentity({
+    ...VALID,
+    VERCEL_BRANCH_URL: "xot-git-preview-masihs-projects.vercel.app",
+  });
+  assert.equal(result.ok, false);
+  assert.ok(result.errorCodes.includes("previewOrigin.aliases_conflict"));
 });
 
 test("conflicting identity aliases fail closed instead of selecting one value", () => {

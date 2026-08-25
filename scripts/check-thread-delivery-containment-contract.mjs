@@ -10,6 +10,7 @@ const paths = {
   basicActionsTest: join(repoRoot, 'supabase/functions/admin-actions/basicActions.test.ts'),
   adminActionsIndex: join(repoRoot, 'supabase/functions/admin-actions/index.ts'),
   actionNames: join(repoRoot, 'supabase/functions/_shared/adminActionNames.ts'),
+  externalPostingGuard: join(repoRoot, 'supabase/functions/_shared/externalPostingGuard.ts'),
   worker: join(repoRoot, 'supabase/functions/worker/index.ts'),
   threads: join(repoRoot, 'src/pages/Threads.tsx'),
   packageJson: join(repoRoot, 'package.json'),
@@ -148,7 +149,7 @@ function validateStructural(source) {
   );
   assert.match(source.basicActions, /const THREAD_DELIVERY_UNAVAILABLE = "thread_delivery_unavailable";/, 'thread delivery must have one stable unavailable code');
   assert.match(postThread, /typeof body\.thread_id === "string"/, 'thread action must keep bounded string admission');
-  assert.match(postThread, /success: false,\s*error: THREAD_DELIVERY_UNAVAILABLE,\s*code: THREAD_DELIVERY_UNAVAILABLE,\s*\},\s*status: 409,/s, 'thread action must return an explicit non-queued 409 result');
+  assert.match(postThread, /ok: false,\s*code: "delivery_cutover_blocked",\s*error: THREAD_DELIVERY_UNAVAILABLE,\s*reason: THREAD_DELIVERY_CUTOVER_REASON,\s*\},\s*status: 409,/s, 'thread action must return the canonical non-queued 409 result');
   assert.doesNotMatch(postThread, /(?:deliveries|subject_type|\.insert\(|Thread queued for delivery)/, 'thread action must not create a pending delivery or claim queued success');
   assertPostThreadHasNoSideEffects(source.basicActions);
 
@@ -176,6 +177,8 @@ function validateStructural(source) {
     paths.basicActions,
     paths.adminActionsIndex,
     paths.actionNames,
+    // This shared policy names the disabled action; it is not a delivery consumer.
+    paths.externalPostingGuard,
   ]);
   const unexpectedPostThreadFiles = sourceFiles(join(repoRoot, 'supabase/functions'))
     .filter((path) => !path.endsWith('.test.ts'))
@@ -203,34 +206,34 @@ if (process.env.MUTATION_TEST === '1') {
   assertRejected('non-success result', (source) => ({
     ...source,
     basicActions: mutatePostThreadAction(source.basicActions, (block) =>
-      block.replace('success: false,', 'success: true,')),
+      block.replace('ok: false,', 'ok: true,')),
   }));
   assertRejected('delivery insert', (source) => ({
     ...source,
     basicActions: source.basicActions.replace(
-      '  return {\n    body: {\n      success: false,',
-      '  await table(_supabase, "deliveries").insert({ subject_type: "thread" });\n  return {\n    body: {\n      success: false,',
+      '  return {\n    body: {\n      ok: false,',
+      '  await table(_supabase, "deliveries").insert({ subject_type: "thread" });\n  return {\n    body: {\n      ok: false,',
     ),
   }));
   assertRejected('job upsert', (source) => ({
     ...source,
     basicActions: source.basicActions.replace(
-      '  return {\n    body: {\n      success: false,',
-      '  await table(_supabase, "jobs").upsert({ type: "post_thread" });\n  return {\n    body: {\n      success: false,',
+      '  return {\n    body: {\n      ok: false,',
+      '  await table(_supabase, "jobs").upsert({ type: "post_thread" });\n  return {\n    body: {\n      ok: false,',
     ),
   }));
   assertRejected('RPC call', (source) => ({
     ...source,
     basicActions: source.basicActions.replace(
-      '  return {\n    body: {\n      success: false,',
-      '  await _supabase.rpc("enqueue_thread_delivery");\n  return {\n    body: {\n      success: false,',
+      '  return {\n    body: {\n      ok: false,',
+      '  await _supabase.rpc("enqueue_thread_delivery");\n  return {\n    body: {\n      ok: false,',
     ),
   }));
   assertRejected('provider fetch', (source) => ({
     ...source,
     basicActions: source.basicActions.replace(
-      '  return {\n    body: {\n      success: false,',
-      '  await fetch("https://provider.invalid/thread");\n  return {\n    body: {\n      success: false,',
+      '  return {\n    body: {\n      ok: false,',
+      '  await fetch("https://provider.invalid/thread");\n  return {\n    body: {\n      ok: false,',
     ),
   }));
   assertRejected('worker post_thread consumer', (source) => ({

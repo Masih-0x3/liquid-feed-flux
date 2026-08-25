@@ -27,9 +27,11 @@ const BRANCH_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/;
 const PRODUCTION_BRANCHES = new Set(["main", "master", "production", "prod"]);
 const PRODUCTION_ORIGIN_HOSTS = new Set(["xot.iraneyes.com", "xot.vercel.app"]);
 const MAX_ORIGIN_LENGTH = 512;
+const BRANCH_ORIGIN_ALIASES = Object.freeze(["VERCEL_BRANCH_URL", "VITE_VERCEL_BRANCH_URL"]);
+const HOST_ONLY_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+\.?$/;
 
 const FIELD_ALIASES = Object.freeze({
-  environment: ["environment", "xotEnvironment", "XOT_ENVIRONMENT", "APP_ENVIRONMENT", "ENVIRONMENT"],
+  environment: ["environment", "xotEnvironment", "XOT_ENVIRONMENT", "APP_ENVIRONMENT", "ENVIRONMENT", "VERCEL_ENV"],
   supabaseProjectRef: [
     "supabaseProjectRef",
     "projectRef",
@@ -68,6 +70,7 @@ function hasAliasConflict(input, names) {
 
 /** Normalize object and process.env-style names without exposing raw values. */
 export function readPreviewIdentity(input = process.env) {
+  const explicitOrigin = firstValue(input, FIELD_ALIASES.previewOrigin);
   return Object.freeze({
     environment: firstValue(input, FIELD_ALIASES.environment),
     supabaseProjectRef: firstValue(input, FIELD_ALIASES.supabaseProjectRef),
@@ -75,7 +78,7 @@ export function readPreviewIdentity(input = process.env) {
     supabaseUrlHost: firstValue(input, FIELD_ALIASES.supabaseUrlHost),
     previewBranch: firstValue(input, FIELD_ALIASES.previewBranch),
     vercelDeploymentTarget: firstValue(input, FIELD_ALIASES.vercelDeploymentTarget),
-    previewOrigin: firstValue(input, FIELD_ALIASES.previewOrigin),
+    previewOrigin: explicitOrigin || derivedPreviewOrigin(input),
   });
 }
 
@@ -146,6 +149,48 @@ function parsePreviewOrigin(value) {
   }
 }
 
+/**
+ * Vercel's branch URL metadata is a host-only value. Keep this parser strict
+ * so a value cannot smuggle credentials, a port, a path, or a URL scheme into
+ * the origin used by the Preview identity contract.
+ */
+function parseBranchOrigin(value) {
+  const host = stringValue(value);
+  if (!host || host.length > MAX_ORIGIN_LENGTH || !HOST_ONLY_RE.test(host)) return null;
+  try {
+    const parsed = new URL(`https://${host}`);
+    if (
+      parsed.protocol !== "https:"
+      || parsed.username !== ""
+      || parsed.password !== ""
+      || parsed.port !== ""
+      || parsed.pathname !== "/"
+      || parsed.search !== ""
+      || parsed.hash !== ""
+    ) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function branchOriginInputs(input) {
+  return BRANCH_ORIGIN_ALIASES
+    .map((name) => ({ name, value: stringValue(input?.[name]) }))
+    .filter(({ value }) => value);
+}
+
+function canonicalOrigin(parsed) {
+  return `${parsed.protocol}//${canonicalOriginHost(parsed.hostname)}`;
+}
+
+function derivedPreviewOrigin(input) {
+  const candidates = branchOriginInputs(input);
+  if (candidates.length === 0) return "";
+  const parsed = parseBranchOrigin(candidates[0].value);
+  return parsed ? `${parsed.protocol}//${parsed.hostname}/` : "";
+}
+
 function canonicalOriginHost(hostname) {
   const host = stringValue(hostname).toLowerCase();
   // WHATWG URL canonicalizes percent-encoded dots in a host and preserves an
@@ -189,6 +234,22 @@ export function validatePreviewIdentity(input = process.env, options = {}) {
     if (hasAliasConflict(input, FIELD_ALIASES[field])) {
       errors.push(error(field, "aliases_conflict", "conflicting identity sources were supplied"));
     }
+  }
+
+  const explicitOrigin = firstValue(input, FIELD_ALIASES.previewOrigin);
+  const branchOriginInputsList = branchOriginInputs(input);
+  const parsedBranchOrigins = branchOriginInputsList.map(({ value }) => parseBranchOrigin(value));
+  if (parsedBranchOrigins.some((parsed) => !parsed)) {
+    errors.push(error("previewOrigin", "malformed_branch_url", "Vercel branch URL must be a host-only value without credentials, a port, or a path"));
+  } else if (parsedBranchOrigins.length > 1
+    && new Set(parsedBranchOrigins.map((parsed) => canonicalOrigin(parsed))).size > 1) {
+    errors.push(error("previewOrigin", "aliases_conflict", "conflicting Vercel branch URL aliases were supplied"));
+  }
+
+  const parsedExplicitOrigin = explicitOrigin ? parsePreviewOrigin(explicitOrigin) : null;
+  const parsedDerivedOrigin = parsedBranchOrigins[0] ?? null;
+  if (parsedExplicitOrigin && parsedDerivedOrigin && canonicalOrigin(parsedExplicitOrigin) !== canonicalOrigin(parsedDerivedOrigin)) {
+    errors.push(error("previewOrigin", "aliases_conflict", "explicit origin conflicts with the Vercel branch URL"));
   }
 
   if (identity.environment !== PREVIEW_ENVIRONMENT) {
