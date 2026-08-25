@@ -122,6 +122,11 @@ import { isReadOnlyAdminActionName } from "../_shared/adminActionNames.ts";
 import { resolveCurrentUserRole, type AppRole } from "../_shared/appRole.ts";
 import { fetchRuntimeControls } from "../_shared/runtimeControls.ts";
 import type { SupabaseAdminClient } from "./types.ts";
+import {
+  adminActionRequiresExternalPosting,
+  evaluateExternalPosting,
+  externalPostingBlockedResponse,
+} from "../_shared/externalPostingGuard.ts";
 
 const DEPLOY_SHA = Deno.env.get('DEPLOY_GIT_SHA') ?? 'unknown';
 const DEPLOY_TIME = Deno.env.get('DEPLOY_TIME') ?? new Date().toISOString();
@@ -311,6 +316,18 @@ serve(async (req: Request): Promise<Response> => {
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
+
+    if (!action) {
+      console.error('[admin-actions] missing action', { contentType: req.headers.get('content-type') });
+      return jsonResponse({ error: 'Missing action parameter' }, 400);
+    }
+
+    if (adminActionRequiresExternalPosting(action, body?.step)) {
+      const postingDecision = await evaluateExternalPosting(supabase);
+      if (!postingDecision.allowed) {
+        return externalPostingBlockedResponse(postingDecision.reason, corsHeaders);
+      }
+    }
 
     switch (action) {
       case 'version': {

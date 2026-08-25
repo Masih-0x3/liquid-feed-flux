@@ -43,6 +43,9 @@ function fakeSupabase(config: FakeConfig = {}) {
     from(tableName: string) {
       const filters: FakeCall[] = [];
       const resolve = () => {
+        if (tableName === "runtime_controls") {
+          return { data: [runtimeControls] };
+        }
         if (tableName === "settings") {
           const key = filters.find((call) =>
             call.op === "eq" && call.column === "key"
@@ -51,7 +54,6 @@ function fakeSupabase(config: FakeConfig = {}) {
             ? { data: { value: settings[key] } }
             : { data: [] };
         }
-        if (tableName === "runtime_controls") return { data: [runtimeControls] };
         return {};
       };
       const builder = {
@@ -90,6 +92,9 @@ function fakeSupabase(config: FakeConfig = {}) {
         },
         maybeSingle() {
           return Promise.resolve(resolve());
+        },
+        limit() {
+          return builder;
         },
       };
       return builder;
@@ -131,6 +136,10 @@ function deps(
       return new Response(JSON.stringify(responseBody), { status: 200 });
     },
     now: () => new Date("2026-01-01T00:00:00.000Z"),
+    externalPostingOptions: {
+      environment: "production",
+      allowExternalPosting: "true",
+    },
   };
   return { deps: actionDeps, calls };
 }
@@ -262,27 +271,20 @@ Deno.test("send test tweet validates payload before credentials", async () => {
   assertEquals(calls.fetches, []);
 });
 
-Deno.test("send test tweet posts JSON body and returns created id", async () => {
+Deno.test("send test tweet is disabled before any provider call", async () => {
   const supabase = fakeSupabase();
   const { deps: actionDeps, calls } = deps({
     data: { id: "tweet-1", text: "hi" },
   });
-
   const result = await sendTestTweetAdminAction(supabase, {
     text: " hi ",
     in_reply_to_tweet_id: "123",
+    tweet_id: "post-after-cutover",
   }, actionDeps);
 
-  assertEquals((result.body as Record<string, unknown>).ok, true);
-  assertEquals((result.body as Record<string, unknown>).tweet_id, "tweet-1");
-  assertEquals(calls.fetches[0].input, "https://api.x.com/2/tweets");
-  assertEquals(
-    JSON.parse(String((calls.fetches[0].init as RequestInit).body)),
-    {
-      text: "hi",
-      reply: { in_reply_to_tweet_id: "123" },
-    },
-  );
+  assertEquals(result.status, 409);
+  assertEquals((result.body as Record<string, unknown>).code, "delivery_cutover_blocked");
+  assertEquals(calls.fetches, []);
 });
 
 Deno.test("Preview blocks direct X test tweet before provider fetch", async () => {

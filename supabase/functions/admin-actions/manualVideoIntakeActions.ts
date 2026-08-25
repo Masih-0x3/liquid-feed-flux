@@ -19,6 +19,7 @@ import {
   type RuntimeControlsQueryClient,
   type RuntimeControls,
 } from "../_shared/runtimeControls.ts";
+import { requireDeliveryCutover } from "../_shared/deliveryCutover.ts";
 import type {
   AdminActionResponse,
   SupabaseAdminClient,
@@ -1291,7 +1292,21 @@ export async function manualVideoIntakePostAdminAction(
   if (body.confirm_manual_post !== true) {
     return { body: { ok: false, error: "confirm_manual_post is required" }, status: 400 };
   }
-
+  try {
+    // Manual intake posting is a direct delivery path. Block its first
+    // mutation for historical or ambiguous lineage; processing-only actions
+    // remain available through their separate handlers.
+    await requireDeliveryCutover(supabase, String(intake.tweet_id ?? ""));
+  } catch (error) {
+    return {
+      body: {
+        ok: false,
+        code: "delivery_cutover_blocked",
+        error: error instanceof Error ? error.message : String(error),
+      },
+      status: 409,
+    };
+  }
   // This is the first side-effect boundary. Keep the breaker before the
   // snapshot, state transition, audit event, and x-poster invoke.
   try {

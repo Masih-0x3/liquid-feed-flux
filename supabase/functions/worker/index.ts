@@ -149,6 +149,11 @@ import {
 } from "../_shared/runtimeControls.ts";
 import { requireExternalPosting } from "../_shared/externalPostingGuard.ts";
 import {
+  DeliveryCutoverBlockedError,
+  requireDeliveryCutover,
+  settleDeliveryCutoverJob,
+} from "../_shared/deliveryCutover.ts";
+import {
   buildClassifierToolFunction,
   buildScoringBaseDecisionState,
   parseClassifierToolCallArguments,
@@ -287,6 +292,25 @@ class JobDeferred extends Error {
     this.name = "JobDeferred";
     this.nextRunAt = new Date(Date.now() + delayMs).toISOString();
     this.meta = meta;
+  }
+}
+
+class DeliveryCutoverSettled extends Error {
+  constructor(readonly reason: string) {
+    super(reason);
+    this.name = "DeliveryCutoverSettled";
+  }
+}
+
+async function settleBlockedDeliveryJob(
+  supabase: any,
+  job: Record<string, unknown>,
+  reason: string,
+): Promise<void> {
+  const jobId = typeof job.id === "string" ? job.id : "";
+  const settled = await settleDeliveryCutoverJob(supabase, jobId, reason);
+  if (!settled) {
+    throw new NonRetryableJobError("delivery_cutover_settlement_not_applied");
   }
 }
 
@@ -1097,6 +1121,26 @@ serve(async (req) => {
             return { success: false, jobId: job.id };
           }
         } catch (error) {
+          if (error instanceof DeliveryCutoverSettled) {
+            await recordPipelineEvent(supabase, job, "completed", error.reason, {
+              ...laneMetrics,
+              skipped: "delivery_cutover_blocked",
+              terminal: true,
+            });
+            console.log(JSON.stringify({
+              function: "worker",
+              action: "job_terminally_settled",
+              job_id: job.id,
+              type: job.type,
+              reason: error.reason,
+            }));
+            return {
+              success: true,
+              settled: true,
+              jobId: job.id,
+              reason: error.reason,
+            };
+          }
           if (error instanceof JobDeferred) {
             await updateJobOrThrow(supabase, job.id, claimEnvelopedPatch(job, {
               status: "pending",
@@ -3314,7 +3358,12 @@ async function handleDeliverJob(
       try {
         // This check runs for the initial request and every provider retry.
         await requireExternalPosting(supabase);
-      } catch (_error) {
+        await requireDeliveryCutover(supabase, tweetId);
+      } catch (error) {
+        if (error instanceof DeliveryCutoverBlockedError) {
+          await settleBlockedDeliveryJob(supabase, job, error.message);
+          throw new DeliveryCutoverSettled(error.message);
+        }
         throw new JobDeferred("telegram_external_posting_blocked", 30_000, {
           tweet_id: tweetId,
           check: "external_posting_guard",

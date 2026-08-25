@@ -1,6 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
-import { rssWebhookInternalAuthHeaders } from "../_shared/internalAuth.ts";
 import { captureEdgeException, initSentryEdge } from "../_shared/sentry.ts";
 import {
   ExternalPostingBlockedError,
@@ -13,6 +12,11 @@ import {
   classifyAdminRetryAction,
   isAdminRetryAction,
 } from "./adminRetryPolicy.ts";
+import {
+  evaluateExternalPosting,
+  externalPostingBlockedResponse,
+} from "../_shared/externalPostingGuard.ts";
+import { requireDeliveryCutover } from "../_shared/deliveryCutover.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': Deno.env.get('ALLOWED_CORS_ORIGIN') ?? 'https://liquid-feed-flux.lovable.app',
@@ -158,6 +162,14 @@ serve(async (req) => {
       });
     }
     const actionClass = classifyAdminRetryAction(action);
+    if ((action as string) === 'test_template') {
+      return new Response(JSON.stringify({
+        success: false,
+        code: 'delivery_cutover_blocked',
+        error: 'Synthetic Telegram template tests are disabled during the immutable delivery cutover',
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 409 });
+    }
+
 
     console.log(JSON.stringify({ function: 'admin-retry', action: action || 'retry_delivery', admin_user: authResult.userId }));
 
@@ -173,6 +185,15 @@ serve(async (req) => {
         });
       }
 
+      try {
+        await requireDeliveryCutover(supabase, String(tweet_id));
+      } catch (error) {
+        return new Response(JSON.stringify({
+          success: false,
+          code: "delivery_cutover_blocked",
+          error: error instanceof Error ? error.message : String(error),
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 409 });
+      }
       const locked = await requireRetryPostingGuard(supabase);
       if (locked) return locked;
 
@@ -255,7 +276,50 @@ serve(async (req) => {
         });
       }
 
-      const retryJobs = (failedDeliveries || []).map(delivery => ({
+      const failedRows = failedDeliveries || [];
+      const failedTweetIds = Array.from(new Set(
+        failedRows.map((delivery) => String(delivery.subject_id ?? '')).filter(Boolean),
+      ));
+      const { data: cutoverAt, error: cutoverError } = await supabase.rpc(
+        'get_delivery_cutover',
+      );
+      if (cutoverError || typeof cutoverAt !== 'string') {
+        return new Response(JSON.stringify({
+          success: false,
+          code: 'delivery_cutover_unavailable',
+          error: cutoverError?.message ?? 'delivery cutover is not initialized',
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 503,
+        });
+      }
+      const { data: lineageRows, error: lineageError } = await supabase
+        .from('posts')
+        .select('tweet_id, created_at')
+        .in('tweet_id', failedTweetIds);
+      if (lineageError) {
+        return new Response(JSON.stringify({
+          success: false,
+          code: 'delivery_cutover_lineage_unavailable',
+          error: lineageError.message,
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 503,
+        });
+      }
+      const eligibleIds = new Set(
+        (lineageRows || [])
+          .filter((row) => new Date(String(row.created_at)).getTime() > new Date(cutoverAt).getTime())
+          .map((row) => String(row.tweet_id)),
+      );
+      const eligibleFailedRows = failedRows.filter((delivery) =>
+        eligibleIds.has(String(delivery.subject_id ?? '')) &&
+        new Date(String(delivery.created_at)).getTime() > new Date(cutoverAt).getTime()
+      );
+      const historicalCount = failedRows.filter(
+        (delivery) => !eligibleFailedRows.includes(delivery),
+      ).length;
+      const retryJobs = eligibleFailedRows.map(delivery => ({
         type: 'deliver',
         payload: { tweet_id: delivery.subject_id },
         status: 'pending',
@@ -277,11 +341,11 @@ serve(async (req) => {
           });
         }
 
-        const uniqueSubjects = Array.from(new Set((failedDeliveries || []).map(d => d.subject_id)));
+        const uniqueSubjects = Array.from(new Set(eligibleFailedRows.map(d => d.subject_id)));
         if (uniqueSubjects.length > 0) {
-          const rows = uniqueSubjects.map(sid => ({
+          const rows = retryJobs.map((job) => ({
             subject_type: 'post',
-            subject_id: sid,
+            subject_id: (job.payload as { tweet_id?: string }).tweet_id,
             step: 'deliver',
             status: 'queued',
             started_at: new Date().toISOString(),
@@ -293,7 +357,8 @@ serve(async (req) => {
 
       return new Response(JSON.stringify({ 
         success: true, 
-        message: `Created ${retryJobs.length} retry jobs for failed deliveries`
+        message: `Created ${retryJobs.length} retry jobs for eligible deliveries`,
+        historical_skipped: historicalCount,
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -368,43 +433,21 @@ serve(async (req) => {
       });
     }
 
-    // Handle test webhook action
-    if (action === "test_webhook") {
-      if (action === ADMIN_RETRY_INBOUND_INGEST_ACTION && actionClass === "inbound_rss_ingest") {
-      const testRSSItem = {
-        guid: `test-tweet-${Date.now()}`,
-        title: 'Breaking: Major tech announcement today',
-        description: '<p>Exciting news from the tech world.</p>',
-        content: 'Exciting news from the tech world. #TechNews #Innovation',
-        link: 'https://twitter.com/example/status/123456789',
-        pubDate: new Date().toISOString()
-      };
-
-      const validationPayload = { data: { items_new: [testRSSItem] }, validate_only: true };
-      const rawWebhookBody = JSON.stringify(validationPayload);
-      const webhookResponse = await supabase.functions.invoke('webhooks-rssapp', {
-        // The signing-only path must authenticate these exact bytes.
-        body: rawWebhookBody,
-        // Do not set Content-Type here: the installed Functions client only
-        // transmits a string body when it chooses the header itself. The
-        // webhook parses the signed JSON string independent of MIME metadata.
-        headers: await rssWebhookInternalAuthHeaders(rawWebhookBody),
-      });
-
-      if (webhookResponse.error) {
-        throw new Error('admin_retry_webhook_test_failed');
-      }
-
-      return new Response(JSON.stringify({ 
-        success: true, 
-        validation_only: true,
-        message: 'Webhook authentication and payload validation completed; no post or job was created.',
+    // Handle the inbound RSS validation route.  It remains named after the
+    // deployed function for routing clarity, but synthetic validation is
+    // disabled during the immutable delivery cutover.
+    if (action === ADMIN_RETRY_INBOUND_INGEST_ACTION && actionClass === 'inbound_rss_ingest') {
+      const inboundFunction = 'webhooks-rssapp';
+      return new Response(JSON.stringify({
+        success: false,
+        code: 'delivery_cutover_blocked',
+        error: `Synthetic webhook tests are disabled during the immutable delivery cutover (${inboundFunction})`,
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 409,
       });
-      }
     }
-    
+
     // Original retry logic
     if (!delivery_id) {
       throw new Error('delivery_id is required');
@@ -423,13 +466,52 @@ serve(async (req) => {
       throw new Error('Delivery not found');
     }
 
+    // The original delivery_id retry path is a second admin bypass. Require
+    // one real post-T post lineage and keep the delivery row itself post-T;
+    // otherwise neither the old row nor a replacement job may be mutated.
+    const deliveryTweetId = delivery.subject_type === 'post' &&
+        typeof delivery.subject_id === 'string'
+      ? delivery.subject_id
+      : '';
+    if (!deliveryTweetId) {
+      return new Response(JSON.stringify({
+        success: false,
+        code: 'delivery_cutover_blocked',
+        error: 'v1 delivery retry supports post deliveries only; non-post lineage is unsupported',
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 409,
+      });
+    }
+    try {
+      await requireDeliveryCutover(supabase, deliveryTweetId);
+      const { data: cutoverAt, error: cutoverError } = await supabase.rpc(
+        'get_delivery_cutover',
+      );
+      if (
+        cutoverError || typeof cutoverAt !== 'string' ||
+        typeof delivery.created_at !== 'string' ||
+        new Date(delivery.created_at).getTime() <= new Date(cutoverAt).getTime()
+      ) {
+        throw new Error('delivery_cutover_blocked:historical_delivery');
+      }
+    } catch (error) {
+      return new Response(JSON.stringify({
+        success: false,
+        code: 'delivery_cutover_blocked',
+        error: error instanceof Error ? error.message : String(error),
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 409,
+      });
+    }
+
     const { error: jobError } = await supabase
       .from('jobs')
       .insert([{
         type: 'deliver',
         payload: {
-          subject_type: delivery.subject_type,
-          subject_id: delivery.subject_id
+          tweet_id: deliveryTweetId,
         },
         status: 'pending',
         next_run_at: new Date().toISOString()
@@ -441,7 +523,6 @@ serve(async (req) => {
       .from('deliveries')
       .update({
         status: 'pending',
-        attempts: 0,
         last_error: null
       })
       .eq('id', delivery_id);

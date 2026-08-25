@@ -403,6 +403,28 @@ Deno.test("clear duplicate validates tweet id before writing", async () => {
   assertEquals(feedbackCalls, 0);
 });
 
+Deno.test("clear duplicate blocks unavailable cutover before writing", async () => {
+  const supabase = fakeSupabase({
+    rpcError: { message: "delivery_cutover_blocked" },
+  });
+
+  const result = await clearDuplicateAdminAction(
+    supabase,
+    { tweet_id: "t2" },
+    { recordFeedback: async () => {} },
+  );
+
+  assertEquals(result.body, {
+    ok: false,
+    code: "delivery_cutover_blocked",
+    error: "delivery_cutover_blocked:delivery_cutover_blocked",
+  });
+  assertEquals(
+    supabase.calls.some((call) => call.op === "update"),
+    false,
+  );
+});
+
 Deno.test("clear duplicate clears post state, blocklists ordered pair, and records feedback", async () => {
   const supabase = fakeSupabase();
   const feedback: Array<Record<string, unknown>> = [];

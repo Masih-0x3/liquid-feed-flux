@@ -4,6 +4,10 @@ import type {
   SupabaseAdminClient,
 } from "./types.ts";
 import { addAdminOperationEnvelope } from "./adminOperation.ts";
+import {
+  DeliveryCutoverBlockedError,
+  requireDeliveryCutover,
+} from "../_shared/deliveryCutover.ts";
 
 type MutationResult = {
   data?: Array<Record<string, unknown>> | null;
@@ -32,6 +36,8 @@ const MAX_BULK_REPROCESS_TWEET_IDS = 100;
 const REPROCESS_MEDIA_PRESERVED_MESSAGE =
   "Existing media will be preserved until staged media refresh is available.";
 const THREAD_DELIVERY_UNAVAILABLE = "thread_delivery_unavailable";
+const THREAD_DELIVERY_CUTOVER_REASON =
+  "Thread delivery requires a real post-T tweet_id lineage";
 
 function normalizeReprocessTweetId(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -84,6 +90,21 @@ export async function retryStepAdminAction(
   if (!tweet_id || !step) {
     return { body: { error: "tweet_id and step are required" }, status: 400 };
   }
+  if (step === "deliver") {
+    try {
+      await requireDeliveryCutover(supabase, String(tweet_id));
+    } catch (error) {
+      if (!(error instanceof DeliveryCutoverBlockedError)) throw error;
+      return {
+        body: {
+          ok: false,
+          code: "delivery_cutover_blocked",
+          error: error.message,
+        },
+        status: 409,
+      };
+    }
+  }
   const { error } = await supabase.rpc("retry_step", { tweet_id, step });
   if (error) throw error;
   if (step === "deliver") {
@@ -117,6 +138,19 @@ export async function reprocessAdminAction(
   const tweetId = normalizeReprocessTweetId(tweet_id);
   if (!tweetId || !/^[A-Za-z0-9_-]{1,128}$/.test(tweetId)) {
     return { body: { error: "tweet_id is required" }, status: 400 };
+  }
+  try {
+    await requireDeliveryCutover(supabase, tweetId);
+  } catch (error) {
+    if (!(error instanceof DeliveryCutoverBlockedError)) throw error;
+    return {
+      body: {
+        ok: false,
+        code: "delivery_cutover_blocked",
+        error: error.message,
+      },
+      status: 409,
+    };
   }
   const idempotencyKey = `reprocess:${tweetId}`;
   const { data: insertedJob, error } = await table(supabase, "jobs")
@@ -164,28 +198,21 @@ export async function cancelPendingJobsAdminAction(
   const statuses = include_running === false
     ? ["pending"]
     : ["pending", "running"];
-  let query = table(supabase, "jobs")
-    .update({
-      status: "failed",
-      last_error: "Manually canceled by admin",
-      completed_at: new Date().toISOString(),
-      locked_at: null,
-      locked_by: null,
-      lease_expires_at: null,
-    })
-    .in("status", statuses);
+  let query = table(supabase, "jobs").in("status", statuses);
   if (Array.isArray(types) && types.length > 0) {
     query = query.in("type", types);
   }
-  const { data, error } = await query.select("id, type");
+  const { data: rows, error } = await query.select(
+    "id,type,status,created_at,payload",
+  );
   if (error) throw error;
-  if (!Array.isArray(data)) {
+  if (!Array.isArray(rows)) {
     return {
       body: { success: false, error: "cancel_pending_jobs_invalid_response" },
       status: 503,
     };
   }
-  for (const row of data) {
+  for (const row of rows) {
     if (!row || typeof row !== "object" || Array.isArray(row) ||
       typeof row.id !== "string" || row.id.trim().length === 0 ||
       typeof row.type !== "string" || row.type.trim().length === 0) {
@@ -195,19 +222,94 @@ export async function cancelPendingJobsAdminAction(
       };
     }
   }
-  const canceled = data.length;
+  let cutoverAt: string | null = null;
+  const hasDeliver = (rows || []).some((row) => row.type === "deliver");
+  if (hasDeliver) {
+    const result = await supabase.rpc("get_delivery_cutover");
+    if (!result.error && typeof result.data === "string") {
+      cutoverAt = result.data;
+    }
+  }
+
+  const canceledRows: Array<Record<string, unknown>> = [];
+  let skippedHistorical = 0;
+  const eligibleDeliverRows: Array<Record<string, unknown>> = [];
+  const nonDeliverRows: Array<Record<string, unknown>> = [];
+  for (const row of rows) {
+    if (row.type === "deliver") {
+      const payload = row.payload && typeof row.payload === "object"
+        ? row.payload as Record<string, unknown>
+        : {};
+      const tweetId = typeof payload.tweet_id === "string"
+        ? payload.tweet_id
+        : "";
+      const jobCreatedAt = typeof row.created_at === "string"
+        ? row.created_at
+        : "";
+      const jobIsPostCutover = Boolean(
+        cutoverAt && jobCreatedAt &&
+          new Date(jobCreatedAt).getTime() > new Date(cutoverAt).getTime(),
+      );
+      if (!jobIsPostCutover || !tweetId) {
+        skippedHistorical++;
+        continue;
+      }
+      try {
+        await requireDeliveryCutover(supabase, tweetId);
+      } catch (_error) {
+        skippedHistorical++;
+        continue;
+      }
+      eligibleDeliverRows.push(row);
+      continue;
+    }
+    nonDeliverRows.push(row);
+  }
+
+  let cancellationError: string | null = null;
+  const cancelRows = async (rowsToCancel: Array<Record<string, unknown>>) => {
+    if (rowsToCancel.length === 0) return;
+    const { error: updateError } = await table(supabase, "jobs")
+      .update({
+        status: "failed",
+        last_error: "Manually canceled by admin",
+        completed_at: new Date().toISOString(),
+        locked_at: null,
+        locked_by: null,
+        lease_expires_at: null,
+      })
+      .in("id", rowsToCancel.map((row) => row.id))
+      .in("status", statuses)
+      .select("id,type");
+    if (updateError) {
+      cancellationError = cancellationError ?? (updateError instanceof Error
+        ? updateError.message
+        : String(updateError));
+      return;
+    }
+    canceledRows.push(...rowsToCancel);
+  };
+
+  // Keep processing/media/translation cancellation bulk and mutable. Deliver
+  // rows are filtered and guarded first, then canceled as one separate batch.
+  await cancelRows(nonDeliverRows);
+  await cancelRows(eligibleDeliverRows);
+
   const byType: Record<string, number> = {};
-  data.forEach((row) => {
-    const type = row.type as string;
+  canceledRows.forEach((row) => {
+    const type = String(row.type ?? "unknown");
     byType[type] = (byType[type] || 0) + 1;
   });
   return {
     body: {
-      success: true,
-      canceled,
+      success: cancellationError === null,
+      canceled: canceledRows.length,
+      skipped_historical: skippedHistorical,
       by_type: byType,
-      message: `Canceled ${canceled} job(s)`,
+      message: `Canceled ${canceledRows.length} job(s)`,
+      ...(cancellationError ? { error: cancellationError } : {}),
     },
+    ...(cancellationError ? { status: 500 } : {}),
   };
 }
 
@@ -237,7 +339,29 @@ export async function bulkReprocessAdminAction(
   if (tweetIds.length === 0) {
     return { body: { error: "tweet_ids must contain valid ids" }, status: 400 };
   }
-  const jobs = tweetIds.map((tid: string) => ({
+  const eligibleTweetIds: string[] = [];
+  let skippedHistorical = 0;
+  for (const tweetId of tweetIds) {
+    try {
+      await requireDeliveryCutover(supabase, tweetId);
+      eligibleTweetIds.push(tweetId);
+    } catch (error) {
+      if (!(error instanceof DeliveryCutoverBlockedError)) throw error;
+      skippedHistorical++;
+    }
+  }
+  if (eligibleTweetIds.length === 0) {
+    return {
+      body: {
+        success: true,
+        requested: tweet_ids.length,
+        queued: 0,
+        skipped_historical: skippedHistorical,
+        message: "No post-cutover reprocess jobs were eligible.",
+      },
+    };
+  }
+  const jobs = eligibleTweetIds.map((tid: string) => ({
     type: "reprocess",
     payload: { tweet_id: tid },
     status: "pending",
@@ -254,8 +378,9 @@ export async function bulkReprocessAdminAction(
     body: {
       success: true,
       requested: tweet_ids.length,
-      queued: tweetIds.length,
-      message: `${tweetIds.length} reprocess job(s) queued. ${REPROCESS_MEDIA_PRESERVED_MESSAGE}`,
+      queued: eligibleTweetIds.length,
+      skipped_historical: skippedHistorical,
+      message: `${eligibleTweetIds.length} reprocess job(s) queued. ${REPROCESS_MEDIA_PRESERVED_MESSAGE}`,
     },
   };
 }
@@ -270,9 +395,10 @@ export async function postThreadAdminAction(
   }
   return {
     body: {
-      success: false,
+      ok: false,
+      code: "delivery_cutover_blocked",
       error: THREAD_DELIVERY_UNAVAILABLE,
-      code: THREAD_DELIVERY_UNAVAILABLE,
+      reason: THREAD_DELIVERY_CUTOVER_REASON,
     },
     status: 409,
   };

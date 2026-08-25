@@ -10,6 +10,10 @@ import {
   requireExternalPosting,
   type ExternalPostingGuardOptions,
 } from '../_shared/externalPostingGuard.ts';
+import {
+  deliveryCutoverAllowsPost,
+  requireDeliveryCutover,
+} from '../_shared/deliveryCutover.ts';
 import type { RuntimeControlsQueryClient } from '../_shared/runtimeControls.ts';
 import { recordXApiEvent } from '../_shared/xApiLedger.ts';
 import { buildXPostText, isEnrichmentBlockingXPost, pickHashtags } from '../_shared/xPostText.ts';
@@ -837,6 +841,7 @@ async function handleManualVideoIntakePost(params: {
   cs: string;
   at: string;
   ats: string;
+  deliveryCutoverAt: string;
 }): Promise<Response | null> {
   const manualIntakeId = cleanString(params.body.manual_intake_id, 80);
   if (!manualIntakeId) return null;
@@ -862,6 +867,20 @@ async function handleManualVideoIntakePost(params: {
   const requestedTweetId = cleanString(params.body.tweet_id, 80);
   if (!tweetId || (requestedTweetId && requestedTweetId !== tweetId)) {
     return xPosterJson({ ok: false, error: 'manual intake tweet mismatch' }, 400);
+  }
+  // Refuse historical, equal-to-cutover, malformed, or missing lineage before
+  // any manual-intake mutation or render/media work.
+  try {
+    await requireDeliveryCutover(params.sb, tweetId);
+  } catch (error) {
+    return xPosterJson({
+      ok: false,
+      status: 'skipped',
+      reason: 'delivery_cutover_blocked',
+      error: safeXPosterErrorCode(error, 'delivery_cutover_blocked'),
+      tweet_id: tweetId,
+      intake_id: manualIntakeId,
+    }, 409);
   }
   if (intake.status === 'canceled') {
     return xPosterJson({ ok: false, error: 'manual intake is canceled', intake_id: manualIntakeId }, 400);
@@ -960,6 +979,16 @@ async function handleManualVideoIntakePost(params: {
       reason: 'post_lookup_failed',
       startedAt,
     });
+  }
+  const postCreatedAt = typeof post.created_at === 'string' ? post.created_at : null;
+  if (!deliveryCutoverAllowsPost(params.deliveryCutoverAt, postCreatedAt)) {
+    return xPosterJson({
+      ok: false,
+      status: 'skipped',
+      reason: 'delivery_cutover_blocked',
+      tweet_id: tweetId,
+      intake_id: manualIntakeId,
+    }, 409);
   }
 
   const duplicateOverride = intake.duplicate_override === true &&
@@ -1442,6 +1471,17 @@ Deno.serve(async (req) => {
     });
   }
 
+  const cutoverResult = await sb.rpc('get_delivery_cutover');
+  if (cutoverResult?.error || typeof cutoverResult?.data !== 'string' ||
+    !Number.isFinite(new Date(cutoverResult.data).getTime())) {
+    return xPosterJson({
+      ok: false,
+      status: 'blocked',
+      reason: 'delivery_cutover_unavailable',
+    }, 503);
+  }
+  const deliveryCutoverAt = cutoverResult.data;
+
   // Load settings
   let settingsRows: unknown = null;
   let settingsError: unknown = null;
@@ -1607,6 +1647,7 @@ Deno.serve(async (req) => {
     cs,
     at,
     ats,
+    deliveryCutoverAt,
   });
   if (manualResponse) return manualResponse;
 
@@ -1721,6 +1762,32 @@ Deno.serve(async (req) => {
     const candidateReason = typeof post.candidate_reason === 'string' ? post.candidate_reason : null;
     const candidateAgeMs = typeof post.candidate_age_ms === 'number' ? post.candidate_age_ms : null;
     const enrichStatus = (post as { enrich_status?: string | null }).enrich_status;
+
+    // App-level admission is deliberately before dedupe, media repair, render
+    // work, claims, or any other mutation. The RPC guard below remains the
+    // last-mile race check immediately before the X claim/provider boundary.
+    const candidateCreatedAt = typeof post.created_at === 'string' ? post.created_at : null;
+    if (!deliveryCutoverAllowsPost(deliveryCutoverAt, candidateCreatedAt)) {
+      results.push({
+        tweet_id: tweetId,
+        status: dryRun ? 'dry_run_skipped' : 'skipped',
+        reason: 'delivery_cutover_blocked',
+      });
+      continue;
+    }
+    if (!dryRun) {
+      try {
+        await requireDeliveryCutover(sb, tweetId);
+      } catch (error) {
+        results.push({
+          tweet_id: tweetId,
+          status: 'skipped',
+          reason: 'delivery_cutover_blocked',
+          error: safeXPosterErrorCode(error, 'delivery_cutover_blocked'),
+        });
+        continue;
+      }
+    }
 
     if (!onlyTweetId && isEnrichmentBlockingXPost(enrichStatus, allowCompletedEnrichment, enrichmentRequiredForX)) {
       const reason = `enrichment_${enrichStatus ?? 'not_approved'}`;
@@ -2102,6 +2169,7 @@ Deno.serve(async (req) => {
 
     if (!dryRun) {
       try {
+        await requireDeliveryCutover(sb, tweetId);
         deliveryClaim = await claimXPostDelivery(sb, {
           postId: tweetId,
           source: dispatchSource,

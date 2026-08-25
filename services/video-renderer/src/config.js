@@ -36,6 +36,21 @@ function positiveInterval(value, fallback, minimum) {
   return Math.max(minimum, numberFromEnv(value, fallback));
 }
 
+export function parseRenderPollingEnabled(value) {
+  const raw = String(value ?? "").trim().toLowerCase();
+  return raw === "1" || raw === "true";
+}
+
+export function parseRenderQueueCutoffAt(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(raw)) {
+    return null;
+  }
+  const parsed = new Date(raw);
+  return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null;
+}
+
 export function normalizeTesseractLang(value) {
   return String(value || DEFAULT_TESSERACT_LANG).trim() || DEFAULT_TESSERACT_LANG;
 }
@@ -131,6 +146,13 @@ export function loadConfigFromEnv(env = process.env) {
 }
 
 export function loadServerRuntimeFromEnv(env = process.env) {
+  const renderQueueCutoffAt = parseRenderQueueCutoffAt(env.RENDER_QUEUE_CUTOFF_AT);
+  const renderPollingEnabled = parseRenderPollingEnabled(env.RENDER_POLLING_ENABLED);
+  const renderQueueCutoffValid = renderQueueCutoffAt !== null;
+  const renderPollingEffective = renderPollingEnabled && renderQueueCutoffValid;
+  const renderPollingBlockReason = renderPollingEnabled && !renderQueueCutoffValid
+    ? "missing_or_invalid_render_queue_cutoff_at"
+    : null;
   return {
     token: normalizeRendererToken(env.VIDEO_RENDERER_TOKEN ?? ""),
     port: numberFromEnv(env.PORT, 8787),
@@ -138,6 +160,12 @@ export function loadServerRuntimeFromEnv(env = process.env) {
     heartbeatIntervalMs: positiveInterval(env.HEARTBEAT_INTERVAL_MS, 30000, 5000),
     renderConcurrency: parseRenderConcurrency(env.RENDER_CONCURRENCY),
     shutdownGraceMs: parseRenderShutdownGraceMs(env.RENDER_SHUTDOWN_GRACE_MS),
+    renderQueueCutoffAt,
+    renderQueueCutoffValid,
+    renderPollingEnabled,
+    renderPollingEffective,
+    renderPollingBlockReason,
+    renderQueueCutoffBlockReason: renderPollingBlockReason,
     version: env.npm_package_version || "0.1.0",
   };
 }

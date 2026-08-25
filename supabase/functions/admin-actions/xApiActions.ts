@@ -46,6 +46,10 @@ export type XApiActionDeps = {
   readEnv?: ReadEnvFn;
   oauthHeader?: OAuthHeaderFn;
   now?: () => Date;
+  externalPostingOptions?: {
+    environment?: string;
+    allowExternalPosting?: string;
+  };
 };
 
 function externalPostingOptions(deps: XApiActionDeps): {
@@ -420,6 +424,27 @@ export async function sendTestTweetAdminAction(
       status: 400,
     };
   }
+  // Apply the environment/runtime guard before the synthetic-write lock so
+  // preview callers receive the stable external-posting response shape.
+  try {
+    await requireExternalPosting(
+      runtimeControlsClient(supabase),
+      externalPostingOptions(deps),
+    );
+  } catch (error) {
+    const blocked = externalPostingBlockedResponse(error);
+    if (blocked) return blocked;
+    throw error;
+  }
+  // Synthetic provider writes are forbidden during the immutable cutover.
+  return {
+    body: {
+      ok: false,
+      code: "delivery_cutover_blocked",
+      error: "Synthetic X test tweets are disabled during the immutable delivery cutover",
+    },
+    status: 409,
+  };
   const { data: controlsRow, error: controlsError } = await table(supabase, "settings").select(
     "value",
   )
@@ -463,16 +488,6 @@ export async function sendTestTweetAdminAction(
       creds.at,
       creds.ats,
     );
-    try {
-      await requireExternalPosting(
-        runtimeControlsClient(supabase),
-        externalPostingOptions(deps),
-      );
-    } catch (error) {
-      const blocked = externalPostingBlockedResponse(error);
-      if (blocked) return blocked;
-      throw error;
-    }
     const resp = await (deps.fetchImpl ?? fetch)(url, {
       method: "POST",
       headers: { Authorization: auth, "Content-Type": "application/json" },

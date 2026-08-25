@@ -12,6 +12,8 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/AuthContext';
+import { useRuntimeControls } from '@/hooks/useRuntimeControls';
 import { invokeAdminAction } from '@/api/adminActions';
 import { useSaveSettings } from '@/hooks/useSettingsData';
 import { Key, Shield, CheckCircle2, XCircle, Send, Sparkles, Loader2, AtSign, AlertTriangle, ExternalLink } from 'lucide-react';
@@ -76,8 +78,12 @@ const supabaseDashboardUrl = getSupabaseDashboardUrl(
 );
 
 export default function XAutomationSettings({ twitterHydration, xPostingConfig, xRateLimits, xApiControls }: Props) {
-  const { data: monthlyCount } = useXMonthlyPostsCount();
-  const { data: xApiSummary, refetch: refetchXApiSummary, isFetching: xApiSummaryFetching } = useXApiSummary(24);
+  const { isAdmin } = useAuth();
+  const { controls: runtimeControls, loading: runtimeLoading, error: runtimeError } = useRuntimeControls();
+  const runtimeAllowsXActions = runtimeControls?.environment === 'production' && runtimeControls.posting_mode === 'enabled';
+  const canMutate = isAdmin === true && !runtimeLoading && !runtimeError && runtimeAllowsXActions;
+  const { data: monthlyCount } = useXMonthlyPostsCount(canMutate);
+  const { data: xApiSummary, refetch: refetchXApiSummary, isFetching: xApiSummaryFetching } = useXApiSummary(24, false, canMutate);
   const { toast } = useToast();
   const saveMutation = useSaveSettings();
 
@@ -108,6 +114,7 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
   const ownedReadsEnabled = xApiControls?.my_x_enabled === true;
 
   const refreshStatus = useCallback(async () => {
+    if (!canMutate) return;
     setStatusLoading(true);
     try {
       const data = await invokeAdminAction<{ status?: Record<string, boolean> }>({ action: 'get_x_status' });
@@ -117,11 +124,14 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
     } finally {
       setStatusLoading(false);
     }
-  }, [toast]);
+  }, [canMutate, toast]);
 
-  useEffect(() => { refreshStatus(); }, [refreshStatus]);
+  useEffect(() => {
+    if (canMutate) void refreshStatus();
+  }, [canMutate, refreshStatus]);
 
   const verifyConnection = async () => {
+    if (!canMutate) return;
     if (!ownedReadsEnabled) {
       const error = 'Owned-read credential verification is paused to prevent X API user-read charges.';
       setVerifyResult({ ok: false, error });
@@ -147,6 +157,7 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
   };
 
   const sendTestTweet = async () => {
+    if (!canMutate) return;
     if (Date.now() - lastSendAt < 60_000) {
       toast({ title: 'Rate limited', description: 'Please wait a minute between test tweets.', variant: 'destructive' });
       return;
@@ -175,6 +186,7 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
   };
 
   const testHydrate = async () => {
+    if (!canMutate) return;
     if (!hydrateId.trim()) {
       toast({ title: 'Tweet ID required', variant: 'destructive' });
       return;
@@ -198,6 +210,7 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
   };
 
   const runBackfill = async (dryRun: boolean) => {
+    if (!canMutate) return;
     setBackfillLoading(true);
     setBackfillResult(null);
     try {
@@ -253,14 +266,14 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <Button onClick={verifyConnection} disabled={verifyLoading || !ownedReadsEnabled} variant="outline" className="border-primary/50 hover:bg-primary/10">
+            <Button onClick={verifyConnection} disabled={!canMutate || verifyLoading || !ownedReadsEnabled} variant="outline" className="border-primary/50 hover:bg-primary/10">
               {verifyLoading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Verifying...</> : <><Shield className="w-4 h-4 mr-2" />Verify connection</>}
             </Button>
-            <Button onClick={() => refetchXApiSummary()} disabled={xApiSummaryFetching} variant="outline" size="sm">
+            <Button onClick={() => { if (canMutate) void refetchXApiSummary(); }} disabled={!canMutate || xApiSummaryFetching} variant="outline" size="sm">
               {xApiSummaryFetching ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : null}
               Refresh usage
             </Button>
-            <Button onClick={refreshStatus} disabled={statusLoading} variant="ghost" size="sm">Refresh status</Button>
+            <Button onClick={refreshStatus} disabled={!canMutate || statusLoading} variant="ghost" size="sm">Refresh status</Button>
             <a href={supabaseDashboardUrl} target="_blank" rel="noreferrer" className="text-xs text-primary inline-flex items-center hover:underline">
               Manage secrets <ExternalLink className="w-3 h-3 ml-1" />
             </a>
@@ -298,7 +311,9 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
             <Checkbox
               id="hydration_enabled"
               checked={twitterHydration?.enabled !== false}
+              disabled={!canMutate || saveMutation.isPending}
               onCheckedChange={(checked) => {
+                if (!canMutate) return;
                 const next = { ...(twitterHydration ?? { enabled: true, max_attempts: 3 }), enabled: !!checked };
                 saveMutation.mutate({ key: 'twitter_hydration', value: next });
               }}
@@ -342,11 +357,11 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
                 <p className="text-xs text-muted-foreground">Scans posts from the last 24h and only queues hydration for score-passing posts marked for delivery. Skipped, duplicate, and below-threshold posts stay untouched.</p>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button onClick={() => runBackfill(true)} disabled={backfillLoading} variant="outline" className="border-primary/50 hover:bg-primary/10">
+                <Button onClick={() => runBackfill(true)} disabled={!canMutate || backfillLoading} variant="outline" className="border-primary/50 hover:bg-primary/10">
                   {backfillLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
                   Estimate
                 </Button>
-                <Button onClick={() => runBackfill(false)} disabled={backfillLoading} variant="outline">
+                <Button onClick={() => runBackfill(false)} disabled={!canMutate || backfillLoading} variant="outline">
                   Queue backfill
                 </Button>
               </div>
@@ -391,7 +406,7 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
           <div className="flex flex-wrap gap-3">
             <AlertDialog>
               <AlertDialogTrigger asChild>
-                <Button disabled={sendLoading || tweetTooLong || tweetText.trim().length === 0} className="bg-gradient-primary hover:opacity-90 text-white">
+                <Button disabled={!canMutate || sendLoading || tweetTooLong || tweetText.trim().length === 0} className="bg-gradient-primary hover:opacity-90 text-white">
                   {sendLoading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Posting...</> : <><Send className="w-4 h-4 mr-2" />Send test tweet</>}
                 </Button>
               </AlertDialogTrigger>
@@ -411,7 +426,7 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                   <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction onClick={sendTestTweet}>Post tweet</AlertDialogAction>
+                  <AlertDialogAction onClick={sendTestTweet} disabled={!canMutate}>Post tweet</AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
@@ -447,7 +462,7 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
             <Label htmlFor="hydrate_id">Tweet ID</Label>
             <div className="flex gap-2">
               <Input id="hydrate_id" value={hydrateId} onChange={(e) => setHydrateId(e.target.value)} placeholder="e.g. 1234567890123456789" className="glass-input" />
-              <Button onClick={testHydrate} disabled={hydrateLoading} variant="outline" className="border-primary/50 hover:bg-primary/10 shrink-0">
+              <Button onClick={testHydrate} disabled={!canMutate || hydrateLoading} variant="outline" className="border-primary/50 hover:bg-primary/10 shrink-0">
                 {hydrateLoading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Testing...</> : 'Test hydrate'}
               </Button>
             </div>
@@ -482,12 +497,13 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
       </Card>
 
       {/* 5. X Posting Configuration */}
-      <XPostingConfig initial={xPostingConfig} />
+      <XPostingConfig initial={xPostingConfig} isAdmin={canMutate} />
 
       {/* 6. Rate Limits & Quotas */}
       <XRateLimits
         initial={xRateLimits}
         monthlyPostsCount={monthlyCount ?? 0}
+        enabled={canMutate}
       />
     </div>
   );

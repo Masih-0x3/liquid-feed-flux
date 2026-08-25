@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import RuntimeControlsPanel from '@/components/settings/RuntimeControlsPanel';
 import { useAuth } from '@/contexts/AuthContext';
@@ -31,17 +32,26 @@ const controls: RuntimeControls = {
 };
 
 describe('RuntimeControlsPanel', () => {
+  const renderPanel = () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <RuntimeControlsPanel />
+      </QueryClientProvider>,
+    );
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
-    mockedUseAuth.mockReturnValue({ role: 'admin' } as ReturnType<typeof useAuth>);
+    mockedUseAuth.mockReturnValue({ role: 'admin', isAdmin: true } as ReturnType<typeof useAuth>);
     mockedGetRuntimeControls.mockResolvedValue(controls);
     mockedUpdateRuntimeControls.mockResolvedValue(controls);
   });
 
   it('shows control state and queue counts to read-only users with disabled switches', async () => {
-    mockedUseAuth.mockReturnValue({ role: 'read_only' } as ReturnType<typeof useAuth>);
+    mockedUseAuth.mockReturnValue({ role: 'read_only', isAdmin: false } as ReturnType<typeof useAuth>);
 
-    render(<RuntimeControlsPanel />);
+    renderPanel();
 
     expect(await screen.findByText('3 queued')).toBeInTheDocument();
     expect(screen.getByText('2 deferred')).toBeInTheDocument();
@@ -55,18 +65,17 @@ describe('RuntimeControlsPanel', () => {
     const updated = { ...controls, dedupe_enabled: true };
     mockedUpdateRuntimeControls.mockResolvedValue(updated);
 
-    render(<RuntimeControlsPanel />);
+    renderPanel();
 
     const dedupeSwitch = await screen.findByRole('switch', { name: /openai dedupe paused/i });
     fireEvent.click(dedupeSwitch);
     expect(await screen.findByRole('alertdialog')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /confirm change/i }));
 
-    await waitFor(() => expect(mockedUpdateRuntimeControls).toHaveBeenCalledWith({
+    await waitFor(() => expect(mockedUpdateRuntimeControls.mock.calls[0]?.[0]).toEqual({
       dedupe_enabled: true,
       translation_enabled: true,
     }));
     expect(await screen.findByText('OpenAI dedupe enabled.')).toBeInTheDocument();
   });
 });
-

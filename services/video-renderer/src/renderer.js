@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { parseRenderQueueCutoffAt } from "./config.js";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import WebSocket from "ws";
@@ -1136,9 +1137,11 @@ export async function runPreflightForRenderId({ supabase, renderId, config }) {
   }
 }
 
-export async function claimNextRender(supabase, config) {
-  const { data, error } = await supabase.rpc("claim_video_renders", {
-    batch_size: 1,
+export async function claimNextRender(supabase, config, runtime) {
+  const cutoff = parseRenderQueueCutoffAt(runtime?.renderQueueCutoffAt);
+  if (!cutoff) return null;
+  const { data, error } = await supabase.rpc("claim_video_render_after", {
+    p_queued_after: cutoff,
     worker_id: config.rendererId,
   });
   if (error) throw error;

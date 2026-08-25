@@ -8,6 +8,7 @@ import {
   type VideoRenderConfig,
 } from "../_shared/videoRenderConfig.ts";
 import type { XMediaRow } from "../_shared/mediaSelection.ts";
+import { requireDeliveryCutover } from "../_shared/deliveryCutover.ts";
 import { insertPipelineEvent } from "./jobLifecycle.ts";
 
 const VIDEO_RENDER_VERSION = "persian-subtitles-masihh-v1";
@@ -471,6 +472,34 @@ export async function enqueuePostDeliveryAfterRenderGate(
       tweet_id: tweetId,
       source,
       reason: gate.blockReason,
+    }));
+    return;
+  }
+  try {
+    // Rendering remains allowed for historical posts, but render completion
+    // must never create a new delivery job or dispatch X for them.
+    await requireDeliveryCutover(supabase, tweetId);
+  } catch (error) {
+    await insertPipelineEvent(
+      supabase,
+      "post",
+      tweetId,
+      "deliver",
+      "completed",
+      null,
+      new Date().toISOString(),
+      null,
+      {
+        skipped: "delivery_cutover_blocked",
+        reason: error instanceof Error ? error.message : String(error),
+        source,
+      },
+    );
+    console.log(JSON.stringify({
+      function: "worker",
+      action: "delivery_skipped_cutover",
+      tweet_id: tweetId,
+      source,
     }));
     return;
   }

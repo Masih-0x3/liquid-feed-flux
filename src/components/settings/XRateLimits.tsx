@@ -28,6 +28,7 @@ const DEFAULTS: XRateLimitsValue = {
 interface Props {
   initial?: Partial<XRateLimitsValue>;
   monthlyPostsCount?: number;
+  enabled?: boolean;
 }
 
 function pctColor(pct: number) {
@@ -42,9 +43,9 @@ function wholeLimit(value: string, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.trunc(parsed)));
 }
 
-export default function XRateLimits({ initial, monthlyPostsCount = 0 }: Props) {
+export default function XRateLimits({ initial, monthlyPostsCount = 0, enabled = true }: Props) {
   const save = useSaveSettings();
-  const { data: xApiSummary } = useXApiSummary(24);
+  const { data: xApiSummary } = useXApiSummary(24, false, enabled);
   const [cfg, setCfg] = useState<XRateLimitsValue>({ ...DEFAULTS, ...(initial ?? {}) });
 
   useEffect(() => { setCfg({ ...DEFAULTS, ...(initial ?? {}) }); }, [initial]);

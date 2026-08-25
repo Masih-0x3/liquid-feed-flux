@@ -6,6 +6,7 @@ import { BrandLogo } from './BrandLogo';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
+import { useRuntimeControls } from '@/hooks/useRuntimeControls';
 import { Loader2, LockKeyhole, LogOut, RefreshCw, ShieldAlert } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -15,6 +16,7 @@ interface AppLayoutProps {
 
 export function AppLayout({ children }: AppLayoutProps) {
   const { user, status, authError, role, isAdmin, signOut, refreshSession } = useAuth();
+  const { controls: runtimeControls } = useRuntimeControls(status === 'authorised');
   const { toast } = useToast();
   const location = useLocation();
   const [headerState, setHeaderState] = useState({ docked: false, hidden: false });
@@ -27,6 +29,16 @@ export function AppLayout({ children }: AppLayoutProps) {
   const activeItem = navigationItems.find((item) =>
     item.url === '/' ? location.pathname === '/' : location.pathname.startsWith(item.url)
   ) ?? navigationItems[0];
+  const environmentLabel = runtimeControls?.environment === 'preview'
+    ? 'Preview'
+    : runtimeControls?.environment === 'production'
+      ? 'Production'
+      : 'Runtime unknown';
+  const postingStatusLabel = runtimeControls?.posting_mode === 'blocked'
+    ? `Posting locked in ${environmentLabel}`
+    : runtimeControls?.posting_mode === 'enabled'
+      ? `Posting enabled in ${environmentLabel}`
+      : 'Posting status unavailable';
 
   const clearHideTimer = useCallback(() => {
     if (hideTimerRef.current) {
@@ -287,7 +299,7 @@ export function AppLayout({ children }: AppLayoutProps) {
                 className="hidden items-center gap-1.5 rounded border border-amber-400/30 bg-amber-500/10 px-2 py-1 text-[11px] font-medium text-amber-100 sm:flex"
               >
                 <LockKeyhole className="h-3 w-3 text-amber-300" aria-hidden="true" />
-                Posting locked in Preview
+                {postingStatusLabel}
               </div>
               <div className="hidden min-w-0 xl:flex">
                 <VersionBanner />

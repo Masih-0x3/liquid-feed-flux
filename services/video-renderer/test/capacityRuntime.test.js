@@ -62,6 +62,8 @@ function createE1Server(overrides = {}) {
       shutdownGraceMs: 1_000,
       pollIntervalMs: 250,
       heartbeatIntervalMs: 5_000,
+      renderPollingEnabled: true,
+      renderQueueCutoffAt: "2026-08-25T12:00:00.000Z",
       version: "0.0.0-e1",
       ...overrides.runtime,
     },

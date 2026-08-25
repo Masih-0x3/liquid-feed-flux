@@ -9,6 +9,7 @@ import {
   queueHydrationJob as defaultQueueHydrationJob,
 } from "./xPostingActions.ts";
 import { insertAdminPipelineEvent as defaultInsertAdminPipelineEvent } from "./sideEffects.ts";
+import { requireDeliveryCutover } from "../_shared/deliveryCutover.ts";
 
 type QueryResult = {
   data?: unknown;
@@ -115,6 +116,14 @@ export async function queueManualAdvance(
     return { queued: "enrich" };
   }
 
+  // Processing and enrichment remain allowed for historical posts. Only the
+  // final delivery queue and delivery-row mutation require a real post-T
+  // lineage, immediately before the first delivery mutation.
+  try {
+    await requireDeliveryCutover(supabase, tweetId);
+  } catch {
+    return { queued: "none", reason: "delivery_cutover_blocked" };
+  }
   const { error: deliverJobError } = await table(supabase, "jobs").upsert({
     type: "deliver",
     payload: { tweet_id: tweetId, source: "manual_score" },

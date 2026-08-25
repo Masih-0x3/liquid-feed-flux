@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { AlertTriangle, CheckCircle2, Clock3, Loader2, LockKeyhole, PauseCircle, PlayCircle } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { getRuntimeControls, updateRuntimeControls, type RuntimeControlName, type RuntimeControls } from '@/api/runtimeControls';
+import { type RuntimeControlName, type RuntimeControls } from '@/api/runtimeControls';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   AlertDialog,
@@ -17,6 +17,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
+import { useRuntimeControls, useUpdateRuntimeControls } from '@/hooks/useRuntimeControls';
 
 type PendingChange = {
   name: RuntimeControlName;
@@ -33,60 +34,37 @@ function countFor(controls: RuntimeControls, key: string): number | undefined {
 }
 
 export default function RuntimeControlsPanel() {
-  const { role } = useAuth();
+  const { role, isAdmin } = useAuth();
   const isReadOnly = role === 'read_only';
-  const [controls, setControls] = useState<RuntimeControls | null>(null);
+  const canMutate = isAdmin === true && !isReadOnly;
+  const { controls, loading, error } = useRuntimeControls();
+  const updateMutation = useUpdateRuntimeControls();
   const [pendingChange, setPendingChange] = useState<PendingChange | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [localError, setLocalError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const saving = updateMutation.isPending;
 
-  useEffect(() => {
-    let active = true;
-    setLoading(true);
-    void getRuntimeControls()
-      .then((nextControls) => {
-        if (!active) return;
-        setControls(nextControls);
-        setError(null);
-      })
-      .catch(() => {
-        if (!active) return;
-        setError('Runtime controls are unavailable. The current state cannot be verified.');
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-
-    return () => {
-      active = false;
-    };
-  }, []);
+  const effectiveError = localError ?? error;
 
   const confirmChange = async () => {
-    if (!pendingChange || !controls || isReadOnly) return;
+    if (!pendingChange || !controls || !canMutate) return;
     const { name, nextValue } = pendingChange;
-    setSaving(true);
-    setError(null);
+    setLocalError(null);
     setSuccess(null);
     try {
-      const nextControls = await updateRuntimeControls({
+      await updateMutation.mutateAsync({
         dedupe_enabled: name === 'dedupe_enabled' ? nextValue : controls.dedupe_enabled,
         translation_enabled: name === 'translation_enabled' ? nextValue : controls.translation_enabled,
       });
-      setControls(nextControls);
       setPendingChange(null);
       setSuccess(`${CONTROL_LABELS[name]} ${nextValue ? 'enabled' : 'paused'}.`);
     } catch {
-      setError(`Could not update ${CONTROL_LABELS[name].toLowerCase()}. No change was applied.`);
-    } finally {
-      setSaving(false);
+      setLocalError(`Could not update ${CONTROL_LABELS[name].toLowerCase()}. No change was applied.`);
     }
   };
 
   const openChangeDialog = (name: RuntimeControlName, nextValue: boolean) => {
-    if (!isReadOnly) setPendingChange({ name, nextValue });
+    if (canMutate) setPendingChange({ name, nextValue });
   };
 
   return (
@@ -94,19 +72,19 @@ export default function RuntimeControlsPanel() {
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-base font-display text-glass-foreground">
           <LockKeyhole className="h-4 w-4 text-primary" aria-hidden="true" />
-          Preview runtime controls
+          {controls?.environment === 'preview' ? 'Preview' : controls?.environment === 'production' ? 'Production' : 'Runtime'} controls
         </CardTitle>
         <CardDescription>
           Dedupe and translation pause before new work is claimed. Existing leased work can finish.
-          {isReadOnly ? ' Read-only access can view state but cannot change controls.' : ' Changes require confirmation.'}
+          {isReadOnly || !canMutate ? ' Read-only access can view state but cannot change controls.' : ' Changes require confirmation.'}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {error && (
+        {effectiveError && (
           <Alert variant="destructive">
             <AlertTriangle className="h-4 w-4" aria-hidden="true" />
             <AlertTitle>Control state unavailable</AlertTitle>
-            <AlertDescription>{error}</AlertDescription>
+            <AlertDescription>{effectiveError}</AlertDescription>
           </Alert>
         )}
         {success && (
@@ -141,14 +119,14 @@ export default function RuntimeControlsPanel() {
                       </div>
                       <Switch
                         checked={enabled}
-                        disabled={isReadOnly || saving}
+                        disabled={!canMutate || saving}
                         onCheckedChange={(nextValue) => openChangeDialog(name, nextValue)}
                         aria-label={`${CONTROL_LABELS[name]} ${enabled ? 'enabled' : 'paused'}`}
                         aria-describedby={`${name}-description`}
                       />
                     </div>
                     <p id={`${name}-description`} className="sr-only">
-                      {isReadOnly ? 'Read-only access. This control is disabled.' : 'Changing this control requires confirmation.'}
+                      {!canMutate ? 'Read-only access. This control is disabled.' : 'Changing this control requires confirmation.'}
                     </p>
                     {(queued !== undefined || deferred !== undefined) && (
                       <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
@@ -163,8 +141,16 @@ export default function RuntimeControlsPanel() {
 
             <div className="flex flex-wrap items-center gap-2 rounded-md border border-amber-400/30 bg-amber-500/10 p-3 text-sm">
               <LockKeyhole className="h-4 w-4 shrink-0 text-amber-300" aria-hidden="true" />
-              <span className="font-medium text-amber-100">Posting locked in Preview</span>
-              <span className="text-xs text-amber-100/75">External posting has no enable control.</span>
+              <span className="font-medium text-amber-100">
+                {controls?.posting_mode === 'blocked'
+                  ? `Posting locked in ${controls.environment === 'preview' ? 'Preview' : 'Production'}`
+                  : controls?.posting_mode === 'enabled'
+                    ? `Posting enabled in ${controls.environment === 'preview' ? 'Preview' : 'Production'}`
+                    : 'Posting status unavailable'}
+              </span>
+              <span className="text-xs text-amber-100/75">
+                {controls?.posting_mode === 'blocked' ? 'External posting has no enable control.' : 'External posting follows the server runtime gate.'}
+              </span>
             </div>
 
             <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -180,7 +166,7 @@ export default function RuntimeControlsPanel() {
           <AlertDialogHeader>
             <AlertDialogTitle>{pendingChange ? `${pendingChange.nextValue ? 'Enable' : 'Pause'} ${CONTROL_LABELS[pendingChange.name]}?` : 'Confirm runtime control change'}</AlertDialogTitle>
             <AlertDialogDescription>
-              This changes whether new {pendingChange?.name === 'dedupe_enabled' ? 'dedupe' : 'translation'} jobs can be claimed. Existing leased work can finish. Posting remains locked in Preview.
+              This changes whether new {pendingChange?.name === 'dedupe_enabled' ? 'dedupe' : 'translation'} jobs can be claimed. Existing leased work can finish. Posting state remains server-controlled.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -195,4 +181,3 @@ export default function RuntimeControlsPanel() {
     </Card>
   );
 }
-

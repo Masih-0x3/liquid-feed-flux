@@ -1,5 +1,5 @@
 import http from "node:http";
-import { isAuthorizedRendererRequest, loadConfigFromEnv, loadServerRuntimeFromEnv, normalizeRendererToken } from "./config.js";
+import { isAuthorizedRendererRequest, loadConfigFromEnv, loadServerRuntimeFromEnv, normalizeRendererToken, parseRenderPollingEnabled, parseRenderQueueCutoffAt } from "./config.js";
 import { RendererCapacityGate } from "./rendererCapacity.js";
 import { RendererRequestInputError, readBoundedRendererDispatchRequest } from "./rendererRequestPolicy.js";
 import { abortAllManagedProcesses } from "./processRunner.js";
@@ -20,6 +20,9 @@ function publicHealthSnapshot(state) {
     failed: state.failed,
     lastError: state.lastError ? "renderer_error" : null,
     shutting_down: state.shutting_down,
+    render_polling_enabled: state.renderPollingEnabled,
+    render_polling_effective: state.renderPollingEffective,
+    render_polling_block_reason: state.renderPollingBlockReason,
   };
 }
 
@@ -34,7 +37,23 @@ function capacityRejectionResponse(res, lease) {
 
 export function createRendererServer(options = {}) {
   const config = options.config || loadConfigFromEnv();
-  const runtime = options.runtime || loadServerRuntimeFromEnv(options.env);
+  const loadedRuntime = options.runtime || loadServerRuntimeFromEnv(options.env);
+  const renderQueueCutoffAt = parseRenderQueueCutoffAt(loadedRuntime.renderQueueCutoffAt);
+  const renderPollingEnabled = parseRenderPollingEnabled(loadedRuntime.renderPollingEnabled);
+  const renderQueueCutoffValid = renderQueueCutoffAt !== null;
+  const renderPollingEffective = renderPollingEnabled && renderQueueCutoffValid;
+  const renderPollingBlockReason = renderPollingEnabled && !renderQueueCutoffValid
+    ? "missing_or_invalid_render_queue_cutoff_at"
+    : null;
+  const runtime = {
+    ...loadedRuntime,
+    renderQueueCutoffAt,
+    renderQueueCutoffValid,
+    renderPollingEnabled,
+    renderPollingEffective,
+    renderPollingBlockReason,
+    renderQueueCutoffBlockReason: renderPollingBlockReason,
+  };
   initSentryRenderer({ config, runtime, env: options.env || process.env });
   const supabase = options.supabase || createSupabase(config);
   const token = normalizeRendererToken(options.token ?? runtime.token);
@@ -44,7 +63,16 @@ export function createRendererServer(options = {}) {
   // startRendererServer entry point) omit this and use the Node globals.
   const setInterval = options.setIntervalFn || globalThis.setInterval;
   const clearInterval = options.clearIntervalFn || globalThis.clearInterval;
-  const state = { running: 0, processed: 0, failed: 0, lastError: null, shutting_down: false };
+  const state = {
+    running: 0,
+    processed: 0,
+    failed: 0,
+    lastError: null,
+    shutting_down: false,
+    renderPollingEnabled,
+    renderPollingEffective,
+    renderPollingBlockReason,
+  };
   const capacityGate = new RendererCapacityGate(runtime.renderConcurrency);
   let pollTimer = null;
   let heartbeatTimer = null;
@@ -82,6 +110,9 @@ export function createRendererServer(options = {}) {
         pid: process.pid,
         node: process.version,
         ...metadata,
+        render_polling_enabled: state.renderPollingEnabled,
+        render_polling_effective: state.renderPollingEffective,
+        render_polling_block_reason: state.renderPollingBlockReason,
       },
       last_seen_at: new Date().toISOString(),
     };
@@ -210,7 +241,7 @@ export function createRendererServer(options = {}) {
   });
 
   async function pollOnce() {
-    if (!capacityGate.accepting) return null;
+    if (!state.renderPollingEffective || !capacityGate.accepting) return null;
     const settings = await loadRenderSettingsOrDefault(supabase).catch(() => ({ mode: "enabled" }));
     if (settings.mode === "disabled") {
       await writeHeartbeat("paused", { mode: settings.mode }).catch(() => null);
@@ -222,7 +253,7 @@ export function createRendererServer(options = {}) {
     try {
       // Acquire the shared slot before claimNextRender so polling cannot claim
       // a row while HTTP work has consumed the renderer's capacity.
-      row = await claimNextRender(supabase, config);
+      row = await claimNextRender(supabase, config, runtime);
       if (!row) {
         await writeHeartbeat("online", { mode: settings.mode }).catch(() => null);
         return null;
@@ -258,7 +289,7 @@ export function createRendererServer(options = {}) {
 
   const startRuntimeTimers = () => {
     if (state.shutting_down) return;
-    if (!pollTimer) {
+    if (state.renderPollingEffective && !pollTimer) {
       pollTimer = setInterval(() => {
         pollOnce().catch((error) => {
           console.error(JSON.stringify({ service: "xot-video-renderer", action: "poll_error", error: error.message }));

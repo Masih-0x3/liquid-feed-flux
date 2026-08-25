@@ -137,8 +137,9 @@ function SettingsPanelFallback() {
 
 export default function Settings() {
   const { toast } = useToast();
-  const { role } = useAuth();
+  const { role, isAdmin } = useAuth();
   const isReadOnly = role === 'read_only';
+  const canMutate = isAdmin === true && !isReadOnly;
   const location = useLocation();
   const { settingsQuery, samplesQuery } = useSettingsData();
   const saveMutation = useSaveSettings();
@@ -212,7 +213,11 @@ export default function Settings() {
 
   const selectedModel = openaiModels.find(m => m.id === ts.model);
   const cappedTranslationMaxTokens = clampOpenAiCompletionTokens(ts.max_completion_tokens, 1000);
-  const saveTranslationPrompt = () => saveMutation.mutate({ key: 'translation_prompt', value: prepareTranslationSettingsForSave(ts) });
+  const saveSetting = (input: Parameters<typeof saveMutation.mutate>[0]) => {
+    if (!canMutate) return;
+    saveMutation.mutate(input);
+  };
+  const saveTranslationPrompt = () => saveSetting({ key: 'translation_prompt', value: prepareTranslationSettingsForSave(ts) });
 
   const getPlaceholderValue = (key: string, tweet: Record<string, unknown>) => {
     const accounts = tweet?.accounts as Record<string, unknown> | undefined;
@@ -280,7 +285,7 @@ export default function Settings() {
           <TabsTrigger value="observability" className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><Activity className="w-4 h-4" />Observability</TabsTrigger>
         </TabsList>
 
-        <fieldset disabled={isReadOnly} className="min-w-0 space-y-6 disabled:cursor-not-allowed">
+        <fieldset disabled={!canMutate} className="min-w-0 space-y-6 disabled:cursor-not-allowed">
 
         {/* Translation Tab */}
         <TabsContent value="translation" className="space-y-6">
@@ -646,6 +651,7 @@ export default function Settings() {
                       <AlertDialogCancel>Cancel</AlertDialogCancel>
                       <AlertDialogAction onClick={async () => {
                         try {
+                          if (!canMutate) return;
                           await invokeAdminRetry({ action: 'test_webhook' });
                           toast({ title: 'Webhook validation passed', description: 'Authentication and payload parsing completed; no post or job was created.' });
                         } catch { toast({ title: 'Test failed', variant: 'destructive' }); }
@@ -769,7 +775,7 @@ export default function Settings() {
                 </div>
               )}
               <div className="flex flex-col gap-3 sm:flex-row">
-                <Button onClick={() => saveMutation.mutate({ key: 'message_template', value: mt })} disabled={saveMutation.isPending} className="bg-gradient-primary hover:opacity-90 text-white w-full sm:flex-1">Save Message Template</Button>
+                <Button onClick={() => saveSetting({ key: 'message_template', value: mt })} disabled={saveMutation.isPending} className="bg-gradient-primary hover:opacity-90 text-white w-full sm:flex-1">Save Message Template</Button>
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
                     <Button variant="outline" disabled={saveMutation.isPending || sampleTweets.length === 0} className="border-primary/50 hover:bg-primary/10 w-full sm:w-auto">
@@ -792,6 +798,7 @@ export default function Settings() {
                       <AlertDialogCancel>Cancel</AlertDialogCancel>
                       <AlertDialogAction onClick={async () => {
                         try {
+                          if (!canMutate) return;
                           await invokeAdminRetry({ action: 'test_template', post: sampleTweets[selectedSample], template: mt.template, settings: { include_source_links: mt.include_source_link, custom_hashtags: mt.custom_hashtags } });
                           toast({ title: 'Test message sent!', description: 'Check your Telegram channel' });
                         } catch { toast({ title: 'Test failed', variant: 'destructive' }); }
@@ -830,7 +837,7 @@ export default function Settings() {
                   </SelectContent>
                 </Select>
               </div>
-              <Button onClick={() => saveMutation.mutate({ key: 'telegram_config', value: tgs })} disabled={saveMutation.isPending} className="bg-gradient-primary hover:opacity-90 text-white w-full">Save Telegram Config</Button>
+              <Button onClick={() => saveSetting({ key: 'telegram_config', value: tgs })} disabled={saveMutation.isPending} className="bg-gradient-primary hover:opacity-90 text-white w-full">Save Telegram Config</Button>
             </CardContent>
           </Card>
         </TabsContent>

@@ -162,7 +162,7 @@ Deno.test("dry run old media cleanup invokes media processor with clamped days",
   });
 });
 
-Deno.test("summarize stale x pending can close matching deliveries", async () => {
+Deno.test("summarize stale x pending blocks historical cleanup", async () => {
   const supabase = fakeSupabase({
     xDeliveries: [{ id: "x1" }, { id: "x2" }],
   });
@@ -173,20 +173,12 @@ Deno.test("summarize stale x pending can close matching deliveries", async () =>
     { now: () => new Date("2026-01-02T00:00:00.000Z") },
   );
 
-  assertEquals((result.body as Record<string, unknown>).matched, 2);
-  assertEquals((result.body as Record<string, unknown>).closed, 2);
-  assertEquals(
-    supabase.calls.find((call) =>
-      call.op === "in" && call.table === "x_deliveries"
-    ),
-    { op: "in", table: "x_deliveries", column: "id", values: ["x1", "x2"] },
-  );
-  assertEquals(
-    supabase.calls.find((call) =>
-      call.op === "lt" && call.table === "x_deliveries"
-    )?.value,
-    "2026-01-01T00:00:00.000Z",
-  );
+  assertEquals(result.body, {
+    ok: false,
+    code: "delivery_cutover_blocked",
+    error: "Historical X delivery cleanup is disabled during the immutable cutover",
+  });
+  assertEquals(supabase.calls, []);
 });
 
 Deno.test("rescore recent queues only missing score axes by default", async () => {

@@ -5,6 +5,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { navigationItems } from "@/components/layout/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import { useRuntimeControls } from "@/hooks/useRuntimeControls";
 
 vi.mock("@/components/layout/VersionBanner", () => ({
   VersionBanner: () => <div data-testid="version-banner" />,
@@ -18,8 +19,13 @@ vi.mock("@/hooks/use-toast", () => ({
   useToast: vi.fn(),
 }));
 
+vi.mock("@/hooks/useRuntimeControls", () => ({
+  useRuntimeControls: vi.fn(),
+}));
+
 const mockedUseAuth = vi.mocked(useAuth);
 const mockedUseToast = vi.mocked(useToast);
+const mockedUseRuntimeControls = vi.mocked(useRuntimeControls);
 
 function renderLayout(path = "/") {
   return render(
@@ -68,6 +74,19 @@ describe("AppLayout", () => {
       toast,
       dismiss: vi.fn(),
       toasts: [],
+    });
+    mockedUseRuntimeControls.mockReturnValue({
+      controls: {
+        environment: 'preview',
+        dedupe_enabled: false,
+        translation_enabled: false,
+        posting_mode: 'blocked',
+        updated_at: '2026-08-25T00:00:00.000Z',
+        updated_by: null,
+      },
+      loading: false,
+      error: null,
+      refresh: vi.fn(),
     });
   });
 
@@ -191,5 +210,28 @@ describe("AppLayout", () => {
     expect(screen.getByRole("status", { name: /read-only access/i })).toHaveTextContent(
       "Viewing only. Changes are disabled.",
     );
+  });
+
+  it("uses the runtime posting state instead of a hardcoded Preview label", async () => {
+    mockedUseRuntimeControls.mockReturnValue({
+      controls: {
+        environment: 'production',
+        dedupe_enabled: true,
+        translation_enabled: true,
+        posting_mode: 'enabled',
+        updated_at: '2026-08-25T00:00:00.000Z',
+        updated_by: null,
+      },
+      loading: false,
+      error: null,
+      refresh: vi.fn(),
+    });
+
+    renderLayout("/");
+
+    expect(await screen.findByRole("status", { name: /posting status/i })).toHaveTextContent(
+      "Posting enabled in Production",
+    );
+    expect(screen.queryByText("Posting locked in Preview")).not.toBeInTheDocument();
   });
 });

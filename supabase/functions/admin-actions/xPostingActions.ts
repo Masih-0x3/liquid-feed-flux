@@ -19,6 +19,7 @@ import {
   RemoteMediaPolicyError,
   type RemoteMediaDnsResolver,
 } from "../_shared/remoteMediaPolicy.ts";
+import { requireDeliveryCutover } from "../_shared/deliveryCutover.ts";
 import { loadActiveThreshold } from "./activeThreshold.ts";
 import {
   ExternalPostingBlockedError,
@@ -1172,7 +1173,22 @@ export async function runXPostAdminAction(
     hydrate?: string;
   } = { ran: false, ok: true };
 
-  if (tweetId && action === "retry_x_post") {
+  if (action === "retry_x_post") {
+    try {
+      await requireDeliveryCutover(supabase, tweetId ?? "");
+    } catch (error) {
+      return {
+        body: {
+          ok: false,
+          code: "delivery_cutover_blocked",
+          error: error instanceof Error ? error.message : String(error),
+        },
+        status: 409,
+      };
+    }
+    if (!tweetId) {
+      return { body: { ok: false, code: "delivery_cutover_blocked", error: "delivery_cutover_blocked:missing_tweet_id" }, status: 409 };
+    }
     const { data: existing, error: existingError } = await table(supabase, "posts")
       .select(
         "text_translated, importance_score, final_score, base_score, learned_score, learned_delta, x_gate_score, learning_confidence, score_breakdown, is_truncated, hydrated_at, dedupe_status, dup_of_tweet_id, dedupe_reason",

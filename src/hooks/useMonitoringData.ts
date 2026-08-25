@@ -367,9 +367,10 @@ export function useMonitoringOverview(windowHours = 24) {
   });
 }
 
-export function useXApiSummary(windowHours = 24, syncOfficialUsage = false) {
+export function useXApiSummary(windowHours = 24, syncOfficialUsage = false, enabled = true) {
   return useQuery({
     queryKey: ['x-api-summary', windowHours, syncOfficialUsage],
+    enabled,
     queryFn: async (): Promise<XApiSummary> => {
       const data = await invokeAdminRead<{ success?: boolean; error?: string; summary?: XApiSummary }>({
         action: 'get_x_api_summary',

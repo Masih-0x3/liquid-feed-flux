@@ -21,6 +21,7 @@ type FakeCall = {
 
 type FakeConfig = {
   intake?: Record<string, unknown> | null;
+  rpcError?: { message: string };
   runtimeControls?: Record<string, unknown>;
   post?: Record<string, unknown> | null;
   media?: Array<Record<string, unknown>>;
@@ -38,6 +39,7 @@ type FakeStorageClient = {
       ): PromiseLike<{ data?: { signedUrl?: string }; error?: unknown }>;
     };
   };
+  rpcError?: { message: string };
 };
 
 function fakeSupabase(config: FakeConfig = {}) {
@@ -132,7 +134,7 @@ function fakeSupabase(config: FakeConfig = {}) {
     },
     rpc(name: string, args?: Record<string, unknown>) {
       calls.push({ op: "rpc", column: name, value: args });
-      return Promise.resolve({ data: null });
+      return Promise.resolve({ data: null, error: config.rpcError ?? null });
     },
     storage: {
       from() {
@@ -371,6 +373,22 @@ Deno.test("manual post re-checks the breaker immediately before dispatch without
     ),
     false,
   );
+});
+Deno.test("manual post action blocks historical lineage before any intake mutation", async () => {
+  const supabase = fakeSupabase({
+    intake: intakeRow,
+    rpcError: { message: "delivery_cutover_blocked:historical" },
+  });
+
+  const result = await manualVideoIntakePostAdminAction(
+    supabase,
+    { intake_id: "intake-1", confirm_manual_post: true },
+    deps(),
+  );
+
+  assertEquals(result.status, 409);
+  assertEquals((result.body as Record<string, unknown>).code, "delivery_cutover_blocked");
+  assertEquals(supabase.calls.filter((call) => call.op === "update"), []);
 });
 
 Deno.test("cancel marks the intake canceled and records a pipeline event", async () => {

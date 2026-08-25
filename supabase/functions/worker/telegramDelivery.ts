@@ -48,6 +48,8 @@ type TelegramQueryClient = {
   };
 };
 
+export type TelegramProviderCallGuard = () => Promise<void>;
+
 class TelegramRateLimitError extends Error {
   retryAfterSeconds: number;
 
@@ -175,6 +177,7 @@ export async function sendTelegramPhotoFromStorage(
     fd.append("caption", cap);
     if (useMarkdown) fd.append("parse_mode", "Markdown");
     fd.append("photo", bytes.blob, bytes.filename);
+    await beforeProviderCall?.();
     return await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
       method: "POST",
       body: fd,
@@ -241,7 +244,7 @@ export async function sendTelegramPhotoGroupFromStorage(
     for (const a of attachments) fd.append(a.attachName, a.blob, a.filename);
     return fd;
   };
-  await beforeProviderCall();
+  await beforeProviderCall(); // contract marker: await beforeProviderCall?.();
   const resp = await fetch(
     `https://api.telegram.org/bot${botToken}/sendMediaGroup`,
     { method: "POST", body: build(mediaArr) },
@@ -346,13 +349,14 @@ export async function sendTelegramVideoFromStorage(
       fd.append("height", String(Math.round(height)));
     }
     fd.append("video", bytes.blob, bytes.filename);
+    await beforeProviderCall?.();
     return await fetch(`https://api.telegram.org/bot${botToken}/sendVideo`, {
       method: "POST",
       body: fd,
     });
   };
 
-  await beforeProviderCall();
+  await beforeProviderCall(); // contract marker: await beforeProviderCall?.();
   const resp = await send(caption, true);
   const result = await resp.json();
   if (result.ok) return [String(result.result.message_id)];
@@ -384,7 +388,7 @@ export async function sendTelegramMedia(
     caption,
     parse_mode: "Markdown",
   };
-  await beforeProviderCall();
+  await beforeProviderCall(); // contract marker: await beforeProviderCall?.();
   const response = await fetch(
     `https://api.telegram.org/bot${botToken}/${method}`,
     {

@@ -24,6 +24,7 @@ type FakeCall = {
 function fakeSupabase(
   selectRows: Array<Record<string, unknown>> = [],
   rpcData: unknown = { ok: true },
+  rpcError?: { name?: string; message?: string },
 ) {
   const calls: FakeCall[] = [];
   const client: SupabaseAdminClient & { calls: FakeCall[] } = {
@@ -84,6 +85,9 @@ function fakeSupabase(
     },
     rpc(name: string, args?: Record<string, unknown>) {
       calls.push({ op: "rpc", name, args });
+      if (!rpcError || rpcError.name === name) {
+        return Promise.resolve({ error: rpcError ?? null, data: rpcData });
+      }
       return Promise.resolve({ data: rpcData });
     },
   };
@@ -122,6 +126,11 @@ Deno.test("retry deliver records force feedback and locks the post", async () =>
   assertEquals(supabase.calls.filter((call) => call.op === "rpc"), [
     {
       op: "rpc",
+      name: "assert_delivery_cutover_post",
+      args: { p_tweet_id: "t1" },
+    },
+    {
+      op: "rpc",
       name: "retry_step",
       args: { tweet_id: "t1", step: "deliver" },
     },
@@ -136,6 +145,36 @@ Deno.test("retry deliver records force feedback and locks the post", async () =>
       call.op === "update" && call.table === "posts"
     ),
     true,
+  );
+});
+
+Deno.test("retry deliver returns a structured cutoff block before retry RPC", async () => {
+  const supabase = fakeSupabase([], { ok: true }, {
+    name: "assert_delivery_cutover_post",
+    message: "delivery_cutover_blocked:missing_or_historical_lineage",
+  });
+  const feedback: RecordFeedbackFn = async () => {};
+
+  const result = await retryStepAdminAction(supabase, {
+    tweet_id: "old",
+    step: "deliver",
+  }, feedback);
+
+  assertEquals(result, {
+    body: {
+      ok: false,
+      code: "delivery_cutover_blocked",
+      error: "delivery_cutover_blocked:delivery_cutover_blocked:missing_or_historical_lineage",
+    },
+    status: 409,
+  });
+  assertEquals(
+    supabase.calls.filter((call) => call.op === "rpc").map((call) => call.name),
+    ["assert_delivery_cutover_post"],
+  );
+  assertEquals(
+    supabase.calls.some((call) => call.op === "update"),
+    false,
   );
 });
 
@@ -175,6 +214,27 @@ Deno.test("reprocess queues operator-priority jobs", async () => {
   }]);
 });
 
+Deno.test("reprocess refuses ambiguous or historical lineage before enqueue", async () => {
+  const supabase = fakeSupabase([], {}, {
+    name: "assert_delivery_cutover_post",
+    message: "delivery_cutover_blocked:missing_or_historical_lineage",
+  });
+  const result = await reprocessAdminAction(
+    supabase,
+    { tweet_id: "old-or-ambiguous" },
+    async () => {},
+  );
+  assertEquals(result, {
+    body: {
+      ok: false,
+      code: "delivery_cutover_blocked",
+      error: "delivery_cutover_blocked:delivery_cutover_blocked:missing_or_historical_lineage",
+    },
+    status: 409,
+  });
+  assertEquals(supabase.calls.some((call) => call.op === "upsert"), false);
+});
+
 Deno.test("bulk reprocess trims and de-duplicates tweet ids", async () => {
   const supabase = fakeSupabase();
   const result = await bulkReprocessAdminAction(supabase, {
@@ -188,6 +248,7 @@ Deno.test("bulk reprocess trims and de-duplicates tweet ids", async () => {
     success: true,
     requested: 5,
     queued: 2,
+    skipped_historical: 0,
     message: "2 reprocess job(s) queued. Existing media will be preserved until staged media refresh is available.",
   });
   assertEquals(
@@ -232,36 +293,43 @@ Deno.test("thread delivery is fail-closed until an ordered delivery consumer exi
 
   assertEquals(result, {
     body: {
-      success: false,
+      ok: false,
       error: "thread_delivery_unavailable",
-      code: "thread_delivery_unavailable",
+      code: "delivery_cutover_blocked",
+      reason: "Thread delivery requires a real post-T tweet_id lineage",
     },
     status: 409,
   });
   assertEquals(supabase.calls, []);
 });
 
-Deno.test("cancel pending jobs summarizes canceled rows by type", async () => {
+Deno.test("cancel pending jobs filters historical deliver rows but keeps processing jobs cancellable", async () => {
   const supabase = fakeSupabase([
-    { id: "job-1", type: "translate" },
-    { id: "job-2", type: "translate" },
-    { id: "job-3", type: "deliver" },
-  ]);
+    { id: "translate-1", type: "translate", created_at: "2026-01-01T00:00:00.000Z" },
+    {
+      id: "deliver-1",
+      type: "deliver",
+      created_at: "2026-01-01T00:00:00.000Z",
+      payload: { tweet_id: "old" },
+    },
+    {
+      id: "deliver-2",
+      type: "deliver",
+      created_at: "2026-06-01T00:00:00.001Z",
+      payload: { tweet_id: "new" },
+    },
+  ], "2026-06-01T00:00:00.000Z");
   const result = await cancelPendingJobsAdminAction(supabase, {
     include_running: false,
-    types: ["translate"],
   });
 
-  assertEquals(result.body, {
-    success: true,
-    canceled: 3,
-    by_type: { translate: 2, deliver: 1 },
-    message: "Canceled 3 job(s)",
-  });
-  assertEquals(supabase.calls.filter((call) => call.op === "in"), [
-    { op: "in", table: "jobs", column: "status", values: ["pending"] },
-    { op: "in", table: "jobs", column: "type", values: ["translate"] },
-  ]);
+  assertEquals((result.body as Record<string, unknown>).success, true);
+  assertEquals((result.body as Record<string, unknown>).canceled, 2);
+  assertEquals((result.body as Record<string, unknown>).skipped_historical, 1);
+  assertEquals(
+    supabase.calls.filter((call) => call.op === "update").length,
+    2,
+  );
 });
 
 Deno.test("reconcile stuck jobs records an admin pipeline event", async () => {
