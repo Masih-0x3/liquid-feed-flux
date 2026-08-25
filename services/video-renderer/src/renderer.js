@@ -1079,9 +1079,10 @@ export async function runPreflightForRenderId({ supabase, renderId, config }) {
   }
 }
 
-export async function claimNextRender(supabase, config) {
-  const { data, error } = await supabase.rpc("claim_video_renders", {
-    batch_size: 1,
+export async function claimNextRender(supabase, config, runtime) {
+  if (!runtime?.renderQueueCutoffAt) return null;
+  const { data, error } = await supabase.rpc("claim_video_render_after", {
+    p_queued_after: runtime.renderQueueCutoffAt,
     worker_id: config.rendererId,
   });
   if (error) throw error;

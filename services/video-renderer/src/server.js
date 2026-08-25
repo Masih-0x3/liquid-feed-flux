@@ -1,5 +1,5 @@
 import http from "node:http";
-import { isAuthorizedRendererRequest, loadConfigFromEnv, loadServerRuntimeFromEnv, normalizeRendererToken } from "./config.js";
+import { isAuthorizedRendererRequest, loadConfigFromEnv, loadServerRuntimeFromEnv, normalizeRendererToken, parseRenderQueueCutoffAt } from "./config.js";
 import { claimNextRender, claimRenderById, createSupabase, processRenderRow, runPreflightForRenderId } from "./renderer.js";
 import { captureRendererException, flushSentryRenderer, initSentryRenderer } from "./sentry.js";
 import { loadRenderSettingsOrDefault } from "./settings.js";
@@ -30,11 +30,23 @@ function readJson(req) {
 
 export function createRendererServer(options = {}) {
   const config = options.config || loadConfigFromEnv();
-  const runtime = options.runtime || loadServerRuntimeFromEnv(options.env);
+  const loadedRuntime = options.runtime || loadServerRuntimeFromEnv(options.env);
+  const renderQueueCutoffAt = parseRenderQueueCutoffAt(loadedRuntime.renderQueueCutoffAt);
+  const runtime = { ...loadedRuntime, renderQueueCutoffAt };
   initSentryRenderer({ config, runtime, env: options.env || process.env });
   const supabase = options.supabase || createSupabase(config);
   const token = normalizeRendererToken(options.token ?? runtime.token);
-  const state = { running: 0, processed: 0, failed: 0, lastError: null };
+  const state = {
+    running: 0,
+    processed: 0,
+    failed: 0,
+    lastError: null,
+    render_polling_enabled: Boolean(runtime.renderPollingEnabled),
+    render_polling_effective: Boolean(runtime.renderPollingEnabled && renderQueueCutoffAt),
+    render_polling_block_reason: runtime.renderPollingEnabled && !renderQueueCutoffAt
+      ? "missing_or_invalid_render_queue_cutoff_at"
+      : null,
+  };
 
   const writeHeartbeat = async (status = "online", metadata = {}) => {
     const payload = {
@@ -49,6 +61,9 @@ export function createRendererServer(options = {}) {
       metadata: {
         pid: process.pid,
         node: process.version,
+        render_polling_enabled: state.render_polling_enabled,
+        render_polling_effective: state.render_polling_effective,
+        render_polling_block_reason: state.render_polling_block_reason,
         ...metadata,
       },
       last_seen_at: new Date().toISOString(),
@@ -129,13 +144,14 @@ export function createRendererServer(options = {}) {
   });
 
   async function pollOnce() {
+    if (!state.render_polling_effective) return null;
     if (state.running > 0) return null;
     const settings = await loadRenderSettingsOrDefault(supabase).catch(() => ({ mode: "enabled" }));
     if (settings.mode === "disabled") {
       await writeHeartbeat("paused", { mode: settings.mode }).catch(() => null);
       return null;
     }
-    const row = await claimNextRender(supabase, config);
+    const row = await claimNextRender(supabase, config, runtime);
     if (!row) {
       await writeHeartbeat("online", { mode: settings.mode }).catch(() => null);
       return null;
@@ -173,12 +189,14 @@ export function startRendererServer() {
       console.error(JSON.stringify({ service: "xot-video-renderer", action: "heartbeat_error", error: error.message }));
     });
   });
-  setInterval(() => {
-    pollOnce().catch((error) => {
-      console.error(JSON.stringify({ service: "xot-video-renderer", action: "poll_error", error: error.message }));
-      captureRendererException(error, { action: "poll_error" });
-    });
-  }, runtime.pollIntervalMs);
+  if (runtime.renderPollingEffective) {
+    setInterval(() => {
+      pollOnce().catch((error) => {
+        console.error(JSON.stringify({ service: "xot-video-renderer", action: "poll_error", error: error.message }));
+        captureRendererException(error, { action: "poll_error" });
+      });
+    }, runtime.pollIntervalMs);
+  }
   setInterval(() => {
     writeModeHeartbeat({ action: "interval" }).catch((error) => {
       console.error(JSON.stringify({ service: "xot-video-renderer", action: "heartbeat_error", error: error.message }));

@@ -105,6 +105,10 @@ import {
 } from "./sideEffects.ts";
 import { queueManualAdvance } from "./manualAdvanceActions.ts";
 import { captureEdgeException, initSentryEdge } from "../_shared/sentry.ts";
+import {
+  evaluateExternalPosting,
+  externalPostingBlockedResponse,
+} from "../_shared/externalPostingGuard.ts";
 
 const DEPLOY_SHA = Deno.env.get('DEPLOY_GIT_SHA') ?? 'unknown';
 const DEPLOY_TIME = Deno.env.get('DEPLOY_TIME') ?? new Date().toISOString();
@@ -224,6 +228,20 @@ serve(async (req) => {
     if (!action) {
       console.error('[admin-actions] missing action', { rawText: rawText.slice(0, 200), contentType: req.headers.get('content-type') });
       return jsonResponse({ error: 'Missing action parameter', received: rawText.slice(0, 200) }, 400);
+    }
+
+    const externalPostingActions = new Set([
+      'post_thread',
+      'retry_step',
+      'manual_video_intake_post',
+      'retry_x_post',
+      'send_test_tweet',
+    ]);
+    if (externalPostingActions.has(action)) {
+      const postingDecision = await evaluateExternalPosting(supabase);
+      if (!postingDecision.allowed) {
+        return externalPostingBlockedResponse(postingDecision.reason, corsHeaders);
+      }
     }
 
     switch (action) {

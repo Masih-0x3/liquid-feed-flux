@@ -1,6 +1,10 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
 import { captureEdgeException, initSentryEdge } from "../_shared/sentry.ts";
+import {
+  evaluateExternalPosting,
+  externalPostingBlockedResponse,
+} from "../_shared/externalPostingGuard.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': Deno.env.get('ALLOWED_CORS_ORIGIN') ?? 'https://liquid-feed-flux.lovable.app',
@@ -74,6 +78,13 @@ serve(async (req) => {
 
     const body = await req.json();
     const { delivery_id, action, tweet_id, post, template, settings } = body;
+
+    if (action !== 'test_webhook') {
+      const postingDecision = await evaluateExternalPosting(supabase);
+      if (!postingDecision.allowed) {
+        return externalPostingBlockedResponse(postingDecision.reason, corsHeaders);
+      }
+    }
 
     console.log(JSON.stringify({ function: 'admin-retry', action: action || 'retry_delivery', admin_user: authResult.userId }));
 

@@ -34,6 +34,23 @@ function createTestServer(options = {}) {
   }).server;
 }
 
+function mockSupabase() {
+  const rpcs = [];
+  return {
+    rpcs,
+    rpc: async (name, params) => {
+      rpcs.push({ name, params });
+      return { data: [], error: null };
+    },
+    from: () => ({
+      select: () => ({
+        eq: () => ({ maybeSingle: async () => ({ data: { value: { mode: "enabled" } }, error: null }) }),
+      }),
+      upsert: async () => ({ error: null }),
+    }),
+  };
+}
+
 test("render dispatch fails closed when no renderer token is configured", async () => {
   const server = createTestServer({ token: "" });
 
@@ -71,4 +88,40 @@ test("configured bearer token reaches route validation", async () => {
 
   assert.equal(response.status, 400);
   assert.deepEqual(response.payload, { error: "render_id is required" });
+});
+
+test("disabled or invalid-cutoff polling makes zero claim calls", async () => {
+  for (const runtime of [
+    { renderPollingEnabled: false, renderQueueCutoffAt: null },
+    { renderPollingEnabled: true, renderQueueCutoffAt: "invalid" },
+  ]) {
+    const supabase = mockSupabase();
+    const renderer = createRendererServer({
+      config: { rendererId: "renderer-test", renderVersion: "v1" },
+      runtime,
+      supabase,
+    });
+    await renderer.pollOnce();
+    assert.equal(supabase.rpcs.length, 0);
+  }
+});
+
+test("enabled polling claims only through the cutoff wrapper", async () => {
+  const supabase = mockSupabase();
+  const renderer = createRendererServer({
+    config: { rendererId: "renderer-test", renderVersion: "v1" },
+    runtime: {
+      renderPollingEnabled: true,
+      renderQueueCutoffAt: "2026-08-25T02:00:00Z",
+    },
+    supabase,
+  });
+  await renderer.pollOnce();
+  assert.deepEqual(supabase.rpcs, [{
+    name: "claim_video_render_after",
+    params: {
+      p_queued_after: "2026-08-25T02:00:00.000Z",
+      worker_id: "renderer-test",
+    },
+  }]);
 });

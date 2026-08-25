@@ -38,6 +38,11 @@ import {
   serviceRoleBearerHeader,
 } from "../_shared/internalAuth.ts";
 import {
+  evaluateExternalPosting,
+  ExternalPostingBlockedError,
+  requireExternalPosting,
+} from "../_shared/externalPostingGuard.ts";
+import {
   captureEdgeException,
   captureEdgeExceptionBackground,
   initSentryEdge,
@@ -157,6 +162,17 @@ const corsHeaders = {
 };
 
 const SETTINGS_CACHE_MS = 45_000;
+const NON_POSTING_JOB_TYPES = [
+  "translate",
+  "moderate",
+  "download_media",
+  "reprocess",
+  "hydrate_tweet",
+  "resolve_media",
+  "dedupe",
+  "compute_signature",
+  "enrich",
+];
 initSentryEdge();
 type ScoringDecisionLog = NonNullable<
   ReturnType<typeof buildScoringBaseDecisionState>["logEvent"]
@@ -726,11 +742,29 @@ serve(async (req) => {
       bypassCache: bypassSettingsCache,
     });
 
+    const postingDecision = await evaluateExternalPosting(supabase);
+    const claimJobTypes = postingDecision.allowed
+      ? requestedJobTypes
+      : requestedJobTypes
+      ? requestedJobTypes.filter((type) => type !== "deliver")
+      : NON_POSTING_JOB_TYPES;
+    if (claimJobTypes?.length === 0) {
+      return new Response(JSON.stringify({
+        success: true,
+        processed: 0,
+        deferred: 0,
+        posting_blocked: true,
+        reason: postingDecision.reason,
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // Use claim_jobs RPC for transactional job claiming
     const { data: jobs, error: claimError } = await supabase
       .rpc("claim_jobs", {
         batch_size: requestedBatchSize,
-        job_types: requestedJobTypes,
+        job_types: claimJobTypes,
         worker_id: "worker-" + crypto.randomUUID().slice(0, 8),
       });
 
@@ -1113,6 +1147,11 @@ async function enqueuePostDeliveryAfterRenderGate(
   source = "worker",
   resetExisting = true,
 ) {
+  const postingDecision = await evaluateExternalPosting(supabase);
+  if (!postingDecision.allowed) {
+    await prepareVideoRenderGate(supabase, tweetId, source);
+    return;
+  }
   return enqueuePostDeliveryAfterRenderGateCore(
     supabase,
     tweetId,
@@ -2676,6 +2715,7 @@ async function handleDeliverJob(
   const payload = job.payload as Record<string, unknown>;
   const tweetId = payload.tweet_id as string;
   try {
+    await requireExternalPosting(supabase);
     console.log(
       JSON.stringify({
         function: "worker",
@@ -2891,6 +2931,10 @@ async function handleDeliverJob(
       renderGate.decision,
     );
 
+    // Re-check immediately before the first Telegram provider call so a
+    // runtime hold that changes during preparation still wins.
+    await requireExternalPosting(supabase);
+
     const message = formatMessageWithTemplate(post, account, messageTemplate);
     let telegramMessageIds: string[] = [];
     const telegramStartedAt = Date.now();
@@ -3040,6 +3084,12 @@ async function handleDeliverJob(
     await markVideoRenderPosted(supabase, tweetId);
     return true;
   } catch (error) {
+    if (error instanceof ExternalPostingBlockedError) {
+      throw new JobDeferred("telegram_external_posting_blocked", 15 * 60_000, {
+        tweet_id: tweetId,
+        reason: error.reason,
+      });
+    }
     if (
       error instanceof StaleMediaObjectError &&
       !isProcessedRenderStoragePath(error.storagePath)

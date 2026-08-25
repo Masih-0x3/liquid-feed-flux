@@ -5,6 +5,11 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1';
 import { requireInternalAuth } from '../_shared/internalAuth.ts';
+import {
+  evaluateExternalPosting,
+  externalPostingBlockedResponse,
+  requireExternalPosting,
+} from '../_shared/externalPostingGuard.ts';
 import { recordXApiEvent } from '../_shared/xApiLedger.ts';
 import { buildXPostText, isEnrichmentBlockingXPost, pickHashtags } from '../_shared/xPostText.ts';
 import { allowCompletedEnrichmentForPosting, doesEnrichmentBlockX, normalizeEnrichmentConfig } from '../_shared/enrich.ts';
@@ -1215,6 +1220,13 @@ Deno.serve(async (req) => {
   const forceRetry = body.force_retry === true || (onlyTweetId !== null && !dryRun);
   const claimTtlSeconds = typeof body.claim_ttl_seconds === 'number' ? body.claim_ttl_seconds : 1800;
 
+  if (!dryRun) {
+    const postingDecision = await evaluateExternalPosting(sb);
+    if (!postingDecision.allowed) {
+      return externalPostingBlockedResponse(postingDecision.reason, corsHeaders);
+    }
+  }
+
   // Load settings
   const { data: settingsRows } = await sb.from('settings').select('key, value')
     .in('key', ['x_posting_config', 'x_rate_limits', 'enrichment_config', 'story_memory']);
@@ -1861,6 +1873,7 @@ Deno.serve(async (req) => {
     let xId = '';
     let raw: unknown = null;
     try {
+      await requireExternalPosting(sb);
       const posted = await postTweet(text, mediaIds, ck, cs, at, ats, sb, tweetId);
       xId = posted.id;
       raw = posted.raw;
