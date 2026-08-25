@@ -41,6 +41,10 @@ const xPostingActions = await readFile(
   new URL("../supabase/functions/admin-actions/xPostingActions.ts", import.meta.url),
   "utf8",
 );
+const manualVideoIntakeActions = await readFile(
+  new URL("../supabase/functions/admin-actions/manualVideoIntakeActions.ts", import.meta.url),
+  "utf8",
+);
 const xPoster = await readFile(
   new URL("../supabase/functions/x-poster/index.ts", import.meta.url),
   "utf8",
@@ -107,6 +111,7 @@ const guardedAdminPaths = [
   ["thread posting", basicActions, "Thread delivery requires a real post-T tweet_id lineage"],
   ["synthetic X test", xApiActions, "Synthetic X test tweets are disabled"],
   ["retry X lineage", xPostingActions, "requireDeliveryCutover"],
+  ["manual intake posting", manualVideoIntakeActions, "requireDeliveryCutover"],
   ["x fallback cutoff", xPoster, "get_delivery_cutover"],
   ["worker settlement", worker, "settleBlockedDeliveryJob"],
 ];
@@ -127,5 +132,11 @@ assertGuardBeforeMutation(
   "await requireDeliveryCutover(supabase, tweetId ?? \"\")",
   "`${supabaseUrl}/functions/v1/x-poster`",
 );
+assertGuardBeforeMutation(
+  "manual intake posting path",
+  manualVideoIntakeActions,
+  "await requireDeliveryCutover(supabase, String(intake.tweet_id ?? \"\"))",
+  'status: "post_requested"',
+);
 
-console.log(`v1 delivery cutover SQL contract PASS (${required.length + 10} markers)`);
+console.log(`v1 delivery cutover SQL contract PASS (${required.length + 11} markers)`);

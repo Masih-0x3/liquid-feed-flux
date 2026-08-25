@@ -4,6 +4,7 @@ import { selectSourceVideo, type VideoRenderRow } from "../_shared/videoRenderGa
 import type { XMediaRow } from "../_shared/mediaSelection.ts";
 import { xOauthHeader, recordAdminXApiAttempt } from "./xApiActions.ts";
 import { runDedupeAdminAction } from "./dedupeActions.ts";
+import { requireDeliveryCutover } from "../_shared/deliveryCutover.ts";
 import type {
   AdminActionResponse,
   SupabaseAdminClient,
@@ -1122,6 +1123,21 @@ export async function manualVideoIntakePostAdminAction(
   if (!intake) return { body: { ok: false, error: "manual intake not found" }, status: 404 };
   if (body.confirm_manual_post !== true) {
     return { body: { ok: false, error: "confirm_manual_post is required" }, status: 400 };
+  }
+  try {
+    // Manual intake posting is a direct delivery path. Block its first
+    // mutation for historical or ambiguous lineage; processing-only actions
+    // remain available through their separate handlers.
+    await requireDeliveryCutover(supabase, String(intake.tweet_id ?? ""));
+  } catch (error) {
+    return {
+      body: {
+        ok: false,
+        code: "delivery_cutover_blocked",
+        error: error instanceof Error ? error.message : String(error),
+      },
+      status: 409,
+    };
   }
   const snapshot = await assembleSnapshot(supabase, intake, deps, {
     runDedupe: true,
