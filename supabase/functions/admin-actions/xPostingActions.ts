@@ -994,17 +994,27 @@ export async function runXPostAdminAction(
     hydrate?: string;
   } = { ran: false, ok: true };
 
-  if (tweetId && action === "retry_x_post") {
+  if (action === "retry_x_post") {
     // Do not rescore, hydrate, queue, or invoke x-poster for historical or
     // ambiguous lineage. The x-poster claim/RPC is the final DB guard too.
     try {
-      await requireDeliveryCutover(supabase, tweetId);
+      await requireDeliveryCutover(supabase, tweetId ?? "");
     } catch (error) {
       return {
         body: {
           ok: false,
           code: "delivery_cutover_blocked",
           error: error instanceof Error ? error.message : String(error),
+        },
+        status: 409,
+      };
+    }
+    if (!tweetId) {
+      return {
+        body: {
+          ok: false,
+          code: "delivery_cutover_blocked",
+          error: "delivery_cutover_blocked:missing_tweet_id",
         },
         status: 409,
       };

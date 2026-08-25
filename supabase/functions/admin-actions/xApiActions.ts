@@ -2,8 +2,6 @@ import {
   recordXApiEvent,
 } from "../_shared/xApiLedger.ts";
 import { isMyXEnabled } from "../_shared/myXControls.ts";
-import { requireDeliveryCutover } from "../_shared/deliveryCutover.ts";
-import { requireExternalPosting } from "../_shared/externalPostingGuard.ts";
 import type { AdminActionResponse, SupabaseAdminClient } from "./types.ts";
 
 type QueryResult = {
@@ -332,99 +330,14 @@ export async function sendTestTweetAdminAction(
       status: 400,
     };
   }
-  const lineageTweetId = typeof body.tweet_id === "string"
-    ? body.tweet_id.trim()
-    : "";
-  if (!lineageTweetId) {
-    return {
-      body: {
-        ok: false,
-        code: "delivery_cutover_blocked",
-        error: "A real post-T tweet_id is required; synthetic test tweets are disabled",
-      },
-      status: 409,
-    };
-  }
-  try {
-    await requireDeliveryCutover(supabase, lineageTweetId);
-  } catch (error) {
-    return {
-      body: {
-        ok: false,
-        code: "delivery_cutover_blocked",
-        error: error instanceof Error ? error.message : String(error),
-      },
-      status: 409,
-    };
-  }
-  const creds = getXCreds(deps);
-  if (!creds) {
-    return {
-      body: { ok: false, error: "One or more TWITTER_* secrets are missing" },
-      status: 200,
-    };
-  }
-  const url = "https://api.x.com/2/tweets";
-  const payload: Record<string, unknown> = { text };
-  if (replyTo) payload.reply = { in_reply_to_tweet_id: replyTo };
-  try {
-    await requireExternalPosting(
-      supabase as unknown as Parameters<typeof requireExternalPosting>[0],
-      deps.externalPostingOptions,
-    );
-    await requireDeliveryCutover(supabase, lineageTweetId);
-    const oauth = deps.oauthHeader ?? xOauthHeader;
-    const auth = await oauth(
-      "POST",
-      url,
-      {},
-      creds.ck,
-      creds.cs,
-      creds.at,
-      creds.ats,
-    );
-    const resp = await (deps.fetchImpl ?? fetch)(url, {
-      method: "POST",
-      headers: { Authorization: auth, "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const respText = await resp.text();
-    let respBody: unknown;
-    try {
-      respBody = JSON.parse(respText);
-    } catch {
-      respBody = respText;
-    }
-    await recordAdminXApiAttempt(
-      supabase,
-      {
-        action: "send_test_tweet",
-        endpoint: url,
-        method: "POST",
-      },
-      resp,
-    );
-    if (!resp.ok) {
-      return {
-        body: {
-          ok: false,
-          error: `HTTP ${resp.status}: ${respText.slice(0, 300)}`,
-          response: respBody,
-        },
-      };
-    }
-    const created = (respBody as { data?: { id?: string; text?: string } })
-      ?.data;
-    return { body: { ok: true, tweet_id: created?.id, response: respBody } };
-  } catch (e) {
-    await recordAdminXApiAttempt(supabase, {
-      action: "send_test_tweet",
-      endpoint: url,
-      method: "POST",
-      error: (e as Error).message,
-    }, null);
-    return { body: { ok: false, error: (e as Error).message } };
-  }
+  return {
+    body: {
+      ok: false,
+      code: "delivery_cutover_blocked",
+      error: "Synthetic X test tweets are disabled during the immutable delivery cutover",
+    },
+    status: 409,
+  };
 }
 
 export async function testHydrateTweetAdminAction(

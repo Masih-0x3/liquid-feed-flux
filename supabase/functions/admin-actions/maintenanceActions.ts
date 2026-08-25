@@ -83,6 +83,16 @@ export async function summarizeStaleXPendingAdminAction(
     720,
   );
   const close = body.close === true;
+  if (close) {
+    return {
+      body: {
+        ok: false,
+        code: "delivery_cutover_blocked",
+        error: "Historical X delivery cleanup is disabled during the immutable cutover",
+      },
+      status: 409,
+    };
+  }
   const cutoff = new Date(
     nowMs(deps) - olderThanHours * 60 * 60 * 1000,
   ).toISOString();

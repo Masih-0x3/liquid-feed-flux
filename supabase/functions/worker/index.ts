@@ -45,6 +45,7 @@ import {
 import {
   DeliveryCutoverBlockedError,
   requireDeliveryCutover,
+  settleDeliveryCutoverJob,
 } from "../_shared/deliveryCutover.ts";
 import {
   captureEdgeException,
@@ -114,6 +115,27 @@ import {
   prepareVideoRenderGate,
   VIDEO_RENDER_DEFER_MS,
 } from "./videoRenderWorkflow.ts";
+
+async function settleBlockedDeliveryJob(
+  supabase: { rpc: (name: string, args?: Record<string, unknown>) => PromiseLike<{ data?: unknown; error?: { message?: string } | null }> },
+  jobId: unknown,
+  reason: string,
+): Promise<void> {
+  if (typeof jobId !== "string" || !jobId) return;
+  try {
+    await settleDeliveryCutoverJob(supabase, jobId, reason);
+  } catch (error) {
+    // Do not release a claimed historical row when settlement is unavailable.
+    // It stays non-eligible (running) until an operator can inspect it.
+    console.error(JSON.stringify({
+      function: "worker",
+      action: "delivery_cutover_settlement_failed",
+      job_id: jobId,
+      error: error instanceof Error ? error.message : "rpc_unavailable",
+    }));
+  }
+}
+
 import {
   computeAdaptiveSpacing,
   getMediaUrl,
@@ -1006,6 +1028,7 @@ serve(async (req) => {
           // failed/retryable row. The transactional claim RPC normally keeps
           // this branch unreachable, but the guard remains fail-closed.
           if (error instanceof DeliveryCutoverBlockedError) {
+            await settleBlockedDeliveryJob(supabase, job.id, error.message);
             console.warn(JSON.stringify({
               function: "worker",
               action: "historical_delivery_blocked",
@@ -1042,6 +1065,7 @@ serve(async (req) => {
         }
       } catch (error) {
         if (error instanceof DeliveryCutoverBlockedError) {
+          await settleBlockedDeliveryJob(supabase, job.id, error.message);
           console.warn(JSON.stringify({
             function: "worker",
             action: "historical_delivery_blocked",

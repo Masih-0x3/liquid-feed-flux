@@ -58,6 +58,7 @@ import {
 import {
   requireDeliveryCutover,
 } from '../_shared/deliveryCutover.ts';
+import { effectiveXCandidateCutoff } from '../_shared/xCandidateCutover.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': Deno.env.get('ALLOWED_CORS_ORIGIN') ?? 'https://liquid-feed-flux.lovable.app',
@@ -1335,9 +1336,28 @@ Deno.serve(async (req) => {
   const dedupeCutoff = new Date(Date.now() - cfg.dedupe_window_hours * 3600 * 1000).toISOString();
   const maxCandidateAgeMinutes = Math.max(1, Math.min(1440, Number(cfg.max_candidate_age_minutes ?? 30) || 30));
   const freshnessCutoff = new Date(Date.now() - maxCandidateAgeMinutes * 60 * 1000).toISOString();
-  // Hard floor: never look at posts created before X posting was enabled.
+  // Hard floors: the immutable database cutover is authoritative. A stale or
+  // missing config floor cannot widen the candidate window.
   const startFrom = cfg.start_posting_from || null;
-  const effectiveCutoff = [dedupeCutoff, freshnessCutoff, startFrom].filter((v): v is string => !!v).sort().at(-1) ?? freshnessCutoff;
+  const cutoverRes = await sb.rpc('get_delivery_cutover');
+  if (
+    cutoverRes.error ||
+    typeof cutoverRes.data !== 'string' ||
+    !Number.isFinite(new Date(cutoverRes.data).getTime())
+  ) {
+    return new Response(JSON.stringify({
+      ok: false,
+      code: 'delivery_cutover_unavailable',
+      error: cutoverRes.error?.message ?? 'delivery cutover is not initialized',
+    }), { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+  }
+  const deliveryCutoverAt = cutoverRes.data;
+  const effectiveCutoff = effectiveXCandidateCutoff([
+    dedupeCutoff,
+    freshnessCutoff,
+    startFrom,
+    deliveryCutoverAt,
+  ]) ?? deliveryCutoverAt;
   const maxPostsPerRun = Math.max(1, Math.min(20, Number(cfg.max_posts_per_run ?? 1) || 1));
 
   const { data: existingRows } = await sb.from('x_deliveries').select('post_id').in('status', ['posting', 'posted', 'pending']).gte('created_at', dedupeCutoff);
@@ -1360,7 +1380,7 @@ Deno.serve(async (req) => {
       console.warn('[x-poster] get_x_post_candidates RPC unavailable, using fallback query', rpcRes.error.message);
       let candidatesQ = sb.from('posts')
         .select('tweet_id, text_translated, text_original, author_handle, has_media, importance_score, final_score, base_score, learned_score, learned_delta, x_gate_score, learning_confidence, delivery_decision, decision_reason, url, is_truncated, hydrated_at, created_at, final_x_text, composed_post_text, post_format_hint, humanized_commentary, commentary_hook, commentary_question, narrative_callback, thread_continuation, enrich_status, dedupe_status, dup_of_tweet_id, dup_similarity, dedupe_reason, accounts!inner(handle)')
-        .gte('created_at', effectiveCutoff)
+        .gt('created_at', effectiveCutoff)
         .not('text_translated', 'is', null)
         .or(`x_gate_score.gte.${cfg.min_score},and(x_gate_score.is.null,final_score.gte.${cfg.min_score}),and(x_gate_score.is.null,final_score.is.null,importance_score.gte.${cfg.min_score})`);
       if (targetTweetId) candidatesQ = candidatesQ.eq('tweet_id', targetTweetId);

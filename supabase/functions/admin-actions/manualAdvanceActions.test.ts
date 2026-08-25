@@ -15,6 +15,7 @@ type FakeConfig = {
   post?: Record<string, unknown> | null;
   enrichmentConfig?: Record<string, unknown>;
   pendingDeliveries?: Array<Record<string, unknown>>;
+  cutoverError?: boolean;
 };
 
 function fakeSupabase(config: FakeConfig = {}) {
@@ -75,7 +76,11 @@ function fakeSupabase(config: FakeConfig = {}) {
       return builder;
     },
     rpc() {
-      return Promise.resolve({});
+      return Promise.resolve(
+        config.cutoverError
+          ? { error: { message: "delivery_cutover_blocked" } }
+          : {},
+      );
     },
   };
   return client;
@@ -101,6 +106,24 @@ Deno.test("queue manual advance stops when translation is missing", async () => 
     supabase.calls.some((call) =>
       call.op === "upsert" && call.table === "jobs"
     ),
+    false,
+  );
+});
+
+Deno.test("queue manual advance blocks unavailable cutover before mutation", async () => {
+  const supabase = fakeSupabase({
+    cutoverError: true,
+    post: { tweet_id: "t1", text_translated: "translated" },
+  });
+
+  const result = await queueManualAdvance(supabase, "t1");
+
+  assertEquals(result, {
+    queued: "none",
+    reason: "delivery_cutover_blocked",
+  });
+  assertEquals(
+    supabase.calls.some((call) => call.op === "upsert" || call.op === "insert"),
     false,
   );
 });

@@ -111,6 +111,11 @@ Deno.test("retry deliver records force feedback and locks the post", async () =>
   assertEquals(supabase.calls.filter((call) => call.op === "rpc"), [
     {
       op: "rpc",
+      name: "assert_delivery_cutover_post",
+      args: { p_tweet_id: "t1" },
+    },
+    {
+      op: "rpc",
       name: "retry_step",
       args: { tweet_id: "t1", step: "deliver" },
     },
@@ -190,25 +195,27 @@ Deno.test("bulk reprocess trims and de-duplicates tweet ids", async () => {
   );
 });
 
-Deno.test("cancel pending jobs summarizes canceled rows by type", async () => {
-  const supabase = fakeSupabase([{ type: "translate" }, { type: "translate" }, {
-    type: "deliver",
-  }]);
+Deno.test("cancel pending jobs filters historical deliver rows but keeps processing jobs cancellable", async () => {
+  const supabase = fakeSupabase([
+    { id: "translate-1", type: "translate", created_at: "2026-01-01T00:00:00.000Z" },
+    {
+      id: "deliver-1",
+      type: "deliver",
+      created_at: "2026-01-01T00:00:00.000Z",
+      payload: { tweet_id: "old" },
+    },
+  ], "2026-06-01T00:00:00.000Z");
   const result = await cancelPendingJobsAdminAction(supabase, {
     include_running: false,
-    types: ["translate"],
   });
 
-  assertEquals(result.body, {
-    success: true,
-    canceled: 3,
-    by_type: { translate: 2, deliver: 1 },
-    message: "Canceled 3 job(s)",
-  });
-  assertEquals(supabase.calls.filter((call) => call.op === "in"), [
-    { op: "in", table: "jobs", column: "status", values: ["pending"] },
-    { op: "in", table: "jobs", column: "type", values: ["translate"] },
-  ]);
+  assertEquals((result.body as Record<string, unknown>).success, true);
+  assertEquals((result.body as Record<string, unknown>).canceled, 1);
+  assertEquals((result.body as Record<string, unknown>).skipped_historical, 1);
+  assertEquals(
+    supabase.calls.filter((call) => call.op === "update").length,
+    1,
+  );
 });
 
 Deno.test("reconcile stuck jobs records an admin pipeline event", async () => {

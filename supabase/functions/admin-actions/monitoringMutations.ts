@@ -4,6 +4,7 @@ import type {
   RecordFeedbackFn,
   SupabaseAdminClient,
 } from "./types.ts";
+import { requireDeliveryCutover } from "../_shared/deliveryCutover.ts";
 
 type QueryResult = {
   data?: unknown;
@@ -177,6 +178,19 @@ export async function ignoreMonitoringItemInternal(
       tweet_id: tweetId,
       ignored: false,
       error: `Post not found: ${tweetId}`,
+    };
+  }
+
+  try {
+    // This action closes delivery rows and jobs. It must never mutate the
+    // historical cohort or proceed while the immutable cutoff is unavailable.
+    await requireDeliveryCutover(supabase, tweetId);
+  } catch {
+    return {
+      ok: false,
+      tweet_id: tweetId,
+      ignored: false,
+      error: "delivery_cutover_blocked",
     };
   }
 

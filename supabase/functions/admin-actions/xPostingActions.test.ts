@@ -38,6 +38,7 @@ type FakeConfig = {
     media24h?: number;
   };
   rpcData?: unknown;
+  rpcError?: { message: string };
 };
 
 function fakeSupabase(config: FakeConfig = {}) {
@@ -221,7 +222,10 @@ function fakeSupabase(config: FakeConfig = {}) {
     },
     rpc(name: string, args?: Record<string, unknown>) {
       calls.push({ op: "rpc", name, args });
-      return Promise.resolve({ data: config.rpcData ?? [] });
+      return Promise.resolve({
+        data: config.rpcData ?? [],
+        error: config.rpcError ?? null,
+      });
     },
   };
   return client;
@@ -367,6 +371,37 @@ Deno.test("retry x post is blocked when posting is disabled", async () => {
   assertEquals(result.status, 200);
   assertEquals((result.body as Record<string, unknown>).skipped, true);
   assertEquals(calls.fetches.length, 0);
+});
+
+Deno.test("retry x post blocks missing or historical lineage before rescore or fetch", async () => {
+  const missingSupabase = fakeSupabase();
+  const { deps: missingDeps, calls: missingCalls } = fakeDeps();
+  const missing = await runXPostAdminAction(
+    missingSupabase,
+    { tweet_id: "" },
+    "retry_x_post",
+    missingDeps,
+  );
+  assertEquals((missing.body as Record<string, unknown>).code, "delivery_cutover_blocked");
+  assertEquals(missingCalls.rescore, []);
+  assertEquals(missingCalls.fetches, []);
+
+  const historicalSupabase = fakeSupabase({
+    rpcError: { message: "delivery_cutover_blocked:historical" },
+    postsByTweet: {
+      old: { text_translated: "translated", is_truncated: false },
+    },
+  });
+  const { deps: historicalDeps, calls: historicalCalls } = fakeDeps();
+  const historical = await runXPostAdminAction(
+    historicalSupabase,
+    { tweet_id: "old" },
+    "retry_x_post",
+    historicalDeps,
+  );
+  assertEquals((historical.body as Record<string, unknown>).code, "delivery_cutover_blocked");
+  assertEquals(historicalCalls.rescore, []);
+  assertEquals(historicalCalls.fetches, []);
 });
 
 Deno.test("retry x post duplicate gate skips before rescore or fetch", async () => {

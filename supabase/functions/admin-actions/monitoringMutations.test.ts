@@ -24,6 +24,7 @@ type FakeConfig = {
   xRows?: Array<Record<string, unknown>>;
   deliveryRows?: Array<Record<string, unknown>>;
   jobRows?: Array<Record<string, unknown>>;
+  cutoverError?: boolean;
 };
 
 function fakeDeps() {
@@ -150,7 +151,11 @@ function fakeSupabase(config: FakeConfig = {}) {
       return builder;
     },
     rpc() {
-      return Promise.resolve({});
+      return Promise.resolve(
+        config.cutoverError
+          ? { error: { message: "delivery_cutover_blocked" } }
+          : {},
+      );
     },
   };
   return client;
@@ -261,6 +266,31 @@ Deno.test("ignore monitoring item skips a pending dedupe post and closes related
     delivery_rows_closed: 1,
     jobs_closed: 1,
   });
+});
+
+Deno.test("ignore monitoring item blocks historical cleanup before mutation", async () => {
+  const supabase = fakeSupabase({
+    cutoverError: true,
+    posts: { t1: { tweet_id: "t1", dedupe_status: "pending" } },
+    xRows: [{ id: "x1" }],
+    deliveryRows: [{ id: "d1" }],
+    jobRows: [{ id: "j1", type: "deliver" }],
+  });
+  const { deps, calls } = fakeDeps();
+
+  const result = await ignoreMonitoringItem(supabase, {
+    tweet_id: "t1",
+    reason: "historical",
+  }, deps);
+
+  assertEquals(result, {
+    ok: false,
+    tweet_id: "t1",
+    ignored: false,
+    error: "delivery_cutover_blocked",
+  });
+  assertEquals(supabase.calls.filter((call) => call.op === "update"), []);
+  assertEquals(calls, { enrichments: [], feedback: [], events: [] });
 });
 
 Deno.test("bulk ignore trims, de-duplicates, and summarizes missing ids", async () => {

@@ -9,6 +9,7 @@ import type {
   RecordFeedbackFn,
   SupabaseAdminClient,
 } from "./types.ts";
+import { requireDeliveryCutover } from "../_shared/deliveryCutover.ts";
 
 type QueryResult = {
   data?: unknown;
@@ -260,6 +261,20 @@ export async function clearDuplicateAdminAction(
     : null;
   if (!tweetId) {
     return { body: { error: "tweet_id is required" }, status: 400 };
+  }
+  try {
+    // Clearing a duplicate forces delivery eligibility. Historical posts must
+    // never be changed through this admin path.
+    await requireDeliveryCutover(supabase, tweetId);
+  } catch (error) {
+    return {
+      body: {
+        ok: false,
+        code: "delivery_cutover_blocked",
+        error: error instanceof Error ? error.message : String(error),
+      },
+      status: 409,
+    };
   }
 
   const { error: clearError } = await table(supabase, "posts").update({

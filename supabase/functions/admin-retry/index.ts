@@ -78,13 +78,24 @@ serve(async (req) => {
     );
 
     const body = await req.json();
-    const { delivery_id, action, tweet_id, post, template, settings } = body;
+    const { delivery_id, action, tweet_id } = body;
 
-    if (action !== 'test_webhook') {
-      const postingDecision = await evaluateExternalPosting(supabase);
-      if (!postingDecision.allowed) {
-        return externalPostingBlockedResponse(postingDecision.reason, corsHeaders);
-      }
+    if (action === 'test_template' || action === 'test_webhook') {
+      return new Response(JSON.stringify({
+        success: false,
+        code: 'delivery_cutover_blocked',
+        error: action === 'test_template'
+          ? 'Synthetic Telegram template tests are disabled during the immutable delivery cutover'
+          : 'Synthetic webhook tests are disabled during the immutable delivery cutover',
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 409,
+      });
+    }
+
+    const postingDecision = await evaluateExternalPosting(supabase);
+    if (!postingDecision.allowed) {
+      return externalPostingBlockedResponse(postingDecision.reason, corsHeaders);
     }
 
     console.log(JSON.stringify({ function: 'admin-retry', action: action || 'retry_delivery', admin_user: authResult.userId }));
@@ -288,131 +299,6 @@ serve(async (req) => {
       });
     }
 
-    // Handle test template action
-    if (action === 'test_template') {
-      if (!post || !template) {
-        return new Response(JSON.stringify({ 
-          success: false, 
-          error: 'post and template are required for test_template action' 
-        }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          status: 400
-        });
-      }
-
-      const templateTweetId = post && typeof post.tweet_id === 'string'
-        ? post.tweet_id
-        : '';
-      try {
-        await requireDeliveryCutover(supabase, templateTweetId);
-      } catch (error) {
-        return new Response(JSON.stringify({
-          success: false,
-          code: 'delivery_cutover_blocked',
-          error: error instanceof Error ? error.message : String(error),
-        }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          status: 409,
-        });
-      }
-
-      console.log('Testing template with post:', post.tweet_id);
-
-      // Use secrets for Telegram config instead of DB settings
-      const botToken = Deno.env.get('TELEGRAM_BOT_TOKEN');
-      const chatId = Deno.env.get('TELEGRAM_CHAT_ID');
-
-      if (!botToken || !chatId) {
-        return new Response(JSON.stringify({ 
-          success: false, 
-          error: 'Telegram secrets not configured. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in Supabase secrets.' 
-        }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          status: 400
-        });
-      }
-
-      // Format message using template
-      const message = template
-        .replace(/{translated_text}/g, post.text_translated || 'Sample translated text')
-        .replace(/{original_text}/g, post.text_original || 'Sample original text')
-        .replace(/{author_handle}/g, post.accounts?.handle || '@sample_handle')
-        .replace(/{author_name}/g, post.accounts?.display_name || 'Sample Author')
-        .replace(/{source_link}/g, settings?.include_source_links ? `<a href="${post.url || 'https://example.com'}">مشاهده اصل</a>` : '')
-        .replace(/{published_date}/g, post.tweeted_at ? new Date(post.tweeted_at).toLocaleDateString('fa-IR') : '۱۴۰۴/۶/۱۲')
-        .replace(/{published_time}/g, post.tweeted_at ? new Date(post.tweeted_at).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }) : '۲۱:۳۵')
-        .replace(/{hashtags}/g, settings?.custom_hashtags || '#تست')
-        .replace(/{media_info}/g, post.has_media ? '📸 تصویر' : '');
-
-      const telegramUrl = `https://api.telegram.org/bot${botToken}/sendMessage`;
-      const postingDecision = await evaluateExternalPosting(supabase);
-      if (!postingDecision.allowed) {
-        return externalPostingBlockedResponse(postingDecision.reason, corsHeaders);
-      }
-      try {
-        await requireDeliveryCutover(supabase, templateTweetId);
-      } catch (error) {
-        return new Response(JSON.stringify({
-          success: false,
-          code: 'delivery_cutover_blocked',
-          error: error instanceof Error ? error.message : String(error),
-        }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          status: 409,
-        });
-      }
-      const telegramResponse = await fetch(telegramUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text: `🧪 TEST MESSAGE 🧪\n\n${message}`,
-          parse_mode: 'HTML',
-          disable_web_page_preview: true
-        })
-      });
-      
-      if (!telegramResponse.ok) {
-        const errorData = await telegramResponse.json();
-        throw new Error(`Telegram API error: ${errorData.description || 'Unknown error'}`);
-      }
-
-      return new Response(JSON.stringify({ 
-        success: true, 
-        message: 'Test message sent successfully to Telegram' 
-      }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-
-    // Handle test webhook action
-    if (action === 'test_webhook') {
-      const testRSSItem = {
-        guid: `test-tweet-${Date.now()}`,
-        title: 'Breaking: Major tech announcement today',
-        description: '<p>Exciting news from the tech world.</p>',
-        content: 'Exciting news from the tech world. #TechNews #Innovation',
-        link: 'https://twitter.com/example/status/123456789',
-        pubDate: new Date().toISOString()
-      };
-
-      const webhookResponse = await supabase.functions.invoke('webhooks-rssapp', {
-        body: { items_new: [testRSSItem], test: true }
-      });
-
-      if (webhookResponse.error) {
-        throw new Error(`Webhook test failed: ${webhookResponse.error.message}`);
-      }
-
-      return new Response(JSON.stringify({ 
-        success: true, 
-        message: 'Test webhook completed',
-        data: webhookResponse.data 
-      }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-    
     // Original retry logic
     if (!delivery_id) {
       throw new Error('delivery_id is required');
@@ -428,13 +314,52 @@ serve(async (req) => {
       throw new Error('Delivery not found');
     }
 
+    // The original delivery_id retry path is a second admin bypass. Require
+    // one real post-T post lineage and keep the delivery row itself post-T;
+    // otherwise neither the old row nor a replacement job may be mutated.
+    const deliveryTweetId = delivery.subject_type === 'post' &&
+        typeof delivery.subject_id === 'string'
+      ? delivery.subject_id
+      : '';
+    if (!deliveryTweetId) {
+      return new Response(JSON.stringify({
+        success: false,
+        code: 'delivery_cutover_blocked',
+        error: 'v1 delivery retry supports post deliveries only; non-post lineage is unsupported',
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 409,
+      });
+    }
+    try {
+      await requireDeliveryCutover(supabase, deliveryTweetId);
+      const { data: cutoverAt, error: cutoverError } = await supabase.rpc(
+        'get_delivery_cutover',
+      );
+      if (
+        cutoverError || typeof cutoverAt !== 'string' ||
+        typeof delivery.created_at !== 'string' ||
+        new Date(delivery.created_at).getTime() <= new Date(cutoverAt).getTime()
+      ) {
+        throw new Error('delivery_cutover_blocked:historical_delivery');
+      }
+    } catch (error) {
+      return new Response(JSON.stringify({
+        success: false,
+        code: 'delivery_cutover_blocked',
+        error: error instanceof Error ? error.message : String(error),
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 409,
+      });
+    }
+
     const { error: jobError } = await supabase
       .from('jobs')
       .insert([{
         type: 'deliver',
         payload: {
-          subject_type: delivery.subject_type,
-          subject_id: delivery.subject_id
+          tweet_id: deliveryTweetId,
         },
         status: 'pending',
         next_run_at: new Date().toISOString()
@@ -446,7 +371,6 @@ serve(async (req) => {
       .from('deliveries')
       .update({
         status: 'pending',
-        attempts: 0,
         last_error: null
       })
       .eq('id', delivery_id);

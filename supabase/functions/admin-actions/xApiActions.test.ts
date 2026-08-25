@@ -259,7 +259,7 @@ Deno.test("send test tweet validates payload before credentials", async () => {
   assertEquals(calls.fetches, []);
 });
 
-Deno.test("send test tweet posts JSON body and returns created id", async () => {
+Deno.test("send test tweet is disabled before any provider call", async () => {
   const supabase = fakeSupabase();
   const { deps: actionDeps, calls } = deps({
     data: { id: "tweet-1", text: "hi" },
@@ -270,16 +270,9 @@ Deno.test("send test tweet posts JSON body and returns created id", async () => 
     tweet_id: "post-after-cutover",
   }, actionDeps);
 
-  assertEquals((result.body as Record<string, unknown>).ok, true);
-  assertEquals((result.body as Record<string, unknown>).tweet_id, "tweet-1");
-  assertEquals(calls.fetches[0].input, "https://api.x.com/2/tweets");
-  assertEquals(
-    JSON.parse(String((calls.fetches[0].init as RequestInit).body)),
-    {
-      text: "hi",
-      reply: { in_reply_to_tweet_id: "123" },
-    },
-  );
+  assertEquals(result.status, 409);
+  assertEquals((result.body as Record<string, unknown>).code, "delivery_cutover_blocked");
+  assertEquals(calls.fetches, []);
 });
 
 Deno.test("test hydrate tweet validates numeric id and reads note tweet fields", async () => {

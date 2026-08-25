@@ -2,6 +2,7 @@ import {
   deliveryCutoverAllowsPost,
   DeliveryCutoverBlockedError,
   requireDeliveryCutover,
+  settleDeliveryCutoverJob,
 } from "./deliveryCutover.ts";
 
 Deno.test("delivery cutover blocks pre-T, equality, and missing lineage", () => {
@@ -58,4 +59,21 @@ Deno.test("last-mile RPC guard allows a validated post-T lineage", async () => {
     },
   }, "new-tweet");
   if (!called) throw new Error("cutover assertion RPC was not called");
+});
+
+Deno.test("claimed historical delivery settlement is terminal and never releases", async () => {
+  const calls: Array<{ name: string; args?: Record<string, unknown> }> = [];
+  const settled = await settleDeliveryCutoverJob({
+    rpc(name, args) {
+      calls.push({ name, args });
+      return Promise.resolve({ data: true, error: null });
+    },
+  }, "job-1", "delivery_cutover_blocked:historical");
+  if (!settled) throw new Error("historical job was not terminally settled");
+  if (calls[0]?.name !== "settle_delivery_cutover_blocked") {
+    throw new Error("unexpected settlement RPC");
+  }
+  if (calls[0]?.args?.p_job_id !== "job-1") {
+    throw new Error("settlement targeted the wrong job");
+  }
 });

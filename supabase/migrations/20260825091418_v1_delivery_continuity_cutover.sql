@@ -144,6 +144,56 @@ BEGIN
 END;
 $$;
 
+-- A job can be claimed just before a final lineage check observes the
+-- immutable floor. Never release that row to pending: settle it terminally
+-- as blocked, and only when it is still the same running deliver job.
+CREATE OR REPLACE FUNCTION public.settle_delivery_cutover_blocked(
+  p_job_id uuid,
+  p_reason text DEFAULT 'delivery_cutover_blocked'
+)
+RETURNS boolean
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO public, pg_catalog
+AS $$
+DECLARE
+  v_tweet_id text;
+  v_updated integer;
+BEGIN
+  SELECT NULLIF(btrim(j.payload->>'tweet_id'), '')
+    INTO v_tweet_id
+  FROM public.jobs j
+  WHERE j.id = p_job_id
+    AND j.type = 'deliver'
+    AND j.status = 'running'
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RETURN false;
+  END IF;
+
+  IF public.delivery_cutover_allows_job(
+    (SELECT j.created_at FROM public.jobs j WHERE j.id = p_job_id),
+    v_tweet_id
+  ) THEN
+    RETURN false;
+  END IF;
+
+  UPDATE public.jobs
+  SET status = 'failed',
+      last_error = left(COALESCE(NULLIF(p_reason, ''), 'delivery_cutover_blocked'), 1000),
+      completed_at = COALESCE(completed_at, clock_timestamp()),
+      locked_at = NULL,
+      locked_by = NULL,
+      lease_expires_at = NULL
+  WHERE id = p_job_id
+    AND type = 'deliver'
+    AND status = 'running';
+  GET DIAGNOSTICS v_updated = ROW_COUNT;
+  RETURN v_updated = 1;
+END;
+$$;
+
 -- Posting-related rows cannot be backdated, requeued, cleaned, or otherwise
 -- mutated after T. Translation/media/render work may still update its own
 -- fields on historical posts.
@@ -186,10 +236,14 @@ BEGIN
       RAISE EXCEPTION 'delivery_cutover_blocked:deliver_job_lineage';
     END IF;
     IF TG_OP = 'UPDATE' AND NEW.type = 'deliver'
-      AND NOT public.delivery_cutover_allows_job(NEW.created_at, v_tweet_id) THEN
+      AND NOT public.delivery_cutover_allows_job(NEW.created_at, v_tweet_id)
+      AND NOT (
+        NEW.status = 'failed' AND
+        COALESCE(NEW.last_error, '') LIKE 'delivery_cutover_blocked%'
+      ) THEN
       RAISE EXCEPTION 'delivery_cutover_blocked:deliver_job_lineage';
     END IF;
-    IF TG_OP = 'DELETE'
+    IF TG_OP = 'DELETE' AND OLD.type = 'deliver'
       AND (OLD.created_at <= public.get_delivery_cutover()
         OR public.get_delivery_cutover() IS NULL) THEN
       RAISE EXCEPTION 'delivery_cutover_blocked:historical_job_delete';
@@ -199,7 +253,11 @@ BEGIN
       RAISE EXCEPTION 'delivery_cutover_blocked:deliver_job_created_at_immutable';
     END IF;
     IF TG_OP = 'UPDATE' AND OLD.type = 'deliver'
-      AND NOT public.delivery_cutover_allows_job(OLD.created_at, v_tweet_id) THEN
+      AND NOT public.delivery_cutover_allows_job(OLD.created_at, v_tweet_id)
+      AND NOT (
+        NEW.status = 'failed' AND
+        COALESCE(NEW.last_error, '') LIKE 'delivery_cutover_blocked%'
+      ) THEN
       RAISE EXCEPTION 'delivery_cutover_blocked:historical_deliver_job_mutation';
     END IF;
     IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
@@ -207,6 +265,10 @@ BEGIN
 
   IF TG_TABLE_NAME = 'deliveries' THEN
     v_tweet_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.subject_id ELSE NEW.subject_id END;
+    IF (TG_OP = 'DELETE' AND OLD.subject_type IS DISTINCT FROM 'post') OR
+       (TG_OP <> 'DELETE' AND NEW.subject_type IS DISTINCT FROM 'post') THEN
+      RAISE EXCEPTION 'delivery_cutover_blocked:non_post_delivery_unsupported';
+    END IF;
     IF TG_OP = 'UPDATE' AND NEW.created_at IS DISTINCT FROM OLD.created_at THEN
       RAISE EXCEPTION 'delivery_cutover_blocked:telegram_created_at_immutable';
     END IF;
@@ -766,11 +828,13 @@ REVOKE ALL ON FUNCTION public.get_delivery_cutover() FROM public, anon, authenti
 REVOKE ALL ON FUNCTION public.delivery_cutover_allows_post(text) FROM public, anon, authenticated;
 REVOKE ALL ON FUNCTION public.delivery_cutover_allows_job(timestamptz,text) FROM public, anon, authenticated;
 REVOKE ALL ON FUNCTION public.assert_delivery_cutover_post(text) FROM public, anon, authenticated;
+REVOKE ALL ON FUNCTION public.settle_delivery_cutover_blocked(uuid,text) FROM public, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.initialize_delivery_cutover(text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.get_delivery_cutover() TO service_role;
 GRANT EXECUTE ON FUNCTION public.delivery_cutover_allows_post(text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.delivery_cutover_allows_job(timestamptz,text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.assert_delivery_cutover_post(text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.settle_delivery_cutover_blocked(uuid,text) TO service_role;
 
 ALTER TABLE public.delivery_cutover ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.delivery_cutover FROM public, anon, authenticated;

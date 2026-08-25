@@ -111,33 +111,79 @@ export async function cancelPendingJobsAdminAction(
   const statuses = include_running === false
     ? ["pending"]
     : ["pending", "running"];
-  let query = table(supabase, "jobs")
-    .update({
-      status: "failed",
-      last_error: "Manually canceled by admin",
-      completed_at: new Date().toISOString(),
-      locked_at: null,
-      locked_by: null,
-      lease_expires_at: null,
-    })
-    .in("status", statuses);
+  let query = table(supabase, "jobs").in("status", statuses);
   if (Array.isArray(types) && types.length > 0) {
     query = query.in("type", types);
   }
-  const { data, error } = await query.select("id, type");
+  const { data: rows, error } = await query.select(
+    "id,type,status,created_at,payload",
+  );
   if (error) throw error;
-  const canceled = data?.length ?? 0;
+
+  let cutoverAt: string | null = null;
+  const hasDeliver = (rows || []).some((row) => row.type === "deliver");
+  if (hasDeliver) {
+    const result = await supabase.rpc("get_delivery_cutover");
+    if (!result.error && typeof result.data === "string") {
+      cutoverAt = result.data;
+    }
+  }
+
+  const canceledRows: Array<Record<string, unknown>> = [];
+  let skippedHistorical = 0;
+  for (const row of rows || []) {
+    if (row.type === "deliver") {
+      const payload = row.payload && typeof row.payload === "object"
+        ? row.payload as Record<string, unknown>
+        : {};
+      const tweetId = typeof payload.tweet_id === "string"
+        ? payload.tweet_id
+        : "";
+      const jobCreatedAt = typeof row.created_at === "string"
+        ? row.created_at
+        : "";
+      const jobIsPostCutover = Boolean(
+        cutoverAt && jobCreatedAt &&
+          new Date(jobCreatedAt).getTime() > new Date(cutoverAt).getTime(),
+      );
+      if (!jobIsPostCutover || !tweetId) {
+        skippedHistorical++;
+        continue;
+      }
+      try {
+        await requireDeliveryCutover(supabase, tweetId);
+      } catch (_error) {
+        skippedHistorical++;
+        continue;
+      }
+    }
+    const { error: updateError } = await table(supabase, "jobs")
+      .update({
+        status: "failed",
+        last_error: "Manually canceled by admin",
+        completed_at: new Date().toISOString(),
+        locked_at: null,
+        locked_by: null,
+        lease_expires_at: null,
+      })
+      .eq("id", row.id)
+      .select("id,type");
+    if (updateError) throw updateError;
+    canceledRows.push(row);
+  }
+
   const byType: Record<string, number> = {};
-  (data || []).forEach((row) => {
-    const type = row.type as string;
+  canceledRows.forEach((row) => {
+    const type = String(row.type ?? "unknown");
     byType[type] = (byType[type] || 0) + 1;
   });
   return {
     body: {
       success: true,
-      canceled,
+      canceled: canceledRows.length,
+      skipped_historical: skippedHistorical,
       by_type: byType,
-      message: `Canceled ${canceled} job(s)`,
+      message: `Canceled ${canceledRows.length} job(s)`,
     },
   };
 }
@@ -187,14 +233,16 @@ export async function postThreadAdminAction(
   if (!thread_id) {
     return { body: { error: "thread_id is required" }, status: 400 };
   }
-  const { error } = await table(supabase, "deliveries")
-    .insert({
-      subject_type: "thread",
-      subject_id: thread_id,
-      status: "pending",
-    });
-  if (error) throw error;
-  return { body: { success: true, message: "Thread queued for delivery" } };
+  // A thread has no single post-T lineage. Keep this manual posting path
+  // fail-closed until it is redesigned around real post tweet IDs.
+  return {
+    body: {
+      ok: false,
+      code: "delivery_cutover_blocked",
+      error: "Thread delivery requires a real post-T tweet_id lineage",
+    },
+    status: 409,
+  };
 }
 
 export async function getHealthAdminAction(
