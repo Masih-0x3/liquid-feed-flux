@@ -55,6 +55,9 @@ import {
   StaleMediaObjectError,
   staleMediaObjectErrorForDownload,
 } from '../_shared/staleMediaRepair.ts';
+import {
+  requireDeliveryCutover,
+} from '../_shared/deliveryCutover.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': Deno.env.get('ALLOWED_CORS_ORIGIN') ?? 'https://liquid-feed-flux.lovable.app',
@@ -358,10 +361,12 @@ async function uploadImage(
   bytes: Uint8Array, mime: string, ck: string, cs: string, at: string, ats: string,
   // deno-lint-ignore no-explicit-any
   sb: any, tweetId: string,
+  beforeProviderCall?: () => Promise<void>,
 ): Promise<string> {
   const b64 = bytesToBase64(bytes);
   const params: Record<string, string> = { media_data: b64 };
   const auth = await oauthHeader('POST', UPLOAD_URL, params, ck, cs, at, ats);
+  await beforeProviderCall?.();
   const resp = await fetch(UPLOAD_URL, {
     method: 'POST',
     headers: { Authorization: auth, 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -387,6 +392,7 @@ async function uploadVideoChunked(
   bytes: Uint8Array, mime: string, ck: string, cs: string, at: string, ats: string,
   // deno-lint-ignore no-explicit-any
   sb: any, tweetId: string,
+  beforeProviderCall?: () => Promise<void>,
 ): Promise<string> {
   // INIT
   const initParams: Record<string, string> = {
@@ -396,6 +402,7 @@ async function uploadVideoChunked(
     media_category: 'tweet_video',
   };
   const initAuth = await oauthHeader('POST', UPLOAD_URL, initParams, ck, cs, at, ats);
+  await beforeProviderCall?.();
   const initResp = await fetch(UPLOAD_URL, {
     method: 'POST',
     headers: { Authorization: initAuth, 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -427,6 +434,7 @@ async function uploadVideoChunked(
     const chunkBuffer = new ArrayBuffer(chunk.byteLength);
     new Uint8Array(chunkBuffer).set(chunk);
     form.append('media', new Blob([chunkBuffer], { type: 'application/octet-stream' }));
+    await beforeProviderCall?.();
     const appendResp = await fetch(UPLOAD_URL, {
       method: 'POST',
       headers: { Authorization: appendAuth },
@@ -450,6 +458,7 @@ async function uploadVideoChunked(
   // FINALIZE
   const finParams: Record<string, string> = { command: 'FINALIZE', media_id: mediaId };
   const finAuth = await oauthHeader('POST', UPLOAD_URL, finParams, ck, cs, at, ats);
+  await beforeProviderCall?.();
   const finResp = await fetch(UPLOAD_URL, {
     method: 'POST',
     headers: { Authorization: finAuth, 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -481,6 +490,7 @@ async function uploadVideoChunked(
     const statusParams: Record<string, string> = { command: 'STATUS', media_id: mediaId };
     const qs = new URLSearchParams(statusParams).toString();
     const statusAuth = await oauthHeader('GET', UPLOAD_URL, statusParams, ck, cs, at, ats);
+    await beforeProviderCall?.();
     const statusResp = await fetch(`${UPLOAD_URL}?${qs}`, {
       method: 'GET',
       headers: { Authorization: statusAuth },
@@ -508,11 +518,13 @@ async function postTweet(
   text: string, mediaIds: string[], ck: string, cs: string, at: string, ats: string,
   // deno-lint-ignore no-explicit-any
   sb: any, tweetId: string,
+  beforeProviderCall?: () => Promise<void>,
 ): Promise<{ id: string; raw: unknown }> {
   const url = 'https://api.x.com/2/tweets';
   const body: Record<string, unknown> = { text };
   if (mediaIds.length > 0) body.media = { media_ids: mediaIds };
   const auth = await oauthHeader('POST', url, {}, ck, cs, at, ats);
+  await beforeProviderCall?.();
   const resp = await fetch(url, {
     method: 'POST',
     headers: { Authorization: auth, 'Content-Type': 'application/json' },
@@ -714,6 +726,21 @@ async function handleManualVideoIntakePost(params: {
   if (!tweetId || (requestedTweetId && requestedTweetId !== tweetId)) {
     return xPosterJson({ ok: false, error: 'manual intake tweet mismatch' }, 400);
   }
+  try {
+    await requireDeliveryCutover(params.sb, tweetId);
+  } catch (error) {
+    return xPosterJson({
+      ok: false,
+      code: 'delivery_cutover_blocked',
+      reason: error instanceof Error ? error.message : String(error),
+      tweet_id: tweetId,
+      intake_id: manualIntakeId,
+    }, 409);
+  }
+  const beforeXProviderCall = async () => {
+    await requireExternalPosting(params.sb);
+    await requireDeliveryCutover(params.sb, tweetId);
+  };
   if (intake.status === 'canceled') {
     return xPosterJson({ ok: false, error: 'manual intake is canceled', intake_id: manualIntakeId }, 400);
   }
@@ -1045,6 +1072,7 @@ async function handleManualVideoIntakePost(params: {
       params.ats,
       params.sb,
       tweetId,
+      beforeXProviderCall,
     );
     mediaBytes = preparedVideo.bytes.length;
   } catch (e) {
@@ -1082,6 +1110,7 @@ async function handleManualVideoIntakePost(params: {
       params.ats,
       params.sb,
       tweetId,
+      beforeXProviderCall,
     );
     xId = posted.id;
     raw = posted.raw;
@@ -1390,6 +1419,21 @@ Deno.serve(async (req) => {
   for (const post of candidates) {
     const tweetId = String(post.tweet_id ?? '');
     if (!tweetId) continue;
+    try {
+      await requireDeliveryCutover(sb, tweetId);
+    } catch (error) {
+      results.push({
+        tweet_id: tweetId,
+        status: 'blocked',
+        reason: error instanceof Error ? error.message : String(error),
+      });
+      console.warn(`[x-poster] blocked ${tweetId}: delivery cutover guard`);
+      continue;
+    }
+    const beforeXProviderCall = async () => {
+      await requireExternalPosting(sb);
+      await requireDeliveryCutover(sb, tweetId);
+    };
     const startedAt = Date.now();
     const dispatchSource = String(post.dispatch_source ?? requestSource ?? (targetTweetId ? 'event' : onlyTweetId ? 'force' : 'cron'));
     const candidateReason = typeof post.candidate_reason === 'string' ? post.candidate_reason : null;
@@ -1811,7 +1855,7 @@ Deno.serve(async (req) => {
         if (sel.tier === 'video') {
           const prepared = preparedMediaUploads[0];
           if (!prepared) throw new Error('media_prepare_missing_video');
-          const id = await uploadVideoChunked(prepared.bytes, prepared.mimeType || 'video/mp4', ck, cs, at, ats, sb, tweetId);
+          const id = await uploadVideoChunked(prepared.bytes, prepared.mimeType || 'video/mp4', ck, cs, at, ats, sb, tweetId, beforeXProviderCall);
           mediaIds.push(id);
           mediaBytes += prepared.bytes.length;
           mediaCount = 1;
@@ -1819,7 +1863,7 @@ Deno.serve(async (req) => {
           mediaUp24hCount += 1;
         } else {
           for (const prepared of preparedMediaUploads) {
-            const id = await uploadImage(prepared.bytes, prepared.mimeType || 'image/jpeg', ck, cs, at, ats, sb, tweetId);
+            const id = await uploadImage(prepared.bytes, prepared.mimeType || 'image/jpeg', ck, cs, at, ats, sb, tweetId, beforeXProviderCall);
             mediaIds.push(id);
             mediaBytes += prepared.bytes.length;
             mediaCount += 1;
@@ -1873,8 +1917,8 @@ Deno.serve(async (req) => {
     let xId = '';
     let raw: unknown = null;
     try {
-      await requireExternalPosting(sb);
-      const posted = await postTweet(text, mediaIds, ck, cs, at, ats, sb, tweetId);
+      await beforeXProviderCall();
+      const posted = await postTweet(text, mediaIds, ck, cs, at, ats, sb, tweetId, beforeXProviderCall);
       xId = posted.id;
       raw = posted.raw;
     } catch (e) {

@@ -5,6 +5,7 @@ import {
   evaluateExternalPosting,
   externalPostingBlockedResponse,
 } from "../_shared/externalPostingGuard.ts";
+import { requireDeliveryCutover } from "../_shared/deliveryCutover.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': Deno.env.get('ALLOWED_CORS_ORIGIN') ?? 'https://liquid-feed-flux.lovable.app',
@@ -100,6 +101,21 @@ serve(async (req) => {
         });
       }
 
+      // Reject historical or ambiguous lineage before inserting any retry
+      // job. The database trigger remains the final bypass-resistant guard.
+      try {
+        await requireDeliveryCutover(supabase, String(tweet_id));
+      } catch (error) {
+        return new Response(JSON.stringify({
+          success: false,
+          code: "delivery_cutover_blocked",
+          error: error instanceof Error ? error.message : String(error),
+        }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 409,
+        });
+      }
+
       const { data: postData, error: postError } = await supabase
         .from('posts')
         .select('account_id')
@@ -180,7 +196,50 @@ serve(async (req) => {
         });
       }
 
-      const retryJobs = (failedDeliveries || []).map(delivery => ({
+      const failedRows = failedDeliveries || [];
+      const failedTweetIds = Array.from(new Set(
+        failedRows.map((delivery) => String(delivery.subject_id ?? '')).filter(Boolean),
+      ));
+      const { data: cutoverAt, error: cutoverError } = await supabase.rpc(
+        'get_delivery_cutover',
+      );
+      if (cutoverError || typeof cutoverAt !== 'string') {
+        return new Response(JSON.stringify({
+          success: false,
+          code: 'delivery_cutover_unavailable',
+          error: cutoverError?.message ?? 'delivery cutover is not initialized',
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 503,
+        });
+      }
+      const { data: lineageRows, error: lineageError } = await supabase
+        .from('posts')
+        .select('tweet_id, created_at')
+        .in('tweet_id', failedTweetIds);
+      if (lineageError) {
+        return new Response(JSON.stringify({
+          success: false,
+          code: 'delivery_cutover_lineage_unavailable',
+          error: lineageError.message,
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 503,
+        });
+      }
+      const eligibleIds = new Set(
+        (lineageRows || [])
+          .filter((row) => new Date(String(row.created_at)).getTime() > new Date(cutoverAt).getTime())
+          .map((row) => String(row.tweet_id)),
+      );
+      const eligibleFailedRows = failedRows.filter((delivery) =>
+        eligibleIds.has(String(delivery.subject_id ?? '')) &&
+        new Date(String(delivery.created_at)).getTime() > new Date(cutoverAt).getTime()
+      );
+      const historicalCount = failedRows.filter(
+        (delivery) => !eligibleFailedRows.includes(delivery),
+      ).length;
+      const retryJobs = eligibleFailedRows.map(delivery => ({
         type: 'deliver',
         payload: { tweet_id: delivery.subject_id },
         status: 'pending',
@@ -203,7 +262,9 @@ serve(async (req) => {
         }
 
         try {
-          const uniqueSubjects = Array.from(new Set((failedDeliveries || []).map(d => d.subject_id)));
+          const uniqueSubjects = Array.from(
+            new Set(retryJobs.map((job) => job.payload.tweet_id)),
+          );
           if (uniqueSubjects.length > 0) {
             const rows = uniqueSubjects.map(sid => ({
               subject_type: 'post',
@@ -220,7 +281,8 @@ serve(async (req) => {
 
       return new Response(JSON.stringify({ 
         success: true, 
-        message: `Created ${retryJobs.length} retry jobs for failed deliveries`
+        message: `Created ${retryJobs.length} retry jobs for eligible deliveries`,
+        historical_skipped: historicalCount,
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -235,6 +297,22 @@ serve(async (req) => {
         }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           status: 400
+        });
+      }
+
+      const templateTweetId = post && typeof post.tweet_id === 'string'
+        ? post.tweet_id
+        : '';
+      try {
+        await requireDeliveryCutover(supabase, templateTweetId);
+      } catch (error) {
+        return new Response(JSON.stringify({
+          success: false,
+          code: 'delivery_cutover_blocked',
+          error: error instanceof Error ? error.message : String(error),
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 409,
         });
       }
 
@@ -267,7 +345,22 @@ serve(async (req) => {
         .replace(/{media_info}/g, post.has_media ? '📸 تصویر' : '');
 
       const telegramUrl = `https://api.telegram.org/bot${botToken}/sendMessage`;
-      
+      const postingDecision = await evaluateExternalPosting(supabase);
+      if (!postingDecision.allowed) {
+        return externalPostingBlockedResponse(postingDecision.reason, corsHeaders);
+      }
+      try {
+        await requireDeliveryCutover(supabase, templateTweetId);
+      } catch (error) {
+        return new Response(JSON.stringify({
+          success: false,
+          code: 'delivery_cutover_blocked',
+          error: error instanceof Error ? error.message : String(error),
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 409,
+        });
+      }
       const telegramResponse = await fetch(telegramUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

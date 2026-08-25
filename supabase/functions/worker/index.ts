@@ -43,6 +43,10 @@ import {
   requireExternalPosting,
 } from "../_shared/externalPostingGuard.ts";
 import {
+  DeliveryCutoverBlockedError,
+  requireDeliveryCutover,
+} from "../_shared/deliveryCutover.ts";
+import {
   captureEdgeException,
   captureEdgeExceptionBackground,
   initSentryEdge,
@@ -871,6 +875,19 @@ serve(async (req) => {
           }),
         );
 
+        // Do not create a running pipeline event for a direct invocation of a
+        // historical or ambiguous delivery. Normal claims already enforce the
+        // same boundary in SQL; this closes the direct-call path before any
+        // status/event write.
+        if (job.type === "deliver") {
+          const directPayload = job.payload as Record<string, unknown> | null;
+          await requireDeliveryCutover(
+            supabase,
+            typeof directPayload?.tweet_id === "string"
+              ? directPayload.tweet_id
+              : "",
+          );
+        }
         await recordPipelineEvent(supabase, job, "running");
 
         let success = false;
@@ -985,6 +1002,24 @@ serve(async (req) => {
               reason: error.message,
             };
           }
+          // A direct invocation must not turn a historical delivery into a
+          // failed/retryable row. The transactional claim RPC normally keeps
+          // this branch unreachable, but the guard remains fail-closed.
+          if (error instanceof DeliveryCutoverBlockedError) {
+            console.warn(JSON.stringify({
+              function: "worker",
+              action: "historical_delivery_blocked",
+              job_id: job.id,
+              type: job.type,
+              reason: error.message,
+            }));
+            return {
+              success: false,
+              blocked: true,
+              jobId: job.id,
+              reason: error.message,
+            };
+          }
           const err = jobError(error);
           console.error(
             JSON.stringify({
@@ -1006,6 +1041,21 @@ serve(async (req) => {
           return { success: false, jobId: job.id, error: err.message };
         }
       } catch (error) {
+        if (error instanceof DeliveryCutoverBlockedError) {
+          console.warn(JSON.stringify({
+            function: "worker",
+            action: "historical_delivery_blocked",
+            job_id: job.id,
+            type: job.type,
+            reason: error.message,
+          }));
+          return {
+            success: false,
+            blocked: true,
+            jobId: job.id,
+            reason: error.message,
+          };
+        }
         const err = jobError(error);
         console.error(
           JSON.stringify({
@@ -2716,6 +2766,7 @@ async function handleDeliverJob(
   const tweetId = payload.tweet_id as string;
   try {
     await requireExternalPosting(supabase);
+    await requireDeliveryCutover(supabase, tweetId);
     console.log(
       JSON.stringify({
         function: "worker",
@@ -2933,7 +2984,11 @@ async function handleDeliverJob(
 
     // Re-check immediately before the first Telegram provider call so a
     // runtime hold that changes during preparation still wins.
-    await requireExternalPosting(supabase);
+    const beforeTelegramProviderCall = async () => {
+      await requireExternalPosting(supabase);
+      await requireDeliveryCutover(supabase, tweetId);
+    };
+    await beforeTelegramProviderCall();
 
     const message = formatMessageWithTemplate(post, account, messageTemplate);
     let telegramMessageIds: string[] = [];
@@ -2967,6 +3022,7 @@ async function handleDeliverJob(
             telegramChatId,
             image,
             message,
+            beforeTelegramProviderCall,
           );
           telegramMessageIds.push(...msgIds);
         } else {
@@ -2977,6 +3033,7 @@ async function handleDeliverJob(
             telegramChatId,
             images.slice(0, 10),
             message,
+            beforeTelegramProviderCall,
           );
           telegramMessageIds.push(...msgIds);
         }
@@ -2990,6 +3047,7 @@ async function handleDeliverJob(
           telegramChatId,
           video,
           message,
+          beforeTelegramProviderCall,
         );
         telegramMessageIds.push(...msgIds);
       }
@@ -3006,11 +3064,13 @@ async function handleDeliverJob(
           telegramChatId,
           { audio: audioUrl },
           caption,
+          beforeTelegramProviderCall,
         );
         telegramMessageIds.push(...msgIds);
       }
     } else {
       addTelegramMethod("sendMessage");
+      await beforeTelegramProviderCall();
       const response = await fetch(
         `https://api.telegram.org/bot${telegramBotToken}/sendMessage`,
         {
@@ -3029,6 +3089,7 @@ async function handleDeliverJob(
         telegramMessageIds.push(String(result.result.message_id));
       } else {
         if (isTelegramParseError(result?.description ?? "")) {
+          await beforeTelegramProviderCall();
           const retryResp = await fetch(
             `https://api.telegram.org/bot${telegramBotToken}/sendMessage`,
             {
@@ -3084,6 +3145,9 @@ async function handleDeliverJob(
     await markVideoRenderPosted(supabase, tweetId);
     return true;
   } catch (error) {
+    if (error instanceof DeliveryCutoverBlockedError) {
+      throw error;
+    }
     if (error instanceof ExternalPostingBlockedError) {
       throw new JobDeferred("telegram_external_posting_blocked", 15 * 60_000, {
         tweet_id: tweetId,

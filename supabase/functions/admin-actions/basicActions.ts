@@ -3,6 +3,7 @@ import type {
   RecordFeedbackFn,
   SupabaseAdminClient,
 } from "./types.ts";
+import { requireDeliveryCutover } from "../_shared/deliveryCutover.ts";
 
 type MutationResult = {
   data?: Array<Record<string, unknown>> | null;
@@ -56,6 +57,9 @@ export async function retryStepAdminAction(
   const { tweet_id, step } = body;
   if (!tweet_id || !step) {
     return { body: { error: "tweet_id and step are required" }, status: 400 };
+  }
+  if (step === "deliver") {
+    await requireDeliveryCutover(supabase, String(tweet_id));
   }
   const { error } = await supabase.rpc("retry_step", { tweet_id, step });
   if (error) throw error;

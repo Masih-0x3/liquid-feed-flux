@@ -12,6 +12,7 @@ import {
   selectMediaTier,
   type XMediaRow,
 } from "../_shared/mediaSelection.ts";
+import { requireDeliveryCutover } from "../_shared/deliveryCutover.ts";
 import { loadActiveThreshold } from "./activeThreshold.ts";
 import type {
   AdminActionResponse,
@@ -994,6 +995,20 @@ export async function runXPostAdminAction(
   } = { ran: false, ok: true };
 
   if (tweetId && action === "retry_x_post") {
+    // Do not rescore, hydrate, queue, or invoke x-poster for historical or
+    // ambiguous lineage. The x-poster claim/RPC is the final DB guard too.
+    try {
+      await requireDeliveryCutover(supabase, tweetId);
+    } catch (error) {
+      return {
+        body: {
+          ok: false,
+          code: "delivery_cutover_blocked",
+          error: error instanceof Error ? error.message : String(error),
+        },
+        status: 409,
+      };
+    }
     const { data: existing } = await table(supabase, "posts")
       .select(
         "text_translated, importance_score, final_score, base_score, learned_score, learned_delta, x_gate_score, learning_confidence, score_breakdown, is_truncated, hydrated_at, dedupe_status, dup_of_tweet_id, dedupe_reason",

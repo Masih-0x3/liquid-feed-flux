@@ -12,6 +12,8 @@ import {
 } from "./workerUtils.ts";
 import { staleMediaObjectErrorForDownload } from "../_shared/staleMediaRepair.ts";
 
+export type TelegramProviderCallGuard = () => Promise<void>;
+
 class TelegramRateLimitError extends Error {
   retryAfterSeconds: number;
 
@@ -122,13 +124,14 @@ export async function sendTelegramPhotoFromStorage(
   chatId: string,
   image: Record<string, unknown>,
   caption: string,
+  beforeProviderCall?: TelegramProviderCallGuard,
 ): Promise<string[]> {
   const bytes = await fetchImageBytes(supabase, image);
   if (!bytes) {
     const imageUrl = await getMediaUrl(supabase, image);
     return await sendTelegramMedia("sendPhoto", botToken, chatId, {
       photo: imageUrl,
-    }, caption);
+    }, caption, beforeProviderCall);
   }
   const send = async (cap: string, useMarkdown: boolean): Promise<Response> => {
     const fd = new FormData();
@@ -136,6 +139,7 @@ export async function sendTelegramPhotoFromStorage(
     fd.append("caption", cap);
     if (useMarkdown) fd.append("parse_mode", "Markdown");
     fd.append("photo", bytes.blob, bytes.filename);
+    await beforeProviderCall?.();
     return await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
       method: "POST",
       body: fd,
@@ -159,6 +163,7 @@ export async function sendTelegramPhotoGroupFromStorage(
   chatId: string,
   images: Record<string, unknown>[],
   caption: string,
+  beforeProviderCall?: TelegramProviderCallGuard,
 ): Promise<string[]> {
   const loaded = await mapLimit(images, 3, async (image, i) => {
     const bytes = await fetchImageBytes(supabase, image);
@@ -196,6 +201,7 @@ export async function sendTelegramPhotoGroupFromStorage(
     for (const a of attachments) fd.append(a.attachName, a.blob, a.filename);
     return fd;
   };
+  await beforeProviderCall?.();
   const resp = await fetch(
     `https://api.telegram.org/bot${botToken}/sendMediaGroup`,
     { method: "POST", body: build(mediaArr) },
@@ -214,6 +220,7 @@ export async function sendTelegramPhotoGroupFromStorage(
       }
       return out;
     });
+    await beforeProviderCall?.();
     const retryResp = await fetch(
       `https://api.telegram.org/bot${botToken}/sendMediaGroup`,
       { method: "POST", body: build(retryArr) },
@@ -279,6 +286,7 @@ export async function sendTelegramVideoFromStorage(
   chatId: string,
   video: Record<string, unknown>,
   caption: string,
+  beforeProviderCall?: TelegramProviderCallGuard,
 ): Promise<string[]> {
   const bytes = await fetchVideoBytes(supabase, video);
   const durationMs = finiteMediaNumber(video.duration_ms);
@@ -300,6 +308,7 @@ export async function sendTelegramVideoFromStorage(
       fd.append("height", String(Math.round(height)));
     }
     fd.append("video", bytes.blob, bytes.filename);
+    await beforeProviderCall?.();
     return await fetch(`https://api.telegram.org/bot${botToken}/sendVideo`, {
       method: "POST",
       body: fd,
@@ -324,6 +333,7 @@ export async function sendTelegramMedia(
   chatId: string,
   mediaPayload: Record<string, string>,
   caption: string,
+  beforeProviderCall?: TelegramProviderCallGuard,
 ): Promise<string[]> {
   const body = {
     chat_id: chatId,
@@ -331,6 +341,7 @@ export async function sendTelegramMedia(
     caption,
     parse_mode: "Markdown",
   };
+  await beforeProviderCall?.();
   const response = await fetch(
     `https://api.telegram.org/bot${botToken}/${method}`,
     {
@@ -348,6 +359,7 @@ export async function sendTelegramMedia(
       ...mediaPayload,
       caption: stripMarkdownToPlain(caption),
     };
+    await beforeProviderCall?.();
     const retryResp = await fetch(
       `https://api.telegram.org/bot${botToken}/${method}`,
       {

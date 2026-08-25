@@ -10,6 +10,10 @@ import {
   type WorkflowRunStatus,
 } from "../_shared/observability.ts";
 import { captureEdgeException, initSentryEdge } from "../_shared/sentry.ts";
+import {
+  evaluateExternalPosting,
+  externalPostingBlockedResponse,
+} from "../_shared/externalPostingGuard.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": Deno.env.get("ALLOWED_CORS_ORIGIN") ?? "https://liquid-feed-flux.lovable.app",
@@ -173,34 +177,6 @@ async function oauthHeader(
     .sort()
     .map((key) => `${percentEncode(key)}="${percentEncode(oauthParams[key])}"`)
     .join(", ")}`;
-}
-
-async function postTweet(
-  text: string,
-  replyToId: string | null,
-  ck: string,
-  cs: string,
-  at: string,
-  ats: string,
-): Promise<{ id: string }> {
-  const url = "https://api.x.com/2/tweets";
-  const body: Record<string, unknown> = { text };
-  if (replyToId) body.reply = { in_reply_to_tweet_id: replyToId };
-
-  const auth = await oauthHeader("POST", url, {}, ck, cs, at, ats);
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { Authorization: auth, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`X API ${res.status}: ${errText.slice(0, 500)}`);
-  }
-
-  const json = await res.json();
-  return { id: json.data.id };
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -462,51 +438,21 @@ Guidelines:
       });
     }
 
-    if (
-      !digestConfig.twitter_consumer_key ||
-      !digestConfig.twitter_consumer_secret ||
-      !digestConfig.twitter_access_token ||
-      !digestConfig.twitter_access_token_secret
-    ) {
-      await finishDigestWorkflow("skipped", {
-        ...workflowMetadata,
+    // This legacy digest path has no per-source delivery lineage or claim
+    // fencing. Keep it preview-only so it cannot bypass the v1 cutover and
+    // post historical/ambiguous source material directly to X.
+    if (!dryRun) {
+      const postingDecision = await evaluateExternalPosting(sb);
+      if (!postingDecision.allowed) {
+        return externalPostingBlockedResponse(postingDecision.reason, corsHeaders);
+      }
+      return jsonResponse({
+        skipped: true,
+        reason: "digest_compiler_preview_only",
         post_count: postCount,
-        tweet_count: tweets.length,
-        reason: "no_twitter_keys",
       });
-      return jsonResponse({ skipped: true, reason: "no_twitter_keys", post_count: postCount });
     }
 
-    const tweetIds: string[] = [];
-    let replyTo: string | null = null;
-    for (const tweetText of tweets) {
-      const result = await postTweet(
-        tweetText,
-        replyTo,
-        digestConfig.twitter_consumer_key,
-        digestConfig.twitter_consumer_secret,
-        digestConfig.twitter_access_token,
-        digestConfig.twitter_access_token_secret,
-      );
-      tweetIds.push(result.id);
-      replyTo = result.id;
-    }
-
-    await sb.from("digests").insert({
-      period_start: periodStart.toISOString(),
-      period_end: periodEnd.toISOString(),
-      post_ids: (posts || []).map((post) => post.tweet_id),
-      summary_text: summary,
-      twitter_tweet_ids: tweetIds,
-      status: "posted",
-    });
-
-    await finishDigestWorkflow("completed", {
-      ...workflowMetadata,
-      post_count: postCount,
-      tweet_count: tweetIds.length,
-    });
-    return jsonResponse({ success: true, tweet_count: tweetIds.length, post_count: postCount });
   } catch (err) {
     await finishDigestWorkflow("failed", { dry_run: dryRun }, err);
     console.error(JSON.stringify({

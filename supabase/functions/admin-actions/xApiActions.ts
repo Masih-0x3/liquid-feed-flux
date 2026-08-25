@@ -2,6 +2,8 @@ import {
   recordXApiEvent,
 } from "../_shared/xApiLedger.ts";
 import { isMyXEnabled } from "../_shared/myXControls.ts";
+import { requireDeliveryCutover } from "../_shared/deliveryCutover.ts";
+import { requireExternalPosting } from "../_shared/externalPostingGuard.ts";
 import type { AdminActionResponse, SupabaseAdminClient } from "./types.ts";
 
 type QueryResult = {
@@ -41,6 +43,10 @@ export type XApiActionDeps = {
   readEnv?: ReadEnvFn;
   oauthHeader?: OAuthHeaderFn;
   now?: () => Date;
+  externalPostingOptions?: {
+    environment?: string;
+    allowExternalPosting?: string;
+  };
 };
 
 type XCreds = { ck: string; cs: string; at: string; ats: string };
@@ -326,6 +332,31 @@ export async function sendTestTweetAdminAction(
       status: 400,
     };
   }
+  const lineageTweetId = typeof body.tweet_id === "string"
+    ? body.tweet_id.trim()
+    : "";
+  if (!lineageTweetId) {
+    return {
+      body: {
+        ok: false,
+        code: "delivery_cutover_blocked",
+        error: "A real post-T tweet_id is required; synthetic test tweets are disabled",
+      },
+      status: 409,
+    };
+  }
+  try {
+    await requireDeliveryCutover(supabase, lineageTweetId);
+  } catch (error) {
+    return {
+      body: {
+        ok: false,
+        code: "delivery_cutover_blocked",
+        error: error instanceof Error ? error.message : String(error),
+      },
+      status: 409,
+    };
+  }
   const creds = getXCreds(deps);
   if (!creds) {
     return {
@@ -337,6 +368,11 @@ export async function sendTestTweetAdminAction(
   const payload: Record<string, unknown> = { text };
   if (replyTo) payload.reply = { in_reply_to_tweet_id: replyTo };
   try {
+    await requireExternalPosting(
+      supabase as unknown as Parameters<typeof requireExternalPosting>[0],
+      deps.externalPostingOptions,
+    );
+    await requireDeliveryCutover(supabase, lineageTweetId);
     const oauth = deps.oauthHeader ?? xOauthHeader;
     const auth = await oauth(
       "POST",
