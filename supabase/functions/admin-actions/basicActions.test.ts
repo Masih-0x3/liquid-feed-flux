@@ -23,6 +23,7 @@ type FakeCall = {
 function fakeSupabase(
   selectRows: Array<Record<string, unknown>> = [],
   rpcData: unknown = { ok: true },
+  rpcError?: { name?: string; message?: string },
 ) {
   const calls: FakeCall[] = [];
   const client: SupabaseAdminClient & { calls: FakeCall[] } = {
@@ -73,6 +74,9 @@ function fakeSupabase(
     },
     rpc(name: string, args?: Record<string, unknown>) {
       calls.push({ op: "rpc", name, args });
+      if (!rpcError || rpcError.name === name) {
+        return Promise.resolve({ error: rpcError ?? null, data: rpcData });
+      }
       return Promise.resolve({ data: rpcData });
     },
   };
@@ -130,6 +134,36 @@ Deno.test("retry deliver records force feedback and locks the post", async () =>
       call.op === "update" && call.table === "posts"
     ),
     true,
+  );
+});
+
+Deno.test("retry deliver returns a structured cutoff block before retry RPC", async () => {
+  const supabase = fakeSupabase([], { ok: true }, {
+    name: "assert_delivery_cutover_post",
+    message: "delivery_cutover_blocked:missing_or_historical_lineage",
+  });
+  const feedback: RecordFeedbackFn = async () => {};
+
+  const result = await retryStepAdminAction(supabase, {
+    tweet_id: "old",
+    step: "deliver",
+  }, feedback);
+
+  assertEquals(result, {
+    body: {
+      ok: false,
+      code: "delivery_cutover_blocked",
+      error: "delivery_cutover_blocked:delivery_cutover_blocked:missing_or_historical_lineage",
+    },
+    status: 409,
+  });
+  assertEquals(
+    supabase.calls.filter((call) => call.op === "rpc").map((call) => call.name),
+    ["assert_delivery_cutover_post"],
+  );
+  assertEquals(
+    supabase.calls.some((call) => call.op === "update"),
+    false,
   );
 });
 
@@ -204,17 +238,23 @@ Deno.test("cancel pending jobs filters historical deliver rows but keeps process
       created_at: "2026-01-01T00:00:00.000Z",
       payload: { tweet_id: "old" },
     },
+    {
+      id: "deliver-2",
+      type: "deliver",
+      created_at: "2026-06-01T00:00:00.001Z",
+      payload: { tweet_id: "new" },
+    },
   ], "2026-06-01T00:00:00.000Z");
   const result = await cancelPendingJobsAdminAction(supabase, {
     include_running: false,
   });
 
   assertEquals((result.body as Record<string, unknown>).success, true);
-  assertEquals((result.body as Record<string, unknown>).canceled, 1);
+  assertEquals((result.body as Record<string, unknown>).canceled, 2);
   assertEquals((result.body as Record<string, unknown>).skipped_historical, 1);
   assertEquals(
     supabase.calls.filter((call) => call.op === "update").length,
-    1,
+    2,
   );
 });
 

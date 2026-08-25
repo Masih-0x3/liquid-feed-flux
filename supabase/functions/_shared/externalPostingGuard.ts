@@ -41,6 +41,29 @@ export class ExternalPostingBlockedError extends Error {
   }
 }
 
+const ADMIN_EXTERNAL_POSTING_ACTIONS = new Set([
+  "post_thread",
+  "retry_step",
+  "manual_video_intake_post",
+  "retry_x_post",
+  "send_test_tweet",
+]);
+
+/**
+ * Retry steps that only process or translate remain available under the
+ * cutover. The external gate applies to the delivery step and direct posting
+ * actions only.
+ */
+export function adminActionRequiresExternalPosting(
+  action: unknown,
+  step: unknown,
+): boolean {
+  if (typeof action !== "string" || !ADMIN_EXTERNAL_POSTING_ACTIONS.has(action)) {
+    return false;
+  }
+  return action !== "retry_step" || step === "deliver";
+}
+
 function normalizeControls(value: unknown): ExternalPostingControls | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;

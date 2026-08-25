@@ -5,6 +5,10 @@ const migrationPath = new URL(
   import.meta.url,
 );
 const sql = await readFile(migrationPath, "utf8");
+const settleReasonMigration = await readFile(
+  new URL("../supabase/migrations/20260825104845_v1_delivery_cutover_settle_reason_prefix.sql", import.meta.url),
+  "utf8",
+);
 const adminRetry = await readFile(
   new URL("../supabase/functions/admin-retry/index.ts", import.meta.url),
   "utf8",
@@ -53,12 +57,51 @@ const worker = await readFile(
   new URL("../supabase/functions/worker/index.ts", import.meta.url),
   "utf8",
 );
+const telegramDelivery = await readFile(
+  new URL("../supabase/functions/worker/telegramDelivery.ts", import.meta.url),
+  "utf8",
+);
+const adminActionsIndex = await readFile(
+  new URL("../supabase/functions/admin-actions/index.ts", import.meta.url),
+  "utf8",
+);
 
-function assertGuardBeforeMutation(name, source, guard, mutation) {
-  const guardAt = source.indexOf(guard);
-  const mutationAt = source.indexOf(mutation);
+function functionBody(source, marker) {
+  const start = source.indexOf(marker);
+  if (start < 0) throw new Error(`missing function marker: ${marker}`);
+  const remainder = source.slice(start + marker.length);
+  const next = remainder.search(/\n(?:export\s+)?(?:async\s+)?function\s+/);
+  return next < 0
+    ? source.slice(start)
+    : source.slice(start, start + marker.length + next);
+}
+
+function assertGuardBeforeMutation(name, source, guard, mutation, marker) {
+  const scoped = marker ? functionBody(source, marker) : source;
+  const guardAt = scoped.indexOf(guard);
+  const mutationAt = scoped.indexOf(mutation);
   if (guardAt < 0 || mutationAt < 0 || guardAt > mutationAt) {
     throw new Error(`${name} does not prove guard-before-mutation ordering`);
+  }
+}
+
+function assertFunctionContains(name, source, marker, requiredMarker) {
+  const scoped = functionBody(source, marker);
+  if (!scoped.includes(requiredMarker)) {
+    throw new Error(`${name} lacks ${requiredMarker}`);
+  }
+}
+
+function assertGuardBeforeEveryFetch(name, source, marker, guard) {
+  const scoped = functionBody(source, marker);
+  let cursor = 0;
+  let fetchAt = scoped.indexOf("fetch(", cursor);
+  while (fetchAt >= 0) {
+    if (scoped.lastIndexOf(guard, fetchAt) < 0) {
+      throw new Error(`${name} has a provider fetch without its last-mile guard`);
+    }
+    cursor = fetchAt + "fetch(".length;
+    fetchAt = scoped.indexOf("fetch(", cursor);
   }
 }
 
@@ -77,6 +120,7 @@ const required = [
   ["deliver-only historical job delete", "IF TG_OP = 'DELETE' AND OLD.type = 'deliver'"],
   ["non-post delivery fail-closed", "non_post_delivery_unsupported"],
   ["claimed delivery settlement", "settle_delivery_cutover_blocked"],
+  ["settlement reason prefix", "v_reason NOT LIKE 'delivery_cutover_blocked%'"],
 ];
 
 const missing = required.filter(([, marker]) => !sql.includes(marker));
@@ -99,8 +143,23 @@ if (
 ) {
   throw new Error("admin retry path does not prove historical rows are skipped");
 }
-if (!digestCompiler.includes("digest_compiler_preview_only") || /api\.x\.com/.test(digestCompiler)) {
+if (!digestCompiler.includes("digest_compiler_preview_only") ||
+  /api\.x\.com/.test(digestCompiler) ||
+  digestCompiler.includes("functions.invoke(\"x-poster\"") ||
+  digestCompiler.includes("fetch(")) {
   throw new Error("digest compiler still exposes a direct X provider path");
+}
+const blockedFinish = digestCompiler.indexOf("reason: postingDecision.reason");
+const blockedReturn = digestCompiler.indexOf("return externalPostingBlockedResponse");
+const previewFinish = digestCompiler.indexOf("reason: \"digest_compiler_preview_only\"");
+const previewReturn = digestCompiler.indexOf("return jsonResponse({\n        skipped: true");
+if (blockedFinish < 0 || blockedReturn < 0 || blockedFinish > blockedReturn ||
+  previewFinish < 0 || previewReturn < 0 || previewFinish > previewReturn) {
+  throw new Error("digest compiler exits do not finalize skipped workflow runs");
+}
+if (!settleReasonMigration.includes("v_reason NOT LIKE 'delivery_cutover_blocked%'") ||
+  !adminActionsIndex.includes("adminActionRequiresExternalPosting(action, body?.step)")) {
+  throw new Error("admin/delivery cutoff contract markers are incomplete");
 }
 const guardedAdminPaths = [
   ["manual advance", manualAdvance, "requireDeliveryCutover"],
@@ -120,23 +179,81 @@ for (const [name, source, marker] of guardedAdminPaths) {
     throw new Error(`${name} admin path lacks an explicit cutover guard`);
   }
 }
+assertFunctionContains(
+  "admin retry step",
+  basicActions,
+  "export async function retryStepAdminAction",
+  "DeliveryCutoverBlockedError",
+);
+assertFunctionContains(
+  "manual advance",
+  manualAdvance,
+  "export async function queueManualAdvance",
+  "requireDeliveryCutover",
+);
+assertFunctionContains(
+  "monitoring cleanup",
+  monitoringMutations,
+  "export async function ignoreMonitoringItemInternal",
+  "requireDeliveryCutover",
+);
+assertFunctionContains(
+  "duplicate clear",
+  dedupeActions,
+  "export async function clearDuplicateAdminAction",
+  "requireDeliveryCutover",
+);
+assertFunctionContains(
+  "retry X lineage",
+  xPostingActions,
+  "export async function runXPostAdminAction",
+  "requireDeliveryCutover",
+);
+assertFunctionContains(
+  "manual intake posting",
+  manualVideoIntakeActions,
+  "export async function manualVideoIntakePostAdminAction",
+  "requireDeliveryCutover",
+);
+for (const marker of [
+  "export async function sendTelegramPhotoFromStorage",
+  "export async function sendTelegramPhotoGroupFromStorage",
+  "export async function sendTelegramVideoFromStorage",
+  "export async function sendTelegramMedia",
+]) {
+  assertGuardBeforeEveryFetch(
+    `Telegram ${marker}`,
+    telegramDelivery,
+    marker,
+    "beforeProviderCall?.()",
+  );
+}
+assertGuardBeforeEveryFetch(
+  "worker Telegram delivery",
+  worker,
+  "async function handleDeliverJob",
+  "await beforeTelegramProviderCall();",
+);
 assertGuardBeforeMutation(
   "worker Telegram provider path",
   worker,
   "const beforeTelegramProviderCall",
   "await sendTelegramMedia",
+  "async function handleDeliverJob",
 );
 assertGuardBeforeMutation(
   "retry X provider path",
   xPostingActions,
   "await requireDeliveryCutover(supabase, tweetId ?? \"\")",
   "`${supabaseUrl}/functions/v1/x-poster`",
+  "export async function runXPostAdminAction",
 );
 assertGuardBeforeMutation(
   "manual intake posting path",
   manualVideoIntakeActions,
   "await requireDeliveryCutover(supabase, String(intake.tweet_id ?? \"\"))",
   'status: "post_requested"',
+  "export async function manualVideoIntakePostAdminAction",
 );
 
 console.log(`v1 delivery cutover SQL contract PASS (${required.length + 11} markers)`);

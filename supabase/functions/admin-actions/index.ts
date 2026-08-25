@@ -106,6 +106,7 @@ import {
 import { queueManualAdvance } from "./manualAdvanceActions.ts";
 import { captureEdgeException, initSentryEdge } from "../_shared/sentry.ts";
 import {
+  adminActionRequiresExternalPosting,
   evaluateExternalPosting,
   externalPostingBlockedResponse,
 } from "../_shared/externalPostingGuard.ts";
@@ -230,14 +231,7 @@ serve(async (req) => {
       return jsonResponse({ error: 'Missing action parameter', received: rawText.slice(0, 200) }, 400);
     }
 
-    const externalPostingActions = new Set([
-      'post_thread',
-      'retry_step',
-      'manual_video_intake_post',
-      'retry_x_post',
-      'send_test_tweet',
-    ]);
-    if (externalPostingActions.has(action)) {
+    if (adminActionRequiresExternalPosting(action, body?.step)) {
       const postingDecision = await evaluateExternalPosting(supabase);
       if (!postingDecision.allowed) {
         return externalPostingBlockedResponse(postingDecision.reason, corsHeaders);

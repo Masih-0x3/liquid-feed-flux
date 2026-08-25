@@ -3,7 +3,10 @@ import type {
   RecordFeedbackFn,
   SupabaseAdminClient,
 } from "./types.ts";
-import { requireDeliveryCutover } from "../_shared/deliveryCutover.ts";
+import {
+  DeliveryCutoverBlockedError,
+  requireDeliveryCutover,
+} from "../_shared/deliveryCutover.ts";
 
 type MutationResult = {
   data?: Array<Record<string, unknown>> | null;
@@ -59,7 +62,19 @@ export async function retryStepAdminAction(
     return { body: { error: "tweet_id and step are required" }, status: 400 };
   }
   if (step === "deliver") {
-    await requireDeliveryCutover(supabase, String(tweet_id));
+    try {
+      await requireDeliveryCutover(supabase, String(tweet_id));
+    } catch (error) {
+      if (!(error instanceof DeliveryCutoverBlockedError)) throw error;
+      return {
+        body: {
+          ok: false,
+          code: "delivery_cutover_blocked",
+          error: error.message,
+        },
+        status: 409,
+      };
+    }
   }
   const { error } = await supabase.rpc("retry_step", { tweet_id, step });
   if (error) throw error;
@@ -131,6 +146,8 @@ export async function cancelPendingJobsAdminAction(
 
   const canceledRows: Array<Record<string, unknown>> = [];
   let skippedHistorical = 0;
+  const eligibleDeliverRows: Array<Record<string, unknown>> = [];
+  const nonDeliverRows: Array<Record<string, unknown>> = [];
   for (const row of rows || []) {
     if (row.type === "deliver") {
       const payload = row.payload && typeof row.payload === "object"
@@ -156,7 +173,15 @@ export async function cancelPendingJobsAdminAction(
         skippedHistorical++;
         continue;
       }
+      eligibleDeliverRows.push(row);
+      continue;
     }
+    nonDeliverRows.push(row);
+  }
+
+  let cancellationError: string | null = null;
+  const cancelRows = async (rowsToCancel: Array<Record<string, unknown>>) => {
+    if (rowsToCancel.length === 0) return;
     const { error: updateError } = await table(supabase, "jobs")
       .update({
         status: "failed",
@@ -166,11 +191,22 @@ export async function cancelPendingJobsAdminAction(
         locked_by: null,
         lease_expires_at: null,
       })
-      .eq("id", row.id)
+      .in("id", rowsToCancel.map((row) => row.id))
+      .in("status", statuses)
       .select("id,type");
-    if (updateError) throw updateError;
-    canceledRows.push(row);
-  }
+    if (updateError) {
+      cancellationError = cancellationError ?? (updateError instanceof Error
+        ? updateError.message
+        : String(updateError));
+      return;
+    }
+    canceledRows.push(...rowsToCancel);
+  };
+
+  // Keep processing/media/translation cancellation bulk and mutable. Deliver
+  // rows are filtered and guarded first, then canceled as one separate batch.
+  await cancelRows(nonDeliverRows);
+  await cancelRows(eligibleDeliverRows);
 
   const byType: Record<string, number> = {};
   canceledRows.forEach((row) => {
@@ -179,12 +215,14 @@ export async function cancelPendingJobsAdminAction(
   });
   return {
     body: {
-      success: true,
+      success: cancellationError === null,
       canceled: canceledRows.length,
       skipped_historical: skippedHistorical,
       by_type: byType,
       message: `Canceled ${canceledRows.length} job(s)`,
+      ...(cancellationError ? { error: cancellationError } : {}),
     },
+    ...(cancellationError ? { status: 500 } : {}),
   };
 }
 

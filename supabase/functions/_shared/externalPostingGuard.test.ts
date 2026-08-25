@@ -1,7 +1,22 @@
 import {
+  adminActionRequiresExternalPosting,
   evaluateExternalPosting,
   type ExternalPostingClient,
 } from "./externalPostingGuard.ts";
+
+Deno.test("admin external gate preserves processing retry steps", () => {
+  for (const step of ["translate", "media", "moderate"]) {
+    if (adminActionRequiresExternalPosting("retry_step", step)) {
+      throw new Error(`unexpected posting gate for ${step}`);
+    }
+  }
+  if (!adminActionRequiresExternalPosting("retry_step", "deliver")) {
+    throw new Error("deliver retry must use the posting gate");
+  }
+  if (!adminActionRequiresExternalPosting("retry_x_post", undefined)) {
+    throw new Error("direct X retry must use the posting gate");
+  }
+});
 
 function client(
   data: unknown,

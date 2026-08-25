@@ -159,6 +159,7 @@ AS $$
 DECLARE
   v_tweet_id text;
   v_updated integer;
+  v_reason text;
 BEGIN
   SELECT NULLIF(btrim(j.payload->>'tweet_id'), '')
     INTO v_tweet_id
@@ -179,9 +180,17 @@ BEGIN
     RETURN false;
   END IF;
 
+  v_reason := left(
+    COALESCE(NULLIF(btrim(p_reason), ''), 'delivery_cutover_blocked'),
+    1000
+  );
+  IF v_reason NOT LIKE 'delivery_cutover_blocked%' THEN
+    v_reason := left('delivery_cutover_blocked:' || v_reason, 1000);
+  END IF;
+
   UPDATE public.jobs
   SET status = 'failed',
-      last_error = left(COALESCE(NULLIF(p_reason, ''), 'delivery_cutover_blocked'), 1000),
+      last_error = v_reason,
       completed_at = COALESCE(completed_at, clock_timestamp()),
       locked_at = NULL,
       locked_by = NULL,

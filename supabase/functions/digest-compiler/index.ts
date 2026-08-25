@@ -21,8 +21,6 @@ const corsHeaders = {
 };
 initSentryEdge();
 
-const encoder = new TextEncoder();
-
 interface DigestConfig {
   twitter_consumer_key: string;
   twitter_consumer_secret: string;
@@ -134,49 +132,6 @@ function buildThreadTweets(summary: string, header: string): string[] {
 
   if (current.trim()) tweets.push(current.trim());
   return tweets;
-}
-
-function percentEncode(s: string): string {
-  return encodeURIComponent(s).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
-}
-
-async function hmacSha1(key: string, data: string): Promise<string> {
-  const cryptoKey = await crypto.subtle.importKey("raw", encoder.encode(key), { name: "HMAC", hash: "SHA-1" }, false, ["sign"]);
-  const sig = await crypto.subtle.sign("HMAC", cryptoKey, encoder.encode(data));
-  return btoa(String.fromCharCode(...new Uint8Array(sig)));
-}
-
-async function oauthHeader(
-  method: string,
-  url: string,
-  params: Record<string, string>,
-  consumerKey: string,
-  consumerSecret: string,
-  accessToken: string,
-  tokenSecret: string,
-): Promise<string> {
-  const oauthParams: Record<string, string> = {
-    oauth_consumer_key: consumerKey,
-    oauth_nonce: crypto.randomUUID().replace(/-/g, ""),
-    oauth_signature_method: "HMAC-SHA1",
-    oauth_timestamp: Math.floor(Date.now() / 1000).toString(),
-    oauth_token: accessToken,
-    oauth_version: "1.0",
-  };
-
-  const allParams = { ...oauthParams, ...params };
-  const paramString = Object.keys(allParams)
-    .sort()
-    .map((key) => `${percentEncode(key)}=${percentEncode(allParams[key])}`)
-    .join("&");
-  const baseString = `${method.toUpperCase()}&${percentEncode(url)}&${percentEncode(paramString)}`;
-  const signingKey = `${percentEncode(consumerSecret)}&${percentEncode(tokenSecret)}`;
-  oauthParams.oauth_signature = await hmacSha1(signingKey, baseString);
-
-  return `OAuth ${Object.keys(oauthParams)
-    .sort()
-    .map((key) => `${percentEncode(key)}="${percentEncode(oauthParams[key])}"`)
-    .join(", ")}`;
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -444,8 +399,18 @@ Guidelines:
     if (!dryRun) {
       const postingDecision = await evaluateExternalPosting(sb);
       if (!postingDecision.allowed) {
+        await finishDigestWorkflow("skipped", {
+          ...workflowMetadata,
+          post_count: postCount,
+          reason: postingDecision.reason,
+        });
         return externalPostingBlockedResponse(postingDecision.reason, corsHeaders);
       }
+      await finishDigestWorkflow("skipped", {
+        ...workflowMetadata,
+        post_count: postCount,
+        reason: "digest_compiler_preview_only",
+      });
       return jsonResponse({
         skipped: true,
         reason: "digest_compiler_preview_only",
