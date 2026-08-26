@@ -17,9 +17,25 @@ function fixture(extraEnv = {}) {
   const calls = join(root, "calls.log");
   const marker = join(root, "injection-marker");
   const fake = `#!/bin/sh
-printf '%s\n' "$0 $*" >> "$XOT_FAKE_CALLS"
-if [ "$(basename "$0")" = "npx" ] && printf '%s' "$*" | grep -q 'secrets list'; then
-  printf '%s\n' '{"secrets":[]}'
+name="$(basename "$0")"
+call="$0 $*"
+# redact any Postgres connection string before persisting the fake CLI call log
+call="$(printf '%s' "$call" | sed -E 's,(postgres(ql)?://[^ ]+),[masked-db-url],g')"
+printf '%s\n' "$call" >> "$XOT_FAKE_CALLS"
+if [ "$name" = "npx" ]; then
+  # simulate the unpinned npx hang/prompt by rejecting anything but the repository pin
+  if ! printf '%s' "$*" | grep -q 'supabase@2\\.111\\.0'; then
+    printf 'npx rejected unpinned supabase invocation\n' >&2
+    exit 42
+  fi
+  # reproduce the obsolete --project-ref failure on db/migration/advisors in CLI 2.111.0
+  if printf '%s' "$*" | grep -qE 'db query .*--project-ref|migration list .*--project-ref|db advisors .*--project-ref'; then
+    printf 'Unrecognized flag: --project-ref\n' >&2
+    exit 1
+  fi
+  if printf '%s' "$*" | grep -q 'secrets list'; then
+    printf '%s\n' '{"secrets":[]}'
+  fi
 fi
 exit 0
 `;
@@ -42,6 +58,7 @@ exit 0
       XOT_PREVIEW_BRANCH: "preview/e10-p2",
       VERCEL_ENV: "preview",
       XOT_PREVIEW_ORIGIN: "https://preview.example.test/",
+      XOT_RELEASE_STATE_DB_URL: "",
       ...extraEnv,
     },
   };
@@ -100,11 +117,50 @@ for (const mode of ["render", "dry-run"]) {
   });
 }
 
-test("Preview execution uses explicit project ref and never linked or production flags", () => {
+const PREVIEW_DB_URL = "postgresql://postgres:fake-password@db.abcdefghijklmnopqrst.supabase.co:5432/postgres";
+
+test("Preview execute fails closed without the nonproduction database connection contract", () => {
   const result = run(["--target", "preview", "--mode", "execute"]);
+  assert.match(result.output, /XOT_RELEASE_STATE_DB_URL|connection contract|rejected/i);
+  assert.equal(result.calls, "");
+});
+
+test("Preview execute rejects a nonproduction connection contract that does not match the identity", () => {
+  const result = run(["--target", "preview", "--mode", "execute"], {
+    XOT_RELEASE_STATE_DB_URL: "postgresql://postgres:fake-password@db.zyxwvutsrqponmlkjihg.supabase.co:5432/postgres",
+  });
+  assert.match(result.output, /XOT_RELEASE_STATE_DB_URL|connection contract|rejected/i);
+  assert.equal(result.calls, "");
+});
+
+test("Preview execute rejects the production database host before any command", () => {
+  const result = run(["--target", "preview", "--mode", "execute"], {
+    XOT_RELEASE_STATE_DB_URL: "postgresql://postgres:fake-password@db.jzirqfzzvlbxwfzndaer.supabase.co:5432/postgres",
+  });
+  assert.match(result.output, /XOT_RELEASE_STATE_DB_URL|connection contract|rejected/i);
+  assert.equal(result.calls, "");
+});
+
+test("Preview execution uses explicit project ref and never linked or production flags", () => {
+  const result = run(["--target", "preview", "--mode", "execute"], { XOT_RELEASE_STATE_DB_URL: PREVIEW_DB_URL });
+  assert.match(result.calls, /npx --yes supabase@2\.111\.0/);
   assert.match(result.calls, /--project-ref abcdefghijklmnopqrst/);
+  assert.doesNotMatch(result.calls, /db query .*--project-ref|migration list .*--project-ref|db advisors .*--project-ref/);
+  assert.match(result.calls, /--db-url \[masked-db-url\]/);
+  assert.doesNotMatch(result.calls, /fake-password|postgresql:\/\/|db\.abcdefghijklmnopqrst\.supabase\.co/);
   assert.doesNotMatch(result.calls, /--linked|--prod/);
-  assert.doesNotMatch(result.calls, /jzirqfzzvlbxwfzndaer|xot\.iraneyes\.com|xot\.vercel\.app/);
+  assert.doesNotMatch(result.output, /!!|npx rejected|Unrecognized flag/);
+  assert.doesNotMatch(result.output, /fake-password|db\.abcdefghijklmnopqrst\.supabase\.co|postgresql:\/\//);
+  assert.doesNotMatch(result.output, /jzirqfzzvlbxwfzndaer|xot\.iraneyes\.com|xot\.vercel\.app/);
+});
+
+test("every Supabase call is routed through the pinned CLI array", () => {
+  const source = readFileSync(script, "utf8");
+  assert.match(source, /SUPABASE_CLI=\(npx --yes supabase@2\.111\.0\)/);
+  const unpinnedCalls = source
+    .split("\n")
+    .filter((line) => /\bnpx\s+supabase\b/.test(line) && !line.includes("SUPABASE_CLI=("));
+  assert.deepEqual(unpinnedCalls, []);
 });
 
 test("shell metacharacters are rejected without execution or output disclosure", () => {

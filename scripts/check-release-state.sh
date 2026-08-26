@@ -12,6 +12,8 @@ MODE=""
 PRODUCTION_IDENTITY_FILE=""
 PRODUCTION_ACK=""
 FAILURES=0
+SUPABASE_CLI=(npx --yes supabase@2.111.0)
+DB_CONNECTION_URL=""
 
 usage() {
   cat >&2 <<'USAGE'
@@ -19,8 +21,10 @@ Usage:
   check-release-state.sh --target preview|production --mode render|dry-run|execute
 
 Preview requires the complete shared preview-identity contract in the
-environment. Render and dry-run only print a masked command plan. Execute is
-the only mode that invokes provider-shaped CLIs.
+environment. Execute mode additionally requires an XOT_RELEASE_STATE_DB_URL
+connection contract that matches the resolved project ref. Render and dry-run
+only print a masked command plan. Execute is the only mode that invokes
+provider-shaped CLIs.
 
 Production additionally requires:
   --identity-file PATH
@@ -92,6 +96,8 @@ display_arg() {
   local value="$1"
   if [[ "$value" == https://* || "$value" == http://* ]]; then
     mask_url "$value"
+  elif [[ "$value" == postgres://* || "$value" == postgresql://* ]]; then
+    printf '[masked-db-url]'
   elif [[ "$value" =~ ^[a-z0-9]{20}$ ]]; then
     mask_identifier "$value"
   else
@@ -199,12 +205,36 @@ NODE
   SUPABASE_HOST="${PROJECT_REF}.supabase.co"
 }
 
+read_db_connection_contract() {
+  [[ -n "${XOT_RELEASE_STATE_DB_URL:-}" ]] || fail "XOT_RELEASE_STATE_DB_URL connection contract is required for execute mode"
+
+  local ok
+  if ! ok="$(node - "$PROJECT_REF" <<'NODE'
+const raw = process.env.XOT_RELEASE_STATE_DB_URL;
+if (typeof raw !== 'string' || raw.length === 0) process.exit(1);
+let parsed;
+try { parsed = new URL(raw); } catch { process.exit(1); }
+if (!['postgres:', 'postgresql:'].includes(parsed.protocol)) process.exit(1);
+if (parsed.username !== 'postgres' || !parsed.password) process.exit(1);
+const expectedHost = `db.${process.argv[2]}.supabase.co`;
+if (parsed.hostname !== expectedHost) process.exit(1);
+if (parsed.pathname !== '/postgres') process.exit(1);
+if (parsed.port && parsed.port !== '5432') process.exit(1);
+if (parsed.hash) process.exit(1);
+process.stdout.write('ok');
+NODE
+  )" || [[ "$ok" != "ok" ]]; then
+    fail "XOT_RELEASE_STATE_DB_URL connection contract rejected the target"
+  fi
+  DB_CONNECTION_URL="$XOT_RELEASE_STATE_DB_URL"
+}
+
 run_secret_names() {
   local tmp
   tmp="$(mktemp)"
   trap 'rm -f "$tmp"' RETURN
-  print_command env SUPABASE_TELEMETRY_DISABLED=1 npx supabase secrets list --project-ref "$PROJECT_REF"
-  SUPABASE_TELEMETRY_DISABLED=1 npx supabase secrets list --project-ref "$PROJECT_REF" >"$tmp"
+  print_command env SUPABASE_TELEMETRY_DISABLED=1 "${SUPABASE_CLI[@]}" secrets list --project-ref "$PROJECT_REF"
+  env SUPABASE_TELEMETRY_DISABLED=1 "${SUPABASE_CLI[@]}" secrets list --project-ref "$PROJECT_REF" >"$tmp"
   local status=$?
   if [[ $status -ne 0 ]]; then
     printf '!! supabase secrets list exited with status %s\n' "$status" >&2
@@ -259,30 +289,30 @@ run_inventory() {
   if [[ "$VERCEL_HOST" != "$PRIMARY_HOST" ]]; then run curl -sSI "$VERCEL_HOST"; fi
 
   section "Supabase Functions"
-  run env SUPABASE_TELEMETRY_DISABLED=1 npx supabase functions list --project-ref "$PROJECT_REF"
+  run env SUPABASE_TELEMETRY_DISABLED=1 "${SUPABASE_CLI[@]}" functions list --project-ref "$PROJECT_REF"
 
   section "Supabase Migrations"
-  run env SUPABASE_TELEMETRY_DISABLED=1 npx supabase migration list --project-ref "$PROJECT_REF"
+  run env SUPABASE_TELEMETRY_DISABLED=1 "${SUPABASE_CLI[@]}" migration list --db-url "$DB_CONNECTION_URL"
 
   section "Supabase Secret Names"
   run_secret_names
 
   section "Supabase Cron"
-  run env SUPABASE_TELEMETRY_DISABLED=1 npx supabase db query --project-ref "$PROJECT_REF" "select jobname, schedule, active from cron.job order by jobname;"
+  run env SUPABASE_TELEMETRY_DISABLED=1 "${SUPABASE_CLI[@]}" db query --db-url "$DB_CONNECTION_URL" "select jobname, schedule, active from cron.job order by jobname;"
 
   section "Supabase Queue Health"
-  run env SUPABASE_TELEMETRY_DISABLED=1 npx supabase db query --project-ref "$PROJECT_REF" "select type, status, count(*)::int as count from public.jobs group by type, status order by type, status;"
-  run env SUPABASE_TELEMETRY_DISABLED=1 npx supabase db query --project-ref "$PROJECT_REF" "select id, type, status, started_at, locked_at, lease_expires_at from public.jobs where status='running' and coalesce(lease_expires_at, started_at) < now() - interval '15 minutes' order by started_at nulls last limit 20;"
+  run env SUPABASE_TELEMETRY_DISABLED=1 "${SUPABASE_CLI[@]}" db query --db-url "$DB_CONNECTION_URL" "select type, status, count(*)::int as count from public.jobs group by type, status order by type, status;"
+  run env SUPABASE_TELEMETRY_DISABLED=1 "${SUPABASE_CLI[@]}" db query --db-url "$DB_CONNECTION_URL" "select id, type, status, started_at, locked_at, lease_expires_at from public.jobs where status='running' and coalesce(lease_expires_at, started_at) < now() - interval '15 minutes' order by started_at nulls last limit 20;"
 
   section "Supabase Renderer Health"
-  run env SUPABASE_TELEMETRY_DISABLED=1 npx supabase db query --project-ref "$PROJECT_REF" "select renderer_id, status, version, render_version, processed, failed, last_seen_at from public.video_renderer_heartbeats order by last_seen_at desc limit 5;"
+  run env SUPABASE_TELEMETRY_DISABLED=1 "${SUPABASE_CLI[@]}" db query --db-url "$DB_CONNECTION_URL" "select renderer_id, status, version, render_version, processed, failed, last_seen_at from public.video_renderer_heartbeats order by last_seen_at desc limit 5;"
 
   section "Supabase Settings"
-  run env SUPABASE_TELEMETRY_DISABLED=1 npx supabase db query --project-ref "$PROJECT_REF" "select key, jsonb_typeof(value) as value_type, value ? 'mode' as has_mode, value->>'mode' as mode from public.settings where key in ('video_render_config','x_posting_config','content_filter','scoring_policy') order by key;"
+  run env SUPABASE_TELEMETRY_DISABLED=1 "${SUPABASE_CLI[@]}" db query --db-url "$DB_CONNECTION_URL" "select key, jsonb_typeof(value) as value_type, value ? 'mode' as has_mode, value->>'mode' as mode from public.settings where key in ('video_render_config','x_posting_config','content_filter','scoring_policy') order by key;"
 
   if [[ "${CHECK_RELEASE_ADVISORS:-0}" == "1" ]]; then
     section "Supabase Advisors"
-    run env SUPABASE_TELEMETRY_DISABLED=1 npx supabase db advisors --project-ref "$PROJECT_REF"
+    run env SUPABASE_TELEMETRY_DISABLED=1 "${SUPABASE_CLI[@]}" db advisors --db-url "$DB_CONNECTION_URL"
   else
     section "Supabase Advisors"
     echo "Skipped by default. Set CHECK_RELEASE_ADVISORS=1 to include advisors."
@@ -302,6 +332,8 @@ if [[ "$MODE" == "render" || "$MODE" == "dry-run" ]]; then
     "$(mask_url "$PRIMARY_HOST")" "$(mask_url "$VERCEL_HOST")"
   exit 0
 fi
+
+read_db_connection_contract
 
 run_inventory
 

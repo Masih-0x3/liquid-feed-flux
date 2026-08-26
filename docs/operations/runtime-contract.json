@@ -98,7 +98,7 @@
   },
   "release_guard": {
     "path": "scripts/check-release-state.sh",
-    "sha256": "869d9cbe91799ba7768a12edbfadf0f1864845095e4919e2ed70548f914216d5"
+    "sha256": "90dbee5d92343b934383ecdf8f32db96c1c247c35da15e2e27dfb50a42165122"
   },
   "vite": {
     "package_range": "^8.0.16",
