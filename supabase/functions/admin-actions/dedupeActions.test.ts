@@ -417,7 +417,7 @@ Deno.test("clear duplicate blocks unavailable cutover before writing", async () 
   assertEquals(result.body, {
     ok: false,
     code: "delivery_cutover_blocked",
-    error: "delivery_cutover_blocked:delivery_cutover_blocked",
+    error: "delivery_cutover_blocked",
   });
   assertEquals(
     supabase.calls.some((call) => call.op === "update"),

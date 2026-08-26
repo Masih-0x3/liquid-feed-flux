@@ -417,7 +417,7 @@ export async function clearDuplicateAdminAction(
       body: {
         ok: false,
         code: "delivery_cutover_blocked",
-        error: error instanceof Error ? error.message : String(error),
+        error: "delivery_cutover_blocked",
       },
       status: 409,
     };
