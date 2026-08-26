@@ -98,6 +98,7 @@ const internalEntrypoints = Object.freeze({
       '../_shared/remoteMediaPolicy.ts',
       '../_shared/runtimeControls.ts',
       '../_shared/externalPostingGuard.ts',
+      '../_shared/deliveryCutover.ts',
       './scoringWorkflow.ts',
       './translateWorkflow.ts',
     ],
@@ -142,6 +143,7 @@ const internalEntrypoints = Object.freeze({
       '../_shared/xQuotaAdmission.ts',
       '../_shared/runtimeControls.ts',
       '../_shared/externalPostingGuard.ts',
+      '../_shared/deliveryCutover.ts',
     ],
   },
   'x-followers-snapshot': {
@@ -174,6 +176,7 @@ const internalEntrypoints = Object.freeze({
       '../_shared/openai.ts',
       '../_shared/observability.ts',
       '../_shared/sentry.ts',
+      '../_shared/externalPostingGuard.ts',
     ],
   },
 });

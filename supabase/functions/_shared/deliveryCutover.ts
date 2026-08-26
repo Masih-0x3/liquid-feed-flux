@@ -6,11 +6,12 @@ export type DeliveryCutoverRpcClient = {
 };
 
 export class DeliveryCutoverBlockedError extends Error {
-  readonly code = "delivery_cutover_blocked";
+  readonly code: string;
 
   constructor(reason = "missing_or_historical_lineage") {
     super(`delivery_cutover_blocked:${reason}`);
     this.name = "DeliveryCutoverBlockedError";
+    this.code = "delivery_cutover_blocked";
   }
 }
 
