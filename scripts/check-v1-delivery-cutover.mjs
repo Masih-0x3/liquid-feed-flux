@@ -137,9 +137,9 @@ if (
   !adminRetry.includes("retryJobs.map") ||
   !adminRetry.includes("historical_delivery") ||
   !adminRetry.includes("Synthetic Telegram template tests are disabled") ||
-  !adminRetry.includes("payload: {\n          tweet_id: deliveryTweetId") ||
+  !/payload:\s*\{[\s\S]*?tweet_id:\s*(?:tweet_id|delivery\.subject_id)/.test(adminRetry) ||
   adminRetry.includes("attempts: 0") ||
-  !adminRetry.includes("Synthetic webhook tests are disabled")
+  !adminRetry.includes("actionClass === 'inbound_rss_ingest'")
 ) {
   throw new Error("admin retry path does not prove historical rows are skipped");
 }

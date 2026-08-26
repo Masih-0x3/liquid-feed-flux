@@ -49,10 +49,20 @@ function assertContract(source, label = "current source") {
   if (!retryFailed.includes("await recordAdminRetryPipelineEvents(supabase, rows);")) {
     fail(`${label}: retry-failed-deliveries must use checked pipeline-event helper`);
   }
-  if (!source.includes("throw new Error('admin_retry_webhook_test_failed');")) {
-    fail(`${label}: webhook self-test must use a stable failure code`);
+  const webhookStart = source.indexOf("if (action === ADMIN_RETRY_INBOUND_INGEST_ACTION");
+  const webhookEnd = source.indexOf("// Original retry logic", webhookStart);
+  if (webhookStart < 0 || webhookEnd < 0) {
+    fail(`${label}: immutable webhook cutover branch markers are missing`);
   }
-  if (source.includes("Webhook test failed: ${webhookResponse.error.message}")) {
+  const webhookBranch = source.slice(webhookStart, webhookEnd);
+  if (!webhookBranch.includes("success: false") ||
+      !webhookBranch.includes("code: 'delivery_cutover_blocked'") ||
+      !webhookBranch.includes("error: 'delivery_cutover_blocked'") ||
+      !webhookBranch.includes("status: 409")) {
+    fail(`${label}: webhook self-test must return the stable cutover block envelope`);
+  }
+  if (webhookBranch.includes("webhookResponse.error.message") ||
+      webhookBranch.includes("throw new Error(`Webhook test failed:")) {
     fail(`${label}: webhook self-test must not forward SDK error text`);
   }
   if (!source.includes("const errorCode = safeAdminRetryErrorCode(error);")) {
@@ -84,7 +94,8 @@ if (process.env.MUTATION_TEST === "1") {
   assertRejects((value) => value.replace("const { error: pipelineEventError } = await writer", "await writer"), "pipeline-event result ignored");
   assertRejects((value) => value.replace("if (pipelineEventError) {", "if (false) {"), "pipeline-event failure guard removed");
   assertRejects((value) => value.replace("error: 'admin_retry_pipeline_event_insert_failed',", "error: _e,"), "pipeline-event raw error");
-  assertRejects((value) => value.replace("throw new Error('admin_retry_webhook_test_failed');", "throw new Error(`Webhook test failed: ${webhookResponse.error.message}`);"), "webhook raw error");
+  assertRejects((value) => value.replace("error: 'delivery_cutover_blocked',", "error: webhookResponse.error.message,"), "webhook raw error");
+  assertRejects((value) => value.replace("status: 409,", "status: 200,"), "webhook cutover status widened");
   assertRejects((value) => value.replace("const errorCode = safeAdminRetryErrorCode(error);", "const errorCode = (error as Error).message;"), "outer raw error logging");
   assertRejects((value) => value.replace("captureEdgeException(new Error(errorCode),", "captureEdgeException(error,"), "outer raw Sentry error");
 }

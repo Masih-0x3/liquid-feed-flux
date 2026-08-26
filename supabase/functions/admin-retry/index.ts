@@ -441,7 +441,7 @@ serve(async (req) => {
       return new Response(JSON.stringify({
         success: false,
         code: 'delivery_cutover_blocked',
-        error: `Synthetic webhook tests are disabled during the immutable delivery cutover (${inboundFunction})`,
+        error: 'delivery_cutover_blocked',
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 409,

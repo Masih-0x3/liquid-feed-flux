@@ -310,7 +310,7 @@
     },
     {
       "path": "supabase/functions/admin-retry/index.ts",
-      "sha256": "c0fd4268bc2e676ca8b206aa155381fba16f718fee6df2c6eff0b1a152b04924"
+      "sha256": "ce9f21a4738939029e202a9a2bdb675ff460b5ebf022f17003cee113d3c96f81"
     },
     {
       "path": "supabase/functions/db-cleanup/index.ts",
@@ -9830,14 +9830,14 @@
           "path": "supabase/functions/admin-actions/index.ts,supabase/functions/admin-retry/index.ts,supabase/functions/db-cleanup/index.ts,supabase/functions/digest-compiler/index.ts,supabase/functions/media-cleanup/index.ts,supabase/functions/media-processor/index.ts,supabase/functions/webhooks-rssapp/index.ts,supabase/functions/worker/index.ts,supabase/functions/x-followers-snapshot/index.ts",
           "version_or_ref": "https://deno.land/std@0.168.0/http/server.ts",
           "integrity_or_source_hash": "e99c1bee8a3f6571ee4cdeb2966efad465b8f6fe62bec1bdb59c1f007cc4d155",
-          "source_file_sha256": "1fda10c45d3996a359655c6d6fc77a81322b2ebc54ebbe92d263b2ed2869c9ac"
+          "source_file_sha256": "6237ac88367e26d260f125f5a2fa001f61625c6e483e561596afbd9c6a1b9465"
         },
         {
           "name": "https://esm.sh/@supabase/supabase-js@2.39.7",
           "path": "supabase/functions/admin-actions/index.ts,supabase/functions/admin-retry/index.ts,supabase/functions/db-cleanup/index.ts,supabase/functions/media-cleanup/index.ts,supabase/functions/media-processor/index.ts,supabase/functions/webhooks-rssapp/index.ts,supabase/functions/worker/index.ts,supabase/functions/x-followers-snapshot/index.ts",
           "version_or_ref": "https://esm.sh/@supabase/supabase-js@2.39.7",
           "integrity_or_source_hash": "5361671c958daa350e504d9975da64b2d6dc9e81390b985ccdafb2e3572e24e7",
-          "source_file_sha256": "903ac8df6a1aed94363695c8cb1cbae7227502c4c240808a7c3a46cf3270d901"
+          "source_file_sha256": "779f11908523713c17db227ed5ba08409e93b4e1c73d9679178ca66bfed2e257"
         },
         {
           "name": "https://esm.sh/@supabase/supabase-js@2.49.1",
