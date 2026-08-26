@@ -176,7 +176,6 @@ const internalEntrypoints = Object.freeze({
       '../_shared/openai.ts',
       '../_shared/observability.ts',
       '../_shared/sentry.ts',
-      '../_shared/externalPostingGuard.ts',
     ],
   },
 });

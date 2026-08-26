@@ -285,6 +285,7 @@ Deno.test("send test tweet is disabled before any provider call", async () => {
   assertEquals(result.status, 409);
   assertEquals((result.body as Record<string, unknown>).code, "delivery_cutover_blocked");
   assertEquals(calls.fetches, []);
+  assertEquals(calls.oauth, []);
 });
 
 Deno.test("Preview blocks direct X test tweet before provider fetch", async () => {

@@ -106,7 +106,6 @@ function assertContract({ source, packageJson, ci }, label = "current source") {
   );
   const testHydrate = source.slice(source.indexOf("export async function testHydrateTweetAdminAction("));
   for (const [handler, name, reason] of [
-    [testTweet, "test tweet", "owned_writes_disabled"],
     [testHydrate, "test hydrate", "owned_reads_disabled"],
   ]) {
     const controlsQueryIndex = handler.indexOf('const { data: controlsRow, error: controlsError }');
@@ -122,10 +121,16 @@ function assertContract({ source, packageJson, ci }, label = "current source") {
     if (!handler.includes(`reason: "${reason}",`)) fail(`${label}: ${name} disabled response is missing`);
     if (!handler.includes('error: "x_api_controls_read_failed"')) fail(`${label}: ${name} controls read failure is missing`);
   }
-  if (!testTweet.includes('if (!created || typeof created.id !== "string" || created.id.trim().length === 0)') ||
-      !testTweet.includes('error: "x_provider_invalid_response"') ||
-      !testTweet.includes('status: 502,')) {
-    fail(`${label}: test tweet provider response shape must fail closed`);
+  if (!testTweet.includes('code: "delivery_cutover_blocked",') ||
+      !testTweet.includes('error: "Synthetic X test tweets are disabled during the immutable delivery cutover",') ||
+      !testTweet.includes('status: 409,')) {
+    fail(`${label}: test tweet handler must fail closed during the immutable delivery cutover`);
+  }
+  if (testTweet.includes('const creds = getXCreds(deps);') ||
+      testTweet.includes('https://api.x.com/2/tweets') ||
+      testTweet.includes('oauthHeader') ||
+      testTweet.includes('fetchImpl')) {
+    fail(`${label}: test tweet handler must not retain a provider write path`);
   }
   if (!testHydrate.includes('if (!data || typeof data !== "object" || Array.isArray(data))') ||
       !testHydrate.includes('error: "x_provider_invalid_response"')) {
@@ -140,11 +145,9 @@ function assertContract({ source, packageJson, ci }, label = "current source") {
   if (!source.includes("error: input.error\n      ? safeXApiEventError(input.error)")) {
     fail(`${label}: X API event errors must be normalized before persistence`);
   }
-  assertProviderFailureBoundary(testTweet, "test tweet", "x_test_tweet", "    const created =");
   assertProviderFailureBoundary(testHydrate, "test hydrate", "x_hydrate", "    const data =");
   assertProviderFailureBoundary(handler, "verify credentials", "x_credentials", "    const user =");
   if (handler.includes("raw: parsedBody") ||
-      testTweet.includes("response: respBody") ||
       testHydrate.includes("raw: respBody")) {
     fail(`${label}: successful X admin envelopes must not forward raw provider bodies`);
   }
@@ -210,21 +213,14 @@ if (process.env.MUTATION_TEST === "1") {
       'if (!isMyXEnabled(asRecord(asRecord(controlsRow).value)))',
       'if (false)',
     ),
-  }), "owned X test-action control removal");
+  }), "owned X hydrate-action control removal");
   assertRejects((input) => ({
     ...input,
     source: input.source.replace(
       'const { data: controlsRow, error: controlsError } = await table(supabase, "settings").select(',
       'const { data: controlsRow } = await table(supabase, "settings").select(',
     ),
-  }), "owned X test-action settings error result removal");
-  assertRejects((input) => ({
-    ...input,
-    source: input.source.replace(
-      'if (!created || typeof created.id !== "string" || created.id.trim().length === 0)',
-      'if (false)',
-    ),
-  }), "test tweet provider response guard removal");
+  }), "owned X hydrate-action settings error result removal");
   assertRejects((input) => ({
     ...input,
     source: input.source.replace(
@@ -256,13 +252,6 @@ if (process.env.MUTATION_TEST === "1") {
   assertRejects((input) => ({
     ...input,
     source: input.source.replace(
-      'error: errorCode,\n        },\n        status: 502,\n      };\n    }\n    const created',
-      'error: respText.slice(0, 300), response: respBody,\n        },\n        status: 502,\n      };\n    }\n    const created',
-    ),
-  }), "test tweet provider raw failure forwarding");
-  assertRejects((input) => ({
-    ...input,
-    source: input.source.replace(
       'error: errorCode,\n        },\n        status: 502,\n      };\n    }\n    const data',
       'error: respText.slice(0, 300), raw: respBody,\n        },\n        status: 502,\n      };\n    }\n    const data',
     ),
@@ -281,13 +270,6 @@ if (process.env.MUTATION_TEST === "1") {
       'name: user?.name,\n        raw: parsedBody,\n      },',
     ),
   }), "verify successful raw response forwarding");
-  assertRejects((input) => ({
-    ...input,
-    source: input.source.replace(
-      'return { body: { ok: true, tweet_id: created.id } };',
-      'return { body: { ok: true, tweet_id: created.id, response: respBody } };',
-    ),
-  }), "test tweet successful raw response forwarding");
   assertRejects((input) => ({
     ...input,
     source: input.source.replace(

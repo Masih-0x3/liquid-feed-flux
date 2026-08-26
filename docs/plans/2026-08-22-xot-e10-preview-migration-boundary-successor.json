@@ -9,7 +9,7 @@
   "branch": "codex/xot-remediation-convergence",
   "predecessor": {
     "path": "docs/plans/2026-08-12-xot-e10-preview-migration-boundary.json",
-    "sha256": "f78dea0fc6b827bc051f64a351e8d6646964af33d00ab30801771db86f6b69bf"
+    "sha256": "63b8023018f0c55c0254640638ad03a8ad3c9ad4b87a42bc3c1d14b7c28efdb5"
   },
   "currentCandidateOverrides": {},
   "evidenceOverrides": {

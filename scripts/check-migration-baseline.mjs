@@ -21,9 +21,9 @@ export const SUCCESSOR_V1_CANDIDATE_RECEIPT_SCHEMA =
 export const SUCCESSOR_V2_CANDIDATE_RECEIPT_SCHEMA =
   "xot-e10-preview-migration-boundary-successor-v2";
 export const CURRENT_CANDIDATE_RECEIPT_CONTRACT = "xot-e10-preview-migration-boundary-v1";
-export const CURRENT_CANDIDATE_MIGRATION_COUNT = 124;
+export const CURRENT_CANDIDATE_MIGRATION_COUNT = 128;
 export const CURRENT_CANDIDATE_INVENTORY_SHA256 =
-  "d6c31480f6d7c9e926be12bf0e555af9d34d74b07f2b4efa42f5e01f120a5b57";
+  "fe22d625661169ab8cc7ecf5ed8011ea759186d20af0b0bbcb6f9bbc00c3c163";
 export const CURRENT_CANDIDATE_TYPES_SHA256 =
   "261c8c9cee143887c629ece4390951d74fed74d0a60cb2f6584b55d0ada771a4";
 // The immediately-preceding authorized successor receipt. The E10 current
@@ -64,8 +64,8 @@ export const CURRENT_CANDIDATE_RUNTIME_STDOUT = Object.freeze({
   context: "orbstack",
   image: CURRENT_CANDIDATE_RUNTIME_IMAGE,
   imageCommand: CURRENT_CANDIDATE_RUNTIME_IMAGE_COMMAND,
-  migrationCount: 124,
-  inventorySha256: "d6c31480f6d7c9e926be12bf0e555af9d34d74b07f2b4efa42f5e01f120a5b57",
+  migrationCount: 128,
+  inventorySha256: "fe22d625661169ab8cc7ecf5ed8011ea759186d20af0b0bbcb6f9bbc00c3c163",
   migrationSha256: "66729659d4573d1245ba3ee7845fb76fa7808ecb5bda74cb616916e0700518d7",
   container: "removed",
   cleanup: "removed",
@@ -1093,7 +1093,7 @@ export function validateCurrentCandidateRuntimeReceipt(root, { evidenceOverrides
       errors.push("E10 SQL runtime receipt image command is not the expected postgres command");
     }
     if (acceptance.migrationCount !== CURRENT_CANDIDATE_MIGRATION_COUNT) {
-      errors.push("E10 SQL runtime receipt migration count is not 124");
+      errors.push("E10 SQL runtime receipt migration count is not 128");
     }
     if (acceptance.inventorySha256 !== CURRENT_CANDIDATE_INVENTORY_SHA256) {
       errors.push("E10 SQL runtime receipt inventory SHA-256 is not the current E10 inventory");
@@ -1597,7 +1597,7 @@ export function validateCurrentCandidateBaseline({
  * Immutable-successor contract for the current-candidate receipt chain.
  *
  * The E10 receipt must both (a) pass the normal current-candidate validation
- * (exact 124 inventory, protected manifest/archive/types bindings, canonical
+ * (exact 128 inventory, protected manifest/archive/types bindings, canonical
  * paths, no symlink/traversal) and (b) bind immutably to its immutable E7
  * predecessor by exact SHA-256. An E10 receipt that is internally consistent but
  * does not prove its immediate predecessor (missing/wrong hash, or the

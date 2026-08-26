@@ -20,8 +20,8 @@
       "-D",
       "/etc/postgresql"
     ],
-    "migrationCount": 124,
-    "inventorySha256": "d6c31480f6d7c9e926be12bf0e555af9d34d74b07f2b4efa42f5e01f120a5b57",
+    "migrationCount": 128,
+    "inventorySha256": "fe22d625661169ab8cc7ecf5ed8011ea759186d20af0b0bbcb6f9bbc00c3c163",
     "migrationSha256": "66729659d4573d1245ba3ee7845fb76fa7808ecb5bda74cb616916e0700518d7",
     "acceptedRun": {
       "command": "node scripts/run-e10-sql-boundary.mjs",
@@ -39,8 +39,8 @@
           "-D",
           "/etc/postgresql"
         ],
-        "migrationCount": 124,
-        "inventorySha256": "d6c31480f6d7c9e926be12bf0e555af9d34d74b07f2b4efa42f5e01f120a5b57",
+        "migrationCount": 128,
+        "inventorySha256": "fe22d625661169ab8cc7ecf5ed8011ea759186d20af0b0bbcb6f9bbc00c3c163",
         "migrationSha256": "66729659d4573d1245ba3ee7845fb76fa7808ecb5bda74cb616916e0700518d7",
         "container": "removed",
         "cleanup": "removed",
@@ -95,8 +95,8 @@
     "scripts/e10SqlBoundary.test.mjs": "392a0cd6871175cdf8331cae86bc7f3b94c1a79ec2b674468cff9c113175c322",
     "scripts/run-e10-sql-boundary.mjs": "da27f50d0ec8e98ea2a841b86e9d1e469bfea88fa6e0562ac6d287e992bcc71d",
     "supabase/migrations/20260812100000_e10_preview_runtime_controls_and_roles.sql": "66729659d4573d1245ba3ee7845fb76fa7808ecb5bda74cb616916e0700518d7",
-    "scripts/check-migration-baseline.mjs": "370ddf43885ab7e4c7c0c5459c7285ce0d77a6eb58fe0761f1923deb6c04feae",
-    "scripts/check-migration-baseline.test.mjs": "34f85551f5d436a0648264b27fa973cc6a75839eca328b34e962fd6dfa796c38",
-    "scripts/build-e10-preview-migration-boundary-receipt.mjs": "9918e70086bf6731a4df7191ccd7686af79073f6d7f60a10e9190015ab82dc08"
+    "scripts/check-migration-baseline.mjs": "cb4621a595f5cd85e053a55f79cfd50fb5b75966fe60d441d3b76e8a708a71be",
+    "scripts/check-migration-baseline.test.mjs": "6fd751e0ce92ed93bd4744c23b2b6e67b2f5a1fbe475ac4c990354b326e338bc",
+    "scripts/build-e10-preview-migration-boundary-receipt.mjs": "3319a32e02b1d3582d563597ddc782a4ef8032c6a64c1354da27df8eb2a8a1dc"
   }
 }

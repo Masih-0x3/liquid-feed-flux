@@ -762,7 +762,7 @@ test("intact current candidate receipt validates cleanly", () =>
     assert.deepEqual(result.errors, []);
   }));
 
-test("current candidate receipt binds the exact E10 evidence set and 124-entry latest inventory", () =>
+test("current candidate receipt binds the exact E10 evidence set and 128-entry latest inventory", () =>
   withCurrentTreeFixture((root) => {
     const receipt = readFixtureCurrentCandidate(root);
     assert.deepEqual(Object.keys(receipt.evidence).sort(), [...CURRENT_CANDIDATE_EVIDENCE_PATHS].sort());
@@ -775,13 +775,13 @@ test("current candidate receipt binds the exact E10 evidence set and 124-entry l
       receipt.evidence["scripts/build-e10-preview-migration-boundary-receipt.mjs"],
       sha256(readFileSync(join(root, "scripts/build-e10-preview-migration-boundary-receipt.mjs"))),
     );
-    assert.equal(receipt.currentCandidate.versionCount, 124);
-    assert.equal(receipt.currentCandidate.pathCount, 124);
+    assert.equal(receipt.currentCandidate.versionCount, 128);
+    assert.equal(receipt.currentCandidate.pathCount, 128);
     assert.equal(receipt.currentCandidate.orderedInventorySha256, CURRENT_CANDIDATE_INVENTORY_SHA256);
     assert.deepEqual(receipt.currentCandidate.migrations.at(-1), {
-      version: "20260812100000",
-      path: "supabase/migrations/20260812100000_e10_preview_runtime_controls_and_roles.sql",
-      sha256: sha256(readFileSync(join(root, "supabase/migrations/20260812100000_e10_preview_runtime_controls_and_roles.sql"))),
+      version: "20260825220124",
+      path: "supabase/migrations/20260825220124_xot_v2_runtime_controls_activation_bridge.sql",
+      sha256: sha256(readFileSync(join(root, "supabase/migrations/20260825220124_xot_v2_runtime_controls_activation_bridge.sql"))),
     });
   }));
 
@@ -848,15 +848,15 @@ test("accepted E10 aggregate rejects a runtime receipt hash binding mutation", (
     assert.ok(result.errors.some((error) => error.includes("runtimeReceipt SHA-256")));
   }));
 
-test("coordinated latest-migration tampering remains rejected by the fixed 124 inventory hash", () =>
+test("coordinated E10-migration tampering remains rejected by the fixed 128 inventory hash", () =>
   withCurrentTreeFixture((root) => {
     const migrationPath = join(root, "supabase/migrations/20260812100000_e10_preview_runtime_controls_and_roles.sql");
     const tamperedBody = `${readFileSync(migrationPath, "utf8")}\n-- coordinated tamper\n`;
     writeFileSync(migrationPath, tamperedBody);
     const tamperedSha = sha256(tamperedBody);
     const receipt = readFixtureCurrentCandidate(root);
-    const latest = receipt.currentCandidate.migrations.at(-1);
-    latest.sha256 = tamperedSha;
+    const e10 = receipt.currentCandidate.migrations.find((entry) => entry.version === "20260812100000");
+    e10.sha256 = tamperedSha;
     receipt.evidence["supabase/migrations/20260812100000_e10_preview_runtime_controls_and_roles.sql"] = tamperedSha;
     writeFixtureCurrentCandidate(root, receipt);
     const result = validateCurrentCandidateSuccessorBaseline({ root });
@@ -1084,7 +1084,7 @@ test("normal mode rejects an E10 candidate that claims acceptance or production 
     );
   }));
 
-test("successor baseline fails when an extra migration is present (124 -> 125)", () =>
+test("successor baseline fails when an extra migration is present (128 -> 129)", () =>
   withCurrentTreeFixture((root) => {
     writeFileSync(join(root, "supabase/migrations/29990101000000_extra_hidden.sql"), "select 1;\n");
     assert.throws(
@@ -1093,7 +1093,7 @@ test("successor baseline fails when an extra migration is present (124 -> 125)",
     );
   }));
 
-test("successor baseline is chained: the applied migration count is 124", () =>
+test("successor baseline is chained: the applied migration count is 128", () =>
   withCurrentTreeFixture((root) => {
     const result = validateMigrationBaseline({ root });
     assert.equal(result.currentCandidateActiveCount, CURRENT_CANDIDATE_MIGRATION_COUNT);
@@ -1222,7 +1222,7 @@ test("a fully evidenced release passes the end-to-end release gate", () =>
 test("release gate ignores the author's current-candidate receipt and enforces the protected 107 candidate", () =>
   withFixture((root) => {
     const evidence = buildEndToEndReleaseFixture(root);
-    // A fully-evidenced release over the frozen 107 candidate passes. The author-created 124-entry
+    // A fully-evidenced release over the frozen 107 candidate passes. The author-created 128-entry
     // current-candidate receipt must NOT be consulted in release mode; release equivalence stays
     // bound to the protected candidate, which has not adopted the forward files.
     const result = validateMigrationBaseline({ root, releaseGate: true, ...evidence });
@@ -1231,7 +1231,7 @@ test("release gate ignores the author's current-candidate receipt and enforces t
 
 test("release mode fails closed when a forward migration is present but not adopted into the candidate", () =>
   withCurrentTreeFixture((root) => {
-    // The 124-entry current candidate satisfies normal mode, but the frozen 107 protected candidate
+    // The 128-entry current candidate satisfies normal mode, but the frozen 107 protected candidate
     // has not adopted the forwards, so the release gate fails closed on the version-set shift.
     const evidence = buildEndToEndReleaseFixture(root);
     assert.throws(

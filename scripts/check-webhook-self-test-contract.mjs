@@ -316,63 +316,85 @@ function assertContract(sources, label) {
     fail(label + " RSS preflight must distinguish signed and token credentials");
   }
 
-  const importIncludesHeaderHelper = adminRetryFile.statements.some((statement) => {
-    if (!ts.isImportDeclaration(statement)
-      || !ts.isStringLiteral(statement.moduleSpecifier)
-      || !statement.moduleSpecifier.text.endsWith("/_shared/internalAuth.ts")) {
-      return false;
+  let adminInvokes = 0;
+  const immutableWebhookBranch = sources.adminRetry.includes(
+    "if (action === ADMIN_RETRY_INBOUND_INGEST_ACTION && actionClass === 'inbound_rss_ingest')",
+  );
+  if (immutableWebhookBranch) {
+    const start = sources.adminRetry.indexOf("if (action === ADMIN_RETRY_INBOUND_INGEST_ACTION");
+    const end = sources.adminRetry.indexOf("// Original retry logic", start);
+    const branch = sources.adminRetry.slice(start, end);
+    for (const expected of [
+      "success: false",
+      "code: 'delivery_cutover_blocked'",
+      "error: 'delivery_cutover_blocked'",
+      "status: 409",
+    ]) {
+      if (!branch.includes(expected)) fail(label + " immutable webhook branch must return a stable 409 cutover block");
     }
-    const bindings = statement.importClause?.namedBindings;
-    return ts.isNamedImports(bindings)
-      && bindings.elements.some((element) => element.name.text === "rssWebhookInternalAuthHeaders");
-  });
-  if (!importIncludesHeaderHelper) fail(label + " admin-retry must import rssWebhookInternalAuthHeaders");
+    if (branch.includes("rssWebhookInternalAuthHeaders") || branch.includes("supabase.functions.invoke")) {
+      fail(label + " immutable webhook branch must not run synthetic provider work");
+    }
+  } else {
+    const importIncludesHeaderHelper = adminRetryFile.statements.some((statement) => {
+      if (!ts.isImportDeclaration(statement)
+        || !ts.isStringLiteral(statement.moduleSpecifier)
+        || !statement.moduleSpecifier.text.endsWith("/_shared/internalAuth.ts")) {
+        return false;
+      }
+      const bindings = statement.importClause?.namedBindings;
+      return ts.isNamedImports(bindings)
+        && bindings.elements.some((element) => element.name.text === "rssWebhookInternalAuthHeaders");
+    });
+    if (!importIncludesHeaderHelper) fail(label + " admin-retry must import rssWebhookInternalAuthHeaders");
 
-  let testWebhookBranch = null;
-  visit(adminRetryFile, (node) => {
-    if (!testWebhookBranch && ts.isIfStatement(node) && isActionCondition(node.expression)) {
-      testWebhookBranch = node;
+    let testWebhookBranch = null;
+    visit(adminRetryFile, (node) => {
+      if (!testWebhookBranch && ts.isIfStatement(node) && isActionCondition(node.expression)) {
+        testWebhookBranch = node;
+      }
+    });
+    if (!testWebhookBranch || !ts.isBlock(testWebhookBranch.thenStatement)) {
+      fail(label + " admin-retry test_webhook branch is missing");
     }
-  });
-  if (!testWebhookBranch || !ts.isBlock(testWebhookBranch.thenStatement)) {
-    fail(label + " admin-retry test_webhook branch is missing");
-  }
-  const adminInvokeCalls = [];
-  visit(testWebhookBranch.thenStatement, (node) => {
-    if (ts.isCallExpression(node) && propertyPath(node.expression) === "supabase.functions.invoke") {
-      adminInvokeCalls.push(node);
+    const adminInvokeCalls = [];
+    visit(testWebhookBranch.thenStatement, (node) => {
+      if (ts.isCallExpression(node) && propertyPath(node.expression) === "supabase.functions.invoke") {
+        adminInvokeCalls.push(node);
+      }
+    });
+    if (adminInvokeCalls.length !== 1 || !ts.isStringLiteral(adminInvokeCalls[0].arguments[0])
+      || adminInvokeCalls[0].arguments[0].text !== "webhooks-rssapp") {
+      fail(label + " test_webhook must invoke only webhooks-rssapp");
     }
-  });
-  if (adminInvokeCalls.length !== 1 || !ts.isStringLiteral(adminInvokeCalls[0].arguments[0])
-    || adminInvokeCalls[0].arguments[0].text !== "webhooks-rssapp") {
-    fail(label + " test_webhook must invoke only webhooks-rssapp");
-  }
-  const invokeOptions = unwrap(adminInvokeCalls[0].arguments[1]);
-  const bodyProperty = findObjectProperty(invokeOptions, "body");
-  const headersProperty = findObjectProperty(invokeOptions, "headers");
-  const invokeBody = unwrap(bodyProperty?.initializer);
-  const invokeHeaders = headersProperty?.initializer;
-  if (!bodyProperty || !headersProperty || !isIdentifier(invokeBody, "rawWebhookBody")
-    || !ts.isAwaitExpression(invokeHeaders)
-    || !isCallTo(invokeHeaders.expression, "rssWebhookInternalAuthHeaders")) {
-    fail(label + " test_webhook must send the raw signed body without an explicit invoke Content-Type wrapper");
-  }
-  const testWebhookSource = testWebhookBranch.thenStatement.getText(adminRetryFile);
-  for (const expected of [
-    "const validationPayload = { data: { items_new: [testRSSItem] }, validate_only: true };",
-    "const rawWebhookBody = JSON.stringify(validationPayload);",
-    "body: rawWebhookBody",
-    "headers: await rssWebhookInternalAuthHeaders(rawWebhookBody),",
-  ]) {
-    if (!testWebhookSource.includes(expected)) {
-      fail(label + " test_webhook must sign or token-authenticate the exact JSON validation body");
+    adminInvokes = adminInvokeCalls.length;
+    const invokeOptions = unwrap(adminInvokeCalls[0].arguments[1]);
+    const bodyProperty = findObjectProperty(invokeOptions, "body");
+    const headersProperty = findObjectProperty(invokeOptions, "headers");
+    const invokeBody = unwrap(bodyProperty?.initializer);
+    const invokeHeaders = headersProperty?.initializer;
+    if (!bodyProperty || !headersProperty || !isIdentifier(invokeBody, "rawWebhookBody")
+      || !ts.isAwaitExpression(invokeHeaders)
+      || !isCallTo(invokeHeaders.expression, "rssWebhookInternalAuthHeaders")) {
+      fail(label + " test_webhook must send the raw signed body without an explicit invoke Content-Type wrapper");
     }
-  }
-  if (testWebhookSource.includes("test:") || sources.adminRetry.includes("webhookResponse.data")) {
-    fail(label + " test_webhook must not rely on legacy test data or return target payloads");
-  }
-  if (!testWebhookBranch.thenStatement.getText(adminRetryFile).includes("validation_only: true")) {
-    fail(label + " admin-retry success response must identify the no-write result");
+    const testWebhookSource = testWebhookBranch.thenStatement.getText(adminRetryFile);
+    for (const expected of [
+      "const validationPayload = { data: { items_new: [testRSSItem] }, validate_only: true };",
+      "const rawWebhookBody = JSON.stringify(validationPayload);",
+      "body: rawWebhookBody",
+      "headers: await rssWebhookInternalAuthHeaders(rawWebhookBody),",
+    ]) {
+      if (!testWebhookSource.includes(expected)) {
+        fail(label + " test_webhook must sign or token-authenticate the exact JSON validation body");
+      }
+    }
+    if (testWebhookSource.includes("test:") || sources.adminRetry.includes("webhookResponse.data")) {
+      fail(label + " test_webhook must not rely on legacy test data or return target payloads");
+    }
+    if (!testWebhookBranch.thenStatement.getText(adminRetryFile).includes("validation_only: true")) {
+      fail(label + " admin-retry success response must identify the no-write result");
+    }
   }
 
   const webhookServe = findServeCallback(webhookFile);
@@ -465,7 +487,7 @@ function assertContract(sources, label) {
   assertIncludes(sources.matrix, "only `validate_only`", label + " auth matrix");
 
   return {
-    adminInvokes: adminInvokeCalls.length,
+    adminInvokes,
     validationResponses: validationResponses.length,
     uiControls: 2,
   };
@@ -577,7 +599,9 @@ const selfTest = process.argv.includes("--self-test");
 
 if (selfTest) {
   const mutants = [
-    ["missing-validate-flag", { ...source, adminRetry: makeMissingValidationFlagMutant(source.adminRetry) }],
+    ...(source.adminRetry.includes("if (action === ADMIN_RETRY_INBOUND_INGEST_ACTION && actionClass === 'inbound_rss_ingest')")
+      ? []
+      : [["missing-validate-flag", { ...source, adminRetry: makeMissingValidationFlagMutant(source.adminRetry) }]]),
     ["pre-validation-query", { ...source, webhook: makePreValidationQueryMutant(source.webhook) }],
     ["pre-validation-alias-query", { ...source, webhook: makePreValidationAliasQueryMutant(source.webhook) }],
     ["pre-validation-indirect-dispatch", { ...source, webhook: makePreValidationIndirectDispatchMutant(source.webhook) }],

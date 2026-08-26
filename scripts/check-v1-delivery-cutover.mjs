@@ -143,19 +143,20 @@ if (
 ) {
   throw new Error("admin retry path does not prove historical rows are skipped");
 }
-if (!digestCompiler.includes("digest_compiler_preview_only") ||
+if (!digestCompiler.includes('await sb.rpc("checkpoint_digest_delivery_disabled"') ||
+  !digestCompiler.includes('delivery_state: "disabled"') ||
+  digestCompiler.includes("digest_compiler_preview_only") ||
+  digestCompiler.includes("evaluateExternalPosting") ||
+  digestCompiler.includes("externalPostingBlockedResponse") ||
   /api\.x\.com/.test(digestCompiler) ||
   digestCompiler.includes("functions.invoke(\"x-poster\"") ||
   digestCompiler.includes("fetch(")) {
-  throw new Error("digest compiler still exposes a direct X provider path");
+  throw new Error("digest compiler does not enforce delivery-disabled checkpointing");
 }
-const blockedFinish = digestCompiler.indexOf("reason: postingDecision.reason");
-const blockedReturn = digestCompiler.indexOf("return externalPostingBlockedResponse");
-const previewFinish = digestCompiler.indexOf("reason: \"digest_compiler_preview_only\"");
-const previewReturn = digestCompiler.indexOf("return jsonResponse({\n        skipped: true");
-if (blockedFinish < 0 || blockedReturn < 0 || blockedFinish > blockedReturn ||
-  previewFinish < 0 || previewReturn < 0 || previewFinish > previewReturn) {
-  throw new Error("digest compiler exits do not finalize skipped workflow runs");
+const deliveryCheckpoint = digestCompiler.lastIndexOf('await sb.rpc("checkpoint_digest_delivery_disabled"');
+const deliveryDisabledResponse = digestCompiler.lastIndexOf('delivery_state: "disabled"');
+if (deliveryCheckpoint < 0 || deliveryDisabledResponse < deliveryCheckpoint) {
+  throw new Error("digest compiler does not checkpoint before its disabled response");
 }
 if (!settleReasonMigration.includes("v_reason NOT LIKE 'delivery_cutover_blocked%'") ||
   !adminActionsIndex.includes("adminActionRequiresExternalPosting(action, body?.step)")) {

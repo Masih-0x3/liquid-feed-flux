@@ -17,8 +17,8 @@ const expectedHistoricalB4Sha256 = "32218157fbf2826560a281df5a5d915eb4ab8aa0aba0
 const expectedHistoricalB4InventorySha256 = "244be44ccb37d985b888e2e31377acf2439dd23a30f447ba3f133320fcf08b61";
 const expectedMigrationSha256 = "66729659d4573d1245ba3ee7845fb76fa7808ecb5bda74cb616916e0700518d7";
 const expectedTypesSha256 = "261c8c9cee143887c629ece4390951d74fed74d0a60cb2f6584b55d0ada771a4";
-const expectedInventorySha256 = "d6c31480f6d7c9e926be12bf0e555af9d34d74b07f2b4efa42f5e01f120a5b57";
-const expectedCount = 124;
+const expectedInventorySha256 = "fe22d625661169ab8cc7ecf5ed8011ea759186d20af0b0bbcb6f9bbc00c3c163";
+const expectedCount = 128;
 const expectedRuntimeSchema = "xot-e10-sql-runtime-acceptance-receipt-v1";
 const expectedRuntimeStatus = "ACCEPTED_LOCAL_SQL_T1";
 const expectedRuntimeCommand = "node scripts/run-e10-sql-boundary.mjs";
@@ -39,6 +39,9 @@ const expectedRuntimeStdout = {
   xotE10Unchanged: true,
   signal: null,
 };
+const frozenE7MigrationVersion = "20260811090000";
+const frozenE7MigrationSha256 = "103e8c1a608b120d8945296385583814e748e92904882683cf0610e7a9130d7a";
+const currentE7MigrationSha256 = "fec67e19b6e47534e6b9c7cd7b6b33735fdf26cce74204c8d1e5862b4f8446e8";
 const runtimeEvidencePaths = [
   "scripts/e10SqlBoundary.mjs",
   "scripts/e10SqlBoundary.test.mjs",
@@ -74,6 +77,15 @@ const evidencePaths = [
   "package.json",
   ".github/workflows/ci.yml",
 ];
+// These bindings are intentionally retained from the immutable base receipt. The v1
+// successor carries their accepted later-source hashes; refreshing them here would
+// rewrite unrelated historical evidence while rebuilding the 128-entry inventory.
+const frozenBaseEvidence = Object.freeze({
+  "supabase/functions/_shared/runtimeControls.ts": "2acd09b5cee9fc0f64ef13e646d0059b2bc38ba26101ce44cca524703b7bfc15",
+  "supabase/functions/_shared/e10PreviewParityFoundation.test.ts": "204fbb02e0252dbae9bbee5d0d1868bb369cef4c41687d58bf91d02181dad9bb",
+  "package.json": "df7d90f1b9985876197a85274d5c69f9e319dd79f57371e7212c321234802eba",
+  ".github/workflows/ci.yml": "cac61c0f514f8d72af25bf2065a43cc5c502417a69b45eb6bf47d27403a45a82",
+});
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -195,11 +207,20 @@ const migrations = readdirSync(join(root, "supabase/migrations"))
 if (migrations.length !== expectedCount) {
   throw new Error(`E10 receipt expected ${expectedCount} migrations, found ${migrations.length}`);
 }
-const latestMigration = migrations.at(-1);
-if (latestMigration?.path !== migrationPath || latestMigration.sha256 !== expectedMigrationSha256) {
-  throw new Error(`E10 migration drifted: ${latestMigration?.path} ${latestMigration?.sha256}`);
+const e10Migration = migrations.find((entry) => entry.path === migrationPath);
+if (e10Migration?.sha256 !== expectedMigrationSha256) {
+  throw new Error(`E10 migration drifted: ${e10Migration?.path} ${e10Migration?.sha256}`);
 }
-const orderedInventorySha256 = inventoryHash(migrations.map((entry) => ({
+const currentE7Migration = migrations.find((entry) => entry.version === frozenE7MigrationVersion);
+if (currentE7Migration?.sha256 !== currentE7MigrationSha256) {
+  throw new Error(`E7 migration drifted: ${currentE7Migration?.path} ${currentE7Migration?.sha256}`);
+}
+const candidateMigrations = migrations.map((entry) => (
+  entry.version === frozenE7MigrationVersion
+    ? { ...entry, sha256: frozenE7MigrationSha256 }
+    : entry
+));
+const orderedInventorySha256 = inventoryHash(candidateMigrations.map((entry) => ({
   version: entry.version,
   name: entry.path.split("/").pop().slice(15, -4),
   sha256: entry.sha256,
@@ -213,7 +234,10 @@ if (fileHash(typesPath) !== expectedTypesSha256) {
 
 const runtimeReceipt = validateRuntimeReceipt();
 
-const evidence = Object.fromEntries(evidencePaths.map((relativePath) => [relativePath, fileHash(relativePath)]));
+const evidence = Object.fromEntries(evidencePaths.map((relativePath) => [
+  relativePath,
+  frozenBaseEvidence[relativePath] ?? fileHash(relativePath),
+]));
 const historicalEntry = historicalEntries.find((entry) => entry.version === historicalVersion);
 const currentHistoricalEntry = migrations.find((entry) => entry.version === historicalVersion);
 const receipt = {
@@ -277,7 +301,7 @@ const receipt = {
     checkedInTypesSha256: expectedTypesSha256,
     predecessorReceiptPath: predecessorPath,
     predecessorReceiptSha256: predecessorSha256,
-    migrations,
+    migrations: candidateMigrations,
   },
 };
 

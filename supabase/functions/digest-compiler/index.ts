@@ -14,10 +14,6 @@ import {
   type WorkflowRunStatus,
 } from "../_shared/observability.ts";
 import { captureEdgeException, initSentryEdge } from "../_shared/sentry.ts";
-import {
-  evaluateExternalPosting,
-  externalPostingBlockedResponse,
-} from "../_shared/externalPostingGuard.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": Deno.env.get("ALLOWED_CORS_ORIGIN") ?? "https://liquid-feed-flux.lovable.app",
@@ -672,30 +668,6 @@ Guidelines:
       post_count: postCount,
       delivery_state: "disabled",
     });
-    // This legacy digest path has no per-source delivery lineage or claim
-    // fencing. Keep it preview-only so it cannot bypass the v1 cutover and
-    // post historical/ambiguous source material directly to X.
-    if (!dryRun) {
-      const postingDecision = await evaluateExternalPosting(sb);
-      if (!postingDecision.allowed) {
-        await finishDigestWorkflow("skipped", {
-          ...workflowMetadata,
-          post_count: postCount,
-          reason: postingDecision.reason,
-        });
-        return externalPostingBlockedResponse(postingDecision.reason, corsHeaders);
-      }
-      await finishDigestWorkflow("skipped", {
-        ...workflowMetadata,
-        post_count: postCount,
-        reason: "digest_compiler_preview_only",
-      });
-      return jsonResponse({
-        skipped: true,
-        reason: "digest_compiler_preview_only",
-        post_count: postCount,
-      });
-    }
 
   } catch (err) {
     const safeError = new Error(digestErrorCode(err));
