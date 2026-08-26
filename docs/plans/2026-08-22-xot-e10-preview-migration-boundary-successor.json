@@ -9,12 +9,12 @@
   "branch": "codex/xot-remediation-convergence",
   "predecessor": {
     "path": "docs/plans/2026-08-12-xot-e10-preview-migration-boundary.json",
-    "sha256": "63b8023018f0c55c0254640638ad03a8ad3c9ad4b87a42bc3c1d14b7c28efdb5"
+    "sha256": "ddc55bd0431cdb0b652d62ac42d2e8f15eaa2db16df7763d344643281c84c6bf"
   },
   "currentCandidateOverrides": {},
   "evidenceOverrides": {
-    "supabase/functions/_shared/runtimeControls.ts": "69f9f63f044479601c5e3093c39125950b7e12cd49168e69f0ad4833d1cf87a6",
-    "supabase/functions/_shared/e10PreviewParityFoundation.test.ts": "eb51d9eb0e1eab93badbb04b80009870d8e9bb1eaf0cf2f4702af339f0503747",
+    "supabase/functions/_shared/runtimeControls.ts": "38d6f6e8852b9abf61d87b301f2da523ee3651189ab733e69242117998583e36",
+    "supabase/functions/_shared/e10PreviewParityFoundation.test.ts": "4760427806432ab9bafca0931ebf1f85d6e3f7b9f9bc28f5c7065f3e697f568b",
     "package.json": "0c6aafbf2624fc7146163cf1db3433820232d82f3c65cd12e0f7d33a89680be8",
     "scripts/check-migration-baseline.mjs": "923c7ddf77fc9409d2ee234eb8855a87155fcc198ea8b7fd888b8b2470701ba7",
     ".github/workflows/ci.yml": "a66ba2cf52cbecb7dd01f3d6b8bde675f67230d1308f175c2ee584e55bd0a144"

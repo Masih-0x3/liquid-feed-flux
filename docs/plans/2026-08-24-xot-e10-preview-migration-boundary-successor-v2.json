@@ -9,7 +9,7 @@
   "branch": "codex/xot-full-closure-candidate",
   "predecessor": {
     "path": "docs/plans/2026-08-22-xot-e10-preview-migration-boundary-successor.json",
-    "sha256": "6f6f7c529f187c75dfacee068d62757ef8aa7f5a4136e8836049c4955dd2bf19"
+    "sha256": "e28a164caa6f3f7bb57819286e0a15f5fb79160131fdd1cfe78f2350e6126442"
   },
   "currentCandidateOverrides": {
     "migrationSha256Overrides": {
