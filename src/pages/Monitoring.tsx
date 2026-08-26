@@ -707,8 +707,11 @@ export default function Monitoring() {
     void openDetails(tweetId);
   };
 
-  const renderRowActions = (entry: MonitoringEntry, compact = false) => (
-    <DropdownMenu>
+  const renderRowActions = (entry: MonitoringEntry, compact = false) => {
+    if (readOnly) return null;
+
+    return (
+      <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
           variant={compact ? 'outline' : 'ghost'}
@@ -762,8 +765,9 @@ export default function Monitoring() {
           <Ban className="w-3 h-3 mr-2" />Ignore / remove
         </DropdownMenuItem>
       </DropdownMenuContent>
-    </DropdownMenu>
-  );
+      </DropdownMenu>
+    );
+  };
 
   const reconcileUnknownOperation = async () => {
     if (!isAdmin) return;
@@ -812,23 +816,25 @@ export default function Monitoring() {
           <p className="text-sm text-muted-foreground">Editorial triage for scoring, translation, delivery blockers, and X visibility</p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap lg:justify-end">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="justify-center sm:w-auto">
-                <Wrench className="w-4 h-4 mr-2" />Maintenance
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {counts.stale_x_pending_24h > 0 && (
-                <DropdownMenuItem disabled={readOnly} title={mutationDisabledTitle} onClick={() => { if (isAdmin) setPendingAction({ type: 'close_stale_x' }); }}>
-                  <Clock className="w-3 h-3 mr-2" />Close stale X pending
+          {!readOnly && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" className="justify-center sm:w-auto">
+                  <Wrench className="w-4 h-4 mr-2" />Maintenance
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {counts.stale_x_pending_24h > 0 && (
+                  <DropdownMenuItem disabled={readOnly} title={mutationDisabledTitle} onClick={() => { if (isAdmin) setPendingAction({ type: 'close_stale_x' }); }}>
+                    <Clock className="w-3 h-3 mr-2" />Close stale X pending
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem disabled={readOnly} title={mutationDisabledTitle} className="text-destructive" onClick={() => { if (isAdmin) setPendingAction({ type: 'cancel_jobs' }); }}>
+                  <Ban className="w-3 h-3 mr-2" />Cancel pending jobs
                 </DropdownMenuItem>
-              )}
-              <DropdownMenuItem disabled={readOnly} title={mutationDisabledTitle} className="text-destructive" onClick={() => { if (isAdmin) setPendingAction({ type: 'cancel_jobs' }); }}>
-                <Ban className="w-3 h-3 mr-2" />Cancel pending jobs
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
           <Button onClick={invalidate} variant="outline" className="justify-center sm:w-auto" disabled={isFetching}>
             {isFetching ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}
             Refresh
@@ -921,11 +927,13 @@ export default function Monitoring() {
                   <TableHeader>
                     <TableRow>
                       <TableHead className="px-2 text-center">
-                        <Checkbox
-                          checked={isAllVisibleSelected}
-                          onCheckedChange={(checked) => toggleSelectAllVisible(checked === true)}
-                          aria-label="Select all visible posts"
-                        />
+                        {!readOnly && (
+                          <Checkbox
+                            checked={isAllVisibleSelected}
+                            onCheckedChange={(checked) => toggleSelectAllVisible(checked === true)}
+                            aria-label="Select all visible posts"
+                          />
+                        )}
                       </TableHead>
                       <TableHead className="px-3">Source / time</TableHead>
                       <TableHead className="px-3">Author</TableHead>

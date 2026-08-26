@@ -57,7 +57,7 @@ function setupVideoHooks() {
 }
 
 describe('read-only child mutation controls', () => {
-  it('disables duplicate checks and bulk mutations but keeps filters usable', () => {
+  it('disables duplicate checks and hides bulk mutations but keeps filters usable', () => {
     const runDedupe = vi.fn();
     const bulkReprocess = vi.fn();
     const bulkIgnore = vi.fn();
@@ -90,15 +90,11 @@ describe('read-only child mutation controls', () => {
     );
 
     const run = screen.getByRole('button', { name: 'Run' });
-    const reprocess = screen.getByRole('button', { name: 'Mass reprocess' });
-    const ignore = screen.getByRole('button', { name: 'Mass ignore' });
     expect(run).toBeDisabled();
-    expect(reprocess).toBeDisabled();
-    expect(ignore).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Mass reprocess' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Mass ignore' })).not.toBeInTheDocument();
     expect(run).toHaveAttribute('title', expect.stringContaining('Read-only'));
     fireEvent.click(run);
-    fireEvent.click(reprocess);
-    fireEvent.click(ignore);
     expect(runDedupe).not.toHaveBeenCalled();
     expect(bulkReprocess).not.toHaveBeenCalled();
     expect(bulkIgnore).not.toHaveBeenCalled();

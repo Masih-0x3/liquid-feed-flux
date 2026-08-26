@@ -340,15 +340,15 @@ export function AppLayout({ children }: AppLayoutProps) {
 
 function MobileBottomNav() {
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-glass-border bg-background/95 px-1.5 pb-[max(env(safe-area-inset-bottom),0.35rem)] pt-1.5 backdrop-blur-glass md:hidden">
-      <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${navigationItems.length}, minmax(0, 1fr))` }}>
+    <nav aria-label="Mobile navigation" className="fixed inset-x-0 bottom-0 z-40 border-t border-glass-border bg-background/95 px-1.5 pb-[max(env(safe-area-inset-bottom),0.35rem)] pt-1.5 backdrop-blur-glass md:hidden">
+      <div className="grid gap-0.5" style={{ gridTemplateColumns: `repeat(${navigationItems.length}, minmax(0, 1fr))` }}>
         {navigationItems.map((item) => (
           <NavLink
             key={item.title}
             to={item.url}
             end
             className={({ isActive }) =>
-              `flex min-w-0 flex-col items-center justify-center gap-1 rounded-lg px-1 py-1.5 text-[10px] leading-none transition-colors ${
+              `flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg px-0 py-1.5 text-[9px] leading-none transition-colors ${
                 isActive
                   ? 'bg-primary/20 text-primary'
                   : 'text-muted-foreground hover:bg-glass-border/20 hover:text-glass-foreground'
@@ -356,7 +356,7 @@ function MobileBottomNav() {
             }
           >
             <item.icon className="h-4 w-4 shrink-0" />
-            <span className="w-full truncate text-center">{item.title}</span>
+            <span className="w-full whitespace-nowrap text-center">{item.title}</span>
           </NavLink>
         ))}
       </div>

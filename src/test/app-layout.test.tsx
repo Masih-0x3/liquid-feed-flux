@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -140,6 +140,15 @@ describe("AppLayout", () => {
     expect(toast).toHaveBeenCalledWith({
       title: "Signed out successfully",
       description: "You have been logged out of the XOT Panel.",
+    });
+  });
+
+  it("keeps all mobile navigation labels readable at narrow widths", () => {
+    renderLayout("/");
+
+    const mobileNav = screen.getByRole("navigation", { name: /mobile navigation/i });
+    navigationItems.forEach((item) => {
+      expect(within(mobileNav).getByText(item.title)).toHaveClass("whitespace-nowrap");
     });
   });
 

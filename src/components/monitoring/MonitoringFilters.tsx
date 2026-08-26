@@ -75,39 +75,41 @@ export function MonitoringFilters({
           </ThemedSelect>
         </div>
       </div>
-      <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border/60 pt-3">
-        <span className="text-xs font-medium text-muted-foreground">{selectedCount} selected</span>
-        <Button size="sm" variant="outline" onClick={onToggleSelectAllVisible} disabled={visibleCount === 0}>
-          {isAllVisibleSelected ? 'Deselect all visible' : 'Select all visible'}
-        </Button>
-        {selectedCount > 0 && (
-          <>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={readOnly}
-              title={readOnly ? mutationDisabledTitle : undefined}
-              onClick={() => { if (!readOnly) onBulkReprocess(); }}
-            >
-              <RotateCcw className="w-3 h-3 mr-2" />
-              Mass reprocess
-            </Button>
-            <Button
-              size="sm"
-              variant="destructive"
-              disabled={readOnly}
-              title={readOnly ? mutationDisabledTitle : undefined}
-              onClick={() => { if (!readOnly) onBulkIgnore(); }}
-            >
-              <Ban className="w-3 h-3 mr-2" />
-              Mass ignore
-            </Button>
-            <Button size="sm" variant="ghost" onClick={onClearSelection}>
-              Clear selection
-            </Button>
-          </>
-        )}
-      </div>
+      {!readOnly && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border/60 pt-3">
+          <span className="text-xs font-medium text-muted-foreground">{selectedCount} selected</span>
+          <Button size="sm" variant="outline" onClick={onToggleSelectAllVisible} disabled={visibleCount === 0}>
+            {isAllVisibleSelected ? 'Deselect all visible' : 'Select all visible'}
+          </Button>
+          {selectedCount > 0 && (
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={readOnly}
+                title={readOnly ? mutationDisabledTitle : undefined}
+                onClick={() => { if (!readOnly) onBulkReprocess(); }}
+              >
+                <RotateCcw className="w-3 h-3 mr-2" />
+                Mass reprocess
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                disabled={readOnly}
+                title={readOnly ? mutationDisabledTitle : undefined}
+                onClick={() => { if (!readOnly) onBulkIgnore(); }}
+              >
+                <Ban className="w-3 h-3 mr-2" />
+                Mass ignore
+              </Button>
+              <Button size="sm" variant="ghost" onClick={onClearSelection}>
+                Clear selection
+              </Button>
+            </>
+          )}
+        </div>
+      )}
     </CardHeader>
   );
 }

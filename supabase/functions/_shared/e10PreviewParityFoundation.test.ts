@@ -131,6 +131,27 @@ Deno.test("runtime controls require exactly one valid row", async () => {
   );
 });
 
+Deno.test("runtime controls read the canonical columns from a branched schema", async () => {
+  let selectedColumns = "";
+  const client = {
+    from: () => ({
+      select: (columns: string) => {
+        selectedColumns = columns;
+        return Promise.resolve({
+          data: [columns === "*" ? { ...PREVIEW_CONTROLS, singleton_key: "preview" } : PREVIEW_CONTROLS],
+          error: null,
+        });
+      },
+    }),
+  };
+
+  assertEquals(await fetchRuntimeControls(client), PREVIEW_CONTROLS);
+  assertEquals(
+    selectedColumns,
+    "singleton_id, environment, dedupe_enabled, translation_enabled, posting_mode, updated_at, updated_by",
+  );
+});
+
 Deno.test("pause decisions are typed and fail closed from control values", async () => {
   const preview = await fetchRuntimeControls(controlsClient([PREVIEW_CONTROLS]));
   assertEquals(isDedupePaused(preview), true);

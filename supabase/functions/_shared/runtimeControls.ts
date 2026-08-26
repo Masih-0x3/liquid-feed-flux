@@ -13,7 +13,7 @@ export type RuntimeControls = {
 
 export type RuntimeControlsQueryClient = {
   from: (table: "runtime_controls") => {
-    select: (columns: "*") => PromiseLike<{
+    select: (columns: string) => PromiseLike<{
       data?: unknown;
       error?: unknown;
     }>;
@@ -80,7 +80,7 @@ export async function fetchRuntimeControls(
   client: RuntimeControlsQueryClient,
 ): Promise<RuntimeControls> {
   try {
-    const result = await client.from("runtime_controls").select("*");
+    const result = await client.from("runtime_controls").select(CONTROL_KEYS.join(", "));
     if (result.error || !Array.isArray(result.data) || result.data.length !== 1) {
       throw new RuntimeControlsError();
     }

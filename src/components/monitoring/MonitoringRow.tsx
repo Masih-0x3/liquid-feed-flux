@@ -146,12 +146,14 @@ export function MonitoringMobileCard({
   return (
     <article className="space-y-3 p-3 sm:p-4">
       <div className="flex items-start justify-between gap-2">
-        <Checkbox
-          checked={isSelected}
-          onCheckedChange={(checked) => onSelectChange(entry.tweet_id, checked === true)}
-          onClick={(event) => event.stopPropagation()}
-          aria-label={`Select ${entry.tweet_id}`}
-        />
+        {!readOnly && (
+          <Checkbox
+            checked={isSelected}
+            onCheckedChange={(checked) => onSelectChange(entry.tweet_id, checked === true)}
+            onClick={(event) => event.stopPropagation()}
+            aria-label={`Select ${entry.tweet_id}`}
+          />
+        )}
         <div className="min-w-0 flex-1">
           <button onClick={() => onOpenDetails(entry.tweet_id)} className="block w-full text-left">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
@@ -279,12 +281,14 @@ export function MonitoringTableEntryRows({
     <Fragment>
       <TableRow className="align-top">
         <TableCell className="px-2 py-4">
-          <Checkbox
-            checked={isSelected}
-            onCheckedChange={(checked) => onSelectChange(entry.tweet_id, checked === true)}
-            onClick={(event) => event.stopPropagation()}
-            aria-label={`Select ${entry.tweet_id}`}
-          />
+          {!readOnly && (
+            <Checkbox
+              checked={isSelected}
+              onCheckedChange={(checked) => onSelectChange(entry.tweet_id, checked === true)}
+              onClick={(event) => event.stopPropagation()}
+              aria-label={`Select ${entry.tweet_id}`}
+            />
+          )}
         </TableCell>
         <TableCell className="px-3 py-4 text-xs">
           <div className="space-y-1">
