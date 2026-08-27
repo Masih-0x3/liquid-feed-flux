@@ -12,8 +12,8 @@ import {
 export const E10_CONTEXT = "orbstack";
 export const E10_EXPECTED_IMAGE = "public.ecr.aws/supabase/postgres@sha256:99b1729aeb0bac314445024fc149fbd39306170b61dd50800ccf180327ab3459";
 export const E10_EXPECTED_IMAGE_COMMAND = Object.freeze(["postgres", "-D", "/etc/postgresql"]);
-export const E10_EXPECTED_MIGRATION_COUNT = 124;
-export const E10_EXPECTED_INVENTORY_SHA256 = "d6c31480f6d7c9e926be12bf0e555af9d34d74b07f2b4efa42f5e01f120a5b57";
+export const E10_EXPECTED_MIGRATION_COUNT = 129;
+export const E10_EXPECTED_INVENTORY_SHA256 = "6953713d9eaee2bc00a4a0b38f9fbdb28233a7adfcc205674bda1ff0d8c29a77";
 export const E10_EXPECTED_MIGRATION_VERSION = "20260812100000";
 export const E10_EXPECTED_MIGRATION_NAME = "e10_preview_runtime_controls_and_roles";
 export const E10_EXPECTED_MIGRATION_SHA256 = "66729659d4573d1245ba3ee7845fb76fa7808ecb5bda74cb616916e0700518d7";

@@ -10,6 +10,7 @@ const lifecyclePath = path.join(repoRoot, "supabase/functions/worker/jobLifecycl
 const workerPath = path.join(repoRoot, "supabase/functions/worker/index.ts");
 const fenceSourcePath = path.join(repoRoot, "supabase/functions/_shared/durableClaimFence.ts");
 const migrationPath = path.join(repoRoot, "supabase/migrations/20260806143000_b3_job_x_claim_fencing.sql");
+const effectiveRepairMigrationPath = path.join(repoRoot, "supabase/migrations/20260827064509_repair_effective_claim_fence_and_delivery_cutover.sql");
 const packagePath = path.join(repoRoot, "package.json");
 const ciPath = path.join(repoRoot, ".github/workflows/ci.yml");
 
@@ -224,6 +225,42 @@ function assertUpdateJobOrThrowWrapped(source, fileName, label) {
 async function assertContract({ lifecycle, worker, fence, migration, packageJson, ci }, label = "current source") {
   parseTS(lifecycle, lifecyclePath);
   parseTS(worker, workerPath);
+
+  // The final effective migration wins at runtime.  Keep this check separate
+  // from the original B3 source so a later CREATE OR REPLACE cannot silently
+  // remove the durable claim envelope or the delivery admission guard.
+  const effectiveRepairMigration = fs.readFileSync(effectiveRepairMigrationPath, "utf8");
+  const effectiveClaimStart = effectiveRepairMigration.indexOf(
+    "CREATE OR REPLACE FUNCTION public.claim_jobs(",
+  );
+  const effectiveClaimEnd = effectiveRepairMigration.indexOf("\n$$;", effectiveClaimStart);
+  if (effectiveClaimStart < 0 || effectiveClaimEnd < 0) {
+    fail(`${label}: effective claim_jobs repair function is missing`);
+  }
+  const effectiveClaimBody = effectiveRepairMigration.slice(effectiveClaimStart, effectiveClaimEnd);
+  for (const marker of [
+    "fresh_claim_token uuid := gen_random_uuid();",
+    "claim_token = fresh_claim_token",
+    "claim_generation = COALESCE(claim_generation, 0) + 1",
+    "claim_state = 'preparing'",
+    "claim_started_at = now()",
+    "claim_expires_at = now() + lease_duration",
+    "provider_started_at = NULL",
+    "public.delivery_cutover_allows_job(",
+    "FOR UPDATE SKIP LOCKED",
+  ]) {
+    if (!effectiveClaimBody.includes(marker)) {
+      fail(`${label}: effective claim_jobs repair lacks ${marker}`);
+    }
+  }
+  const effectiveSettlement = effectiveRepairMigration.slice(
+    effectiveRepairMigration.indexOf("CREATE OR REPLACE FUNCTION public.settle_delivery_cutover_blocked("),
+    effectiveRepairMigration.indexOf("\n$$;", effectiveRepairMigration.indexOf("CREATE OR REPLACE FUNCTION public.settle_delivery_cutover_blocked(")),
+  );
+  if (!effectiveSettlement.includes("claim_state = 'failed'") ||
+    !effectiveSettlement.includes("claim_expires_at = NULL")) {
+    fail(`${label}: effective cutover settlement must close the durable claim envelope`);
+  }
 
   // 1. claim_jobs mints a fresh cryptographically random token + monotonic generation.
   if (!migration.includes("fresh_claim_token uuid := gen_random_uuid();")) {

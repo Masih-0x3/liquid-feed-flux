@@ -624,7 +624,7 @@
   "noDatabaseApplication": true,
   "runtimeReceipt": {
     "path": "docs/plans/2026-08-12-xot-e10-disposable-sql-runtime-acceptance.json",
-    "sha256": "0fe3e0f80bc09f4a504424320011be66adace9fa4a85ec08a8fa206504af7aa1",
+    "sha256": "5505cad41f189b47475d73eeb88dec884f5a71de9f01eeb49c8dcf1960550c73",
     "schema": "xot-e10-sql-runtime-acceptance-receipt-v1",
     "status": "ACCEPTED_LOCAL_SQL_T1"
   },
@@ -641,15 +641,15 @@
   "evidence": {
     "docs/plans/2026-08-08-xot-b4-video-render-claim-fencing.json": "32218157fbf2826560a281df5a5d915eb4ab8aa0aba093093f0d7ea046f7cee5",
     "docs/plans/2026-08-11-xot-e7-aggregate-migration-rls-grant-type-boundary.json": "19239b884f73a7eb606103695dd97184cd8ddb27772c8f427b06c6f3debc0f02",
-    "docs/plans/2026-08-12-xot-e10-disposable-sql-runtime-acceptance.json": "0fe3e0f80bc09f4a504424320011be66adace9fa4a85ec08a8fa206504af7aa1",
-    "scripts/e10SqlBoundary.mjs": "669e6b02e5e8a2f09f10cfe886b0a135bbe17fc84cd7f216612cb401fd9be550",
-    "scripts/e10SqlBoundary.test.mjs": "392a0cd6871175cdf8331cae86bc7f3b94c1a79ec2b674468cff9c113175c322",
+    "docs/plans/2026-08-12-xot-e10-disposable-sql-runtime-acceptance.json": "5505cad41f189b47475d73eeb88dec884f5a71de9f01eeb49c8dcf1960550c73",
+    "scripts/e10SqlBoundary.mjs": "652e14ec3cc3c94c45095767df45a7068f95f1763db4e84578bf328b87aead58",
+    "scripts/e10SqlBoundary.test.mjs": "4f56a8fff1818b566b4119ed7d9c55a3247b12f56518efe8110fa654f2bbaa2e",
     "scripts/run-e10-sql-boundary.mjs": "da27f50d0ec8e98ea2a841b86e9d1e469bfea88fa6e0562ac6d287e992bcc71d",
     "supabase/migrations/20260812100000_e10_preview_runtime_controls_and_roles.sql": "66729659d4573d1245ba3ee7845fb76fa7808ecb5bda74cb616916e0700518d7",
     "src/integrations/supabase/types.ts": "261c8c9cee143887c629ece4390951d74fed74d0a60cb2f6584b55d0ada771a4",
     "supabase/functions/_shared/appRole.ts": "1d966b8d5cbe9c5fdbb20bc231046fcf049d200534366b49306c9296542628d8",
-    "supabase/functions/_shared/runtimeControls.ts": "38d6f6e8852b9abf61d87b301f2da523ee3651189ab733e69242117998583e36",
-    "supabase/functions/_shared/e10PreviewParityFoundation.test.ts": "4760427806432ab9bafca0931ebf1f85d6e3f7b9f9bc28f5c7065f3e697f568b",
+    "supabase/functions/_shared/runtimeControls.ts": "2acd09b5cee9fc0f64ef13e646d0059b2bc38ba26101ce44cca524703b7bfc15",
+    "supabase/functions/_shared/e10PreviewParityFoundation.test.ts": "204fbb02e0252dbae9bbee5d0d1868bb369cef4c41687d58bf91d02181dad9bb",
     "supabase/functions/admin-actions/adminAccessPolicy.test.ts": "36bb5ea46eaf87f5734e0841fc3420688f2f790388fc31b2676f12a65b2957ea",
     "supabase/functions/admin-actions/runtimeControlsRoute.test.ts": "a14f5e45f605c3889dddf594e9909f6dc80bc5a3de5c428bc0d48af6a59a577c",
     "src/api/runtimeControls.ts": "6d652a6823dd6ab3922800f6fda678d218655b928e58b181992b4d5616530b8f",
@@ -657,16 +657,16 @@
     "src/test/runtime-controls.test.tsx": "2457a734b606f98582be97e85ee9d723fbbef6c90304ff3e6ce9003caf35f2be",
     "src/components/settings/RuntimeControlsPanel.tsx": "44a6bdc0dbdc118a9cbcc354ae676f7422c4af09e02b3520891096fe6c58f0ab",
     "scripts/check-admin-role-auth-contract.mjs": "bc404e06eb36a832a51d6b1d2f8a785998ff54162e366a91692c7be0570c4769",
-    "scripts/check-migration-baseline.mjs": "cb4621a595f5cd85e053a55f79cfd50fb5b75966fe60d441d3b76e8a708a71be",
-    "scripts/check-migration-baseline.test.mjs": "6fd751e0ce92ed93bd4744c23b2b6e67b2f5a1fbe475ac4c990354b326e338bc",
-    "scripts/build-e10-preview-migration-boundary-receipt.mjs": "3319a32e02b1d3582d563597ddc782a4ef8032c6a64c1354da27df8eb2a8a1dc",
+    "scripts/check-migration-baseline.mjs": "805d67c46c93b316c2fc4b60817c2a3d3158c9890defdadff30d5a9ec0db1fbc",
+    "scripts/check-migration-baseline.test.mjs": "17aed153ba10024aa4ef97ccb56129e289b4230206e60591967750caa2721a32",
+    "scripts/build-e10-preview-migration-boundary-receipt.mjs": "340c6f4bf18d7a85bbacaec7e6b51dc214ba9838c87c717f3c26d588d4dd07d3",
     "package.json": "df7d90f1b9985876197a85274d5c69f9e319dd79f57371e7212c321234802eba",
     ".github/workflows/ci.yml": "cac61c0f514f8d72af25bf2065a43cc5c502417a69b45eb6bf47d27403a45a82"
   },
   "currentCandidate": {
-    "versionCount": 128,
-    "pathCount": 128,
-    "orderedInventorySha256": "fe22d625661169ab8cc7ecf5ed8011ea759186d20af0b0bbcb6f9bbc00c3c163",
+    "versionCount": 129,
+    "pathCount": 129,
+    "orderedInventorySha256": "cb9945c9a08efef8ef2bbe21c88f59ce8ee30e418055de5a035f37cda330c0ce",
     "protectedManifestSha256": "418fc0a4994565daf929244e47e77feb3b8c08728849057b5dce7888f6e96b78",
     "archiveSha256": "72d7e0c9ef610594fb937f8a59f7a6ab77698b43c776ba1a875a56ae9d38edb5",
     "checkedInTypesSha256": "261c8c9cee143887c629ece4390951d74fed74d0a60cb2f6584b55d0ada771a4",
@@ -1312,6 +1312,11 @@
         "version": "20260825220124",
         "path": "supabase/migrations/20260825220124_xot_v2_runtime_controls_activation_bridge.sql",
         "sha256": "7d70aee49b5849f8b7df9e20c78a9d5d886a18eb4618a96ff9296afe81920910"
+      },
+      {
+        "version": "20260827064509",
+        "path": "supabase/migrations/20260827064509_repair_effective_claim_fence_and_delivery_cutover.sql",
+        "sha256": "754cef7f569a784125327b20eb20ffba6330f3e801fd43a264175c39d5f2d816"
       }
     ]
   }

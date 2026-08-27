@@ -103,6 +103,7 @@ jobs:
       - run: npm run check:x-followers-response
       - run: npm run check:x-posting-diagnostics-bounds
       - run: npm run check:x-post-delivery-claim
+      - run: npm run check:v1-delivery-cutover
       - run: npm run check:b3a-job-fence
       - run: npm run check:b3a-x-generation
       - run: npm run check:b3b1-rss-receipt

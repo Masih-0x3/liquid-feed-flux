@@ -20,8 +20,8 @@
       "-D",
       "/etc/postgresql"
     ],
-    "migrationCount": 128,
-    "inventorySha256": "fe22d625661169ab8cc7ecf5ed8011ea759186d20af0b0bbcb6f9bbc00c3c163",
+    "migrationCount": 129,
+    "inventorySha256": "cb9945c9a08efef8ef2bbe21c88f59ce8ee30e418055de5a035f37cda330c0ce",
     "migrationSha256": "66729659d4573d1245ba3ee7845fb76fa7808ecb5bda74cb616916e0700518d7",
     "acceptedRun": {
       "command": "node scripts/run-e10-sql-boundary.mjs",
@@ -39,8 +39,8 @@
           "-D",
           "/etc/postgresql"
         ],
-        "migrationCount": 128,
-        "inventorySha256": "fe22d625661169ab8cc7ecf5ed8011ea759186d20af0b0bbcb6f9bbc00c3c163",
+        "migrationCount": 129,
+        "inventorySha256": "cb9945c9a08efef8ef2bbe21c88f59ce8ee30e418055de5a035f37cda330c0ce",
         "migrationSha256": "66729659d4573d1245ba3ee7845fb76fa7808ecb5bda74cb616916e0700518d7",
         "container": "removed",
         "cleanup": "removed",
@@ -91,12 +91,12 @@
     "deploymentContact": "not_claimed"
   },
   "evidence": {
-    "scripts/e10SqlBoundary.mjs": "669e6b02e5e8a2f09f10cfe886b0a135bbe17fc84cd7f216612cb401fd9be550",
-    "scripts/e10SqlBoundary.test.mjs": "392a0cd6871175cdf8331cae86bc7f3b94c1a79ec2b674468cff9c113175c322",
+    "scripts/e10SqlBoundary.mjs": "652e14ec3cc3c94c45095767df45a7068f95f1763db4e84578bf328b87aead58",
+    "scripts/e10SqlBoundary.test.mjs": "4f56a8fff1818b566b4119ed7d9c55a3247b12f56518efe8110fa654f2bbaa2e",
     "scripts/run-e10-sql-boundary.mjs": "da27f50d0ec8e98ea2a841b86e9d1e469bfea88fa6e0562ac6d287e992bcc71d",
     "supabase/migrations/20260812100000_e10_preview_runtime_controls_and_roles.sql": "66729659d4573d1245ba3ee7845fb76fa7808ecb5bda74cb616916e0700518d7",
-    "scripts/check-migration-baseline.mjs": "cb4621a595f5cd85e053a55f79cfd50fb5b75966fe60d441d3b76e8a708a71be",
-    "scripts/check-migration-baseline.test.mjs": "6fd751e0ce92ed93bd4744c23b2b6e67b2f5a1fbe475ac4c990354b326e338bc",
-    "scripts/build-e10-preview-migration-boundary-receipt.mjs": "3319a32e02b1d3582d563597ddc782a4ef8032c6a64c1354da27df8eb2a8a1dc"
+    "scripts/check-migration-baseline.mjs": "805d67c46c93b316c2fc4b60817c2a3d3158c9890defdadff30d5a9ec0db1fbc",
+    "scripts/check-migration-baseline.test.mjs": "17aed153ba10024aa4ef97ccb56129e289b4230206e60591967750caa2721a32",
+    "scripts/build-e10-preview-migration-boundary-receipt.mjs": "340c6f4bf18d7a85bbacaec7e6b51dc214ba9838c87c717f3c26d588d4dd07d3"
   }
 }

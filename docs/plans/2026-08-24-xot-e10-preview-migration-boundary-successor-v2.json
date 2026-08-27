@@ -9,20 +9,20 @@
   "branch": "codex/xot-full-closure-candidate",
   "predecessor": {
     "path": "docs/plans/2026-08-22-xot-e10-preview-migration-boundary-successor.json",
-    "sha256": "e28a164caa6f3f7bb57819286e0a15f5fb79160131fdd1cfe78f2350e6126442"
+    "sha256": "7cf2bb6550e9fa6052f61eec8c08daf8e6bd95021104add185d5a397321c12f9"
   },
   "currentCandidateOverrides": {
     "migrationSha256Overrides": {
       "supabase/migrations/20260811090000_revoke_public_default_privileges.sql": "fec67e19b6e47534e6b9c7cd7b6b33735fdf26cce74204c8d1e5862b4f8446e8"
     },
-    "orderedInventorySha256": "19026c0bb2f21ff2679da25133637e898a61a7b0615182f48c239e7e670c3a13"
+    "orderedInventorySha256": "6953713d9eaee2bc00a4a0b38f9fbdb28233a7adfcc205674bda1ff0d8c29a77"
   },
   "evidenceOverrides": {
-    "scripts/check-migration-baseline.mjs": "cb4621a595f5cd85e053a55f79cfd50fb5b75966fe60d441d3b76e8a708a71be",
-    "scripts/check-migration-baseline.test.mjs": "6fd751e0ce92ed93bd4744c23b2b6e67b2f5a1fbe475ac4c990354b326e338bc"
+    "scripts/check-migration-baseline.mjs": "805d67c46c93b316c2fc4b60817c2a3d3158c9890defdadff30d5a9ec0db1fbc",
+    "scripts/check-migration-baseline.test.mjs": "17aed153ba10024aa4ef97ccb56129e289b4230206e60591967750caa2721a32"
   },
   "additionalEvidence": {
-    "scripts/check-migration-baseline.test.mjs": "6fd751e0ce92ed93bd4744c23b2b6e67b2f5a1fbe475ac4c990354b326e338bc",
+    "scripts/check-migration-baseline.test.mjs": "17aed153ba10024aa4ef97ccb56129e289b4230206e60591967750caa2721a32",
     "scripts/check-video-render-rls-contract.mjs": "7e03dce248a612e8c96a51130884c7e5c89ae390628f8250c66d9308e3c6a6e3"
   },
   "supersession": {

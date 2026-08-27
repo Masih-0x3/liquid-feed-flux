@@ -3322,6 +3322,11 @@ async function handleDeliverJob(
       );
     }
     if (!telegramClaim.claimed) {
+      if (telegramClaim.reason.startsWith("delivery_cutover_blocked")) {
+        const reason = "delivery_cutover_blocked:telegram_claim";
+        await settleBlockedDeliveryJob(supabase, job, reason);
+        throw new DeliveryCutoverSettled(reason);
+      }
       if (telegramClaim.reason === "already_posted") {
         await insertPipelineEvent(
           supabase,

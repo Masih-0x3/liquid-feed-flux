@@ -98,6 +98,7 @@
     "check:x-followers-response": "node scripts/check-x-followers-response-contract.mjs",
     "check:x-posting-diagnostics-bounds": "node scripts/check-x-posting-diagnostics-bounds-contract.mjs",
     "check:x-post-delivery-claim": "node scripts/check-x-post-delivery-claim-contract.mjs",
+    "check:v1-delivery-cutover": "node scripts/check-v1-delivery-cutover.mjs",
     "check:b3a-job-fence": "node scripts/check-b3a-job-fence-contract.mjs",
     "check:b3a-x-generation": "node scripts/check-b3a-x-generation-contract.mjs",
     "check:b3b1-rss-receipt": "node scripts/check-rss-webhook-receipt-contract.mjs",

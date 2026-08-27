@@ -9,6 +9,10 @@ const settleReasonMigration = await readFile(
   new URL("../supabase/migrations/20260825104845_v1_delivery_cutover_settle_reason_prefix.sql", import.meta.url),
   "utf8",
 );
+const effectiveRepairMigration = await readFile(
+  new URL("../supabase/migrations/20260827064509_repair_effective_claim_fence_and_delivery_cutover.sql", import.meta.url),
+  "utf8",
+);
 const adminRetry = await readFile(
   new URL("../supabase/functions/admin-retry/index.ts", import.meta.url),
   "utf8",
@@ -161,6 +165,63 @@ if (deliveryCheckpoint < 0 || deliveryDisabledResponse < deliveryCheckpoint) {
 if (!settleReasonMigration.includes("v_reason NOT LIKE 'delivery_cutover_blocked%'") ||
   !adminActionsIndex.includes("adminActionRequiresExternalPosting(action, body?.step)")) {
   throw new Error("admin/delivery cutoff contract markers are incomplete");
+}
+const effectiveClaimStart = effectiveRepairMigration.indexOf(
+  "CREATE OR REPLACE FUNCTION public.claim_jobs(",
+);
+const effectiveClaimEnd = effectiveRepairMigration.indexOf("\n$$;", effectiveClaimStart);
+if (effectiveClaimStart < 0 || effectiveClaimEnd < 0) {
+  throw new Error("effective claim_jobs repair function is incomplete");
+}
+const effectiveClaimBody = effectiveRepairMigration.slice(effectiveClaimStart, effectiveClaimEnd);
+for (const marker of [
+  "fresh_claim_token uuid := gen_random_uuid();",
+  "claim_token = fresh_claim_token",
+  "claim_generation = COALESCE(claim_generation, 0) + 1",
+  "claim_state = 'preparing'",
+  "claim_started_at = now()",
+  "claim_expires_at = now() + lease_duration",
+  "provider_started_at = NULL",
+  "public.delivery_cutover_allows_job(",
+  "FOR UPDATE SKIP LOCKED",
+]) {
+  if (!effectiveClaimBody.includes(marker)) {
+    throw new Error(`effective claim_jobs repair lacks ${marker}`);
+  }
+}
+const settlementStart = effectiveRepairMigration.indexOf(
+  "CREATE OR REPLACE FUNCTION public.settle_delivery_cutover_blocked(",
+);
+const settlementEnd = effectiveRepairMigration.indexOf("\n$$;", settlementStart);
+const settlementBody = settlementStart >= 0 && settlementEnd >= 0
+  ? effectiveRepairMigration.slice(settlementStart, settlementEnd)
+  : "";
+for (const marker of [
+  "claim_state = 'failed'",
+  "claim_expires_at = NULL",
+  "last_error = v_reason",
+]) {
+  if (!settlementBody.includes(marker)) {
+    throw new Error(`effective cutover settlement lacks ${marker}`);
+  }
+}
+const guardedTelegramStart = effectiveRepairMigration.indexOf(
+  "CREATE OR REPLACE FUNCTION public.claim_telegram_delivery(",
+);
+const guardedTelegramEnd = effectiveRepairMigration.indexOf("\n$$;", guardedTelegramStart);
+const guardedTelegramBody = guardedTelegramStart >= 0 && guardedTelegramEnd >= 0
+  ? effectiveRepairMigration.slice(guardedTelegramStart, guardedTelegramEnd)
+  : "";
+const telegramGuardAt = guardedTelegramBody.indexOf("public.delivery_cutover_allows_post(");
+const telegramDelegateAt = guardedTelegramBody.indexOf("public.claim_telegram_delivery_unchecked(");
+if (telegramGuardAt < 0 || telegramDelegateAt < 0 || telegramGuardAt > telegramDelegateAt) {
+  throw new Error("effective Telegram claim does not guard before its legacy delegate");
+}
+if (!worker.includes('if (telegramClaim.reason.startsWith("delivery_cutover_blocked"))') ||
+  !worker.includes('await settleBlockedDeliveryJob(supabase, job, reason);') ||
+  worker.indexOf('if (telegramClaim.reason.startsWith("delivery_cutover_blocked"))') >
+    worker.indexOf('if (telegramClaim.reason === "already_posted")')) {
+  throw new Error("worker does not terminally settle a blocked Telegram claim before defer");
 }
 const guardedAdminPaths = [
   ["manual advance", manualAdvance, "requireDeliveryCutover"],

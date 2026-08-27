@@ -762,7 +762,7 @@ test("intact current candidate receipt validates cleanly", () =>
     assert.deepEqual(result.errors, []);
   }));
 
-test("current candidate receipt binds the exact E10 evidence set and 128-entry latest inventory", () =>
+test("current candidate receipt binds the exact E10 evidence set and 129-entry latest inventory", () =>
   withCurrentTreeFixture((root) => {
     const receipt = readFixtureCurrentCandidate(root);
     assert.deepEqual(Object.keys(receipt.evidence).sort(), [...CURRENT_CANDIDATE_EVIDENCE_PATHS].sort());
@@ -775,13 +775,13 @@ test("current candidate receipt binds the exact E10 evidence set and 128-entry l
       receipt.evidence["scripts/build-e10-preview-migration-boundary-receipt.mjs"],
       sha256(readFileSync(join(root, "scripts/build-e10-preview-migration-boundary-receipt.mjs"))),
     );
-    assert.equal(receipt.currentCandidate.versionCount, 128);
-    assert.equal(receipt.currentCandidate.pathCount, 128);
+    assert.equal(receipt.currentCandidate.versionCount, 129);
+    assert.equal(receipt.currentCandidate.pathCount, 129);
     assert.equal(receipt.currentCandidate.orderedInventorySha256, CURRENT_CANDIDATE_INVENTORY_SHA256);
     assert.deepEqual(receipt.currentCandidate.migrations.at(-1), {
-      version: "20260825220124",
-      path: "supabase/migrations/20260825220124_xot_v2_runtime_controls_activation_bridge.sql",
-      sha256: sha256(readFileSync(join(root, "supabase/migrations/20260825220124_xot_v2_runtime_controls_activation_bridge.sql"))),
+      version: "20260827064509",
+      path: "supabase/migrations/20260827064509_repair_effective_claim_fence_and_delivery_cutover.sql",
+      sha256: sha256(readFileSync(join(root, "supabase/migrations/20260827064509_repair_effective_claim_fence_and_delivery_cutover.sql"))),
     });
   }));
 
@@ -848,7 +848,7 @@ test("accepted E10 aggregate rejects a runtime receipt hash binding mutation", (
     assert.ok(result.errors.some((error) => error.includes("runtimeReceipt SHA-256")));
   }));
 
-test("coordinated E10-migration tampering remains rejected by the fixed 128 inventory hash", () =>
+test("coordinated E10-migration tampering remains rejected by the fixed 129 inventory hash", () =>
   withCurrentTreeFixture((root) => {
     const migrationPath = join(root, "supabase/migrations/20260812100000_e10_preview_runtime_controls_and_roles.sql");
     const tamperedBody = `${readFileSync(migrationPath, "utf8")}\n-- coordinated tamper\n`;
@@ -1084,7 +1084,7 @@ test("normal mode rejects an E10 candidate that claims acceptance or production 
     );
   }));
 
-test("successor baseline fails when an extra migration is present (128 -> 129)", () =>
+test("successor baseline fails when an extra migration is present (129 -> 130)", () =>
   withCurrentTreeFixture((root) => {
     writeFileSync(join(root, "supabase/migrations/29990101000000_extra_hidden.sql"), "select 1;\n");
     assert.throws(
@@ -1093,7 +1093,7 @@ test("successor baseline fails when an extra migration is present (128 -> 129)",
     );
   }));
 
-test("successor baseline is chained: the applied migration count is 128", () =>
+test("successor baseline is chained: the applied migration count is 129", () =>
   withCurrentTreeFixture((root) => {
     const result = validateMigrationBaseline({ root });
     assert.equal(result.currentCandidateActiveCount, CURRENT_CANDIDATE_MIGRATION_COUNT);

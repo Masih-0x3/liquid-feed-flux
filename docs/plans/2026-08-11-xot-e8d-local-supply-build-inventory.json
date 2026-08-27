@@ -10,7 +10,7 @@
   "source_files": [
     {
       "path": ".github/workflows/ci.yml",
-      "sha256": "a66ba2cf52cbecb7dd01f3d6b8bde675f67230d1308f175c2ee584e55bd0a144"
+      "sha256": "6c1c3c97f37e8a9258d1af3459f0da70be579c0c4b62792bc2a9a6b35bc7d88f"
     },
     {
       "path": "deno.lock",
@@ -26,7 +26,7 @@
     },
     {
       "path": "package.json",
-      "sha256": "0c6aafbf2624fc7146163cf1db3433820232d82f3c65cd12e0f7d33a89680be8"
+      "sha256": "bb4b106825ce09eeb7e2cd6fc550d4ae8f35ce78edbffe79a44053af80986936"
     },
     {
       "path": "scripts/build-e8-local-supply-build-inventory.test.mjs",
@@ -334,7 +334,7 @@
     },
     {
       "path": "supabase/functions/worker/index.ts",
-      "sha256": "406b05a4f71109c2077af92df3e4153eb13b08127646f699c5b3cd8c7ed6470b"
+      "sha256": "9412c3450e55030bfcee7f7041b0786f74d207c1b5275a4def7d6452b65be099"
     },
     {
       "path": "supabase/functions/worker/jobLifecycle.test.ts",
@@ -389,7 +389,7 @@
     "root_npm": {
       "package_manifest": {
         "path": "package.json",
-        "sha256": "0c6aafbf2624fc7146163cf1db3433820232d82f3c65cd12e0f7d33a89680be8"
+        "sha256": "bb4b106825ce09eeb7e2cd6fc550d4ae8f35ce78edbffe79a44053af80986936"
       },
       "lockfile": {
         "path": "package-lock.json",
@@ -9830,14 +9830,14 @@
           "path": "supabase/functions/admin-actions/index.ts,supabase/functions/admin-retry/index.ts,supabase/functions/db-cleanup/index.ts,supabase/functions/digest-compiler/index.ts,supabase/functions/media-cleanup/index.ts,supabase/functions/media-processor/index.ts,supabase/functions/webhooks-rssapp/index.ts,supabase/functions/worker/index.ts,supabase/functions/x-followers-snapshot/index.ts",
           "version_or_ref": "https://deno.land/std@0.168.0/http/server.ts",
           "integrity_or_source_hash": "e99c1bee8a3f6571ee4cdeb2966efad465b8f6fe62bec1bdb59c1f007cc4d155",
-          "source_file_sha256": "7c7065709d62a6a5b5cdc2659401e9527d2ef50bb388bb3b7d819de49a308d95"
+          "source_file_sha256": "670066762475274eb5206881792194140a2c1378b0d2e9bac87f4fcb0b7b38ed"
         },
         {
           "name": "https://esm.sh/@supabase/supabase-js@2.39.7",
           "path": "supabase/functions/admin-actions/index.ts,supabase/functions/admin-retry/index.ts,supabase/functions/db-cleanup/index.ts,supabase/functions/media-cleanup/index.ts,supabase/functions/media-processor/index.ts,supabase/functions/webhooks-rssapp/index.ts,supabase/functions/worker/index.ts,supabase/functions/x-followers-snapshot/index.ts",
           "version_or_ref": "https://esm.sh/@supabase/supabase-js@2.39.7",
           "integrity_or_source_hash": "5361671c958daa350e504d9975da64b2d6dc9e81390b985ccdafb2e3572e24e7",
-          "source_file_sha256": "779f11908523713c17db227ed5ba08409e93b4e1c73d9679178ca66bfed2e257"
+          "source_file_sha256": "65a8abadae0aa3c59c0a147a1e67eff2a0f30f0a19a6f7c78bdb7a1e56db5936"
         },
         {
           "name": "https://esm.sh/@supabase/supabase-js@2.49.1",
@@ -9858,7 +9858,7 @@
           "path": "supabase/functions/worker/index.ts",
           "version_or_ref": "jsr:@supabase/functions-js/edge-runtime.d.ts",
           "integrity_or_source_hash": "e81b95eac034f9ebb8b62d64e9006958ce762622a882ad6b19ee9eab94da2043",
-          "source_file_sha256": "a1300fc336432f18503569bb91b527ca9c212f81a8531fbb10938b28b97b337e"
+          "source_file_sha256": "8728270047f765b65d2c43c4500c962e2f6cee1b63282ccb5062e429e4eff7d3"
         },
         {
           "name": "npm:@ai-sdk/openai@3.0.79",
@@ -10001,7 +10001,7 @@
     "ci": {
       "source_file": {
         "path": ".github/workflows/ci.yml",
-        "sha256": "a66ba2cf52cbecb7dd01f3d6b8bde675f67230d1308f175c2ee584e55bd0a144"
+        "sha256": "6c1c3c97f37e8a9258d1af3459f0da70be579c0c4b62792bc2a9a6b35bc7d88f"
       },
       "action_refs": [
         {
@@ -10009,14 +10009,14 @@
           "path": ".github/workflows/ci.yml",
           "version_or_ref": "v4",
           "integrity_or_source_hash": null,
-          "source_file_sha256": "a66ba2cf52cbecb7dd01f3d6b8bde675f67230d1308f175c2ee584e55bd0a144"
+          "source_file_sha256": "6c1c3c97f37e8a9258d1af3459f0da70be579c0c4b62792bc2a9a6b35bc7d88f"
         },
         {
           "name": "actions/setup-node",
           "path": ".github/workflows/ci.yml",
           "version_or_ref": "v4",
           "integrity_or_source_hash": null,
-          "source_file_sha256": "a66ba2cf52cbecb7dd01f3d6b8bde675f67230d1308f175c2ee584e55bd0a144"
+          "source_file_sha256": "6c1c3c97f37e8a9258d1af3459f0da70be579c0c4b62792bc2a9a6b35bc7d88f"
         }
       ]
     },
