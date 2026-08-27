@@ -23,7 +23,7 @@
   },
   "additionalEvidence": {
     "scripts/check-migration-baseline.test.mjs": "17aed153ba10024aa4ef97ccb56129e289b4230206e60591967750caa2721a32",
-    "scripts/check-video-render-rls-contract.mjs": "7e03dce248a612e8c96a51130884c7e5c89ae390628f8250c66d9308e3c6a6e3"
+    "scripts/check-video-render-rls-contract.mjs": "21df040b90c85ac6263440688e54c30371c022ca17d94e1b66d0b7e659f78879"
   },
   "supersession": {
     "reason": "Append-only successor binding the immutable successor-v1 to the repaired E7 migration contract and branch-only P3 staging evidence.",
