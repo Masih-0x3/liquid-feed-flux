@@ -1,0 +1,88 @@
+# XOT Lightning renderer Docker Compose — candidate deployment bundle.
+#
+# Target host: lightning-studio-1 (linux/amd64).
+# Persistent root on Lightning: /teamspace/studios/this_studio/xot-renderer
+# The Compose bundle is copied to the stable control/deploy directory. The
+# selected renderer source is supplied by XOT_RENDERER_BUILD_SOURCE.
+#
+# This file is a CANDIDATE only. Luna owns integration and acceptance.
+# It is designed for disabled-first staged start: restart policy is "no"
+# until final acceptance, at which point the operator switches it to
+# unless-stopped (see deploy/lightning/README.md "After acceptance").
+#
+# Hard constraints enforced here:
+#   - loopback-only bind 127.0.0.1:8797 -> container 8787
+#   - platform linux/amd64
+#   - cpus 2, memory 6 GiB, shm 1 GiB, pids 512, init true
+#   - concurrency 1
+#   - healthcheck + 35s stop grace
+#   - json-file logs 10 MiB x 3
+#   - dedicated network + temp volume
+#   - NO Docker socket mount, NO host network, NO Hermes path
+#
+# Variables (all non-secret except the runtime env contents):
+#   XOT_RENDERER_IMAGE_TAG     commit-qualified image tag
+#   XOT_RENDERER_BUILD_SOURCE  selected source tree containing Dockerfile
+#   XOT_RENDERER_ENV_FILE      absolute path to 0600 secret runtime env
+#   XOT_RENDERER_RESTART_POLICY no (default) or unless-stopped after acceptance
+#
+# The env file at XOT_RENDERER_ENV_FILE must be provisioned mode 0600 from
+# XOT-owned sources only. Never commit secret values. Hermes is never a source.
+
+name: xot-renderer
+
+services:
+  xot-video-renderer:
+    build:
+      context: ${XOT_RENDERER_BUILD_SOURCE:-../../}
+      dockerfile: Dockerfile
+      platforms:
+        - linux/amd64
+    image: ${XOT_RENDERER_IMAGE_TAG:-xot-video-renderer:lightning-local}
+    platform: linux/amd64
+    restart: "${XOT_RENDERER_RESTART_POLICY:-no}"
+    init: true
+    env_file:
+      - ${XOT_RENDERER_ENV_FILE:-/teamspace/studios/this_studio/xot-renderer/runtime/renderer.env}
+    environment:
+      PORT: "8787"
+      WORK_DIR: /tmp/xot-video-renderer
+      RENDER_CONCURRENCY: "1"
+      RENDER_SHUTDOWN_GRACE_MS: "30000"
+      # RENDER_POLLING_ENABLED is read from the protected env_file. Do not
+      # override it from the host shell: an unset value fails closed in the
+      # renderer, while an explicit 1/true in the env file must remain usable.
+    ports:
+      - "127.0.0.1:8797:8787"
+    volumes:
+      - xot-renderer-tmp:/tmp/xot-video-renderer
+    networks:
+      - xot-renderer-net
+    mem_limit: 6g
+    memswap_limit: 6g
+    shm_size: 1g
+    pids_limit: 512
+    cpus: "2.0"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8787/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    stop_grace_period: 35s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  xot-renderer-net:
+    name: xot-renderer-net
+    driver: bridge
+    internal: false
+
+volumes:
+  xot-renderer-tmp:
+    name: xot-renderer-tmp
+    driver: local
