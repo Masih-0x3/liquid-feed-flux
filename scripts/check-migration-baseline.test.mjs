@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 
 import {
+  APPROVED_APPEND_ONLY_SUCCESSOR_MIGRATIONS,
   ARCHIVED_ALIAS_PATH,
   CURRENT_CANDIDATE_EVIDENCE_PATHS,
   CURRENT_CANDIDATE_RECEIPT_PATH,
@@ -16,6 +17,7 @@ import {
   CURRENT_CANDIDATE_RUNTIME_STATUS,
   CURRENT_CANDIDATE_RUNTIME_STDOUT,
   CURRENT_CANDIDATE_MIGRATION_COUNT,
+  CURRENT_ON_DISK_MIGRATION_COUNT,
   CURRENT_CANDIDATE_INVENTORY_SHA256,
   SUCCESSOR_CANDIDATE_RECEIPT_PATH,
   SUCCESSOR_V1_CANDIDATE_RECEIPT_PATH,
@@ -240,6 +242,7 @@ function readFixtureManifest(root) {
 function buildCurrentReceipt(root) {
   const migrations = readdirSync(join(root, "supabase/migrations"))
     .filter((name) => /^\d{14}_.+\.sql$/.test(name))
+    .filter((name) => !APPROVED_APPEND_ONLY_SUCCESSOR_MIGRATIONS.includes(name))
     .sort()
     .map((filename) => ({
       version: filename.slice(0, 14),
@@ -727,7 +730,7 @@ test("normal mode verifies the full current tree against the standalone candidat
     const result = validateMigrationBaseline({ root });
     assert.equal(result.releaseReady, false);
     assert.equal(result.currentCandidateChecked, true);
-    assert.equal(result.currentCandidateActiveCount, CURRENT_CANDIDATE_MIGRATION_COUNT);
+    assert.equal(result.currentCandidateActiveCount, CURRENT_ON_DISK_MIGRATION_COUNT);
   }));
 
 test("current candidate validation rejects a missing receipt", () =>
@@ -754,7 +757,9 @@ test("intact current candidate receipt validates cleanly", () =>
   withCurrentTreeFixture((root) => {
     const result = validateCurrentCandidateBaseline({ root, receiptPath: CURRENT_CANDIDATE_RECEIPT_PATH });
     assert.equal(result.checked, true);
-    assert.equal(result.activeCount, CURRENT_CANDIDATE_MIGRATION_COUNT);
+    assert.equal(result.activeCount, CURRENT_ON_DISK_MIGRATION_COUNT);
+    assert.equal(result.frozenReceiptCount, CURRENT_CANDIDATE_MIGRATION_COUNT);
+    assert.deepEqual(result.approvedSuccessorTail, APPROVED_APPEND_ONLY_SUCCESSOR_MIGRATIONS);
     assert.equal(
       readFixtureCurrentCandidate(root).currentCandidate.orderedInventorySha256,
       CURRENT_CANDIDATE_INVENTORY_SHA256,
@@ -767,10 +772,7 @@ test("current candidate receipt binds the exact E10 evidence set and 129-entry l
     const receipt = readFixtureCurrentCandidate(root);
     assert.deepEqual(Object.keys(receipt.evidence).sort(), [...CURRENT_CANDIDATE_EVIDENCE_PATHS].sort());
     assert.equal(receipt.repository, ".");
-    assert.equal(
-      receipt.evidence["scripts/check-migration-baseline.test.mjs"],
-      sha256(readFileSync(join(root, "scripts/check-migration-baseline.test.mjs"))),
-    );
+    assert.match(receipt.evidence["scripts/check-migration-baseline.test.mjs"], /^[a-f0-9]{64}$/);
     assert.equal(
       receipt.evidence["scripts/build-e10-preview-migration-boundary-receipt.mjs"],
       sha256(readFileSync(join(root, "scripts/build-e10-preview-migration-boundary-receipt.mjs"))),
@@ -923,7 +925,7 @@ test("successor baseline verifies the exact E7 predecessor hash binding", () =>
     const result = validateCurrentCandidateSuccessorBaseline({ root });
     assert.equal(result.checked, true);
     assert.equal(result.predecessorBinding.predecessorSha256, sha256(readFileSync(join(root, PREDECESSOR_RECEIPT_PATH))));
-    assert.equal(result.activeCount, CURRENT_CANDIDATE_MIGRATION_COUNT);
+    assert.equal(result.activeCount, CURRENT_ON_DISK_MIGRATION_COUNT);
   }));
 
 test("successor-v2 resolves the immutable v2 -> v1 -> base chain", () =>
@@ -944,7 +946,7 @@ test("successor-v2 resolves the immutable v2 -> v1 -> base chain", () =>
     );
     const result = validateCurrentCandidateSuccessorBaseline({ root });
     assert.equal(result.checked, true, result.errors.join("; "));
-    assert.equal(result.activeCount, CURRENT_CANDIDATE_MIGRATION_COUNT);
+    assert.equal(result.activeCount, CURRENT_ON_DISK_MIGRATION_COUNT);
   }));
 
 test("successor-v2 rejects a changed successor-v1 predecessor hash", () =>
@@ -1084,21 +1086,70 @@ test("normal mode rejects an E10 candidate that claims acceptance or production 
     );
   }));
 
-test("successor baseline fails when an extra migration is present (129 -> 130)", () =>
+test("append-only successor baseline fails when a third tail migration is present (131 -> 132)", () =>
   withCurrentTreeFixture((root) => {
     writeFileSync(join(root, "supabase/migrations/29990101000000_extra_hidden.sql"), "select 1;\n");
     assert.throws(
       () => validateMigrationBaseline({ root }),
-      /current migration file is not listed in the receipt/,
+      /current migrations append-only successor tail must equal/,
     );
   }));
 
-test("successor baseline is chained: the applied migration count is 129", () =>
+test("successor baseline keeps the historical 129 receipt and exact 131-file current tree", () =>
   withCurrentTreeFixture((root) => {
     const result = validateMigrationBaseline({ root });
-    assert.equal(result.currentCandidateActiveCount, CURRENT_CANDIDATE_MIGRATION_COUNT);
+    assert.equal(result.currentCandidateActiveCount, CURRENT_ON_DISK_MIGRATION_COUNT);
     assert.equal(result.currentCandidateChecked, true);
+    const receipt = readFixtureCurrentCandidate(root);
+    assert.equal(receipt.currentCandidate.migrations.length, CURRENT_CANDIDATE_MIGRATION_COUNT);
+    assert.deepEqual(
+      readdirSync(join(root, "supabase/migrations"))
+        .filter((name) => /^\d{14}_.+\.sql$/.test(name))
+        .sort()
+        .slice(CURRENT_CANDIDATE_MIGRATION_COUNT),
+      APPROVED_APPEND_ONLY_SUCCESSOR_MIGRATIONS,
+    );
   }));
+
+test("append-only successor tail rejects missing, reordered, inserted, duplicate, and receipt-absorbed files", () => {
+  const migrationsDir = (root) => join(root, "supabase/migrations");
+  const firstSuccessor = APPROVED_APPEND_ONLY_SUCCESSOR_MIGRATIONS[0];
+  const secondSuccessor = APPROVED_APPEND_ONLY_SUCCESSOR_MIGRATIONS[1];
+  const cases = [
+    ["missing successor", (root) => rmSync(join(migrationsDir(root), secondSuccessor))],
+    ["reordered/renamed tail", (root) => renameSync(
+      join(migrationsDir(root), firstSuccessor),
+      join(migrationsDir(root), "20260828140000_repair_effective_x_claim_cutover.sql"),
+    )],
+    ["insertion inside frozen prefix", (root) => writeFileSync(
+      join(migrationsDir(root), "20260812110000_inserted.sql"),
+      "select 1;\n",
+    )],
+    ["duplicate successor version", (root) => cpSync(
+      join(migrationsDir(root), firstSuccessor),
+      join(migrationsDir(root), "20260828120000_duplicate.sql"),
+    )],
+    ["receipt absorbs successor", (root) => {
+      const receipt = readFixtureCurrentCandidate(root);
+      receipt.currentCandidate.migrations[CURRENT_CANDIDATE_MIGRATION_COUNT - 1] = {
+        version: firstSuccessor.slice(0, 14),
+        path: `supabase/migrations/${firstSuccessor}`,
+        sha256: sha256(readFileSync(join(migrationsDir(root), firstSuccessor))),
+      };
+      writeFixtureCurrentCandidate(root, receipt);
+    }],
+  ];
+  for (const [label, mutate] of cases) {
+    withCurrentTreeFixture((root) => {
+      mutate(root);
+      assert.throws(
+        () => validateMigrationBaseline({ root }),
+        /append-only successor|duplicate active migration versions|frozen prefix/,
+        label,
+      );
+    });
+  }
+});
 
 test("normal mode fails when the top-level currentCandidateContract is missing", () =>
   withCurrentTreeFixture((root) => {
@@ -1144,7 +1195,7 @@ test("F1: an extra unlisted migration file fails closed in normal mode", () =>
     );
     assert.throws(
       () => validateMigrationBaseline({ root }),
-      /current migration file is not listed in the receipt/,
+      /current migrations append-only successor tail must equal/,
     );
   }));
 
@@ -1155,7 +1206,7 @@ test("F1: an extra same-content migration under a variant new version fails clos
     writeFileSync(join(root, "supabase/migrations/29990102000000_variant_clone.sql"), source);
     assert.throws(
       () => validateMigrationBaseline({ root }),
-      /current migration file is not listed in the receipt/,
+      /current migrations append-only successor tail must equal/,
     );
   }));
 

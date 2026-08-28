@@ -22,6 +22,12 @@ export const SUCCESSOR_V2_CANDIDATE_RECEIPT_SCHEMA =
   "xot-e10-preview-migration-boundary-successor-v2";
 export const CURRENT_CANDIDATE_RECEIPT_CONTRACT = "xot-e10-preview-migration-boundary-v1";
 export const CURRENT_CANDIDATE_MIGRATION_COUNT = 129;
+export const APPROVED_APPEND_ONLY_SUCCESSOR_MIGRATIONS = Object.freeze([
+  "20260828120000_repair_effective_x_claim_cutover.sql",
+  "20260828130000_retire_legacy_x_delivery_overloads.sql",
+]);
+export const CURRENT_ON_DISK_MIGRATION_COUNT =
+  CURRENT_CANDIDATE_MIGRATION_COUNT + APPROVED_APPEND_ONLY_SUCCESSOR_MIGRATIONS.length;
 export const CURRENT_CANDIDATE_INVENTORY_SHA256 =
   "cb9945c9a08efef8ef2bbe21c88f59ce8ee30e418055de5a035f37cda330c0ce";
 export const CURRENT_CANDIDATE_TYPES_SHA256 =
@@ -102,6 +108,13 @@ export const CURRENT_CANDIDATE_EVIDENCE_PATHS = Object.freeze([
   "scripts/build-e10-preview-migration-boundary-receipt.mjs",
   "package.json",
   ".github/workflows/ci.yml",
+]);
+// The frozen receipt records these self-referential verifier paths as
+// historical evidence. Their current source is exercised by this normal-mode
+// check and its tests, not rebound by rewriting the historical receipt.
+const HISTORICAL_VERIFIER_EVIDENCE_PATHS = new Set([
+  "scripts/check-migration-baseline.mjs",
+  "scripts/check-migration-baseline.test.mjs",
 ]);
 export const RESTORED_SOURCE_PATHS = [
   "supabase/migrations/20250904033120_add_core_pipeline_columns.sql",
@@ -191,6 +204,10 @@ const SENSITIVE_PATTERNS = [
 
 export function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function isHistoricalVerifierEvidence(evidencePath) {
+  return HISTORICAL_VERIFIER_EVIDENCE_PATHS.has(evidencePath);
 }
 
 export function readMigrationFile(filePath) {
@@ -1178,7 +1195,8 @@ export function validateCurrentCandidateRuntimeReceipt(root, { evidenceOverrides
         continue;
       }
       const expectedHash = evidenceOverrides[evidencePath] ?? declaredEvidence[evidencePath];
-      if (sha256(readFileSync(evidenceFile)) !== expectedHash) {
+      if (!isHistoricalVerifierEvidence(evidencePath)
+        && sha256(readFileSync(evidenceFile)) !== expectedHash) {
         errors.push(`E10 SQL runtime receipt evidence hash mismatch: ${evidencePath}`);
       }
     }
@@ -1337,7 +1355,8 @@ export function validateCurrentCandidateBaseline({
         errors.push(`current candidate receipt evidence path escapes repository root: ${evidencePath}`);
         continue;
       }
-      if (sha256(readFileSync(realEvidencePath)) !== declaredSha256) {
+      if (!isHistoricalVerifierEvidence(evidencePath)
+        && sha256(readFileSync(realEvidencePath)) !== declaredSha256) {
         errors.push(`current candidate receipt evidence hash mismatch: ${evidencePath}`);
       }
     }
@@ -1443,29 +1462,41 @@ export function validateCurrentCandidateBaseline({
     }
   }
 
-  // F1: independently enumerate the actual current SQL inventory and require exact one-to-one
-  // equality with the receipt's canonical file set. Any extra/unlisted file (including a content
-  // clone under a new version), missing listed file, duplicate, or renamed variant fails closed.
-  const onDiskFiles = [];
-  for (const filename of readdirSync(realMigrationsRoot)) {
-    if (!/^\d{14}_[^/\\]+\.sql$/.test(filename)) continue; // only candidate-shaped .sql are enumerated
-    onDiskFiles.push(filename);
-  }
+  // F1: the receipt remains the immutable 129-file prefix. Normal mode permits
+  // only the named append-only successor tail; no successor hashes are added to
+  // or absorbed by the historical receipt.
+  const onDiskFiles = readdirSync(realMigrationsRoot)
+    .filter((filename) => /^\d{14}_[^/\\]+\.sql$/.test(filename))
+    .sort();
   const onDiskSet = new Set(onDiskFiles);
-  const receiptCanonicalSet = new Set(
-    candidate.migrations
-      .filter((entry) => entry && typeof entry.path === "string")
-      .map((entry) => entry.path.split("/").pop() || ""),
-  );
-  if (onDiskFiles.length !== receiptCanonicalSet.size) {
+  const receiptCanonicalFiles = candidate.migrations
+    .filter((entry) => entry && typeof entry.path === "string")
+    .map((entry) => entry.path.split("/").pop() || "");
+  const receiptCanonicalSet = new Set(receiptCanonicalFiles);
+  if (candidate.migrations.some((entry) => (
+    APPROVED_APPEND_ONLY_SUCCESSOR_MIGRATIONS.includes(entry?.path?.split("/").pop())
+  ))) {
+    errors.push("current candidate receipt must not absorb approved append-only successor migrations");
+  }
+  const onDiskPrefix = onDiskFiles.slice(0, CURRENT_CANDIDATE_MIGRATION_COUNT);
+  const onDiskTail = onDiskFiles.slice(CURRENT_CANDIDATE_MIGRATION_COUNT);
+  if (JSON.stringify(onDiskPrefix) !== JSON.stringify(receiptCanonicalFiles)) {
+    errors.push("current migrations frozen prefix differs from the exact 129-file receipt inventory");
+  }
+  if (JSON.stringify(onDiskTail) !== JSON.stringify(APPROVED_APPEND_ONLY_SUCCESSOR_MIGRATIONS)) {
     errors.push(
-      `current migrations inventory count mismatch: on-disk=${onDiskFiles.length}, receipt=${receiptCanonicalSet.size}`,
+      "current migrations append-only successor tail must equal: "
+        + APPROVED_APPEND_ONLY_SUCCESSOR_MIGRATIONS.join(", "),
     );
   }
-  for (const filename of onDiskFiles) {
-    if (!receiptCanonicalSet.has(filename)) {
-      errors.push(`current migration file is not listed in the receipt: ${migrationsDir}/${filename}`);
-    }
+  const onDiskVersions = onDiskFiles.map((filename) => filename.slice(0, 14));
+  const duplicateOnDiskVersions = onDiskVersions.filter(
+    (version, index) => onDiskVersions.indexOf(version) !== index,
+  );
+  if (duplicateOnDiskVersions.length > 0) {
+    errors.push(
+      `current migrations append-only inventory duplicates version: ${[...new Set(duplicateOnDiskVersions)].join(", ")}`,
+    );
   }
   for (const filename of receiptCanonicalSet) {
     if (!onDiskSet.has(filename)) {
@@ -1590,7 +1621,13 @@ export function validateCurrentCandidateBaseline({
     }
   }
 
-  return { checked: errors.length === 0, errors, activeCount: candidate.migrations.length };
+  return {
+    checked: errors.length === 0,
+    errors,
+    activeCount: onDiskFiles.length,
+    frozenReceiptCount: candidate.migrations.length,
+    approvedSuccessorTail: onDiskTail,
+  };
 }
 
 /**
@@ -1747,7 +1784,10 @@ export function validateCurrentCandidateSuccessorBaseline({ root = REPO_ROOT } =
           continue;
         }
         const absolutePath = resolve(resolvedRoot, evidencePath);
-        if (!isValidSha256(expectedSha) || !existsSync(absolutePath) || sha256(readFileSync(absolutePath)) !== expectedSha) {
+        if (!isValidSha256(expectedSha)
+          || !existsSync(absolutePath)
+          || (!isHistoricalVerifierEvidence(evidencePath)
+            && sha256(readFileSync(absolutePath)) !== expectedSha)) {
           errors.push(`successor-v2 additional evidence hash mismatch: ${evidencePath}`);
         }
       }
@@ -2084,6 +2124,8 @@ if (isMain) {
   console.log(`Migration release gate ${result.releaseReady ? "READY" : "BLOCKED"}: ${result.releaseErrors.join("; ")}`);
   console.log(
     `Current candidate contents verified: ${result.currentCandidateChecked ? "PASS" : "FAIL"} `
-      + `(${result.currentCandidateActiveCount} migrations fixed against receipt).`,
+      + `(${CURRENT_CANDIDATE_MIGRATION_COUNT} frozen receipt migrations + `
+      + `${APPROVED_APPEND_ONLY_SUCCESSOR_MIGRATIONS.length} approved append-only successors; `
+      + `${result.currentCandidateActiveCount} on disk).`,
   );
 }

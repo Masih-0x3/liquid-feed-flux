@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 
 const migrationPath = new URL(
   "../supabase/migrations/20260825091418_v1_delivery_continuity_cutover.sql",
@@ -12,6 +12,26 @@ const settleReasonMigration = await readFile(
 const effectiveRepairMigration = await readFile(
   new URL("../supabase/migrations/20260827064509_repair_effective_claim_fence_and_delivery_cutover.sql", import.meta.url),
   "utf8",
+);
+const b3GenerationMigration = await readFile(
+  new URL("../supabase/migrations/20260806143000_b3_job_x_claim_fencing.sql", import.meta.url),
+  "utf8",
+);
+const effectiveXClaimMigrationName = "20260828120000_repair_effective_x_claim_cutover.sql";
+const effectiveXClaimMigration = await readFile(
+  new URL(`../supabase/migrations/${effectiveXClaimMigrationName}`, import.meta.url),
+  "utf8",
+);
+const effectiveXCleanupMigrationName = "20260828130000_retire_legacy_x_delivery_overloads.sql";
+const effectiveXCleanupMigration = await readFile(
+  new URL(`../supabase/migrations/${effectiveXCleanupMigrationName}`, import.meta.url),
+  "utf8",
+);
+const migrationNames = (await readdir(new URL("../supabase/migrations/", import.meta.url)))
+  .filter((name) => /^\d{14}_.+\.sql$/.test(name))
+  .sort();
+const migrationSources = await Promise.all(
+  migrationNames.map(async (name) => [name, await readFile(new URL(`../supabase/migrations/${name}`, import.meta.url), "utf8")]),
 );
 const adminRetry = await readFile(
   new URL("../supabase/functions/admin-retry/index.ts", import.meta.url),
@@ -216,6 +236,132 @@ const telegramGuardAt = guardedTelegramBody.indexOf("public.delivery_cutover_all
 const telegramDelegateAt = guardedTelegramBody.indexOf("public.claim_telegram_delivery_unchecked(");
 if (telegramGuardAt < 0 || telegramDelegateAt < 0 || telegramGuardAt > telegramDelegateAt) {
   throw new Error("effective Telegram claim does not guard before its legacy delegate");
+}
+
+// The final migration must be the last source definition of the X claimer.
+// This catches a later migration silently restoring the pre-generation or
+// pre-cutover implementation.
+const xClaimDefinitionNames = migrationSources
+  .filter(([, source]) => source.includes("CREATE OR REPLACE FUNCTION public.claim_x_post_delivery("))
+  .map(([name]) => name);
+if (migrationNames.indexOf(effectiveXClaimMigrationName) <= migrationNames.indexOf(
+  "20260827064509_repair_effective_claim_fence_and_delivery_cutover.sql",
+)) {
+  throw new Error("effective X claim repair is not ordered after the prior delivery repair");
+}
+if (xClaimDefinitionNames.at(-1) !== effectiveXClaimMigrationName) {
+  throw new Error("effective X claim migration is not the final claim_x_post_delivery definition");
+}
+if (migrationNames.indexOf(effectiveXCleanupMigrationName) <= migrationNames.indexOf(effectiveXClaimMigrationName)) {
+  throw new Error("legacy X overload cleanup is not ordered after the effective X claim repair");
+}
+
+const effectiveXClaimStart = effectiveXClaimMigration.indexOf(
+  "CREATE OR REPLACE FUNCTION public.claim_x_post_delivery(",
+);
+const effectiveXClaimEnd = effectiveXClaimMigration.indexOf("\n$$;", effectiveXClaimStart);
+if (effectiveXClaimStart < 0 || effectiveXClaimEnd < 0) {
+  throw new Error("effective X claim repair function is incomplete");
+}
+const effectiveXClaimBody = effectiveXClaimMigration.slice(effectiveXClaimStart, effectiveXClaimEnd);
+const effectiveXClaimInsertAt = effectiveXClaimBody.indexOf("INSERT INTO public.x_deliveries");
+const effectiveXCutoverAt = effectiveXClaimBody.indexOf("public.delivery_cutover_allows_post(v_post_id)");
+const effectiveXHistoricalAt = effectiveXClaimBody.indexOf("FROM public.x_deliveries xd");
+if (effectiveXCutoverAt < 0 || effectiveXHistoricalAt < 0 || effectiveXClaimInsertAt < 0 ||
+  effectiveXCutoverAt > effectiveXClaimInsertAt || effectiveXHistoricalAt > effectiveXClaimInsertAt ||
+  !effectiveXClaimBody.includes("xd.created_at <= public.get_delivery_cutover()") ||
+  !effectiveXClaimBody.includes("reason', 'historical_x_delivery")) {
+  throw new Error("effective X claim does not enforce cutoff and historical-row guards before insertion");
+}
+for (const marker of [
+  "v_claim_token uuid := gen_random_uuid();",
+  "claim_generation",
+  "claim_state",
+  "'preparing'",
+  "'claim_generation', 1",
+]) {
+  if (!effectiveXClaimBody.includes(marker)) {
+    throw new Error(`effective X claim repair lost ${marker}`);
+  }
+}
+
+// The pre-stage must explicitly recreate the V1 overloads because a
+// convergence run may apply B3 after the original V1 migration has already
+// dropped them. Both remain available until the activation cleanup.
+for (const pattern of [
+  /CREATE OR REPLACE FUNCTION public\.complete_x_post_delivery\(\s*p_delivery_id uuid,\s*p_claim_token uuid,\s*p_x_tweet_id text,/s,
+  /CREATE OR REPLACE FUNCTION public\.fail_x_post_delivery\(\s*p_delivery_id uuid,\s*p_claim_token uuid,\s*p_status text DEFAULT 'failed',/s,
+  /REVOKE ALL ON FUNCTION public\.complete_x_post_delivery\(\s*uuid, uuid, text, integer, bigint, text, timestamptz, integer, jsonb, text\s*\) FROM public, anon, authenticated;/s,
+  /REVOKE ALL ON FUNCTION public\.fail_x_post_delivery\(\s*uuid, uuid, text, text, jsonb, timestamptz, text, integer, bigint, text\s*\) FROM public, anon, authenticated;/s,
+  /GRANT EXECUTE ON FUNCTION public\.complete_x_post_delivery\(\s*uuid, uuid, text, integer, bigint, text, timestamptz, integer, jsonb, text\s*\)\s*TO service_role;/s,
+  /GRANT EXECUTE ON FUNCTION public\.fail_x_post_delivery\(\s*uuid, uuid, text, text, jsonb, timestamptz, text, integer, bigint, text\s*\)\s*TO service_role;/s,
+]) {
+  if (!pattern.test(effectiveXClaimMigration)) {
+    throw new Error("effective X claim pre-stage does not recreate the V1 lifecycle overloads");
+  }
+}
+if ((effectiveXClaimMigration.match(/IF NOT public\.delivery_cutover_allows_post\(v_post_id\) THEN RETURN false;/g) ?? []).length < 2) {
+  throw new Error("effective X claim pre-stage lifecycle overloads lost their cutoff guards");
+}
+for (const marker of ["claim_state='posted', claim_expires_at=NULL", "claim_state=v_status, claim_expires_at=NULL"]) {
+  if (!effectiveXClaimMigration.includes(marker)) {
+    throw new Error(`effective X claim pre-stage does not settle the V1 claim envelope: ${marker}`);
+  }
+}
+
+// Completion/failure must continue to use the B3 generation-fenced overloads
+// after the two unsafe V1 overloads are removed by the activation cleanup.
+for (const marker of [
+  "CREATE OR REPLACE FUNCTION public.complete_x_post_delivery(\n  p_delivery_id uuid,\n  p_claim_token uuid,\n  p_claim_generation bigint",
+  "CREATE OR REPLACE FUNCTION public.fail_x_post_delivery(\n  p_delivery_id uuid,\n  p_claim_token uuid,\n  p_claim_generation bigint",
+  "AND claim_generation = p_claim_generation",
+]) {
+  if (!b3GenerationMigration.includes(marker)) {
+    throw new Error(`B3 generation-fenced X lifecycle marker is missing: ${marker}`);
+  }
+}
+if ((b3GenerationMigration.match(/AND claim_generation = p_claim_generation/g) ?? []).length < 4) {
+  throw new Error("B3 X lifecycle functions do not retain all generation fences");
+}
+
+const preStageDropStatements = effectiveXClaimMigration.match(/DROP FUNCTION\s+IF EXISTS\s+public\./gi) ?? [];
+if (preStageDropStatements.length > 0) {
+  throw new Error("effective X claim pre-stage must not drop legacy X lifecycle overloads");
+}
+const droppedXOverloads = [...effectiveXCleanupMigration.matchAll(
+  /DROP FUNCTION IF EXISTS public\.[\s\S]*?\);/g,
+)].map(([statement]) => statement.replace(/\s+/g, " ").trim());
+const expectedDroppedXOverloads = [
+  "DROP FUNCTION IF EXISTS public.complete_x_post_delivery( uuid, uuid, text, integer, bigint, text, timestamptz, integer, jsonb, text );",
+  "DROP FUNCTION IF EXISTS public.fail_x_post_delivery( uuid, uuid, text, text, jsonb, timestamptz, text, integer, bigint, text );",
+];
+if (droppedXOverloads.length !== expectedDroppedXOverloads.length ||
+  droppedXOverloads.some((statement, index) => statement !== expectedDroppedXOverloads[index])) {
+  throw new Error("legacy X overload cleanup must drop exactly the two unsafe legacy overloads");
+}
+for (const marker of [
+  "REVOKE ALL ON FUNCTION public.claim_x_post_delivery(text, text, boolean, integer)",
+  "GRANT EXECUTE ON FUNCTION public.claim_x_post_delivery(text, text, boolean, integer)",
+  "REVOKE ALL ON FUNCTION public.complete_x_post_delivery(",
+  "GRANT EXECUTE ON FUNCTION public.complete_x_post_delivery(",
+  "REVOKE ALL ON FUNCTION public.fail_x_post_delivery(",
+  "GRANT EXECUTE ON FUNCTION public.fail_x_post_delivery(",
+  "TO service_role",
+]) {
+  if (!effectiveXClaimMigration.includes(marker)) {
+    throw new Error(`effective X claim grant contract is missing: ${marker}`);
+  }
+}
+for (const marker of [
+  "REVOKE ALL ON FUNCTION public.complete_x_post_delivery(",
+  "GRANT EXECUTE ON FUNCTION public.complete_x_post_delivery(",
+  "REVOKE ALL ON FUNCTION public.fail_x_post_delivery(",
+  "GRANT EXECUTE ON FUNCTION public.fail_x_post_delivery(",
+  "TO service_role",
+]) {
+  if (!effectiveXCleanupMigration.includes(marker)) {
+    throw new Error(`legacy X overload cleanup grant contract is missing: ${marker}`);
+  }
 }
 if (!worker.includes('if (telegramClaim.reason.startsWith("delivery_cutover_blocked"))') ||
   !worker.includes('await settleBlockedDeliveryJob(supabase, job, reason);') ||
