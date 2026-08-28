@@ -3762,6 +3762,8 @@ const reviewedNonRawMigrationDigests = new Map([
   // surface, so keep the exemption byte-locked here as well.
   ['20260827064509_repair_effective_claim_fence_and_delivery_cutover.sql', '754cef7f569a784125327b20eb20ffba6330f3e801fd43a264175c39d5f2d816'],
 ]);
+const reviewedServiceOnlyXCutoverMigration =
+  '20260828120000_repair_effective_x_claim_cutover.sql';
 
 const protectedAccessIdentifierPattern = new RegExp(
   `\\b(?:${[
@@ -3809,10 +3811,29 @@ function hasBrowserRoleMembershipGrant(source) {
 
 function isReviewedNonRawMigration(name, source) {
   const expectedDigest = name ? reviewedNonRawMigrationDigests.get(name) : null;
-  return Boolean(
+  if (Boolean(
     expectedDigest
     && createHash('sha256').update(source).digest('hex') === expectedDigest,
-  );
+  )) return true;
+
+  if (name !== reviewedServiceOnlyXCutoverMigration) return false;
+
+  const normalized = normalizedMigrationAccessSource(source);
+  if (
+    protectedAccessIdentifierPattern.test(normalized)
+    || /\b(?:alter|create)\s+role\b|\balter\s+default\s+privileges\b|\bset\s+(?:local\s+)?role\b|\balter\s+function\b/i.test(normalized)
+    || hasBrowserRoleMembershipGrant(source)
+    || hasBrowserFunctionGrant(source)
+    || hasDynamicSqlBlock(source)
+  ) return false;
+
+  const definitions = functionDefinitions(source);
+  return definitions.length > 0
+    && definitions.every(({ signature }) => (
+      /^public\.(?:claim_x_post_delivery|complete_x_post_delivery|fail_x_post_delivery)\s*\(/i
+        .test(signature)
+    ))
+    && functionGrantStatements(source).every(isServiceOnlyFunctionGrant);
 }
 
 function isExactPostLockdownMigration(name, source) {
@@ -5391,6 +5412,22 @@ if (process.env.MUTATION_TEST === '1') {
     migrationTouchesProtectedAccessSurface("DO $$ BEGIN EXECUTE 'GRANT ' || 'ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO authenticated'; END $$;"),
     true,
     'later dynamic SQL migrations must enter the review gate even when protected names are fragmented',
+  );
+  assert.equal(
+    migrationTouchesProtectedAccessSurface(
+      read(join(migrationsDirectory, reviewedServiceOnlyXCutoverMigration)),
+      reviewedServiceOnlyXCutoverMigration,
+    ),
+    false,
+    'reviewed service-only X cutover migration must remain outside the video raw-table gate',
+  );
+  assert.equal(
+    migrationTouchesProtectedAccessSurface(
+      `${read(join(migrationsDirectory, reviewedServiceOnlyXCutoverMigration))}\nGRANT EXECUTE ON FUNCTION public.claim_video_renders(integer,text) TO authenticated;`,
+      reviewedServiceOnlyXCutoverMigration,
+    ),
+    true,
+    'an X cutover migration that reaches a protected renderer RPC must re-enter the gate',
   );
   assert.equal(
     migrationTouchesProtectedAccessSurface('GRANT service_role TO authenticated;'),
