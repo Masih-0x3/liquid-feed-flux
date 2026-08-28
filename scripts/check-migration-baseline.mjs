@@ -115,6 +115,7 @@ export const CURRENT_CANDIDATE_EVIDENCE_PATHS = Object.freeze([
 const HISTORICAL_VERIFIER_EVIDENCE_PATHS = new Set([
   "scripts/check-migration-baseline.mjs",
   "scripts/check-migration-baseline.test.mjs",
+  "scripts/check-video-render-rls-contract.mjs",
 ]);
 export const RESTORED_SOURCE_PATHS = [
   "supabase/migrations/20250904033120_add_core_pipeline_columns.sql",
