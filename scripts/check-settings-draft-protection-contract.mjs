@@ -179,6 +179,7 @@ function assertCard({
   pendingDisabled,
   pendingDisabledCount,
   recommendedSavedConfig,
+  readOnly,
 }) {
   assertIncludes(input, "import { useIncomingSettingsDraft } from '@/hooks/useIncomingSettingsDraft';", label + " shared draft hook import");
   assertIncludes(input, "useIncomingSettingsDraft(incomingConfig)", label + " hook use");
@@ -193,6 +194,26 @@ function assertCard({
   assertIncludes(input, "Keep editing", label + " keep choice");
   assertIncludes(input, "onClick={reloadIncoming}", label + " reload action");
   assertIncludes(input, "onClick={keepEditing}", label + " keep action");
+
+  const updateCount = input.split(updateDraft + "(").length - 1;
+  if (updateCount < 2) {
+    fail(label + " must route more than one draft interaction through " + updateDraft);
+  }
+
+  if (readOnly) {
+    assertIncludes(input, "const legacyReadOnly = true;", label + " legacy read-only guard");
+    assertIncludes(input, "Scoring Studio is the only writable scoring policy", label + " read-only notice");
+    assertIncludes(input, "Legacy content-filter settings are read-only", label + " read-only footer");
+    assertOccurrenceCount(input, "disabled={legacyReadOnly}", 9, label + " disabled controls bound to legacy guard");
+    assertOccurrenceCount(input, "readOnly={legacyReadOnly}", 3, label + " readOnly controls bound to legacy guard");
+    assertNotIncludes(input, "useSaveSettings", label + " must not import save settings hook");
+    assertNotIncludes(input, "saveMutation", label + " must not keep save mutation state");
+    assertNotIncludes(input, saveFunction + " = async () => {", label + " must not define a save handler");
+    assertNotIncludes(input, "mutateAsync({ key: 'content_filter'", label + " must not call content filter save mutation");
+    assertNotIncludes(input, "Save Content Filter Settings", label + " must not render a content filter save control");
+    return;
+  }
+
   assertOccurrenceCount(input, pendingDisabled, pendingDisabledCount, label + " save disabled until decision");
 
   const saveHandler = sliceBetween(
@@ -209,11 +230,6 @@ function assertCard({
   if (recommendedSavedConfig) {
     assertIncludes(input, "markSaved(" + recommendedSavedConfig + ");", label + " recommended defaults acknowledgement");
   }
-
-  const updateCount = input.split(updateDraft + "(").length - 1;
-  if (updateCount < 2) {
-    fail(label + " must route more than one draft interaction through " + updateDraft);
-  }
 }
 
 function assertContract(sources, label) {
@@ -229,12 +245,7 @@ function assertContract(sources, label) {
     updateDraft: "updateConfig",
     configName: "config",
     saveFunction: "saveContentFilter",
-    saveHandlerEnd: "  const filterStatus =",
-    saveMutation: "await saveMutation.mutateAsync({ key: 'content_filter', value: savedConfig });",
-    savedConfig: "savedConfig",
-    pendingDisabled: "disabled={saveMutation.isPending || hasPendingIncoming}",
-    pendingDisabledCount: 2,
-    recommendedSavedConfig: "recommendedConfig",
+    readOnly: true,
   });
   assertCard({
     input: sources.storyMemory,
@@ -281,8 +292,22 @@ function makeDistinctPendingClearMutant(input) {
   );
 }
 
-function makeSaveAcknowledgementMutant(input) {
-  return input.replace("markSaved(savedConfig);", "void savedConfig;");
+function makeContentReadOnlyGuardMutant(input) {
+  return input.replace("const legacyReadOnly = true;", "const legacyReadOnly = false;");
+}
+
+function makeContentRestoreSaveMutant(input) {
+  return input.replace(
+    "const legacyReadOnly = true;",
+    "const legacyReadOnly = true;\n  const saveMutation = useSaveSettings();",
+  );
+}
+
+function makeContentRemoveDisabledGuardMutant(input) {
+  return input.replace(
+    "onClick={() => updateConfig(applyFilterStatus(config, opt.value))}\n                disabled={legacyReadOnly}",
+    "onClick={() => updateConfig(applyFilterStatus(config, opt.value))}\n                disabled={false}",
+  );
 }
 
 function makeContentDirectResetMutant(input) {
@@ -291,13 +316,6 @@ function makeContentDirectResetMutant(input) {
 
 function makeStoryDirectResetMutant(input) {
   return input.replace("updateCfg({ ...cfg,", "setCfg({ ...cfg,");
-}
-
-function makeContentSaveGuardMutant(input) {
-  return input.replace(
-    "disabled={saveMutation.isPending || hasPendingIncoming}",
-    "disabled={saveMutation.isPending}",
-  );
 }
 
 function makeNoticeMutant(input) {
@@ -317,10 +335,11 @@ if (selfTest) {
     ["pending-guard", { ...source, hook: makePendingGuardMutant(source.hook) }],
     ["replay-guard", { ...source, hook: makeReplayGuardMutant(source.hook) }],
     ["distinct-pending-save", { ...source, hook: makeDistinctPendingClearMutant(source.hook) }],
-    ["content-save-acknowledgement", { ...source, contentFilter: makeSaveAcknowledgementMutant(source.contentFilter) }],
+    ["content-readonly-guard", { ...source, contentFilter: makeContentReadOnlyGuardMutant(source.contentFilter) }],
+    ["content-restore-save", { ...source, contentFilter: makeContentRestoreSaveMutant(source.contentFilter) }],
+    ["content-remove-disabled-guard", { ...source, contentFilter: makeContentRemoveDisabledGuardMutant(source.contentFilter) }],
     ["content-direct-reset", { ...source, contentFilter: makeContentDirectResetMutant(source.contentFilter) }],
     ["story-direct-reset", { ...source, storyMemory: makeStoryDirectResetMutant(source.storyMemory) }],
-    ["content-save-guard", { ...source, contentFilter: makeContentSaveGuardMutant(source.contentFilter) }],
     ["content-notice", { ...source, contentFilter: makeNoticeMutant(source.contentFilter) }],
     ["story-compare", { ...source, storyMemory: makeCompareMutant(source.storyMemory) }],
   ];
