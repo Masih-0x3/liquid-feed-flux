@@ -23,6 +23,20 @@ export function isAdminRetryAction(value: unknown): value is AdminRetryAction {
   return typeof value === "string" && ADMIN_RETRY_ACTION_SET.has(value);
 }
 
+/**
+ * A failed delivery is safe for an admin retry only when no provider call may
+ * have started. Keep legacy rows with no claim metadata retryable, but fail
+ * closed for durable ambiguity or any provider-started timestamp.
+ */
+export function isRetryableFailedTelegramDelivery(
+  delivery: Record<string, unknown>,
+): boolean {
+  const claimState = typeof delivery.claim_state === "string"
+    ? delivery.claim_state.trim()
+    : null;
+  return claimState !== "ambiguous" && delivery.provider_started_at == null;
+}
+
 export function classifyAdminRetryAction(
   action: AdminRetryAction,
 ): AdminRetryActionClass {
