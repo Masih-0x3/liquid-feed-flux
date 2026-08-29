@@ -86,6 +86,7 @@ const internalEntrypoints = Object.freeze({
       '../_shared/feedbackBias.ts',
       '../_shared/workerAutochain.ts',
       '../_shared/videoRenderGate.ts',
+      '../_shared/effectiveThreshold.ts',
       '../_shared/mediaSelection.ts',
       '../_shared/staleMediaRepair.ts',
       './workerUtils.ts',
