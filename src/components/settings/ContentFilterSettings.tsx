@@ -183,14 +183,14 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
             <Filter className="w-5 h-5 mr-2" />Content Filtering
           </CardTitle>
           <CardDescription className="space-y-2">
-            <p>
+            <span>
               Legacy path: the model returns an <span className="font-medium text-foreground">importance score</span> (1–20). When filtering is{' '}
               <span className="font-medium text-foreground">Active</span>, posts below your threshold are skipped for Telegram. When an editorial profile is active in the worker,
               delivery instead uses that profile&apos;s <span className="font-medium text-foreground">final score</span> and profile threshold — so Monitoring may show different headline numbers than this card.
-            </p>
-            <p className="text-muted-foreground">
+            </span>
+            <span className="block text-muted-foreground">
               Score Only records scores without blocking delivery. Off disables scoring for this legacy path (profiles may still apply).
-            </p>
+            </span>
           </CardDescription>
         </CardHeader>
         <div className="mx-6 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-muted-foreground">
@@ -219,7 +219,7 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
             </div>
           )}
           {/* 3-way status selector */}
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {statusOptions.map(opt => (
               <button
                 key={opt.value}
@@ -446,12 +446,12 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
               <Sparkles className="w-5 h-5 mr-2" />Editorial Guidelines
             </CardTitle>
             <CardDescription className="space-y-2">
-              <p>
+              <span>
                 Free-text rubric merged into the scoring prompt; this is usually the strongest narrative control on what “important” means for your channel.
-              </p>
-              <p className="text-muted-foreground">
+              </span>
+              <span className="block text-muted-foreground">
                 Shown when filtering is Score Only or Active so you can tune the model even if delivery is not gated here.
-              </p>
+              </span>
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">

@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Sparkles, X, Loader2, RefreshCw, ChevronDown } from 'lucide-react';
+import { Sparkles, X, Plus, Loader2, RefreshCw, ChevronDown } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { DEFAULT_AXIS_WEIGHTS, SCORE_AXIS_KEYS, type EditorialProfile, type ScoreAxisKey } from '@/hooks/useSettingsData';
 import { invokeAdminAction } from '@/api/adminActions';
@@ -147,8 +147,8 @@ export default function EditorialProfilesCard({ profiles: initialProfiles, activ
         <div className="flex flex-wrap items-end gap-3">
           <div className="space-y-1 flex-1 min-w-[220px]">
             <Label>Legacy profile snapshot</Label>
-            <Select value={editingId ?? ''} onValueChange={setEditingId} disabled={legacyReadOnly}>
-              <SelectTrigger><SelectValue placeholder="No profiles — click New" /></SelectTrigger>
+            <Select value={editingId ?? ''} onValueChange={setEditingId} disabled={profiles.length === 0}>
+              <SelectTrigger aria-label="Legacy profile snapshot"><SelectValue placeholder="No profiles available" /></SelectTrigger>
               <SelectContent>
                 {profiles.map(p => (
                   <SelectItem key={p.id} value={p.id}>
