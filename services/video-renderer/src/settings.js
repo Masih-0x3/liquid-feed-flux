@@ -35,6 +35,8 @@ const DEFAULT_RENDER_SETTINGS = {
   },
 };
 
+export const RENDER_SETTINGS_ERROR_MARKER = "renderer_error";
+
 function isRecord(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -112,7 +114,7 @@ export async function loadRenderSettingsOrDefault(supabase, metrics = null) {
   try {
     return await loadRenderSettings(supabase);
   } catch (error) {
-    if (metrics) metrics.video_render_config_error = error instanceof Error ? error.message : String(error);
+    if (metrics) metrics.video_render_config_error = RENDER_SETTINGS_ERROR_MARKER;
     return normalizeRenderSettings();
   }
 }

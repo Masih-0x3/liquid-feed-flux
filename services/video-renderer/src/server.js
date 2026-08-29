@@ -5,7 +5,7 @@ import { RendererRequestInputError, readBoundedRendererDispatchRequest } from ".
 import { abortAllManagedProcesses } from "./processRunner.js";
 import { claimNextRender, claimRenderById, createSupabase, processRenderRow, runPreflightForRenderId } from "./renderer.js";
 import { captureRendererException, flushSentryRenderer, initSentryRenderer } from "./sentry.js";
-import { loadRenderSettingsOrDefault } from "./settings.js";
+import { loadRenderSettingsOrDefault, RENDER_SETTINGS_ERROR_MARKER } from "./settings.js";
 
 function json(res, status, body, headers = {}) {
   res.writeHead(status, { "Content-Type": "application/json", ...headers });
@@ -77,9 +77,24 @@ export function createRendererServer(options = {}) {
   let pollTimer = null;
   let heartbeatTimer = null;
   let shutdownPromise = null;
+  let renderSettingsReadFailed = false;
 
   const syncCapacityState = () => {
     state.running = capacityGate.inFlight;
+  };
+
+  const readRenderSettings = async () => {
+    const settingsMetrics = {};
+    const settings = await loadRenderSettingsOrDefault(supabase, settingsMetrics);
+    const readFailed = settingsMetrics.video_render_config_error === RENDER_SETTINGS_ERROR_MARKER;
+    if (readFailed) {
+      renderSettingsReadFailed = true;
+      state.lastError = RENDER_SETTINGS_ERROR_MARKER;
+    } else if (renderSettingsReadFailed) {
+      renderSettingsReadFailed = false;
+      state.lastError = null;
+    }
+    return settings;
   };
 
   const tryAcquireRendererCapacity = () => {
@@ -127,7 +142,7 @@ export function createRendererServer(options = {}) {
   };
 
   const writeModeHeartbeat = async (metadata = {}) => {
-    const settings = await loadRenderSettingsOrDefault(supabase).catch(() => ({ mode: "enabled" }));
+    const settings = await readRenderSettings();
     const status = settings.mode === "disabled" ? "paused" : "online";
     return writeHeartbeat(status, { mode: settings.mode, ...metadata });
   };
@@ -242,7 +257,7 @@ export function createRendererServer(options = {}) {
 
   async function pollOnce() {
     if (!state.renderPollingEffective || !capacityGate.accepting) return null;
-    const settings = await loadRenderSettingsOrDefault(supabase).catch(() => ({ mode: "enabled" }));
+    const settings = await readRenderSettings();
     if (settings.mode === "disabled") {
       await writeHeartbeat("paused", { mode: settings.mode }).catch(() => null);
       return null;
