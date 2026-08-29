@@ -96,6 +96,7 @@ jobs:
       - run: npm run check:resolve-media-persistence
       - run: npm run check:reprocess-queue-fail-closed
       - run: npm run check:x-poster-self-heal
+      - run: npm run check:x-poster-claim-order
       - run: npm run check:video-render-gate-queue
       - run: npm run check:x-poster-ambiguity
       - run: npm run check:x-poster-read-gates

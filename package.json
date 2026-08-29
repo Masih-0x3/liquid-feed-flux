@@ -91,6 +91,7 @@
     "check:resolve-media-persistence": "node scripts/check-resolve-media-persistence-contract.mjs",
     "check:reprocess-queue-fail-closed": "node scripts/check-reprocess-queue-fail-closed-contract.mjs",
     "check:x-poster-self-heal": "node scripts/check-x-poster-self-heal-contract.mjs",
+    "check:x-poster-claim-order": "node scripts/check-x-poster-claim-order-contract.mjs",
     "check:video-render-gate-queue": "node scripts/check-video-render-gate-queue-contract.mjs",
     "check:x-poster-ambiguity": "node scripts/check-x-poster-ambiguity-contract.mjs",
     "check:x-poster-read-gates": "node scripts/check-x-poster-read-gates-contract.mjs",

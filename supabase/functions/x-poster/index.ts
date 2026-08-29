@@ -1164,33 +1164,6 @@ async function handleManualVideoIntakePost(params: {
     });
   }
 
-  let preparedVideo: PreparedMediaUpload;
-  try {
-    preparedVideo = await downloadMediaForUpload(params.sb, sel.items[0]);
-  } catch (e) {
-    if (
-      e instanceof StaleMediaObjectError &&
-      await repairOriginalStaleMediaForX(params.sb, tweetId, e, 'manual_video_intake')
-    ) {
-      return completeManualFailure(params.sb, {
-        intakeId: manualIntakeId,
-        tweetId,
-        status: 'blocked',
-        reason: `stale_media_repair_queued:${e.storagePath}`,
-        startedAt,
-        meta: { render_id: selectedRenderId, media_id: e.mediaId },
-      });
-    }
-    return completeManualFailure(params.sb, {
-      intakeId: manualIntakeId,
-      tweetId,
-      status: 'failed',
-      reason: safeXPosterErrorCode(e, 'media_upload_failed_video'),
-      startedAt,
-      meta: { render_id: selectedRenderId },
-    });
-  }
-
   await updateManualIntake(params.sb, manualIntakeId, {
     status: 'post_requested',
     selected_render_id: selectedRenderId,
@@ -1238,6 +1211,61 @@ async function handleManualVideoIntakePost(params: {
     });
   }
 
+  let preparedVideo: PreparedMediaUpload;
+  try {
+    preparedVideo = await downloadMediaForUpload(params.sb, sel.items[0]);
+  } catch (e) {
+    if (
+      e instanceof StaleMediaObjectError &&
+      await repairOriginalStaleMediaForX(params.sb, tweetId, e, 'manual_video_intake')
+    ) {
+      try {
+        const released = await failXPostDelivery(params.sb, {
+          deliveryId: deliveryClaim.deliveryId,
+          claimToken: deliveryClaim.claimToken,
+          claimGeneration: deliveryClaim.claimGeneration,
+          status: 'skipped',
+          error: 'stale_media_repair_queued',
+          skipReason: 'stale_media_repair_queued',
+          mediaKind: 'video',
+        });
+        if (!released) console.error('[x-poster] manual pre-provider claim release rejected (stale media)', { tweetId });
+      } catch (releaseError) {
+        console.error('[x-poster] manual pre-provider claim release failed (stale media)', { tweetId, error: safeXPosterErrorCode(releaseError, 'claim_release_failed') });
+      }
+      return completeManualFailure(params.sb, {
+        intakeId: manualIntakeId,
+        tweetId,
+        status: 'blocked',
+        reason: `stale_media_repair_queued:${e.storagePath}`,
+        startedAt,
+        meta: { render_id: selectedRenderId, media_id: e.mediaId },
+      });
+    }
+    const errorCode = safeXPosterErrorCode(e, 'media_upload_failed_video');
+    try {
+      const released = await failXPostDelivery(params.sb, {
+        deliveryId: deliveryClaim.deliveryId,
+        claimToken: deliveryClaim.claimToken,
+        claimGeneration: deliveryClaim.claimGeneration,
+        error: errorCode,
+        skipReason: 'media_preparation_failed',
+        mediaKind: 'video',
+      });
+      if (!released) console.error('[x-poster] manual pre-provider claim release rejected (media)', { tweetId });
+    } catch (releaseError) {
+      console.error('[x-poster] manual pre-provider claim release failed (media)', { tweetId, error: safeXPosterErrorCode(releaseError, 'claim_release_failed') });
+    }
+    return completeManualFailure(params.sb, {
+      intakeId: manualIntakeId,
+      tweetId,
+      status: 'failed',
+      reason: errorCode,
+      startedAt,
+      meta: { render_id: selectedRenderId },
+    });
+  }
+
   // Durable provider-start boundary: recorded BEFORE the first irreversible X
   // provider call. If the durable marker cannot be written, the provider is never
   // invoked (fail-closed). Once the provider may accept, a DB completion failure
@@ -1250,6 +1278,19 @@ async function handleManualVideoIntakePost(params: {
       claimGeneration: deliveryClaim.claimGeneration,
     });
   } catch (e) {
+    try {
+      const released = await failXPostDelivery(params.sb, {
+        deliveryId: deliveryClaim.deliveryId,
+        claimToken: deliveryClaim.claimToken,
+        claimGeneration: deliveryClaim.claimGeneration,
+        error: safeXPosterErrorCode(e, 'provider_start_marker_failed'),
+        skipReason: 'provider_boundary_failed',
+        mediaKind: 'video',
+      });
+      if (!released) console.error('[x-poster] manual provider-boundary claim release rejected', { tweetId });
+    } catch (releaseError) {
+      console.error('[x-poster] manual provider-boundary claim release failed', { tweetId, error: safeXPosterErrorCode(releaseError, 'claim_release_failed') });
+    }
     return completeManualFailure(params.sb, {
       intakeId: manualIntakeId,
       tweetId,
@@ -1260,6 +1301,20 @@ async function handleManualVideoIntakePost(params: {
     });
   }
   if (!providerStarted) {
+    try {
+      const released = await failXPostDelivery(params.sb, {
+        deliveryId: deliveryClaim.deliveryId,
+        claimToken: deliveryClaim.claimToken,
+        claimGeneration: deliveryClaim.claimGeneration,
+        status: 'skipped',
+        error: 'provider_start_marker_rejected',
+        skipReason: 'provider_boundary_failed',
+        mediaKind: 'video',
+      });
+      if (!released) console.error('[x-poster] manual provider-boundary claim release rejected', { tweetId });
+    } catch (releaseError) {
+      console.error('[x-poster] manual provider-boundary claim release failed', { tweetId, error: safeXPosterErrorCode(releaseError, 'claim_release_failed') });
+    }
     return completeManualFailure(params.sb, {
       intakeId: manualIntakeId,
       tweetId,
@@ -2139,34 +2194,6 @@ Deno.serve(async (req) => {
       continue;
     }
 
-    let preparedMediaUploads: PreparedMediaUpload[] = [];
-    if (sel.tier !== 'text' && !dryRun) {
-      try {
-        preparedMediaUploads = [];
-        for (const item of sel.items) {
-          preparedMediaUploads.push(await downloadMediaForUpload(sb, item));
-        }
-      } catch (e) {
-        if (
-          e instanceof StaleMediaObjectError &&
-          await repairOriginalStaleMediaForX(sb, tweetId, e, 'x_poster')
-        ) {
-          results.push({
-            tweet_id: tweetId,
-            status: 'deferred',
-            reason: 'stale_media_repair_queued',
-            media_id: e.mediaId,
-          });
-          console.warn(`[x-poster] deferred ${tweetId}: stale media object repair queued`);
-          continue;
-        }
-        const errMsg = safeXPosterErrorCode(e, `media_upload_failed_${sel.tier}`);
-        results.push({ tweet_id: tweetId, status: 'failed', error: errMsg });
-        console.warn(`[x-poster] ${sel.tier} media preparation failed for ${tweetId}; not claiming delivery`, { code: errMsg });
-        continue;
-      }
-    }
-
     if (!dryRun) {
       try {
         await requireDeliveryCutover(sb, tweetId);
@@ -2201,6 +2228,61 @@ Deno.serve(async (req) => {
         });
         results.push({ tweet_id: tweetId, ...rejection, candidate_reason: candidateReason, candidate_age_ms: candidateAgeMs, dispatch_source: dispatchSource });
         console.log(`[x-poster] deferring ${tweetId}: X claim not acquired (${rejection.reason})`);
+        continue;
+      }
+    }
+
+    let preparedMediaUploads: PreparedMediaUpload[] = [];
+    if (sel.tier !== 'text' && !dryRun) {
+      try {
+        preparedMediaUploads = [];
+        for (const item of sel.items) {
+          preparedMediaUploads.push(await downloadMediaForUpload(sb, item));
+        }
+      } catch (e) {
+        if (
+          e instanceof StaleMediaObjectError &&
+          await repairOriginalStaleMediaForX(sb, tweetId, e, 'x_poster')
+        ) {
+          try {
+            const released = await failXPostDelivery(sb, {
+              deliveryId: deliveryClaim!.deliveryId!,
+              claimToken: deliveryClaim!.claimToken!,
+              claimGeneration: deliveryClaim!.claimGeneration,
+              status: 'skipped',
+              error: 'stale_media_repair_queued',
+              skipReason: 'stale_media_repair_queued',
+              mediaKind: sel.tier,
+            });
+            if (!released) console.error('[x-poster] pre-provider claim release rejected (stale media)', { tweetId });
+          } catch (releaseError) {
+            console.error('[x-poster] pre-provider claim release failed (stale media)', { tweetId, error: safeXPosterErrorCode(releaseError, 'claim_release_failed') });
+          }
+          results.push({
+            tweet_id: tweetId,
+            status: 'deferred',
+            reason: 'stale_media_repair_queued',
+            media_id: e.mediaId,
+          });
+          console.warn(`[x-poster] deferred ${tweetId}: stale media object repair queued`);
+          continue;
+        }
+        const errMsg = safeXPosterErrorCode(e, `media_upload_failed_${sel.tier}`);
+        try {
+          const released = await failXPostDelivery(sb, {
+            deliveryId: deliveryClaim!.deliveryId!,
+            claimToken: deliveryClaim!.claimToken!,
+            claimGeneration: deliveryClaim!.claimGeneration,
+            error: errMsg,
+            skipReason: 'media_preparation_failed',
+            mediaKind: sel.tier,
+          });
+          if (!released) console.error('[x-poster] pre-provider claim release rejected (media)', { tweetId });
+        } catch (releaseError) {
+          console.error('[x-poster] pre-provider claim release failed (media)', { tweetId, error: safeXPosterErrorCode(releaseError, 'claim_release_failed') });
+        }
+        results.push({ tweet_id: tweetId, status: 'failed', error: errMsg });
+        console.warn(`[x-poster] ${sel.tier} media preparation failed for ${tweetId}; released delivery claim`, { code: errMsg });
         continue;
       }
     }
