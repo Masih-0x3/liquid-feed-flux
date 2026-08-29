@@ -96,7 +96,7 @@ export function DashboardHealth({ health, queue, xUsage, systemPerformance }: Pr
         }
         case 'validate-webhook': {
           await invokeAdminRetry({ action: 'test_webhook' });
-          toast({ title: 'Webhook validation completed', description: 'Authentication and payload parsing completed; no post or job was created.' });
+          toast({ title: 'Webhook validation completed', description: 'Authentication and payload parsing completed; no posts or jobs will be created.' });
           break;
         }
       }
@@ -352,7 +352,7 @@ export function DashboardHealth({ health, queue, xUsage, systemPerformance }: Pr
                   <AlertDialogHeader>
                     <AlertDialogTitle>Validate the webhook safely?</AlertDialogTitle>
                     <AlertDialogDescription>
-                      This checks the production webhook's authentication and payload parsing. It does not create posts or jobs.
+                      Validation is currently blocked during the immutable delivery cutover. No webhook request will be made. No posts or jobs will be created.
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
