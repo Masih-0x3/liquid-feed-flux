@@ -480,10 +480,18 @@ function assertContract(sources, label) {
   assertNotIncludes(sources.settings, "live pipeline test", label + " Settings copy");
   assertIncludes(sources.dashboard, "case 'validate-webhook'", label + " Dashboard action");
   assertIncludes(sources.dashboard, "Validate webhook", label + " Dashboard control");
-  assertIncludes(sources.dashboard, "It does not create posts or jobs.", label + " Dashboard copy");
+  assertIncludes(sources.dashboard, "No posts or jobs will be created.", label + " Dashboard copy");
   assertIncludes(sources.dashboard, "Webhook validation blocked", label + " Dashboard blocked state");
   assertIncludes(sources.dashboard, "Validation is unavailable during the immutable delivery cutover.", label + " Dashboard blocked copy");
   assertNotIncludes(sources.dashboard, "Webhook validation passed", label + " Dashboard success must not be claimed");
+  const dashboardValidationDialogStart = sources.dashboard.indexOf("<AlertDialogTitle>Validate the webhook safely?</AlertDialogTitle>");
+  const dashboardValidationDialogEnd = sources.dashboard.indexOf("</AlertDialogContent>", dashboardValidationDialogStart);
+  if (dashboardValidationDialogStart < 0 || dashboardValidationDialogEnd <= dashboardValidationDialogStart) {
+    fail(label + " Dashboard validation dialog is missing");
+  }
+  const dashboardValidationDialog = sources.dashboard.slice(dashboardValidationDialogStart, dashboardValidationDialogEnd);
+  assertIncludes(dashboardValidationDialog, "Validation is currently blocked during the immutable delivery cutover.", label + " Dashboard dialog blocked copy");
+  assertIncludes(dashboardValidationDialog, "No webhook request will be made", label + " Dashboard dialog no-request copy");
   assertNotIncludes(sources.dashboard, "test-pipeline", label + " Dashboard action");
   assertNotIncludes(sources.dashboard, "sample content", label + " Dashboard copy");
   assertNotIncludes(sources.dashboard, "Live test", label + " Dashboard copy");
