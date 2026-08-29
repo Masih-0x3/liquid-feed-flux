@@ -104,7 +104,15 @@ function assertContract(sources, label) {
     label + " filtered sample scope copy",
   );
 
-  assertIncludes(sources.actionNames, "'get_recent_author_stats'", label + " registered action name");
+  const adminActionRegistry = sources.actionNames.match(
+    /export const ADMIN_ACTION_NAMES = \[([\s\S]*?)\] as const;/,
+  );
+  if (!adminActionRegistry) fail(label + " admin action registry is missing");
+  assertIncludes(
+    adminActionRegistry[1],
+    "  'get_recent_author_stats',",
+    label + " registered action name",
+  );
   assertIncludes(sources.dispatcher, "import { getRecentAuthorStatsAdminAction } from \"./authorStats.ts\";", label + " author stats handler import");
   assertIncludes(sources.dispatcher, "case 'get_recent_author_stats': {", label + " author stats dispatcher case");
   assertIncludes(sources.dispatcher, "getRecentAuthorStatsAdminAction(supabase, body)", label + " author stats dispatcher call");
