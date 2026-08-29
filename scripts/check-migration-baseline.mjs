@@ -13,6 +13,8 @@ export const ARCHIVED_ALIAS_PATH = "supabase/migration-history/20250903140000_rp
 export const CURRENT_CANDIDATE_RECEIPT_PATH =
   "docs/plans/2026-08-12-xot-e10-preview-migration-boundary.json";
 export const SUCCESSOR_CANDIDATE_RECEIPT_PATH =
+  "docs/plans/2026-08-29-xot-e10-preview-migration-boundary-successor-v3.json";
+export const SUCCESSOR_V2_CANDIDATE_RECEIPT_PATH =
   "docs/plans/2026-08-24-xot-e10-preview-migration-boundary-successor-v2.json";
 export const SUCCESSOR_V1_CANDIDATE_RECEIPT_PATH =
   "docs/plans/2026-08-22-xot-e10-preview-migration-boundary-successor.json";
@@ -20,11 +22,14 @@ export const SUCCESSOR_V1_CANDIDATE_RECEIPT_SCHEMA =
   "xot-e10-preview-migration-boundary-successor-v1";
 export const SUCCESSOR_V2_CANDIDATE_RECEIPT_SCHEMA =
   "xot-e10-preview-migration-boundary-successor-v2";
+export const SUCCESSOR_V3_CANDIDATE_RECEIPT_SCHEMA =
+  "xot-e10-preview-migration-boundary-successor-v3";
 export const CURRENT_CANDIDATE_RECEIPT_CONTRACT = "xot-e10-preview-migration-boundary-v1";
 export const CURRENT_CANDIDATE_MIGRATION_COUNT = 129;
 export const APPROVED_APPEND_ONLY_SUCCESSOR_MIGRATIONS = Object.freeze([
   "20260828120000_repair_effective_x_claim_cutover.sql",
   "20260828130000_retire_legacy_x_delivery_overloads.sql",
+  "20260828140000_runtime_control_claim_release_race_guards.sql",
   "20260829120000_reconcile_historical_delivery_jobs.sql",
 ]);
 export const CURRENT_ON_DISK_MIGRATION_COUNT =
@@ -32,7 +37,7 @@ export const CURRENT_ON_DISK_MIGRATION_COUNT =
 export const CURRENT_CANDIDATE_INVENTORY_SHA256 =
   "cb9945c9a08efef8ef2bbe21c88f59ce8ee30e418055de5a035f37cda330c0ce";
 export const CURRENT_CANDIDATE_TYPES_SHA256 =
-  "261c8c9cee143887c629ece4390951d74fed74d0a60cb2f6584b55d0ada771a4";
+  "1480973b0ff3603d02a66b7f12623502c37b19b6524bb81a485150dbb32a9ddb";
 // The immediately-preceding authorized successor receipt. The E10 current
 // candidate must carry this exact predecessor SHA-256 so the append-only chain
 // remains immutable: E7 -> E10 (this candidate).
@@ -1647,13 +1652,16 @@ export function validateCurrentCandidateBaseline({
 export function validateCurrentCandidateSuccessorBaseline({ root = REPO_ROOT } = {}) {
   const resolvedRoot = resolve(root);
   const errors = [];
-  const successorV2Path = resolve(resolvedRoot, SUCCESSOR_CANDIDATE_RECEIPT_PATH);
+  const successorV3Path = resolve(resolvedRoot, SUCCESSOR_CANDIDATE_RECEIPT_PATH);
+  const successorV2Path = resolve(resolvedRoot, SUCCESSOR_V2_CANDIDATE_RECEIPT_PATH);
   const successorV1Path = resolve(resolvedRoot, SUCCESSOR_V1_CANDIDATE_RECEIPT_PATH);
-  const currentPath = existsSync(successorV2Path)
-    ? successorV2Path
-    : existsSync(successorV1Path)
-      ? successorV1Path
-      : resolve(resolvedRoot, CURRENT_CANDIDATE_RECEIPT_PATH);
+  const currentPath = existsSync(successorV3Path)
+    ? successorV3Path
+    : existsSync(successorV2Path)
+      ? successorV2Path
+      : existsSync(successorV1Path)
+        ? successorV1Path
+        : resolve(resolvedRoot, CURRENT_CANDIDATE_RECEIPT_PATH);
   if (!existsSync(currentPath)) {
     return {
       checked: false,
@@ -1708,7 +1716,15 @@ export function validateCurrentCandidateSuccessorBaseline({ root = REPO_ROOT } =
         errors.push(`${label} migration override path is not in the predecessor inventory: ${path}`);
       }
     }
-    const allowedCandidateKeys = new Set(["migrationSha256Overrides", "orderedInventorySha256"]);
+    if (candidateOverrides.checkedInTypesSha256 !== undefined
+      && !isValidSha256(candidateOverrides.checkedInTypesSha256)) {
+      errors.push(`${label} checkedInTypesSha256 override is invalid`);
+    }
+    const allowedCandidateKeys = new Set([
+      "migrationSha256Overrides",
+      "orderedInventorySha256",
+      "checkedInTypesSha256",
+    ]);
     for (const key of Object.keys(candidateOverrides)) {
       if (!allowedCandidateKeys.has(key)) errors.push(`${label} currentCandidateOverrides key is unexpected: ${key}`);
     }
@@ -1751,13 +1767,13 @@ export function validateCurrentCandidateSuccessorBaseline({ root = REPO_ROOT } =
     return JSON.parse(predecessorRaw);
   };
 
-  let effectiveCurrent = current;
-  if (current?.schema === SUCCESSOR_V2_CANDIDATE_RECEIPT_SCHEMA) {
-    if (JSON.stringify(current.supersession?.evidenceTier) !== JSON.stringify({ achieved: ["T0", "T1", "T2"], deferred: ["T3", "T4"] })) {
+  const resolveSuccessorV2 = (v2) => {
+    let effectiveV2 = null;
+    if (JSON.stringify(v2.supersession?.evidenceTier) !== JSON.stringify({ achieved: ["T0", "T1", "T2"], deferred: ["T3", "T4"] })) {
       errors.push("successor-v2 evidence tier is invalid");
     }
     const v1 = validateEnvelope(
-      current,
+      v2,
       SUCCESSOR_V2_CANDIDATE_RECEIPT_SCHEMA,
       SUCCESSOR_V1_CANDIDATE_RECEIPT_PATH,
       545,
@@ -1774,9 +1790,11 @@ export function validateCurrentCandidateSuccessorBaseline({ root = REPO_ROOT } =
         544,
         "successor-v1 receipt",
       );
-      if (base) effectiveCurrent = applyOverrides(applyOverrides(base, v1, "successor-v1"), current, "successor-v2");
+      if (base) {
+        effectiveV2 = applyOverrides(applyOverrides(base, v1, "successor-v1"), v2, "successor-v2");
+      }
     }
-    const additionalEvidence = current.additionalEvidence ?? {};
+    const additionalEvidence = v2.additionalEvidence ?? {};
     if (!additionalEvidence || typeof additionalEvidence !== "object" || Array.isArray(additionalEvidence)) {
       errors.push("successor-v2 additionalEvidence must be an object");
     } else {
@@ -1794,6 +1812,31 @@ export function validateCurrentCandidateSuccessorBaseline({ root = REPO_ROOT } =
         }
       }
     }
+    return effectiveV2;
+  };
+
+  let effectiveCurrent = current;
+  if (current?.schema === SUCCESSOR_V3_CANDIDATE_RECEIPT_SCHEMA) {
+    if (JSON.stringify(current.supersession?.evidenceTier) !== JSON.stringify({ achieved: ["T0", "T1", "T2"], deferred: ["T3", "T4"] })) {
+      errors.push("successor-v3 evidence tier is invalid");
+    }
+    const v2 = validateEnvelope(
+      current,
+      SUCCESSOR_V3_CANDIDATE_RECEIPT_SCHEMA,
+      SUCCESSOR_V2_CANDIDATE_RECEIPT_PATH,
+      546,
+      "successor-v3 receipt",
+    );
+    if (v2?.schema !== SUCCESSOR_V2_CANDIDATE_RECEIPT_SCHEMA) {
+      errors.push("successor-v3 predecessor must be successor-v2");
+    }
+    if (v2) {
+      const effectiveV2 = resolveSuccessorV2(v2);
+      if (effectiveV2) effectiveCurrent = applyOverrides(effectiveV2, current, "successor-v3");
+    }
+  } else if (current?.schema === SUCCESSOR_V2_CANDIDATE_RECEIPT_SCHEMA) {
+    const effectiveV2 = resolveSuccessorV2(current);
+    if (effectiveV2) effectiveCurrent = effectiveV2;
   } else if (current?.schema === SUCCESSOR_V1_CANDIDATE_RECEIPT_SCHEMA) {
     if (current.supersession?.evidenceTier && JSON.stringify(current.supersession.evidenceTier) !== JSON.stringify({ achieved: ["T0", "T1"], deferred: ["T2", "T3", "T4"] })) {
       errors.push("successor-v1 evidence tier is invalid");

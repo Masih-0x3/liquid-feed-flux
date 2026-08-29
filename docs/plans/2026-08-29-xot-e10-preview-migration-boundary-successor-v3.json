@@ -1,0 +1,73 @@
+{
+  "schema": "xot-e10-preview-migration-boundary-successor-v3",
+  "event": "e10_preview_migration_boundary_successor_local_type_reconciliation_acceptance",
+  "phase": "preview-migration-boundary-local-only",
+  "status": "ACCEPTED_LOCAL_SQL_T1",
+  "release": "CLOSED",
+  "releaseGate": "CLOSED",
+  "repository": ".",
+  "branch": "codex/xot-v2-composite-release",
+  "predecessor": {
+    "path": "docs/plans/2026-08-24-xot-e10-preview-migration-boundary-successor-v2.json",
+    "sha256": "132947ce68611a26d63145dc8fa22b9655797bd389c8a59b5ddf1146713c6015"
+  },
+  "currentCandidateOverrides": {
+    "checkedInTypesSha256": "1480973b0ff3603d02a66b7f12623502c37b19b6524bb81a485150dbb32a9ddb"
+  },
+  "evidenceOverrides": {
+    "src/integrations/supabase/types.ts": "1480973b0ff3603d02a66b7f12623502c37b19b6524bb81a485150dbb32a9ddb",
+    "supabase/functions/admin-actions/adminAccessPolicy.test.ts": "7842be651faf066deece0bb6dd96cd5c8c8968b372924747d78a6be8aadb91e3",
+    "supabase/functions/admin-actions/runtimeControlsRoute.test.ts": "b6a90f1c79f6a87e06a126ae3e0f02af1c6239dcffd3aec824840017b2399012",
+    "src/api/runtimeControls.ts": "6268d500d0cda794a0885b543d2ad1981ddf0ffec82476a28b4e119bdf4d29a2",
+    "src/test/runtime-controls-api.test.ts": "5fc612d3b72dad51d6fb9d8daacc09ff27e05b069cbd6444bbcd40acd4cfef00",
+    "src/test/runtime-controls.test.tsx": "1bacc12bce358c033d2d2cd095dcef2188ecace097c93c2d2379459302e981c4",
+    "src/components/settings/RuntimeControlsPanel.tsx": "8d2581d27d77d0e4633c1b47561b55bc7c525b99d34bc550c2d3780e4a4e0dd8"
+  },
+  "supersession": {
+    "reason": "Append-only successor binding the immutable successor-v2 to reconciled generated types, admin access policy, and runtime-control race evidence.",
+    "changedPaths": [
+      "src/integrations/supabase/types.ts",
+      "supabase/functions/admin-actions/adminAccessPolicy.test.ts",
+      "supabase/functions/admin-actions/runtimeControlsRoute.test.ts",
+      "src/api/runtimeControls.ts",
+      "src/test/runtime-controls-api.test.ts",
+      "src/test/runtime-controls.test.tsx",
+      "src/components/settings/RuntimeControlsPanel.tsx",
+      "supabase/migrations/20260828140000_runtime_control_claim_release_race_guards.sql",
+      "scripts/check-migration-baseline.mjs",
+      "scripts/check-migration-baseline.test.mjs",
+      "docs/plans/2026-08-29-xot-e10-preview-migration-boundary-successor-v3.json"
+    ],
+    "ledgerRow": 546,
+    "validation": [
+      "migration baseline normal and mutation checker",
+      "admin access policy tests",
+      "runtime controls route and UI tests",
+      "strict TypeScript typecheck"
+    ],
+    "evidenceTier": {
+      "achieved": [
+        "T0",
+        "T1",
+        "T2"
+      ],
+      "deferred": [
+        "T3",
+        "T4"
+      ]
+    },
+    "releaseState": "CLOSED"
+  },
+  "claims": {
+    "productionSchema": "not_claimed",
+    "productionDeployment": "not_claimed",
+    "productionChanged": false,
+    "staging": "not_claimed",
+    "deployment": "not_claimed",
+    "liveVerification": "not_claimed"
+  },
+  "notClosed": [
+    "Hosted CI, staging, deployment, live and production equivalence remain unverified.",
+    "Release gate remains CLOSED."
+  ]
+}

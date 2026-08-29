@@ -20,6 +20,7 @@ import {
   CURRENT_ON_DISK_MIGRATION_COUNT,
   CURRENT_CANDIDATE_INVENTORY_SHA256,
   SUCCESSOR_CANDIDATE_RECEIPT_PATH,
+  SUCCESSOR_V2_CANDIDATE_RECEIPT_PATH,
   SUCCESSOR_V1_CANDIDATE_RECEIPT_PATH,
   GATE_REQUIRED_CHECKS,
   HISTORICAL_B4_RECEIPT_PATH,
@@ -928,10 +929,11 @@ test("successor baseline verifies the exact E7 predecessor hash binding", () =>
     assert.equal(result.activeCount, CURRENT_ON_DISK_MIGRATION_COUNT);
   }));
 
-test("successor-v2 resolves the immutable v2 -> v1 -> base chain", () =>
+test("successor-v3 resolves the immutable v3 -> v2 -> v1 -> base chain", () =>
   withCurrentTreeFixture((root) => {
     for (const relativePath of [
       SUCCESSOR_CANDIDATE_RECEIPT_PATH,
+      SUCCESSOR_V2_CANDIDATE_RECEIPT_PATH,
       SUCCESSOR_V1_CANDIDATE_RECEIPT_PATH,
       "supabase/migrations/20260811090000_revoke_public_default_privileges.sql",
       "scripts/check-video-render-rls-contract.mjs",
@@ -949,9 +951,14 @@ test("successor-v2 resolves the immutable v2 -> v1 -> base chain", () =>
     assert.equal(result.activeCount, CURRENT_ON_DISK_MIGRATION_COUNT);
   }));
 
-test("successor-v2 rejects a changed successor-v1 predecessor hash", () =>
+test("successor-v3 rejects a changed successor-v2 predecessor hash", () =>
   withCurrentTreeFixture((root) => {
-    for (const relativePath of [SUCCESSOR_CANDIDATE_RECEIPT_PATH, SUCCESSOR_V1_CANDIDATE_RECEIPT_PATH, "scripts/check-video-render-rls-contract.mjs"]) {
+    for (const relativePath of [
+      SUCCESSOR_CANDIDATE_RECEIPT_PATH,
+      SUCCESSOR_V2_CANDIDATE_RECEIPT_PATH,
+      SUCCESSOR_V1_CANDIDATE_RECEIPT_PATH,
+      "scripts/check-video-render-rls-contract.mjs",
+    ]) {
       const destination = join(root, relativePath);
       mkdirSync(dirname(destination), { recursive: true });
       cpSync(join(REPO_ROOT, relativePath), destination);
@@ -962,17 +969,40 @@ test("successor-v2 rejects a changed successor-v1 predecessor hash", () =>
     writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
     const result = validateCurrentCandidateSuccessorBaseline({ root });
     assert.equal(result.checked, false);
-    assert.ok(result.errors.some((error) => error.includes("successor-v2 receipt predecessor SHA-256")));
+    assert.ok(result.errors.some((error) => error.includes("successor-v3 receipt predecessor SHA-256")));
   }));
 
-test("successor-v2 rejects widened migration and evidence overrides", () =>
+test("successor-v3 rejects a stale types binding and unexpected candidate override", () =>
   withCurrentTreeFixture((root) => {
-    for (const relativePath of [SUCCESSOR_CANDIDATE_RECEIPT_PATH, SUCCESSOR_V1_CANDIDATE_RECEIPT_PATH, "scripts/check-video-render-rls-contract.mjs"]) {
+    for (const relativePath of [
+      SUCCESSOR_CANDIDATE_RECEIPT_PATH,
+      SUCCESSOR_V2_CANDIDATE_RECEIPT_PATH,
+      SUCCESSOR_V1_CANDIDATE_RECEIPT_PATH,
+      "scripts/check-video-render-rls-contract.mjs",
+    ]) {
       const destination = join(root, relativePath);
       mkdirSync(dirname(destination), { recursive: true });
       cpSync(join(REPO_ROOT, relativePath), destination);
     }
     const receiptPath = join(root, SUCCESSOR_CANDIDATE_RECEIPT_PATH);
+    const receipt = JSON.parse(readFileSync(receiptPath, "utf8"));
+    receipt.currentCandidateOverrides.checkedInTypesSha256 = "0".repeat(64);
+    receipt.currentCandidateOverrides.unexpected = true;
+    writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+    const result = validateCurrentCandidateSuccessorBaseline({ root });
+    assert.equal(result.checked, false);
+    assert.ok(result.errors.some((error) => error.includes("checkedInTypesSha256")));
+    assert.ok(result.errors.some((error) => error.includes("currentCandidateOverrides key is unexpected")));
+  }));
+
+test("successor-v2 rejects widened migration and evidence overrides", () =>
+  withCurrentTreeFixture((root) => {
+    for (const relativePath of [SUCCESSOR_V2_CANDIDATE_RECEIPT_PATH, SUCCESSOR_V1_CANDIDATE_RECEIPT_PATH, "scripts/check-video-render-rls-contract.mjs"]) {
+      const destination = join(root, relativePath);
+      mkdirSync(dirname(destination), { recursive: true });
+      cpSync(join(REPO_ROOT, relativePath), destination);
+    }
+    const receiptPath = join(root, SUCCESSOR_V2_CANDIDATE_RECEIPT_PATH);
     const receipt = JSON.parse(readFileSync(receiptPath, "utf8"));
     receipt.currentCandidateOverrides.migrationSha256Overrides["README.md"] = "0".repeat(64);
     receipt.additionalEvidence["README.md"] = "0".repeat(64);
@@ -1086,7 +1116,7 @@ test("normal mode rejects an E10 candidate that claims acceptance or production 
     );
   }));
 
-test("append-only successor baseline fails when a fourth tail migration is present (132 -> 133)", () =>
+test("append-only successor baseline fails when a fifth tail migration is present (133 -> 134)", () =>
   withCurrentTreeFixture((root) => {
     writeFileSync(join(root, "supabase/migrations/29990101000000_extra_hidden.sql"), "select 1;\n");
     assert.throws(
@@ -1095,7 +1125,7 @@ test("append-only successor baseline fails when a fourth tail migration is prese
     );
   }));
 
-test("successor baseline keeps the historical 129 receipt and exact 132-file current tree", () =>
+test("successor baseline keeps the historical 129 receipt and exact 133-file current tree", () =>
   withCurrentTreeFixture((root) => {
     const result = validateMigrationBaseline({ root });
     assert.equal(result.currentCandidateActiveCount, CURRENT_ON_DISK_MIGRATION_COUNT);
