@@ -24,11 +24,14 @@ import { useQuery } from '@tanstack/react-query';
 import { invokeAdminAction } from '@/api/adminActions';
 import { useIncomingSettingsDraft } from '@/hooks/useIncomingSettingsDraft';
 
-const RECOMMENDED_IRAN_RUBRIC: ContentFilterConfig = {
+/** Shared effective default for the legacy content-filter delivery threshold. */
+export const DEFAULT_CONTENT_FILTER_THRESHOLD = 14;
+
+export const RECOMMENDED_IRAN_RUBRIC: ContentFilterConfig = {
   enabled: true,
   score_only: false,
   filter_mode: 'global',
-  default_threshold: 12,
+  default_threshold: DEFAULT_CONTENT_FILTER_THRESHOLD,
   priority_topics: ['Iran', 'IRGC', 'Hormuz', 'sanctions', 'nuclear', 'Hezbollah', 'Houthis', 'Israel-Iran', 'Persian Gulf', 'Middle East', 'GCC', 'Syria', 'Iraq', 'Yemen', 'Pahlavi'],
   low_priority_topics: ['stocks', 'crypto', 'earnings', 'sports', 'entertainment', 'celebrity', 'tech launches', 'weather'],
   author_rules: {},
@@ -46,11 +49,11 @@ export interface ContentFilterConfig {
   author_rules: Record<string, { rule: string; threshold?: number }>;
 }
 
-const defaultConfig: ContentFilterConfig = {
+export const defaultConfig: ContentFilterConfig = {
   enabled: false,
   score_only: false,
   filter_mode: 'global',
-  default_threshold: 12,
+  default_threshold: DEFAULT_CONTENT_FILTER_THRESHOLD,
   editorial_guidelines: '',
   priority_topics: [],
   low_priority_topics: [],
@@ -129,7 +132,7 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
     try {
       await saveMutation.mutateAsync({ key: 'content_filter', value: recommendedConfig });
       markSaved(recommendedConfig);
-      toast({ title: 'Recommended Iran-rubric defaults applied', description: 'Threshold 12 with updated guidelines.' });
+      toast({ title: 'Recommended Iran-rubric defaults applied', description: 'Threshold 14 with updated guidelines.' });
     } catch (e) {
       // useSaveSettings already shows an error toast
     }
@@ -642,7 +645,7 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
           disabled={saveMutation.isPending || hasPendingIncoming}
           variant="outline"
           className="sm:w-auto"
-          title="Sets threshold to 12, replaces editorial guidelines with the bias-corrected version, and switches the OpenAI model to gpt-5.4-mini."
+          title="Sets threshold to 14, replaces editorial guidelines with the bias-corrected version, and switches the OpenAI model to gpt-5.4-mini."
         >
           <Wand2 className="w-4 h-4 mr-2" />
           Apply Recommended Iran-Rubric Defaults

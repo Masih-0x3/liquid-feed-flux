@@ -761,3 +761,126 @@ Deno.test("runRescore updates post with parsed tool score", async () => {
   assertEquals(postUpdate.text_translated, "ترجمه.");
   assertEquals(postUpdate.translation_model, "legacy-model");
 });
+
+Deno.test("runRescore falls back to the default effective threshold when content_filter.default_threshold is missing", async () => {
+  const supabase = fakeSupabase({
+    post: {
+      tweet_id: "t1",
+      text_original: "hello",
+      author_handle: "source",
+      tweeted_at: "2026-01-01T00:00:00.000Z",
+      has_media: false,
+      url: "https://x.com/post",
+    },
+    settings: [
+      { key: "translation_prompt", value: { model: "legacy-model" } },
+      { key: "content_filter", value: { enabled: true } },
+    ],
+  });
+
+  const result = await runRescore(supabase, "t1", {
+    getOpenAiApiKey: () => "key",
+    now: () => new Date("2026-01-02T00:00:00.000Z"),
+    callOpenAI: (async () =>
+      openAiResponse({
+        toolCall: {
+          name: "classify_importance",
+          arguments: JSON.stringify({
+            importance_score: 13,
+            tags: [],
+            reasoning: "direct",
+          }),
+        },
+      })) as never,
+  });
+
+  assertEquals(result.ok, true);
+  assertEquals(result.score, 13);
+  assertEquals(result.threshold, 14);
+  assertEquals(result.decision, "skip");
+  assertEquals(result.decision_reason, "below_threshold:13<14");
+});
+
+Deno.test("runRescore falls back to the default effective threshold when content_filter.default_threshold is non-numeric", async () => {
+  const supabase = fakeSupabase({
+    post: {
+      tweet_id: "t1",
+      text_original: "hello",
+      author_handle: "source",
+      tweeted_at: "2026-01-01T00:00:00.000Z",
+      has_media: false,
+      url: "https://x.com/post",
+    },
+    settings: [
+      { key: "translation_prompt", value: { model: "legacy-model" } },
+      {
+        key: "content_filter",
+        value: { enabled: true, default_threshold: "not-a-number" },
+      },
+    ],
+  });
+
+  const result = await runRescore(supabase, "t1", {
+    getOpenAiApiKey: () => "key",
+    now: () => new Date("2026-01-02T00:00:00.000Z"),
+    callOpenAI: (async () =>
+      openAiResponse({
+        toolCall: {
+          name: "classify_importance",
+          arguments: JSON.stringify({
+            importance_score: 13,
+            tags: [],
+            reasoning: "direct",
+          }),
+        },
+      })) as never,
+  });
+
+  assertEquals(result.ok, true);
+  assertEquals(result.score, 13);
+  assertEquals(result.threshold, 14);
+  assertEquals(result.decision, "skip");
+  assertEquals(result.decision_reason, "below_threshold:13<14");
+});
+
+Deno.test("runRescore preserves an explicit content_filter.default_threshold of 12", async () => {
+  const supabase = fakeSupabase({
+    post: {
+      tweet_id: "t1",
+      text_original: "hello",
+      author_handle: "source",
+      tweeted_at: "2026-01-01T00:00:00.000Z",
+      has_media: false,
+      url: "https://x.com/post",
+    },
+    settings: [
+      { key: "translation_prompt", value: { model: "legacy-model" } },
+      {
+        key: "content_filter",
+        value: { enabled: true, default_threshold: 12 },
+      },
+    ],
+  });
+
+  const result = await runRescore(supabase, "t1", {
+    getOpenAiApiKey: () => "key",
+    now: () => new Date("2026-01-02T00:00:00.000Z"),
+    callOpenAI: (async () =>
+      openAiResponse({
+        toolCall: {
+          name: "classify_importance",
+          arguments: JSON.stringify({
+            importance_score: 13,
+            tags: [],
+            reasoning: "direct",
+          }),
+        },
+      })) as never,
+  });
+
+  assertEquals(result.ok, true);
+  assertEquals(result.score, 13);
+  assertEquals(result.threshold, 12);
+  assertEquals(result.decision, "deliver");
+  assertEquals(result.decision_reason, "score_pass:13>=12");
+});

@@ -12,6 +12,9 @@ import {
   startWorkflowRun,
 } from "../_shared/observability.ts";
 import {
+  DEFAULT_EFFECTIVE_THRESHOLD,
+} from "../_shared/effectiveThreshold.ts";
+import {
   repairTranslationReadability,
   translationReadabilityMeta,
   type TranslationReadabilityRepairResult,
@@ -666,7 +669,7 @@ export async function runRescore(
           ? authorRule.threshold
           : (typeof cf.default_threshold === "number"
             ? cf.default_threshold
-            : 12);
+            : DEFAULT_EFFECTIVE_THRESHOLD);
         deliveryDecision = importanceScore >= threshold ? "deliver" : "skip";
         decisionReason = deliveryDecision === "deliver"
           ? `score_pass:${importanceScore}>=${threshold}`
@@ -681,7 +684,7 @@ export async function runRescore(
 
   const legacyThreshold = typeof cf.default_threshold === "number"
     ? cf.default_threshold
-    : 12;
+    : DEFAULT_EFFECTIVE_THRESHOLD;
   const thresholdOut = editorialProfile
     ? editorialProfile.threshold
     : legacyThreshold;
