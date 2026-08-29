@@ -73,6 +73,10 @@ import {
   shouldAutochain,
 } from "../_shared/workerAutochain.ts";
 import { applyRenderedVideoPreference } from "../_shared/videoRenderGate.ts";
+import {
+  resolveEffectiveThreshold,
+  type EffectiveThresholdEnvelope,
+} from "../_shared/effectiveThreshold.ts";
 import type { XMediaRow } from "../_shared/mediaSelection.ts";
 import {
   isProcessedRenderStoragePath,
@@ -159,7 +163,6 @@ import {
   parseClassifierToolCallArguments,
   renderScoringSystemPrompt,
   renderScoringUserMessage,
-  resolveActiveFeedbackThreshold,
   resolveScoringCallOptions,
 } from "./scoringWorkflow.ts";
 import {
@@ -387,6 +390,7 @@ async function loadConfig(
       author_rules: {} as Record<string, { rule: string; threshold?: number }>,
       score_only: false,
     },
+    thresholdEnvelope: resolveEffectiveThreshold([]) as EffectiveThresholdEnvelope,
     editorialProfile: null as null | {
       id: string;
       name: string;
@@ -597,6 +601,7 @@ async function loadConfig(
         }
       }
     }
+    defaults.thresholdEnvelope = resolveEffectiveThreshold(settings ?? []);
   } catch (e) {
     throw new Error("worker_settings_read_failed");
   }
@@ -1834,15 +1839,14 @@ async function handleTranslateJob(
     const scoringPolicyActive = scoringPolicyEnabled &&
       config.scoringPolicy?.enabled === true &&
       config.scoringPolicy?.mode === "active";
+    const activeLegacyProfile = config.editorialProfile &&
+        config.thresholdEnvelope.source === "editorial_profile"
+      ? {
+        ...config.editorialProfile,
+        threshold: config.thresholdEnvelope.threshold,
+      }
+      : config.editorialProfile;
     let splitDecisionState: FeedbackBiasResult | null = null;
-
-    const activeFeedbackThreshold = () =>
-      resolveActiveFeedbackThreshold({
-        editorialProfileThreshold: config.editorialProfile?.threshold,
-        authorHandle,
-        authorRules: config.contentFilter.author_rules,
-        defaultThreshold: config.contentFilter.default_threshold,
-      });
 
     const logBaseDecision = (logEvent: ScoringDecisionLog | null) => {
       if (!logEvent) return;
@@ -1900,10 +1904,10 @@ async function handleTranslateJob(
         filterEnabled,
         legacyFilterEnabled,
         scoreOnly,
-        editorialProfile: config.editorialProfile,
+        editorialProfile: activeLegacyProfile,
         authorHandle,
         authorRules: config.contentFilter.author_rules,
-        defaultThreshold: config.contentFilter.default_threshold,
+        defaultThreshold: config.thresholdEnvelope.threshold,
         textOriginal: String(post.text_original || ""),
       });
       importanceScore = result.scoringFields.importanceScore;
@@ -1992,7 +1996,7 @@ async function handleTranslateJob(
           finalScore: state.finalScore,
           filterEnabled,
           scoreOnly,
-          threshold: activeFeedbackThreshold(),
+          threshold: config.thresholdEnvelope.threshold,
           xGateThreshold: typeof config.xPostingConfig?.min_score === "number"
             ? config.xPostingConfig.min_score
             : 14,

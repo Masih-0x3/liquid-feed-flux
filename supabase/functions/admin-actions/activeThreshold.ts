@@ -1,4 +1,7 @@
-import { normalizeScoringPolicy } from "../_shared/scoringPolicy.ts";
+import {
+  resolveEffectiveThreshold,
+  type EffectiveThresholdEnvelope,
+} from "../_shared/effectiveThreshold.ts";
 
 type SettingsQuery = PromiseLike<{
   data?: unknown;
@@ -38,36 +41,23 @@ function settingsQuery(supabase: unknown): SettingsQuery {
   return selected as SettingsQuery;
 }
 
-export async function loadActiveThreshold(supabase: unknown): Promise<number> {
+export async function loadActiveThresholdEnvelope(
+  supabase: unknown,
+): Promise<EffectiveThresholdEnvelope> {
   const { data: settings, error } = await settingsQuery(supabase)
     .in("key", ["content_filter", "editorial_profiles", "active_profile_id", "scoring_policy"]);
   if (error) throw new Error("active_threshold_settings_read_failed");
-  if (!Array.isArray(settings)) {
-    throw new Error("active_threshold_settings_invalid_response");
-  }
-  const byKey: Record<string, Record<string, unknown>> = {};
-  for (const row of settings) {
-    if (!row || typeof row !== "object" || Array.isArray(row)) {
-      throw new Error("active_threshold_settings_invalid_row");
+  try {
+    return resolveEffectiveThreshold(settings);
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("effective_threshold_")) {
+      throw new Error(error.message.replace("effective_threshold_", "active_threshold_"));
     }
-    const key = (row as Record<string, unknown>).key;
-    const value = (row as Record<string, unknown>).value;
-    if (typeof key !== "string" || !value || typeof value !== "object" || Array.isArray(value)) {
-      throw new Error("active_threshold_settings_invalid_row");
-    }
-    byKey[key] = value as Record<string, unknown>;
+    throw error;
   }
-  const activeId = typeof byKey.active_profile_id?.id === "string" ? byKey.active_profile_id.id : "";
-  if (byKey.scoring_policy) {
-    const policy = normalizeScoringPolicy(byKey.scoring_policy);
-    if (policy.enabled && policy.mode === "active") {
-      const profile = policy.profiles.find((p) => p.id === policy.active_profile_id) ?? policy.profiles[0];
-      if (profile?.thresholds?.direct_focus?.threshold) return profile.thresholds.direct_focus.threshold;
-    }
-  }
-  const profiles = Array.isArray(byKey.editorial_profiles?.profiles) ? byKey.editorial_profiles.profiles as Array<Record<string, unknown>> : [];
-  const active = profiles.find((p) => p.id === activeId);
-  if (typeof active?.threshold === "number") return active.threshold;
-  if (typeof byKey.content_filter?.default_threshold === "number") return byKey.content_filter.default_threshold as number;
-  return 14;
+}
+
+/** Numeric compatibility seam for existing X/scoring action callers. */
+export async function loadActiveThreshold(supabase: unknown): Promise<number> {
+  return (await loadActiveThresholdEnvelope(supabase)).threshold;
 }

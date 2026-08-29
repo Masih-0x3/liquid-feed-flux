@@ -299,6 +299,11 @@ export type MonitoringFilter =
 export interface MonitoringOverview {
   window_hours: number;
   threshold: number;
+  threshold_mode: 'active' | 'legacy';
+  threshold_source: 'scoring_policy' | 'editorial_profile' | 'content_filter' | 'default';
+  threshold_version: string;
+  threshold_compatibility_fallback: boolean;
+  threshold_policy_mode: 'shadow' | 'active' | null;
   counts: {
     needs_attention: number;
     failed_stuck: number;

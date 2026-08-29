@@ -1,4 +1,7 @@
-import { loadActiveThreshold } from "./activeThreshold.ts";
+import {
+  loadActiveThreshold,
+  loadActiveThresholdEnvelope,
+} from "./activeThreshold.ts";
 import {
   getPayloadTweetId,
   isFailedJobActionable,
@@ -2118,7 +2121,8 @@ export async function getMonitoringOverview(
   const since = new Date(Date.now() - windowHours * 60 * 60 * 1000)
     .toISOString();
   const staleCutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-  const threshold = await loadActiveThreshold(supabase);
+  const thresholdEnvelope = await loadActiveThresholdEnvelope(supabase);
+  const threshold = thresholdEnvelope.threshold;
   const [
     postsRes,
     deliveriesRes,
@@ -2308,6 +2312,12 @@ export async function getMonitoringOverview(
     overview: {
       window_hours: windowHours,
       threshold,
+      threshold_mode: thresholdEnvelope.mode,
+      threshold_source: thresholdEnvelope.source,
+      threshold_version: thresholdEnvelope.version,
+      threshold_compatibility_fallback:
+        thresholdEnvelope.compatibility_fallback,
+      threshold_policy_mode: thresholdEnvelope.policy_mode,
       counts,
     },
   };
