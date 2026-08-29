@@ -154,6 +154,12 @@ test("Preview execution uses explicit project ref and never linked or production
   assert.doesNotMatch(result.output, /jzirqfzzvlbxwfzndaer|xot\.iraneyes\.com|xot\.vercel\.app/);
 });
 
+test("Preview execution asserts production-targeted cron schedules are inactive", () => {
+  const result = run(["--target", "preview", "--mode", "execute"], { XOT_RELEASE_STATE_DB_URL: PREVIEW_DB_URL });
+  assert.match(result.calls, /active IS DISTINCT FROM false/);
+  assert.match(result.calls, /production-targeted cron schedule/);
+});
+
 test("every Supabase call is routed through the pinned CLI array", () => {
   const source = readFileSync(script, "utf8");
   assert.match(source, /SUPABASE_CLI=\(npx --yes supabase@2\.111\.0\)/);
