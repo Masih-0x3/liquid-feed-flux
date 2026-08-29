@@ -3202,6 +3202,21 @@ export type Database = {
           updated_by: string | null
         }
       }
+      update_runtime_control: {
+        Args: {
+          p_control_name: string
+          p_enabled: boolean
+        }
+        Returns: {
+          dedupe_enabled: boolean
+          environment: string
+          posting_mode: string
+          singleton_id: boolean
+          translation_enabled: boolean
+          updated_at: string
+          updated_by: string | null
+        }
+      }
       save_video_render_feedback_if_current: {
         Args: {
           p_created_by: string

@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getRuntimeControls, updateRuntimeControls, type RuntimeControls, type RuntimeControlName } from '@/api/runtimeControls';
+import { getRuntimeControls, updateRuntimeControls, type RuntimeControls, type RuntimeControlUpdate } from '@/api/runtimeControls';
 
 export interface RuntimeControlsState {
   controls: RuntimeControls | null;
@@ -36,7 +36,7 @@ export function useRuntimeControls(enabled = true): RuntimeControlsState {
 
 export function useUpdateRuntimeControls() {
   const queryClient = useQueryClient();
-  return useMutation<RuntimeControls, Error, Pick<RuntimeControls, RuntimeControlName>>({
+  return useMutation<RuntimeControls, Error, RuntimeControlUpdate>({
     mutationFn: updateRuntimeControls,
     onSuccess: (controls) => {
       queryClient.setQueryData(RUNTIME_CONTROLS_QUERY_KEY, controls);
