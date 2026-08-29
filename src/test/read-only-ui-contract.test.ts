@@ -39,10 +39,13 @@ describe('read-only mutation inventory', () => {
     }
   });
 
-  it('keeps Downloader as an authorised read surface without mutation hooks', () => {
+  it('fails closed for Downloader metadata lookup in read-only mode', () => {
     const contents = source('src/pages/Downloader.tsx');
     expect(contents).toContain('resolve_x_media');
     expect(contents).not.toContain('.mutate(');
     expect(contents).not.toContain('update_');
+    expect(contents).toContain('disabled={loading || readOnly}');
+    expect(contents).toContain('if (readOnly)');
+    expect(contents).toContain('Media metadata lookup is unavailable for read-only access.');
   });
 });

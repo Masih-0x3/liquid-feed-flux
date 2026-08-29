@@ -64,6 +64,11 @@ export default function Downloader() {
     setError(null);
     setTweetData(null);
 
+    if (readOnly) {
+      setError("Media metadata lookup is unavailable for read-only access.");
+      return;
+    }
+
     const match = url.trim().match(TWEET_REGEX);
     if (!match) {
       setError("Please enter a valid X or Twitter status URL.");
@@ -100,7 +105,7 @@ export default function Downloader() {
         </p>
         {readOnly && (
           <p role="note" className="text-xs text-muted-foreground">
-            Read-only access: authorised media metadata reads remain available. No external media URL is opened here.
+            Read-only access: media metadata lookup is unavailable for this role. No external media URL is opened here.
           </p>
         )}
       </div>
@@ -117,17 +122,17 @@ export default function Downloader() {
               placeholder="https://x.com/username/status/1234567890"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              disabled={loading}
+              disabled={loading || readOnly}
               required
               className="flex-1"
             />
-            <Button type="submit" disabled={loading} className="sm:w-44">
+            <Button type="submit" disabled={loading || readOnly} className="sm:w-44">
               {loading ? (
                 <Loader2 className="w-4 h-4 animate-spin mr-2" />
               ) : (
                 <Download className="w-4 h-4 mr-2" />
               )}
-              {loading ? "Fetching..." : "Extract Media"}
+              {readOnly ? "Unavailable" : loading ? "Fetching..." : "Extract Media"}
             </Button>
           </form>
 

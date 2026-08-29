@@ -17,6 +17,10 @@ Deno.test("normal dashboard reads are an explicit subset of admin actions", () =
   assertFalse(isReadOnlyAdminActionName("x_verify_credentials"));
   assertFalse(isReadOnlyAdminActionName("send_test_tweet"));
   assertFalse(isReadOnlyAdminActionName("update_runtime_controls"));
+  assertFalse(isReadOnlyAdminActionName("resolve_x_media"));
+  assertEquals(isReadOnlyAdminActionName("get_settings"), true);
+  assertEquals(isReadOnlyAdminActionName("get_settings_samples"), true);
+  assertEquals(isReadOnlyAdminActionName("get_pipeline_events"), true);
 });
 
 Deno.test("unknown and legacy action names are denied", () => {

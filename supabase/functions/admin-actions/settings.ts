@@ -5,9 +5,16 @@ import type { AdminActionResponse, SupabaseAdminClient } from "./types.ts";
 type SettingsQueryBuilder = {
   select(columns: string): SettingsQueryBuilder;
   eq(column: string, value: unknown): SettingsQueryBuilder;
+  in(column: string, values: readonly string[]): SettingsQueryBuilder;
   maybeSingle(): Promise<
     { data?: { value?: unknown } | null; error?: unknown }
   >;
+  order(column: string, options?: Record<string, unknown>): SettingsQueryBuilder;
+  limit(value: number): SettingsQueryBuilder;
+  then(
+    onfulfilled?: ((value: { data?: unknown; error?: unknown }) => unknown) | null,
+    onrejected?: ((reason: unknown) => unknown) | null,
+  ): PromiseLike<{ data?: unknown; error?: unknown }>;
   upsert(
     value: Record<string, unknown>,
     options?: Record<string, unknown>,
@@ -29,6 +36,108 @@ export const SETTINGS_ALLOWED_KEYS = [
   "story_memory",
   "scoring_policy",
 ] as const;
+
+/**
+ * Browser settings reads must use the admin-actions boundary. Keep this
+ * allowlist separate from the write validator: historical voice settings are
+ * reviewable, but remain intentionally unwritable through this surface.
+ */
+export const SETTINGS_READ_KEYS = [
+  ...SETTINGS_ALLOWED_KEYS,
+  "voice_samples",
+  "voice_guide",
+  "personal_voice_profile",
+] as const;
+
+type SettingsReadKey = typeof SETTINGS_READ_KEYS[number];
+
+function isSettingsReadKey(value: unknown): value is SettingsReadKey {
+  return typeof value === "string" &&
+    (SETTINGS_READ_KEYS as readonly string[]).includes(value);
+}
+
+function asSettingsReadRows(value: unknown): Array<{ key: SettingsReadKey; value: unknown }> {
+  if (!Array.isArray(value)) throw new Error("settings_read_invalid_rows");
+  return value.flatMap((row) => {
+    if (!row || typeof row !== "object" || Array.isArray(row)) {
+      throw new Error("settings_read_invalid_row");
+    }
+    const record = row as Record<string, unknown>;
+    if (!isSettingsReadKey(record.key)) return [];
+    return [{ key: record.key, value: record.value }];
+  });
+}
+
+function requestedSettingsReadKeys(body: Record<string, unknown>): SettingsReadKey[] {
+  if (!Array.isArray(body.keys)) return [...SETTINGS_READ_KEYS];
+  return [...new Set(body.keys.filter(isSettingsReadKey))] as SettingsReadKey[];
+}
+
+/** Read-only settings projection used by Settings and other review surfaces. */
+export async function getSettingsAdminAction(
+  supabase: SupabaseAdminClient,
+  body: Record<string, unknown> = {},
+): Promise<AdminActionResponse> {
+  const keys = requestedSettingsReadKeys(body);
+  const query = supabase.from("settings") as SettingsQueryBuilder;
+  const { data, error } = await query.select("key, value").in("key", keys);
+  if (error) {
+    return { body: { success: false, error: "settings_read_failed" }, status: 503 };
+  }
+  try {
+    return { body: { success: true, rows: asSettingsReadRows(data) } };
+  } catch {
+    return { body: { success: false, error: "settings_read_invalid_response" }, status: 503 };
+  }
+}
+
+type SettingsSampleQueryBuilder = SettingsQueryBuilder & {
+  select(columns: string): SettingsSampleQueryBuilder;
+};
+
+function settingsSampleRow(row: unknown): Record<string, unknown> {
+  if (!row || typeof row !== "object" || Array.isArray(row)) {
+    throw new Error("settings_samples_invalid_row");
+  }
+  const source = row as Record<string, unknown>;
+  const accounts = source.accounts;
+  if (!accounts || typeof accounts !== "object" || Array.isArray(accounts)) {
+    throw new Error("settings_samples_invalid_row");
+  }
+  const account = accounts as Record<string, unknown>;
+  return {
+    tweet_id: typeof source.tweet_id === "string" ? source.tweet_id : "",
+    text_original: typeof source.text_original === "string" ? source.text_original : "",
+    text_translated: typeof source.text_translated === "string" ? source.text_translated : "",
+    url: typeof source.url === "string" ? source.url : "",
+    tweeted_at: typeof source.tweeted_at === "string" ? source.tweeted_at : null,
+    has_media: source.has_media === true,
+    accounts: {
+      handle: typeof account.handle === "string" ? account.handle : "",
+      display_name: typeof account.display_name === "string" ? account.display_name : "",
+    },
+  };
+}
+
+/** Return only the bounded post fields needed for Settings previews. */
+export async function getSettingsSamplesAdminAction(
+  supabase: SupabaseAdminClient,
+): Promise<AdminActionResponse> {
+  const query = supabase.from("posts") as SettingsSampleQueryBuilder;
+  const { data, error } = await query
+    .select("tweet_id, text_original, text_translated, url, tweeted_at, has_media, accounts!inner(handle, display_name)")
+    .order("created_at", { ascending: false })
+    .limit(5);
+  if (error) {
+    return { body: { success: false, error: "settings_samples_read_failed" }, status: 503 };
+  }
+  try {
+    if (!Array.isArray(data)) throw new Error("settings_samples_invalid_rows");
+    return { body: { success: true, samples: data.map(settingsSampleRow) } };
+  } catch {
+    return { body: { success: false, error: "settings_samples_invalid_response" }, status: 503 };
+  }
+}
 
 export function validateSettingsValue(
   key: string,
