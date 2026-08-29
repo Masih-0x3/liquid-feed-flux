@@ -6,7 +6,7 @@ import { Activity, AlertTriangle, Eye, RefreshCw, Loader2, Settings, Wrench, Pla
 import type { PipelineHealth, QueueBreakdown, SystemPerformanceSummary, XLocalUsage } from '@/hooks/useDashboardData';
 import { useState } from 'react';
 import { invokeAdminAction } from '@/api/adminActions';
-import { invokeAdminRetry } from '@/api/adminRetry';
+import { invokeAdminRetry, isAdminRetryCutoverBlocked } from '@/api/adminRetry';
 import { useToast } from '@/hooks/use-toast';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -96,11 +96,19 @@ export function DashboardHealth({ health, queue, xUsage, systemPerformance }: Pr
         }
         case 'validate-webhook': {
           await invokeAdminRetry({ action: 'test_webhook' });
-          toast({ title: 'Webhook validation passed', description: 'Authentication and payload parsing completed; no post or job was created.' });
+          toast({ title: 'Webhook validation completed', description: 'Authentication and payload parsing completed; no post or job was created.' });
           break;
         }
       }
-    } catch {
+    } catch (error) {
+      if (action === 'validate-webhook' && isAdminRetryCutoverBlocked(error)) {
+        toast({
+          title: 'Webhook validation blocked',
+          description: 'Validation is unavailable during the immutable delivery cutover. No webhook request was made.',
+          variant: 'destructive',
+        });
+        return;
+      }
       toast({ title: 'Action failed', description: `Failed to execute ${action}.`, variant: 'destructive' });
     } finally {
       setActionLoading(null);
