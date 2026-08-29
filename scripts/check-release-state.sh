@@ -98,6 +98,10 @@ display_arg() {
     mask_url "$value"
   elif [[ "$value" == postgres://* || "$value" == postgresql://* ]]; then
     printf '[masked-db-url]'
+  elif [[ "$value" == *'jzirqfzzvlbxwfzndaer.supabase.co'* ]]; then
+    # SQL assertions may contain the production host. Keep the actual query
+    # intact for the CLI, but do not disclose that host in the inventory plan.
+    printf '[masked-sql]'
   elif [[ "$value" =~ ^[a-z0-9]{20}$ ]]; then
     mask_identifier "$value"
   else
@@ -299,6 +303,12 @@ run_inventory() {
 
   section "Supabase Cron"
   run env SUPABASE_TELEMETRY_DISABLED=1 "${SUPABASE_CLI[@]}" db query --db-url "$DB_CONNECTION_URL" "select jobname, schedule, active from cron.job order by jobname;"
+  if [[ "$TARGET" == "preview" ]]; then
+    # Historical migrations contain production Edge URLs. A Preview release
+    # state check is read-only, but it must fail if the post-replay guard did
+    # not leave any production-targeted schedule inactive.
+    run env SUPABASE_TELEMETRY_DISABLED=1 "${SUPABASE_CLI[@]}" db query --db-url "$DB_CONNECTION_URL" "DO \$xot_preview_cron_release_check\$ BEGIN IF EXISTS (SELECT 1 FROM cron.job WHERE active IS DISTINCT FROM false AND command ILIKE '%https://jzirqfzzvlbxwfzndaer.supabase.co/functions/v1/%') THEN RAISE EXCEPTION 'Preview contains an active production-targeted cron schedule'; END IF; END \$xot_preview_cron_release_check\$;"
+  fi
 
   section "Supabase Queue Health"
   run env SUPABASE_TELEMETRY_DISABLED=1 "${SUPABASE_CLI[@]}" db query --db-url "$DB_CONNECTION_URL" "select type, status, count(*)::int as count from public.jobs group by type, status order by type, status;"
