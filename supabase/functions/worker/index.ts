@@ -163,6 +163,7 @@ import {
   parseClassifierToolCallArguments,
   renderScoringSystemPrompt,
   renderScoringUserMessage,
+  resolveActiveFeedbackThreshold,
   resolveScoringCallOptions,
 } from "./scoringWorkflow.ts";
 import {
@@ -383,7 +384,9 @@ async function loadConfig(
     classifierToolSchema: null as string | null,
     contentFilter: {
       enabled: false,
-      default_threshold: 12,
+      // Kept in sync with the shared effective-threshold default (14). The
+      // worker uses resolveEffectiveThreshold for the authoritative threshold.
+      default_threshold: 14,
       editorial_guidelines: "",
       priority_topics: [] as string[],
       low_priority_topics: [] as string[],
@@ -1846,6 +1849,20 @@ async function handleTranslateJob(
         threshold: config.thresholdEnvelope.threshold,
       }
       : config.editorialProfile;
+
+    // Per-post threshold resolution: the shared envelope gives the system
+    // default, but legacy author_rules may still override it. This mirrors the
+    // pre-envelope resolveActiveFeedbackThreshold priority (profile, then
+    // author custom_threshold, then default) so feedback-bias re-evaluations
+    // use the same gate the original decision used.
+    const activeFeedbackThreshold = () =>
+      resolveActiveFeedbackThreshold({
+        editorialProfileThreshold: activeLegacyProfile?.threshold,
+        authorHandle,
+        authorRules: config.contentFilter.author_rules,
+        defaultThreshold: config.thresholdEnvelope.threshold,
+      });
+
     let splitDecisionState: FeedbackBiasResult | null = null;
 
     const logBaseDecision = (logEvent: ScoringDecisionLog | null) => {
@@ -1996,7 +2013,7 @@ async function handleTranslateJob(
           finalScore: state.finalScore,
           filterEnabled,
           scoreOnly,
-          threshold: config.thresholdEnvelope.threshold,
+          threshold: activeFeedbackThreshold(),
           xGateThreshold: typeof config.xPostingConfig?.min_score === "number"
             ? config.xPostingConfig.min_score
             : 14,

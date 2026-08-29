@@ -5,6 +5,16 @@ import {
 
 export const EFFECTIVE_THRESHOLD_VERSION = "threshold-envelope-v1";
 export const LEGACY_THRESHOLD_VERSION = "legacy-threshold-v1";
+
+/**
+ * Shared fallback default for the effective delivery threshold.
+ *
+ * The 2026-04-13 content_filter seed migration sets `default_threshold: 14`,
+ * the admin/monitoring fallback was historically 14, and the X posting gate
+ * also defaults to 14. The worker's in-code content_filter fallback was 12
+ * but was only used when settings were missing. Unifying the envelope on 14
+ * matches the product setting and avoids silently diverging delivery behavior.
+ */
 export const DEFAULT_EFFECTIVE_THRESHOLD = 14;
 
 export type EffectiveThresholdMode = "active" | "legacy";

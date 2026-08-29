@@ -77,3 +77,33 @@ Deno.test("legacy profile wins over content-filter threshold and marks compatibi
     policy_mode: null,
   });
 });
+
+Deno.test("active threshold falls back to the shared default on empty settings", async () => {
+  const envelope = await loadActiveThresholdEnvelope(settingsClient([]));
+  assertEquals(envelope.threshold, 14);
+  assertEquals(envelope.source, "default");
+  assertEquals(envelope.compatibility_fallback, true);
+});
+
+Deno.test("shadow scoring policy does not own the threshold", async () => {
+  const envelope = await loadActiveThresholdEnvelope(settingsClient([
+    {
+      key: "scoring_policy",
+      value: {
+        enabled: true,
+        mode: "shadow",
+        active_profile_id: "iran-first",
+        profiles: [{ id: "iran-first", thresholds: { direct_focus: { threshold: 17 } } }],
+      },
+    },
+    { key: "content_filter", value: { default_threshold: 11 } },
+  ]));
+  assertEquals(envelope, {
+    threshold: 11,
+    mode: "legacy",
+    source: "content_filter",
+    version: "legacy-threshold-v1",
+    compatibility_fallback: true,
+    policy_mode: "shadow",
+  });
+});
