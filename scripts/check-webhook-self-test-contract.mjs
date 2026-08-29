@@ -473,13 +473,17 @@ function assertContract(sources, label) {
 
   assertIncludes(sources.settings, "Validate Webhook", label + " Settings control");
   assertIncludes(sources.settings, "It does not create posts or jobs.", label + " Settings copy");
-  assertIncludes(sources.settings, "Webhook validation passed", label + " Settings success");
+  assertIncludes(sources.settings, "Webhook validation blocked", label + " Settings blocked state");
+  assertIncludes(sources.settings, "Validation is unavailable during the immutable delivery cutover.", label + " Settings blocked copy");
+  assertNotIncludes(sources.settings, "Webhook validation passed", label + " Settings success must not be claimed");
   assertNotIncludes(sources.settings, "sample content", label + " Settings copy");
   assertNotIncludes(sources.settings, "live pipeline test", label + " Settings copy");
   assertIncludes(sources.dashboard, "case 'validate-webhook'", label + " Dashboard action");
   assertIncludes(sources.dashboard, "Validate webhook", label + " Dashboard control");
   assertIncludes(sources.dashboard, "It does not create posts or jobs.", label + " Dashboard copy");
-  assertIncludes(sources.dashboard, "Webhook validation passed", label + " Dashboard success");
+  assertIncludes(sources.dashboard, "Webhook validation blocked", label + " Dashboard blocked state");
+  assertIncludes(sources.dashboard, "Validation is unavailable during the immutable delivery cutover.", label + " Dashboard blocked copy");
+  assertNotIncludes(sources.dashboard, "Webhook validation passed", label + " Dashboard success must not be claimed");
   assertNotIncludes(sources.dashboard, "test-pipeline", label + " Dashboard action");
   assertNotIncludes(sources.dashboard, "sample content", label + " Dashboard copy");
   assertNotIncludes(sources.dashboard, "Live test", label + " Dashboard copy");

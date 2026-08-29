@@ -12,6 +12,13 @@ type InvokeAdminRetryOptions = {
   throwOnFailure?: boolean;
 };
 
+export function isAdminRetryCutoverBlocked(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'status' in error
+    && (error as { status?: unknown }).status === 409;
+}
+
 export async function invokeAdminRetry<T>(
   body: AdminRetryBody,
   options: InvokeAdminRetryOptions = {},

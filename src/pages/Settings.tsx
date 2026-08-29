@@ -17,7 +17,7 @@ import {
 
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
-import { invokeAdminRetry } from '@/api/adminRetry';
+import { invokeAdminRetry, isAdminRetryCutoverBlocked } from '@/api/adminRetry';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Activity, AlertTriangle, Brain, MessageSquare, Eye, Code, Sparkles, Send, Shield, Loader2, Filter, AtSign, ChevronDown, Info, Film } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -644,7 +644,7 @@ export default function Settings() {
                     <AlertDialogHeader>
                       <AlertDialogTitle>Validate the webhook safely?</AlertDialogTitle>
                       <AlertDialogDescription>
-                        This checks the production webhook's authentication and payload parsing. It does not create posts or jobs.
+                        This checks the production webhook's authentication and payload parsing when validation is available. It does not create posts or jobs. Validation is currently blocked during the immutable delivery cutover.
                       </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
@@ -653,8 +653,18 @@ export default function Settings() {
                         try {
                           if (!canMutate) return;
                           await invokeAdminRetry({ action: 'test_webhook' });
-                          toast({ title: 'Webhook validation passed', description: 'Authentication and payload parsing completed; no post or job was created.' });
-                        } catch { toast({ title: 'Test failed', variant: 'destructive' }); }
+                          toast({ title: 'Webhook validation completed', description: 'Authentication and payload parsing completed; no post or job was created.' });
+                        } catch (error) {
+                          if (isAdminRetryCutoverBlocked(error)) {
+                            toast({
+                              title: 'Webhook validation blocked',
+                              description: 'Validation is unavailable during the immutable delivery cutover. No webhook request was made.',
+                              variant: 'destructive',
+                            });
+                            return;
+                          }
+                          toast({ title: 'Webhook validation failed', description: 'The webhook could not be validated.', variant: 'destructive' });
+                        }
                       }}>Validate webhook</AlertDialogAction>
                     </AlertDialogFooter>
                   </AlertDialogContent>

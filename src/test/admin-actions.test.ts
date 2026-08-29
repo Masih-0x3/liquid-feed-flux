@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminActionClientError } from "@/api/adminActionErrors";
 import { invokeAdminAction, invokeAdminRead } from "@/api/adminActions";
-import { invokeAdminRetry } from "@/api/adminRetry";
+import { invokeAdminRetry, isAdminRetryCutoverBlocked } from "@/api/adminRetry";
 
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -86,6 +86,22 @@ describe("admin action API", () => {
       message: "The service is temporarily unavailable.",
     });
     expect((error as Error).message).not.toContain("provider credentials rejected");
+  });
+
+  it("preserves the admin-retry cutover block for truthful webhook validation", async () => {
+    mocks.invoke.mockResolvedValueOnce({
+      data: null,
+      error: {
+        message: "Edge Function returned a non-2xx status code",
+        context: new Response(JSON.stringify({ code: "delivery_cutover_blocked" }), { status: 409 }),
+      },
+    });
+
+    const error = await invokeAdminRetry({ action: "test_webhook" }).catch((cause: unknown) => cause);
+
+    expect(error).toMatchObject({ status: 409 });
+    expect(isAdminRetryCutoverBlocked(error)).toBe(true);
+    expect(isAdminRetryCutoverBlocked({ status: 503 })).toBe(false);
   });
 
   it("keeps the bounded fifteen-second default for admin reads", async () => {
