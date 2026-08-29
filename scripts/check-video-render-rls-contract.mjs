@@ -3761,6 +3761,10 @@ const reviewedNonRawMigrationDigests = new Map([
   // cutover contracts. It does not alter the protected video raw-table grant
   // surface, so keep the exemption byte-locked here as well.
   ['20260827064509_repair_effective_claim_fence_and_delivery_cutover.sql', '754cef7f569a784125327b20eb20ffba6330f3e801fd43a264175c39d5f2d816'],
+  // This runtime-control race-guard repair is reviewed by the worker-lifecycle
+  // and role-auth contracts. It does not alter the protected video raw-table
+  // grant surface, so keep the exemption byte-locked here as well.
+  ['20260828140000_runtime_control_claim_release_race_guards.sql', 'c8d56b34ecab578555aaae7036c6ee8690493faaed259c80de95a5a3ae24de5f'],
   // This append-only reconciliation successor is reviewed by the delivery
   // cutover and no-replay contracts. It only terminally settles historical
   // delivery jobs and does not change the protected video raw-table surface.
