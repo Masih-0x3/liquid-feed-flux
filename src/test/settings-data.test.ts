@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchSettings, fetchSettingsRows, previewTranslation, saveSetting } from "@/api/settingsData";
 import { invokeAdminAction } from "@/api/adminActions";
+import {
+  DEFAULT_CONTENT_FILTER_THRESHOLD,
+  defaultConfig,
+} from "@/components/settings/ContentFilterSettings";
 
 const mocks = vi.hoisted(() => ({
   from: vi.fn(),
@@ -170,5 +174,46 @@ describe("settings data API", () => {
     });
     expect(settings.telegram_config.parse_mode).toBe("Markdown");
     expect(settings.message_template.template).toContain("{translated_text}");
+  });
+
+  it("preserves an explicit content_filter.default_threshold of 12 from a valid settings row", async () => {
+    mocks.from.mockReturnValueOnce({
+      select: vi.fn().mockResolvedValue({
+        data: [
+          {
+            key: "content_filter",
+            value: { enabled: true, default_threshold: 12 },
+          },
+        ],
+        error: null,
+      }),
+    });
+
+    const settings = await fetchSettings();
+    expect(settings.content_filter.default_threshold).toBe(12);
+  });
+
+  it("preserves an explicit content_filter.default_threshold of 14 from a valid settings row", async () => {
+    mocks.from.mockReturnValueOnce({
+      select: vi.fn().mockResolvedValue({
+        data: [
+          {
+            key: "content_filter",
+            value: { enabled: true, default_threshold: 14 },
+          },
+        ],
+        error: null,
+      }),
+    });
+
+    const settings = await fetchSettings();
+    expect(settings.content_filter.default_threshold).toBe(14);
+  });
+});
+
+describe("ContentFilterSettings threshold defaults", () => {
+  it("uses the shared effective default threshold of 14", () => {
+    expect(DEFAULT_CONTENT_FILTER_THRESHOLD).toBe(14);
+    expect(defaultConfig.default_threshold).toBe(14);
   });
 });

@@ -22,6 +22,8 @@ import { useQuery } from '@tanstack/react-query';
 import { invokeAdminAction } from '@/api/adminActions';
 import { useIncomingSettingsDraft } from '@/hooks/useIncomingSettingsDraft';
 
+/** Shared effective default for the legacy content-filter delivery threshold. */
+export const DEFAULT_CONTENT_FILTER_THRESHOLD = 14;
 export interface ContentFilterConfig {
   enabled: boolean;
   score_only?: boolean;
@@ -33,11 +35,11 @@ export interface ContentFilterConfig {
   author_rules: Record<string, { rule: string; threshold?: number }>;
 }
 
-const defaultConfig: ContentFilterConfig = {
+export const defaultConfig: ContentFilterConfig = {
   enabled: false,
   score_only: false,
   filter_mode: 'global',
-  default_threshold: 12,
+  default_threshold: DEFAULT_CONTENT_FILTER_THRESHOLD,
   editorial_guidelines: '',
   priority_topics: [],
   low_priority_topics: [],
