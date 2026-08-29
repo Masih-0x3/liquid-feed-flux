@@ -1,6 +1,10 @@
 import { assert, assertEquals, assertRejects } from "jsr:@std/assert";
 import { StaleMediaObjectError } from "../_shared/staleMediaRepair.ts";
 import { TELEGRAM_BOT_VIDEO_UPLOAD_MAX_BYTES } from "../_shared/telegramVideoLimits.ts";
+import {
+  ExternalPostingBlockedError,
+  requireExternalPosting,
+} from "../_shared/externalPostingGuard.ts";
 import { NonRetryableJobError } from "./jobLifecycle.ts";
 import {
   computeAdaptiveSpacing,
@@ -24,6 +28,18 @@ type MockFetchResponse = {
 };
 
 const allowProviderCall = async () => {};
+
+function runtimeControlsClient(row: unknown) {
+  return {
+    from() {
+      return {
+        select() {
+          return Promise.resolve({ data: [row], error: null });
+        },
+      };
+    },
+  };
+}
 
 function createStorageSupabase(options: {
   signedUrl?: string | null;
@@ -505,6 +521,38 @@ Deno.test("Telegram provider callback blocks before the first request", async ()
       "external_posting_blocked",
     );
     assertEquals(guardCalls, 1);
+    assertEquals(calls.length, 0);
+  });
+});
+
+Deno.test("Telegram provider guard blocks malformed strict controls before the first request", async () => {
+  const controls = {
+    singleton_id: true,
+    environment: "production",
+    dedupe_enabled: true,
+    translation_enabled: true,
+    posting_mode: "enabled",
+    updated_at: "not-a-date",
+    updated_by: null,
+  };
+  const guard = () => requireExternalPosting(
+    runtimeControlsClient(controls),
+    { environment: "production", allowExternalPosting: "true" },
+  );
+
+  await withMockFetch([], async (calls) => {
+    await assertRejects(
+      () => sendTelegramMedia(
+        "sendPhoto",
+        "token",
+        "chat",
+        { photo: "https://example.com/photo.jpg" },
+        "caption",
+        guard,
+      ),
+      ExternalPostingBlockedError,
+      "external posting is blocked",
+    );
     assertEquals(calls.length, 0);
   });
 });

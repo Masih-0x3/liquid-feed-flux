@@ -104,7 +104,12 @@ export async function checkExternalPosting(
   return { allowed: true, code: "external_posting_allowed" };
 }
 
-/** Compatibility evaluator for continuity callers; it still fails closed. */
+/** Compatibility evaluator for continuity callers; it still fails closed.
+ *
+ * This intentionally reads only the legacy control columns. It is safe for
+ * read-only compatibility decisions, but must not be used as a provider-write
+ * fallback because it cannot validate the strict runtime-control contract.
+ */
 export async function evaluateExternalPosting(
   client: ExternalPostingClient,
   options: { environment?: string; allowExternalPosting?: string } = {},
@@ -141,19 +146,7 @@ export async function requireExternalPosting(
 ): Promise<void> {
   const strict = await checkExternalPosting(client as RuntimeControlsQueryClient, options);
   if (!('reason' in strict)) return;
-  const strictReason = strict.reason;
-  if (strictReason === "controls_unavailable") {
-    const compatibility = await evaluateExternalPosting(client as ExternalPostingClient, {
-      environment: String(readEnvironment(options) ?? ""),
-      allowExternalPosting: String(readPostingBreaker(options) ?? ""),
-    });
-    if (compatibility.allowed) return;
-    if (compatibility.reason === "allowed") return;
-    throw new ExternalPostingBlockedError(compatibility.reason === "environment_missing_or_invalid"
-      ? "invalid_environment"
-      : compatibility.reason);
-  }
-  throw new ExternalPostingBlockedError(strictReason);
+  throw new ExternalPostingBlockedError(strict.reason);
 }
 
 const ADMIN_EXTERNAL_POSTING_ACTIONS = new Set([
