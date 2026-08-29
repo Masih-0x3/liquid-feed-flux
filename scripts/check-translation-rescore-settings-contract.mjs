@@ -7,6 +7,7 @@ const paths = {
   action: path.join(repoRoot, "supabase/functions/admin-actions/translationRescoreActions.ts"),
   scoring: path.join(repoRoot, "supabase/functions/admin-actions/scoringActions.ts"),
   threshold: path.join(repoRoot, "supabase/functions/admin-actions/activeThreshold.ts"),
+  effectiveThreshold: path.join(repoRoot, "supabase/functions/_shared/effectiveThreshold.ts"),
   xPosting: path.join(repoRoot, "supabase/functions/admin-actions/xPostingActions.ts"),
   packageJson: path.join(repoRoot, "package.json"),
   ci: path.join(repoRoot, ".github/workflows/ci.yml"),
@@ -56,6 +57,7 @@ function assertContract(source, label = "current source") {
   parseAction(source.action);
   parseScoring(source.scoring);
   parse(source.threshold, paths.threshold, "active threshold");
+  parse(source.effectiveThreshold, paths.effectiveThreshold, "effective threshold");
   parse(source.xPosting, paths.xPosting, "X posting actions");
   assertIncludes(source.action, "function checkedSettingsRows(value: unknown): Array<Record<string, unknown>>", `${label}: settings shape helper`);
   assertIncludes(source.action, 'throw new Error("scoring_settings_invalid_response");', `${label}: settings shape failure`);
@@ -70,11 +72,16 @@ function assertContract(source, label = "current source") {
   assertIncludes(source.scoring, '"scoring_policy_settings_read_failed"', `${label}: scoring policy failure code`);
   assertIncludes(source.scoring, '"scoring_model_settings_read_failed"', `${label}: scoring model failure code`);
   assertIncludes(source.threshold, 'if (error) throw new Error("active_threshold_settings_read_failed");', `${label}: active threshold read error gate`);
-  assertIncludes(source.threshold, 'if (!Array.isArray(settings)) {', `${label}: active threshold response shape gate`);
-  assertIncludes(source.threshold, 'active_threshold_settings_invalid_row', `${label}: active threshold row shape gate`);
+  assertIncludes(source.threshold, 'return resolveEffectiveThreshold(settings);', `${label}: active threshold resolves via shared effective resolver`);
+  assertIncludes(source.threshold, 'error.message.replace("effective_threshold_", "active_threshold_")', `${label}: active threshold remaps effective errors`);
   assertIncludes(source.threshold, 'export async function loadActiveThreshold(supabase: unknown): Promise<number>', `${label}: active threshold client must not use any`);
   assertIncludes(source.threshold, 'active_threshold_client_invalid', `${label}: active threshold client shape gate`);
   assertIncludes(source.threshold, 'active_threshold_query_invalid', `${label}: active threshold query shape gate`);
+  assertIncludes(source.effectiveThreshold, 'if (!Array.isArray(settings)) {', `${label}: effective threshold response shape gate`);
+  assertIncludes(source.effectiveThreshold, 'effective_threshold_settings_invalid_response', `${label}: effective threshold response error code`);
+  assertIncludes(source.effectiveThreshold, 'effective_threshold_settings_invalid_row', `${label}: effective threshold row shape gate`);
+  assertIncludes(source.effectiveThreshold, 'export function resolveEffectiveThreshold(', `${label}: effective threshold resolver is exported`);
+  assertIncludes(source.effectiveThreshold, 'DEFAULT_EFFECTIVE_THRESHOLD = 14', `${label}: effective threshold default is preserved`);
   assertIncludes(source.xPosting, "loadActiveThreshold(supabase),", `${label}: diagnostics must not default threshold after read failure`);
   assertIncludes(source.action, 'return status > 0 ? `openai_http_${status}` : "openai_request_failed";', `${label}: OpenAI provider failures must use bounded codes`);
   assertIncludes(source.action, "function safeUsageSnapshot(raw: unknown): Record<string, number> | null", `${label}: preview usage must use an allowlisted snapshot`);
@@ -192,11 +199,11 @@ if (process.env.MUTATION_TEST === "1") {
   }), "active threshold client guard removal");
   assertRejects((source) => ({
     ...source,
-    threshold: source.threshold.replace(
+    effectiveThreshold: source.effectiveThreshold.replace(
       "if (!Array.isArray(settings)) {",
       "if (false) {",
     ),
-  }), "active threshold response shape bypass");
+  }), "effective threshold response shape bypass");
   assertRejects((source) => ({
     ...source,
     xPosting: source.xPosting.replace(
