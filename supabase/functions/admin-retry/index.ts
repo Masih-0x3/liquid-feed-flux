@@ -215,17 +215,16 @@ serve(async (req) => {
 
       const { error: jobError } = await supabase
         .from('jobs')
-        .insert({
+        .upsert({
           type: 'deliver',
           payload: { 
             tweet_id: tweet_id,
             account_id: postData.account_id
           },
           status: 'pending',
+          idempotency_key: `deliver:admin_resend:${tweet_id}`,
           next_run_at: new Date().toISOString()
-        })
-        .select()
-        .single();
+        }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
 
       if (jobError) {
         console.error('Error creating delivery job:', jobError);
@@ -323,13 +322,14 @@ serve(async (req) => {
         type: 'deliver',
         payload: { tweet_id: delivery.subject_id },
         status: 'pending',
+        idempotency_key: `deliver:admin_retry:${delivery.id}`,
         next_run_at: new Date().toISOString()
       }));
 
       if (retryJobs.length > 0) {
         const { error: jobError } = await supabase
           .from('jobs')
-          .insert(retryJobs);
+          .upsert(retryJobs, { onConflict: 'idempotency_key', ignoreDuplicates: true });
 
         if (jobError) {
           return new Response(JSON.stringify({ 
@@ -508,14 +508,15 @@ serve(async (req) => {
 
     const { error: jobError } = await supabase
       .from('jobs')
-      .insert([{
+      .upsert([{
         type: 'deliver',
         payload: {
           tweet_id: deliveryTweetId,
         },
         status: 'pending',
+        idempotency_key: `deliver:admin_retry:${delivery_id}`,
         next_run_at: new Date().toISOString()
-      }]);
+      }], { onConflict: 'idempotency_key', ignoreDuplicates: true });
 
     if (jobError) throw jobError;
 
