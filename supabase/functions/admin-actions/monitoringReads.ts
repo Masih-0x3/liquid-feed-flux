@@ -2,6 +2,7 @@ import {
   loadActiveThreshold,
   loadActiveThresholdEnvelope,
 } from "./activeThreshold.ts";
+import type { SupabaseAdminClient } from "./types.ts";
 import {
   getPayloadTweetId,
   isFailedJobActionable,
@@ -2106,6 +2107,85 @@ export async function getDashboardProcessHud(
         entries: [],
       },
     };
+  }
+}
+
+type PipelineEventsQuery = PromiseLike<{ data?: unknown; error?: unknown }> & {
+  select(columns: string): PipelineEventsQuery;
+  eq(column: string, value: unknown): PipelineEventsQuery;
+  order(column: string, options?: Record<string, unknown>): PipelineEventsQuery;
+  limit(value: number): PipelineEventsQuery;
+};
+
+const PIPELINE_EVENT_META_KEYS = [
+  "queue_wait_ms",
+  "claim_delay_ms",
+  "worker_run_ms",
+  "scoring_call_ms",
+  "translation_call_ms",
+  "telegram_api_ms",
+  "media_download_ms",
+  "x_api_ms",
+  "source",
+  "reason_tag",
+] as const;
+
+function clientPipelineEvent(row: unknown): Record<string, unknown> {
+  if (!row || typeof row !== "object" || Array.isArray(row)) {
+    throw new Error("pipeline_events_invalid_row");
+  }
+  const source = row as Record<string, unknown>;
+  if (source.subject_type !== "post" || typeof source.subject_id !== "string" ||
+    typeof source.step !== "string" || typeof source.status !== "string") {
+    throw new Error("pipeline_events_invalid_row");
+  }
+  const rawMeta = source.meta;
+  const meta: Record<string, unknown> = {};
+  if (rawMeta && typeof rawMeta === "object" && !Array.isArray(rawMeta)) {
+    const candidate = rawMeta as Record<string, unknown>;
+    for (const key of PIPELINE_EVENT_META_KEYS) {
+      const value = candidate[key];
+      if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+        meta[key] = value;
+      } else if ((key === "source" || key === "reason_tag") && typeof value === "string") {
+        meta[key] = value.slice(0, 120);
+      }
+    }
+  }
+  return {
+    subject_type: "post",
+    subject_id: source.subject_id,
+    step: source.step.slice(0, 120),
+    status: source.status.slice(0, 80),
+    started_at: typeof source.started_at === "string" ? source.started_at : null,
+    ended_at: typeof source.ended_at === "string" ? source.ended_at : null,
+    error: typeof source.error === "string" ? source.error.slice(0, 500) : null,
+    ...(Object.keys(meta).length > 0 ? { meta } : {}),
+  };
+}
+
+/** Read-only, bounded pipeline timeline projection for the Monitoring drawer. */
+export async function getPipelineEvents(
+  supabase: SupabaseAdminClient,
+  body: Record<string, unknown> = {},
+) {
+  const tweetId = typeof body.tweet_id === "string" ? body.tweet_id.trim() : "";
+  if (!tweetId || tweetId.length > 128) {
+    return { success: false, error: "pipeline_events_tweet_id_invalid" };
+  }
+  const query = supabase.from("pipeline_events") as PipelineEventsQuery;
+  const { data, error } = await query
+    .select("subject_type, subject_id, step, status, started_at, ended_at, error, meta")
+    .eq("subject_type", "post")
+    .eq("subject_id", tweetId)
+    .order("started_at", { ascending: false })
+    .limit(200);
+  if (error) return { success: false, error: "pipeline_events_read_failed" };
+  try {
+    if (!Array.isArray(data)) throw new Error("pipeline_events_invalid_rows");
+    return { success: true, events: data.map(clientPipelineEvent) };
+  } catch {
+    return { success: false, error: "pipeline_events_invalid_response" };
   }
 }
 

@@ -1,8 +1,70 @@
 import { assertEquals } from "jsr:@std/assert";
 import {
+  getSettingsAdminAction,
+  getSettingsSamplesAdminAction,
   shouldRestampXPostingStart,
   validateSettingsValue,
 } from "./settings.ts";
+
+function readQuery(data: unknown, error: unknown = null) {
+  const query = {
+    select(_columns: string) { return query; },
+    in(_column: string, _values: readonly string[]) { return query; },
+    order(_column: string, _options?: Record<string, unknown>) { return query; },
+    limit(_value: number) { return query; },
+    then<TResult1 = unknown, TResult2 = never>(
+      onfulfilled?: ((value: unknown) => TResult1 | PromiseLike<TResult1>) | null,
+      _onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+    ): PromiseLike<TResult1 | TResult2> {
+      return Promise.resolve({ data, error }).then(
+        onfulfilled ?? ((value) => value as TResult1),
+      );
+    },
+  };
+  return query;
+}
+
+Deno.test("read-only settings action returns only the requested allowlisted rows", async () => {
+  const query = readQuery([
+    { key: "x_posting_config", value: { enabled: false } },
+    { key: "private_future_setting", value: "must not cross" },
+  ]);
+  const result = await getSettingsAdminAction({ from: () => query } as never, {
+    keys: ["x_posting_config", "private_future_setting"],
+  });
+
+  assertEquals(result.body, {
+    success: true,
+    rows: [{ key: "x_posting_config", value: { enabled: false } }],
+  });
+});
+
+Deno.test("read-only settings samples return bounded post metadata", async () => {
+  const query = readQuery([{
+    tweet_id: "tweet-1",
+    text_original: "source",
+    text_translated: "translated",
+    url: "https://x.com/source/status/1",
+    tweeted_at: "2026-08-29T00:00:00.000Z",
+    has_media: true,
+    accounts: { handle: "source", display_name: "Source" },
+    secret: "must not cross",
+  }]);
+  const result = await getSettingsSamplesAdminAction({ from: () => query } as never);
+
+  assertEquals(result.body, {
+    success: true,
+    samples: [{
+      tweet_id: "tweet-1",
+      text_original: "source",
+      text_translated: "translated",
+      url: "https://x.com/source/status/1",
+      tweeted_at: "2026-08-29T00:00:00.000Z",
+      has_media: true,
+      accounts: { handle: "source", display_name: "Source" },
+    }],
+  });
+});
 
 Deno.test("settings validator rejects invalid shapes without touching storage", () => {
   assertEquals(

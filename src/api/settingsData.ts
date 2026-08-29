@@ -1,5 +1,4 @@
-import { invokeAdminAction } from '@/api/adminActions';
-import { supabase } from '@/integrations/supabase/client';
+import { invokeAdminAction, invokeAdminRead } from '@/api/adminActions';
 
 export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high';
 export type Verbosity = 'low' | 'medium' | 'high';
@@ -430,10 +429,12 @@ export interface SettingsRow {
 }
 
 export async function fetchSettingsRows(keys: string[] = []): Promise<SettingsRow[]> {
-  const query = supabase.from('settings').select('key, value');
-  const { data, error } = keys.length > 0 ? await query.in('key', keys) : await query;
-  if (error) throw error;
-  return (data || []) as SettingsRow[];
+  const data = await invokeAdminRead<{ success?: boolean; error?: string; rows?: unknown[] }>({
+    action: 'get_settings',
+    ...(keys.length > 0 ? { keys } : {}),
+  });
+  if (data?.success && Array.isArray(data.rows)) return data.rows as SettingsRow[];
+  throw new Error(data?.error ?? 'Settings unavailable');
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -470,13 +471,11 @@ export async function fetchSettings() {
 }
 
 export async function fetchSampleTweets() {
-  const { data, error } = await supabase
-    .from('posts')
-    .select('tweet_id, text_original, text_translated, url, tweeted_at, has_media, accounts!inner(handle, display_name)')
-    .order('created_at', { ascending: false })
-    .limit(5);
-  if (error) throw error;
-  return (data || []) as Record<string, unknown>[];
+  const data = await invokeAdminRead<{ success?: boolean; error?: string; samples?: unknown[] }>({
+    action: 'get_settings_samples',
+  });
+  if (data?.success && Array.isArray(data.samples)) return data.samples as Record<string, unknown>[];
+  throw new Error(data?.error ?? 'Settings samples unavailable');
 }
 
 export interface SaveSettingsInput {

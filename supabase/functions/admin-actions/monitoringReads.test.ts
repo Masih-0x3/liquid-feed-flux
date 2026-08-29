@@ -4,6 +4,7 @@ import {
   attachDuplicateClusters,
   deriveMonitoringState,
   getDashboardProcessHud,
+  getPipelineEvents,
   getMonitoringEntries,
   matchesMonitoringFilter,
   normalizeMonitoringFilter,
@@ -537,4 +538,42 @@ Deno.test("getDashboardProcessHud returns bounded ordered process entries", asyn
     supabase.calls.some((call) => call.op === "range"),
     false,
   );
+});
+
+Deno.test("getPipelineEvents returns a read-only metadata projection", async () => {
+  const calls: Array<{ op: string; value?: unknown }> = [];
+  const rows = [{
+    subject_type: "post",
+    subject_id: "tweet-1",
+    step: "translate",
+    status: "completed",
+    started_at: "2026-08-29T00:00:00.000Z",
+    ended_at: "2026-08-29T00:00:01.000Z",
+    error: "provider detail should be bounded",
+    meta: {
+      translation_call_ms: 250,
+      source: "worker",
+      secret: "must not cross the read boundary",
+    },
+  }];
+  const query = {
+    select(_columns: string) { calls.push({ op: "select" }); return query; },
+    eq(_column: string, value: unknown) { calls.push({ op: "eq", value }); return query; },
+    order(_column: string) { calls.push({ op: "order" }); return query; },
+    limit(_value: number) { calls.push({ op: "limit" }); return query; },
+    then<TResult1 = unknown, TResult2 = never>(
+      onfulfilled?: ((value: unknown) => TResult1 | PromiseLike<TResult1>) | null,
+      _onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+    ): PromiseLike<TResult1 | TResult2> {
+      return Promise.resolve({ data: rows, error: null }).then(
+        onfulfilled ?? ((value) => value as TResult1),
+      );
+    },
+  };
+  const result = await getPipelineEvents({ from: () => query } as never, { tweet_id: "tweet-1" });
+
+  assertEquals(result.success, true);
+  assertEquals(result.events?.[0].meta, { translation_call_ms: 250, source: "worker" });
+  assertEquals("secret" in (result.events?.[0].meta ?? {}), false);
+  assertEquals(calls.at(-1)?.op, "limit");
 });

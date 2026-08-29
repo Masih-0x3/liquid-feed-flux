@@ -1,31 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchSettings, fetchSettingsRows, previewTranslation, saveSetting } from "@/api/settingsData";
-import { invokeAdminAction } from "@/api/adminActions";
+import { fetchSampleTweets, fetchSettings, fetchSettingsRows, previewTranslation, saveSetting } from "@/api/settingsData";
+import { invokeAdminAction, invokeAdminRead } from "@/api/adminActions";
 import {
   DEFAULT_CONTENT_FILTER_THRESHOLD,
   defaultConfig,
 } from "@/components/settings/ContentFilterSettings";
 
-const mocks = vi.hoisted(() => ({
-  from: vi.fn(),
-}));
-
 vi.mock("@/api/adminActions", () => ({
   invokeAdminAction: vi.fn(),
-}));
-
-vi.mock("@/integrations/supabase/client", () => ({
-  supabase: {
-    from: mocks.from,
-  },
+  invokeAdminRead: vi.fn(),
 }));
 
 describe("settings data API", () => {
   const invokeAdminActionMock = vi.mocked(invokeAdminAction);
+  const invokeAdminReadMock = vi.mocked(invokeAdminRead);
 
   beforeEach(() => {
     invokeAdminActionMock.mockReset();
-    mocks.from.mockReset();
+    invokeAdminReadMock.mockReset();
   });
 
   it("saves settings through the admin-actions contract", async () => {
@@ -41,21 +33,18 @@ describe("settings data API", () => {
   });
 
   it("reads selected setting rows through the shared settings API", async () => {
-    const filteredQuery = {
-      in: vi.fn().mockResolvedValue({
-        data: [{ key: "voice_guide", value: { guide: "short" } }],
-        error: null,
-      }),
-    };
-    const select = vi.fn(() => filteredQuery);
-    mocks.from.mockReturnValueOnce({ select });
+    invokeAdminReadMock.mockResolvedValueOnce({
+      success: true,
+      rows: [{ key: "voice_guide", value: { guide: "short" } }],
+    });
 
     const rows = await fetchSettingsRows(["voice_guide"]);
 
     expect(rows).toEqual([{ key: "voice_guide", value: { guide: "short" } }]);
-    expect(mocks.from).toHaveBeenCalledWith("settings");
-    expect(select).toHaveBeenCalledWith("key, value");
-    expect(filteredQuery.in).toHaveBeenCalledWith("key", ["voice_guide"]);
+    expect(invokeAdminReadMock).toHaveBeenCalledWith({
+      action: "get_settings",
+      keys: ["voice_guide"],
+    });
   });
 
   it("runs translation previews through the admin-actions contract", async () => {
@@ -97,6 +86,18 @@ describe("settings data API", () => {
     });
   });
 
+  it("reads Settings preview samples through the read-only admin action", async () => {
+    invokeAdminReadMock.mockResolvedValueOnce({
+      success: true,
+      samples: [{ tweet_id: "tweet-1", text_original: "source" }],
+    });
+
+    await expect(fetchSampleTweets()).resolves.toEqual([
+      { tweet_id: "tweet-1", text_original: "source" },
+    ]);
+    expect(invokeAdminReadMock).toHaveBeenCalledWith({ action: "get_settings_samples" });
+  });
+
   it("surfaces preview failures as errors", async () => {
     invokeAdminActionMock.mockResolvedValueOnce({ ok: false, error: "preview unavailable" });
 
@@ -116,22 +117,20 @@ describe("settings data API", () => {
   });
 
   it("merges a historical five-field translation_prompt row with nested defaults so missing fields survive", async () => {
-    mocks.from.mockReturnValueOnce({
-      select: vi.fn().mockResolvedValue({
-        data: [
-          {
-            key: "translation_prompt",
-            value: {
-              system_prompt: "Historical system prompt",
-              user_prompt_template: "{content}",
-              model: "gpt-4o",
-              temperature: 0.5,
-              max_completion_tokens: 500,
-            },
+    invokeAdminReadMock.mockResolvedValueOnce({
+      success: true,
+      rows: [
+        {
+          key: "translation_prompt",
+          value: {
+            system_prompt: "Historical system prompt",
+            user_prompt_template: "{content}",
+            model: "gpt-4o",
+            temperature: 0.5,
+            max_completion_tokens: 500,
           },
-        ],
-        error: null,
-      }),
+        },
+      ],
     });
 
     const settings = await fetchSettings();
@@ -153,15 +152,13 @@ describe("settings data API", () => {
   });
 
   it("keeps baseline defaults when a stored setting has an incompatible container shape", async () => {
-    mocks.from.mockReturnValueOnce({
-      select: vi.fn().mockResolvedValue({
-        data: [
-          { key: "translation_prompt", value: [] },
-          { key: "telegram_config", value: "malformed" },
-          { key: "message_template", value: null },
-        ],
-        error: null,
-      }),
+    invokeAdminReadMock.mockResolvedValueOnce({
+      success: true,
+      rows: [
+        { key: "translation_prompt", value: [] },
+        { key: "telegram_config", value: "malformed" },
+        { key: "message_template", value: null },
+      ],
     });
 
     const settings = await fetchSettings();
@@ -177,16 +174,14 @@ describe("settings data API", () => {
   });
 
   it("preserves an explicit content_filter.default_threshold of 12 from a valid settings row", async () => {
-    mocks.from.mockReturnValueOnce({
-      select: vi.fn().mockResolvedValue({
-        data: [
-          {
-            key: "content_filter",
-            value: { enabled: true, default_threshold: 12 },
-          },
-        ],
-        error: null,
-      }),
+    invokeAdminReadMock.mockResolvedValueOnce({
+      success: true,
+      rows: [
+        {
+          key: "content_filter",
+          value: { enabled: true, default_threshold: 12 },
+        },
+      ],
     });
 
     const settings = await fetchSettings();
@@ -194,16 +189,14 @@ describe("settings data API", () => {
   });
 
   it("preserves an explicit content_filter.default_threshold of 14 from a valid settings row", async () => {
-    mocks.from.mockReturnValueOnce({
-      select: vi.fn().mockResolvedValue({
-        data: [
-          {
-            key: "content_filter",
-            value: { enabled: true, default_threshold: 14 },
-          },
-        ],
-        error: null,
-      }),
+    invokeAdminReadMock.mockResolvedValueOnce({
+      success: true,
+      rows: [
+        {
+          key: "content_filter",
+          value: { enabled: true, default_threshold: 14 },
+        },
+      ],
     });
 
     const settings = await fetchSettings();

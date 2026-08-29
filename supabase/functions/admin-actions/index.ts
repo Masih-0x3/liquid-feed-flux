@@ -23,6 +23,7 @@ import {
 } from "./dedupeActions.ts";
 import {
   getDashboardProcessHud,
+  getPipelineEvents,
   getMonitoringEntries,
   getMonitoringOverview,
 } from "./monitoringReads.ts";
@@ -51,7 +52,11 @@ import {
   updateVideoRenderConfigAdmin,
 } from "./videoRenderActions.ts";
 import { getXApiSummary } from "./xApiSummary.ts";
-import { saveSettingsAdminAction } from "./settings.ts";
+import {
+  getSettingsAdminAction,
+  getSettingsSamplesAdminAction,
+  saveSettingsAdminAction,
+} from "./settings.ts";
 import { getRecentAuthorStatsAdminAction } from "./authorStats.ts";
 import {
   approveEnrichmentAdminAction,
@@ -389,6 +394,16 @@ serve(async (req: Request): Promise<Response> => {
         return jsonResponse(result.body, result.status);
       }
 
+      case 'get_settings': {
+        const result = await getSettingsAdminAction(supabase, body);
+        return jsonResponse(result.body, result.status);
+      }
+
+      case 'get_settings_samples': {
+        const result = await getSettingsSamplesAdminAction(supabase);
+        return jsonResponse(result.body, result.status);
+      }
+
       case 'get_recent_author_stats': {
         const result = await getRecentAuthorStatsAdminAction(supabase, body);
         return jsonResponse(result.body, result.status);
@@ -475,6 +490,10 @@ serve(async (req: Request): Promise<Response> => {
 
       case 'get_monitoring_entries': {
         return jsonResponse(await getMonitoringEntries(supabase, body));
+      }
+
+      case 'get_pipeline_events': {
+        return jsonResponse(await getPipelineEvents(supabase, body));
       }
 
       case 'get_dashboard_process_hud': {

@@ -20,6 +20,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { invokeAdminRead } from "@/api/adminActions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -197,14 +198,30 @@ export default function Monitoring() {
   const deliverThreshold = overview?.threshold ?? 14;
   const thresholdSource = overview?.threshold_source ?? 'default';
 
-  const { data: xPostingEnabled = false } = useQuery({
+  const { data: xPostingStatus } = useQuery({
     queryKey: ['x-posting-enabled'],
     queryFn: async () => {
-      const { data } = await supabase.from('settings').select('value').eq('key', 'x_posting_config').maybeSingle();
-      return (data?.value as { enabled?: boolean } | null)?.enabled === true;
+      const data = await invokeAdminRead<{ success?: boolean; error?: string; rows?: unknown[] }>({
+        action: 'get_settings',
+        keys: ['x_posting_config'],
+      });
+      if (!data?.success || !Array.isArray(data.rows)) {
+        throw new Error(data?.error ?? 'X posting status unavailable');
+      }
+      const row = data.rows.find((candidate) => (
+        candidate && typeof candidate === 'object' &&
+        (candidate as { key?: unknown }).key === 'x_posting_config'
+      )) as { value?: unknown } | undefined;
+      return {
+        available: true,
+        enabled: Boolean(row?.value && typeof row.value === 'object' && !Array.isArray(row.value) &&
+          (row.value as { enabled?: unknown }).enabled === true),
+      };
     },
     staleTime: 30_000,
   });
+  const xPostingEnabled = xPostingStatus?.enabled === true;
+  const xPostingStatusAvailable = xPostingStatus?.available === true;
 
   const moderationEntries = useMemo(() => clusterMonitoringEntries(entries), [entries]);
   const entryByTweetId = useMemo(() => new Map(entries.map((entry) => [entry.tweet_id, entry])), [entries]);
@@ -346,15 +363,15 @@ export default function Monitoring() {
     setDrawerOpen(true);
     setTimelineState({ tweetId, events: [], loading: true, error: false });
     try {
-      const { data, error: timelineError } = await supabase
-        .from('pipeline_events')
-        .select('subject_type, subject_id, step, status, started_at, ended_at, error, meta')
-        .eq('subject_type', 'post')
-        .eq('subject_id', tweetId)
-        .order('started_at', { ascending: false });
-      if (timelineError) throw timelineError;
+      const data = await invokeAdminRead<{ success?: boolean; error?: string; events?: unknown[] }>({
+        action: 'get_pipeline_events',
+        tweet_id: tweetId,
+      });
+      if (!data?.success || !Array.isArray(data.events)) {
+        throw new Error(data?.error ?? 'Pipeline timeline unavailable');
+      }
       if (timelineRequestRef.current !== requestId) return;
-      setTimelineState({ tweetId, events: (data as PipelineEvent[]) || [], loading: false, error: false });
+      setTimelineState({ tweetId, events: data.events as PipelineEvent[], loading: false, error: false });
     } catch {
       if (timelineRequestRef.current !== requestId) return;
       setTimelineState({ tweetId, events: [], loading: false, error: true });
@@ -850,7 +867,15 @@ export default function Monitoring() {
         </div>
       )}
 
-      {!xPostingEnabled && (
+      {!xPostingStatusAvailable ? (
+        <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
+          <AlertCircle className="w-4 h-4 mt-0.5 shrink-0 text-amber-500" />
+          <div>
+            <p className="font-medium">X posting status unavailable</p>
+            <p className="text-muted-foreground">The current X posting setting could not be read. No posting action is enabled.</p>
+          </div>
+        </div>
+      ) : !xPostingEnabled && (
         <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
           <AlertCircle className="w-4 h-4 mt-0.5 shrink-0 text-amber-500" />
           <div>
