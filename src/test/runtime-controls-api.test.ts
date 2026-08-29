@@ -43,6 +43,17 @@ describe('runtime control client contract', () => {
     expect(Object.values(body).slice(1).every((value) => typeof value === 'boolean')).toBe(true);
   });
 
+  it('can send one named control without a stale full-row snapshot', async () => {
+    invoke.mockResolvedValueOnce({ data: { success: true, controls: { ...controls, dedupe_enabled: true } }, error: null });
+
+    await updateRuntimeControls({ control: 'dedupe_enabled', enabled: true });
+    expect(invoke.mock.calls.at(-1)?.[1]?.body).toEqual({
+      action: 'update_runtime_controls',
+      control: 'dedupe_enabled',
+      enabled: true,
+    });
+  });
+
   it('does not expose unexpected response fields and rejects malformed control state', async () => {
     invoke.mockResolvedValueOnce({
       data: {

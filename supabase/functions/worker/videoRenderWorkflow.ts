@@ -9,6 +9,7 @@ import {
 } from "../_shared/videoRenderConfig.ts";
 import type { XMediaRow } from "../_shared/mediaSelection.ts";
 import { requireDeliveryCutover } from "../_shared/deliveryCutover.ts";
+import { requireExternalPosting } from "../_shared/externalPostingGuard.ts";
 import { insertPipelineEvent } from "./jobLifecycle.ts";
 
 const VIDEO_RENDER_VERSION = "persian-subtitles-masihh-v1";
@@ -36,6 +37,7 @@ type DispatchXPosterForTarget = (
 type VideoRenderWorkflowDeps = {
   dispatchVideoRendererForTarget?: DispatchVideoRendererForTarget;
   dispatchXPosterForTarget?: DispatchXPosterForTarget;
+  requireExternalPosting?: (supabase: any) => Promise<void>;
 };
 
 function scheduleBackground(promise: Promise<unknown>): boolean {
@@ -472,6 +474,22 @@ export async function enqueuePostDeliveryAfterRenderGate(
       tweet_id: tweetId,
       source,
       reason: gate.blockReason,
+    }));
+    return;
+  }
+  // Rendering may continue in render-only mode, but release of a delivery
+  // queue job and its dispatch event must re-check the server posting gate.
+  // This check is a fast path; the database release trigger closes the
+  // read-to-write race for direct callers and concurrent toggles.
+  try {
+    await (deps.requireExternalPosting ?? requireExternalPosting)(supabase);
+  } catch (error) {
+    console.log(JSON.stringify({
+      function: "worker",
+      action: "delivery_skipped_external_posting_blocked",
+      tweet_id: tweetId,
+      source,
+      reason: error instanceof Error ? error.message : "external_posting_blocked",
     }));
     return;
   }

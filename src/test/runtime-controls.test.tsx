@@ -73,8 +73,8 @@ describe('RuntimeControlsPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /confirm change/i }));
 
     await waitFor(() => expect(mockedUpdateRuntimeControls.mock.calls[0]?.[0]).toEqual({
-      dedupe_enabled: true,
-      translation_enabled: true,
+      control: 'dedupe_enabled',
+      enabled: true,
     }));
     expect(await screen.findByText('OpenAI dedupe enabled.')).toBeInTheDocument();
   });

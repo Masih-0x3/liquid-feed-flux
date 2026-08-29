@@ -2,6 +2,9 @@ import { createAdminActionResponseError } from './adminActionErrors';
 import { invokeAdminAction, invokeAdminRead, type AdminActionBody } from './adminActions';
 
 export type RuntimeControlName = 'dedupe_enabled' | 'translation_enabled';
+export type RuntimeControlUpdate =
+  | Pick<RuntimeControls, RuntimeControlName>
+  | { control: RuntimeControlName; enabled: boolean };
 
 export type RuntimeQueueCounts = {
   dedupe_queued?: number;
@@ -94,13 +97,22 @@ export async function getRuntimeControls(): Promise<RuntimeControls> {
   return parseControls(response);
 }
 
-export async function updateRuntimeControls(input: Pick<RuntimeControls, RuntimeControlName>): Promise<RuntimeControls> {
+export async function updateRuntimeControls(input: RuntimeControlUpdate): Promise<RuntimeControls> {
   // Keep this request deliberately narrow. It must never carry posting state,
   // credentials, or arbitrary settings from a browser draft.
+  const body = 'control' in input
+    ? {
+      action: 'update_runtime_controls',
+      control: input.control,
+      enabled: input.enabled === true,
+    }
+    : {
+      action: 'update_runtime_controls',
+      dedupe_enabled: input.dedupe_enabled === true,
+      translation_enabled: input.translation_enabled === true,
+    };
   const response = await invokeAdminAction<Record<string, unknown>>({
-    action: 'update_runtime_controls',
-    dedupe_enabled: input.dedupe_enabled === true,
-    translation_enabled: input.translation_enabled === true,
+    ...body,
   } as AdminActionBody);
   return parseControls(response);
 }

@@ -253,6 +253,18 @@ export function isExactRuntimeControlsUpdateBody(body: Record<string, unknown>):
     typeof body.translation_enabled === "boolean";
 }
 
+/** Accept one lane mutation so concurrent admin tabs cannot overwrite a full row. */
+export function isExactRuntimeControlFieldUpdateBody(body: Record<string, unknown>): boolean {
+  const keys = Object.keys(body).sort();
+  return keys.length === 3 &&
+    keys[0] === "action" &&
+    keys[1] === "control" &&
+    keys[2] === "enabled" &&
+    body.action === "update_runtime_controls" &&
+    (body.control === "dedupe_enabled" || body.control === "translation_enabled") &&
+    typeof body.enabled === "boolean";
+}
+
 async function runTranslationOnlyForAdmin(supabase: SupabaseAdminClient, tweetId: string) {
   return await runTranslationOnly(supabase, tweetId, {
     insertAdminPipelineEvent,
@@ -353,22 +365,23 @@ serve(async (req: Request): Promise<Response> => {
       }
 
       case 'update_runtime_controls': {
-        if (!isExactRuntimeControlsUpdateBody(body)) {
+        if (!isExactRuntimeControlsUpdateBody(body) && !isExactRuntimeControlFieldUpdateBody(body)) {
           return jsonResponse({
             ok: false,
-            error: 'only action, dedupe_enabled, and translation_enabled are accepted',
+            error: 'only one named runtime control or the legacy boolean pair is accepted',
             code: 'runtime_controls_input_invalid',
           }, 400);
         }
-        const dedupeEnabled = body.dedupe_enabled;
-        const translationEnabled = body.translation_enabled;
-        const { error: updateError } = await authResult.authClient.rpc(
-          'update_runtime_controls',
-          {
-            p_dedupe_enabled: dedupeEnabled,
-            p_translation_enabled: translationEnabled,
-          },
-        );
+        const fieldUpdate = isExactRuntimeControlFieldUpdateBody(body);
+        const { error: updateError } = fieldUpdate
+          ? await authResult.authClient.rpc('update_runtime_control', {
+            p_control_name: body.control,
+            p_enabled: body.enabled,
+          })
+          : await authResult.authClient.rpc('update_runtime_controls', {
+            p_dedupe_enabled: body.dedupe_enabled,
+            p_translation_enabled: body.translation_enabled,
+          });
         if (updateError) {
           return jsonResponse({
             ok: false,

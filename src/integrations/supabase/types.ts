@@ -3309,6 +3309,21 @@ export type Database = {
           updated_by: string | null
         }
       }
+      update_runtime_control: {
+        Args: {
+          p_control_name: string
+          p_enabled: boolean
+        }
+        Returns: {
+          dedupe_enabled: boolean
+          environment: string
+          posting_mode: string
+          singleton_id: boolean
+          translation_enabled: boolean
+          updated_at: string
+          updated_by: string | null
+        }
+      }
       update_runtime_controls_v2: {
         Args: {
           p_dedupe_enabled: boolean

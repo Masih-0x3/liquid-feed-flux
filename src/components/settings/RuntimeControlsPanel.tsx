@@ -52,10 +52,7 @@ export default function RuntimeControlsPanel() {
     setLocalError(null);
     setSuccess(null);
     try {
-      await updateMutation.mutateAsync({
-        dedupe_enabled: name === 'dedupe_enabled' ? nextValue : controls.dedupe_enabled,
-        translation_enabled: name === 'translation_enabled' ? nextValue : controls.translation_enabled,
-      });
+      await updateMutation.mutateAsync({ control: name, enabled: nextValue });
       setPendingChange(null);
       setSuccess(`${CONTROL_LABELS[name]} ${nextValue ? 'enabled' : 'paused'}.`);
     } catch {
