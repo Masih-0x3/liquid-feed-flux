@@ -28,6 +28,35 @@ describe('migration-defined Supabase type contracts', () => {
     }>();
   });
 
+  it('enforces write-shape contracts for generated and defaulted columns', () => {
+    expectTypeOf<Tables['runtime_controls']['Insert']>().toEqualTypeOf<{
+      dedupe_enabled?: boolean;
+      environment?: string;
+      posting_mode?: string;
+      singleton_id?: boolean;
+      singleton_key?: boolean;
+      translation_enabled?: boolean;
+      updated_at?: string;
+      updated_by?: string | null;
+    }>();
+    expectTypeOf<Tables['runtime_activation_epochs']['Insert']>().toEqualTypeOf<{
+      activated_by?: string | null;
+      activation_key?: string | null;
+      created_at?: string;
+      epoch_id?: never;
+      t1_cutover_at?: string;
+      t2_activated_at?: string;
+    }>();
+    expectTypeOf<Tables['runtime_activation_epochs']['Update']>().toEqualTypeOf<{
+      activated_by?: string | null;
+      activation_key?: string | null;
+      created_at?: string;
+      epoch_id?: never;
+      t1_cutover_at?: string;
+      t2_activated_at?: string;
+    }>();
+  });
+
   it('matches the committed V2, cutover, and render RPC signatures', () => {
     expectTypeOf<Functions['activate_runtime_v2']['Args']>().toEqualTypeOf<{
       p_activation_key?: string;
