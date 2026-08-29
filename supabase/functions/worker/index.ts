@@ -3328,6 +3328,26 @@ async function handleDeliverJob(
       renderGate.decision,
     );
 
+    const assertTelegramDeliveryGuards = async () => {
+      try {
+        await requireExternalPosting(supabase);
+        await requireDeliveryCutover(supabase, tweetId);
+      } catch (error) {
+        if (error instanceof DeliveryCutoverBlockedError) {
+          await settleBlockedDeliveryJob(supabase, job, error.message);
+          throw new DeliveryCutoverSettled(error.message);
+        }
+        throw new JobDeferred("telegram_external_posting_blocked", 30_000, {
+          tweet_id: tweetId,
+          check: "external_posting_guard",
+        });
+      }
+    };
+
+    // Run both fail-closed guards before claiming a durable Telegram delivery
+    // row. A blocked/Preview retry must not strand a `preparing` receipt.
+    await assertTelegramDeliveryGuards();
+
     let telegramClaim: Awaited<ReturnType<typeof claimTelegramDelivery>>;
     try {
       telegramClaim = await claimTelegramDelivery(supabase, {
@@ -3381,20 +3401,8 @@ async function handleDeliverJob(
     };
     let providerStarted = false;
     const beforeTelegramProviderCall = async () => {
-      try {
-        // This check runs for the initial request and every provider retry.
-        await requireExternalPosting(supabase);
-        await requireDeliveryCutover(supabase, tweetId);
-      } catch (error) {
-        if (error instanceof DeliveryCutoverBlockedError) {
-          await settleBlockedDeliveryJob(supabase, job, error.message);
-          throw new DeliveryCutoverSettled(error.message);
-        }
-        throw new JobDeferred("telegram_external_posting_blocked", 30_000, {
-          tweet_id: tweetId,
-          check: "external_posting_guard",
-        });
-      }
+      // This check runs for the initial request and every provider retry.
+      await assertTelegramDeliveryGuards();
       if (providerStarted) return;
       let started = false;
       try {
