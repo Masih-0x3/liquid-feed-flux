@@ -4,6 +4,7 @@ import {
   adminRetryActionError,
   classifyAdminRetryAction,
   isAdminRetryAction,
+  isRetryableFailedTelegramDelivery,
 } from "./adminRetryPolicy.ts";
 
 Deno.test("admin-retry accepts only explicit actions", () => {
@@ -34,4 +35,18 @@ Deno.test("test_webhook is classified as inbound RSS ingest, not provider postin
   assertEquals(classifyAdminRetryAction("test_webhook"), "inbound_rss_ingest");
   assertEquals(classifyAdminRetryAction("test_template"), "telegram_provider_write");
   assertEquals(classifyAdminRetryAction("retry_x" as never), "external_delivery_retry");
+});
+
+Deno.test("admin retry excludes ambiguous and provider-started failed deliveries", () => {
+  const fixture = [
+    { id: "safe", claim_state: "failed", provider_started_at: null },
+    { id: "legacy", claim_state: null, provider_started_at: null },
+    { id: "ambiguous", claim_state: "ambiguous", provider_started_at: null },
+    { id: "provider-started", claim_state: "failed", provider_started_at: "2026-08-29T00:00:00Z" },
+  ];
+
+  assertEquals(
+    fixture.filter(isRetryableFailedTelegramDelivery).map((delivery) => delivery.id),
+    ["safe", "legacy"],
+  );
 });

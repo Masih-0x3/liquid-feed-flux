@@ -11,6 +11,7 @@ import {
   ADMIN_RETRY_INBOUND_INGEST_ACTION,
   classifyAdminRetryAction,
   isAdminRetryAction,
+  isRetryableFailedTelegramDelivery,
 } from "./adminRetryPolicy.ts";
 import {
   evaluateExternalPosting,
@@ -312,13 +313,19 @@ serve(async (req) => {
           .filter((row) => new Date(String(row.created_at)).getTime() > new Date(cutoverAt).getTime())
           .map((row) => String(row.tweet_id)),
       );
-      const eligibleFailedRows = failedRows.filter((delivery) =>
+      const cutoverEligibleFailedRows = failedRows.filter((delivery) =>
         eligibleIds.has(String(delivery.subject_id ?? '')) &&
         new Date(String(delivery.created_at)).getTime() > new Date(cutoverAt).getTime()
       );
       const historicalCount = failedRows.filter(
-        (delivery) => !eligibleFailedRows.includes(delivery),
+        (delivery) => !cutoverEligibleFailedRows.includes(delivery),
       ).length;
+      const ambiguousCount = cutoverEligibleFailedRows.filter(
+        (delivery) => !isRetryableFailedTelegramDelivery(delivery),
+      ).length;
+      const eligibleFailedRows = cutoverEligibleFailedRows.filter(
+        isRetryableFailedTelegramDelivery,
+      );
       const retryJobs = eligibleFailedRows.map(delivery => ({
         type: 'deliver',
         payload: { tweet_id: delivery.subject_id },
@@ -359,6 +366,7 @@ serve(async (req) => {
         success: true, 
         message: `Created ${retryJobs.length} retry jobs for eligible deliveries`,
         historical_skipped: historicalCount,
+        ambiguous_skipped: ambiguousCount,
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
