@@ -195,6 +195,7 @@ export default function Monitoring() {
   const { data: xSummary } = useXApiSummary(24);
 
   const deliverThreshold = overview?.threshold ?? 14;
+  const thresholdSource = overview?.threshold_source ?? 'default';
 
   const { data: xPostingEnabled = false } = useQuery({
     queryKey: ['x-posting-enabled'],
@@ -814,6 +815,7 @@ export default function Monitoring() {
         <div className="min-w-0">
           <h1 className="text-2xl sm:text-3xl font-bold">Content Monitoring</h1>
           <p className="text-sm text-muted-foreground">Editorial triage for scoring, translation, delivery blockers, and X visibility</p>
+          <p className="text-xs text-muted-foreground/80">Effective threshold: {deliverThreshold} · source: {thresholdSource}</p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap lg:justify-end">
           {!readOnly && (

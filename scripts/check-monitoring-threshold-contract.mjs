@@ -46,8 +46,8 @@ function assertContract(sources, label = "current source") {
   parse(paths.backend, sources.backend);
   parse(paths.api, sources.api);
   parse(paths.page, sources.page);
-  requireMatch(sources.backend, /const threshold = await loadActiveThreshold\(supabase\);/, `${label}: backend must use canonical active-threshold resolver`);
-  if (!sources.backend.includes("overview: {\n      window_hours: windowHours,\n      threshold,\n      counts,")) fail(`${label}: overview must return the resolved threshold`);
+  requireMatch(sources.backend, /loadActiveThresholdEnvelope\(supabase\)/, `${label}: backend must use canonical active-threshold envelope resolver`);
+  if (!sources.backend.includes("overview: {\n      window_hours: windowHours,\n      threshold,\n      threshold_mode: thresholdEnvelope.mode,")) fail(`${label}: overview must return the resolved threshold envelope`);
   requireMatch(sources.api, /export interface MonitoringOverview \{[\s\S]*?threshold: number;/, `${label}: MonitoringOverview must type the threshold`);
   requireMatch(sources.page, /const deliverThreshold = overview\?\.threshold \?\? 14;/, `${label}: Monitoring must consume the overview threshold`);
   requireNoMatch(sources.page, /active_profile_id|editorial_profiles/, `${label}: Monitoring must not read legacy threshold settings directly`);
@@ -60,7 +60,7 @@ const sources = readSources();
 assertContract(sources);
 if (process.env.MUTATION_TEST === "1") {
   for (const [label, mutate] of [
-    ["backend threshold omitted", (input) => ({ ...input, backend: input.backend.replace("overview: {\n      window_hours: windowHours,\n      threshold,\n      counts,", "overview: {\n      window_hours: windowHours,\n      counts,") })],
+    ["backend threshold omitted", (input) => ({ ...input, backend: input.backend.replace("overview: {\n      window_hours: windowHours,\n      threshold,\n      threshold_mode: thresholdEnvelope.mode,", "overview: {\n      window_hours: windowHours,\n      counts,") })],
     ["page threshold bypass", (input) => ({ ...input, page: input.page.replace("const deliverThreshold = overview?.threshold ?? 14;", "const deliverThreshold = 14;") })],
     ["legacy page read reintroduced", (input) => ({ ...input, page: input.page.replace("const deliverThreshold = overview?.threshold ?? 14;", "const deliverThreshold = overview?.threshold ?? 14; const active_profile_id = 'legacy';") })],
     ["CI command removed", (input) => ({ ...input, ci: input.ci.replace("      - run: npm run check:monitoring-threshold\n", "") })],
