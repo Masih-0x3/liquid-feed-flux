@@ -2,12 +2,15 @@ import { assertEquals, assertRejects } from "jsr:@std/assert";
 import { ExternalPostingBlockedError } from "../_shared/externalPostingGuard.ts";
 
 const originalServe = Deno.serve;
+const originalEnvGet = Deno.env.get;
 Deno.serve = (() => undefined) as typeof Deno.serve;
+Deno.env.get = (() => undefined) as typeof Deno.env.get;
 let guardedExternalProviderFetch: typeof import("./index.ts").guardedExternalProviderFetch;
 try {
   ({ guardedExternalProviderFetch } = await import("./index.ts"));
 } finally {
   Deno.serve = originalServe;
+  Deno.env.get = originalEnvGet;
 }
 
 const PREVIEW_CONTROLS = {
@@ -95,7 +98,13 @@ Deno.test("X provider guard blocks missing or malformed controls before fetch", 
     return new Response("unexpected");
   };
   try {
-    for (const controls of [null, [{ ...PRODUCTION_CONTROLS, posting_mode: "invalid" }]]) {
+    const { dedupe_enabled: _dedupeEnabled, ...missingRequiredControls } = PRODUCTION_CONTROLS;
+    for (const controls of [
+      null,
+      { ...PRODUCTION_CONTROLS, posting_mode: "invalid" },
+      { ...PRODUCTION_CONTROLS, updated_at: "not-a-date" },
+      missingRequiredControls,
+    ]) {
       await assertRejects(
         () => guardedExternalProviderFetch(
           controlsClient(controls),

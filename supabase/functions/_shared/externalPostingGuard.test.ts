@@ -1,6 +1,9 @@
+import { assertRejects } from "jsr:@std/assert";
 import {
   adminActionRequiresExternalPosting,
   evaluateExternalPosting,
+  ExternalPostingBlockedError,
+  requireExternalPosting,
   type ExternalPostingClient,
 } from "./externalPostingGuard.ts";
 
@@ -86,5 +89,21 @@ Deno.test("preview, missing rows, duplicate rows, and environment breaker fail c
   ];
   if (JSON.stringify(reasons) !== JSON.stringify(expected)) {
     throw new Error(`unexpected reasons ${JSON.stringify(reasons)}`);
+  }
+});
+
+Deno.test("provider guard does not use compatibility fallback for malformed strict controls", async () => {
+  for (const controls of [
+    { environment: "production", posting_mode: "enabled", updated_at: "not-a-date" },
+    { environment: "production", posting_mode: "enabled", updated_at: "2026-08-12T12:00:00.000Z" },
+  ]) {
+    await assertRejects(
+      () => requireExternalPosting(
+        client([controls]),
+        { environment: "production", allowExternalPosting: "true" },
+      ),
+      ExternalPostingBlockedError,
+      "external posting is blocked",
+    );
   }
 });
