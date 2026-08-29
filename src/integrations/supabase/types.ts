@@ -331,6 +331,30 @@ export type Database = {
         }
         Relationships: []
       }
+      delivery_cutover: {
+        Row: {
+          delivery_cutover_at: string
+          disposition: string
+          initialized_at: string
+          initialized_by: string | null
+          singleton_key: boolean
+        }
+        Insert: {
+          delivery_cutover_at: string
+          disposition?: string
+          initialized_at?: string
+          initialized_by?: string | null
+          singleton_key?: boolean
+        }
+        Update: {
+          delivery_cutover_at?: string
+          disposition?: string
+          initialized_at?: string
+          initialized_by?: string | null
+          singleton_key?: boolean
+        }
+        Relationships: []
+      }
       digest_runs: {
         Row: {
           claim_expires_at: string | null
@@ -1669,12 +1693,40 @@ export type Database = {
           },
         ]
       }
+      runtime_activation_epochs: {
+        Row: {
+          activated_by: string | null
+          activation_key: string | null
+          created_at: string
+          epoch_id: number
+          t1_cutover_at: string
+          t2_activated_at: string
+        }
+        Insert: {
+          activated_by?: string | null
+          activation_key?: string | null
+          created_at?: string
+          epoch_id?: number
+          t1_cutover_at?: string
+          t2_activated_at?: string
+        }
+        Update: {
+          activated_by?: string | null
+          activation_key?: string | null
+          created_at?: string
+          epoch_id?: number
+          t1_cutover_at?: string
+          t2_activated_at?: string
+        }
+        Relationships: []
+      }
       runtime_controls: {
         Row: {
           dedupe_enabled: boolean
           environment: string
           posting_mode: string
           singleton_id: boolean
+          singleton_key: boolean
           translation_enabled: boolean
           updated_at: string
           updated_by: string | null
@@ -1684,6 +1736,7 @@ export type Database = {
           environment: string
           posting_mode?: string
           singleton_id?: boolean
+          singleton_key?: boolean
           translation_enabled?: boolean
           updated_at?: string
           updated_by?: string | null
@@ -1693,6 +1746,7 @@ export type Database = {
           environment?: string
           posting_mode?: string
           singleton_id?: boolean
+          singleton_key?: boolean
           translation_enabled?: boolean
           updated_at?: string
           updated_by?: string | null
@@ -2533,6 +2587,10 @@ export type Database = {
         Args: { p_tweet_id: string }
         Returns: boolean
       }
+      activate_runtime_v2: {
+        Args: { p_activation_key?: string; p_activated_by?: string }
+        Returns: string
+      }
       audit_duplicate_candidates: {
         Args: {
           candidate_min_similarity?: number
@@ -2634,6 +2692,22 @@ export type Database = {
           p_subject_id: string
         }
         Returns: Json
+      }
+      claim_telegram_delivery_v2: {
+        Args: {
+          p_chat_id: string
+          p_claim_ttl_seconds?: number
+          p_delivery_key: string
+          p_epoch_generation: number
+          p_lineage_time: string
+          p_source?: string
+          p_subject_id: string
+        }
+        Returns: Json
+      }
+      claim_video_render_after: {
+        Args: { p_queued_after: string; worker_id?: string }
+        Returns: Database["public"]["Tables"]["video_renders"]["Row"][]
       }
       claim_video_render_by_id: {
         Args: { render_id: string; worker_id?: string }
@@ -2746,6 +2820,17 @@ export type Database = {
         }
         Returns: Json
       }
+      claim_x_post_delivery_v2: {
+        Args: {
+          p_claim_ttl_seconds?: number
+          p_epoch_generation: number
+          p_force_retry?: boolean
+          p_lineage_time: string
+          p_post_id: string
+          p_source?: string
+        }
+        Returns: Json
+      }
       cleanup_old_data: {
         Args: { batch_limit?: number; retention_days?: number }
         Returns: Json
@@ -2818,6 +2903,14 @@ export type Database = {
       }
       current_user_is_admin: { Args: never; Returns: boolean }
       current_user_role: { Args: never; Returns: Database["public"]["Enums"]["app_role"] | null }
+      delivery_cutover_allows_job: {
+        Args: { p_created_at: string; p_tweet_id: string }
+        Returns: boolean
+      }
+      delivery_cutover_allows_post: {
+        Args: { p_tweet_id: string }
+        Returns: boolean
+      }
       enqueue_video_render: {
         Args: {
           p_failure_policy?: string
@@ -2932,6 +3025,7 @@ export type Database = {
         }[]
       }
       get_dashboard_summary: { Args: never; Returns: Json }
+      get_delivery_cutover: { Args: never; Returns: string }
       get_expired_video_render_paths: {
         Args: { limit_count?: number }
         Returns: {
@@ -3026,6 +3120,10 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      initialize_delivery_cutover: {
+        Args: { p_initialized_by?: string }
+        Returns: string
       }
       invoke_x_poster_if_enabled: { Args: never; Returns: undefined }
       knn_feedback_prior: {
@@ -3187,6 +3285,14 @@ export type Database = {
         Returns: Json
       }
       retry_step: { Args: { step: string; tweet_id: string }; Returns: boolean }
+      runtime_v2_allows_lineage: {
+        Args: { p_epoch_generation: number; p_lineage_time: string }
+        Returns: boolean
+      }
+      settle_delivery_cutover_blocked: {
+        Args: { p_job_id: string; p_reason?: string }
+        Returns: boolean
+      }
       update_runtime_controls: {
         Args: {
           p_dedupe_enabled: boolean
@@ -3197,10 +3303,22 @@ export type Database = {
           environment: string
           posting_mode: string
           singleton_id: boolean
+          singleton_key: boolean
           translation_enabled: boolean
           updated_at: string
           updated_by: string | null
         }
+      }
+      update_runtime_controls_v2: {
+        Args: {
+          p_dedupe_enabled: boolean
+          p_translation_enabled: boolean
+        }
+        Returns: Database["public"]["Tables"]["runtime_controls"]["Row"]
+      }
+      assert_delivery_cutover_post: {
+        Args: { p_tweet_id: string }
+        Returns: undefined
       }
       save_video_render_feedback_if_current: {
         Args: {
