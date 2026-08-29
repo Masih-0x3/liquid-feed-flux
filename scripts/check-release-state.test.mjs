@@ -185,3 +185,11 @@ test("production execution requires a separate acknowledgement and identity cont
   assert.match(missing.output, /production|acknowledg|identity/i);
   assert.equal(missing.calls, "");
 });
+
+test("release-state context can invoke the preview cron isolation helper", () => {
+  const output = execFileSync("node", [join(repoRoot, "scripts", "preview-cron-isolation.mjs"), "--check"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  assert.match(output, /PREVIEW_CRON_ISOLATION_SOURCE_CONTRACT_PASS/);
+});
