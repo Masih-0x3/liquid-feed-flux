@@ -97,7 +97,7 @@ function assertContract(sources, label) {
   );
   assertIncludes(
     sources.monitoring,
-    "setTimelineState({ tweetId, events: (data as PipelineEvent[]) || [], loading: false, error: false });",
+    "setTimelineState({ tweetId, events: data.events as PipelineEvent[], loading: false, error: false });",
     label + " matching response state",
   );
   assertIncludes(
@@ -113,14 +113,14 @@ function assertContract(sources, label) {
   );
   const successfulTimelineRead = sliceBetween(
     openDetailsHandler,
-    "if (timelineError) throw timelineError;",
+    "const data = await invokeAdminRead<",
     "} catch {",
     label + " successful timeline read",
   );
   assertOrder(
     successfulTimelineRead,
     "if (timelineRequestRef.current !== requestId) return;",
-    "setTimelineState({ tweetId, events: (data as PipelineEvent[]) || [], loading: false, error: false });",
+    "setTimelineState({ tweetId, events: data.events as PipelineEvent[], loading: false, error: false });",
     label + " success guard before matching state commit",
   );
   const failedTimelineRead = sliceBetween(
@@ -204,8 +204,11 @@ function assertContract(sources, label) {
   assertIncludes(sources.drawer, "Retry timeline", label + " drawer retry copy");
   assertIncludes(sources.drawer, "onClick={onRetryTimeline}", label + " drawer retry action");
 
-  assertOrder(openDetailsHandler, "const requestId = ++timelineRequestRef.current;", ".from('pipeline_events')", label + " request before query");
-  assertOrder(openDetailsHandler, ".from('pipeline_events')", "if (timelineRequestRef.current !== requestId) return;", label + " query before success guard");
+  assertOrder(openDetailsHandler, "const requestId = ++timelineRequestRef.current;", "invokeAdminRead", label + " request before admin read");
+  assertOrder(openDetailsHandler, "get_pipeline_events", "if (timelineRequestRef.current !== requestId) return;", label + " admin read before success guard");
+  assertOccurrenceCount(openDetailsHandler, ".from('pipeline_events')", 0, label + " no direct browser pipeline_events query in open details");
+  assertIncludes(openDetailsHandler, "action: 'get_pipeline_events'", label + " admin read action is get_pipeline_events");
+  assertIncludes(openDetailsHandler, "if (!data?.success || !Array.isArray(data.events))", label + " admin read response envelope validation");
   assertOrder(sources.monitoring, "timelineRequestRef.current += 1;", "setTimelineState({ tweetId: null, events: [], loading: false, error: false });", label + " invalidation before clearing");
   assertOrder(sources.drawer, "{timelineLoading ? (", ") : timelineError ? (", label + " drawer state priority");
 
@@ -219,10 +222,17 @@ function makeLateResponseMutant(input) {
   );
 }
 
+function makeDirectBrowserQueryMutant(input) {
+  return input.replace(
+    "      const data = await invokeAdminRead<{ success?: boolean; error?: string; events?: unknown[] }>({\n        action: 'get_pipeline_events',\n        tweet_id: tweetId,\n      });",
+    "      const { data, error } = await supabase\n        .from('pipeline_events')\n        .select('subject_type, subject_id, step, status, started_at, ended_at, error, meta')\n        .eq('subject_type', 'post')\n        .eq('subject_id', tweetId)\n        .order('started_at', { ascending: false })\n        .limit(200);\n      if (error) throw error;",
+  );
+}
+
 function makeSuccessCommitOrderMutant(input) {
   return input.replace(
-    "if (timelineRequestRef.current !== requestId) return;\n      setTimelineState({ tweetId, events: (data as PipelineEvent[]) || [], loading: false, error: false });",
-    "setTimelineState({ tweetId, events: (data as PipelineEvent[]) || [], loading: false, error: false });\n      if (timelineRequestRef.current !== requestId) return;",
+    "if (timelineRequestRef.current !== requestId) return;\n      setTimelineState({ tweetId, events: data.events as PipelineEvent[], loading: false, error: false });",
+    "setTimelineState({ tweetId, events: data.events as PipelineEvent[], loading: false, error: false });\n      if (timelineRequestRef.current !== requestId) return;",
   );
 }
 
@@ -304,6 +314,7 @@ const selfTest = process.argv.includes("--self-test");
 if (selfTest) {
   const mutants = [
     ["late-response", { ...source, monitoring: makeLateResponseMutant(source.monitoring) }],
+    ["direct-browser-query", { ...source, monitoring: makeDirectBrowserQueryMutant(source.monitoring) }],
     ["success-commit-order", { ...source, monitoring: makeSuccessCommitOrderMutant(source.monitoring) }],
     ["failure-commit-order", { ...source, monitoring: makeFailureCommitOrderMutant(source.monitoring) }],
     ["identity-suppression", { ...source, monitoring: makeIdentityMutant(source.monitoring) }],

@@ -573,7 +573,12 @@ Deno.test("getPipelineEvents returns a read-only metadata projection", async () 
   const result = await getPipelineEvents({ from: () => query } as never, { tweet_id: "tweet-1" });
 
   assertEquals(result.success, true);
-  assertEquals(result.events?.[0].meta, { translation_call_ms: 250, source: "worker" });
-  assertEquals("secret" in (result.events?.[0].meta ?? {}), false);
+  const eventMeta = result.events?.[0].meta;
+  const metaRecord = typeof eventMeta === "object" && eventMeta !== null &&
+      !Array.isArray(eventMeta)
+    ? eventMeta as Record<string, unknown>
+    : {};
+  assertEquals(metaRecord, { translation_call_ms: 250, source: "worker" });
+  assertEquals("secret" in metaRecord, false);
   assertEquals(calls.at(-1)?.op, "limit");
 });
