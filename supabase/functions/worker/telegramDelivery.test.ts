@@ -17,6 +17,12 @@ type FetchCall = {
   body?: Record<string, unknown>;
 };
 
+type MockFetchResponse = {
+  status?: number;
+  body: Record<string, unknown>;
+  error?: Error;
+};
+
 const allowProviderCall = async () => {};
 
 function createStorageSupabase(options: {
@@ -84,7 +90,7 @@ function createSpacingSupabase(options: { count?: number; throws?: boolean }) {
 }
 
 async function withMockFetch<T>(
-  responses: Array<{ status?: number; body: Record<string, unknown> }>,
+  responses: MockFetchResponse[],
   fn: (calls: FetchCall[]) => Promise<T>,
 ): Promise<T> {
   const originalFetch = globalThis.fetch;
@@ -100,6 +106,7 @@ async function withMockFetch<T>(
     calls.push({ input: String(input), init, body: rawBody });
     const response = responses[index++] ??
       { status: 500, body: { ok: false, description: "unexpected fetch" } };
+    if (response.error) throw response.error;
     return new Response(JSON.stringify(response.body), {
       status: response.status ?? 200,
       headers: { "Content-Type": "application/json" },
@@ -331,6 +338,38 @@ Deno.test("sendTelegramMedia reports a fallback server error from the final resp
     assertEquals((thrown as Error).name, "Error");
     assert((thrown as Error).message.includes("status 500"));
     assertEquals((thrown as Error).message.includes("final attempt failed"), false);
+  });
+});
+
+Deno.test("sendTelegramMedia propagates a network throw from the fallback attempt", async () => {
+  const retryError = new Error("telegram retry network failed");
+
+  await withMockFetch([
+    {
+      status: 400,
+      body: {
+        ok: false,
+        description: "Bad Request: can't parse entities",
+      },
+    },
+    { body: {}, error: retryError },
+  ], async (calls) => {
+    const thrown = await assertRejects(
+      () => sendTelegramMedia(
+        "sendPhoto",
+        "token",
+        "chat",
+        { photo: "https://example.com/photo.jpg" },
+        "*caption*",
+        allowProviderCall,
+      ),
+      Error,
+      "telegram retry network failed",
+    );
+
+    assertEquals(thrown, retryError);
+    assertEquals(calls.length, 2);
+    assertEquals(calls[1].body?.parse_mode, undefined);
   });
 });
 
