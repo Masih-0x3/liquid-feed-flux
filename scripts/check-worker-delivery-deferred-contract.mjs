@@ -26,8 +26,17 @@ function validate(source = readFileSync(join(ROOT, WORKER_PATH), "utf8")) {
   const providerIndex = Math.min(
     ...["sendTelegramPhotoFromStorage", "sendTelegramPhotoGroupFromStorage", "sendTelegramVideoFromStorage", "sendTelegramMedia", "https://api.telegram.org"].map((needle) => handle.indexOf(needle)).filter((index) => index >= 0),
   );
+  const postingGuardIndex = handle.indexOf("await requireExternalPosting(supabase);");
+  const cutoverGuardIndex = handle.indexOf("await requireDeliveryCutover(supabase, tweetId);");
   const claimIndex = handle.indexOf("claimTelegramDelivery(supabase");
   assert.ok(claimIndex >= 0 && providerIndex > claimIndex, "atomic delivery claim must precede provider work");
+  assert.ok(postingGuardIndex >= 0 && postingGuardIndex < claimIndex, "external posting guard must run before the Telegram claim");
+  assert.ok(cutoverGuardIndex >= 0 && cutoverGuardIndex < claimIndex, "delivery cutover guard must run before the Telegram claim");
+  const deferStart = source.indexOf("if (error instanceof JobDeferred) {");
+  const deferEnd = source.indexOf("if (error instanceof JobStateWriteError", deferStart);
+  assert.ok(deferStart >= 0 && deferEnd > deferStart, "JobDeferred dispatch branch must remain discoverable");
+  const deferBranch = source.slice(deferStart, deferEnd);
+  assert.match(deferBranch, /status: "pending"[\s\S]*?claim_state: "idle"[\s\S]*?claim_token: null[\s\S]*?claim_generation: 0/, "JobDeferred must clear the worker claim envelope for retry");
   assert.match(handle, /completeTelegramDelivery\(supabase/, "successful delivery must complete its claimed receipt through the RPC boundary");
   assert.match(handle, /markTelegramDeliveryAmbiguous\(supabase/, "post-call uncertainty must persist as an ambiguous delivery state");
   assert.equal(handle.includes('supabase.from("deliveries").insert'), false, "delivery handler must not append an unclaimed receipt after provider work");
