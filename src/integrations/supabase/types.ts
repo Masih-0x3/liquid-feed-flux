@@ -1706,7 +1706,7 @@ export type Database = {
           activated_by?: string | null
           activation_key?: string | null
           created_at?: string
-          epoch_id?: number
+          epoch_id?: never
           t1_cutover_at?: string
           t2_activated_at?: string
         }
@@ -1714,7 +1714,7 @@ export type Database = {
           activated_by?: string | null
           activation_key?: string | null
           created_at?: string
-          epoch_id?: number
+          epoch_id?: never
           t1_cutover_at?: string
           t2_activated_at?: string
         }
@@ -1733,7 +1733,7 @@ export type Database = {
         }
         Insert: {
           dedupe_enabled?: boolean
-          environment: string
+          environment?: string
           posting_mode?: string
           singleton_id?: boolean
           singleton_key?: boolean
