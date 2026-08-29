@@ -20,6 +20,8 @@ interface PromptEditorProps {
   onReset?: () => void;
   /** Force monospace + smaller font for prompt/JSON content. Default true. */
   mono?: boolean;
+  /** Prevent edits while retaining copy and fullscreen inspection. */
+  readOnly?: boolean;
 }
 
 export function PromptEditor({
@@ -32,6 +34,7 @@ export function PromptEditor({
   title = 'Edit prompt',
   onReset,
   mono = true,
+  readOnly = false,
 }: PromptEditorProps) {
   const [fullscreen, setFullscreen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -64,6 +67,7 @@ export function PromptEditor({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
+          readOnly={readOnly}
           spellCheck={false}
           className={cn(textareaClass, 'border-0 rounded-none')}
           style={{ height: `${minHeight}px`, maxHeight: '70vh', overflow: 'auto' }}
@@ -80,7 +84,7 @@ export function PromptEditor({
 
       <div className="flex items-center justify-between gap-2 text-xs">
         <div className="flex items-center gap-2">
-          {onReset && (
+          {onReset && !readOnly && (
             <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={onReset}>
               <RotateCcw className="w-3 h-3 mr-1" />Reset to default
             </Button>
@@ -116,6 +120,7 @@ export function PromptEditor({
               value={value}
               onChange={(e) => onChange(e.target.value)}
               placeholder={placeholder}
+              readOnly={readOnly}
               spellCheck={false}
               className={cn(textareaClass, 'h-full resize-none')}
             />

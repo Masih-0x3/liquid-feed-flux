@@ -11,29 +11,16 @@ import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Filter, Shield, Users, Sparkles, X, Plus, Loader2, ChevronDown, Wand2, Code } from 'lucide-react';
+import { Filter, Shield, Users, Sparkles, X, Plus, Loader2, ChevronDown, Code } from 'lucide-react';
 import PromptEditor from '@/components/settings/PromptEditor';
 import {
   DEFAULT_SCORING_SYSTEM_PROMPT,
   DEFAULT_CLASSIFIER_TOOL_SCHEMA,
   type TranslationSettings,
-  useSaveSettings,
 } from '@/hooks/useSettingsData';
-import { useToast } from '@/hooks/use-toast';
 import { useQuery } from '@tanstack/react-query';
 import { invokeAdminAction } from '@/api/adminActions';
 import { useIncomingSettingsDraft } from '@/hooks/useIncomingSettingsDraft';
-
-const RECOMMENDED_IRAN_RUBRIC: ContentFilterConfig = {
-  enabled: true,
-  score_only: false,
-  filter_mode: 'global',
-  default_threshold: 12,
-  priority_topics: ['Iran', 'IRGC', 'Hormuz', 'sanctions', 'nuclear', 'Hezbollah', 'Houthis', 'Israel-Iran', 'Persian Gulf', 'Middle East', 'GCC', 'Syria', 'Iraq', 'Yemen', 'Pahlavi'],
-  low_priority_topics: ['stocks', 'crypto', 'earnings', 'sports', 'entertainment', 'celebrity', 'tech launches', 'weather'],
-  author_rules: {},
-  editorial_guidelines: 'This channel covers Iran and the broader Middle East. Score on whether the SUBJECT MATTER touches Iran/Middle East — NOT on the framing or dateline. Polls, leaks, analyst reports, and foreign leadership rhetoric ABOUT Iran, the Iran war, or US-Iran relations are INDIRECT Iran-adjacent (cap 16) and should score 13–16 when they materially shift the public or political picture of an active Iran-related conflict. Only pure US/EU/China domestic news with NO Iran nexus should fall to 8 or below. When in doubt between two tiers, prefer the higher tier.',
-};
 
 export interface ContentFilterConfig {
   enabled: boolean;
@@ -105,46 +92,15 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
     updateDraft: updateConfig,
     reloadIncoming,
     keepEditing,
-    markSaved,
   } = useIncomingSettingsDraft(incomingConfig);
   const [newPriorityTopic, setNewPriorityTopic] = useState('');
   const [newLowPriorityTopic, setNewLowPriorityTopic] = useState('');
   const [authorOverridesOpen, setAuthorOverridesOpen] = useState(false);
   const [advancedFilterHelpOpen, setAdvancedFilterHelpOpen] = useState(false);
-  const saveMutation = useSaveSettings();
-  const { toast } = useToast();
+  const legacyReadOnly = true;
 
   const ts = translationSettings;
   const setTs = (patch: Partial<TranslationSettings>) => onTranslationSettingsChange({ ...ts, ...patch });
-  const saveTranslationPrompt = () => saveMutation.mutate({ key: 'translation_prompt', value: ts });
-
-  const applyRecommendedDefaults = async () => {
-    const recommendedConfig: ContentFilterConfig = {
-      ...RECOMMENDED_IRAN_RUBRIC,
-      priority_topics: [...RECOMMENDED_IRAN_RUBRIC.priority_topics],
-      low_priority_topics: [...RECOMMENDED_IRAN_RUBRIC.low_priority_topics],
-      author_rules: { ...RECOMMENDED_IRAN_RUBRIC.author_rules },
-    };
-    updateConfig(recommendedConfig);
-    try {
-      await saveMutation.mutateAsync({ key: 'content_filter', value: recommendedConfig });
-      markSaved(recommendedConfig);
-      toast({ title: 'Recommended Iran-rubric defaults applied', description: 'Threshold 12 with updated guidelines.' });
-    } catch (e) {
-      // useSaveSettings already shows an error toast
-    }
-  };
-
-  const saveContentFilter = async () => {
-    const savedConfig = config;
-    try {
-      await saveMutation.mutateAsync({ key: 'content_filter', value: savedConfig });
-      markSaved(savedConfig);
-    } catch {
-      // useSaveSettings already shows an error toast and keeps the draft dirty.
-    }
-  };
-
   const filterStatus = getFilterStatus(config);
   const filterMode = config.filter_mode || 'global';
   const shouldLoadAuthors = filterStatus === 'active' &&
@@ -237,6 +193,9 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
             </p>
           </CardDescription>
         </CardHeader>
+        <div className="mx-6 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-muted-foreground">
+          Read-only legacy snapshot. Scoring Studio is the only writable scoring policy. Existing filter values remain visible for compatibility and parity checks.
+        </div>
         <CardContent className="space-y-6">
           {hasPendingIncoming && (
             <div role="alert" className="space-y-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm">
@@ -265,6 +224,7 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
               <button
                 key={opt.value}
                 onClick={() => updateConfig(applyFilterStatus(config, opt.value))}
+                disabled={legacyReadOnly}
                 className={`p-4 rounded-lg border-2 text-left transition-all ${
                   filterStatus === opt.value
                     ? 'border-primary bg-primary/10'
@@ -310,6 +270,7 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
                 <RadioGroup
                   value={filterMode}
                   onValueChange={(v) => updateConfig({ ...config, filter_mode: v as 'global' | 'granular' })}
+                  disabled={legacyReadOnly}
                   className="space-y-3"
                 >
                   <label className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all ${
@@ -359,6 +320,7 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
                   max={20}
                   step={1}
                   className="w-full"
+                  disabled={legacyReadOnly}
                 />
                 <div className="flex justify-between text-xs text-muted-foreground">
                   <span>1 — Deliver all</span>
@@ -425,7 +387,7 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
                                         {count > 0 ? count.toLocaleString() : 'Not in sample'}
                                       </TableCell>
                                       <TableCell>
-                                        <Select value={rule} onValueChange={(v) => setAuthorRule(handle, v)}>
+                                        <Select value={rule} onValueChange={(v) => setAuthorRule(handle, v)} disabled={legacyReadOnly}>
                                           <SelectTrigger className="w-[180px]">
                                             <SelectValue />
                                           </SelectTrigger>
@@ -447,6 +409,7 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
                                               max={20}
                                               step={1}
                                               className="w-24"
+                                              disabled={legacyReadOnly}
                                             />
                                             <Badge variant="outline">{getAuthorThreshold(handle)}</Badge>
                                           </div>
@@ -497,6 +460,7 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
               onChange={(e) => updateConfig({ ...config, editorial_guidelines: e.target.value })}
               className="glass-input min-h-[120px]"
               placeholder="e.g., Prioritize anything related to Iran, the war, GCC countries, sanctions, and military developments..."
+              readOnly={legacyReadOnly}
             />
 
             <div className="space-y-2">
@@ -511,14 +475,15 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
                   onKeyDown={(e) => e.key === 'Enter' && addTopic('priority')}
                   placeholder="Add topic..."
                   className="glass-input"
+                  disabled={legacyReadOnly}
                 />
-                <Button variant="outline" size="icon" onClick={() => addTopic('priority')}><Plus className="w-4 h-4" /></Button>
+                <Button variant="outline" size="icon" onClick={() => addTopic('priority')} disabled={legacyReadOnly}><Plus className="w-4 h-4" /></Button>
               </div>
               <div className="flex flex-wrap gap-2">
                 {config.priority_topics.map(topic => (
                   <Badge key={topic} className="bg-green-500/20 text-green-400 border-green-500/30 gap-1">
                     {topic}
-                    <X className="w-3 h-3 cursor-pointer" onClick={() => removeTopic('priority', topic)} />
+                    {!legacyReadOnly && <X className="w-3 h-3 cursor-pointer" onClick={() => removeTopic('priority', topic)} />}
                   </Badge>
                 ))}
               </div>
@@ -536,14 +501,15 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
                   onKeyDown={(e) => e.key === 'Enter' && addTopic('low_priority')}
                   placeholder="Add topic..."
                   className="glass-input"
+                  disabled={legacyReadOnly}
                 />
-                <Button variant="outline" size="icon" onClick={() => addTopic('low_priority')}><Plus className="w-4 h-4" /></Button>
+                <Button variant="outline" size="icon" onClick={() => addTopic('low_priority')} disabled={legacyReadOnly}><Plus className="w-4 h-4" /></Button>
               </div>
               <div className="flex flex-wrap gap-2">
                 {config.low_priority_topics.map(topic => (
                   <Badge key={topic} className="bg-orange-500/20 text-orange-400 border-orange-500/30 gap-1">
                     {topic}
-                    <X className="w-3 h-3 cursor-pointer" onClick={() => removeTopic('low_priority', topic)} />
+                    {!legacyReadOnly && <X className="w-3 h-3 cursor-pointer" onClick={() => removeTopic('low_priority', topic)} />}
                   </Badge>
                 ))}
               </div>
@@ -572,17 +538,8 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
             maxLength={20000}
             title="Scoring Rubric (System Prompt)"
             onReset={() => setTs({ scoring_system_prompt: DEFAULT_SCORING_SYSTEM_PROMPT })}
+            readOnly={legacyReadOnly}
           />
-          <div className="flex justify-end">
-            <Button
-              size="sm"
-              onClick={saveTranslationPrompt}
-              disabled={saveMutation.isPending}
-              className="bg-gradient-primary hover:opacity-90 text-white"
-            >
-              Save scoring prompt
-            </Button>
-          </div>
         </CardContent>
       </Card>
 
@@ -605,48 +562,16 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
             maxLength={20000}
             title="Classifier Tool Schema"
             onReset={() => setTs({ classifier_tool_schema: DEFAULT_CLASSIFIER_TOOL_SCHEMA })}
+            readOnly={legacyReadOnly}
           />
           <div className="flex gap-2 items-center justify-end">
-            <span className="text-xs text-muted-foreground mr-auto">JSON validated on save</span>
-            <Button
-              size="sm"
-              onClick={() => {
-                try {
-                  JSON.parse(ts.classifier_tool_schema ?? DEFAULT_CLASSIFIER_TOOL_SCHEMA);
-                  saveTranslationPrompt();
-                } catch (e) {
-                  toast({ title: 'Invalid JSON', description: (e as Error).message, variant: 'destructive' });
-                }
-              }}
-              disabled={saveMutation.isPending}
-              className="bg-gradient-primary hover:opacity-90 text-white"
-            >
-              Save tool schema
-            </Button>
+            <span className="text-xs text-muted-foreground">Legacy schema is retained for read parity.</span>
           </div>
         </CardContent>
       </Card>
 
-      {/* Action Buttons */}
-      <div className="flex flex-col sm:flex-row gap-3">
-        <Button
-          onClick={() => { void saveContentFilter(); }}
-          disabled={saveMutation.isPending || hasPendingIncoming}
-          className="bg-gradient-primary hover:opacity-90 text-white flex-1"
-        >
-          {saveMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Shield className="w-4 h-4 mr-2" />}
-          Save Content Filter Settings
-        </Button>
-        <Button
-          onClick={applyRecommendedDefaults}
-          disabled={saveMutation.isPending || hasPendingIncoming}
-          variant="outline"
-          className="sm:w-auto"
-          title="Sets threshold to 12, replaces editorial guidelines with the bias-corrected version, and switches the OpenAI model to gpt-5.4-mini."
-        >
-          <Wand2 className="w-4 h-4 mr-2" />
-          Apply Recommended Iran-Rubric Defaults
-        </Button>
+      <div className="rounded-lg border border-border bg-muted/20 p-3 text-sm text-muted-foreground">
+        Legacy content-filter settings are read-only. To change scoring or thresholds, use Scoring Studio and save one canonical <code>scoring_policy</code> row.
       </div>
     </div>
   );
