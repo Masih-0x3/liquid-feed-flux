@@ -69,7 +69,7 @@ export function PromptEditor({
           placeholder={placeholder}
           readOnly={readOnly}
           spellCheck={false}
-          className={cn(textareaClass, 'border-0 rounded-none')}
+          className={cn(textareaClass, 'border-0 rounded-none pr-20')}
           style={{ height: `${minHeight}px`, maxHeight: '70vh', overflow: 'auto' }}
         />
         <div className="absolute top-2 right-2 flex items-center gap-1 opacity-70 hover:opacity-100 transition-opacity">
