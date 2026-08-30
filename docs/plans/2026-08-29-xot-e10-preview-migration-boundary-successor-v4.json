@@ -1,0 +1,192 @@
+{
+  "schema": "xot-e10-preview-migration-boundary-successor-v4",
+  "event": "e10_preview_migration_boundary_successor_hosted_ci_preview_live_reconciliation_acceptance",
+  "phase": "preview-migration-boundary-hosted-ci-and-preview-live",
+  "status": "ACCEPTED_PREVIEW_DB_FUNCTION_RECONCILIATION_T2_LIVE_PREVIEW",
+  "release": "CLOSED",
+  "releaseGate": "CLOSED",
+  "repository": ".",
+  "branch": "codex/xot-v2-composite-release",
+  "headSha": "60e888818fe2dbff7e0369fdbcedae8c23109f7c",
+  "predecessor": {
+    "path": "docs/plans/2026-08-29-xot-e10-preview-migration-boundary-successor-v3.json"
+  },
+  "supersession": {
+    "reason": "Append-only successor binding the immutable successor-v3 local type reconciliation to hosted CI success, Vercel Preview deployment, and isolated Supabase Preview branch live database/function reconciliation. Production equivalence remains unclaimed and deferred.",
+    "changedPaths": [
+      "docs/plans/2026-08-29-xot-e10-preview-migration-boundary-successor-v4.json"
+    ],
+    "evidenceTier": {
+      "achieved": ["T0", "T1", "T2", "T2_LIVE_PREVIEW"],
+      "deferred": ["T3_AUTHENTICATED_PREVIEW", "T4_PRODUCTION"]
+    },
+    "releaseState": "CLOSED"
+  },
+  "git": {
+    "branch": "codex/xot-v2-composite-release",
+    "head": "60e888818fe2dbff7e0369fdbcedae8c23109f7c",
+    "pr": 73,
+    "hostedCi": {
+      "runId": 33282095116,
+      "url": "https://github.com/Masih-0x3/liquid-feed-flux/actions/runs/33282095116",
+      "status": "completed",
+      "conclusion": "success"
+    }
+  },
+  "vercelPreview": {
+    "url": "https://xot-git-codex-xot-v2-composite-5614ef-masihation-8914s-projects.vercel.app",
+    "deploymentInspector": "https://vercel.com/masihation-8914s-projects/xot/HAVerBiL2QpEAMy3ucSp7G7i1zwp"
+  },
+  "supabasePreview": {
+    "projectRef": "umicnrtkpuzjwivmgnei",
+    "branchName": "codex-xot-full-closure-candidate",
+    "branchId": "2b2441ba-8cc6-4ee9-a8f8-d802a10d4ec4",
+    "persistence": "nonpersistent",
+    "status": "ACTIVE_HEALTHY",
+    "productionRef": "jzirqfzzvlbxwfzndaer",
+    "productionTouched": false,
+    "deploymentIdentityBinding": {
+      "note": "Deployment identity deliberately bound the current Git branch codex/xot-v2-composite-release and the current Vercel Preview origin to the reused isolated Supabase Preview branch ref. These names are distinct and must not be conflated.",
+      "gitBranch": "codex/xot-v2-composite-release",
+      "vercelPreviewOrigin": "xot-git-codex-xot-v2-composite-5614ef-masihation-8914s-projects.vercel.app",
+      "supabaseBranchName": "codex-xot-full-closure-candidate",
+      "supabaseBranchId": "2b2441ba-8cc6-4ee9-a8f8-d802a10d4ec4"
+    }
+  },
+  "appliedMigrations": {
+    "order": [
+      {
+        "repoVersion": "20260828140000",
+        "sourceFile": "supabase/migrations/20260828140000_runtime_control_claim_release_race_guards.sql",
+        "remoteSchemaMigrationVersion": "20260830001556",
+        "remoteName": "runtime_control_claim_release_race_guards_20260828"
+      },
+      {
+        "repoVersion": "20260829120000",
+        "sourceFile": "supabase/migrations/20260829120000_reconcile_historical_delivery_jobs.sql",
+        "remoteSchemaMigrationVersion": "20260830001621",
+        "remoteName": "reconcile_historical_delivery_jobs_20260829"
+      }
+    ],
+    "identityNote": "Repo migration filenames (repoVersion/sourceFile) and generated remote schema migration versions (remoteSchemaMigrationVersion/remoteName) are distinct identities and must not be conflated."
+  },
+  "liveReadChecks": {
+    "status": "PASSED",
+    "checks": [
+      "locks",
+      "cutover_guards",
+      "enabled_delivery_release_trigger",
+      "reconcile_historical_settlement_cutover_predicates",
+      "grants"
+    ]
+  },
+  "rowCounts": {
+    "beforeMigrations": {"posts": 2001, "jobs": 1000, "queue_reconcile_runs": 21, "deliveries": 800, "x_deliveries": 600},
+    "afterFunctionDeployment": {"posts": 2001, "jobs": 1000, "queue_reconcile_runs": 21, "deliveries": 800, "x_deliveries": 600},
+    "identicalBeforeAndAfter": true
+  },
+  "v2SnapshotDelta": {
+    "differenceFromV2Snapshot": "v2 recorded posts=2000; current count is 2001",
+    "explanation": "Pre-existing row preview-fixture-b2f6839 created 2026-08-26T01:36:27.148381Z, delivery_decision=blocked, enrich_status=skipped. It predates this operation and was neither processed nor deleted.",
+    "row": {
+      "tweetId": "preview-fixture-b2f6839",
+      "createdAt": "2026-08-26T01:36:27.148381Z",
+      "deliveryDecision": "blocked",
+      "enrichStatus": "skipped",
+      "processedByThisOperation": false,
+      "deletedByThisOperation": false
+    }
+  },
+  "runtimeControls": {
+    "environment": "preview",
+    "postingMode": "blocked",
+    "dedupeEnabled": false,
+    "translationEnabled": false
+  },
+  "functionDeployments": {
+    "selectedInOrder": [
+      {"name": "admin-actions", "status": "active", "version": 232, "verifyJwt": true},
+      {"name": "worker", "status": "active", "version": 302, "verifyJwt": false},
+      {"name": "admin-retry", "status": "active", "version": 221, "verifyJwt": true},
+      {"name": "x-poster", "status": "active", "version": 177, "verifyJwt": false}
+    ],
+    "notSelected": "six other functions were not selected; their updated_at values stayed unchanged",
+    "versionNote": "Versions are live observations from the isolated Supabase Preview branch, stored as numbers."
+  },
+  "postDeployRuntime": {
+    "activeCron": 0,
+    "queuedHttpRequests": 0,
+    "runningJobs": 0,
+    "leasedRunningJobs": 0,
+    "edgeFunctionLogs": "empty"
+  },
+  "noInvocationGuarantees": {
+    "noFunctionJobProviderInvoked": true,
+    "exclusions": [
+      "no Telegram/X historical backlog replay",
+      "no retry",
+      "no requeue",
+      "no posting",
+      "no cleanup",
+      "no manual advance",
+      "no synthetic production canary"
+    ]
+  },
+  "browserAcceptance": {
+    "publicNativeInAppBrowser": {
+      "status": "PASSED",
+      "url": "https://xot-git-codex-xot-v2-composite-5614ef-masihation-8914s-projects.vercel.app/auth",
+      "route": "/auth",
+      "desktop": {"width": 1383, "height": 832},
+      "mobile": {"width": 390, "height": 844}
+    },
+    "authenticatedAdminReadOnlyUi": {
+      "status": "BLOCKED",
+      "reason": "no app credential found",
+      "deferredWith": "authenticated UI acceptance"
+    }
+  },
+  "productionState": {
+    "v1Status": "not_reverified_assumed_unchanged",
+    "mainMerge": false,
+    "productionDeploy": false,
+    "aliasSwitch": false,
+    "productionDbMutation": false,
+    "cutover": false,
+    "productionReadyClaim": false
+  },
+  "remainingGates": [
+    "authenticated Preview acceptance",
+    "explicit owner authorization for any production step",
+    "natural-new proof only after production authorization, never synthetic"
+  ],
+  "acceptanceScope": {
+    "accepted": "Preview database/function reconciliation",
+    "unclaimedOrDeferred": "production equivalence/readiness"
+  },
+  "evidenceStates": {
+    "local": "achieved",
+    "hostedCi": "achieved",
+    "previewLive": "achieved",
+    "authenticated": "blocked",
+    "production": "untouched"
+  },
+  "claims": {
+    "productionSchema": "not_claimed",
+    "productionDeployment": "not_claimed",
+    "productionChanged": false,
+    "staging": "preview-branch-live-verified",
+    "deployment": "vercel-preview-only",
+    "liveVerification": "preview-read-only-live",
+    "productionEquivalence": "not_claimed",
+    "productionReadiness": "not_claimed"
+  },
+  "notClosed": [
+    "Authenticated admin/read_only Preview UI acceptance is blocked because no app credential was found.",
+    "Authenticated admin dashboard response remains deferred with authenticated UI acceptance; no secret values or digests are verified in this receipt.",
+    "Production V1 was not reverified by this receipt and is assumed unchanged; no production actions occurred.",
+    "Natural-new proof is gated on explicit owner production authorization; no synthetic production canary was run.",
+    "Production equivalence/readiness remains unclaimed and deferred.",
+    "Release gate remains CLOSED."
+  ]
+}
