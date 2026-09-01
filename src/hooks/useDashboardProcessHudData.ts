@@ -4,7 +4,7 @@ import {
   fetchDashboardProcessHud,
   type DashboardProcessHudPayload,
 } from '@/api/dashboardProcessHud';
-import { supabase } from '@/integrations/supabase/client';
+import { useDashboardRealtime } from '@/contexts/DashboardRealtimeContext';
 
 export type { DashboardProcessHudPayload } from '@/api/dashboardProcessHud';
 
@@ -18,6 +18,7 @@ export function useDashboardProcessHudData({ enabled }: DashboardProcessHudOptio
   const queryClient = useQueryClient();
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const enabledRef = useRef(enabled);
+  const realtime = useDashboardRealtime();
 
   useEffect(() => {
     enabledRef.current = enabled;
@@ -56,20 +57,17 @@ export function useDashboardProcessHudData({ enabled }: DashboardProcessHudOptio
       return;
     }
 
-    const channel = supabase.channel('dashboard-process-hud-realtime');
-    for (const table of ['posts', 'jobs', 'deliveries', 'x_deliveries', 'workflow_runs', 'ai_call_ledger']) {
-      channel.on('postgres_changes', { event: '*', schema: 'public', table }, debouncedInvalidate);
-    }
-    channel.subscribe();
+    if (!realtime) return;
+    const unsubscribe = realtime.subscribeDashboardProcessHud(debouncedInvalidate);
 
     return () => {
-      supabase.removeChannel(channel);
+      unsubscribe();
       if (timerRef.current) {
         clearTimeout(timerRef.current);
         timerRef.current = null;
       }
     };
-  }, [debouncedInvalidate, enabled]);
+  }, [debouncedInvalidate, enabled, realtime]);
 
   return {
     ...query,

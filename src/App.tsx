@@ -5,7 +5,9 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { lazy, Suspense } from "react";
 import { AlertTriangle, Loader2 } from "lucide-react";
-import { supabaseConfigError, missingSupabaseEnv } from "@/integrations/supabase/client";
+import { supabase, supabaseConfigError, missingSupabaseEnv } from "@/integrations/supabase/client";
+import type { DashboardRealtimeSubscriptions } from "@/contexts/DashboardRealtimeContext";
+import { DashboardRealtimeProvider } from "@/contexts/DashboardRealtimeContext";
 import { loadChunkWithRecovery } from "@/lib/chunkReloadRecovery";
 import AuthPage from "./pages/AuthPage";
 import NotFound from "./pages/NotFound";
@@ -41,6 +43,31 @@ const FoglampHUDDev = import.meta.env.DEV && import.meta.env.VITE_FOGLAMP_HUD ==
   : null;
 
 const queryClient = new QueryClient();
+
+const dashboardRealtimeSubscriptions: DashboardRealtimeSubscriptions = {
+  subscribeDashboardPosts(onInvalidate) {
+    const channel = supabase.channel("dash-posts").on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "posts" },
+      onInvalidate,
+    ).subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  },
+  subscribeDashboardProcessHud(onInvalidate) {
+    const channel = supabase.channel("dashboard-process-hud-realtime");
+    for (const table of ["posts", "jobs", "deliveries", "x_deliveries", "workflow_runs", "ai_call_ledger"]) {
+      channel.on("postgres_changes", { event: "*", schema: "public", table }, onInvalidate);
+    }
+    channel.subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  },
+};
 
 function PageLoader() {
   return (
@@ -96,22 +123,24 @@ const App = () => (
     <AuthProvider>
       <Toaster />
       <BrowserRouter>
-        <FoglampHUDMount />
-        <Suspense fallback={<PageLoader />}>
-          <Routes>
-            <Route path="/auth" element={<AuthPage />} />
-            <Route element={<AppLayout />}>
-              <Route index element={<Dashboard />} />
-              <Route path="monitoring" element={<Monitoring />} />
-              <Route path="video-renders" element={<VideoRenders />} />
-              <Route path="threads" element={<Threads />} />
-              <Route path="x-account" element={<XAccountDisabled />} />
-              <Route path="downloader" element={<Downloader />} />
-              <Route path="settings" element={<Settings />} />
-            </Route>
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </Suspense>
+        <DashboardRealtimeProvider subscriptions={dashboardRealtimeSubscriptions}>
+          <FoglampHUDMount />
+          <Suspense fallback={<PageLoader />}>
+            <Routes>
+              <Route path="/auth" element={<AuthPage />} />
+              <Route element={<AppLayout />}>
+                <Route index element={<Dashboard />} />
+                <Route path="monitoring" element={<Monitoring />} />
+                <Route path="video-renders" element={<VideoRenders />} />
+                <Route path="threads" element={<Threads />} />
+                <Route path="x-account" element={<XAccountDisabled />} />
+                <Route path="downloader" element={<Downloader />} />
+                <Route path="settings" element={<Settings />} />
+              </Route>
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </Suspense>
+        </DashboardRealtimeProvider>
       </BrowserRouter>
     </AuthProvider>
   </QueryClientProvider>

@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useCallback } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { fetchDashboardData } from '@/api/dashboardData';
-import { supabase } from '@/integrations/supabase/client';
+import { useDashboardRealtime } from '@/contexts/DashboardRealtimeContext';
 
 export type {
   DashboardMetrics,
@@ -23,6 +23,7 @@ export type {
 export function useDashboardData() {
   const queryClient = useQueryClient();
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const realtime = useDashboardRealtime();
 
   const query = useQuery({
     queryKey: ['dashboard'],
@@ -40,14 +41,17 @@ export function useDashboardData() {
   }, [queryClient]);
 
   useEffect(() => {
-    // Only subscribe to posts to reduce realtime I/O. Jobs/deliveries churn too fast
-    // and the dashboard refetches on the posts signal anyway.
-    const ch1 = supabase.channel('dash-posts').on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'posts' }, debouncedInvalidate).subscribe();
+    if (!realtime) return;
+    const unsubscribe = realtime.subscribeDashboardPosts(debouncedInvalidate);
+
     return () => {
-      supabase.removeChannel(ch1);
-      if (timerRef.current) clearTimeout(timerRef.current);
+      unsubscribe();
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
     };
-  }, [debouncedInvalidate]);
+  }, [debouncedInvalidate, realtime]);
 
   return query;
 }

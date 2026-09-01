@@ -23,7 +23,6 @@ const manualChunkGroups: Record<string, string[]> = {
     '@radix-ui/react-tooltip',
   ],
   'vendor-charts': ['recharts'],
-  'vendor-supabase': ['@supabase/supabase-js'],
   'vendor-query': ['@tanstack/react-query'],
 };
 
