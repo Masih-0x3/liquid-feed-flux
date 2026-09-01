@@ -5,6 +5,33 @@
 -- generation-fenced lifecycle as the sole completion/failure surface.
 BEGIN;
 
+-- This migration is activation-only. Refuse to retire the V1 overloads when
+-- T2 has not been explicitly recorded, when the V2 caller is not present, or
+-- while any old X claim is still in flight. A retry after an uncertain commit
+-- therefore fails closed instead of silently widening the retirement window.
+DO $xot_v2_retirement_gate$
+DECLARE
+  active_claims bigint;
+BEGIN
+  IF to_regclass('public.runtime_activation_epochs') IS NULL
+     OR NOT EXISTS (SELECT 1 FROM public.runtime_activation_epochs) THEN
+    RAISE EXCEPTION 'xot_v2_retirement_requires_activation';
+  END IF;
+  IF to_regprocedure('public.claim_x_post_delivery_v2(text,timestamptz,bigint,text,boolean,integer)') IS NULL THEN
+    RAISE EXCEPTION 'xot_v2_retirement_requires_v2_x_caller';
+  END IF;
+
+  SELECT count(*)
+    INTO active_claims
+    FROM public.x_deliveries
+   WHERE status = 'posting'
+      OR claim_state IN ('preparing', 'posting');
+  IF active_claims > 0 THEN
+    RAISE EXCEPTION 'xot_v2_retirement_requires_drained_x_claims: % active claims', active_claims;
+  END IF;
+END
+$xot_v2_retirement_gate$;
+
 DROP FUNCTION IF EXISTS public.complete_x_post_delivery(
   uuid, uuid, text, integer, bigint, text, timestamptz, integer, jsonb, text
 );

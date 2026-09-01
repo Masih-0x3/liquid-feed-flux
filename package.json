@@ -150,6 +150,7 @@
     "check:visual-layer-characterization": "node scripts/check-visual-layer-characterization-contract.mjs",
     "check:asset-weight-characterization": "node scripts/check-asset-weight-characterization-contract.mjs",
     "test": "vitest run",
+    "test:xot-v2-production-convergence": "node --test scripts/build-xot-v2-production-convergence-sql.test.mjs",
     "test:migration-baseline": "node --test scripts/check-migration-baseline.test.mjs",
     "test:rss-webhook-receipt": "node --test scripts/check-rss-webhook-receipt-contract.test.mjs",
     "test:digest-checkpoint": "node --test scripts/check-digest-checkpoint-contract.test.mjs",

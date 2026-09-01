@@ -16,6 +16,7 @@ const IMAGE = "public.ecr.aws/supabase/postgres@sha256:99b1729aeb0bac314445024fc
 const EXPECTED_IMAGE_CMD = Object.freeze(["postgres", "-D", "/etc/postgresql"]);
 const SQL_FIXTURE = join(ROOT, "scripts/e6-disposable-fixture.sql");
 const DENO_FIXTURE = join(ROOT, "supabase/functions/_shared/e6DisposableAcceptance.test.ts");
+const ACTIVATION_ONLY_MIGRATION = "20260828130000_retire_legacy_x_delivery_overloads.sql";
 const bootstrapPassword = randomBytes(48).toString("base64url");
 const TIMEOUTS = Object.freeze({
   dockerProbeMs: 15_000,
@@ -247,6 +248,10 @@ function extractSqlEvidence(error) {
 function applyMigrations() {
   const migrations = readdirSync(join(ROOT, "supabase/migrations"))
     .filter((name) => /^\d{14}_.+\.sql$/.test(name))
+    // The disposable replay starts pre-activation. The activation-only
+    // retirement is exercised by its own source contract and must refuse to
+    // run before an operator records T2 and drains old X claims.
+    .filter((name) => name !== ACTIVATION_ONLY_MIGRATION)
     .sort()
     .map((name) => ({ name, body: readFileSync(join(ROOT, "supabase/migrations", name), "utf8") }));
   if (migrations.length < 110) throw new Error(`E6_REPLAY_BLOCKED migration_count=${migrations.length}`);

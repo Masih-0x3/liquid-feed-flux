@@ -3,6 +3,18 @@
 
 -- E6 uses a fresh database and deliberately fixed IDs so every assertion is
 -- reproducible without logging credentials, tokens, or provider payloads.
+-- Initialize the immutable delivery floor before seeding any post lineage.
+-- Effective 2706/2812 claim gates fail closed while this singleton is empty.
+DO $$
+DECLARE
+  fixture_cutover timestamptz;
+BEGIN
+  fixture_cutover := public.initialize_delivery_cutover('e6-disposable-fixture');
+  IF fixture_cutover IS NULL OR (SELECT count(*) FROM public.delivery_cutover) <> 1 THEN
+    RAISE EXCEPTION 'E6_DELIVERY_CUTOVER initialization did not produce one immutable floor';
+  END IF;
+END $$;
+
 INSERT INTO public.accounts (id, handle) VALUES ('00000000-0000-0000-0000-000000000601', 'e6-account') ON CONFLICT DO NOTHING;
 INSERT INTO public.posts (tweet_id, account_id) VALUES
   ('e6-mixed-old', '00000000-0000-0000-0000-000000000601'),
