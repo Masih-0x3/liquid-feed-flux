@@ -18,6 +18,7 @@ const REQUIRED_CI_RUNTIME_RUNS = [
   "node --test scripts/check-runtime-contract.test.mjs",
   "node --test scripts/check-supply-chain-contract.test.mjs",
 ];
+const REQUIRED_CI_BUILD_IDENTITY_TEST_RUN = "node --test scripts/check-build-output-identity.test.mjs scripts/run-vite-build.test.mjs";
 
 const REQUIRED_CI_SUPPLY_PREFLIGHT_RUNS = [
   "node scripts/check-supply-chain-contract.mjs",
@@ -31,6 +32,13 @@ const REQUIRED_CI_SUPPLY_PREFLIGHT_RUNS = [
 const REQUIRED_CI_GUARD_PREFIX = [
   ...REQUIRED_CI_SUPPLY_PREFLIGHT_RUNS,
   ...REQUIRED_CI_RUNTIME_RUNS,
+];
+
+const REQUIRED_CI_PREFIX_STEPS = [
+  ...REQUIRED_CI_SUPPLY_PREFLIGHT_RUNS,
+  ...REQUIRED_CI_RUNTIME_RUNS.slice(0, 2),
+  REQUIRED_CI_BUILD_IDENTITY_TEST_RUN,
+  ...REQUIRED_CI_RUNTIME_RUNS.slice(2),
 ];
 
 const observedNpmVersion = () => process.env.npm_config_user_agent?.match(/(?:^|\s)npm\/([^\s]+)/)?.[1] ?? null;
@@ -249,8 +257,8 @@ function workflowRuntimeFacts(value, jobName, setupNodeAction) {
       && steps[1]?.meaningful.length === 4
       && steps[1]?.meaningful[1]?.trim() === "with:"
       && steps[1]?.cache === "npm"
-      && steps.slice(2, 11).map((step) => step.run).every((run, index) => run === REQUIRED_CI_GUARD_PREFIX[index]),
-    unsafeRequiredRun: steps.some((step) => REQUIRED_CI_GUARD_PREFIX.includes(step.run) && !step.isBareRun),
+      && steps.slice(2, 12).map((step) => step.run).every((run, index) => run === REQUIRED_CI_PREFIX_STEPS[index]),
+    unsafeRequiredRun: steps.some((step) => [...REQUIRED_CI_GUARD_PREFIX, REQUIRED_CI_BUILD_IDENTITY_TEST_RUN].includes(step.run) && !step.isBareRun),
     workflowHasOverrides,
     workflowHasQuotedKeys,
     workflowHasYamlIndirection,
@@ -360,6 +368,18 @@ export function validateRuntimeContract({
     errors.push("CI does not contain every exact runtime/supply guard command");
   } else if (requiredStepIndexes.some((index, position) => position > 0 && index <= requiredStepIndexes[position - 1])) {
     errors.push("CI runtime/supply guard commands are out of order");
+  }
+  const buildIdentityTestIndexes = workflowFacts.runSteps
+    .map((command, index) => command === REQUIRED_CI_BUILD_IDENTITY_TEST_RUN ? index : -1)
+    .filter((index) => index >= 0);
+  if (buildIdentityTestIndexes.length !== 1) {
+    errors.push("CI must contain exactly one focused build identity test command");
+  } else {
+    const runtimeTestIndex = workflowFacts.runSteps.indexOf(REQUIRED_CI_RUNTIME_RUNS[1]);
+    const supplyTestIndex = workflowFacts.runSteps.indexOf(REQUIRED_CI_RUNTIME_RUNS[2]);
+    if (buildIdentityTestIndexes[0] <= runtimeTestIndex || buildIdentityTestIndexes[0] >= supplyTestIndex) {
+      errors.push("CI focused build identity tests are out of order");
+    }
   }
   requireEqual(errors, "Vercel build command", vercel.buildCommand, contract.vercel_config.buildCommand);
   requireEqual(errors, "Vercel install command", vercel.installCommand, contract.vercel_config.installCommand);

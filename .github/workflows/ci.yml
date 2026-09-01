@@ -25,6 +25,7 @@ jobs:
       - run: npm --prefix services/video-renderer audit --omit=dev --audit-level=high
       - run: node scripts/check-runtime-contract.mjs
       - run: node --test scripts/check-runtime-contract.test.mjs
+      - run: node --test scripts/check-build-output-identity.test.mjs scripts/run-vite-build.test.mjs
       - run: node --test scripts/check-supply-chain-contract.test.mjs
       - run: npm rebuild --ignore-scripts=false deno
       - run: npx --yes supabase@2.111.0 --version

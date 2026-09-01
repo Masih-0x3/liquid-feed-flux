@@ -11,6 +11,7 @@ const EXPECTED = "abcdefghijklmnopqrst";
 const WRAPPER = join(process.cwd(), "scripts", "run-vite-build.mjs");
 const BASE_ENV = {
   PATH: process.env.PATH ?? "/usr/bin:/bin",
+  XOT_ENVIRONMENT: "preview",
   VITE_SUPABASE_PROJECT_ID: EXPECTED,
   VITE_SUPABASE_URL: `https://${EXPECTED}.supabase.co`,
   VITE_SUPABASE_PUBLISHABLE_KEY: "eyJhbGciOiJIUzI1NiJ9.synthetic-public-payload.synthetic-signature",
@@ -147,5 +148,124 @@ test("identity failure propagates after the same-directory Vite command", () => 
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("wrapper propagates the explicit target to the output validator", () => {
+  const root = fixture();
+  const output = join(root, "output");
+  const argsFile = join(root, "args.json");
+  fakeVite(root);
+  try {
+    let received;
+    const result = runBuild({
+      cwd: root,
+      argv: [],
+      env: { ...BASE_ENV, XOT_VITE_ARGS_FILE: argsFile, XOT_BUILD_OUTPUT_DIR: output },
+      validate: (directory, expected, target) => {
+        received = { directory, expected, target };
+        return { ok: true, filesScanned: 1, expectedProject: "abc…rst" };
+      },
+      execute: (file, args, options) => execFileSync(file, args, options),
+    });
+    assert.deepEqual(received, { directory: resolve(output), expected: EXPECTED, target: "preview" });
+    assert.equal(result.selection.buildTarget, "preview");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("wrapper selects and propagates the Production target", () => {
+  const root = fixture();
+  const output = join(root, "output");
+  const argsFile = join(root, "args.json");
+  fakeVite(root);
+  try {
+    let received;
+    const productionEnv = {
+      ...BASE_ENV,
+      XOT_ENVIRONMENT: "production",
+      VITE_SUPABASE_PROJECT_ID: "jzirqfzzvlbxwfzndaer",
+      XOT_VITE_ARGS_FILE: argsFile,
+      XOT_BUILD_OUTPUT_DIR: output,
+    };
+    const result = runBuild({
+      cwd: root,
+      argv: [],
+      env: productionEnv,
+      validate: (directory, expected, target) => {
+        received = { directory, expected, target };
+        return { ok: true, filesScanned: 1, expectedProject: "jzi…aer" };
+      },
+      execute: (file, args, options) => execFileSync(file, args, options),
+    });
+    assert.deepEqual(received, { directory: resolve(output), expected: "jzirqfzzvlbxwfzndaer", target: "production" });
+    assert.equal(result.selection.buildTarget, "production");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("wrapper rejects missing, invalid, and ambiguous target before Vite starts", () => {
+  for (const targetEnv of [
+    { XOT_ENVIRONMENT: undefined },
+    { XOT_ENVIRONMENT: "staging" },
+    { XOT_ENVIRONMENT: "preview", VERCEL_ENV: "production" },
+  ]) {
+    const root = fixture();
+    const output = join(root, "output");
+    const argsFile = join(root, "args.json");
+    fakeVite(root);
+    try {
+      let executed = false;
+      const testEnv = { ...BASE_ENV, ...targetEnv, XOT_VITE_ARGS_FILE: argsFile, XOT_BUILD_OUTPUT_DIR: output };
+      if (targetEnv.XOT_ENVIRONMENT === undefined) delete testEnv.VITE_SUPABASE_PROJECT_ID;
+      assert.throws(
+        () => runBuild({
+          cwd: root,
+          argv: [],
+          env: testEnv,
+          execute: () => { executed = true; },
+        }),
+        /BUILD_OUTPUT_IDENTITY_CONFIG_FAIL/,
+      );
+      assert.equal(executed, false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("wrapper rejects missing or production Preview refs before Vite starts", () => {
+  for (const refEnv of [
+    { VITE_SUPABASE_PROJECT_ID: undefined },
+    { VITE_SUPABASE_PROJECT_ID: "jzirqfzzvlbxwfzndaer" },
+  ]) {
+    const root = fixture();
+    const output = join(root, "output");
+    const argsFile = join(root, "args.json");
+    fakeVite(root);
+    try {
+      let executed = false;
+      const testEnv = {
+        ...BASE_ENV,
+        ...refEnv,
+        XOT_ENVIRONMENT: "preview",
+        XOT_VITE_ARGS_FILE: argsFile,
+        XOT_BUILD_OUTPUT_DIR: output,
+      };
+      assert.throws(
+        () => runBuild({
+          cwd: root,
+          argv: [],
+          env: testEnv,
+          execute: () => { executed = true; },
+        }),
+        /BUILD_OUTPUT_IDENTITY_CONFIG_FAIL.*expected Preview project ref/,
+      );
+      assert.equal(executed, false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   }
 });

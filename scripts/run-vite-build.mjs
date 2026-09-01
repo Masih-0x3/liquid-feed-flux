@@ -5,7 +5,11 @@ import { existsSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { validateBuildOutputIdentity } from "./check-build-output-identity.mjs";
+import {
+  selectBuildTarget,
+  selectExpectedProjectRef,
+  validateBuildOutputIdentity,
+} from "./check-build-output-identity.mjs";
 
 const REPO_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const DEFAULT_OUTPUT_DIR = "dist";
@@ -46,8 +50,13 @@ export function runBuild({
   validate = validateBuildOutputIdentity,
 } = {}) {
   let selection;
+  let buildTarget;
+  let expectedProjectRef;
   try {
     selection = selectBuildOutput(argv, env, cwd);
+    buildTarget = selectBuildTarget(env);
+    expectedProjectRef = selectExpectedProjectRef(env, buildTarget);
+    selection = { ...selection, buildTarget };
   } catch (error) {
     throw new Error(`BUILD_OUTPUT_IDENTITY_CONFIG_FAIL ${error instanceof Error ? error.message : "invalid build configuration"}`);
   }
@@ -64,9 +73,7 @@ export function runBuild({
     stdio: "inherit",
   });
 
-  const expectedProjectRef = valueOf(env.XOT_EXPECTED_PREVIEW_PROJECT_REF)
-    || valueOf(env.VITE_SUPABASE_PROJECT_ID);
-  const result = validate(selection.outputDir, expectedProjectRef);
+  const result = validate(selection.outputDir, expectedProjectRef, buildTarget);
   if (!result.ok) {
     throw new Error(result.errors.join("; "));
   }

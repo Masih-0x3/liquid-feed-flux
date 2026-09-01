@@ -84,7 +84,7 @@
     "vercel_ignore_path": ".vercelignore",
     "vercel_ignore_sha256": "abc295fdc2acda9d3430d70254bc2c93cf3ae324bad2d9b06141d9cd728405fa",
     "ci_workflow_path": ".github/workflows/ci.yml",
-    "ci_workflow_sha256": "6c1c3c97f37e8a9258d1af3459f0da70be579c0c4b62792bc2a9a6b35bc7d88f",
+    "ci_workflow_sha256": "7f14ac3f2a198ebb3f4a8fd3b72b1fad1038fb2fb10edbc6ad0401bc0a6d847f",
     "wrapper_path": "scripts/check-build-contract.mjs",
     "wrapper_sha256": "7959d9345395856258f9b79efe655dc57f5e14f3a67cb7ce3c87bf742313249d",
     "frontend_env_path": "scripts/check-vite-env.mjs",
@@ -92,9 +92,9 @@
     "preview_identity_path": "scripts/preview-identity.mjs",
     "preview_identity_sha256": "99779c2c0606007103892e905d0ce87ca9395f2f6b8f30b21e3b8e3f6b5bf836",
     "build_output_identity_path": "scripts/check-build-output-identity.mjs",
-    "build_output_identity_sha256": "d6da662b96a2e048044f994192f1413a4d5b21f8014059009750c0da2e3c0b30",
+    "build_output_identity_sha256": "a669f3e1a4ba5efa22acd58b00e88d2db315d19953cbd92fba017fe40c8db72a",
     "build_script_path": "scripts/run-vite-build.mjs",
-    "build_script_sha256": "c0e3f969226819c478ba9a7f26d4cf7c147f910169f16474dc55b7522aaa2072"
+    "build_script_sha256": "69dd32faae85d926f88253bae0e9ba17b833458e446d2fec373160ef607d7f37"
   },
   "release_guard": {
     "path": "scripts/check-release-state.sh",

@@ -164,6 +164,22 @@ test("the CI guard prefix preflights registry policy, suppresses lifecycle scrip
   assert.ok(validateRuntimeContract({ root, actualNodeVersion: "20.19.0" }).errors.some((error) => error.includes("both direct supply preflight")));
 }));
 
+test("CI runs the focused build identity tests exactly once between runtime and supply tests", () => withFixture((root) => {
+  const path = join(root, ".github/workflows/ci.yml");
+  const original = readFileSync(path, "utf8");
+  const focused = "      - run: node --test scripts/check-build-output-identity.test.mjs scripts/run-vite-build.test.mjs";
+  const missing = original.replace(`${focused}\n`, "");
+  writeFileSync(path, missing);
+  assert.ok(validateRuntimeContract({ root, actualNodeVersion: "20.19.0" }).errors.some((error) => error.includes("focused build identity test command")));
+
+  const reordered = original.replace(
+    `${focused}\n      - run: node --test scripts/check-supply-chain-contract.test.mjs`,
+    `      - run: node --test scripts/check-supply-chain-contract.test.mjs\n${focused}`,
+  );
+  writeFileSync(path, reordered);
+  assert.ok(validateRuntimeContract({ root, actualNodeVersion: "20.19.0" }).errors.some((error) => error.includes("focused build identity tests are out of order")));
+}));
+
 test("Deno function gates bypass the task runner in fresh npm installs", () => withFixture((root) => {
   const path = join(root, "package.json");
   const value = JSON.parse(readFileSync(path, "utf8"));
