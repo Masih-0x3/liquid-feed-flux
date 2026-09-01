@@ -77,6 +77,7 @@ const internalEntrypoints = Object.freeze({
       '../_shared/enrich.ts',
       '../_shared/scoring.ts',
       '../_shared/internalAuth.ts',
+      '../_shared/xPosterOutcome.ts',
       '../_shared/sentry.ts',
       '../_shared/dedupe.ts',
       '../_shared/openaiCostControls.ts',
