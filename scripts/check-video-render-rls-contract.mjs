@@ -3772,6 +3772,10 @@ const reviewedNonRawMigrationDigests = new Map([
   // This final delivery zero-write fence is reviewed by the delivery-cutover
   // contract. It changes jobs only and does not expose a protected video table.
   ['20260830120000_enforce_historical_delivery_zero_write.sql', '8ca74e40a5b199f5664edf72933559e8af089536e8506cc7415b8a5ded4c3901'],
+  // This Telegram receipt-adoption successor is reviewed by the delivery
+  // claim and cutover contracts. It is service-role-only and does not change
+  // the protected video raw-table grant surface.
+  ['20260901150013_adopt_telegram_pending_delivery_receipts.sql', 'ba209ccb73f7681f86b76e966500c39fbe75a3aa4f8f7354b2fab0b26b46d526'],
 ]);
 const reviewedServiceOnlyXCutoverMigration =
   '20260828120000_repair_effective_x_claim_cutover.sql';
