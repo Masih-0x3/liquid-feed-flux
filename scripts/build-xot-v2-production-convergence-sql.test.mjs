@@ -9,6 +9,7 @@ import {
   EXPECTED_MIGRATION_ORDER,
   RUNTIME_CONTROLS_BRIDGE,
   buildProductionConvergenceSql,
+  extractSourceBodies,
   extractSourceOrder,
   findTopLevelTransactionStatements,
   stripSourceTransactionWrapper,
@@ -107,5 +108,33 @@ test("validator rejects source removal, reordering, nested control, and X retire
       `-- XOT V2 atomic production convergence bundle.\n-- ${ACTIVATION_ONLY_X_RETIREMENT}`,
     )),
     /activation-only X retirement/,
+  );
+  assert.throws(
+    () => validateProductionConvergenceSql(sql.replace(
+      `-- Source: ${EXPECTED_MIGRATION_ORDER[0]}`,
+      `-- Source: ${EXPECTED_MIGRATION_ORDER[0]}\nDROP FUNCTION IF EXISTS public.complete_x_post_delivery(uuid, uuid, text, integer, bigint, text, timestamptz, integer, jsonb, text);`,
+    )),
+    /activation-only X retirement/,
+  );
+});
+
+test("validator rejects missing and whitespace-only source bodies", () => {
+  const sql = buildFixture();
+  const bodies = extractSourceBodies(sql);
+  assert.equal(bodies.length, EXPECTED_INCLUSION_COUNT);
+  assert.ok(bodies.every(({ body }) => body.trim().length > 0));
+  const firstSource = EXPECTED_MIGRATION_ORDER[0];
+  const secondSource = EXPECTED_MIGRATION_ORDER[1];
+  const firstBody = new RegExp(
+    `(\\-\\- Source: ${firstSource}\\n)[\\s\\S]*?(?=\\-\\- Source: ${secondSource})`,
+  );
+
+  assert.throws(
+    () => validateProductionConvergenceSql(sql.replace(firstBody, "$1\n\n")),
+    /source body.*empty|missing.*body/i,
+  );
+  assert.throws(
+    () => validateProductionConvergenceSql(sql.replace(firstBody, "$1-- comments only\n\n")),
+    /source body.*empty|missing.*body/i,
   );
 });

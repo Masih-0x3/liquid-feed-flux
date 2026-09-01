@@ -216,17 +216,21 @@ serve(async (req) => {
 
       const { error: jobError } = await supabase
         .from('jobs')
-        .insert({
+        .upsert({
           type: 'deliver',
           payload: { 
             tweet_id: tweet_id,
             account_id: postData.account_id
           },
           status: 'pending',
-          next_run_at: new Date().toISOString()
-        })
-        .select()
-        .single();
+          next_run_at: new Date().toISOString(),
+          // A stable operation key makes repeated explicit admin requests
+          // idempotent. The action remains mandatory; there is no implicit
+          // retry path.
+          idempotency_key: `deliver:admin-resend:${tweet_id}`,
+        }, { onConflict: 'idempotency_key', ignoreDuplicates: true })
+        .select('id')
+        .maybeSingle();
 
       if (jobError) {
         console.error('Error creating delivery job:', jobError);
@@ -330,13 +334,14 @@ serve(async (req) => {
         type: 'deliver',
         payload: { tweet_id: delivery.subject_id },
         status: 'pending',
-        next_run_at: new Date().toISOString()
+        next_run_at: new Date().toISOString(),
+        idempotency_key: `deliver:admin-failed:${String(delivery.id)}`,
       }));
 
       if (retryJobs.length > 0) {
         const { error: jobError } = await supabase
           .from('jobs')
-          .insert(retryJobs);
+          .upsert(retryJobs, { onConflict: 'idempotency_key', ignoreDuplicates: true });
 
         if (jobError) {
           return new Response(JSON.stringify({ 
@@ -516,14 +521,15 @@ serve(async (req) => {
 
     const { error: jobError } = await supabase
       .from('jobs')
-      .insert([{
+      .upsert([{
         type: 'deliver',
         payload: {
           tweet_id: deliveryTweetId,
         },
         status: 'pending',
-        next_run_at: new Date().toISOString()
-      }]);
+        next_run_at: new Date().toISOString(),
+        idempotency_key: `deliver:admin-retry:${String(delivery_id)}`,
+      }], { onConflict: 'idempotency_key', ignoreDuplicates: true });
 
     if (jobError) throw jobError;
 

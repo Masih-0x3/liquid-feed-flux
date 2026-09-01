@@ -219,6 +219,63 @@ export function extractSourceOrder(sql) {
     .map((match) => match[1]);
 }
 
+export function extractSourceBodies(sql) {
+  const bodies = [];
+  let current = null;
+  for (const line of String(sql).split("\n")) {
+    const source = line.match(/^-- Source: (\d{14}_.+\.sql)$/);
+    if (source) {
+      if (current) bodies.push(current);
+      current = { filename: source[1], lines: [] };
+      continue;
+    }
+    if (/^-- Phase \d+:/.test(line) || /^COMMIT;$/.test(line)) {
+      if (current) {
+        bodies.push(current);
+        current = null;
+      }
+      continue;
+    }
+    if (current) current.lines.push(line);
+  }
+  if (current) bodies.push(current);
+  return bodies.map(({ filename, lines }) => Object.freeze({
+    filename,
+    body: lines.join("\n"),
+  }));
+}
+
+function hasExecutableSql(source) {
+  const state = {
+    blockCommentDepth: 0,
+    dollarTag: null,
+    doubleQuoted: false,
+    singleQuoted: false,
+  };
+  return String(source).split("\n").some((line) => maskNonTopLevelSql(line, state).trim() !== "");
+}
+
+const LEGACY_X_OVERLOAD_RETIREMENT_SOURCE =
+  "20260828130000_retire_legacy_x_delivery_overloads.sql";
+const LEGACY_X_OVERLOAD_DROP = /DROP\s+FUNCTION\s+IF\s+EXISTS\s+public\.(?:complete|fail)_x_post_delivery\s*\(/i;
+
+function unattributedSql(sql) {
+  const lines = [];
+  let insideSource = false;
+  for (const line of String(sql).split("\n")) {
+    if (/^-- Source: \d{14}_.+\.sql$/.test(line)) {
+      insideSource = true;
+      continue;
+    }
+    if (/^-- Phase \d+:/.test(line) || /^COMMIT;$/.test(line)) {
+      insideSource = false;
+      continue;
+    }
+    if (!insideSource) lines.push(line);
+  }
+  return lines.join("\n");
+}
+
 export function findTopLevelTransactionStatements(sql) {
   const state = {
     blockCommentDepth: 0,
@@ -248,6 +305,22 @@ export function validateProductionConvergenceSql(sql) {
   if (sourceOrder.includes(ACTIVATION_ONLY_X_RETIREMENT)
     || String(sql).includes(ACTIVATION_ONLY_X_RETIREMENT)) {
     throw new Error("activation-only X retirement migration is excluded from this bundle");
+  }
+
+  const sourceBodies = extractSourceBodies(sql);
+  if (sourceBodies.length !== sourceOrder.length) {
+    throw new Error("every migration source must have an attributed body");
+  }
+  for (const { filename, body } of sourceBodies) {
+    if (!hasExecutableSql(body)) {
+      throw new Error(`${filename}: source body is missing or empty`);
+    }
+    if (LEGACY_X_OVERLOAD_DROP.test(body) && filename !== LEGACY_X_OVERLOAD_RETIREMENT_SOURCE) {
+      throw new Error("activation-only X retirement SQL is not allowed in this bundle");
+    }
+  }
+  if (LEGACY_X_OVERLOAD_DROP.test(unattributedSql(sql))) {
+    throw new Error("activation-only X retirement SQL is not attributed to an allowed source");
   }
 
   const transactionStatements = findTopLevelTransactionStatements(sql);

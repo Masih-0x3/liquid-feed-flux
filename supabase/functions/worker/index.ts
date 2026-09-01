@@ -37,6 +37,7 @@ import {
   requireInternalAuth,
   serviceRoleBearerHeader,
 } from "../_shared/internalAuth.ts";
+import { classifyXPosterResponse } from "../_shared/xPosterOutcome.ts";
 import {
   captureEdgeException,
   captureEdgeExceptionBackground,
@@ -4231,7 +4232,7 @@ async function dispatchXPosterForTarget( // deno-lint-ignore no-explicit-any
     },
     headers: serviceRoleBearerHeader(),
   } as Record<string, unknown>).then(
-    ({ error }: { error?: { message?: string } | null }) => {
+    ({ data, error }: { data?: unknown; error?: { message?: string } | null }) => {
       if (error) {
         return insertPipelineEvent(
           supabase,
@@ -4242,12 +4243,35 @@ async function dispatchXPosterForTarget( // deno-lint-ignore no-explicit-any
           null,
           new Date().toISOString(),
           "x_poster_invoke_failed",
-          meta,
+          { ...meta, outcome_status: "failed", outcome_reason: "x_poster_invoke_failed" },
         );
       }
-      return undefined;
+      const outcome = classifyXPosterResponse(data, tweetId);
+      const eventStatus = outcome.status === "posted"
+        ? "completed"
+        : outcome.status === "failed"
+        ? "failed"
+        : outcome.status === "deferred"
+        ? "pending"
+        : "skipped";
+      return insertPipelineEvent(
+        supabase,
+        "post",
+        tweetId,
+        "x_dispatch",
+        eventStatus,
+        null,
+        new Date().toISOString(),
+        outcome.status === "failed" ? outcome.reason : null,
+        {
+          ...meta,
+          outcome_status: outcome.status,
+          outcome_reason: outcome.reason,
+          outcome_x_tweet_id: outcome.xTweetId,
+        },
+      );
     },
-  ).catch((error: unknown) =>
+  ).catch((_error: unknown) =>
     insertPipelineEvent(
       supabase,
       "post",
@@ -4257,7 +4281,7 @@ async function dispatchXPosterForTarget( // deno-lint-ignore no-explicit-any
       null,
       new Date().toISOString(),
       "x_poster_invoke_failed",
-      meta,
+      { ...meta, outcome_status: "failed", outcome_reason: "x_poster_invoke_failed" },
     )
   );
 

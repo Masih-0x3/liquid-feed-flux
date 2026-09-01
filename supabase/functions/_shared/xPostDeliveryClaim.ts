@@ -198,3 +198,39 @@ export async function failXPostDelivery(
   if (rpcError) throw new Error(xPostDeliveryRpcErrorCode("fail_x_post_delivery"));
   return data === true;
 }
+
+/**
+ * Release a claim that failed before the provider-start boundary.
+ *
+ * The database function only releases a matching token/generation while
+ * provider_started_at is NULL. It returns the receipt to the retryable pending
+ * state so the next normal claim does not need force_retry=true.
+ */
+export async function releaseXPostDeliveryForRetry(
+  sb: RpcClient,
+  params: {
+    deliveryId: string;
+    claimToken: string;
+    claimGeneration: number;
+    error: string;
+    nextRetryAt?: string | null;
+    mediaCount?: number;
+    mediaBytes?: number;
+    mediaKind?: string | null;
+  },
+): Promise<boolean> {
+  const { data, error: rpcError } = await sb.rpc("release_x_post_delivery_for_retry", {
+    p_delivery_id: params.deliveryId,
+    p_claim_token: params.claimToken,
+    p_claim_generation: params.claimGeneration,
+    p_error: params.error,
+    p_next_retry_at: params.nextRetryAt ?? new Date().toISOString(),
+    p_media_count: params.mediaCount ?? 0,
+    p_media_bytes: params.mediaBytes ?? 0,
+    p_media_kind: params.mediaKind ?? null,
+  });
+  if (rpcError) {
+    throw new Error(xPostDeliveryRpcErrorCode("release_x_post_delivery_for_retry"));
+  }
+  return data === true;
+}

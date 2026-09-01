@@ -1116,7 +1116,7 @@ test("normal mode rejects an E10 candidate that claims acceptance or production 
     );
   }));
 
-test("append-only successor baseline fails when a seventh tail migration is present (135 -> 136)", () =>
+test("append-only successor baseline fails when an eighth tail migration is present (136 -> 137)", () =>
   withCurrentTreeFixture((root) => {
     writeFileSync(join(root, "supabase/migrations/29990101000000_extra_hidden.sql"), "select 1;\n");
     assert.throws(
@@ -1125,7 +1125,7 @@ test("append-only successor baseline fails when a seventh tail migration is pres
     );
   }));
 
-test("successor baseline keeps the historical 129 receipt and exact 135-file current tree", () =>
+test("successor baseline keeps the historical 129 receipt and exact 136-file current tree", () =>
   withCurrentTreeFixture((root) => {
     const result = validateMigrationBaseline({ root });
     assert.equal(result.currentCandidateActiveCount, CURRENT_ON_DISK_MIGRATION_COUNT);

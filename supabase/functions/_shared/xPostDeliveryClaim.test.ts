@@ -5,6 +5,7 @@ import {
   failXPostDelivery,
   markXPostDeliveryProviderStarted,
   normalizeXPostDeliveryClaim,
+  releaseXPostDeliveryForRetry,
   xPostClaimRejection,
 } from "./xPostDeliveryClaim.ts";
 
@@ -101,6 +102,46 @@ Deno.test("claim x post delivery calls the database claim before side effects", 
   }]);
 });
 
+Deno.test("concurrent claim callers preserve one winner and one fenced rejection", async () => {
+  let callCount = 0;
+  const client = {
+    rpc(name: string, _args?: Record<string, unknown>) {
+      assertEquals(name, "claim_x_post_delivery");
+      callCount += 1;
+      return Promise.resolve({
+        data: callCount === 1
+          ? {
+            claimed: true,
+            delivery_id: "delivery-winner",
+            claim_token: "claim-winner",
+            claim_generation: 1,
+            reason: "claimed",
+          }
+          : {
+            claimed: false,
+            reason: "already_posting",
+            delivery_id: "delivery-winner",
+            existing_status: "posting",
+            claim_generation: 1,
+          },
+      });
+    },
+  };
+
+  const claims = await Promise.all([
+    claimXPostDelivery(client, { postId: "tweet-race", source: "worker-a" }),
+    claimXPostDelivery(client, { postId: "tweet-race", source: "worker-b" }),
+  ]);
+
+  assertEquals(callCount, 2);
+  assertEquals(claims.filter((claim) => claim.claimed).length, 1);
+  assertEquals(claims.filter((claim) => !claim.claimed).length, 1);
+  assertEquals(xPostClaimRejection(claims.find((claim) => !claim.claimed)!), {
+    status: "deferred",
+    reason: "already_posting",
+  });
+});
+
 Deno.test("complete and fail x post delivery require the claim token", async () => {
   const { calls, client } = fakeRpcClient({
     complete_x_post_delivery: true,
@@ -167,6 +208,28 @@ Deno.test("mark provider started records the durable boundary before provider ca
       p_claim_generation: 4,
     },
   }]);
+});
+
+Deno.test("pre-provider release returns a claim to the retryable state", async () => {
+  const { calls, client } = fakeRpcClient({
+    release_x_post_delivery_for_retry: true,
+  });
+
+  assertEquals(
+    await releaseXPostDeliveryForRetry(client, {
+      deliveryId: "delivery-1",
+      claimToken: "claim-1",
+      claimGeneration: 5,
+      error: "stale_media_repair_queued",
+      mediaKind: "video",
+    }),
+    true,
+  );
+  assertEquals(calls[0].name, "release_x_post_delivery_for_retry");
+  assertEquals(calls[0].args?.p_delivery_id, "delivery-1");
+  assertEquals(calls[0].args?.p_claim_token, "claim-1");
+  assertEquals(calls[0].args?.p_claim_generation, 5);
+  assertEquals(calls[0].args?.p_error, "stale_media_repair_queued");
 });
 
 Deno.test("provider start marker rejects a missing or stale generation fence", async () => {

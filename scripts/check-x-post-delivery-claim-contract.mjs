@@ -5,6 +5,7 @@ import ts from "typescript";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const helperPath = path.join(repoRoot, "supabase/functions/_shared/xPostDeliveryClaim.ts");
+const releaseMigrationPath = path.join(repoRoot, "supabase/migrations/20260901170000_release_pre_provider_x_delivery_claim.sql");
 const packagePath = path.join(repoRoot, "package.json");
 const ciPath = path.join(repoRoot, ".github/workflows/ci.yml");
 
@@ -25,7 +26,7 @@ function parse(source) {
   }
 }
 
-function assertContract({ helper, packageJson, ci }, label = "current source") {
+function assertContract({ helper, packageJson, ci, releaseMigration }, label = "current source") {
   parse(helper);
   for (const code of [
     "claim_x_post_delivery_failed",
@@ -70,6 +71,22 @@ function assertContract({ helper, packageJson, ci }, label = "current source") {
   if (!helper.includes('"mark_x_delivery_provider_started"')) {
     fail(`${label}: provider boundary RPC is missing`);
   }
+  const releaseStart = helper.indexOf("export async function releaseXPostDeliveryForRetry(");
+  if (releaseStart < 0) fail(`${label}: pre-provider release helper is missing`);
+  const releaseSection = helper.slice(releaseStart, helper.indexOf("\n}\n", releaseStart));
+  if (!releaseSection.includes('"release_x_post_delivery_for_retry"') ||
+      !releaseSection.includes("params.claimGeneration") ||
+      !releaseSection.includes("return data === true;")) {
+    fail(`${label}: pre-provider release helper must forward and check the fenced RPC result`);
+  }
+  if (!releaseMigration ||
+      !releaseMigration.includes("CREATE OR REPLACE FUNCTION public.release_x_post_delivery_for_retry(") ||
+      !releaseMigration.includes("AND provider_started_at IS NULL") ||
+      !releaseMigration.includes("AND claim_state = 'preparing'") ||
+      !releaseMigration.includes("status = 'pending'") ||
+      !releaseMigration.includes("GRANT EXECUTE ON FUNCTION public.release_x_post_delivery_for_retry")) {
+    fail(`${label}: pre-provider release migration is missing its fenced retry contract`);
+  }
   const markStart = helper.indexOf("export async function markXPostDeliveryProviderStarted(");
   if (markStart >= 0) {
     const markSection = helper.slice(markStart, helper.indexOf("\n}\n", markStart));
@@ -93,6 +110,7 @@ function assertContract({ helper, packageJson, ci }, label = "current source") {
 function sources() {
   return {
     helper: fs.readFileSync(helperPath, "utf8"),
+    releaseMigration: fs.readFileSync(releaseMigrationPath, "utf8"),
     packageJson: fs.readFileSync(packagePath, "utf8"),
     ci: fs.readFileSync(ciPath, "utf8"),
   };

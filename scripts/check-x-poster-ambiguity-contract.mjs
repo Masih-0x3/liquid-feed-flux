@@ -46,6 +46,23 @@ function assertContract({ source, packageJson, ci }, label = "current source") {
   } else {
     fail(`${label}: a rejected provider-start marker must block provider invocation`);
   }
+  // The delivery claim is the admission fence for expensive preparation. It
+  // must be acquired before the first media object read, and preparation
+  // failures must have a guarded pre-provider release path.
+  const claimCall = source.indexOf("deliveryClaim = await claimXPostDelivery(");
+  const mediaReadCall = source.indexOf("preparedMediaUploads.push(await downloadMediaForUpload(");
+  if (claimCall < 0 || mediaReadCall < 0 || claimCall > mediaReadCall) {
+    fail(`${label}: delivery claim must precede media preparation`);
+  }
+  const manualClaimCall = source.indexOf("deliveryClaim = await claimXPostDelivery(params.sb,");
+  const manualMediaReadCall = source.indexOf("preparedVideo = await downloadMediaForUpload(params.sb,");
+  if (manualClaimCall < 0 || manualMediaReadCall < 0 || manualClaimCall > manualMediaReadCall) {
+    fail(`${label}: manual delivery claim must precede media preparation`);
+  }
+  if (!source.includes("releaseXPostDeliveryForRetry") ||
+      !source.includes("pre-provider claim release failed")) {
+    fail(`${label}: preparation failures must release the pre-provider claim`);
+  }
   const manualEnd = source.indexOf("// ─── Main ────────────────────────────────────────────");
   if (manualEnd < 0) fail(`${label}: manual x-poster section marker is missing`);
   const manual = source.slice(0, manualEnd);
@@ -456,6 +473,13 @@ if (process.env.MUTATION_TEST === "1") {
     ...source,
     source: source.source.replace("if (!providerStarted) {", "if (false) {"),
   }), "provider marker rejection guard removal");
+  assertRejects((source) => ({
+    ...source,
+    source: source.source.replace(
+      "deliveryClaim = await claimXPostDelivery(",
+      "preparedMediaUploads.push(await downloadMediaForUpload(\n        deliveryClaim = await claimXPostDelivery(",
+    ),
+  }), "claim-after-media-preparation");
 }
 
 console.log(`X_POSTER_AMBIGUITY_SOURCE_CONTRACT_PASS manualAndBatchAmbiguous=true autoRetryBlocked=true selfTest=${process.env.MUTATION_TEST === "1" ? "pass" : "skipped"}`);

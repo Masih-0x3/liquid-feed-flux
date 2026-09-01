@@ -13,6 +13,10 @@ Deno.test("admin-retry validates action before any dispatch branch", async () =>
   assert(retryFailed > validation);
   assert(legacy > validation);
   assertStringIncludes(source, "const invalid = adminRetryActionError(action);");
+  assertStringIncludes(source, "idempotency_key: `deliver:admin-resend:${tweet_id}`");
+  assertStringIncludes(source, "idempotency_key: `deliver:admin-failed:${String(delivery.id)}`");
+  assertStringIncludes(source, "idempotency_key: `deliver:admin-retry:${String(delivery_id)}`");
+  assertStringIncludes(source, ".upsert(retryJobs, { onConflict: 'idempotency_key', ignoreDuplicates: true })");
   assertStringIncludes(policy, "admin_retry_action_missing");
   assertStringIncludes(policy, "admin_retry_action_unknown");
   assertEquals(classifyAdminRetryAction("test_webhook"), "inbound_rss_ingest");
