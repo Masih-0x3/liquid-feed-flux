@@ -4,6 +4,7 @@ import {
   adminRetryActionError,
   classifyAdminRetryAction,
   isAdminRetryAction,
+  resolveAdminRetryAction,
 } from "./adminRetryPolicy.ts";
 
 Deno.test("admin-retry accepts only explicit actions", () => {
@@ -27,6 +28,14 @@ Deno.test("admin-retry gives stable missing and unknown action errors", () => {
     status: 400,
     body: { success: false, error: "unknown admin-retry action", code: "admin_retry_action_unknown" },
   });
+});
+
+Deno.test("admin-retry preserves the legacy delivery_id action default", () => {
+  assertEquals(resolveAdminRetryAction(undefined, "delivery-123"), "retry_delivery");
+  assertEquals(resolveAdminRetryAction(undefined, "  delivery-123  "), "retry_delivery");
+  assertEquals(resolveAdminRetryAction(undefined, ""), undefined);
+  assertEquals(resolveAdminRetryAction(undefined, undefined), undefined);
+  assertEquals(resolveAdminRetryAction("unknown", "delivery-123"), "unknown");
 });
 
 Deno.test("test_webhook is classified as inbound RSS ingest, not provider posting", () => {
