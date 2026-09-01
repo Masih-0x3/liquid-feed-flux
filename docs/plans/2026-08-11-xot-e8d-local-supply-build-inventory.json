@@ -50,7 +50,7 @@
     },
     {
       "path": "services/video-renderer/Dockerfile",
-      "sha256": "77c76af1dfb84513cc8bf5283a11777a5b8dc0171d13d332b4e919b46587fa81"
+      "sha256": "4ef0c39a776b49e09d84d6b32fe4a8776bd57313473d1007b3b1bb3c6bdac179"
     },
     {
       "path": "services/video-renderer/package-lock.json",
@@ -342,7 +342,7 @@
     },
     {
       "path": "supabase/functions/worker/index.ts",
-      "sha256": "95510b837cab25ddbe84d28777c97c6d552bff102f8b6730fa84ed312ddfda13"
+      "sha256": "3cec75a1d2ae263a0fcde967c1f0e61a785a7b2dcf2c57e0ce8f27d1ac4baa65"
     },
     {
       "path": "supabase/functions/worker/jobLifecycle.test.ts",
@@ -9842,14 +9842,14 @@
           "path": "supabase/functions/admin-actions/index.ts,supabase/functions/admin-retry/index.ts,supabase/functions/db-cleanup/index.ts,supabase/functions/digest-compiler/index.ts,supabase/functions/media-cleanup/index.ts,supabase/functions/media-processor/index.ts,supabase/functions/webhooks-rssapp/index.ts,supabase/functions/worker/index.ts,supabase/functions/x-followers-snapshot/index.ts",
           "version_or_ref": "https://deno.land/std@0.168.0/http/server.ts",
           "integrity_or_source_hash": "e99c1bee8a3f6571ee4cdeb2966efad465b8f6fe62bec1bdb59c1f007cc4d155",
-          "source_file_sha256": "0b2426be27d201dcd4b68804ea86824452429ddb4c2ce379b12d6c3d1cc1ae81"
+          "source_file_sha256": "ddcd5a44af9c574e60d210ac3381c6a9a7acfccf30a5c96db7f830107d876a26"
         },
         {
           "name": "https://esm.sh/@supabase/supabase-js@2.39.7",
           "path": "supabase/functions/admin-actions/index.ts,supabase/functions/admin-retry/index.ts,supabase/functions/db-cleanup/index.ts,supabase/functions/media-cleanup/index.ts,supabase/functions/media-processor/index.ts,supabase/functions/webhooks-rssapp/index.ts,supabase/functions/worker/index.ts,supabase/functions/x-followers-snapshot/index.ts",
           "version_or_ref": "https://esm.sh/@supabase/supabase-js@2.39.7",
           "integrity_or_source_hash": "5361671c958daa350e504d9975da64b2d6dc9e81390b985ccdafb2e3572e24e7",
-          "source_file_sha256": "f653d6c2998ddfed4a81543de4fa550dc35008b8c866f76fc6bacfe27293c2ea"
+          "source_file_sha256": "4cbfd7c093e5b2ca5abe4c8a9312f031a8ab19bea2a6f00ae4f89472f22305d0"
         },
         {
           "name": "https://esm.sh/@supabase/supabase-js@2.49.1",
@@ -9870,7 +9870,7 @@
           "path": "supabase/functions/worker/index.ts",
           "version_or_ref": "jsr:@supabase/functions-js/edge-runtime.d.ts",
           "integrity_or_source_hash": "e81b95eac034f9ebb8b62d64e9006958ce762622a882ad6b19ee9eab94da2043",
-          "source_file_sha256": "8cbd7839a9092814ac90b6208f4372392997d18a0ef7b4cea97097f8a1e7700e"
+          "source_file_sha256": "9b7abf417aa7603faf86365a3e5f4267b44e5c135a751a39271327be17dc2809"
         },
         {
           "name": "npm:@ai-sdk/openai@3.0.79",
@@ -9905,7 +9905,7 @@
     "docker": {
       "source_file": {
         "path": "services/video-renderer/Dockerfile",
-        "sha256": "77c76af1dfb84513cc8bf5283a11777a5b8dc0171d13d332b4e919b46587fa81"
+        "sha256": "4ef0c39a776b49e09d84d6b32fe4a8776bd57313473d1007b3b1bb3c6bdac179"
       },
       "base_images": [
         {
@@ -9913,7 +9913,7 @@
           "path": "services/video-renderer/Dockerfile",
           "version_or_ref": "node:20-bookworm-slim",
           "integrity_or_source_hash": null,
-          "source_file_sha256": "77c76af1dfb84513cc8bf5283a11777a5b8dc0171d13d332b4e919b46587fa81"
+          "source_file_sha256": "4ef0c39a776b49e09d84d6b32fe4a8776bd57313473d1007b3b1bb3c6bdac179"
         }
       ],
       "apt_packages": [
@@ -9922,91 +9922,91 @@
           "path": "services/video-renderer/Dockerfile",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "77c76af1dfb84513cc8bf5283a11777a5b8dc0171d13d332b4e919b46587fa81"
+          "source_file_sha256": "4ef0c39a776b49e09d84d6b32fe4a8776bd57313473d1007b3b1bb3c6bdac179"
         },
         {
           "name": "curl",
           "path": "services/video-renderer/Dockerfile",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "77c76af1dfb84513cc8bf5283a11777a5b8dc0171d13d332b4e919b46587fa81"
+          "source_file_sha256": "4ef0c39a776b49e09d84d6b32fe4a8776bd57313473d1007b3b1bb3c6bdac179"
         },
         {
           "name": "ffmpeg",
           "path": "services/video-renderer/Dockerfile",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "77c76af1dfb84513cc8bf5283a11777a5b8dc0171d13d332b4e919b46587fa81"
+          "source_file_sha256": "4ef0c39a776b49e09d84d6b32fe4a8776bd57313473d1007b3b1bb3c6bdac179"
         },
         {
           "name": "fontconfig",
           "path": "services/video-renderer/Dockerfile",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "77c76af1dfb84513cc8bf5283a11777a5b8dc0171d13d332b4e919b46587fa81"
+          "source_file_sha256": "4ef0c39a776b49e09d84d6b32fe4a8776bd57313473d1007b3b1bb3c6bdac179"
         },
         {
           "name": "fonts-noto-core",
           "path": "services/video-renderer/Dockerfile",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "77c76af1dfb84513cc8bf5283a11777a5b8dc0171d13d332b4e919b46587fa81"
+          "source_file_sha256": "4ef0c39a776b49e09d84d6b32fe4a8776bd57313473d1007b3b1bb3c6bdac179"
         },
         {
           "name": "python3",
           "path": "services/video-renderer/Dockerfile",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "77c76af1dfb84513cc8bf5283a11777a5b8dc0171d13d332b4e919b46587fa81"
+          "source_file_sha256": "4ef0c39a776b49e09d84d6b32fe4a8776bd57313473d1007b3b1bb3c6bdac179"
         },
         {
           "name": "python3-numpy",
           "path": "services/video-renderer/Dockerfile",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "77c76af1dfb84513cc8bf5283a11777a5b8dc0171d13d332b4e919b46587fa81"
+          "source_file_sha256": "4ef0c39a776b49e09d84d6b32fe4a8776bd57313473d1007b3b1bb3c6bdac179"
         },
         {
           "name": "python3-opencv",
           "path": "services/video-renderer/Dockerfile",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "77c76af1dfb84513cc8bf5283a11777a5b8dc0171d13d332b4e919b46587fa81"
+          "source_file_sha256": "4ef0c39a776b49e09d84d6b32fe4a8776bd57313473d1007b3b1bb3c6bdac179"
         },
         {
           "name": "tesseract-ocr",
           "path": "services/video-renderer/Dockerfile",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "77c76af1dfb84513cc8bf5283a11777a5b8dc0171d13d332b4e919b46587fa81"
+          "source_file_sha256": "4ef0c39a776b49e09d84d6b32fe4a8776bd57313473d1007b3b1bb3c6bdac179"
         },
         {
           "name": "tesseract-ocr-ara",
           "path": "services/video-renderer/Dockerfile",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "77c76af1dfb84513cc8bf5283a11777a5b8dc0171d13d332b4e919b46587fa81"
+          "source_file_sha256": "4ef0c39a776b49e09d84d6b32fe4a8776bd57313473d1007b3b1bb3c6bdac179"
         },
         {
           "name": "tesseract-ocr-eng",
           "path": "services/video-renderer/Dockerfile",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "77c76af1dfb84513cc8bf5283a11777a5b8dc0171d13d332b4e919b46587fa81"
+          "source_file_sha256": "4ef0c39a776b49e09d84d6b32fe4a8776bd57313473d1007b3b1bb3c6bdac179"
         },
         {
           "name": "tesseract-ocr-fas",
           "path": "services/video-renderer/Dockerfile",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "77c76af1dfb84513cc8bf5283a11777a5b8dc0171d13d332b4e919b46587fa81"
+          "source_file_sha256": "4ef0c39a776b49e09d84d6b32fe4a8776bd57313473d1007b3b1bb3c6bdac179"
         },
         {
           "name": "tesseract-ocr-heb",
           "path": "services/video-renderer/Dockerfile",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "77c76af1dfb84513cc8bf5283a11777a5b8dc0171d13d332b4e919b46587fa81"
+          "source_file_sha256": "4ef0c39a776b49e09d84d6b32fe4a8776bd57313473d1007b3b1bb3c6bdac179"
         }
       ]
     },
