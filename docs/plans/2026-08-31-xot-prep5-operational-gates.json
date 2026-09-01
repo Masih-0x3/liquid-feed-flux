@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-08-31T05:57:23Z",
+  "repository": "/Users/stevmq/xot-v2-composite-release",
+  "branch": "codex/xot-v2-composite-release",
+  "startingHead": "fae3614e987c37f2135fb8bdbd6f52bc598ba69c",
+  "productionProjectRef": "jzirqfzzvlbxwfzndaer",
+  "productionMutated": false,
+  "gates": {
+    "patAlert1": {
+      "status": "PASS",
+      "githubState": "resolved",
+      "resolution": "revoked",
+      "resolvedAt": "2026-08-31T05:50:04Z",
+      "verification": "Supabase returned HTTP 401 for the historical token before the GitHub alert was resolved. No token value is retained in this receipt."
+    },
+    "databaseAdvisor": {
+      "status": "PASS",
+      "mode": "read-only live Production advisor check",
+      "cli": "Supabase CLI 2.111.0",
+      "minimumLevel": "WARN",
+      "focusedSurfaces": [
+        "deliveries",
+        "jobs",
+        "runtime_controls",
+        "runtime_v2_epochs",
+        "video_renders",
+        "video_render_feedback",
+        "video_renderer_heartbeats",
+        "manual_video_intakes"
+      ],
+      "findingCount": 46,
+      "candidateResolvedCount": 41,
+      "deferredNonblockingCount": 5,
+      "candidateResolved": [
+        {
+          "count": 40,
+          "objects": [
+            "video_renders",
+            "video_render_feedback",
+            "video_renderer_heartbeats",
+            "manual_video_intakes"
+          ],
+          "reason": "The ordered convergence bundle includes 20260723173100_lock_down_video_render_raw_tables.sql. It revokes PUBLIC, anon, and authenticated table access, removes the legacy browser policies, and leaves service_role access only."
+        },
+        {
+          "count": 1,
+          "objects": ["runtime_controls"],
+          "reason": "The E10 convergence step revokes table access from PUBLIC and anon, so the current anonymous GraphQL discoverability warning is removed."
+        }
+      ],
+      "deferredNonblocking": [
+        {
+          "count": 2,
+          "objects": ["runtime_controls"],
+          "reason": "Authenticated schema visibility is required for the runtime-control read surface. The per-row auth init-plan warning affects a singleton table and is not a cutover correctness or authorization blocker."
+        },
+        {
+          "count": 1,
+          "objects": ["deliveries"],
+          "reason": "Authenticated schema discoverability is existing Production behavior; RLS remains the row-authorization boundary and the convergence change does not widen it."
+        },
+        {
+          "count": 2,
+          "objects": ["jobs"],
+          "reason": "Authenticated schema discoverability and one duplicate index are existing Production debt. They do not change claim, posting, historical-zero-write, or rollback behavior."
+        }
+      ],
+      "edgeFunctionNote": "Database advisors do not inspect Edge Function source. The ten release functions are covered by docs/plans/2026-08-31-xot-function-cutover-cards.json and their exact probes. Project-wide findings outside the focused surfaces are deferred from this release."
+    },
+    "rollbackArtifacts": {
+      "status": "PASS",
+      "functions": "docs/plans/2026-08-31-xot-function-cutover-cards.json",
+      "functionArchive": "docs/plans/artifacts/xot-production-functions-prior-2026-08-31.tar.gz",
+      "renderer": "docs/plans/2026-08-31-xot-renderer-cutover-card.json"
+    },
+    "rolloutOwner": {
+      "status": "NAMED",
+      "owner": "Masih Hedayat",
+      "rollbackOperator": "Masih Hedayat",
+      "implementationOwner": "GPT-5.6 Luna High",
+      "windowCondition": "Masih Hedayat must confirm presence before live-window step 0 and remain available through the 75-105 minute mutation window. Naming does not authorize Production mutation."
+    },
+    "restoreReadiness": {
+      "status": "BLOCKED_DECISION",
+      "backupInventory": {
+        "mechanism": "WAL-G physical backups",
+        "completedBackups": 7,
+        "latestBackupId": 1525974373,
+        "latestBackupAt": "2026-08-30T11:27:36.487Z",
+        "pitrEnabled": false
+      },
+      "restoreDrill": "not run",
+      "validatedRpo": null,
+      "validatedRto": null,
+      "reason": "The existing Supabase preview branch was created without Production data, and managed physical restore is not available to that branch. Restoring the live project would be a Production mutation. A provider clone still lacks a proven pre-start outbound and cron block.",
+      "decision": "Either authorize PITR enablement and verification, or provide an approved disposable restore target with pre-start outbound and cron isolation. Until then the release preparation can continue, but Production cutover authority remains blocked."
+    }
+  },
+  "externalReview": {
+    "task": "task_27601f826635",
+    "dispatch": "ctx_542f2b722c47",
+    "route": "Command Code 1.38.2 / deepseek-v4-flash / high / --yolo",
+    "disposition": "accepted read-only local evidence map; Luna replaced historical PAT and advisor states with live verification"
+  }
+}

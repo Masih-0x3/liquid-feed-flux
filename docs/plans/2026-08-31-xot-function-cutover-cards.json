@@ -1,0 +1,593 @@
+{
+  "schema": "xot-function-cutover-cards-v1",
+  "event": "function_cutover_cards_prep",
+  "status": "CANDIDATE_READY_LOCAL_ONLY",
+  "productionMutated": false,
+  "supabaseCli": "2.111.0",
+  "projectRef": "jzirqfzzvlbxwfzndaer",
+  "priorRoot": "/tmp/xot-production-functions-prior-2026-08-31",
+  "candidateRoot": "/Users/stevmq/xot-v2-composite-release",
+  "archive": {
+    "path": "docs/plans/artifacts/xot-production-functions-prior-2026-08-31.tar.gz",
+    "bytes": 259355,
+    "sha256": "501ef103715dccd5ff87b3096daa6da56aa091c1a422930635a2ed1e00769572"
+  },
+  "functions": [
+    {
+      "name": "webhooks-rssapp",
+      "entrypoint": "supabase/functions/webhooks-rssapp/index.ts",
+      "prior": {
+        "entrypoint": "/tmp/xot-production-functions-prior-2026-08-31/supabase/functions/webhooks-rssapp/index.ts",
+        "entrypointBytes": 31709,
+        "entrypointSha256": "9527c3fc4e3d229e65417d31d5fba2cf5e90d23e3403757718693782d5dcd6de",
+        "dependencyGraphSha256": "6a7daa6f9eb8fcfe7e0e74e724531d8ab0be4a64b4b52961f1bf8b4833f9567e"
+      },
+      "candidate": {
+        "command": "deploy",
+        "cli": "npx --yes supabase@2.111.0",
+        "argv": [
+          "functions",
+          "deploy",
+          "webhooks-rssapp",
+          "--project-ref",
+          "jzirqfzzvlbxwfzndaer",
+          "--use-api",
+          "--no-verify-jwt"
+        ],
+        "workingDirectory": "/Users/stevmq/xot-v2-composite-release",
+        "entrypoint": "/Users/stevmq/xot-v2-composite-release/supabase/functions/webhooks-rssapp/index.ts",
+        "entrypointBytes": 42889,
+        "entrypointSha256": "5628c6723d9df79c02f9712fff2ef133eb6a2129c72da181121c9f9db1abaa15",
+        "dependencyGraphSha256": "48f197bf697d67e0aad4ea355da7d5a7bf377d6bdd48f6161baeac7f02ceca96"
+      },
+      "inventory": {
+        "id": "93044177-46cc-483e-82d5-dd93d8014418",
+        "version": 248,
+        "ezbr_sha256": "fd5bbde2af0df70dd02fb7080c7c4def3ed777ece3e700a2fa5667e47ef2b3eb",
+        "status": "ACTIVE",
+        "verify_jwt": false
+      },
+      "rollback": {
+        "command": "deploy",
+        "cli": "npx --yes supabase@2.111.0",
+        "argv": [
+          "functions",
+          "deploy",
+          "webhooks-rssapp",
+          "--project-ref",
+          "jzirqfzzvlbxwfzndaer",
+          "--use-api",
+          "--no-verify-jwt"
+        ],
+        "workingDirectory": "/tmp/xot-production-functions-prior-2026-08-31",
+        "archive": {
+          "path": "docs/plans/artifacts/xot-production-functions-prior-2026-08-31.tar.gz",
+          "bytes": 259355,
+          "sha256": "501ef103715dccd5ff87b3096daa6da56aa091c1a422930635a2ed1e00769572"
+        }
+      },
+      "probe": {
+        "probe": "POST /webhooks-rssapp with a forged RSS.app signature",
+        "expectedResult": "invalid signature rejected; queue/provider delta 0"
+      }
+    },
+    {
+      "name": "media-processor",
+      "entrypoint": "supabase/functions/media-processor/index.ts",
+      "prior": {
+        "entrypoint": "/tmp/xot-production-functions-prior-2026-08-31/supabase/functions/media-processor/index.ts",
+        "entrypointBytes": 16711,
+        "entrypointSha256": "b9c257980efb5ec0f2692ee917f4a6020c478ae003bb5decdad7a89115e04e36",
+        "dependencyGraphSha256": "d5a233edf08061464b3793d54820591d8c0198465e32933b6d3e0a29306fb661"
+      },
+      "candidate": {
+        "command": "deploy",
+        "cli": "npx --yes supabase@2.111.0",
+        "argv": [
+          "functions",
+          "deploy",
+          "media-processor",
+          "--project-ref",
+          "jzirqfzzvlbxwfzndaer",
+          "--use-api",
+          "--no-verify-jwt"
+        ],
+        "workingDirectory": "/Users/stevmq/xot-v2-composite-release",
+        "entrypoint": "/Users/stevmq/xot-v2-composite-release/supabase/functions/media-processor/index.ts",
+        "entrypointBytes": 14310,
+        "entrypointSha256": "df8aa2835962bc3f7917abbbbc59899ae624580a79d1dbb8b6886f0f9cffa921",
+        "dependencyGraphSha256": "a34a7b7b8d71b192d5c810d04df2967bb16bbd59d8d15f8987b7861c340a33e7"
+      },
+      "inventory": {
+        "id": "1401e7e1-bf74-468e-ac93-1356ec911d5a",
+        "version": 213,
+        "ezbr_sha256": "1becc70c7b8704da03b655c42cdc6fc517c16fac7a71e225b597f9ed96aa06e1",
+        "status": "ACTIVE",
+        "verify_jwt": false
+      },
+      "rollback": {
+        "command": "deploy",
+        "cli": "npx --yes supabase@2.111.0",
+        "argv": [
+          "functions",
+          "deploy",
+          "media-processor",
+          "--project-ref",
+          "jzirqfzzvlbxwfzndaer",
+          "--use-api",
+          "--no-verify-jwt"
+        ],
+        "workingDirectory": "/tmp/xot-production-functions-prior-2026-08-31",
+        "archive": {
+          "path": "docs/plans/artifacts/xot-production-functions-prior-2026-08-31.tar.gz",
+          "bytes": 259355,
+          "sha256": "501ef103715dccd5ff87b3096daa6da56aa091c1a422930635a2ed1e00769572"
+        }
+      },
+      "probe": {
+        "probe": "POST /media-processor with an unauthorized internal auth header",
+        "expectedResult": "invalid internal auth rejected; delivery/provider delta 0"
+      }
+    },
+    {
+      "name": "digest-compiler",
+      "entrypoint": "supabase/functions/digest-compiler/index.ts",
+      "prior": {
+        "entrypoint": "/tmp/xot-production-functions-prior-2026-08-31/supabase/functions/digest-compiler/index.ts",
+        "entrypointBytes": 16194,
+        "entrypointSha256": "8ab4a6754523dcc0b70c5cbad3bbe34088f18f60a62f02143c3357d293c3fc0d",
+        "dependencyGraphSha256": "9cbee768dbb3c50b8332c689be38ede886addb676fb5bfd4c2bb89e416950ec3"
+      },
+      "candidate": {
+        "command": "deploy",
+        "cli": "npx --yes supabase@2.111.0",
+        "argv": [
+          "functions",
+          "deploy",
+          "digest-compiler",
+          "--project-ref",
+          "jzirqfzzvlbxwfzndaer",
+          "--use-api",
+          "--no-verify-jwt"
+        ],
+        "workingDirectory": "/Users/stevmq/xot-v2-composite-release",
+        "entrypoint": "/Users/stevmq/xot-v2-composite-release/supabase/functions/digest-compiler/index.ts",
+        "entrypointBytes": 24467,
+        "entrypointSha256": "0798b83de3dee7e208f62d5de3e957c5a9b354331dbe01e618184947a4a16354",
+        "dependencyGraphSha256": "23353a61248fa6ad7204644a52c2348af764b70f14723e1f7253eba6313515d1"
+      },
+      "inventory": {
+        "id": "dc5b1852-2698-4357-bc36-456dd0724a1d",
+        "version": 133,
+        "ezbr_sha256": "44dfe946ea25e4ac0ee5b7028925bd0a05bb4cc098d38e6c05d173cf5f06e5dd",
+        "status": "ACTIVE",
+        "verify_jwt": false
+      },
+      "rollback": {
+        "command": "deploy",
+        "cli": "npx --yes supabase@2.111.0",
+        "argv": [
+          "functions",
+          "deploy",
+          "digest-compiler",
+          "--project-ref",
+          "jzirqfzzvlbxwfzndaer",
+          "--use-api",
+          "--no-verify-jwt"
+        ],
+        "workingDirectory": "/tmp/xot-production-functions-prior-2026-08-31",
+        "archive": {
+          "path": "docs/plans/artifacts/xot-production-functions-prior-2026-08-31.tar.gz",
+          "bytes": 259355,
+          "sha256": "501ef103715dccd5ff87b3096daa6da56aa091c1a422930635a2ed1e00769572"
+        }
+      },
+      "probe": {
+        "probe": "POST /digest-compiler with no Authorization header",
+        "expectedResult": "unauthorized probe rejected; checkpoint/delivery delta 0"
+      }
+    },
+    {
+      "name": "db-cleanup",
+      "entrypoint": "supabase/functions/db-cleanup/index.ts",
+      "prior": {
+        "entrypoint": "/tmp/xot-production-functions-prior-2026-08-31/supabase/functions/db-cleanup/index.ts",
+        "entrypointBytes": 3941,
+        "entrypointSha256": "9f99813734f70c01df8e495ffa05c1395bc03ecce959919345336e0018691efb",
+        "dependencyGraphSha256": "12f3574072d9a0080f86ea2f1b0cdac1a3ac8db76a82830ab121dc6f85154a43"
+      },
+      "candidate": {
+        "command": "deploy",
+        "cli": "npx --yes supabase@2.111.0",
+        "argv": [
+          "functions",
+          "deploy",
+          "db-cleanup",
+          "--project-ref",
+          "jzirqfzzvlbxwfzndaer",
+          "--use-api",
+          "--no-verify-jwt"
+        ],
+        "workingDirectory": "/Users/stevmq/xot-v2-composite-release",
+        "entrypoint": "/Users/stevmq/xot-v2-composite-release/supabase/functions/db-cleanup/index.ts",
+        "entrypointBytes": 1010,
+        "entrypointSha256": "fd585714af596f18ceb526a3c66134df7aa7c9c23cb1f23ccc235c4a725d0ddc",
+        "dependencyGraphSha256": "9d39020432261fc8142e28d78cdd3efd3a2607d648574099fc59452974bab5be"
+      },
+      "inventory": {
+        "id": "acf7043c-5968-4036-9c16-ef5d0399b095",
+        "version": 174,
+        "ezbr_sha256": "50e9afed1bb1ffbdd6ab3fe9a9f9a9eda21d3e5c58dae99d4a00812fb4f23a31",
+        "status": "ACTIVE",
+        "verify_jwt": false
+      },
+      "rollback": {
+        "command": "deploy",
+        "cli": "npx --yes supabase@2.111.0",
+        "argv": [
+          "functions",
+          "deploy",
+          "db-cleanup",
+          "--project-ref",
+          "jzirqfzzvlbxwfzndaer",
+          "--use-api",
+          "--no-verify-jwt"
+        ],
+        "workingDirectory": "/tmp/xot-production-functions-prior-2026-08-31",
+        "archive": {
+          "path": "docs/plans/artifacts/xot-production-functions-prior-2026-08-31.tar.gz",
+          "bytes": 259355,
+          "sha256": "501ef103715dccd5ff87b3096daa6da56aa091c1a422930635a2ed1e00769572"
+        }
+      },
+      "probe": {
+        "probe": "POST /db-cleanup with no Authorization header",
+        "expectedResult": "unauthorized probe rejected; row-count delta 0"
+      }
+    },
+    {
+      "name": "media-cleanup",
+      "entrypoint": "supabase/functions/media-cleanup/index.ts",
+      "prior": {
+        "entrypoint": "/tmp/xot-production-functions-prior-2026-08-31/supabase/functions/media-cleanup/index.ts",
+        "entrypointBytes": 2750,
+        "entrypointSha256": "d047961e29ff979ee319321fa87cd8f466add2c5f172b19396c3d1cc42cdd692",
+        "dependencyGraphSha256": "82f538aae8a2326e390d76cf6d75da58f8b3cd84dc9ee639355b8d85bb38c3ad"
+      },
+      "candidate": {
+        "command": "deploy",
+        "cli": "npx --yes supabase@2.111.0",
+        "argv": [
+          "functions",
+          "deploy",
+          "media-cleanup",
+          "--project-ref",
+          "jzirqfzzvlbxwfzndaer",
+          "--use-api",
+          "--no-verify-jwt"
+        ],
+        "workingDirectory": "/Users/stevmq/xot-v2-composite-release",
+        "entrypoint": "/Users/stevmq/xot-v2-composite-release/supabase/functions/media-cleanup/index.ts",
+        "entrypointBytes": 1016,
+        "entrypointSha256": "c7cc9091b2300678dbe2ef27270e1098539255e5090f3d466cabdc52fa132f6a",
+        "dependencyGraphSha256": "e351757603b5261e70ba95f6d6f039e9fda239f3897cee8477a8ca0be0477b5b"
+      },
+      "inventory": {
+        "id": "83bacfb4-9813-48fb-9aa1-095acb2c042e",
+        "version": 210,
+        "ezbr_sha256": "87f95aec75740eec4e7eaac10e1bd0ee524a169ed74dc4334a78c4ee95bec4df",
+        "status": "ACTIVE",
+        "verify_jwt": false
+      },
+      "rollback": {
+        "command": "deploy",
+        "cli": "npx --yes supabase@2.111.0",
+        "argv": [
+          "functions",
+          "deploy",
+          "media-cleanup",
+          "--project-ref",
+          "jzirqfzzvlbxwfzndaer",
+          "--use-api",
+          "--no-verify-jwt"
+        ],
+        "workingDirectory": "/tmp/xot-production-functions-prior-2026-08-31",
+        "archive": {
+          "path": "docs/plans/artifacts/xot-production-functions-prior-2026-08-31.tar.gz",
+          "bytes": 259355,
+          "sha256": "501ef103715dccd5ff87b3096daa6da56aa091c1a422930635a2ed1e00769572"
+        }
+      },
+      "probe": {
+        "probe": "POST /media-cleanup with no Authorization header",
+        "expectedResult": "unauthorized probe rejected; media-object delta 0"
+      }
+    },
+    {
+      "name": "x-followers-snapshot",
+      "entrypoint": "supabase/functions/x-followers-snapshot/index.ts",
+      "prior": {
+        "entrypoint": "/tmp/xot-production-functions-prior-2026-08-31/supabase/functions/x-followers-snapshot/index.ts",
+        "entrypointBytes": 17117,
+        "entrypointSha256": "d2e85cfad31061b8d1ef2e316c28d2ae8e917b85e0e279bcecbe82cbc37ebcb6",
+        "dependencyGraphSha256": "668f8866b475ae5b126a3b272e143029903e8c1d6f275020a6ce8269dc96a342"
+      },
+      "candidate": {
+        "command": "deploy",
+        "cli": "npx --yes supabase@2.111.0",
+        "argv": [
+          "functions",
+          "deploy",
+          "x-followers-snapshot",
+          "--project-ref",
+          "jzirqfzzvlbxwfzndaer",
+          "--use-api",
+          "--no-verify-jwt"
+        ],
+        "workingDirectory": "/Users/stevmq/xot-v2-composite-release",
+        "entrypoint": "/Users/stevmq/xot-v2-composite-release/supabase/functions/x-followers-snapshot/index.ts",
+        "entrypointBytes": 20466,
+        "entrypointSha256": "8367d38caa644699d7e2f3e9abdaaf373539c2538e437f93a5a405d127607278",
+        "dependencyGraphSha256": "95e8df0b8166db2cb3aed0a9b064ab62e1d273629d556efde90803ebabe03e18"
+      },
+      "inventory": {
+        "id": "d1ff9294-8b7a-4c02-8dbc-b2ec701bb1a8",
+        "version": 124,
+        "ezbr_sha256": "816c5783e45a9d690733940c2a29ca42caecf699975c9a083418cccd2a7d257a",
+        "status": "ACTIVE",
+        "verify_jwt": false
+      },
+      "rollback": {
+        "command": "deploy",
+        "cli": "npx --yes supabase@2.111.0",
+        "argv": [
+          "functions",
+          "deploy",
+          "x-followers-snapshot",
+          "--project-ref",
+          "jzirqfzzvlbxwfzndaer",
+          "--use-api",
+          "--no-verify-jwt"
+        ],
+        "workingDirectory": "/tmp/xot-production-functions-prior-2026-08-31",
+        "archive": {
+          "path": "docs/plans/artifacts/xot-production-functions-prior-2026-08-31.tar.gz",
+          "bytes": 259355,
+          "sha256": "501ef103715dccd5ff87b3096daa6da56aa091c1a422930635a2ed1e00769572"
+        }
+      },
+      "probe": {
+        "probe": "POST /x-followers-snapshot with no Authorization header",
+        "expectedResult": "unauthorized probe rejected; X/provider request 0"
+      }
+    },
+    {
+      "name": "admin-retry",
+      "entrypoint": "supabase/functions/admin-retry/index.ts",
+      "prior": {
+        "entrypoint": "/tmp/xot-production-functions-prior-2026-08-31/supabase/functions/admin-retry/index.ts",
+        "entrypointBytes": 13287,
+        "entrypointSha256": "5340e9a81928381a7059e7ce8d18e7f0f7a2ee7eec94c51da6f8061c31b75a26",
+        "dependencyGraphSha256": "7cd435dac7b20640afae4943fe6bc60125140321ee8db6aa77877f56ee48beeb"
+      },
+      "candidate": {
+        "command": "deploy",
+        "cli": "npx --yes supabase@2.111.0",
+        "argv": [
+          "functions",
+          "deploy",
+          "admin-retry",
+          "--project-ref",
+          "jzirqfzzvlbxwfzndaer",
+          "--use-api"
+        ],
+        "workingDirectory": "/Users/stevmq/xot-v2-composite-release",
+        "entrypoint": "/Users/stevmq/xot-v2-composite-release/supabase/functions/admin-retry/index.ts",
+        "entrypointBytes": 19716,
+        "entrypointSha256": "298e1f2616826d17e242894ba64f6439376f5246723c7eeeccf04a885c104601",
+        "dependencyGraphSha256": "8a2c92033c228ec9c796cea75104b623939fdc733a9a1e05db913fd85f869cd5"
+      },
+      "inventory": {
+        "id": "ecc25772-af42-41a9-b7c7-fc98d072f81e",
+        "version": 205,
+        "ezbr_sha256": "6060da252c661cc99068fb50e89dd6b31178bcde45cb1bdbcf518720bf14bb33",
+        "status": "ACTIVE",
+        "verify_jwt": true
+      },
+      "rollback": {
+        "command": "deploy",
+        "cli": "npx --yes supabase@2.111.0",
+        "argv": [
+          "functions",
+          "deploy",
+          "admin-retry",
+          "--project-ref",
+          "jzirqfzzvlbxwfzndaer",
+          "--use-api"
+        ],
+        "workingDirectory": "/tmp/xot-production-functions-prior-2026-08-31",
+        "archive": {
+          "path": "docs/plans/artifacts/xot-production-functions-prior-2026-08-31.tar.gz",
+          "bytes": 259355,
+          "sha256": "501ef103715dccd5ff87b3096daa6da56aa091c1a422930635a2ed1e00769572"
+        }
+      },
+      "probe": {
+        "probe": "POST /admin-retry signed-out and as read_only",
+        "expectedResult": "signed-out rejected; read_only cannot mutate"
+      }
+    },
+    {
+      "name": "admin-actions",
+      "entrypoint": "supabase/functions/admin-actions/index.ts",
+      "prior": {
+        "entrypoint": "/tmp/xot-production-functions-prior-2026-08-31/supabase/functions/admin-actions/index.ts",
+        "entrypointBytes": 22248,
+        "entrypointSha256": "06b1b78bd2f36be6196cd6c25da864c4dca4dda71627824c724918b4ba945424",
+        "dependencyGraphSha256": "3692f8ce1b95247f43803b22ca323c46175bb3e630fb01cb64e812a82bda40d9"
+      },
+      "candidate": {
+        "command": "deploy",
+        "cli": "npx --yes supabase@2.111.0",
+        "argv": [
+          "functions",
+          "deploy",
+          "admin-actions",
+          "--project-ref",
+          "jzirqfzzvlbxwfzndaer",
+          "--use-api"
+        ],
+        "workingDirectory": "/Users/stevmq/xot-v2-composite-release",
+        "entrypoint": "/Users/stevmq/xot-v2-composite-release/supabase/functions/admin-actions/index.ts",
+        "entrypointBytes": 29927,
+        "entrypointSha256": "b3b1fdc29ad09d943e190008b724ab441ea64b99e9c60070413ba72982026fca",
+        "dependencyGraphSha256": "ba9e1a8810d8ceb4df3230e5fdacd06cc6e039dc5e26a419fe899e7636aead44"
+      },
+      "inventory": {
+        "id": "7679f664-50e5-41fa-b02a-1e58ccb24d9d",
+        "version": 214,
+        "ezbr_sha256": "efaa0826d672d150ae3f89517d2b9e9446f8339e026c88976fef53be4cbaa7c8",
+        "status": "ACTIVE",
+        "verify_jwt": true
+      },
+      "rollback": {
+        "command": "deploy",
+        "cli": "npx --yes supabase@2.111.0",
+        "argv": [
+          "functions",
+          "deploy",
+          "admin-actions",
+          "--project-ref",
+          "jzirqfzzvlbxwfzndaer",
+          "--use-api"
+        ],
+        "workingDirectory": "/tmp/xot-production-functions-prior-2026-08-31",
+        "archive": {
+          "path": "docs/plans/artifacts/xot-production-functions-prior-2026-08-31.tar.gz",
+          "bytes": 259355,
+          "sha256": "501ef103715dccd5ff87b3096daa6da56aa091c1a422930635a2ed1e00769572"
+        }
+      },
+      "probe": {
+        "probe": "POST /admin-actions signed-out and as read_only",
+        "expectedResult": "signed-out rejected; read_only cannot mutate"
+      }
+    },
+    {
+      "name": "x-poster",
+      "entrypoint": "supabase/functions/x-poster/index.ts",
+      "prior": {
+        "entrypoint": "/tmp/xot-production-functions-prior-2026-08-31/supabase/functions/x-poster/index.ts",
+        "entrypointBytes": 82870,
+        "entrypointSha256": "64dfcd67cb97e8ec936972a816cc9770dc889e27006295e4519eb8ad5f4302fa",
+        "dependencyGraphSha256": "e78ef23f08d2cafe229b5baecdba286ad09893f4a849faeab811a3be01a23404"
+      },
+      "candidate": {
+        "command": "deploy",
+        "cli": "npx --yes supabase@2.111.0",
+        "argv": [
+          "functions",
+          "deploy",
+          "x-poster",
+          "--project-ref",
+          "jzirqfzzvlbxwfzndaer",
+          "--use-api",
+          "--no-verify-jwt"
+        ],
+        "workingDirectory": "/Users/stevmq/xot-v2-composite-release",
+        "entrypoint": "/Users/stevmq/xot-v2-composite-release/supabase/functions/x-poster/index.ts",
+        "entrypointBytes": 98691,
+        "entrypointSha256": "e21010611e03401162c67768bfa70b036b81d5f11e5d384b48c7e1e08791ac9e",
+        "dependencyGraphSha256": "ece282283631788caf6d3363c58e67866f8666d849c25cfb68fa3f93bcc48922"
+      },
+      "inventory": {
+        "id": "27669ebd-30bb-4dfd-8142-ccdf319a982e",
+        "version": 161,
+        "ezbr_sha256": "49c7eedb227889ff9efd6d0192603738228f52d9a0a019476457b6fd166430d1",
+        "status": "ACTIVE",
+        "verify_jwt": false
+      },
+      "rollback": {
+        "command": "deploy",
+        "cli": "npx --yes supabase@2.111.0",
+        "argv": [
+          "functions",
+          "deploy",
+          "x-poster",
+          "--project-ref",
+          "jzirqfzzvlbxwfzndaer",
+          "--use-api",
+          "--no-verify-jwt"
+        ],
+        "workingDirectory": "/tmp/xot-production-functions-prior-2026-08-31",
+        "archive": {
+          "path": "docs/plans/artifacts/xot-production-functions-prior-2026-08-31.tar.gz",
+          "bytes": 259355,
+          "sha256": "501ef103715dccd5ff87b3096daa6da56aa091c1a422930635a2ed1e00769572"
+        }
+      },
+      "probe": {
+        "probe": "POST /x-poster guarded probe with posting blocked and X held",
+        "expectedResult": "probe stops before provider; active claims/provider delta 0"
+      }
+    },
+    {
+      "name": "worker",
+      "entrypoint": "supabase/functions/worker/index.ts",
+      "prior": {
+        "entrypoint": "/tmp/xot-production-functions-prior-2026-08-31/supabase/functions/worker/index.ts",
+        "entrypointBytes": 140814,
+        "entrypointSha256": "f7acebbf16e5b6a88af8724d659dbce3de5ce3eaf84b832c887fd5b67ba3f57a",
+        "dependencyGraphSha256": "ba70e7330b9dc29a7bfa10ff3abd872cfbd7d9ff6479f064a3773416f62e4e34"
+      },
+      "candidate": {
+        "command": "deploy",
+        "cli": "npx --yes supabase@2.111.0",
+        "argv": [
+          "functions",
+          "deploy",
+          "worker",
+          "--project-ref",
+          "jzirqfzzvlbxwfzndaer",
+          "--use-api",
+          "--no-verify-jwt"
+        ],
+        "workingDirectory": "/Users/stevmq/xot-v2-composite-release",
+        "entrypoint": "/Users/stevmq/xot-v2-composite-release/supabase/functions/worker/index.ts",
+        "entrypointBytes": 161828,
+        "entrypointSha256": "3cec75a1d2ae263a0fcde967c1f0e61a785a7b2dcf2c57e0ce8f27d1ac4baa65",
+        "dependencyGraphSha256": "c4a9da8a3ee40646712b94698d315ddc0b65ffd24dafcc6a785d463a4a7f3c3f"
+      },
+      "inventory": {
+        "id": "15d56d97-a8fe-496b-b64f-6cd8d0f44de5",
+        "version": 286,
+        "ezbr_sha256": "993ab8806421aa8bd5f8601a2e7d850c4cd26038ff6e9691d85af660c575c5d8",
+        "status": "ACTIVE",
+        "verify_jwt": false
+      },
+      "rollback": {
+        "command": "deploy",
+        "cli": "npx --yes supabase@2.111.0",
+        "argv": [
+          "functions",
+          "deploy",
+          "worker",
+          "--project-ref",
+          "jzirqfzzvlbxwfzndaer",
+          "--use-api",
+          "--no-verify-jwt"
+        ],
+        "workingDirectory": "/tmp/xot-production-functions-prior-2026-08-31",
+        "archive": {
+          "path": "docs/plans/artifacts/xot-production-functions-prior-2026-08-31.tar.gz",
+          "bytes": 259355,
+          "sha256": "501ef103715dccd5ff87b3096daa6da56aa091c1a422930635a2ed1e00769572"
+        }
+      },
+      "probe": {
+        "probe": "POST /worker safe zero-work probe with schedule held",
+        "expectedResult": "safe zero-work probe; historical rows/attempts/provider delta 0"
+      }
+    }
+  ]
+}

@@ -31,6 +31,7 @@ export const APPROVED_APPEND_ONLY_SUCCESSOR_MIGRATIONS = Object.freeze([
   "20260828130000_retire_legacy_x_delivery_overloads.sql",
   "20260828140000_runtime_control_claim_release_race_guards.sql",
   "20260829120000_reconcile_historical_delivery_jobs.sql",
+  "20260830120000_enforce_historical_delivery_zero_write.sql",
 ]);
 export const CURRENT_ON_DISK_MIGRATION_COUNT =
   CURRENT_CANDIDATE_MIGRATION_COUNT + APPROVED_APPEND_ONLY_SUCCESSOR_MIGRATIONS.length;

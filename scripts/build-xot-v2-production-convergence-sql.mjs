@@ -32,6 +32,12 @@ export const EFFECTIVE_X_CLAIM_REPAIR =
   "20260828120000_repair_effective_x_claim_cutover.sql";
 export const ACTIVATION_ONLY_X_RETIREMENT =
   "20260828130000_retire_legacy_x_delivery_overloads.sql";
+export const RUNTIME_CONTROL_CLAIM_RACE_GUARDS =
+  "20260828140000_runtime_control_claim_release_race_guards.sql";
+export const RECONCILE_HISTORICAL_DELIVERY_JOBS =
+  "20260829120000_reconcile_historical_delivery_jobs.sql";
+export const ENFORCE_HISTORICAL_DELIVERY_ZERO_WRITE =
+  "20260830120000_enforce_historical_delivery_zero_write.sql";
 
 export const BUNDLE_PHASES = Object.freeze([
   Object.freeze({
@@ -58,12 +64,24 @@ export const BUNDLE_PHASES = Object.freeze([
     comment: "Phase 6: restore the effective X claim cutoff fence",
     migrations: Object.freeze([EFFECTIVE_X_CLAIM_REPAIR]),
   }),
+  Object.freeze({
+    comment: "Phase 7: guard runtime control claim release races",
+    migrations: Object.freeze([RUNTIME_CONTROL_CLAIM_RACE_GUARDS]),
+  }),
+  Object.freeze({
+    comment: "Phase 8: reconcile historical delivery jobs",
+    migrations: Object.freeze([RECONCILE_HISTORICAL_DELIVERY_JOBS]),
+  }),
+  Object.freeze({
+    comment: "Phase 9: enforce historical delivery zero-write invariant",
+    migrations: Object.freeze([ENFORCE_HISTORICAL_DELIVERY_ZERO_WRITE]),
+  }),
 ]);
 
 export const EXPECTED_MIGRATION_ORDER = Object.freeze(
   BUNDLE_PHASES.flatMap(({ migrations }) => migrations),
 );
-export const EXPECTED_INCLUSION_COUNT = 20;
+export const EXPECTED_INCLUSION_COUNT = 23;
 
 const TRANSACTION_STATEMENT = /^(?:BEGIN|START\s+TRANSACTION|COMMIT|END|ROLLBACK|ABORT|SAVEPOINT|RELEASE(?:\s+SAVEPOINT)?|PREPARE\s+TRANSACTION|COMMIT\s+PREPARED|ROLLBACK\s+PREPARED|SET\s+TRANSACTION)\b.*;$/i;
 

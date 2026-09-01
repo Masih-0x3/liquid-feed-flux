@@ -49,20 +49,13 @@ export async function requireDeliveryCutover(
 }
 
 /**
- * Terminally settles a claimed historical deliver job. A false result is
- * intentionally not a release signal: the database function either settled
- * the same running historical row or left it untouched.
+ * Compatibility no-op for older callers. Historical delivery rows are
+ * immutable, so application code must never call a settlement RPC for them.
  */
 export async function settleDeliveryCutoverJob(
-  client: DeliveryCutoverRpcClient,
-  jobId: string,
-  reason = "delivery_cutover_blocked",
+  _client: DeliveryCutoverRpcClient,
+  _jobId: string,
+  _reason = "delivery_cutover_blocked",
 ): Promise<boolean> {
-  if (!jobId.trim()) return false;
-  const { data, error } = await client.rpc("settle_delivery_cutover_blocked", {
-    p_job_id: jobId,
-    p_reason: reason,
-  });
-  if (error) throw new DeliveryCutoverBlockedError("settlement_unavailable");
-  return data === true;
+  return false;
 }

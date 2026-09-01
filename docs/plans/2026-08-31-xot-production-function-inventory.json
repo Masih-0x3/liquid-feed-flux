@@ -1,0 +1,89 @@
+{
+  "schema": "xot-production-function-inventory-v1",
+  "observedAt": "2026-08-31T04:43:06Z",
+  "projectRef": "jzirqfzzvlbxwfzndaer",
+  "supabaseCli": "2.111.0",
+  "productionMutated": false,
+  "functions": [
+    {
+      "name": "webhooks-rssapp",
+      "id": "93044177-46cc-483e-82d5-dd93d8014418",
+      "version": 248,
+      "ezbr_sha256": "fd5bbde2af0df70dd02fb7080c7c4def3ed777ece3e700a2fa5667e47ef2b3eb",
+      "status": "ACTIVE",
+      "verify_jwt": false
+    },
+    {
+      "name": "media-processor",
+      "id": "1401e7e1-bf74-468e-ac93-1356ec911d5a",
+      "version": 213,
+      "ezbr_sha256": "1becc70c7b8704da03b655c42cdc6fc517c16fac7a71e225b597f9ed96aa06e1",
+      "status": "ACTIVE",
+      "verify_jwt": false
+    },
+    {
+      "name": "digest-compiler",
+      "id": "dc5b1852-2698-4357-bc36-456dd0724a1d",
+      "version": 133,
+      "ezbr_sha256": "44dfe946ea25e4ac0ee5b7028925bd0a05bb4cc098d38e6c05d173cf5f06e5dd",
+      "status": "ACTIVE",
+      "verify_jwt": false
+    },
+    {
+      "name": "db-cleanup",
+      "id": "acf7043c-5968-4036-9c16-ef5d0399b095",
+      "version": 174,
+      "ezbr_sha256": "50e9afed1bb1ffbdd6ab3fe9a9f9a9eda21d3e5c58dae99d4a00812fb4f23a31",
+      "status": "ACTIVE",
+      "verify_jwt": false
+    },
+    {
+      "name": "media-cleanup",
+      "id": "83bacfb4-9813-48fb-9aa1-095acb2c042e",
+      "version": 210,
+      "ezbr_sha256": "87f95aec75740eec4e7eaac10e1bd0ee524a169ed74dc4334a78c4ee95bec4df",
+      "status": "ACTIVE",
+      "verify_jwt": false
+    },
+    {
+      "name": "x-followers-snapshot",
+      "id": "d1ff9294-8b7a-4c02-8dbc-b2ec701bb1a8",
+      "version": 124,
+      "ezbr_sha256": "816c5783e45a9d690733940c2a29ca42caecf699975c9a083418cccd2a7d257a",
+      "status": "ACTIVE",
+      "verify_jwt": false
+    },
+    {
+      "name": "admin-retry",
+      "id": "ecc25772-af42-41a9-b7c7-fc98d072f81e",
+      "version": 205,
+      "ezbr_sha256": "6060da252c661cc99068fb50e89dd6b31178bcde45cb1bdbcf518720bf14bb33",
+      "status": "ACTIVE",
+      "verify_jwt": true
+    },
+    {
+      "name": "admin-actions",
+      "id": "7679f664-50e5-41fa-b02a-1e58ccb24d9d",
+      "version": 214,
+      "ezbr_sha256": "efaa0826d672d150ae3f89517d2b9e9446f8339e026c88976fef53be4cbaa7c8",
+      "status": "ACTIVE",
+      "verify_jwt": true
+    },
+    {
+      "name": "x-poster",
+      "id": "27669ebd-30bb-4dfd-8142-ccdf319a982e",
+      "version": 161,
+      "ezbr_sha256": "49c7eedb227889ff9efd6d0192603738228f52d9a0a019476457b6fd166430d1",
+      "status": "ACTIVE",
+      "verify_jwt": false
+    },
+    {
+      "name": "worker",
+      "id": "15d56d97-a8fe-496b-b64f-6cd8d0f44de5",
+      "version": 286,
+      "ezbr_sha256": "993ab8806421aa8bd5f8601a2e7d850c4cd26038ff6e9691d85af660c575c5d8",
+      "status": "ACTIVE",
+      "verify_jwt": false
+    }
+  ]
+}

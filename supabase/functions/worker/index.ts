@@ -155,7 +155,6 @@ import { requireExternalPosting } from "../_shared/externalPostingGuard.ts";
 import {
   DeliveryCutoverBlockedError,
   requireDeliveryCutover,
-  settleDeliveryCutoverJob,
 } from "../_shared/deliveryCutover.ts";
 import {
   buildClassifierToolFunction,
@@ -299,22 +298,10 @@ class JobDeferred extends Error {
   }
 }
 
-class DeliveryCutoverSettled extends Error {
+class DeliveryCutoverBlockedNoWrite extends Error {
   constructor(readonly reason: string) {
     super(reason);
-    this.name = "DeliveryCutoverSettled";
-  }
-}
-
-async function settleBlockedDeliveryJob(
-  supabase: any,
-  job: Record<string, unknown>,
-  reason: string,
-): Promise<void> {
-  const jobId = typeof job.id === "string" ? job.id : "";
-  const settled = await settleDeliveryCutoverJob(supabase, jobId, reason);
-  if (!settled) {
-    throw new NonRetryableJobError("delivery_cutover_settlement_not_applied");
+    this.name = "DeliveryCutoverBlockedNoWrite";
   }
 }
 
@@ -1129,22 +1116,17 @@ serve(async (req) => {
             return { success: false, jobId: job.id };
           }
         } catch (error) {
-          if (error instanceof DeliveryCutoverSettled) {
-            await recordPipelineEvent(supabase, job, "completed", error.reason, {
-              ...laneMetrics,
-              skipped: "delivery_cutover_blocked",
-              terminal: true,
-            });
+          if (error instanceof DeliveryCutoverBlockedNoWrite) {
             console.log(JSON.stringify({
               function: "worker",
-              action: "job_terminally_settled",
+              action: "job_blocked_without_write",
               job_id: job.id,
               type: job.type,
               reason: error.reason,
             }));
             return {
-              success: true,
-              settled: true,
+              success: false,
+              blocked: true,
               jobId: job.id,
               reason: error.reason,
             };
@@ -3068,6 +3050,24 @@ async function handleDeliverJob(
       }),
     );
 
+    const assertTelegramDeliveryGuards = async () => {
+      try {
+        // Historical or ambiguous lineage must stop before any delivery-path
+        // write, including a posting-mode deferral or pipeline event.
+        await requireDeliveryCutover(supabase, tweetId);
+        await requireExternalPosting(supabase);
+      } catch (error) {
+        if (error instanceof DeliveryCutoverBlockedError) {
+          throw new DeliveryCutoverBlockedNoWrite(error.message);
+        }
+        throw new JobDeferred("telegram_external_posting_blocked", 30_000, {
+          tweet_id: tweetId,
+          check: "external_posting_guard",
+        });
+      }
+    };
+    await assertTelegramDeliveryGuards();
+
     const telegramBotToken = Deno.env.get("TELEGRAM_BOT_TOKEN");
     const telegramChatId = Deno.env.get("TELEGRAM_CHAT_ID");
 
@@ -3328,26 +3328,6 @@ async function handleDeliverJob(
       renderGate.decision,
     );
 
-    const assertTelegramDeliveryGuards = async () => {
-      try {
-        await requireExternalPosting(supabase);
-        await requireDeliveryCutover(supabase, tweetId);
-      } catch (error) {
-        if (error instanceof DeliveryCutoverBlockedError) {
-          await settleBlockedDeliveryJob(supabase, job, error.message);
-          throw new DeliveryCutoverSettled(error.message);
-        }
-        throw new JobDeferred("telegram_external_posting_blocked", 30_000, {
-          tweet_id: tweetId,
-          check: "external_posting_guard",
-        });
-      }
-    };
-
-    // Run both fail-closed guards before claiming a durable Telegram delivery
-    // row. A blocked/Preview retry must not strand a `preparing` receipt.
-    await assertTelegramDeliveryGuards();
-
     let telegramClaim: Awaited<ReturnType<typeof claimTelegramDelivery>>;
     try {
       telegramClaim = await claimTelegramDelivery(supabase, {
@@ -3365,8 +3345,7 @@ async function handleDeliverJob(
     if (!telegramClaim.claimed) {
       if (telegramClaim.reason.startsWith("delivery_cutover_blocked")) {
         const reason = "delivery_cutover_blocked:telegram_claim";
-        await settleBlockedDeliveryJob(supabase, job, reason);
-        throw new DeliveryCutoverSettled(reason);
+        throw new DeliveryCutoverBlockedNoWrite(reason);
       }
       if (telegramClaim.reason === "already_posted") {
         await insertPipelineEvent(

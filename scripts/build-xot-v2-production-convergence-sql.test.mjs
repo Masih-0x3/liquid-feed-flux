@@ -26,13 +26,25 @@ function buildFixture() {
   });
 }
 
-test("production convergence order matches the 15 prerequisites and four repairs", () => {
-  assert.equal(BUNDLE_PHASES.length, 6);
-  assert.equal(EXPECTED_INCLUSION_COUNT, 20);
+test("production convergence order matches the 15 prerequisites and eight repairs/successors", () => {
+  assert.equal(BUNDLE_PHASES.length, 9);
+  assert.equal(EXPECTED_INCLUSION_COUNT, 23);
   assert.equal(EXPECTED_MIGRATION_ORDER.length, EXPECTED_INCLUSION_COUNT);
   assert.deepEqual(EXPECTED_MIGRATION_ORDER.slice(0, 15), BUNDLE_PHASES[0].migrations);
   assert.equal(EXPECTED_MIGRATION_ORDER.filter((name) => name === RUNTIME_CONTROLS_BRIDGE).length, 2);
   assert.equal(EXPECTED_MIGRATION_ORDER.includes(ACTIVATION_ONLY_X_RETIREMENT), false);
+  assert.equal(
+    EXPECTED_MIGRATION_ORDER[20],
+    "20260828140000_runtime_control_claim_release_race_guards.sql",
+  );
+  assert.equal(
+    EXPECTED_MIGRATION_ORDER[21],
+    "20260829120000_reconcile_historical_delivery_jobs.sql",
+  );
+  assert.equal(
+    EXPECTED_MIGRATION_ORDER[22],
+    "20260830120000_enforce_historical_delivery_zero_write.sql",
+  );
 });
 
 test("builder emits deterministic phase-marked SQL in one outer transaction", () => {
@@ -41,7 +53,7 @@ test("builder emits deterministic phase-marked SQL in one outer transaction", ()
 
   assert.equal(first, second);
   assert.deepEqual(extractSourceOrder(first), EXPECTED_MIGRATION_ORDER);
-  assert.equal(first.match(/^-- Phase \d:/gm)?.length, 6);
+  assert.equal(first.match(/^-- Phase \d:/gm)?.length, 9);
   assert.equal(first.includes(ACTIVATION_ONLY_X_RETIREMENT), false);
   assert.deepEqual(findTopLevelTransactionStatements(first).map(({ statement }) => statement), [
     "BEGIN;",

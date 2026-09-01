@@ -13,6 +13,11 @@ const effectiveRepairMigration = await readFile(
   new URL("../supabase/migrations/20260827064509_repair_effective_claim_fence_and_delivery_cutover.sql", import.meta.url),
   "utf8",
 );
+const zeroWriteMigrationName = "20260830120000_enforce_historical_delivery_zero_write.sql";
+const zeroWriteMigration = await readFile(
+  new URL(`../supabase/migrations/${zeroWriteMigrationName}`, import.meta.url),
+  "utf8",
+);
 const b3GenerationMigration = await readFile(
   new URL("../supabase/migrations/20260806143000_b3_job_x_claim_fencing.sql", import.meta.url),
   "utf8",
@@ -209,21 +214,37 @@ for (const marker of [
     throw new Error(`effective claim_jobs repair lacks ${marker}`);
   }
 }
-const settlementStart = effectiveRepairMigration.indexOf(
+const settlementStart = zeroWriteMigration.indexOf(
   "CREATE OR REPLACE FUNCTION public.settle_delivery_cutover_blocked(",
 );
-const settlementEnd = effectiveRepairMigration.indexOf("\n$$;", settlementStart);
+const settlementEnd = zeroWriteMigration.indexOf("\n$$;", settlementStart);
 const settlementBody = settlementStart >= 0 && settlementEnd >= 0
-  ? effectiveRepairMigration.slice(settlementStart, settlementEnd)
+  ? zeroWriteMigration.slice(settlementStart, settlementEnd)
   : "";
-for (const marker of [
-  "claim_state = 'failed'",
-  "claim_expires_at = NULL",
-  "last_error = v_reason",
-]) {
-  if (!settlementBody.includes(marker)) {
-    throw new Error(`effective cutover settlement lacks ${marker}`);
-  }
+if (!settlementBody.includes("RETURN false;") ||
+  /\b(?:UPDATE|INSERT|DELETE)\b/i.test(settlementBody) ||
+  /\bFOR\s+UPDATE\b/i.test(settlementBody)) {
+  throw new Error("final cutover settlement function is not zero-DML");
+}
+const reconcileStart = zeroWriteMigration.indexOf(
+  "CREATE OR REPLACE FUNCTION public.reconcile_stuck_jobs()",
+);
+const reconcileEnd = zeroWriteMigration.indexOf("\n$function$;", reconcileStart);
+const reconcileBody = reconcileStart >= 0 && reconcileEnd >= 0
+  ? zeroWriteMigration.slice(reconcileStart, reconcileEnd)
+  : "";
+if (!reconcileBody || reconcileBody.includes("settle_delivery_cutover_blocked") ||
+  reconcileBody.includes("historical_deliveries_settled") ||
+  (reconcileBody.match(/public\.delivery_cutover_allows_job\(/g) ?? []).length < 2) {
+  throw new Error("final reconciliation function does not skip historical delivery rows before updates");
+}
+if (!zeroWriteMigration.includes("CREATE TRIGGER trg_00_historical_delivery_job_zero_write") ||
+  !zeroWriteMigration.includes("BEFORE UPDATE OR DELETE ON public.jobs") ||
+  !zeroWriteMigration.includes("delivery_cutover_blocked:historical_deliver_job_zero_write")) {
+  throw new Error("historical delivery jobs do not have a first-write trigger fence");
+}
+if (migrationNames.at(-1) !== zeroWriteMigrationName) {
+  throw new Error("historical zero-write migration is not the final active migration");
 }
 const guardedTelegramStart = effectiveRepairMigration.indexOf(
   "CREATE OR REPLACE FUNCTION public.claim_telegram_delivery(",
@@ -364,10 +385,25 @@ for (const marker of [
   }
 }
 if (!worker.includes('if (telegramClaim.reason.startsWith("delivery_cutover_blocked"))') ||
-  !worker.includes('await settleBlockedDeliveryJob(supabase, job, reason);') ||
+  !worker.includes('throw new DeliveryCutoverBlockedNoWrite(reason);') ||
+  worker.includes('settleBlockedDeliveryJob') ||
+  worker.includes('settleDeliveryCutoverJob') ||
+  worker.includes('recordPipelineEvent(supabase, job, "completed", error.reason') ||
   worker.indexOf('if (telegramClaim.reason.startsWith("delivery_cutover_blocked"))') >
     worker.indexOf('if (telegramClaim.reason === "already_posted")')) {
-  throw new Error("worker does not terminally settle a blocked Telegram claim before defer");
+  throw new Error("worker does not stop a blocked Telegram claim without writes");
+}
+assertGuardBeforeMutation(
+  "worker delivery",
+  worker,
+  "await requireDeliveryCutover(supabase, tweetId);",
+  "await insertPipelineEvent(",
+  "async function handleDeliverJob",
+);
+const deliverBody = functionBody(worker, "async function handleDeliverJob");
+if (deliverBody.indexOf("await requireDeliveryCutover(supabase, tweetId);") >
+  deliverBody.indexOf("await requireExternalPosting(supabase);")) {
+  throw new Error("worker delivery does not reject historical lineage before posting-mode deferral");
 }
 const guardedAdminPaths = [
   ["manual advance", manualAdvance, "requireDeliveryCutover"],
@@ -380,7 +416,7 @@ const guardedAdminPaths = [
   ["retry X lineage", xPostingActions, "requireDeliveryCutover"],
   ["manual intake posting", manualVideoIntakeActions, "requireDeliveryCutover"],
   ["x fallback cutoff", xPoster, "get_delivery_cutover"],
-  ["worker settlement", worker, "settleBlockedDeliveryJob"],
+  ["worker zero-write block", worker, "DeliveryCutoverBlockedNoWrite"],
 ];
 for (const [name, source, marker] of guardedAdminPaths) {
   if (!source.includes(marker)) {
