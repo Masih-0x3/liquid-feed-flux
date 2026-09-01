@@ -52,6 +52,7 @@ import {
   completeXPostDelivery,
   failXPostDelivery,
   markXPostDeliveryProviderStarted,
+  releaseXPostDeliveryForRetry,
   xPostClaimRejection,
   type XPostDeliveryClaim,
 } from '../_shared/xPostDeliveryClaim.ts';
@@ -1220,13 +1221,11 @@ async function handleManualVideoIntakePost(params: {
       await repairOriginalStaleMediaForX(params.sb, tweetId, e, 'manual_video_intake')
     ) {
       try {
-        const released = await failXPostDelivery(params.sb, {
+        const released = await releaseXPostDeliveryForRetry(params.sb, {
           deliveryId: deliveryClaim.deliveryId,
           claimToken: deliveryClaim.claimToken,
           claimGeneration: deliveryClaim.claimGeneration,
-          status: 'skipped',
           error: 'stale_media_repair_queued',
-          skipReason: 'stale_media_repair_queued',
           mediaKind: 'video',
         });
         if (!released) console.error('[x-poster] manual pre-provider claim release rejected (stale media)', { tweetId });
@@ -1244,12 +1243,11 @@ async function handleManualVideoIntakePost(params: {
     }
     const errorCode = safeXPosterErrorCode(e, 'media_upload_failed_video');
     try {
-      const released = await failXPostDelivery(params.sb, {
+      const released = await releaseXPostDeliveryForRetry(params.sb, {
         deliveryId: deliveryClaim.deliveryId,
         claimToken: deliveryClaim.claimToken,
         claimGeneration: deliveryClaim.claimGeneration,
         error: errorCode,
-        skipReason: 'media_preparation_failed',
         mediaKind: 'video',
       });
       if (!released) console.error('[x-poster] manual pre-provider claim release rejected (media)', { tweetId });
@@ -2245,13 +2243,11 @@ Deno.serve(async (req) => {
           await repairOriginalStaleMediaForX(sb, tweetId, e, 'x_poster')
         ) {
           try {
-            const released = await failXPostDelivery(sb, {
+            const released = await releaseXPostDeliveryForRetry(sb, {
               deliveryId: deliveryClaim!.deliveryId!,
               claimToken: deliveryClaim!.claimToken!,
               claimGeneration: deliveryClaim!.claimGeneration,
-              status: 'skipped',
               error: 'stale_media_repair_queued',
-              skipReason: 'stale_media_repair_queued',
               mediaKind: sel.tier,
             });
             if (!released) console.error('[x-poster] pre-provider claim release rejected (stale media)', { tweetId });
@@ -2269,12 +2265,11 @@ Deno.serve(async (req) => {
         }
         const errMsg = safeXPosterErrorCode(e, `media_upload_failed_${sel.tier}`);
         try {
-          const released = await failXPostDelivery(sb, {
+          const released = await releaseXPostDeliveryForRetry(sb, {
             deliveryId: deliveryClaim!.deliveryId!,
             claimToken: deliveryClaim!.claimToken!,
             claimGeneration: deliveryClaim!.claimGeneration,
             error: errMsg,
-            skipReason: 'media_preparation_failed',
             mediaKind: sel.tier,
           });
           if (!released) console.error('[x-poster] pre-provider claim release rejected (media)', { tweetId });
