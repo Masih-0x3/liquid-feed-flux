@@ -6,6 +6,7 @@ import ts from "typescript";
 const ROOT = process.cwd();
 const paths = {
   migration: join(ROOT, "supabase/migrations/20260730070000_telegram_delivery_claims.sql"),
+  successor: join(ROOT, "supabase/migrations/20260901150013_adopt_telegram_pending_delivery_receipts.sql"),
   claim: join(ROOT, "supabase/functions/worker/telegramDeliveryClaim.ts"),
   worker: join(ROOT, "supabase/functions/worker/index.ts"),
   delivery: join(ROOT, "supabase/functions/worker/telegramDelivery.ts"),
@@ -48,6 +49,38 @@ function validate(sources = sourceSet()) {
   ]) {
     assert.match(sources.migration, new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), `migration must retain ${needle}`);
   }
+
+  for (const needle of [
+    "CREATE OR REPLACE FUNCTION public.claim_telegram_delivery(",
+    "public.delivery_cutover_allows_post(v_subject_id)",
+    "d.status = 'posted'",
+    "d.telegram_chat_id IS NULL",
+    "d.delivery_key IS NULL",
+    "d.status = 'pending'",
+    "d.claim_state = 'idle'",
+    "d.provider_started_at IS NULL",
+    "cardinality(d.provider_message_ids)",
+    "cardinality(d.telegram_message_ids)",
+    "SET telegram_chat_id = v_chat_id",
+    "public.claim_telegram_delivery_unchecked(",
+    "GRANT EXECUTE ON FUNCTION public.claim_telegram_delivery",
+  ]) {
+    assert.ok(sources.successor.includes(needle), `pending-receipt successor must retain ${needle}`);
+  }
+  const successorGuardAt = sources.successor.indexOf("IF NOT public.delivery_cutover_allows_post(v_subject_id)");
+  const successorAlreadyPostedAt = sources.successor.indexOf("d.status = 'posted'");
+  const successorReadAt = sources.successor.indexOf("SELECT d.id");
+  const successorUpdateAt = sources.successor.indexOf("UPDATE public.deliveries");
+  const successorDelegateAt = sources.successor.lastIndexOf("public.claim_telegram_delivery_unchecked(");
+  assert.ok(
+    successorGuardAt >= 0 && successorAlreadyPostedAt > successorGuardAt && successorReadAt > successorAlreadyPostedAt
+      && successorUpdateAt > successorReadAt && successorDelegateAt > successorUpdateAt,
+    "pending-receipt adoption must run after the cutover and already-posted guards and before the unchecked claim",
+  );
+  const pendingSelector = sources.successor.slice(successorReadAt, sources.successor.indexOf("IF FOUND THEN", successorReadAt));
+  assert.ok(pendingSelector.includes("d.telegram_chat_id IS NULL"), "only chat-agnostic placeholders may be adopted");
+  assert.ok(pendingSelector.includes("d.status = 'pending'"), "only pending placeholders may be adopted");
+  assert.ok(!pendingSelector.includes("'failed'"), "failed canary receipts must remain terminal and untouched");
 
   for (const needle of [
     "export async function claimTelegramDelivery",
@@ -103,6 +136,10 @@ if (process.env.MUTATION_TEST === "1") {
     ["worker claim boundary", { ...sources, worker: sources.worker.replaceAll("claimTelegramDelivery(supabase", "claimTelegramDeliveryMutated(supabase") }],
     ["provider pre-call callback", { ...sources, delivery: sources.delivery.replaceAll("await beforeProviderCall?.();", "await beforeProviderCallMutated?.();") }],
     ["legacy receipt insert", { ...sources, worker: sources.worker.replace("completeTelegramDelivery(supabase", "supabase.from(\"deliveries\").insert({ completeTelegramDelivery(supabase") }],
+    ["successor cutover guard", { ...sources, successor: sources.successor.replace("IF NOT public.delivery_cutover_allows_post(v_subject_id)", "IF false") }],
+    ["successor already-posted preservation", { ...sources, successor: sources.successor.replace("d.status = 'posted'", "d.status = 'pending'") }],
+    ["successor pending-only adoption", { ...sources, successor: sources.successor.replaceAll("d.status = 'pending'", "d.status IN ('pending', 'failed')") }],
+    ["successor null-chat boundary", { ...sources, successor: sources.successor.replaceAll("d.telegram_chat_id IS NULL", "d.telegram_chat_id IS NOT NULL") }],
   ];
   for (const [label, mutated] of mutations) {
     assert.throws(() => validate(mutated), `${label} mutation must fail the claim contract`);

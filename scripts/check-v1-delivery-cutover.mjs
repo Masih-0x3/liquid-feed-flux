@@ -14,6 +14,7 @@ const effectiveRepairMigration = await readFile(
   "utf8",
 );
 const zeroWriteMigrationName = "20260830120000_enforce_historical_delivery_zero_write.sql";
+const pendingReceiptAdoptionMigrationName = "20260901150013_adopt_telegram_pending_delivery_receipts.sql";
 const zeroWriteMigration = await readFile(
   new URL(`../supabase/migrations/${zeroWriteMigrationName}`, import.meta.url),
   "utf8",
@@ -243,8 +244,9 @@ if (!zeroWriteMigration.includes("CREATE TRIGGER trg_00_historical_delivery_job_
   !zeroWriteMigration.includes("delivery_cutover_blocked:historical_deliver_job_zero_write")) {
   throw new Error("historical delivery jobs do not have a first-write trigger fence");
 }
-if (migrationNames.at(-1) !== zeroWriteMigrationName) {
-  throw new Error("historical zero-write migration is not the final active migration");
+if (migrationNames.at(-1) !== pendingReceiptAdoptionMigrationName ||
+  migrationNames.at(-2) !== zeroWriteMigrationName) {
+  throw new Error("historical zero-write migration and Telegram receipt adoption successor are not the final active migrations");
 }
 const guardedTelegramStart = effectiveRepairMigration.indexOf(
   "CREATE OR REPLACE FUNCTION public.claim_telegram_delivery(",
@@ -257,6 +259,37 @@ const telegramGuardAt = guardedTelegramBody.indexOf("public.delivery_cutover_all
 const telegramDelegateAt = guardedTelegramBody.indexOf("public.claim_telegram_delivery_unchecked(");
 if (telegramGuardAt < 0 || telegramDelegateAt < 0 || telegramGuardAt > telegramDelegateAt) {
   throw new Error("effective Telegram claim does not guard before its legacy delegate");
+}
+
+const telegramClaimDefinitionNames = migrationSources
+  .filter(([, source]) => source.includes("CREATE OR REPLACE FUNCTION public.claim_telegram_delivery("))
+  .map(([name]) => name);
+if (telegramClaimDefinitionNames.at(-1) !== pendingReceiptAdoptionMigrationName) {
+  throw new Error("Telegram pending-receipt adoption is not the final claim_telegram_delivery definition");
+}
+const pendingReceiptAdoptionMigration = migrationSources.find(
+  ([name]) => name === pendingReceiptAdoptionMigrationName,
+)?.[1] ?? "";
+const pendingReceiptClaimStart = pendingReceiptAdoptionMigration.indexOf(
+  "CREATE OR REPLACE FUNCTION public.claim_telegram_delivery(",
+);
+const pendingReceiptClaimEnd = pendingReceiptAdoptionMigration.indexOf("\n$$;", pendingReceiptClaimStart);
+const pendingReceiptClaimBody = pendingReceiptClaimStart >= 0 && pendingReceiptClaimEnd >= 0
+  ? pendingReceiptAdoptionMigration.slice(pendingReceiptClaimStart, pendingReceiptClaimEnd)
+  : "";
+const pendingReceiptGuardAt = pendingReceiptClaimBody.indexOf("public.delivery_cutover_allows_post(");
+const pendingReceiptAlreadyPostedAt = pendingReceiptClaimBody.indexOf("d.status = 'posted'");
+const pendingReceiptReadAt = pendingReceiptClaimBody.indexOf("SELECT d.id");
+const pendingReceiptUpdateAt = pendingReceiptClaimBody.indexOf("UPDATE public.deliveries");
+const pendingReceiptDelegateAt = pendingReceiptClaimBody.lastIndexOf("public.claim_telegram_delivery_unchecked(");
+if (pendingReceiptGuardAt < 0 || pendingReceiptAlreadyPostedAt <= pendingReceiptGuardAt ||
+  pendingReceiptReadAt <= pendingReceiptAlreadyPostedAt ||
+  pendingReceiptUpdateAt <= pendingReceiptReadAt || pendingReceiptDelegateAt <= pendingReceiptUpdateAt ||
+  !pendingReceiptClaimBody.includes("d.telegram_chat_id IS NULL") ||
+  !pendingReceiptClaimBody.includes("d.delivery_key IS NULL") ||
+  !pendingReceiptClaimBody.includes("d.status = 'pending'") ||
+  pendingReceiptClaimBody.includes("d.status IN ('pending', 'failed')")) {
+  throw new Error("Telegram pending-receipt adoption does not preserve zero-write, pending-only, or null-chat boundaries");
 }
 
 // The final migration must be the last source definition of the X claimer.
