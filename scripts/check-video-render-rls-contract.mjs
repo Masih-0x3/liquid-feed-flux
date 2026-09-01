@@ -3776,6 +3776,11 @@ const reviewedNonRawMigrationDigests = new Map([
   // claim and cutover contracts. It is service-role-only and does not change
   // the protected video raw-table grant surface.
   ['20260901150013_adopt_telegram_pending_delivery_receipts.sql', 'ba209ccb73f7681f86b76e966500c39fbe75a3aa4f8f7354b2fab0b26b46d526'],
+  // This X pre-provider claim-release successor is reviewed by the X delivery
+  // claim contract. It only defines a service-role-only x_deliveries RPC and
+  // does not change the protected video raw-table grant surface. Keep the
+  // exemption byte-locked so any edit re-enters this RLS review.
+  ['20260901170000_release_pre_provider_x_delivery_claim.sql', 'afeb056d73020e084e68afc5fca8aa33346cf56b8afa6f661cf94c57b2f36f68'],
 ]);
 const reviewedServiceOnlyXCutoverMigration =
   '20260828120000_repair_effective_x_claim_cutover.sql';
@@ -5496,6 +5501,23 @@ if (process.env.MUTATION_TEST === '1') {
     ),
     true,
     'the caller-bound admin-role helper must be exempt only at its reviewed filename and exact bytes',
+  );
+  const reviewedAir013MigrationName = '20260901170000_release_pre_provider_x_delivery_claim.sql';
+  const reviewedAir013Migration = read(join(migrationsDirectory, reviewedAir013MigrationName));
+  assert.equal(
+    migrationTouchesProtectedAccessSurface(reviewedAir013Migration, reviewedAir013MigrationName),
+    false,
+    'the byte-locked X pre-provider claim-release migration must remain outside the video raw-table gate',
+  );
+  assert.equal(
+    migrationTouchesProtectedAccessSurface(`${reviewedAir013Migration}\n`, reviewedAir013MigrationName),
+    true,
+    'editing the byte-locked X pre-provider claim-release migration must re-enter the video raw-table gate',
+  );
+  assert.equal(
+    migrationTouchesProtectedAccessSurface(reviewedAir013Migration, 'unreviewed_x_claim_release.sql'),
+    true,
+    'the X pre-provider claim-release migration must be exempt only at its reviewed filename and exact bytes',
   );
   expectRejected('renderer browser credential', (source) => ({
     ...source,
