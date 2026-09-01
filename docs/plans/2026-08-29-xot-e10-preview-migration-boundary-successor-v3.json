@@ -9,7 +9,7 @@
   "branch": "codex/xot-v2-composite-release",
   "predecessor": {
     "path": "docs/plans/2026-08-24-xot-e10-preview-migration-boundary-successor-v2.json",
-    "sha256": "132947ce68611a26d63145dc8fa22b9655797bd389c8a59b5ddf1146713c6015"
+    "sha256": "8e17642505ba97b768c2cc9f9f8ea01fb1faa4faa5db585a75faef1191eace7a"
   },
   "currentCandidateOverrides": {
     "checkedInTypesSha256": "1480973b0ff3603d02a66b7f12623502c37b19b6524bb81a485150dbb32a9ddb"

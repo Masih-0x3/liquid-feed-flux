@@ -17,7 +17,7 @@
     "supabase/functions/_shared/e10PreviewParityFoundation.test.ts": "4760427806432ab9bafca0931ebf1f85d6e3f7b9f9bc28f5c7065f3e697f568b",
     "package.json": "bb4b106825ce09eeb7e2cd6fc550d4ae8f35ce78edbffe79a44053af80986936",
     "scripts/check-migration-baseline.mjs": "805d67c46c93b316c2fc4b60817c2a3d3158c9890defdadff30d5a9ec0db1fbc",
-    ".github/workflows/ci.yml": "6c1c3c97f37e8a9258d1af3459f0da70be579c0c4b62792bc2a9a6b35bc7d88f"
+    ".github/workflows/ci.yml": "7f14ac3f2a198ebb3f4a8fd3b72b1fad1038fb2fb10edbc6ad0401bc0a6d847f"
   },
   "supersession": {
     "reason": "Accepted successor after source and package metadata drift in later local work; predecessor remains immutable.",
