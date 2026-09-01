@@ -50,6 +50,7 @@ const REQUIRED_CI_RUNS = [
   "npm --prefix services/video-renderer audit --omit=dev --audit-level=high",
   "node scripts/check-runtime-contract.mjs",
   "node --test scripts/check-runtime-contract.test.mjs",
+  "node --test scripts/check-build-output-identity.test.mjs scripts/run-vite-build.test.mjs",
   "node --test scripts/check-supply-chain-contract.test.mjs",
 ];
 

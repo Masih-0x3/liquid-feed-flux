@@ -108,6 +108,25 @@ test("production audits must finish before mutable Node contract and test comman
   assert.ok(validateSupplyChainContract({ root }).errors.some((error) => error.includes("reviewed checkout, setup-node")));
 }));
 
+test("focused build identity tests must remain in the reviewed CI prefix", () => withFullInventoryFixture((root) => {
+  const path = join(root, ".github/workflows/ci.yml");
+  const original = readFileSync(path, "utf8");
+  const focused = "      - run: node --test scripts/check-build-output-identity.test.mjs scripts/run-vite-build.test.mjs\n";
+  writeFileSync(path, original.replace(focused, ""));
+  assert.ok(validateSupplyChainContract({ root }).errors.some((error) => error.includes("reviewed checkout, setup-node")));
+}));
+
+test("focused build identity tests must follow runtime contract tests", () => withFullInventoryFixture((root) => {
+  const path = join(root, ".github/workflows/ci.yml");
+  const original = readFileSync(path, "utf8");
+  const focused = "      - run: node --test scripts/check-build-output-identity.test.mjs scripts/run-vite-build.test.mjs\n";
+  writeFileSync(path, original.replace(
+    `${focused}      - run: node --test scripts/check-supply-chain-contract.test.mjs\n`,
+    `      - run: node --test scripts/check-supply-chain-contract.test.mjs\n${focused}`,
+  ));
+  assert.ok(validateSupplyChainContract({ root }).errors.some((error) => error.includes("reviewed checkout, setup-node")));
+}));
+
 test("workflow-level defaults cannot redirect every supply-chain command", () => withFixture((root) => {
   const path = join(root, ".github/workflows/ci.yml");
   writeFileSync(path, `defaults:\n  run:\n    working-directory: .ci/clean\n${readFileSync(path, "utf8")}`);
