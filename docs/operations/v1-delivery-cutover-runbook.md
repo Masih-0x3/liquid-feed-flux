@@ -130,10 +130,17 @@ Historical `video_renders` are different: queued or expired-running renders
 may move through running, completed, failed, or blocked and may update
 attempts, error/output, and lease fields as normal processing. Those transitions
 are allowed and must be recorded separately from the immutable delivery cohort.
-`settle_delivery_cutover_blocked` only settles a still-running historical
-`deliver` job. It writes a `delivery_cutover_blocked`-prefixed error, sets
-`completed_at`, and clears its lock fields. It does not settle or mutate
-`video_renders`.
+
+The append-only migration
+`20260830120000_enforce_historical_delivery_zero_write.sql` supersedes the
+older settlement behavior. `reconcile_stuck_jobs()` excludes historical
+`deliver` rows before any update, and `settle_delivery_cutover_blocked` is now a
+service-role-only compatibility no-op that returns `false`. The
+`trg_00_historical_delivery_job_zero_write` trigger rejects every historical
+`jobs` update or delete with
+`delivery_cutover_blocked:historical_deliver_job_zero_write`. Do not settle,
+requeue, delete, or otherwise mutate historical delivery rows; record them as
+unchanged evidence with zero provider writes.
 
 ## Rollback
 
