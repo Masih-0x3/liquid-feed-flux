@@ -31,11 +31,13 @@ const REQUIRED_CI_SUPPLY_PREFLIGHT_RUNS = [
 
 const REQUIRED_CI_GUARD_PREFIX = [
   ...REQUIRED_CI_SUPPLY_PREFLIGHT_RUNS,
+  PINNED_DENO_BOOTSTRAP_RUN,
   ...REQUIRED_CI_RUNTIME_RUNS,
 ];
 
 const REQUIRED_CI_PREFIX_STEPS = [
   ...REQUIRED_CI_SUPPLY_PREFLIGHT_RUNS,
+  PINNED_DENO_BOOTSTRAP_RUN,
   ...REQUIRED_CI_RUNTIME_RUNS.slice(0, 2),
   REQUIRED_CI_BUILD_IDENTITY_TEST_RUN,
   ...REQUIRED_CI_RUNTIME_RUNS.slice(2),
@@ -258,10 +260,11 @@ function workflowRuntimeFacts(value, jobName, setupNodeAction) {
       && steps[1]?.meaningful[1]?.trim() === "with:"
       && steps[1]?.cache === "npm"
       && steps.slice(2, 6).map((step) => step.run).every((run, index) => run === REQUIRED_CI_SUPPLY_PREFLIGHT_RUNS[index])
-      && steps[6]?.run === 'node scripts/collect-supply-chain-evidence.mjs --collect-only --output-dir "$RUNNER_TEMP/xot-supply-chain"'
-      && steps[7]?.uses === "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"
-      && steps[8]?.run === 'node scripts/collect-supply-chain-evidence.mjs --validate-only --output-dir "$RUNNER_TEMP/xot-supply-chain"'
-      && steps.slice(9, 13).map((step) => step.run).every((run, index) => run === REQUIRED_CI_PREFIX_STEPS[index + 4]),
+      && steps[6]?.run === PINNED_DENO_BOOTSTRAP_RUN
+      && steps[7]?.run === 'node scripts/collect-supply-chain-evidence.mjs --collect-only --output-dir "$RUNNER_TEMP/xot-supply-chain"'
+      && steps[8]?.uses === "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"
+      && steps[9]?.run === 'node scripts/collect-supply-chain-evidence.mjs --validate-only --technical-only --output-dir "$RUNNER_TEMP/xot-supply-chain"'
+      && steps.slice(10, 14).map((step) => step.run).every((run, index) => run === REQUIRED_CI_PREFIX_STEPS[index + 5]),
     unsafeRequiredRun: steps.some((step) => [...REQUIRED_CI_GUARD_PREFIX, REQUIRED_CI_BUILD_IDENTITY_TEST_RUN].includes(step.run) && !step.isBareRun),
     workflowHasOverrides,
     workflowHasQuotedKeys,

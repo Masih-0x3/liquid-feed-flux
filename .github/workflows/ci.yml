@@ -21,6 +21,7 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: node scripts/check-supply-chain-contract.mjs
       - run: npm --prefix services/video-renderer ci --ignore-scripts
+      - run: npm rebuild --ignore-scripts=false deno
       - name: Collect redacted hosted supply-chain evidence
         env:
           XOT_REVIEWED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -31,15 +32,14 @@ jobs:
           name: xot-supply-chain-${{ github.event.pull_request.head.sha || github.sha }}
           path: ${{ runner.temp }}/xot-supply-chain
           if-no-files-found: error
-      - name: Enforce hosted supply-chain evidence contract
+      - name: Enforce technical hosted supply-chain evidence contract
         env:
           XOT_REVIEWED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: node scripts/collect-supply-chain-evidence.mjs --validate-only --output-dir "$RUNNER_TEMP/xot-supply-chain"
+        run: node scripts/collect-supply-chain-evidence.mjs --validate-only --technical-only --output-dir "$RUNNER_TEMP/xot-supply-chain"
       - run: node scripts/check-runtime-contract.mjs
       - run: node --test scripts/check-runtime-contract.test.mjs
       - run: node --test scripts/check-build-output-identity.test.mjs scripts/run-vite-build.test.mjs
       - run: node --test scripts/check-supply-chain-contract.test.mjs
-      - run: npm rebuild --ignore-scripts=false deno
       - run: npx --yes supabase@2.111.0 --version
       - run: npm run check:remote-media-policy
       - run: npm run check:remote-media-no-egress
@@ -191,3 +191,7 @@ jobs:
           VITE_SUPABASE_URL: https://abcdefghijklmnopqrst.supabase.co
           VITE_SUPABASE_PUBLISHABLE_KEY: eyJhbGciOiJIUzI1NiJ9.synthetic-public-payload.synthetic-signature
           VITE_SUPABASE_PROJECT_ID: abcdefghijklmnopqrst
+      - name: Enforce final hosted supply-chain owner disposition
+        env:
+          XOT_REVIEWED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node scripts/collect-supply-chain-evidence.mjs --validate-only --output-dir "$RUNNER_TEMP/xot-supply-chain"

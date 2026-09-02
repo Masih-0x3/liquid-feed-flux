@@ -10,6 +10,8 @@ import {
   normalizeSpdx,
   normalizeTrivy,
   normalizeDockerInspect,
+  collectDenoResolutionEvidence,
+  stableErrors,
   validateOwnerDisposition,
   validateEvidenceDirectory,
   validateEvidenceArtifacts,
@@ -32,6 +34,8 @@ test("npm audit normalization keeps only reviewable metadata", () => {
 
   assert.deepEqual(normalized.vulnerabilities, { info: 0, low: 1, moderate: 0, high: 2, critical: 0 });
   assert.equal(normalized.findings[0].package, "demo-package");
+  assert.match(normalized.findings[0].id, /^npm:root:demo-package:[a-f0-9]{24}$/);
+  assert.deepEqual(normalized.findingSummary, { total: 1, actionable: 0, nonfixable: 1, ids: [normalized.findings[0].id] });
   assert.deepEqual(normalized.findings[0].advisory, ["Demo advisory"]);
   assert.equal("rawToken" in normalized, false);
   assert.equal("url" in normalized.findings[0], false);
@@ -47,10 +51,42 @@ test("scanner normalization rejects missing or empty Trivy results", () => {
   assert.throws(() => normalizeTrivy({ Results: [] }, { status: 0 }), /non-empty/);
 });
 
+test("Trivy normalization retains H/C findings and classifies only fixed versions as actionable", () => {
+  const normalized = normalizeTrivy({ Results: [{ Target: "debian", Vulnerabilities: [
+    { PkgName: "openssl", InstalledVersion: "1.0", FixedVersion: "1.1", Severity: "HIGH", VulnerabilityID: "CVE-1" },
+    { PkgName: "zlib", InstalledVersion: "1.0", FixedVersion: "", Severity: "CRITICAL", VulnerabilityID: "CVE-2" },
+  ] }] });
+  assert.equal(normalized.findings.length, 2);
+  assert.equal(normalized.findingSummary.total, 2);
+  assert.equal(normalized.findingSummary.actionable, 1);
+  assert.equal(normalized.findingSummary.nonfixable, 1);
+  assert.deepEqual(normalized.findingSummary.ids, normalized.findings.map((finding) => finding.id).sort());
+  assert.ok(normalized.findings.every((finding) => /^trivy:[a-f0-9]{24}$/.test(finding.id)));
+});
+
 test("scanner normalization fails closed on command errors", () => {
   assert.throws(() => normalizeSpdx({ spdxVersion: "SPDX-2.3", packages: [{ name: "pkg", versionInfo: "1.0.0" }] }, "root", { status: 1 }), /command failed/);
   assert.throws(() => normalizeTrivy({ Results: [{ Target: "os", Vulnerabilities: [] }] }, { status: 1 }), /command failed/);
   assert.throws(() => normalizeNpmAudit({}, "root", { timedOut: true }), /timed out/);
+});
+
+test("Deno evidence performs frozen non-executing resolution over every function entrypoint", () => {
+  const evidence = collectDenoResolutionEvidence(process.cwd(), "a".repeat(40));
+  assert.equal(evidence.status, "passed");
+  assert.equal(evidence.scanMode, "non-executing-frozen-lock-resolution");
+  assert.equal(evidence.resolutionMethod, "deno-check-frozen");
+  assert.equal(evidence.runtimeExecution, "not_run_by_policy");
+  assert.equal(evidence.commandStatus, 0);
+  assert.equal(evidence.versionCommandStatus, 0);
+  assert.ok(evidence.entrypointCount > 0);
+  assert.equal("entrypoints" in evidence, false);
+  assert.equal("deno" in evidence, false);
+  assert.equal("stdout" in evidence, false);
+  assert.equal("stderr" in evidence, false);
+});
+
+test("validation errors are deduplicated and ordered deterministically", () => {
+  assert.deepEqual(stableErrors(["z", "a", "z", "b"]), ["a", "b", "z"]);
 });
 
 test("npm audit normalization rejects malformed vulnerability counts and shapes", () => {
@@ -165,16 +201,19 @@ test("owner acceptance requires dated no-waiver or per-finding dispositions", ()
     status: "reviewed",
     decision: "accepted",
     highOrCritical: 1,
-    findings: [{ owner: "security", expiresAt: null }],
+    actionableIds: ["test-id"],
+    findings: [{ id: "test-id", owner: "security", expiresAt: null }],
     signedAt: "2026-09-02T00:00:00Z",
   }).some((error) => error.includes("expiry")));
   const acceptedClean = {
     status: "reviewed",
     decision: "accepted",
     owner: "release-security",
+    reviewedSha: "a".repeat(40),
     signedAt: "2026-09-02T00:00:00Z",
     highOrCritical: 0,
-    noWaiverReceipt: { decision: "no_waivers", owner: "release-security", signedAt: "2026-09-02T00:00:00Z" },
+    actionableIds: [],
+    noWaiverReceipt: { decision: "no_waivers", owner: "release-security", reviewedSha: "a".repeat(40), baseImageClassification: "reviewed-non-actionable", signedAt: "2026-09-02T00:00:00Z" },
   };
   assert.deepEqual(validateOwnerDisposition(acceptedClean, Date.parse("2026-09-02T01:00:00Z")), []);
   assert.ok(validateOwnerDisposition({ ...acceptedClean, noWaiverReceipt: { ...acceptedClean.noWaiverReceipt, signedAt: "2026-09-03T00:00:00Z" } }, Date.parse("2026-09-02T01:00:00Z")).some((error) => error.includes("no-waiver")));
