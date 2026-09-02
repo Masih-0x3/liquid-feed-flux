@@ -85,11 +85,17 @@ export function VideoRenderDetailPanel({
     render_revision: render?.render_revision,
   });
   const [feedbackDraft, setFeedbackDraft] = useState(() => createVideoRenderFeedbackDraft());
+  const [feedbackTouched, setFeedbackTouched] = useState(false);
   useEffect(() => {
     setFeedbackDraft((draft) => rebaseVideoRenderFeedbackDraft(draft, feedbackTargetKey));
+    setFeedbackTouched(false);
   }, [feedbackTargetKey]);
   const feedbackDraftCurrent = isVideoRenderFeedbackDraftCurrent(feedbackDraft, feedbackTargetKey);
-  const feedbackLabel = feedbackDraftCurrent ? feedbackDraft.label : 'pass';
+  const requiresFeedbackLabel = (render?.status === 'failed' || render?.status === 'blocked')
+    && !detail.data?.feedback?.length;
+  const feedbackLabel = requiresFeedbackLabel
+    ? feedbackTouched && feedbackDraftCurrent ? feedbackDraft.label : ''
+    : feedbackDraftCurrent ? feedbackDraft.label : 'pass';
   const feedbackNote = feedbackDraftCurrent ? feedbackDraft.note : '';
   const feedbackPending = saveFeedback.isPendingFor({
     render_id: render?.id,
@@ -101,10 +107,18 @@ export function VideoRenderDetailPanel({
     if (!metrics) return [];
     const entries = Object.entries(metrics)
       .filter(([key, value]) => key.endsWith('_ms') && Number.isFinite(Number(value)))
-      .sort((a, b) => Number(b[1]) - Number(a[1]))
-      .slice(0, 8);
+      .sort((a, b) => Number(b[1]) - Number(a[1]));
     return entries;
   }, [metrics]);
+  const topTimings = timings.slice(0, 3);
+  const remainingTimings = timings.slice(3);
+  const actionLabel = render?.action_label?.trim() ?? '';
+  const normalizedActionLabel = actionLabel.toLowerCase().replace(/[\s-]+/g, '_');
+  const showActionLabel = Boolean(actionLabel)
+    && normalizedActionLabel !== render?.status
+    && normalizedActionLabel !== `render_${render?.status}`;
+  const finalSubtitle = [render?.translated_srt, render?.persian_srt]
+    .find((subtitle) => typeof subtitle === 'string' && subtitle.trim().length > 0) ?? null;
 
   if (detail.isLoading) {
     return (
@@ -154,15 +168,37 @@ export function VideoRenderDetailPanel({
               </CardTitle>
               <p className="mt-1 break-all text-xs text-muted-foreground">{render.id}</p>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2">
               <Badge className={statusClass(render.status)}>{render.status}</Badge>
               {render.reviewed_at && <Badge variant="outline" className="border-emerald-500/30 text-emerald-500">Reviewed</Badge>}
-              <Badge variant="outline">{render.action_label}</Badge>
+              {showActionLabel && <Badge variant="outline">{actionLabel}</Badge>}
               {render.source_language && render.target_language && (
                 <Badge variant="outline" className="gap-1">
                   <Languages className="h-3 w-3" />
                   {render.source_language} → {render.target_language}
                 </Badge>
+              )}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => { if (!readOnly) retry.mutate({ render_id: render.id }); }}
+                disabled={readOnly || renderRetryPending}
+                title={disabledMutationTitle}
+              >
+                {renderRetryPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
+                Retry
+              </Button>
+              {(render.status === 'failed' || render.status === 'blocked') && (
+                <Button
+                  size="sm"
+                  variant={render.reviewed_at ? 'ghost' : 'outline'}
+                  onClick={() => { if (!readOnly) setReviewed.mutate({ render_id: render.id, reviewed: !render.reviewed_at }); }}
+                  disabled={readOnly || setReviewed.isPending}
+                  title={disabledMutationTitle}
+                >
+                  {setReviewed.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : render.reviewed_at ? <Undo2 className="mr-2 h-4 w-4" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+                  {render.reviewed_at ? 'Restore' : 'Mark reviewed'}
+                </Button>
               )}
             </div>
           </div>
@@ -184,7 +220,7 @@ export function VideoRenderDetailPanel({
           <div
             role="status"
             aria-live="polite"
-            className="flex items-start gap-3 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-muted-foreground"
+            className="flex items-start gap-3 rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground"
           >
             <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
             <div className="space-y-1">
@@ -195,60 +231,74 @@ export function VideoRenderDetailPanel({
             </div>
           </div>
 
-          <div className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
-            <div className="rounded-md border bg-muted/20 p-2">
-              <p className="text-xs text-muted-foreground">Attempts</p>
-              <p className="font-medium">{render.attempts ?? 0}</p>
+          <dl className="grid gap-x-4 gap-y-3 border-y py-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+            <div className="min-w-0">
+              <dt className="text-xs text-muted-foreground">Attempts</dt>
+              <dd className="mt-1 font-medium">{render.attempts ?? 0}</dd>
             </div>
-            <div className="rounded-md border bg-muted/20 p-2">
-              <p className="text-xs text-muted-foreground">Total time</p>
-              <p className="font-medium">{formatMs(metrics?.total_ms)}</p>
+            <div className="min-w-0">
+              <dt className="text-xs text-muted-foreground">Total time</dt>
+              <dd className="mt-1 font-medium">{formatMs(metrics?.total_ms)}</dd>
             </div>
-            <div className="rounded-md border bg-muted/20 p-2">
-              <p className="text-xs text-muted-foreground">Output size</p>
-              <p className="font-medium">{formatBytes(render.output_file_size)}</p>
+            <div className="min-w-0">
+              <dt className="text-xs text-muted-foreground">Output size</dt>
+              <dd className="mt-1 font-medium">{formatBytes(render.output_file_size)}</dd>
             </div>
-            <div className="rounded-md border bg-muted/20 p-2">
-              <p className="text-xs text-muted-foreground">Updated</p>
-              <p className="font-medium">{render.updated_at ? formatDistanceToNow(new Date(render.updated_at), { addSuffix: true }) : '-'}</p>
+            <div className="min-w-0">
+              <dt className="text-xs text-muted-foreground">Updated</dt>
+              <dd className="mt-1 font-medium">{render.updated_at ? formatDistanceToNow(new Date(render.updated_at), { addSuffix: true }) : '-'}</dd>
             </div>
-          </div>
+          </dl>
 
-          {timings.length > 0 && (
-            <div className="rounded-md border bg-muted/20 p-3">
+          {topTimings.length > 0 && (
+            <div className="border-b pb-3">
               <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">Slowest stages</p>
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                {timings.map(([key, value]) => (
-                  <div key={key} className="rounded bg-background/60 p-2">
+              <div className="grid gap-x-4 gap-y-2 sm:grid-cols-3">
+                {topTimings.map(([key, value]) => (
+                  <div key={key} className="min-w-0">
                     <p className="truncate text-xs text-muted-foreground" title={key}>{key.replace(/_ms$/, '').replace(/_/g, ' ')}</p>
                     <p className="font-medium">{formatMs(value)}</p>
                   </div>
                 ))}
               </div>
+              {remainingTimings.length > 0 && (
+                <details className="mt-3 text-sm">
+                  <summary className="cursor-pointer text-muted-foreground hover:text-foreground">Show {remainingTimings.length} more stages</summary>
+                  <div className="mt-2 grid gap-x-4 gap-y-2 sm:grid-cols-3">
+                    {remainingTimings.map(([key, value]) => (
+                      <div key={key} className="min-w-0">
+                        <p className="truncate text-xs text-muted-foreground" title={key}>{key.replace(/_ms$/, '').replace(/_/g, ' ')}</p>
+                        <p className="font-medium">{formatMs(value)}</p>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
             </div>
           )}
 
-          <div className="grid gap-3">
+          {finalSubtitle && (
             <div className="rounded-md border bg-muted/20 p-3">
               <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">Final subtitle</p>
               <pre {...contentLanguageAttributes(render.target_language)} className="max-h-56 overflow-auto whitespace-pre-wrap text-xs leading-5">
-                {render.translated_srt || render.persian_srt || '[No subtitle text]'}
+                {finalSubtitle}
               </pre>
             </div>
-          </div>
+          )}
 
-          <div className="flex flex-col gap-2 rounded-md border bg-muted/20 p-3">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-              <div className="grid gap-1 sm:w-48">
-                <Label>Feedback</Label>
+          <div className="space-y-3 rounded-md border bg-muted/20 p-3">
+            <div className="grid gap-3">
+              <div className="grid max-w-xs gap-1">
+                <Label htmlFor="video-render-feedback-label">Feedback</Label>
                 <Select
-                  value={feedbackLabel}
+                  value={feedbackLabel || undefined}
                   disabled={readOnly}
-                  onValueChange={(label) => setFeedbackDraft((draft) =>
-                    updateVideoRenderFeedbackDraft(draft, feedbackTargetKey, { label }),
-                  )}
+                  onValueChange={(label) => {
+                    setFeedbackTouched(true);
+                    setFeedbackDraft((draft) => updateVideoRenderFeedbackDraft(draft, feedbackTargetKey, { label }));
+                  }}
                 >
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger id="video-render-feedback-label"><SelectValue placeholder="Choose a label" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="pass">Pass</SelectItem>
                     <SelectItem value="needs_review">Needs review</SelectItem>
@@ -264,19 +314,21 @@ export function VideoRenderDetailPanel({
                   </SelectContent>
                 </Select>
               </div>
-              <div className="grid min-w-0 flex-1 gap-1">
-                <Label>Note</Label>
+              <div className="grid min-w-0 gap-1">
+                <Label htmlFor="video-render-feedback-note">Note</Label>
                 <Textarea
                   value={feedbackNote}
                   disabled={readOnly}
                   onChange={(event) => setFeedbackDraft((draft) =>
                     updateVideoRenderFeedbackDraft(draft, feedbackTargetKey, { note: event.target.value }),
                   )}
+                  id="video-render-feedback-note"
                   placeholder="What should be improved?"
-                  className="min-h-10"
+                  className="min-h-24 w-full resize-y"
                 />
               </div>
-              <div className="flex flex-wrap gap-2">
+            </div>
+            <div className="flex justify-end border-t pt-3">
                 <Button
                   size="sm"
                   onClick={() => { if (!readOnly) saveFeedback.mutate({
@@ -286,35 +338,12 @@ export function VideoRenderDetailPanel({
                     label: feedbackLabel,
                     note: feedbackNote,
                   }); }}
-                  disabled={readOnly || !feedbackDraftCurrent || feedbackPending}
+                  disabled={readOnly || !feedbackDraftCurrent || !feedbackLabel || feedbackPending}
                   title={disabledMutationTitle}
                 >
                   {feedbackPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
                   Save
                 </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => { if (!readOnly) retry.mutate({ render_id: render.id }); }}
-                  disabled={readOnly || renderRetryPending}
-                  title={disabledMutationTitle}
-                >
-                  {renderRetryPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
-                  Retry
-                </Button>
-                {(render.status === 'failed' || render.status === 'blocked') && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => { if (!readOnly) setReviewed.mutate({ render_id: render.id, reviewed: !render.reviewed_at }); }}
-                    disabled={readOnly || setReviewed.isPending}
-                    title={disabledMutationTitle}
-                  >
-                    {setReviewed.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : render.reviewed_at ? <Undo2 className="mr-2 h-4 w-4" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
-                    {render.reviewed_at ? 'Restore' : 'Mark reviewed'}
-                  </Button>
-                )}
-              </div>
             </div>
             {detail.data?.feedback?.length ? (
               <div className="space-y-1">

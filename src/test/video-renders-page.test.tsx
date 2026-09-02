@@ -195,4 +195,31 @@ describe('video renders review workflow', () => {
       { isVisible: true },
     );
   });
+
+  it('renders compact selectable queue items without row lifecycle actions', () => {
+    const nativeMatchMedia = window.matchMedia;
+    const matchMediaSpy = vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({
+      ...nativeMatchMedia(query),
+      matches: query === '(min-width: 1024px)',
+    }));
+    renderPage();
+
+    expect(screen.queryByRole('columnheader')).not.toBeInTheDocument();
+    const rowButtons = screen.getAllByRole('button', { name: /render_failed/ });
+    const firstId = '00bf8307-38db-41f9-8594-06435247b1c1';
+    const secondId = '3b268a62-a906-4d84-9354-fb158f388667';
+    const buttonsFor = (id: string) => screen.getAllByRole('button', { name: /render_failed/ })
+      .filter((button) => button.getAttribute('data-render-id') === id);
+    expect(buttonsFor(firstId).every((button) => button.getAttribute('aria-current') === 'true')).toBe(true);
+    expect(screen.queryByRole('button', { name: /^Retry/ })).not.toBeInTheDocument();
+
+    fireEvent.click(buttonsFor(secondId)[0]);
+    expect(buttonsFor(secondId).every((button) => button.getAttribute('aria-current') === 'true')).toBe(true);
+
+    fireEvent.keyDown(buttonsFor(firstId)[0], { key: 'ArrowDown' });
+    expect(buttonsFor(secondId).every((button) => button.getAttribute('aria-current') === 'true')).toBe(true);
+    fireEvent.keyDown(buttonsFor(secondId)[0], { key: 'Home' });
+    expect(buttonsFor(firstId).every((button) => button.getAttribute('aria-current') === 'true')).toBe(true);
+    matchMediaSpy.mockRestore();
+  });
 });

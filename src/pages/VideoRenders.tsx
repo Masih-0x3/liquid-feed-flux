@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { formatDistanceToNow } from 'date-fns';
-import { AlertTriangle, CheckCheck, CheckCircle2, Clock, Film, HardDrive, Loader2, RefreshCw, Settings, TimerReset, Undo2, Wand2, Wifi, WifiOff } from 'lucide-react';
+import { AlertTriangle, CheckCheck, CheckCircle2, Clock, Film, HardDrive, Loader2, RefreshCw, Settings, TimerReset, Wand2, Wifi, WifiOff } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import {
   AlertDialog,
@@ -15,17 +15,16 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import { ManualVideoIntakePanel } from '@/components/video/ManualVideoIntakePanel';
 import { VideoRenderDetailPanel } from '@/components/video/VideoRenderDetailPanel';
 import { useDocumentVisibility } from '@/hooks/useDocumentVisibility';
 import { useAuth } from '@/contexts/AuthContext';
 import {
-  useRetryVideoRender,
   useSetVideoRenderReviewed,
   useVideoRenderOverview,
   useVideoRenderQueue,
@@ -72,13 +71,6 @@ function rendererHealthLabel(state?: string | null): string {
   return 'Unknown';
 }
 
-function rendererHealthClass(state?: string | null): string {
-  if (state === 'healthy') return 'mt-2 text-2xl font-semibold text-emerald-500';
-  if (state === 'unavailable') return 'mt-2 text-2xl font-semibold text-red-500';
-  if (state === 'blocked' || state === 'stale') return 'mt-2 text-2xl font-semibold text-amber-500';
-  return 'mt-2 text-2xl font-semibold text-muted-foreground';
-}
-
 const STATUS_OPTIONS: Array<{ value: string; label: string; statuses?: VideoRenderStatus[] }> = [
   { value: 'active', label: 'Active + issues', statuses: ['queued', 'running', 'failed', 'blocked'] },
   { value: 'queued', label: 'Queued', statuses: ['queued'] },
@@ -88,6 +80,31 @@ const STATUS_OPTIONS: Array<{ value: string; label: string; statuses?: VideoRend
   { value: 'blocked', label: 'Blocked', statuses: ['blocked'] },
   { value: 'all', label: 'All', statuses: ['queued', 'running', 'completed', 'failed', 'blocked', 'expired'] },
 ];
+
+const LARGE_SCREEN_QUERY = '(min-width: 1024px)';
+
+function useIsLargeScreen(): boolean {
+  const [isLargeScreen, setIsLargeScreen] = useState(() => (
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia(LARGE_SCREEN_QUERY).matches
+      : false
+  ));
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined;
+    const media = window.matchMedia(LARGE_SCREEN_QUERY);
+    const update = () => setIsLargeScreen(media.matches);
+    update();
+    media.addEventListener?.('change', update);
+    media.addListener?.(update);
+    return () => {
+      media.removeEventListener?.('change', update);
+      media.removeListener?.(update);
+    };
+  }, []);
+
+  return isLargeScreen;
+}
 
 export default function VideoRenders() {
   const { isAdmin, role } = useAuth();
@@ -99,9 +116,11 @@ export default function VideoRenders() {
   const isVisible = useDocumentVisibility();
   const overview = useVideoRenderOverview({ isVisible });
   const queue = useVideoRenderQueue(statuses, showReviewed ? 'all' : 'unreviewed', { isVisible });
-  const retry = useRetryVideoRender();
   const setReviewed = useSetVideoRenderReviewed();
   const [selectedRenderId, setSelectedRenderId] = useState<string | null>(null);
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
+  const queueItemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const isLargeScreen = useIsLargeScreen();
 
   const rows = useMemo(() => queue.data?.rows ?? [], [queue.data?.rows]);
   const unreviewedIssueRows = useMemo(
@@ -114,6 +133,154 @@ export default function VideoRenders() {
   );
   const rendererHealth = overview.data?.renderer_health ?? null;
   const rendererState = rendererHealth?.state ?? 'unknown';
+
+  const selectRender = (renderId: string) => {
+    setSelectedRenderId(renderId);
+    setMobileDetailOpen(true);
+  };
+
+  const queueList = rows.length === 0 ? (
+    <div className="p-8 text-center text-sm text-muted-foreground">No video renders match this filter.</div>
+  ) : (
+    <ul role="list" aria-label="Video render queue" className="divide-y divide-border">
+      {rows.map((row: VideoRenderQueueRow, index) => {
+        const isSelected = selected?.id === row.id;
+        const author = row.post?.author_handle ? `@${row.post.author_handle}` : row.tweet_id;
+        const title = row.post?.text_original || row.error || row.block_reason || row.id;
+        const language = row.source_language && row.target_language
+          ? `${row.source_language} to ${row.target_language}`
+          : null;
+        const metadata = [language, formatBytes(row.output_file_size) !== '-' ? formatBytes(row.output_file_size) : null]
+          .filter(Boolean)
+          .join(' · ');
+
+        return (
+          <li key={row.id}>
+            <button
+              type="button"
+              aria-current={isSelected ? 'true' : undefined}
+              data-render-id={row.id}
+              ref={(element) => { queueItemRefs.current[row.id] = element; }}
+              onClick={() => selectRender(row.id)}
+              onKeyDown={(event) => {
+                const isArrow = event.key === 'ArrowDown' || event.key === 'ArrowUp';
+                const isBoundary = event.key === 'Home' || event.key === 'End';
+                if (!isArrow && !isBoundary) return;
+                event.preventDefault();
+                const nextIndex = event.key === 'ArrowUp'
+                  ? Math.max(0, index - 1)
+                  : event.key === 'ArrowDown'
+                    ? Math.min(rows.length - 1, index + 1)
+                    : event.key === 'Home'
+                      ? 0
+                      : rows.length - 1;
+                const nextRow = rows[nextIndex];
+                if (!nextRow || nextRow.id === row.id) return;
+                selectRender(nextRow.id);
+                queueItemRefs.current[nextRow.id]?.focus();
+              }}
+              className={`group flex w-full min-w-0 items-start gap-3 border-l-2 px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary ${isSelected ? 'border-l-primary bg-primary/10' : 'border-l-transparent hover:bg-muted/40'}`}
+            >
+              <span className="mt-0.5 shrink-0">
+                <Badge className={statusClass(row.status)}>{row.status}</Badge>
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="truncate font-medium group-hover:text-primary">{author}</span>
+                  {row.reviewed_at && <span className="shrink-0 text-[11px] text-emerald-500">Reviewed</span>}
+                </span>
+                <span className="mt-1 block line-clamp-2 text-xs text-muted-foreground">{title}</span>
+                <span className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+                  <span>{row.activity_at ? formatDistanceToNow(new Date(row.activity_at), { addSuffix: true }) : 'Age unknown'}</span>
+                  {metadata && <span>{metadata}</span>}
+                  {row.latest_feedback?.label && <span>{row.latest_feedback.label.replace(/_/g, ' ')}</span>}
+                </span>
+              </span>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+
+  const queueHeader = (
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <CardTitle>Render Queue</CardTitle>
+        <CardDescription>Production rows from Supabase, not local golden outputs</CardDescription>
+      </div>
+      <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+        <label htmlFor="show-reviewed-renders" className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm text-muted-foreground">
+          <Switch id="show-reviewed-renders" checked={showReviewed} onCheckedChange={setShowReviewed} />
+          Show reviewed
+        </label>
+        {unreviewedIssueRows.length > 0 && (
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button size="sm" variant="outline" title={mutationDisabledTitle} disabled={readOnly || setReviewed.isPending}>
+                {setReviewed.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCheck className="mr-2 h-4 w-4" />}
+                Mark {unreviewedIssueRows.length} reviewed
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Clear these issues from the actionable queue?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This marks {unreviewedIssueRows.length} visible failed or blocked render{unreviewedIssueRows.length === 1 ? '' : 's'} as reviewed. Their real status and diagnostics stay intact. Use “Show reviewed” to restore any of them later.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction disabled={!isAdmin} onClick={() => { if (isAdmin) setReviewed.mutate({ render_ids: unreviewedIssueRows.map((row) => row.id), reviewed: true }); }}>
+                  Mark reviewed
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        )}
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="w-full sm:w-52"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {STATUS_OPTIONS.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  );
+
+  const queueContent = queue.isLoading ? (
+    <div className="flex min-h-60 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
+  ) : queueList;
+
+  const queueSummary = (
+    <Card className="glass-card">
+      <CardContent className="grid gap-2 p-4 text-sm sm:grid-cols-3">
+        <div className="flex items-center gap-2">
+          <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+          <span>{compactNumber(overview.data?.counts?.completed ?? 0)} completed</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <HardDrive className="h-4 w-4 text-primary" />
+          <span>{formatBytes(overview.data?.output_bytes_7d)} in 7d</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <Clock className="h-4 w-4 text-blue-500" />
+          <span>{overview.data?.oldest_queued_at ? `Oldest ${formatDistanceToNow(new Date(overview.data.oldest_queued_at), { addSuffix: true })}` : 'No backlog'}</span>
+        </div>
+      </CardContent>
+    </Card>
+  );
+
+  const detailContent = (
+    <VideoRenderDetailPanel
+      renderId={selected?.id ?? null}
+      status={selected?.status ?? null}
+      enabled={Boolean(selected)}
+      isVisible={isVisible}
+      readOnly={readOnly}
+      mutationDisabledTitle={mutationDisabledTitle}
+    />
+  );
 
   return (
     <div className="w-full space-y-4 animate-fade-in-up">
@@ -145,63 +312,52 @@ export default function VideoRenders() {
         </div>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        <Card className="glass-card">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-sm text-muted-foreground">Mode</p>
-              <Wand2 className="h-4 w-4 text-primary" />
-            </div>
-            <p className="mt-2 text-2xl font-semibold">{overview.data?.config?.mode ?? '-'}</p>
-          </CardContent>
-        </Card>
-        <Card className="glass-card">
-          <CardContent className="p-4" aria-live="polite">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-sm text-muted-foreground">Renderer</p>
-              {rendererState === 'healthy'
-                ? <Wifi className="h-4 w-4 text-emerald-500" />
-                : rendererState === 'unavailable'
-                  ? <WifiOff className="h-4 w-4 text-red-500" />
-                  : <AlertTriangle className="h-4 w-4 text-amber-500" />}
-            </div>
-            <p className={rendererHealthClass(rendererState)}>{rendererHealthLabel(rendererState)}</p>
-            {typeof rendererHealth?.age_ms === 'number' && (
-              <p className="mt-1 text-xs text-muted-foreground">Heartbeat age at server check: {formatServerAge(rendererHealth.age_ms)}</p>
-            )}
-            {rendererHealth?.reported_status && (
-              <p className="mt-1 text-xs text-muted-foreground">Reported {rendererHealth.reported_status}</p>
-            )}
-          </CardContent>
-        </Card>
-        <Card className="glass-card">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-sm text-muted-foreground">Queued</p>
-              <Clock className="h-4 w-4 text-blue-500" />
-            </div>
-            <p className="mt-2 text-2xl font-semibold">{compactNumber(overview.data?.counts?.queued ?? 0)}</p>
-          </CardContent>
-        </Card>
-        <Card className="glass-card">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-sm text-muted-foreground">Issues</p>
-              <AlertTriangle className="h-4 w-4 text-red-500" />
-            </div>
-            <p className="mt-2 text-2xl font-semibold">{compactNumber(overview.data?.unreviewed_issues ?? ((overview.data?.counts?.failed ?? 0) + (overview.data?.counts?.blocked ?? 0)))}</p>
-            <p className="mt-1 text-xs text-muted-foreground">{compactNumber(overview.data?.reviewed_issues ?? 0)} reviewed</p>
-          </CardContent>
-        </Card>
-        <Card className="glass-card">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-sm text-muted-foreground">Median total</p>
-              <TimerReset className="h-4 w-4 text-primary" />
-            </div>
-            <p className="mt-2 text-2xl font-semibold">{formatMs(overview.data?.medians?.total_ms)}</p>
-          </CardContent>
-        </Card>
+      <div role="region" aria-label="Render overview" className="grid min-w-0 overflow-hidden rounded-lg border bg-card/40 sm:grid-cols-2 xl:grid-cols-5">
+        <div className="min-w-0 border-b p-3 sm:border-r xl:border-b-0">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Wand2 className="h-3.5 w-3.5 text-primary" />
+            <span>Mode</span>
+          </div>
+          <p className="mt-1 truncate text-sm font-semibold">{overview.data?.config?.mode ?? '-'}</p>
+        </div>
+        <div className="min-w-0 border-b p-3 xl:border-b-0 xl:border-r" aria-live="polite">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            {rendererState === 'healthy'
+              ? <Wifi className="h-3.5 w-3.5 text-emerald-500" />
+              : rendererState === 'unavailable'
+                ? <WifiOff className="h-3.5 w-3.5 text-red-500" />
+                : <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />}
+            <span>Renderer</span>
+          </div>
+          <p className={`mt-1 truncate text-sm font-semibold ${rendererState === 'healthy' ? 'text-emerald-500' : rendererState === 'unavailable' ? 'text-red-500' : rendererState === 'blocked' || rendererState === 'stale' ? 'text-amber-500' : 'text-muted-foreground'}`}>{rendererHealthLabel(rendererState)}</p>
+          {(typeof rendererHealth?.age_ms === 'number' || rendererHealth?.reported_status) && (
+            <p className="mt-1 truncate text-[11px] text-muted-foreground">
+              {typeof rendererHealth?.age_ms === 'number' ? `Heartbeat ${formatServerAge(rendererHealth.age_ms)}` : `Reported ${rendererHealth.reported_status}`}
+            </p>
+          )}
+        </div>
+        <div className="min-w-0 border-b p-3 sm:border-r xl:border-b-0">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Clock className="h-3.5 w-3.5 text-blue-500" />
+            <span>Queued</span>
+          </div>
+          <p className="mt-1 text-sm font-semibold">{compactNumber(overview.data?.counts?.queued ?? 0)}</p>
+        </div>
+        <div className="min-w-0 border-b p-3 xl:border-b-0 xl:border-r">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <AlertTriangle className="h-3.5 w-3.5 text-red-500" />
+            <span>Issues</span>
+          </div>
+          <p className="mt-1 text-sm font-semibold">{compactNumber(overview.data?.unreviewed_issues ?? ((overview.data?.counts?.failed ?? 0) + (overview.data?.counts?.blocked ?? 0)))}</p>
+          <p className="mt-1 truncate text-[11px] text-muted-foreground">{compactNumber(overview.data?.reviewed_issues ?? 0)} reviewed</p>
+        </div>
+        <div className="min-w-0 p-3">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <TimerReset className="h-3.5 w-3.5 text-primary" />
+            <span>Median total</span>
+          </div>
+          <p className="mt-1 text-sm font-semibold">{formatMs(overview.data?.medians?.total_ms)}</p>
+        </div>
       </div>
 
       <Tabs defaultValue="queue" className="space-y-4">
@@ -211,145 +367,41 @@ export default function VideoRenders() {
         </TabsList>
 
         <TabsContent value="queue" className="mt-0">
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(440px,0.95fr)]">
-            <Card className="glass-card">
-              <CardHeader className="pb-3">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <CardTitle>Render Queue</CardTitle>
-                    <CardDescription>Production rows from Supabase, not local golden outputs</CardDescription>
+          <div className="mb-3 rounded-lg border bg-card/40 p-3">{queueHeader}</div>
+          {isLargeScreen ? (
+            <div className="h-[72vh] min-h-[28rem] max-h-[54rem]">
+              <ResizablePanelGroup direction="horizontal" className="h-full min-h-0 rounded-lg border">
+                <ResizablePanel defaultSize={40} minSize={30} maxSize={50} className="min-h-0 min-w-0 overflow-hidden">
+                  <Card className="glass-card h-full rounded-r-none border-0 shadow-none">
+                    <CardContent className="h-full overflow-y-auto p-0">{queueContent}</CardContent>
+                  </Card>
+                </ResizablePanel>
+                <ResizableHandle withHandle aria-label="Resize render queue and inspector" />
+                <ResizablePanel defaultSize={60} minSize={50} className="min-h-0 min-w-0 overflow-hidden">
+                  <div className="h-full min-h-0 space-y-3 overflow-y-auto p-3">
+                    {queueSummary}
+                    {detailContent}
                   </div>
-                  <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
-                    <label htmlFor="show-reviewed-renders" className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm text-muted-foreground">
-                      <Switch id="show-reviewed-renders" checked={showReviewed} onCheckedChange={setShowReviewed} />
-                      Show reviewed
-                    </label>
-                    {unreviewedIssueRows.length > 0 && (
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button size="sm" variant="outline" title={mutationDisabledTitle} disabled={readOnly || setReviewed.isPending}>
-                            {setReviewed.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCheck className="mr-2 h-4 w-4" />}
-                            Mark {unreviewedIssueRows.length} reviewed
-                          </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>Clear these issues from the actionable queue?</AlertDialogTitle>
-                            <AlertDialogDescription>
-                              This marks {unreviewedIssueRows.length} visible failed or blocked render{unreviewedIssueRows.length === 1 ? '' : 's'} as reviewed. Their real status and diagnostics stay intact. Use “Show reviewed” to restore any of them later.
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>Cancel</AlertDialogCancel>
-                            <AlertDialogAction disabled={!isAdmin} onClick={() => { if (isAdmin) setReviewed.mutate({ render_ids: unreviewedIssueRows.map((row) => row.id), reviewed: true }); }}>
-                              Mark reviewed
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
-                    )}
-                    <Select value={statusFilter} onValueChange={setStatusFilter}>
-                      <SelectTrigger className="w-full sm:w-52"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {STATUS_OPTIONS.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="p-0">
-                {queue.isLoading ? (
-                  <div className="flex min-h-60 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
-                ) : rows.length === 0 ? (
-                  <div className="p-8 text-center text-sm text-muted-foreground">No video renders match this filter.</div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Status</TableHead>
-                          <TableHead>Post</TableHead>
-                          <TableHead>Lang</TableHead>
-                          <TableHead>Time</TableHead>
-                          <TableHead>Size</TableHead>
-                          <TableHead className="text-right">Action</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {rows.map((row: VideoRenderQueueRow) => (
-                          <TableRow key={row.id} className={selected?.id === row.id ? 'bg-primary/5' : undefined}>
-                            <TableCell>
-                              <div className="space-y-1">
-                                <Badge className={statusClass(row.status)}>{row.status}</Badge>
-                                {row.reviewed_at && <Badge variant="outline" className="block w-fit border-emerald-500/30 text-[10px] text-emerald-500">Reviewed</Badge>}
-                                {row.latest_feedback?.label && <Badge variant="outline" className="block w-fit text-[10px]">{row.latest_feedback.label.replace(/_/g, ' ')}</Badge>}
-                              </div>
-                            </TableCell>
-                            <TableCell className="max-w-[280px]">
-                              <button type="button" onClick={() => setSelectedRenderId(row.id)} className="block w-full text-left hover:text-primary">
-                                <p className="truncate font-medium">{row.post?.author_handle ? `@${row.post.author_handle}` : row.tweet_id}</p>
-                                <p className="line-clamp-2 text-xs text-muted-foreground">{row.post?.text_original || row.error || row.block_reason || row.id}</p>
-                              </button>
-                            </TableCell>
-                            <TableCell className="text-sm">{row.source_language || '-'} → {row.target_language || '-'}</TableCell>
-                            <TableCell className="text-sm">{row.activity_at ? formatDistanceToNow(new Date(row.activity_at), { addSuffix: true }) : '-'}</TableCell>
-                            <TableCell className="text-sm">{formatBytes(row.output_file_size)}</TableCell>
-                            <TableCell className="text-right">
-                              <div className="flex justify-end gap-2">
-                                <Button size="sm" variant="outline" onClick={() => setSelectedRenderId(row.id)}>Review</Button>
-                                {(row.status === 'failed' || row.status === 'blocked') && (
-                                  <Button
-                                    size="sm"
-                                    variant={row.reviewed_at ? 'ghost' : 'outline'}
-                                    title={mutationDisabledTitle}
-                                    onClick={() => { if (isAdmin) setReviewed.mutate({ render_id: row.id, reviewed: !row.reviewed_at }); }}
-                                    disabled={readOnly || setReviewed.isPending}
-                                  >
-                                    {setReviewed.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : row.reviewed_at ? <Undo2 className="mr-2 h-4 w-4" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
-                                    {row.reviewed_at ? 'Restore' : 'Mark reviewed'}
-                                  </Button>
-                                )}
-                                <Button size="sm" variant="ghost" title={mutationDisabledTitle} onClick={() => { if (isAdmin) retry.mutate({ render_id: row.id }); }} disabled={readOnly || retry.isPendingFor({ render_id: row.id })}>
-                                  {retry.isPendingFor({ render_id: row.id }) ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            <div className="space-y-3">
-              <Card className="glass-card">
-                <CardContent className="grid gap-2 p-4 text-sm sm:grid-cols-3">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                    <span>{compactNumber(overview.data?.counts?.completed ?? 0)} completed</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <HardDrive className="h-4 w-4 text-primary" />
-                    <span>{formatBytes(overview.data?.output_bytes_7d)} in 7d</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Clock className="h-4 w-4 text-blue-500" />
-                    <span>{overview.data?.oldest_queued_at ? `Oldest ${formatDistanceToNow(new Date(overview.data.oldest_queued_at), { addSuffix: true })}` : 'No backlog'}</span>
-                  </div>
-                </CardContent>
-              </Card>
-              <VideoRenderDetailPanel
-                renderId={selected?.id ?? null}
-                status={selected?.status ?? null}
-                enabled={Boolean(selected)}
-                isVisible={isVisible}
-                readOnly={readOnly}
-                mutationDisabledTitle={mutationDisabledTitle}
-              />
+                </ResizablePanel>
+              </ResizablePanelGroup>
             </div>
-          </div>
+          ) : (
+            <div>
+              {mobileDetailOpen && selected ? (
+                <div className="space-y-3">
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setMobileDetailOpen(false)}>
+                    Back to queue
+                  </Button>
+                  {queueSummary}
+                  {detailContent}
+                </div>
+              ) : (
+                <Card className="glass-card">
+                  <CardContent className="p-0">{queueContent}</CardContent>
+                </Card>
+              )}
+            </div>
+          )}
         </TabsContent>
 
         <TabsContent value="manual" className="mt-0">
