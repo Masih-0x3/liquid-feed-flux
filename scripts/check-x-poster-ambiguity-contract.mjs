@@ -144,6 +144,15 @@ function assertContract({ source, packageJson, ci }, label = "current source") {
   const mainEnd = source.indexOf("\n\nasync function insertXPipelineEvent(", mainStart);
   if (mainStart < 0 || mainEnd < 0) fail(`${label}: x-poster main handler markers are missing`);
   const main = source.slice(mainStart, mainEnd);
+  const terminalProviderFailures = source.match(
+    /skipReason: 'x_api_not_sent',\s+nextRetryAt: null,/g,
+  ) ?? [];
+  if (terminalProviderFailures.length !== 2) {
+    fail(`${label}: both tweet POST failure paths must persist a terminal failure without a scheduled retry`);
+  }
+  if (source.includes("'x_api_retriable'") || source.includes("Date.now() + 15 * 60 * 1000")) {
+    fail(`${label}: tweet POST failures must not retain automatic retry metadata`);
+  }
   if (!main.includes("const fatalCode = safeXPosterErrorCode(error, 'x_poster_fatal');") ||
       !main.includes("captureEdgeException(new Error(fatalCode),")) {
     fail(`${label}: x-poster fatal telemetry must use a stable code`);
@@ -327,6 +336,13 @@ if (process.env.MUTATION_TEST === "1") {
     ...source,
     source: source.source.replace("blocks_auto_delivery: !deliveryWriteConfirmed,", "blocks_auto_delivery: false,"),
   }), "manual redelivery guard removal");
+  assertRejects((source) => ({
+    ...source,
+    source: source.source.replace(
+      "skipReason: 'x_api_not_sent',",
+      "skipReason: 'x_api_retriable',",
+    ),
+  }), "tweet POST retry scheduling restoration");
   assertRejects((source) => ({
     ...source,
     source: source.source.replace("if (updateError) {", "if (false) {"),
