@@ -10,6 +10,8 @@ export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const CONTRACT_PATH = "docs/operations/runtime-contract.json";
 export const PINNED_SUPABASE_CLI_VERSION = "2.111.0";
 export const PINNED_DENO_BOOTSTRAP_RUN = "npm rebuild --ignore-scripts=false deno";
+export const PINNED_CHECKOUT_ACTION = "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683";
+export const PINNED_SETUP_NODE_ACTION = "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020";
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 
@@ -25,8 +27,6 @@ const REQUIRED_CI_SUPPLY_PREFLIGHT_RUNS = [
   "npm ci --ignore-scripts",
   "node scripts/check-supply-chain-contract.mjs",
   "npm --prefix services/video-renderer ci --ignore-scripts",
-  "npm audit --omit=dev --audit-level=high",
-  "npm --prefix services/video-renderer audit --omit=dev --audit-level=high",
 ];
 
 const REQUIRED_CI_GUARD_PREFIX = [
@@ -249,7 +249,7 @@ function workflowRuntimeFacts(value, jobName, setupNodeAction) {
     blocking: !jobHasBypass && steps.every((step) => !step.hasBypass),
     setupBeforeRuns: setupIndex >= 0 && setupIndex < firstRequiredRunIndex,
     requiredPrefixMatches:
-      steps[0]?.uses === "actions/checkout@v4"
+      steps[0]?.uses === PINNED_CHECKOUT_ACTION
       && steps[0]?.meaningful.length === 3
       && steps[0]?.meaningful[1]?.trim() === "with:"
       && steps[0]?.meaningful[2]?.trim() === "ref: ${{ github.event.pull_request.head.sha || github.sha }}"
@@ -257,7 +257,11 @@ function workflowRuntimeFacts(value, jobName, setupNodeAction) {
       && steps[1]?.meaningful.length === 4
       && steps[1]?.meaningful[1]?.trim() === "with:"
       && steps[1]?.cache === "npm"
-      && steps.slice(2, 12).map((step) => step.run).every((run, index) => run === REQUIRED_CI_PREFIX_STEPS[index]),
+      && steps.slice(2, 6).map((step) => step.run).every((run, index) => run === REQUIRED_CI_SUPPLY_PREFLIGHT_RUNS[index])
+      && steps[6]?.run === 'node scripts/collect-supply-chain-evidence.mjs --collect-only --output-dir "$RUNNER_TEMP/xot-supply-chain"'
+      && steps[7]?.uses === "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"
+      && steps[8]?.run === 'node scripts/collect-supply-chain-evidence.mjs --validate-only --output-dir "$RUNNER_TEMP/xot-supply-chain"'
+      && steps.slice(9, 13).map((step) => step.run).every((run, index) => run === REQUIRED_CI_PREFIX_STEPS[index + 4]),
     unsafeRequiredRun: steps.some((step) => [...REQUIRED_CI_GUARD_PREFIX, REQUIRED_CI_BUILD_IDENTITY_TEST_RUN].includes(step.run) && !step.isBareRun),
     workflowHasOverrides,
     workflowHasQuotedKeys,
@@ -352,7 +356,7 @@ export function validateRuntimeContract({
   if (workflowFacts.workflowHasYamlIndirection) errors.push("YAML anchors, aliases, and merge keys are prohibited in the runtime workflow");
   requireEqual(errors, "CI runtime job runner", workflowFacts.runsOn, contract.node.ci_runs_on);
   if (!workflowFacts.blocking) errors.push("CI runtime job or one of its steps can be skipped or ignored");
-  if (!workflowFacts.requiredPrefixMatches) errors.push("CI must begin with checkout, setup-node, both direct supply preflight/install/audit phases, then direct runtime and supply test commands in that exact order");
+  if (!workflowFacts.requiredPrefixMatches) errors.push("CI must begin with checkout, setup-node, lifecycle-suppressed installs, hosted supply evidence collection/validation, then direct runtime and supply test commands in that exact order");
   if (workflowFacts.unsafeRequiredRun) errors.push("CI required runtime run steps must be bare commands without shell, directory, env, or other overrides");
   if (!workflowFacts.setupNodeActionFound) errors.push("CI setup-node action is missing or changed");
   if (!workflowFacts.setupBeforeRuns) errors.push("CI setup-node must execute before runtime run steps");

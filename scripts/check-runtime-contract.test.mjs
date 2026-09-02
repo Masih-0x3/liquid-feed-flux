@@ -296,8 +296,8 @@ test("required runtime steps cannot override shell or working directory", () => 
 test("no step can be inserted before the runtime gate prefix", () => withFixture((root) => {
   const path = join(root, ".github/workflows/ci.yml");
   const value = readFileSync(path, "utf8").replace(
-    "      - uses: actions/checkout@v4",
-    "      - run: echo fake-npm >> $GITHUB_PATH\n      - uses: actions/checkout@v4",
+    "      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+    "      - run: echo fake-npm >> $GITHUB_PATH\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
   );
   writeFileSync(path, value);
   assert.ok(validateRuntimeContract({ root, actualNodeVersion: "20.19.0" }).errors.some((error) => error.includes("must begin with checkout")));
@@ -307,8 +307,8 @@ test("checkout and setup-node cannot be redirected or extended", () => withFixtu
   const path = join(root, ".github/workflows/ci.yml");
   const original = readFileSync(path, "utf8");
   writeFileSync(path, original.replace(
-    "      - uses: actions/checkout@v4",
-    "      - uses: actions/checkout@v4\n        with:\n          repository: attacker/replacement",
+    "      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+    "      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n        with:\n          repository: attacker/replacement",
   ));
   assert.ok(validateRuntimeContract({ root, actualNodeVersion: "20.19.0" }).errors.some((error) => error.includes("must begin with checkout")));
 

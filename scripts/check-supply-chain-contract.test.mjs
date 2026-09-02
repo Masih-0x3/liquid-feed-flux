@@ -11,6 +11,7 @@ function withFixture(callback) {
   try {
     for (const path of [
       ".github/workflows/ci.yml",
+      "scripts/collect-supply-chain-evidence.mjs",
       "package.json",
       "package-lock.json",
       "deno.lock",
@@ -40,6 +41,8 @@ function withFullInventoryFixture(callback) {
       "docs/plans/2026-08-11-xot-e8d-local-supply-build-inventory.json",
       "scripts/check-supply-chain-contract.mjs",
       "scripts/check-supply-chain-contract.test.mjs",
+      "scripts/collect-supply-chain-evidence.mjs",
+      "scripts/collect-supply-chain-evidence.test.mjs",
       "scripts/build-e8-local-supply-build-inventory.test.mjs",
       "scripts/check-vite-env.mjs",
       "scripts/check-vite-env.test.mjs",
@@ -57,10 +60,30 @@ test("the committed supply-chain source contract is internally consistent", () =
   assert.deepEqual(result.errors, []);
 });
 
-test("the renderer production audit cannot be deleted from the CI gate", () => withFixture((root) => {
+test("the renderer production audit cannot be deleted from the hosted collector", () => withFullInventoryFixture((root) => {
+  const path = join(root, "scripts/collect-supply-chain-evidence.mjs");
+  writeFileSync(path, readFileSync(path, "utf8").replace("[\"renderer\", join(REPO_ROOT, \"services/video-renderer\"), [\"audit\", \"--omit=dev\", \"--json\"]],\n", ""));
+  assert.ok(validateSupplyChainContract({ root }).errors.some((error) => error.includes("renderer npm audit") || error.includes("source-file coverage")));
+}));
+
+test("hosted supply-chain evidence is immutable, present, and before mutable tests", () => withFixture((root) => {
   const path = join(root, ".github/workflows/ci.yml");
-  writeFileSync(path, readFileSync(path, "utf8").replace("      - run: npm --prefix services/video-renderer audit --omit=dev --audit-level=high\n", ""));
-  assert.ok(validateSupplyChainContract({ root }).errors.some((error) => error.includes("renderer audit")));
+  const original = readFileSync(path, "utf8");
+  writeFileSync(path, original.replace("actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02", "actions/upload-artifact@v4"));
+  assert.ok(validateSupplyChainContract({ root }).errors.some((error) => error.includes("immutable SHA")));
+
+  writeFileSync(path, original.replace("--collect-only", "--validate-only"));
+  assert.ok(validateSupplyChainContract({ root }).errors.some((error) => error.includes("hosted supply-chain")));
+}));
+
+test("workflow actions outside the official namespace are rejected", () => withFixture((root) => {
+  const path = join(root, ".github/workflows/ci.yml");
+  const original = readFileSync(path, "utf8");
+  writeFileSync(path, original.replace(
+    "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+    `untrusted/upload-artifact@${"c".repeat(40)}`,
+  ));
+  assert.ok(validateSupplyChainContract({ root }).errors.some((error) => error.includes("official actions/*")));
 }));
 
 test("the root install cannot run lifecycle scripts before the source gate", () => withFixture((root) => {
@@ -88,7 +111,7 @@ test("registry and npm configuration preflight must complete before any root ins
   assert.ok(validateSupplyChainContract({ root }).errors.some((error) => error.includes("reviewed checkout, setup-node")));
 }));
 
-test("the second supply preflight must precede renderer install and audits", () => withFixture((root) => {
+test("the second supply preflight must precede renderer install", () => withFixture((root) => {
   const path = join(root, ".github/workflows/ci.yml");
   const original = readFileSync(path, "utf8");
   writeFileSync(path, original.replace(
@@ -98,14 +121,14 @@ test("the second supply preflight must precede renderer install and audits", () 
   assert.ok(validateSupplyChainContract({ root }).errors.some((error) => error.includes("reviewed checkout, setup-node")));
 }));
 
-test("production audits must finish before mutable Node contract and test commands", () => withFixture((root) => {
+test("hosted evidence must finish before mutable Node contract and test commands", () => withFixture((root) => {
   const path = join(root, ".github/workflows/ci.yml");
   const original = readFileSync(path, "utf8");
   writeFileSync(path, original.replace(
-    "      - run: npm --prefix services/video-renderer audit --omit=dev --audit-level=high\n      - run: node scripts/check-runtime-contract.mjs",
-    "      - run: node scripts/check-runtime-contract.mjs\n      - run: npm --prefix services/video-renderer audit --omit=dev --audit-level=high",
+    "        run: node scripts/collect-supply-chain-evidence.mjs --validate-only --output-dir \"$RUNNER_TEMP/xot-supply-chain\"",
+    "        run: node scripts/check-runtime-contract.mjs",
   ));
-  assert.ok(validateSupplyChainContract({ root }).errors.some((error) => error.includes("reviewed checkout, setup-node")));
+  assert.ok(validateSupplyChainContract({ root }).errors.some((error) => error.includes("reviewed checkout, setup-node") || error.includes("hosted supply-chain")));
 }));
 
 test("focused build identity tests must remain in the reviewed CI prefix", () => withFullInventoryFixture((root) => {
@@ -113,7 +136,7 @@ test("focused build identity tests must remain in the reviewed CI prefix", () =>
   const original = readFileSync(path, "utf8");
   const focused = "      - run: node --test scripts/check-build-output-identity.test.mjs scripts/run-vite-build.test.mjs\n";
   writeFileSync(path, original.replace(focused, ""));
-  assert.ok(validateSupplyChainContract({ root }).errors.some((error) => error.includes("reviewed checkout, setup-node")));
+  assert.ok(validateSupplyChainContract({ root }).errors.some((error) => error.includes("reviewed checkout, setup-node") || error.includes("mutable Node/runtime")));
 }));
 
 test("focused build identity tests must follow runtime contract tests", () => withFullInventoryFixture((root) => {
@@ -124,7 +147,7 @@ test("focused build identity tests must follow runtime contract tests", () => wi
     `${focused}      - run: node --test scripts/check-supply-chain-contract.test.mjs\n`,
     `      - run: node --test scripts/check-supply-chain-contract.test.mjs\n${focused}`,
   ));
-  assert.ok(validateSupplyChainContract({ root }).errors.some((error) => error.includes("reviewed checkout, setup-node")));
+  assert.ok(validateSupplyChainContract({ root }).errors.some((error) => error.includes("reviewed checkout, setup-node") || error.includes("mutable Node/runtime")));
 }));
 
 test("workflow-level defaults cannot redirect every supply-chain command", () => withFixture((root) => {
@@ -142,19 +165,19 @@ test("a trusted pull_request_target trigger cannot replace the reviewed PR trigg
 test("checkout cannot redirect the supply-chain gate to a trusted ref", () => withFixture((root) => {
   const path = join(root, ".github/workflows/ci.yml");
   writeFileSync(path, readFileSync(path, "utf8").replace(
-    "      - uses: actions/checkout@v4",
-    "      - uses: actions/checkout@v4\n        with:\n          ref: main",
+    "      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2",
+    "      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2\n        with:\n          ref: main",
   ));
   assert.ok(validateSupplyChainContract({ root }).errors.some((error) => error.includes("reviewed checkout, setup-node")));
 }));
 
-test("a non-blocking production audit is rejected", () => withFixture((root) => {
+test("a non-blocking hosted evidence collection is rejected", () => withFixture((root) => {
   const path = join(root, ".github/workflows/ci.yml");
   writeFileSync(path, readFileSync(path, "utf8").replace(
-    "      - run: npm audit --omit=dev --audit-level=high",
-    "      - run: npm audit --omit=dev --audit-level=high\n        continue-on-error: true",
+    "        run: node scripts/collect-supply-chain-evidence.mjs --collect-only --output-dir \"$RUNNER_TEMP/xot-supply-chain\"",
+    "        run: node scripts/collect-supply-chain-evidence.mjs --collect-only --output-dir \"$RUNNER_TEMP/xot-supply-chain\"\n        continue-on-error: true",
   ));
-  assert.ok(validateSupplyChainContract({ root }).errors.some((error) => error.includes("must be a bare")));
+  assert.ok(validateSupplyChainContract({ root }).errors.some((error) => error.includes("must remain blocking")));
 }));
 
 test("the containing CI job cannot skip the supply-chain gate", () => withFixture((root) => {
@@ -181,13 +204,13 @@ test("duplicate CI jobs cannot replace the reviewed gate", () => withFixture((ro
   assert.ok(validateSupplyChainContract({ root }).errors.some((error) => error.includes("must appear exactly once")));
 }));
 
-test("quoted step properties cannot make a required audit non-blocking", () => withFixture((root) => {
+test("quoted step properties cannot make hosted evidence non-blocking", () => withFixture((root) => {
   const path = join(root, ".github/workflows/ci.yml");
   writeFileSync(path, readFileSync(path, "utf8").replace(
-    "      - run: npm audit --omit=dev --audit-level=high",
-    "      - run: npm audit --omit=dev --audit-level=high\n        \"continue-on-error\": true",
+    "        run: node scripts/collect-supply-chain-evidence.mjs --validate-only --output-dir \"$RUNNER_TEMP/xot-supply-chain\"",
+    "        run: node scripts/collect-supply-chain-evidence.mjs --validate-only --output-dir \"$RUNNER_TEMP/xot-supply-chain\"\n        \"continue-on-error\": true",
   ));
-  assert.ok(validateSupplyChainContract({ root }).errors.some((error) => error.includes("must be a bare")));
+  assert.ok(validateSupplyChainContract({ root }).errors.some((error) => error.includes("must remain blocking")));
 }));
 
 test("unchecksummed Deno remote imports are rejected", () => withFixture((root) => {
