@@ -676,6 +676,12 @@ function safeManualFailureMeta(meta: unknown): Record<string, unknown> {
     if (value) safe[key] = value;
   }
   if (source.duplicate_gate === true) safe.duplicate_gate = true;
+  if (typeof source.provider_retriable === 'boolean') {
+    safe.provider_retriable = source.provider_retriable;
+  }
+  if (typeof source.retry_scheduled === 'boolean') {
+    safe.retry_scheduled = source.retry_scheduled;
+  }
   if (typeof source.x_api_ms === 'number' && Number.isFinite(source.x_api_ms)) {
     safe.x_api_ms = Math.max(0, Math.min(600_000, Math.floor(source.x_api_ms)));
   }

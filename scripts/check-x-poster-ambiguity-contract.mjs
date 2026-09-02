@@ -96,6 +96,10 @@ function assertContract({ source, packageJson, ci }, label = "current source") {
   if (!manualFailure.includes("...safeManualFailureMeta(input.meta),")) {
     fail(`${label}: manual failure metadata must use the bounded allowlist`);
   }
+  if (!manualFailure.includes("if (typeof source.provider_retriable === 'boolean')") ||
+      !manualFailure.includes("if (typeof source.retry_scheduled === 'boolean')")) {
+    fail(`${label}: manual failure metadata must preserve bounded provider retry diagnostics`);
+  }
   if (manualFailure.includes("input.reason.slice") ||
       manualFailure.includes("reason: input.reason,") ||
       manualFailure.includes("...(input.meta ?? {})")) {
@@ -368,6 +372,13 @@ if (process.env.MUTATION_TEST === "1") {
     ...source,
     source: source.source.replace("...safeManualFailureMeta(input.meta),", "...(input.meta ?? {}),"),
   }), "raw manual failure metadata mutant");
+  assertRejects((source) => ({
+    ...source,
+    source: source.source.replace(
+      "if (typeof source.retry_scheduled === 'boolean')",
+      "if (false)",
+    ),
+  }), "manual retry scheduling diagnostic removal");
   assertRejects((source) => ({
     ...source,
     source: source.source.replace("const status = Number.isInteger(resp.status) && resp.status >= 100 && resp.status <= 599", "const status = resp.status"),

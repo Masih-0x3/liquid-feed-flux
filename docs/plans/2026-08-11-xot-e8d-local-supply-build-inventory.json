@@ -394,7 +394,7 @@
     },
     {
       "path": "supabase/functions/x-poster/index.ts",
-      "sha256": "10ddee439bc448f2011e95e0aaed5cd3c5fbce6a9efb4703f319a702d0221702"
+      "sha256": "1cbb16d7f3d0bd17a2ec3e6f7265e94ee5d99c0ca1a2fa04f2a0b3c268f6b2a5"
     },
     {
       "path": "supabase/functions/x-poster/providerGuard.test.ts",
@@ -9860,7 +9860,7 @@
           "path": "supabase/functions/digest-compiler/index.ts,supabase/functions/x-poster/index.ts",
           "version_or_ref": "https://esm.sh/@supabase/supabase-js@2.49.1",
           "integrity_or_source_hash": "947c71e163ca8bb5b538eccb5ee86fbc8da6bcb916a861586db5fad1af4701bb",
-          "source_file_sha256": "b2ee2cb160fb2f22e65f4dac6fcb931e128646484fbee16c969bd4434073ab8d"
+          "source_file_sha256": "982eb5bb289cffc9d9c3dcd87ab48b3c75339f6db2a725c87fd6b849bf3a1393"
         },
         {
           "name": "jsr:@std/assert",
