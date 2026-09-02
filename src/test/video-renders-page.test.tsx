@@ -236,8 +236,8 @@ describe('video renders review workflow', () => {
     fireEvent.keyDown(buttons[0], { key: 'ArrowDown' });
 
     const nextButton = screen.getAllByRole('button', { name: /render_failed/ })[1];
-    expect(nextButton).toHaveAttribute('aria-current', 'true');
-    expect(screen.getByRole('list', { name: 'Video render queue' })).toBeInTheDocument();
+    expect(nextButton.getAttribute('aria-current')).toBe('true');
+    expect(screen.queryByRole('list', { name: 'Video render queue' })).not.toBeNull();
     expect(screen.queryByRole('button', { name: 'Back to queue' })).toBeNull();
     expect(document.activeElement).toBe(nextButton);
     matchMediaSpy.mockRestore();
