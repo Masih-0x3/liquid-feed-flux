@@ -5,7 +5,8 @@
   "installCommand": "npm ci",
   "git": {
     "deploymentEnabled": {
-      "codex/xot-full-closure-candidate": false
+      "codex/xot-full-closure-candidate": false,
+      "codex/video-render-workspace-redesign": false
     }
   },
   "headers": [

@@ -5,7 +5,11 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-export const SUCCESSOR_BRANCH = "codex/xot-full-closure-candidate";
+export const SUPPRESSED_BRANCHES = Object.freeze([
+  "codex/xot-full-closure-candidate",
+  "codex/video-render-workspace-redesign",
+]);
+export const SUCCESSOR_BRANCH = SUPPRESSED_BRANCHES[0];
 
 export function validateVercelBranchSuppression({ root = REPO_ROOT } = {}) {
   const errors = [];
@@ -23,12 +27,14 @@ export function validateVercelBranchSuppression({ root = REPO_ROOT } = {}) {
     errors.push("Vercel git.deploymentEnabled branch map is required");
     return { errors };
   }
-  if (deploymentEnabled[SUCCESSOR_BRANCH] !== false) {
-    errors.push(`Vercel successor branch ${SUCCESSOR_BRANCH} must be explicitly disabled`);
+  for (const branch of SUPPRESSED_BRANCHES) {
+    if (deploymentEnabled[branch] !== false) {
+      errors.push(`Vercel suppressed branch ${branch} must be explicitly disabled`);
+    }
   }
   for (const [branch, enabled] of Object.entries(deploymentEnabled)) {
-    if (branch !== SUCCESSOR_BRANCH && enabled === true && branch.includes("*")) {
-      errors.push("Vercel suppression map must not enable a wildcard that can override the successor branch");
+    if (!SUPPRESSED_BRANCHES.includes(branch) && enabled === true && branch.includes("*")) {
+      errors.push("Vercel suppression map must not enable a wildcard that can override a suppressed branch");
     }
   }
   return { errors };
@@ -39,5 +45,5 @@ if (result.errors.length > 0) {
   for (const error of result.errors) console.error(`Vercel branch suppression contract: ${error}`);
   process.exitCode = 1;
 } else {
-  console.log(`Vercel branch suppression contract PASS: ${SUCCESSOR_BRANCH}=false`);
+  console.log(`Vercel branch suppression contract PASS: ${SUPPRESSED_BRANCHES.map((branch) => `${branch}=false`).join(", ")}`);
 }
