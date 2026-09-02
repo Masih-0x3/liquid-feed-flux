@@ -260,8 +260,15 @@ export function AppLayout({ children }: AppLayoutProps) {
             <div className="flex min-w-0 items-center gap-2">
               <BrandLogo compact className="h-8 w-8 shrink-0 rounded-lg ring-1 ring-glass-border/70" />
               <div className="min-w-0">
-                <div className="text-sm font-display font-semibold leading-tight text-glass-foreground">
-                  XOT
+                <div className="flex items-center gap-1.5 text-sm font-display font-semibold leading-tight text-glass-foreground">
+                  <span>XOT</span>
+                  <span
+                    aria-label="XOT version 2"
+                    title="XOT version 2"
+                    className="inline-flex items-center rounded border border-primary/35 bg-primary/10 px-1.5 py-0.5 font-mono text-[9px] font-semibold leading-none tracking-[0.08em] text-primary"
+                  >
+                    V2
+                  </span>
                 </div>
                 <div className="truncate text-[11px] uppercase leading-tight tracking-[0.14em] text-muted-foreground">
                   {activeItem.title}
