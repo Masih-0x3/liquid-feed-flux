@@ -228,7 +228,7 @@ function withFixture(callback) {
     }
     return callback(root);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }
 
@@ -393,7 +393,7 @@ function withCurrentTreeFixture(callback) {
     writeFileSync(receiptPath, `${JSON.stringify(buildCurrentReceipt(root), null, 2)}\n`);
     return callback(root);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }
 
