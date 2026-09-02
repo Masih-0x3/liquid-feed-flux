@@ -130,10 +130,12 @@ Historical `video_renders` are different: queued or expired-running renders
 may move through running, completed, failed, or blocked and may update
 attempts, error/output, and lease fields as normal processing. Those transitions
 are allowed and must be recorded separately from the immutable delivery cohort.
-`settle_delivery_cutover_blocked` only settles a still-running historical
-`deliver` job. It writes a `delivery_cutover_blocked`-prefixed error, sets
-`completed_at`, and clears its lock fields. It does not settle or mutate
-`video_renders`.
+Historical `deliver` jobs are immutable under the zero-write invariant: a
+`BEFORE UPDATE OR DELETE` trigger on `public.jobs` blocks any mutation of a
+historical deliver row, and `settle_delivery_cutover_blocked` is now a
+zero-DML no-op that returns `false`. The worker rejects historical lineage
+before any first write and stops without writing. `video_renders` are not
+blocked by that trigger and continue as above.
 
 ## Rollback
 
