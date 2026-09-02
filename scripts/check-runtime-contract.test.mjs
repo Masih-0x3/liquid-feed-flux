@@ -142,26 +142,26 @@ test("comments and echo text cannot impersonate exact CI runtime steps", () => w
     .replace("      - run: node scripts/check-runtime-contract.mjs", "      # run: node scripts/check-runtime-contract.mjs")
     .replace("      - run: node --test scripts/check-runtime-contract.test.mjs", "      - run: echo node --test scripts/check-runtime-contract.test.mjs");
   writeFileSync(path, value);
-  assert.ok(validateRuntimeContract({ root, actualNodeVersion: "20.19.0" }).errors.some((error) => error.includes("direct supply preflight")));
+  assert.ok(validateRuntimeContract({ root, actualNodeVersion: "20.19.0" }).errors.some((error) => error.includes("CI must begin with checkout, setup-node")));
 }));
 
 test("the CI guard prefix preflights registry policy, suppresses lifecycle scripts, and bypasses package aliases", () => withFixture((root) => {
   const path = join(root, ".github/workflows/ci.yml");
   const original = readFileSync(path, "utf8");
   writeFileSync(path, original.replace("      - run: npm ci --ignore-scripts", "      - run: npm ci"));
-  assert.ok(validateRuntimeContract({ root, actualNodeVersion: "20.19.0" }).errors.some((error) => error.includes("both direct supply preflight")));
+  assert.ok(validateRuntimeContract({ root, actualNodeVersion: "20.19.0" }).errors.some((error) => error.includes("CI must begin with checkout, setup-node")));
 
   writeFileSync(path, original.replace(
     "      - run: node scripts/check-runtime-contract.mjs",
     "      - run: npm run check:runtime-contract",
   ));
-  assert.ok(validateRuntimeContract({ root, actualNodeVersion: "20.19.0" }).errors.some((error) => error.includes("both direct supply preflight")));
+  assert.ok(validateRuntimeContract({ root, actualNodeVersion: "20.19.0" }).errors.some((error) => error.includes("CI must begin with checkout, setup-node")));
 
   writeFileSync(path, original.replace(
     "      - run: node scripts/check-supply-chain-contract.mjs\n      - run: npm ci --ignore-scripts",
     "      - run: npm ci --ignore-scripts\n      - run: node scripts/check-supply-chain-contract.mjs",
   ));
-  assert.ok(validateRuntimeContract({ root, actualNodeVersion: "20.19.0" }).errors.some((error) => error.includes("both direct supply preflight")));
+  assert.ok(validateRuntimeContract({ root, actualNodeVersion: "20.19.0" }).errors.some((error) => error.includes("CI must begin with checkout, setup-node")));
 }));
 
 test("CI runs the focused build identity tests exactly once between runtime and supply tests", () => withFixture((root) => {
