@@ -94,6 +94,7 @@ describe("AppLayout", () => {
     renderLayout("/");
 
     expect(screen.getByText("Page content")).toBeInTheDocument();
+    expect(screen.getByLabelText("XOT version 2")).toHaveTextContent("V2");
     expect(screen.getByRole("navigation", { name: /primary navigation/i })).toBeInTheDocument();
     expect(screen.queryByLabelText(/toggle sidebar/i)).not.toBeInTheDocument();
     expect(screen.queryByText("Admin Panel")).not.toBeInTheDocument();
