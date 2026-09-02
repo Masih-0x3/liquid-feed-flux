@@ -96,6 +96,10 @@ function assertContract({ source, packageJson, ci }, label = "current source") {
   if (!manualFailure.includes("...safeManualFailureMeta(input.meta),")) {
     fail(`${label}: manual failure metadata must use the bounded allowlist`);
   }
+  if (!manualFailure.includes("if (typeof source.provider_retriable === 'boolean')") ||
+      !manualFailure.includes("if (typeof source.retry_scheduled === 'boolean')")) {
+    fail(`${label}: manual failure metadata must preserve bounded provider retry diagnostics`);
+  }
   if (manualFailure.includes("input.reason.slice") ||
       manualFailure.includes("reason: input.reason,") ||
       manualFailure.includes("...(input.meta ?? {})")) {
@@ -144,6 +148,27 @@ function assertContract({ source, packageJson, ci }, label = "current source") {
   const mainEnd = source.indexOf("\n\nasync function insertXPipelineEvent(", mainStart);
   if (mainStart < 0 || mainEnd < 0) fail(`${label}: x-poster main handler markers are missing`);
   const main = source.slice(mainStart, mainEnd);
+  const manualPostStart = manualHandler.indexOf("const xApiStartedAt = Date.now();");
+  const manualPostEnd = manualHandler.indexOf("const postedAt = new Date().toISOString();", manualPostStart);
+  const manualPostFailure = manualHandler.slice(manualPostStart, manualPostEnd);
+  const batchPostStart = main.indexOf("const xApiStartedAt = Date.now();");
+  const batchPostEnd = main.indexOf(
+    "const xApiMs = Date.now() - xApiStartedAt;\n    const latency",
+    batchPostStart,
+  );
+  if (manualPostStart < 0 || manualPostEnd <= manualPostStart ||
+      batchPostStart < 0 || batchPostEnd <= batchPostStart) {
+    fail(`${label}: tweet POST failure boundaries are missing`);
+  }
+  const batchPostFailure = main.slice(batchPostStart, batchPostEnd);
+  for (const [path, failure] of [["manual", manualPostFailure], ["batch", batchPostFailure]]) {
+    if (!failure.includes("skipReason: null,") || !failure.includes("nextRetryAt: null,")) {
+      fail(`${label}: ${path} tweet POST failure must remain ambiguous without a scheduled retry`);
+    }
+  }
+  if (source.includes("'x_api_retriable'") || source.includes("Date.now() + 15 * 60 * 1000")) {
+    fail(`${label}: tweet POST failures must not retain automatic retry metadata`);
+  }
   if (!main.includes("const fatalCode = safeXPosterErrorCode(error, 'x_poster_fatal');") ||
       !main.includes("captureEdgeException(new Error(fatalCode),")) {
     fail(`${label}: x-poster fatal telemetry must use a stable code`);
@@ -329,6 +354,10 @@ if (process.env.MUTATION_TEST === "1") {
   }), "manual redelivery guard removal");
   assertRejects((source) => ({
     ...source,
+    source: source.source.replaceAll("skipReason: null,", "skipReason: 'x_api_retriable',"),
+  }), "tweet POST retry scheduling restoration");
+  assertRejects((source) => ({
+    ...source,
     source: source.source.replace("if (updateError) {", "if (false) {"),
   }), "manual intake persistence error guard removal");
   assertRejects((source) => ({
@@ -343,6 +372,13 @@ if (process.env.MUTATION_TEST === "1") {
     ...source,
     source: source.source.replace("...safeManualFailureMeta(input.meta),", "...(input.meta ?? {}),"),
   }), "raw manual failure metadata mutant");
+  assertRejects((source) => ({
+    ...source,
+    source: source.source.replace(
+      "if (typeof source.retry_scheduled === 'boolean')",
+      "if (false)",
+    ),
+  }), "manual retry scheduling diagnostic removal");
   assertRejects((source) => ({
     ...source,
     source: source.source.replace("const status = Number.isInteger(resp.status) && resp.status >= 100 && resp.status <= 599", "const status = resp.status"),

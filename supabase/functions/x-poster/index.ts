@@ -676,6 +676,12 @@ function safeManualFailureMeta(meta: unknown): Record<string, unknown> {
     if (value) safe[key] = value;
   }
   if (source.duplicate_gate === true) safe.duplicate_gate = true;
+  if (typeof source.provider_retriable === 'boolean') {
+    safe.provider_retriable = source.provider_retriable;
+  }
+  if (typeof source.retry_scheduled === 'boolean') {
+    safe.retry_scheduled = source.retry_scheduled;
+  }
   if (typeof source.x_api_ms === 'number' && Number.isFinite(source.x_api_ms)) {
     safe.x_api_ms = Math.max(0, Math.min(600_000, Math.floor(source.x_api_ms)));
   }
@@ -1359,11 +1365,11 @@ async function handleManualVideoIntakePost(params: {
     const xApiMs = Date.now() - xApiStartedAt;
     const status = (e as { status?: number }).status || 0;
     const errMsg = safeXPosterErrorCode(e, 'x_provider_post_tweet_failed');
-    const isRetriable = status === 429 || status >= 500;
+    const providerRetryable = status === 429 || status >= 500;
     captureEdgeExceptionBackground(e, {
       functionName: 'x-poster',
       action: 'manual_post_error',
-      tags: { status, retriable: isRetriable },
+      tags: { status, provider_retriable: providerRetryable, retry_scheduled: false },
       extra: {
         tweet_id: tweetId,
         intake_id: manualIntakeId,
@@ -1378,8 +1384,8 @@ async function handleManualVideoIntakePost(params: {
         claimGeneration: deliveryClaim.claimGeneration,
         error: errMsg,
         apiResponse: null,
-        skipReason: isRetriable ? 'x_api_retriable' : null,
-        nextRetryAt: isRetriable ? new Date(Date.now() + 15 * 60 * 1000).toISOString() : null,
+        skipReason: null,
+        nextRetryAt: null,
         mediaCount: 1,
         mediaBytes,
         mediaKind: 'video',
@@ -1393,7 +1399,12 @@ async function handleManualVideoIntakePost(params: {
       status: 'failed',
       reason: errMsg,
       startedAt,
-      meta: { render_id: selectedRenderId, x_api_ms: xApiMs },
+      meta: {
+        render_id: selectedRenderId,
+        x_api_ms: xApiMs,
+        provider_retriable: providerRetryable,
+        retry_scheduled: false,
+      },
     });
   }
 
@@ -2411,13 +2422,14 @@ Deno.serve(async (req) => {
       const xApiMs = Date.now() - xApiStartedAt;
       const status = (e as { status?: number }).status || 0;
       const errMsg = safeXPosterErrorCode(e, 'x_provider_post_tweet_failed');
-      const isRetriable = status === 429 || status >= 500;
+      const providerRetryable = status === 429 || status >= 500;
       captureEdgeExceptionBackground(e, {
         functionName: "x-poster",
         action: "post_error",
         tags: {
           status,
-          retriable: isRetriable,
+          provider_retriable: providerRetryable,
+          retry_scheduled: false,
         },
         extra: {
           tweet_id: tweetId,
@@ -2434,8 +2446,8 @@ Deno.serve(async (req) => {
             claimGeneration: deliveryClaim.claimGeneration,
             error: errMsg,
             apiResponse: null,
-            skipReason: isRetriable ? 'x_api_retriable' : null,
-            nextRetryAt: isRetriable ? new Date(Date.now() + 15 * 60 * 1000).toISOString() : null,
+            skipReason: null,
+            nextRetryAt: null,
             mediaCount,
             mediaBytes,
             mediaKind,
@@ -2447,12 +2459,13 @@ Deno.serve(async (req) => {
       }
       await insertXPipelineEvent(sb, tweetId, 'failed', new Date(xApiStartedAt).toISOString(), new Date().toISOString(), errMsg, {
         x_api_ms: xApiMs,
-        retriable: isRetriable,
+        provider_retriable: providerRetryable,
+        retry_scheduled: false,
         candidate_reason: candidateReason,
         candidate_age_ms: candidateAgeMs,
         dispatch_source: dispatchSource,
       });
-      results.push({ tweet_id: tweetId, status: 'failed', error: errMsg, retriable: isRetriable, x_api_ms: xApiMs, candidate_reason: candidateReason, candidate_age_ms: candidateAgeMs, dispatch_source: dispatchSource });
+      results.push({ tweet_id: tweetId, status: 'failed', error: errMsg, provider_retriable: providerRetryable, retry_scheduled: false, x_api_ms: xApiMs, candidate_reason: candidateReason, candidate_age_ms: candidateAgeMs, dispatch_source: dispatchSource });
       continue;
     }
 
