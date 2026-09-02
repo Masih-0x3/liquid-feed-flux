@@ -277,6 +277,13 @@ function validateEvidenceDirectory(directory, reviewedSha, checkoutSha) {
   if (licenseInventory && (typeof licenseInventory.surfaces !== "object" || ["root", "renderer"].some((surface) => !Number.isInteger(licenseInventory.surfaces?.[surface]?.packageCount) || licenseInventory.surfaces[surface].packageCount <= 0 || !Array.isArray(licenseInventory.surfaces[surface].licenses)))) errors.push("license inventory must contain both non-empty audited surfaces");
   const trivy = artifacts["renderer-image-trivy.json"];
   if (trivy && (trivy.status !== "passed" || !Number.isInteger(trivy.resultCount) || trivy.resultCount <= 0)) errors.push("renderer-image-trivy.json must contain non-empty Results evidence");
+  const highOrCritical = [
+    artifacts["root-npm-audit.json"],
+    artifacts["renderer-npm-audit.json"],
+    artifacts["root-dev-npm-audit.json"],
+    artifacts["renderer-dev-npm-audit.json"],
+  ].flatMap((audit) => audit?.findings ?? []).filter((finding) => ["high", "critical"].includes(finding.severity)).length
+    + (trivy?.findings ?? []).filter((finding) => ["HIGH", "CRITICAL"].includes(finding.severity)).length;
   const imageProvenance = artifacts["renderer-image-provenance.json"];
   if (imageProvenance && (imageProvenance.buildStatus !== 0 || imageProvenance.inspectStatus !== 0 || typeof imageProvenance.imageId !== "string" || imageProvenance.imageId.length === 0 || typeof imageProvenance.dockerVersion !== "string" || imageProvenance.dockerVersion.length === 0)) errors.push("renderer-image-provenance.json must contain successful build, inspect, and Docker version evidence");
   const deno = artifacts["deno-import-evidence.json"];
@@ -290,6 +297,7 @@ function validateEvidenceDirectory(directory, reviewedSha, checkoutSha) {
   }
   const owner = artifacts["owner-disposition.json"];
   if (owner) errors.push(...validateOwnerDisposition(owner));
+  if (highOrCritical > 0 && owner?.status !== "reviewed" && owner?.decision !== "accepted") errors.push("actionable high or critical findings require an owner disposition");
 
   let manifest = null;
   try {

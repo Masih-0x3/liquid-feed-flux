@@ -50,7 +50,7 @@
     },
     {
       "path": "scripts/collect-supply-chain-evidence.mjs",
-      "sha256": "bc2f74625781b09708d6181cb5218674de55a6cc14b8547da079764d3e1db81e"
+      "sha256": "0f271d64d5700274706cb6c378d8663c903cd5e5910d68b9e3c8aea065a00e26"
     },
     {
       "path": "scripts/collect-supply-chain-evidence.test.mjs",
