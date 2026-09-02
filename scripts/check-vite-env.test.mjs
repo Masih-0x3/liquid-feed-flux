@@ -222,6 +222,21 @@ test("explicit production mode accepts only the canonical public/server tuple", 
   assert.doesNotMatch(output(result), /Preview identity/);
 });
 
+test("Git-linked production accepts VERCEL_BRANCH_URL metadata", () => {
+  const result = run({
+    ...productionRequired,
+    ...sentry,
+    VERCEL_ENV: "production",
+    VERCEL_BRANCH_URL: "xot-git-main-masihation-8914s-projects.vercel.app",
+    VERCEL_GIT_COMMIT_REF: "main",
+    SUPABASE_PROJECT_REF: "jzirqfzzvlbxwfzndaer",
+    SUPABASE_URL: "https://jzirqfzzvlbxwfzndaer.supabase.co/",
+  });
+  assert.equal(result.status, 0, output(result));
+  assert.match(result.stdout, /Frontend env contract OK/);
+  assert.doesNotMatch(output(result), /Preview identity/);
+});
+
 test("explicit production mode requires production observability aliases", () => {
   const rejected = run({
     ...productionRequired,
