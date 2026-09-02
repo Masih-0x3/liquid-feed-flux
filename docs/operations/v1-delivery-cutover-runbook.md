@@ -136,8 +136,9 @@ The append-only migration
 older settlement behavior. `reconcile_stuck_jobs()` excludes historical
 `deliver` rows before any update, and `settle_delivery_cutover_blocked` is now a
 service-role-only compatibility no-op that returns `false`. The
-`trg_00_historical_delivery_job_zero_write` trigger rejects every historical
-`jobs` update or delete with
+`trg_00_historical_delivery_job_zero_write` trigger rejects an update or delete
+of a historical `jobs` row when `OLD.type = 'deliver'` and
+`delivery_cutover_allows_job(...)` is false, with
 `delivery_cutover_blocked:historical_deliver_job_zero_write`. Do not settle,
 requeue, delete, or otherwise mutate historical delivery rows; record them as
 unchanged evidence with zero provider writes.

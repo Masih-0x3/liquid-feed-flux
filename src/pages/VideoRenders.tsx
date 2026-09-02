@@ -136,6 +136,10 @@ export default function VideoRenders() {
 
   const selectRender = (renderId: string) => {
     setSelectedRenderId(renderId);
+  };
+
+  const openRender = (renderId: string) => {
+    selectRender(renderId);
     setMobileDetailOpen(true);
   };
 
@@ -161,7 +165,7 @@ export default function VideoRenders() {
               aria-current={isSelected ? 'true' : undefined}
               data-render-id={row.id}
               ref={(element) => { queueItemRefs.current[row.id] = element; }}
-              onClick={() => selectRender(row.id)}
+              onClick={() => openRender(row.id)}
               onKeyDown={(event) => {
                 const isArrow = event.key === 'ArrowDown' || event.key === 'ArrowUp';
                 const isBoundary = event.key === 'Home' || event.key === 'End';

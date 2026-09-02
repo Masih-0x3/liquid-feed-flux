@@ -291,7 +291,7 @@ export function VideoRenderDetailPanel({
               <div className="grid max-w-xs gap-1">
                 <Label htmlFor="video-render-feedback-label">Feedback</Label>
                 <Select
-                  value={feedbackLabel || undefined}
+                  value={feedbackLabel}
                   disabled={readOnly}
                   onValueChange={(label) => {
                     setFeedbackTouched(true);

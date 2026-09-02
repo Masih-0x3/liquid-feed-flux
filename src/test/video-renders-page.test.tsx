@@ -222,4 +222,24 @@ describe('video renders review workflow', () => {
     expect(buttonsFor(firstId).every((button) => button.getAttribute('aria-current') === 'true')).toBe(true);
     matchMediaSpy.mockRestore();
   });
+
+  it('keeps the mobile queue mounted and focusable during keyboard traversal', () => {
+    const nativeMatchMedia = window.matchMedia;
+    const matchMediaSpy = vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({
+      ...nativeMatchMedia(query),
+      matches: query !== '(min-width: 1024px)',
+    }));
+    renderPage();
+
+    const buttons = screen.getAllByRole('button', { name: /render_failed/ });
+    buttons[0].focus();
+    fireEvent.keyDown(buttons[0], { key: 'ArrowDown' });
+
+    const nextButton = screen.getAllByRole('button', { name: /render_failed/ })[1];
+    expect(nextButton).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByRole('list', { name: 'Video render queue' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Back to queue' })).toBeNull();
+    expect(document.activeElement).toBe(nextButton);
+    matchMediaSpy.mockRestore();
+  });
 });

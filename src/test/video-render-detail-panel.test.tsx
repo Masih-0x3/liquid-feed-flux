@@ -55,4 +55,22 @@ describe('video render detail review states', () => {
     expect(screen.queryByText('Final subtitle')).not.toBeInTheDocument();
     expect(screen.getAllByText('failed')).toHaveLength(1);
   });
+
+  it('keeps the feedback Select controlled while feedback state hydrates', () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { rerender } = render(<VideoRenderDetailPanel renderId="render-1" status="failed" />);
+    const detail = videoHooks.useVideoRenderDetail.mock.results[0]?.value;
+
+    videoHooks.useVideoRenderDetail.mockReturnValue({
+      ...detail,
+      data: {
+        ...detail.data,
+        feedback: [{ id: 'feedback-1', label: 'pass', note: null, created_at: '2026-08-12T00:00:00.000Z' }],
+      },
+    });
+    rerender(<VideoRenderDetailPanel renderId="render-1" status="failed" />);
+
+    expect(warning).not.toHaveBeenCalledWith(expect.stringContaining('Select is changing from uncontrolled to controlled'));
+    warning.mockRestore();
+  });
 });
