@@ -553,6 +553,8 @@ Deno.test("getPipelineEvents returns a read-only metadata projection", async () 
     meta: {
       translation_call_ms: 250,
       source: "worker",
+      provider_retriable: true,
+      retry_scheduled: false,
       secret: "must not cross the read boundary",
     },
   }];
@@ -578,7 +580,12 @@ Deno.test("getPipelineEvents returns a read-only metadata projection", async () 
       !Array.isArray(eventMeta)
     ? eventMeta as Record<string, unknown>
     : {};
-  assertEquals(metaRecord, { translation_call_ms: 250, source: "worker" });
+  assertEquals(metaRecord, {
+    translation_call_ms: 250,
+    source: "worker",
+    provider_retriable: true,
+    retry_scheduled: false,
+  });
   assertEquals("secret" in metaRecord, false);
   assertEquals(calls.at(-1)?.op, "limit");
 });

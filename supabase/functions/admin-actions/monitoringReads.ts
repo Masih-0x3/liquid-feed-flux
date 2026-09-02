@@ -2126,6 +2126,8 @@ const PIPELINE_EVENT_META_KEYS = [
   "telegram_api_ms",
   "media_download_ms",
   "x_api_ms",
+  "provider_retriable",
+  "retry_scheduled",
   "source",
   "reason_tag",
 ] as const;
@@ -2146,6 +2148,8 @@ function clientPipelineEvent(row: unknown): Record<string, unknown> {
     for (const key of PIPELINE_EVENT_META_KEYS) {
       const value = candidate[key];
       if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+        meta[key] = value;
+      } else if ((key === "provider_retriable" || key === "retry_scheduled") && typeof value === "boolean") {
         meta[key] = value;
       } else if ((key === "source" || key === "reason_tag") && typeof value === "string") {
         meta[key] = value.slice(0, 120);

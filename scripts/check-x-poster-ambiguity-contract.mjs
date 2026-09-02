@@ -144,11 +144,23 @@ function assertContract({ source, packageJson, ci }, label = "current source") {
   const mainEnd = source.indexOf("\n\nasync function insertXPipelineEvent(", mainStart);
   if (mainStart < 0 || mainEnd < 0) fail(`${label}: x-poster main handler markers are missing`);
   const main = source.slice(mainStart, mainEnd);
-  const terminalProviderFailures = source.match(
-    /skipReason: 'x_api_not_sent',\s+nextRetryAt: null,/g,
-  ) ?? [];
-  if (terminalProviderFailures.length !== 2) {
-    fail(`${label}: both tweet POST failure paths must persist a terminal failure without a scheduled retry`);
+  const manualPostStart = manualHandler.indexOf("const xApiStartedAt = Date.now();");
+  const manualPostEnd = manualHandler.indexOf("const postedAt = new Date().toISOString();", manualPostStart);
+  const manualPostFailure = manualHandler.slice(manualPostStart, manualPostEnd);
+  const batchPostStart = main.indexOf("const xApiStartedAt = Date.now();");
+  const batchPostEnd = main.indexOf(
+    "const xApiMs = Date.now() - xApiStartedAt;\n    const latency",
+    batchPostStart,
+  );
+  if (manualPostStart < 0 || manualPostEnd <= manualPostStart ||
+      batchPostStart < 0 || batchPostEnd <= batchPostStart) {
+    fail(`${label}: tweet POST failure boundaries are missing`);
+  }
+  const batchPostFailure = main.slice(batchPostStart, batchPostEnd);
+  for (const [path, failure] of [["manual", manualPostFailure], ["batch", batchPostFailure]]) {
+    if (!failure.includes("skipReason: null,") || !failure.includes("nextRetryAt: null,")) {
+      fail(`${label}: ${path} tweet POST failure must remain ambiguous without a scheduled retry`);
+    }
   }
   if (source.includes("'x_api_retriable'") || source.includes("Date.now() + 15 * 60 * 1000")) {
     fail(`${label}: tweet POST failures must not retain automatic retry metadata`);
@@ -338,10 +350,7 @@ if (process.env.MUTATION_TEST === "1") {
   }), "manual redelivery guard removal");
   assertRejects((source) => ({
     ...source,
-    source: source.source.replace(
-      "skipReason: 'x_api_not_sent',",
-      "skipReason: 'x_api_retriable',",
-    ),
+    source: source.source.replaceAll("skipReason: null,", "skipReason: 'x_api_retriable',"),
   }), "tweet POST retry scheduling restoration");
   assertRejects((source) => ({
     ...source,
