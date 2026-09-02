@@ -1,0 +1,488 @@
+{
+  "schema": "xot-e4-job-lane-capacity-checked-write-closure-receipt-v1",
+  "event": "e4-job-lane-capacity-checked-write-closure-review-ready-local-only",
+  "phase": "split-e4-review-ready-local-only",
+  "status": "REVIEW_READY_LOCAL_T0_T1",
+  "riskTier": "high",
+  "airIds": [
+    "AIR-064"
+  ],
+  "brIds": [
+    "BR-JOB-02",
+    "BR-MOD-01"
+  ],
+  "repository": "/Users/stevmq/Finalized XOT",
+  "branch": "codex/xot-remediation-convergence",
+  "head": "0bd578856016c06a10890339f93aa13b82ecae48",
+  "plan": {
+    "path": "docs/plans/2026-08-08-xot-post-b4-execution-sequence.md",
+    "sha256": "24feff64abe2a221ca69cb9f52e1a03eb53d707ec024367fa8aa3e75cf0dea4c",
+    "section": "E4 - AIR-064 Job Lane Capacity And Checked-Write Closure"
+  },
+  "predecessor": {
+    "path": "docs/plans/2026-08-10-xot-e3-admin-mutation-operation-protocol.json",
+    "receiptSha256": "71d5ab2ec75655a328bbf80ccdb933251ae404830fb0f3ca7f3d02d7e62c91ba",
+    "status": "REVIEW_READY_LOCAL_T0_T1",
+    "ledgerBinding": {
+      "row": 521,
+      "row521NoNewlineSha256": "6c5c961484dae017ed944096ec3f34fb07a31e2071c936e28c924039bb3fcb06",
+      "row521Event": "e3_admin_mutation_operation_protocol_acceptance_local_t0_t1_row521",
+      "predecessorRow": 520,
+      "predecessorRowNoNewlineSha256": "fbfb5e965a2f3af5add4c4eca8564b4fca42737c26ac603288814311aa251684"
+    }
+  },
+  "ledger": {
+    "path": "docs/plans/2026-07-14-xot-comprehensive-audit-remediation-implementation-ledger.jsonl",
+    "currentRowCount": 521,
+    "currentFileSha256": "268faf23153985e6c80d3d3c288f07f4b8b676572088087d415aa4f564b0b5d8",
+    "row521": {
+      "event": "e3_admin_mutation_operation_protocol_acceptance_local_t0_t1_row521",
+      "lineNoNewlineSha256": "6c5c961484dae017ed944096ec3f34fb07a31e2071c936e28c924039bb3fcb06",
+      "predecessor": {
+        "row": 520,
+        "lineSha256": "fbfb5e965a2f3af5add4c4eca8564b4fca42737c26ac603288814311aa251684",
+        "event": "e2_renderer_subprocess_containment_acceptance_provenance_correction_local_t0_t1_row520"
+      },
+      "currentReceipt": {
+        "path": "docs/plans/2026-08-10-xot-e3-admin-mutation-operation-protocol.json",
+        "sha256": "71d5ab2ec75655a328bbf80ccdb933251ae404830fb0f3ca7f3d02d7e62c91ba",
+        "schema": "xot-e3-admin-mutation-operation-protocol-receipt-v1"
+      }
+    },
+    "chain": [
+      {
+        "row": 519,
+        "event": "e2_renderer_subprocess_containment_accepted_local_t0_t1_row519",
+        "lineNoNewlineSha256": "adb2c416778571d279ab5fbf4defa4a78d4ed795505d8182171dc823490f3056"
+      },
+      {
+        "row": 520,
+        "event": "e2_renderer_subprocess_containment_acceptance_provenance_correction_local_t0_t1_row520",
+        "lineNoNewlineSha256": "fbfb5e965a2f3af5add4c4eca8564b4fca42737c26ac603288814311aa251684",
+        "prefixThroughRow520Sha256": "d8db00ce221d61ae17b908ec52c519e134735be973622bb37569ea07610866af"
+      },
+      {
+        "row": 521,
+        "event": "e3_admin_mutation_operation_protocol_acceptance_local_t0_t1_row521",
+        "lineNoNewlineSha256": "6c5c961484dae017ed944096ec3f34fb07a31e2071c936e28c924039bb3fcb06",
+        "fullFileSha256": "268faf23153985e6c80d3d3c288f07f4b8b676572088087d415aa4f564b0b5d8"
+      }
+    ],
+    "state": "append_only_authority_current_521_rows; no E4 row appended",
+    "acceptance": "pending_append_acceptance",
+    "releaseGate": "CLOSED"
+  },
+  "reviewState": {
+    "status": "REVIEW_READY_LOCAL_T0_T1",
+    "ledgerAcceptance": "pending_append_acceptance",
+    "independentLunaHighAcceptance": "ACCEPT",
+    "independentLunaRuntimeModelReasoningTelemetry": "unknown; assigned route requested but runtime identity and settings were not independently exposed",
+    "coordinatorAuthority": "/root retains acceptance and receipt/ledger authority",
+    "localAcceptanceDoesNotCloseExternalRelease": true
+  },
+  "authoring": {
+    "receiptAuthor": {
+      "handle": "/root/e4_receipt_author",
+      "role": "receipt author",
+      "route": {
+        "model": "GPT-5.6 Luna",
+        "reasoning": "high",
+        "runtimeTelemetry": "unknown"
+      }
+    },
+    "implementation": {
+      "handle": "not provided; no handle invented",
+      "route": "GPT-5.6 Luna high",
+      "runtimeTelemetry": "unknown"
+    },
+    "coordinatorAuthority": "/root",
+    "independentAcceptance": {
+      "handle": "/root/e4_independent_acceptance",
+      "verdict": "ACCEPT",
+      "requestedRoute": "GPT-5.6 Luna high",
+      "runtimeModelReasoningTelemetry": "unknown; assigned route requested but runtime identity was not independently confirmed",
+      "acceptanceScope": "local E4 T0+T1 code, tests, and receipt"
+    },
+    "claudeFinalReview": {
+      "reportPath": "/tmp/xot-e4-final-review.md",
+      "reportSha256": "5c35ba5a5ab1da1455ce4d2589d88084a41ac848d35622c95ad9fb925a028839",
+      "runId": "run_5306a4d7dfb2",
+      "taskId": "task_2810c9b42219",
+      "dispatchId": "ctx_16b38afba9c3",
+      "route": "Claude Code DeepSeek V4 Flash 0731 /effort ultracode (xhigh)",
+      "verdict": "ACCEPT local T0+T1",
+      "visibleRouteEvidence": "DeepSeek V4 Flash 0731 and ultracode/xhigh were verified in the final review",
+      "noInternalSubagents": true
+    },
+    "authorDoneclaim": {
+      "path": "/tmp/xot-e4-author-doneclaim.md",
+      "sha256": "529b846072bfa4aee76dff59030efdf7b34724c53f78d1a9810c1c7d8e87e553",
+      "status": "final local rework doneclaim; no receipt or ledger authored"
+    },
+    "noInventedIdentityIds": true
+  },
+  "scope": {
+    "goal": "Close AIR-064 job-lane capacity and checked-write behavior at local T0+T1 only.",
+    "pathCeiling": {
+      "ceiling": 30,
+      "ownedCount": 8,
+      "status": "PROVEN",
+      "note": "Exactly eight owned source/test/checker paths are bound below; no path outside this set is attributed to E4."
+    },
+    "handWrittenLineAttribution": {
+      "bound": 1500,
+      "status": "NOT_PROVEN",
+      "reason": "Five owned paths were already dirty and three owned paths were untracked at entry; full-file hashes prove artifact identity but do not reconstruct exact E4-authored lines."
+    },
+    "ownedPaths": [
+      {
+        "path": "supabase/functions/worker/index.ts",
+        "sha256": "e121bcf9912debc9c8ab10529857ecd48b126bfefbefa27395f6b10cc7a96fee",
+        "entryState": "tracked_dirty"
+      },
+      {
+        "path": "supabase/functions/worker/workerUtils.ts",
+        "sha256": "842767c14613e73e39851545b8b66136dec88ece2874d5d20f210a50ccd687d5",
+        "entryState": "tracked_dirty"
+      },
+      {
+        "path": "supabase/functions/worker/workerUtils.test.ts",
+        "sha256": "82cf32ff9b6ba1284e6ee8c92039c02759123dd6263d118d46881ccb07ef91a3",
+        "entryState": "tracked_dirty"
+      },
+      {
+        "path": "supabase/functions/worker/jobLifecycle.ts",
+        "sha256": "7432858480e50c6e20c43dd7c2815d6ea0df1d974e976086de12ea83065a696c",
+        "entryState": "tracked_dirty"
+      },
+      {
+        "path": "supabase/functions/worker/jobLifecycle.test.ts",
+        "sha256": "5a637045489dd705b5376c9290366fe02120eb769450a96d01a8e9699f4a9e1c",
+        "entryState": "tracked_dirty"
+      },
+      {
+        "path": "supabase/functions/_shared/durableClaimFence.ts",
+        "sha256": "93bf9f1f9a16c4846e3a69baa73f18c20d7fd372ea328ecc36ff67c9c700cf36",
+        "entryState": "untracked"
+      },
+      {
+        "path": "supabase/functions/_shared/durableClaimFence.test.ts",
+        "sha256": "44f6e998b4b55b2c6651ac4de1fbd1d3e9c0be4da18b3504037bb54023478b8e",
+        "entryState": "untracked"
+      },
+      {
+        "path": "scripts/check-worker-lifecycle-contract.mjs",
+        "sha256": "d2bbe14deb6f82acfaac5c3fd2806a6309430064759c452f08ab267efa9cb600",
+        "entryState": "untracked"
+      }
+    ],
+    "excluded": [
+      "schema and migrations",
+      "provider-facing mutations",
+      "database application",
+      "production workload tuning",
+      "live queue metrics",
+      "hosted CI, staging, deployment, browser, provider, and production verification"
+    ]
+  },
+  "verifiedBehavior": {
+    "batchAndCapacity": {
+      "fetchBatchIsIndependent": true,
+      "fetchBatchRule": "fast-only selections use the existing fetch bound of 40; mixed/non-fast selections use 20; this claim/fetch bound is not execution concurrency",
+      "executionCaps": {
+        "fast": 4,
+        "model": 2,
+        "delivery": 2
+      },
+      "fixture": "22 deferred jobs",
+      "fixtureProof": [
+        "exact observed peaks fast=4, model=2, delivery=2",
+        "FIFO contention order is preserved within each lane",
+        "model work advances while fast and delivery remain gated",
+        "one model rejection is contained",
+        "all 22 jobs settle with complete accounting",
+        "fetch batch size remains independent of execution capacity"
+      ],
+      "laneIndependence": true,
+      "allSettledAccounting": true
+    },
+    "checkedWrites": {
+      "requiredIdentity": [
+        "job id",
+        "owner / locked_by",
+        "claim_token",
+        "claim_generation",
+        "claim_state"
+      ],
+      "fenceSemantics": "id, owner, token, generation, and active claim state are equality predicates on authoritative writes; reserved token/generation/state patch keys are stripped and never written as update values",
+      "activeClaimStates": [
+        "preparing",
+        "ready",
+        "posting",
+        "idle"
+      ],
+      "idleSemantics": "idle is a fenced pre-provider/defer state",
+      "missingIdentity": "fail-closed non-success",
+      "staleOwnerOrGeneration": "conditional update yields zero rows and is surfaced as non-success",
+      "providerStart": "provider-side effect is allowed only after the durable provider-start marker succeeds; marker failure or rejection permits zero provider calls",
+      "completionAmbiguity": "provider acceptance followed by unknown completion persistence is ambiguous/non-success, never success"
+    },
+    "zeroRowsAndErrors": {
+      "databaseError": "JobStateWriteError database_error; non-success",
+      "zeroRows": "JobStateWriteError affected_rows_unknown; non-success",
+      "wrongCountOrNonArray": "non-success",
+      "failureRetryTerminalAndDeferWrites": "authoritative checked writes; no unchecked success report"
+    },
+    "metrics": {
+      "boundedFields": [
+        "lane",
+        "lane_capacity",
+        "lane_selected",
+        "lane_executing",
+        "lane_saturated",
+        "queue_wait_ms",
+        "claim_delay_ms",
+        "worker_run_ms",
+        "attempts",
+        "retry_count",
+        "retry_after_seconds"
+      ],
+      "boundedDurations": "durations are non-negative and clamped to 30 days; attempts are bounded to 100000; retry-after is bounded to 86400 seconds",
+      "hydration": "metrics derive from selected bounded jobs passed to the scheduler; no extra unbounded row hydration is required"
+    },
+    "schema": {
+      "changed": false,
+      "migrations": false,
+      "reason": "E4 reuses existing jobs claim, token, generation, state, and checked-write seams; no schema or generated-type change was authored"
+    }
+  },
+  "validation": {
+    "commands": [
+      {
+        "command": "npm exec --offline -- deno test --no-check supabase/functions/worker/workerUtils.test.ts supabase/functions/worker/jobLifecycle.test.ts supabase/functions/_shared/durableClaimFence.test.ts",
+        "result": "40 passed, 0 failed"
+      },
+      {
+        "command": "npm exec --offline -- deno check supabase/functions/worker/workerUtils.ts supabase/functions/worker/jobLifecycle.ts supabase/functions/_shared/durableClaimFence.ts supabase/functions/worker/workerUtils.test.ts supabase/functions/worker/jobLifecycle.test.ts supabase/functions/_shared/durableClaimFence.test.ts",
+        "result": "passed"
+      },
+      {
+        "command": "npm exec --offline -- deno lint supabase/functions/worker/index.ts supabase/functions/worker/jobLifecycle.ts supabase/functions/worker/workerUtils.ts supabase/functions/worker/workerUtils.test.ts supabase/functions/worker/jobLifecycle.test.ts supabase/functions/_shared/durableClaimFence.ts supabase/functions/_shared/durableClaimFence.test.ts",
+        "result": "Checked 7 files"
+      },
+      {
+        "command": "npm exec --offline -- tsc --noEmit -p tsconfig.strict.json",
+        "result": "passed"
+      },
+      {
+        "command": "node scripts/check-worker-lifecycle-contract.mjs",
+        "result": "WORKER_LIFECYCLE_SOURCE_CONTRACT_PASS transitions=5 reconciliation=fail-closed selfTest=skipped"
+      },
+      {
+        "command": "MUTATION_TEST=1 node scripts/check-worker-lifecycle-contract.mjs",
+        "result": "WORKER_LIFECYCLE_SOURCE_CONTRACT_PASS transitions=5 reconciliation=fail-closed selfTest=pass"
+      },
+      {
+        "command": "git diff --check",
+        "result": "clean"
+      },
+      {
+        "command": "git diff --cached --quiet",
+        "result": "exit 0; staged index empty"
+      },
+      {
+        "command": "npm exec --offline -- deno check supabase/functions/worker/index.ts",
+        "result": "exit 1 with seven current diagnostics outside all eight E4-owned paths; zero E4-owned LifecycleQuery/PostgREST-builder diagnostics"
+      }
+    ],
+    "mutationChecker": {
+      "normal": "passed",
+      "mutation": "passed; selfTest=pass",
+      "ciState": "MUTATION_TEST=1 was run manually; CI runs the base checker assertion only and does not wire the mutation mode"
+    },
+    "protectedArtifactChecks": {
+      "ledger": {
+        "path": "docs/plans/2026-07-14-xot-comprehensive-audit-remediation-implementation-ledger.jsonl",
+        "sha256": "268faf23153985e6c80d3d3c288f07f4b8b676572088087d415aa4f564b0b5d8",
+        "unchanged": true
+      },
+      "e3Receipt": {
+        "path": "docs/plans/2026-08-10-xot-e3-admin-mutation-operation-protocol.json",
+        "sha256": "71d5ab2ec75655a328bbf80ccdb933251ae404830fb0f3ca7f3d02d7e62c91ba",
+        "unchanged": true
+      },
+      "directPlan": {
+        "path": "docs/plans/2026-08-08-xot-post-b4-execution-sequence.md",
+        "sha256": "24feff64abe2a221ca69cb9f52e1a03eb53d707ec024367fa8aa3e75cf0dea4c",
+        "unchanged": true
+      }
+    },
+    "ownedArtifactHashCount": 8,
+    "stagedIndexEmpty": true,
+    "protectedArtifactsUnchanged": true
+  },
+  "outsideOwnedDiagnostics": {
+    "command": "npm exec --offline -- deno check supabase/functions/worker/index.ts",
+    "exitCode": 1,
+    "entryProvenance": "not proven; entry-time raw diagnostics were not captured",
+    "currentDiagnostics": [
+      {
+        "path": "supabase/functions/_shared/internalAuth.ts",
+        "line": 130,
+        "diagnostic": "Uint8Array/BufferSource type mismatch"
+      },
+      {
+        "path": "supabase/functions/_shared/observability.ts",
+        "line": 183,
+        "diagnostic": "rawError.message property diagnostic"
+      },
+      {
+        "path": "supabase/functions/_shared/observability.ts",
+        "line": 183,
+        "diagnostic": "rawError.code property diagnostic"
+      },
+      {
+        "path": "supabase/functions/worker/telegramDelivery.ts",
+        "line": 50,
+        "diagnostic": "TelegramSupabaseClient.from diagnostic"
+      },
+      {
+        "path": "supabase/functions/worker/xApiWorkflow.ts",
+        "line": 165,
+        "diagnostic": "value.enabled diagnostic"
+      },
+      {
+        "path": "supabase/functions/worker/xApiWorkflow.ts",
+        "line": 186,
+        "diagnostic": "value.hydrations_per_day diagnostic"
+      },
+      {
+        "path": "supabase/functions/worker/xApiWorkflow.ts",
+        "line": 187,
+        "diagnostic": "value.hydrations_per_day diagnostic"
+      }
+    ],
+    "ownershipConclusion": "The broad canonical worker check currently has seven diagnostics, all outside E4 ownership; this receipt does not claim canonical full-worker typecheck success or prove those diagnostics were pre-existing."
+  },
+  "reviewChronology": [
+    {
+      "step": "RED",
+      "result": "The original lane test was RED before bounded scheduler implementation."
+    },
+    {
+      "step": "REWORK",
+      "result": "Reviewer rework added real Supabase builder-stage typing, the greater-than-capacity 22-job deferred fixture, lane independence, FIFO, rejection/all-settled accounting, batch independence, explicit idle-state documentation/test, checker builder-stage and mutation gates, and honest outside-owned diagnostic classification."
+    },
+    {
+      "step": "TOOLING_BLOCK",
+      "result": "The first direct Deno command was blocked by deno: command not found; final evidence used cached offline npm-exec Deno tooling."
+    },
+    {
+      "step": "GREEN",
+      "result": "Final deferred contention fixture and listed local checks are green; the canonical full-worker check remains nonzero only for the seven currently observed diagnostics outside E4 ownership."
+    },
+    {
+      "step": "INDEPENDENT_ACCEPTANCE",
+      "result": "Independent Luna verdict ACCEPT and final Claude review verdict ACCEPT were recorded with runtime telemetry caveat retained."
+    }
+  ],
+  "advisories": [
+    "Unknown job types currently default to the fast lane; this is a deferred hardening advisory, not a current-type correctness failure.",
+    "lane_selected counts all jobs selected for a lane, while lane_saturated means executing has reached that lane capacity at the metric snapshot; the label does not mean the queue is drained.",
+    "The broad canonical worker check currently has seven diagnostics outside the eight E4-owned paths; entry-time provenance is not proven.",
+    "The mutation checker passed locally in manual MUTATION_TEST=1 mode; CI currently wires only the base checker assertion.",
+    "Production workload tuning, live queue metrics, T2 host/container evidence, hosted CI, staging, deployment, browser, provider, database, and live verification remain deferred.",
+    "The eight full-file hashes establish artifact identity, not an exact E4-authored line count; the 1500 handwritten-line bound is not proven."
+  ],
+  "deferred": [
+    "production workload tuning",
+    "live queue metrics",
+    "T2 host/container capacity and performance evidence",
+    "hosted CI",
+    "staging",
+    "deployment",
+    "browser",
+    "provider",
+    "database",
+    "live-service verification",
+    "aggregate migration, RLS, type, owner, and PAT gates",
+    "runtime identity/settings telemetry for the assigned Luna acceptance route"
+  ],
+  "evidenceTier": {
+    "achieved": [
+      "T0",
+      "T1"
+    ],
+    "deferred": [
+      "T2",
+      "T3",
+      "T4"
+    ],
+    "note": "T0 is local source contract, mutation contract, owned type/lint checks, diff/staged checks, and protected-hash checks. T1 is bounded local Deno behavior and the 22-job deferred scheduler fixture. No production-like workload, live queue metric, hosted CI, staging, deploy, browser, provider, database, or live evidence is claimed."
+  },
+  "deploymentState": {
+    "local": "review-ready_local_t0_t1",
+    "server": "not run",
+    "database": "not run",
+    "browser": "not run",
+    "provider": "not contacted",
+    "networkProduct": "not contacted",
+    "staged": "no",
+    "committed": "no",
+    "pushed": "no",
+    "ci": "not run",
+    "staging": "not run",
+    "deployed": "no",
+    "live": "not run"
+  },
+  "isolation": {
+    "localOnly": true,
+    "noProductStateMutation": true,
+    "noDatabaseApplication": true,
+    "noProviderContact": true,
+    "noBrowser": true,
+    "noNetworkProductContact": true,
+    "toolingNote": "Evidence used local source and tests with previously cached/offline tooling; this receipt task made no product-state mutation or network contact.",
+    "dirtyWorktreePreserved": true,
+    "noLedgerRowAuthored": true,
+    "onlyRequestedReceiptPathCreated": true
+  },
+  "rollback": {
+    "mode": "selective source-path rollback plus later append-only evidence correction",
+    "selectiveSourcePaths": [
+      "supabase/functions/worker/index.ts",
+      "supabase/functions/worker/workerUtils.ts",
+      "supabase/functions/worker/workerUtils.test.ts",
+      "supabase/functions/worker/jobLifecycle.ts",
+      "supabase/functions/worker/jobLifecycle.test.ts",
+      "supabase/functions/_shared/durableClaimFence.ts",
+      "supabase/functions/_shared/durableClaimFence.test.ts",
+      "scripts/check-worker-lifecycle-contract.mjs"
+    ],
+    "laterAppendOnlyEvidenceCorrection": true,
+    "neverRewriteLedgerHistory": true,
+    "noHistoryRewrite": true,
+    "note": "If later evidence overturns this local result, selectively correct only the E4-owned source paths through an explicitly authorized workflow and append a correcting ledger record; do not rewrite prior ledger rows."
+  },
+  "releaseGate": "CLOSED",
+  "evidence": {
+    "directPlan": "24feff64abe2a221ca69cb9f52e1a03eb53d707ec024367fa8aa3e75cf0dea4c",
+    "predecessorE3Receipt": "71d5ab2ec75655a328bbf80ccdb933251ae404830fb0f3ca7f3d02d7e62c91ba",
+    "authorDoneclaim": "529b846072bfa4aee76dff59030efdf7b34724c53f78d1a9810c1c7d8e87e553",
+    "claudeFinalReview": "5c35ba5a5ab1da1455ce4d2589d88084a41ac848d35622c95ad9fb925a028839",
+    "ledgerRow521": "6c5c961484dae017ed944096ec3f34fb07a31e2071c936e28c924039bb3fcb06",
+    "ledgerFullFile": "268faf23153985e6c80d3d3c288f07f4b8b676572088087d415aa4f564b0b5d8",
+    "ownedArtifactCount": 8,
+    "ownedArtifactPaths": [
+      "supabase/functions/worker/index.ts",
+      "supabase/functions/worker/workerUtils.ts",
+      "supabase/functions/worker/workerUtils.test.ts",
+      "supabase/functions/worker/jobLifecycle.ts",
+      "supabase/functions/worker/jobLifecycle.test.ts",
+      "supabase/functions/_shared/durableClaimFence.ts",
+      "supabase/functions/_shared/durableClaimFence.test.ts",
+      "scripts/check-worker-lifecycle-contract.mjs"
+    ]
+  },
+  "receiptAuthoringNote": "This file is the only artifact authored by this receipt-author task. No ledger row, source path, test path, checker path, temporary report, stage, commit, push, deploy, browser, provider, database, or network product action was performed."
+}

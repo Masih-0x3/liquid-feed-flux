@@ -6,12 +6,8 @@
     "strictNullChecks": true
   },
   "include": [
-    "src/vite-env.d.ts",
-    "src/components/layout/**/*.tsx",
-    "src/components/x/**/*.tsx",
-    "src/contexts/**/*.tsx",
-    "src/hooks/**/*.ts",
-    "src/hooks/**/*.tsx",
-    "src/integrations/**/*.ts"
-  ]
+    "src/**/*.ts",
+    "src/**/*.tsx"
+  ],
+  "exclude": ["src/test"]
 }

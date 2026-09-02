@@ -3,7 +3,8 @@
   "compilerOptions": {
     "strict": false,
     "noImplicitAny": false,
-    "strictNullChecks": false
+    "strictNullChecks": false,
+    "experimentalDecorators": false
   },
   "lint": {
     "rules": {

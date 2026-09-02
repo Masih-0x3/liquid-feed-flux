@@ -1,4 +1,8 @@
-import { loadActiveThreshold } from "./activeThreshold.ts";
+import {
+  loadActiveThreshold,
+  loadActiveThresholdEnvelope,
+} from "./activeThreshold.ts";
+import type { SupabaseAdminClient } from "./types.ts";
 import {
   getPayloadTweetId,
   isFailedJobActionable,
@@ -138,10 +142,38 @@ type MonitoringProcessLookup = {
   unavailableReason: string | null;
 };
 
-function monitoringErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  if (typeof error === "string") return error;
-  return "Unknown monitoring error";
+function checkedMonitoringQuery(
+  value: unknown,
+  section: string,
+): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${section}_invalid_response`);
+  }
+  const result = value as Record<string, unknown>;
+  if (result.error) throw result.error;
+  return result;
+}
+
+function checkedMonitoringRows(
+  value: unknown,
+  section: string,
+): Array<Record<string, unknown>> {
+  if (!Array.isArray(value) || value.some((row) =>
+    !row || typeof row !== "object" || Array.isArray(row)
+  )) {
+    throw new Error(`${section}_invalid_rows`);
+  }
+  return value as Array<Record<string, unknown>>;
+}
+
+function checkedMonitoringCount(
+  value: unknown,
+  section: string,
+): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new Error(`${section}_invalid_count`);
+  }
+  return value;
 }
 
 const MONITORING_BASE_POST_COLUMNS = [
@@ -285,6 +317,12 @@ export function normalizeMonitoringScoreBucket(
 export function sanitizeSearchTerm(v: unknown): string {
   if (typeof v !== "string") return "";
   return v.trim().replace(/[%_,()]/g, " ").replace(/\s+/g, " ").slice(0, 120);
+}
+
+export function normalizeMonitoringTweetId(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const tweetId = v.trim();
+  return tweetId.length > 0 && tweetId.length <= 128 ? tweetId : null;
 }
 
 function postSearchOr(term: string): string {
@@ -706,7 +744,7 @@ async function getTweetIdsFromFailedJobs(
   limit: number,
   offset: number,
 ): Promise<string[]> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("jobs")
     .select(
       "id, type, status, payload, result_meta, idempotency_key, created_at",
@@ -714,7 +752,8 @@ async function getTweetIdsFromFailedJobs(
     .eq("status", "failed")
     .order("created_at", { ascending: false })
     .range(offset, offset + limit * 3 - 1);
-  const jobRows = (data ?? []) as Array<Record<string, unknown>>;
+  if (error) throw error;
+  const jobRows = checkedMonitoringRows(data, "monitoring_failed_jobs");
   const postByRef = await loadPostsByJobReferences(supabase, jobRows);
   const ids: string[] = [];
   for (const row of jobRows) {
@@ -724,14 +763,18 @@ async function getTweetIdsFromFailedJobs(
     if (ids.length >= limit) break;
   }
   if (ids.length < limit) {
-    const { data: dedupeRows } = await supabase
+    const { data: dedupeRows, error: dedupeError } = await supabase
       .from("posts")
       .select("tweet_id, dedupe_checked_at")
       .eq("dedupe_status", "failed")
       .order("dedupe_checked_at", { ascending: false, nullsFirst: false })
       .limit(limit);
-    for (const row of dedupeRows ?? []) {
-      const tid = row.tweet_id as string;
+    if (dedupeError) throw dedupeError;
+    for (const row of checkedMonitoringRows(dedupeRows, "monitoring_failed_dedupe")) {
+      const tid = row.tweet_id;
+      if (typeof tid !== "string" || tid.length === 0) {
+        throw new Error("monitoring_failed_dedupe_invalid_row");
+      }
       if (tid && !ids.includes(tid)) ids.push(tid);
       if (ids.length >= limit) break;
     }
@@ -746,6 +789,7 @@ async function getTweetIdsFromXDeliveries(
   limit: number,
   offset: number,
   since?: string,
+  exactPostId?: string,
 ): Promise<string[]> {
   let q = supabase
     .from("x_deliveries")
@@ -754,12 +798,19 @@ async function getTweetIdsFromXDeliveries(
     .range(offset, offset + limit - 1);
   q = Array.isArray(status) ? q.in("status", status) : q.eq("status", status);
   if (since) q = q.gte("created_at", since);
-  const { data } = await q;
+  if (exactPostId) q = q.eq("post_id", exactPostId);
+  const { data, error } = await q;
+  if (error) throw error;
+  const rows = checkedMonitoringRows(data, "monitoring_x_delivery_ids");
   return [
     ...new Set(
-      (data ?? []).map((row: { post_id?: string }) => row.post_id).filter(
-        Boolean,
-      ),
+      rows.map((row) => {
+        const postId = row.post_id;
+        if (typeof postId !== "string" || postId.length === 0) {
+          throw new Error("monitoring_x_delivery_ids_invalid_row");
+        }
+        return postId;
+      }),
     ),
   ] as string[];
 }
@@ -996,16 +1047,33 @@ async function loadJobStateMap(
   tweetIds?: string[],
 ): Promise<Map<string, Map<string, LatestJobState>>> {
   const wanted = new Set(tweetIds ?? []);
-  const { data } = await supabase
+  let query = supabase
     .from("jobs")
     .select("type, status, last_error, payload, created_at")
     .in("type", ["dedupe", "translate", "deliver", "hydrate_tweet", "enrich"])
     .in("status", ["pending", "running", "failed"])
     .order("created_at", { ascending: false })
     .limit(5000);
+  // Exact Monitoring rehydration must not retain the page path's global
+  // active/failed-jobs scan. A single requested post has an indexed JSON
+  // payload lookup; multi-post pages retain the established broad behavior.
+  if (wanted.size === 1) {
+    query = query.filter("payload->>tweet_id", "eq", [...wanted][0]);
+  }
+  const { data, error } = await query;
+  if (error) throw error;
+  if (!Array.isArray(data)) {
+    throw new Error("monitoring_job_state_invalid_response");
+  }
 
   const map = new Map<string, Map<string, LatestJobState>>();
-  for (const row of data ?? []) {
+  for (const row of data) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) {
+      throw new Error("monitoring_job_state_invalid_row");
+    }
+    if (typeof row.type !== "string" || typeof row.status !== "string") {
+      throw new Error("monitoring_job_state_invalid_row");
+    }
     const tid = getPayloadTweetId(row.payload);
     if (!tid || (wanted.size > 0 && !wanted.has(tid))) continue;
     if (!map.has(tid)) map.set(tid, new Map());
@@ -1203,6 +1271,35 @@ export function toMonitoringEntry(
 }
 
 // deno-lint-ignore no-explicit-any
+async function loadPipelineStatusMap(
+  supabase: any,
+  tweetIds: string[],
+): Promise<Record<string, Record<string, unknown>>> {
+  const wanted = new Set(tweetIds.filter(Boolean));
+  const statusByTweet: Record<string, Record<string, unknown>> = {};
+  if (wanted.size === 0) return statusByTweet;
+
+  const { data, error } = await supabase.rpc("get_post_pipeline_status", {
+    tweet_ids: [...wanted],
+  });
+  if (error) throw error;
+  if (!Array.isArray(data)) {
+    throw new Error("monitoring_pipeline_status_invalid_response");
+  }
+  for (const row of data) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) {
+      throw new Error("monitoring_pipeline_status_invalid_row");
+    }
+    const tweetId = (row as Record<string, unknown>).tweet_id;
+    if (typeof tweetId !== "string" || !wanted.has(tweetId)) {
+      throw new Error("monitoring_pipeline_status_invalid_row");
+    }
+    statusByTweet[tweetId] = row as Record<string, unknown>;
+  }
+  return statusByTweet;
+}
+
+// deno-lint-ignore no-explicit-any
 async function loadDuplicateTargetMap(
   supabase: any,
   rows: Record<string, unknown>[],
@@ -1224,22 +1321,26 @@ async function loadDuplicateTargetMap(
       "tweet_id, text_original, url, created_at, author_handle, delivery_decision, decision_reason, importance_score, final_score, dedupe_status, dup_of_tweet_id, dup_similarity, translated_at, text_translated, is_truncated, hydrated_at, enrich_status, score_review_status",
     )
     .in("tweet_id", ids);
-  if (error) return map;
-
-  const targets = (data ?? []) as Record<string, unknown>[];
-  const targetIds = targets.map((post) => post.tweet_id as string).filter(
-    Boolean,
-  );
-  const statusByTweet: Record<string, Record<string, unknown>> = {};
-  const jobStateByTweet = await loadJobStateMap(supabase, targetIds);
-  if (targetIds.length > 0) {
-    const { data: statuses } = await supabase.rpc("get_post_pipeline_status", {
-      tweet_ids: targetIds,
-    });
-    for (const row of statuses ?? []) {
-      statusByTweet[row.tweet_id as string] = row;
-    }
+  if (error) throw error;
+  if (!Array.isArray(data)) {
+    throw new Error("monitoring_duplicate_target_invalid_response");
   }
+
+  const wanted = new Set(ids);
+  const targets: Record<string, unknown>[] = [];
+  for (const row of data) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) {
+      throw new Error("monitoring_duplicate_target_invalid_row");
+    }
+    const tweetId = (row as Record<string, unknown>).tweet_id;
+    if (typeof tweetId !== "string" || !wanted.has(tweetId)) {
+      throw new Error("monitoring_duplicate_target_invalid_row");
+    }
+    targets.push(row as Record<string, unknown>);
+  }
+  const targetIds = targets.map((post) => post.tweet_id as string);
+  const jobStateByTweet = await loadJobStateMap(supabase, targetIds);
+  const statusByTweet = await loadPipelineStatusMap(supabase, targetIds);
 
   for (const post of targets) {
     const tweetId = post.tweet_id as string;
@@ -1606,14 +1707,27 @@ export async function getMonitoringEntries(
   const search = sanitizeSearchTerm(body.search);
   const limit = Math.min(Math.max(Number(body.limit) || 50, 1), 100);
   const cursor = Math.max(Number(body.cursor) || 0, 0);
+  const hasExactTweetId = Object.prototype.hasOwnProperty.call(body, "tweet_id");
+  const exactTweetId = normalizeMonitoringTweetId(body.tweet_id);
+  if (hasExactTweetId && !exactTweetId) {
+    return { success: false, error: "Invalid monitoring tweet id" };
+  }
   const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const threshold = await loadActiveThreshold(supabase);
+  const emptyExactResult = () => ({
+    success: true,
+    entries: [],
+    next_cursor: null,
+    filter,
+    score_bucket: scoreBucket,
+    search,
+  });
 
   let idOrder: string[] | null = null;
-  if (filter === "failed_stuck") {
+  if (!exactTweetId && filter === "failed_stuck") {
     idOrder = await getTweetIdsFromFailedJobs(supabase, limit, cursor);
   }
-  if (filter === "x_pending") {
+  if (!exactTweetId && filter === "x_pending") {
     idOrder = await getTweetIdsFromXDeliveries(
       supabase,
       ["pending", "posting"],
@@ -1621,7 +1735,7 @@ export async function getMonitoringEntries(
       cursor,
     );
   }
-  if (filter === "x_failed") {
+  if (!exactTweetId && filter === "x_failed") {
     idOrder = await getTweetIdsFromXDeliveries(
       supabase,
       "failed",
@@ -1629,7 +1743,7 @@ export async function getMonitoringEntries(
       cursor,
     );
   }
-  if (filter === "delivered_24h") {
+  if (!exactTweetId && filter === "delivered_24h") {
     idOrder = await getTweetIdsFromXDeliveries(
       supabase,
       "posted",
@@ -1639,14 +1753,60 @@ export async function getMonitoringEntries(
     );
   }
 
-  if (idOrder && idOrder.length === 0) {
+  // X-delivery-backed filters are defined by related x_deliveries rows rather
+  // than the post projection alone. Keep exact lookups inside their same
+  // bounded status/window membership predicates before the generic entry view.
+  if (exactTweetId && filter === "x_pending") {
+    const pendingTweetIds = await getTweetIdsFromXDeliveries(
+      supabase,
+      ["pending", "posting"],
+      1,
+      0,
+      undefined,
+      exactTweetId,
+    );
+    if (!pendingTweetIds.includes(exactTweetId)) return emptyExactResult();
+  }
+  if (exactTweetId && filter === "x_failed") {
+    const failedTweetIds = await getTweetIdsFromXDeliveries(
+      supabase,
+      "failed",
+      1,
+      0,
+      undefined,
+      exactTweetId,
+    );
+    if (!failedTweetIds.includes(exactTweetId)) return emptyExactResult();
+  }
+  if (exactTweetId && filter === "delivered_24h") {
+    const deliveredTweetIds = await getTweetIdsFromXDeliveries(
+      supabase,
+      "posted",
+      1,
+      0,
+      since24h,
+      exactTweetId,
+    );
+    if (!deliveredTweetIds.includes(exactTweetId)) {
+      return emptyExactResult();
+    }
+  }
+  // failed_stuck has actionability rules spanning jobs and dedupe fallback
+  // ordering. There is no bounded exact predicate yet, so fail closed here;
+  // the client preserves offset pages and lets its deadline-triggered resync
+  // obtain the canonical paginated view instead of injecting a false member.
+  if (exactTweetId && filter === "failed_stuck") return emptyExactResult();
+
+  if (!exactTweetId && idOrder && idOrder.length === 0) {
     return { success: true, entries: [], next_cursor: null, filter, search };
   }
 
   const needsInMemoryScoreFilter = scoreBucket !== "any" &&
     scoreBucket !== "unscored";
   const needsInMemoryFilter = filter !== "all" || needsInMemoryScoreFilter;
-  const scanLimit = idOrder
+  const scanLimit = exactTweetId
+    ? 1
+    : idOrder
     ? limit
     : needsInMemoryFilter
     ? Math.min(limit * 8, 500)
@@ -1657,7 +1817,9 @@ export async function getMonitoringEntries(
       .select(selectColumns)
       .order("created_at", { ascending: false });
 
-    if (idOrder) {
+    if (exactTweetId) {
+      q = q.eq("tweet_id", exactTweetId).limit(1);
+    } else if (idOrder) {
       q = q.in("tweet_id", idOrder);
     } else {
       switch (filter) {
@@ -1737,16 +1899,8 @@ export async function getMonitoringEntries(
   }
 
   const tweetIds = rows.map((p) => p.tweet_id as string).filter(Boolean);
-  const statusByTweet: Record<string, Record<string, unknown>> = {};
   const jobStateByTweet = await loadJobStateMap(supabase, tweetIds);
-  if (tweetIds.length > 0) {
-    const { data: statuses } = await supabase.rpc("get_post_pipeline_status", {
-      tweet_ids: tweetIds,
-    });
-    for (const row of statuses ?? []) {
-      statusByTweet[row.tweet_id as string] = row;
-    }
-  }
+  const statusByTweet = await loadPipelineStatusMap(supabase, tweetIds);
   const duplicateTargets = await loadDuplicateTargetMap(
     supabase,
     rows,
@@ -1789,7 +1943,7 @@ export async function getMonitoringEntries(
   return {
     success: true,
     entries: visibleEntries.slice(0, limit),
-    next_cursor: rows.length === scanLimit ? cursor + scanLimit : null,
+    next_cursor: exactTweetId ? null : rows.length === scanLimit ? cursor + scanLimit : null,
     filter,
     score_bucket: scoreBucket,
     search,
@@ -1890,16 +2044,8 @@ export async function getDashboardProcessHud(
 
     const rows = ((result.data ?? []) as Array<Record<string, unknown>>);
     const tweetIds = rows.map((post) => post.tweet_id as string).filter(Boolean);
-    const statusByTweet: Record<string, Record<string, unknown>> = {};
     const jobStateByTweet = await loadJobStateMap(supabase, tweetIds);
-    if (tweetIds.length > 0) {
-      const { data: statuses } = await supabase.rpc("get_post_pipeline_status", {
-        tweet_ids: tweetIds,
-      });
-      for (const row of statuses ?? []) {
-        statusByTweet[row.tweet_id as string] = row;
-      }
-    }
+    const statusByTweet = await loadPipelineStatusMap(supabase, tweetIds);
     const duplicateTargets = await loadDuplicateTargetMap(
       supabase,
       rows,
@@ -1956,11 +2102,90 @@ export async function getDashboardProcessHud(
         window_hours: windowHours,
         source: "unavailable",
         partial_reason: "dashboard_process_hud_unavailable",
-        error: monitoringErrorMessage(error),
+        error: "monitoring_process_hud_unavailable",
         truncated: false,
         entries: [],
       },
     };
+  }
+}
+
+type PipelineEventsQuery = PromiseLike<{ data?: unknown; error?: unknown }> & {
+  select(columns: string): PipelineEventsQuery;
+  eq(column: string, value: unknown): PipelineEventsQuery;
+  order(column: string, options?: Record<string, unknown>): PipelineEventsQuery;
+  limit(value: number): PipelineEventsQuery;
+};
+
+const PIPELINE_EVENT_META_KEYS = [
+  "queue_wait_ms",
+  "claim_delay_ms",
+  "worker_run_ms",
+  "scoring_call_ms",
+  "translation_call_ms",
+  "telegram_api_ms",
+  "media_download_ms",
+  "x_api_ms",
+  "source",
+  "reason_tag",
+] as const;
+
+function clientPipelineEvent(row: unknown): Record<string, unknown> {
+  if (!row || typeof row !== "object" || Array.isArray(row)) {
+    throw new Error("pipeline_events_invalid_row");
+  }
+  const source = row as Record<string, unknown>;
+  if (source.subject_type !== "post" || typeof source.subject_id !== "string" ||
+    typeof source.step !== "string" || typeof source.status !== "string") {
+    throw new Error("pipeline_events_invalid_row");
+  }
+  const rawMeta = source.meta;
+  const meta: Record<string, unknown> = {};
+  if (rawMeta && typeof rawMeta === "object" && !Array.isArray(rawMeta)) {
+    const candidate = rawMeta as Record<string, unknown>;
+    for (const key of PIPELINE_EVENT_META_KEYS) {
+      const value = candidate[key];
+      if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+        meta[key] = value;
+      } else if ((key === "source" || key === "reason_tag") && typeof value === "string") {
+        meta[key] = value.slice(0, 120);
+      }
+    }
+  }
+  return {
+    subject_type: "post",
+    subject_id: source.subject_id,
+    step: source.step.slice(0, 120),
+    status: source.status.slice(0, 80),
+    started_at: typeof source.started_at === "string" ? source.started_at : null,
+    ended_at: typeof source.ended_at === "string" ? source.ended_at : null,
+    error: typeof source.error === "string" ? source.error.slice(0, 500) : null,
+    ...(Object.keys(meta).length > 0 ? { meta } : {}),
+  };
+}
+
+/** Read-only, bounded pipeline timeline projection for the Monitoring drawer. */
+export async function getPipelineEvents(
+  supabase: SupabaseAdminClient,
+  body: Record<string, unknown> = {},
+) {
+  const tweetId = typeof body.tweet_id === "string" ? body.tweet_id.trim() : "";
+  if (!tweetId || tweetId.length > 128) {
+    return { success: false, error: "pipeline_events_tweet_id_invalid" };
+  }
+  const query = supabase.from("pipeline_events") as PipelineEventsQuery;
+  const { data, error } = await query
+    .select("subject_type, subject_id, step, status, started_at, ended_at, error, meta")
+    .eq("subject_type", "post")
+    .eq("subject_id", tweetId)
+    .order("started_at", { ascending: false })
+    .limit(200);
+  if (error) return { success: false, error: "pipeline_events_read_failed" };
+  try {
+    if (!Array.isArray(data)) throw new Error("pipeline_events_invalid_rows");
+    return { success: true, events: data.map(clientPipelineEvent) };
+  } catch {
+    return { success: false, error: "pipeline_events_invalid_response" };
   }
 }
 
@@ -1976,7 +2201,8 @@ export async function getMonitoringOverview(
   const since = new Date(Date.now() - windowHours * 60 * 60 * 1000)
     .toISOString();
   const staleCutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-  const threshold = await loadActiveThreshold(supabase);
+  const thresholdEnvelope = await loadActiveThresholdEnvelope(supabase);
+  const threshold = thresholdEnvelope.threshold;
   const [
     postsRes,
     deliveriesRes,
@@ -2011,14 +2237,55 @@ export async function getMonitoringOverview(
     supabase.from("x_deliveries").select("id", { count: "exact", head: true })
       .in("status", ["pending", "posting"]).lt(
         "created_at",
-        new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+      new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
       ),
   ]);
+  const postsQuery = checkedMonitoringQuery(
+    postsRes,
+    "monitoring_overview_posts",
+  );
+  const deliveriesQuery = checkedMonitoringQuery(
+    deliveriesRes,
+    "monitoring_overview_deliveries",
+  );
+  const xDeliveriesQuery = checkedMonitoringQuery(
+    xDeliveriesRes,
+    "monitoring_overview_x_deliveries",
+  );
+  const staleJobsQuery = checkedMonitoringQuery(
+    staleJobs,
+    "monitoring_overview_stale_jobs",
+  );
+  const staleXPendingQuery = checkedMonitoringQuery(
+    staleXPending,
+    "monitoring_overview_stale_x_pending",
+  );
+  const posts = checkedMonitoringRows(
+    postsQuery.data,
+    "monitoring_overview_posts",
+  );
+  const deliveries = checkedMonitoringRows(
+    deliveriesQuery.data,
+    "monitoring_overview_deliveries",
+  );
+  const xDeliveries = checkedMonitoringRows(
+    xDeliveriesQuery.data,
+    "monitoring_overview_x_deliveries",
+  );
+  const staleJobsCount = checkedMonitoringCount(
+    staleJobsQuery.count,
+    "monitoring_overview_stale_jobs",
+  );
+  const staleXPendingCount = checkedMonitoringCount(
+    staleXPendingQuery.count,
+    "monitoring_overview_stale_x_pending",
+  );
   const jobStateByTweet = await loadJobStateMap(supabase);
   const deliveryByTweet = new Map<string, Record<string, unknown>>();
-  for (const row of deliveriesRes.data ?? []) {
-    if (row.subject_id && !deliveryByTweet.has(row.subject_id)) {
-      deliveryByTweet.set(row.subject_id, {
+  for (const row of deliveries) {
+    const subjectId = row.subject_id;
+    if (typeof subjectId === "string" && subjectId && !deliveryByTweet.has(subjectId)) {
+      deliveryByTweet.set(subjectId, {
         delivery_status: row.status,
         posted_at: row.posted_at,
         delivery_error: row.last_error,
@@ -2026,9 +2293,10 @@ export async function getMonitoringOverview(
     }
   }
   const xByTweet = new Map<string, Record<string, unknown>>();
-  for (const row of xDeliveriesRes.data ?? []) {
-    if (row.post_id && !xByTweet.has(row.post_id)) {
-      xByTweet.set(row.post_id, {
+  for (const row of xDeliveries) {
+    const postId = row.post_id;
+    if (typeof postId === "string" && postId && !xByTweet.has(postId)) {
+      xByTweet.set(postId, {
         x_status: row.status,
         x_tweet_id: row.x_tweet_id,
         x_posted_at: row.posted_at,
@@ -2058,11 +2326,11 @@ export async function getMonitoringOverview(
     v2_regional_auto: 0,
     global_pilot_review: 0,
     manual_scoring_feedback: 0,
-    stale_jobs: staleJobs.count ?? 0,
-    stale_x_pending_24h: staleXPending.count ?? 0,
+    stale_jobs: staleJobsCount,
+    stale_x_pending_24h: staleXPendingCount,
   };
 
-  for (const post of postsRes.data ?? []) {
+  for (const post of posts) {
     const tid = post.tweet_id as string;
     const rpc = {
       ...(deliveryByTweet.get(tid) ?? {}),
@@ -2112,7 +2380,7 @@ export async function getMonitoringOverview(
     if (isManualScoringFeedbackEntry(post)) counts.manual_scoring_feedback += 1;
   }
 
-  for (const row of xDeliveriesRes.data ?? []) {
+  for (const row of xDeliveries) {
     if (row.status === "posted" && row.posted_at && row.posted_at >= since) {
       counts.delivered_24h += 1;
     }
@@ -2123,6 +2391,13 @@ export async function getMonitoringOverview(
     success: true,
     overview: {
       window_hours: windowHours,
+      threshold,
+      threshold_mode: thresholdEnvelope.mode,
+      threshold_source: thresholdEnvelope.source,
+      threshold_version: thresholdEnvelope.version,
+      threshold_compatibility_fallback:
+        thresholdEnvelope.compatibility_fallback,
+      threshold_policy_mode: thresholdEnvelope.policy_mode,
       counts,
     },
   };

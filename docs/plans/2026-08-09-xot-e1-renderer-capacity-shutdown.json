@@ -1,0 +1,149 @@
+{
+  "schema": "xot-e1-renderer-capacity-shutdown-receipt-v1",
+  "event": "e1-renderer-capacity-shutdown-review-ready-local-only",
+  "phase": "split-e1-review-ready-local-only",
+  "status": "REVIEW_READY_LOCAL_T0_T1",
+  "riskTier": "high",
+  "airIds": [
+    "AIR-019"
+  ],
+  "brIds": [
+    "BR-RENDER-02"
+  ],
+  "repository": "/Users/stevmq/Finalized XOT",
+  "branch": "codex/xot-remediation-convergence",
+  "head": "0bd578856016c06a10890339f93aa13b82ecae48",
+  "plan": {
+    "path": "docs/plans/2026-08-08-xot-post-b4-execution-sequence.md",
+    "sha256": "24feff64abe2a221ca69cb9f52e1a03eb53d707ec024367fa8aa3e75cf0dea4c"
+  },
+  "predecessor": {
+    "path": "docs/plans/2026-08-08-xot-b4-video-render-claim-fencing.json",
+    "receiptSha256": "32218157fbf2826560a281df5a5d915eb4ab8aa0aba093093f0d7ea046f7cee5"
+  },
+  "ledger": {
+    "path": "docs/plans/2026-07-14-xot-comprehensive-audit-remediation-implementation-ledger.jsonl",
+    "preAppendRowCount": 515,
+    "preAppendFileSha256": "4cbd5ef61d329b1b52de2722d9af8776c9dc5ce0fdb7af00bc19640a162a6ad7",
+    "row515Event": "b4_video_render_claim_fencing_final_post_append_acceptance_row515",
+    "row515NoNewlineSha256": "4438d49d34be58db8d90217a597b160238b0033239cb1879e514e4d42224f84f"
+  },
+  "ledgerState": "pending_append_acceptance",
+  "ledgerIsAuthority": "append-only ledger acceptance remains the authority; this E1 receipt is NOT ledger-accepted",
+  "reviewState": {
+    "status": "REVIEW_READY_LOCAL_T0_T1",
+    "ledgerAcceptance": "pending",
+    "independentLunaHighAcceptance": "pending"
+  },
+  "noLiveContactDeclaration": true,
+  "noDatabaseApplication": true,
+  "noExternalWrite": true,
+  "isolation": "local loopback only; no external DB/provider/browser/CI/staging/deploy/live; no test container; no lingering E1 agent or listener after close",
+  "authoring": {
+    "routeOverride": "user-directed run-specific override: Claude Code DeepSeek V4 Flash 0731 /effort ultracode used for E1 authors and independent reviewers instead of the plan's nominal Luna High author route; coordinator retained acceptance authority",
+    "attribution": [
+      {
+        "path": "services/video-renderer/src/server.js",
+        "authored": true,
+        "baselineSha256": "4c759107173cce2a839430e989b586d52890a282154378cd42bdcc0e17fd990d",
+        "finalSha256": "d8c8a124c95d4d65587073701939c8d73726a3fab3f42703c39418ad5bfb2056"
+      },
+      {
+        "path": "services/video-renderer/test/capacityRuntime.test.js",
+        "authored": true,
+        "baselineSha256": null,
+        "baselineNote": "file did not exist before E1; newly added",
+        "finalSha256": "48a0491e0d1962c3836dc464ace33f92df453716563ab52247622b3d39a4d878"
+      }
+    ],
+    "note": "Only server.js and capacityRuntime.test.js are the two E1-authored paths. The wider dirty working tree is NOT claimed committed."
+  },
+  "verifiedBehavior": {
+    "oneSharedGate": "HTTP render, HTTP preflight, and renderer poller all acquire one shared non-queuing RendererCapacityGate before any claim attempt",
+    "preclaim429": "pre-claim saturation rejection returns HTTP 429 + Retry-After before any claim RPC",
+    "shutdown503": "shutdown-driven path (accepting=false) returns HTTP 503 + Retry-After before any claim, with a deferred close/listener seam proving zero claims on a live open listener",
+    "defaultListenerClose": "default behavior closes the live listener after real shutdown so new connections are refused",
+    "exactTimerClear": "exact cancellation of the poll/heartbeat interval handles started by shutdown",
+    "drainReclaim": "drain/reclaim within grace, no false terminal, no unreclaimable current claim",
+    "honestTimeout": "drain timeout reports an unfinished operation honestly after enforcing the 1000ms minimum grace; no fabricated terminal",
+    "managedChildAbort": "real managed render child aborted with SIGTERM through the coordinated shutdown abortAllManagedProcesses path",
+    "signalWiring": "production code wires process.once(SIGTERM) and process.once(SIGINT) handlers",
+    "signalCoverage": "synthetic EventEmitter.emit coverage for both SIGTERM and SIGINT callbacks; explicitly NOT real OS signal delivery"
+  },
+  "achieved": [
+    "shared non-queuing capacity gate for HTTP render/preflight/poller",
+    "pre-claim 429 + Retry-After",
+    "shutdown-driven 503 + Retry-After with deferred live listener, zero claims",
+    "default live listener closes/refuses after shutdown",
+    "exact poll/heartbeat timer clear",
+    "drain/reclaim with no false claim",
+    "honest 1000ms minimum grace timeout",
+    "real managed render child abort",
+    "production process.once SIGTERM/SIGINT wiring",
+    "synthetic EventEmitter.emit coverage for both signal callbacks, explicitly not real OS signal delivery"
+  ],
+  "deferred": [
+    "ledger append-only acceptance (ledger remains authority)",
+    "independent Luna High receipt/code acceptance",
+    "real OS signal delivery in a launched host",
+    "production-like load/host metrics",
+    "hosted CI",
+    "staging",
+    "deployment",
+    "live verification",
+    "commit/push of the wider dirty working tree",
+    "aggregate RLS/migration/type/owner/PAT gates"
+  ],
+  "validation": {
+    "focused": "focused 10/10 capacity-shutdown tests passed",
+    "fullRendererSuite": "full renderer suite 185/185",
+    "mutationChecker": "RENDERER_CAPACITY_SOURCE_CONTRACT_PASS default=1 max=4 selfTest=pass",
+    "boundaryTypecheck": "renderer boundary strict typecheck clean",
+    "diffCheck": "git diff --check clean",
+    "stagedIndexEmpty": "staged index empty (zero files)",
+    "isolation": "no external DB/provider/browser/CI/staging/deploy/live; local loopback only; no test container; no lingering E1 agent or listener after close"
+  },
+  "reviewChronology": [
+    {
+      "step": "v1",
+      "note": "initial author draft reworked"
+    },
+    {
+      "step": "v2",
+      "note": "first independent reviewer output rejected for lease/timer/listener/abort/timing overclaims"
+    },
+    {
+      "step": "v3",
+      "note": "targeted fix accepted as a draft"
+    },
+    {
+      "step": "v4",
+      "note": "a later Claude reviewer ACCEPT was rejected by the coordinator because its report admitted missing signal-handler runtime coverage"
+    },
+    {
+      "step": "v5",
+      "note": "final signal repair; final fresh read-only Claude review ACCEPT T0+T1"
+    }
+  ],
+  "rollback": {
+    "noProductionContact": true,
+    "noExternalWrite": true,
+    "revertPaths": [
+      "services/video-renderer/src/server.js",
+      "services/video-renderer/test/capacityRuntime.test.js"
+    ],
+    "thenAppendCorrection": true,
+    "neverRewriteLedgerHistory": true
+  },
+  "releaseGate": "CLOSED",
+  "evidence": {
+    "services/video-renderer/src/server.js": "d8c8a124c95d4d65587073701939c8d73726a3fab3f42703c39418ad5bfb2056",
+    "services/video-renderer/test/capacityRuntime.test.js": "48a0491e0d1962c3836dc464ace33f92df453716563ab52247622b3d39a4d878",
+    "services/video-renderer/src/rendererCapacity.js": "7f533a5073366f68d8c14ab1f4fa0de94a47e821fa896eff1201e6b3cd1cc1e8",
+    "services/video-renderer/src/renderer.js": "66a74727b83dfbd312d49e0f6fe950839155fac6d09b531bc304758a29df0d26",
+    "services/video-renderer/src/config.js": "14f2c567015da352b54e5c41dbe19ca32766a952c07bf0816f8733ea6d56ec58",
+    "services/video-renderer/test/server.test.js": "3cd978028389adbc344156ac66521fca4ffb3b491602747a917e65c5bb9a1b64",
+    "scripts/check-renderer-capacity-contract.mjs": "22435dea10d8572f4aff5b5ff416174fcef63791b533237bd43fd7be3dcdd9da",
+    "package.json": "d8002462b8df8842c416d57ae95051664341db972090ff37babe1304bc45d4a2"
+  }
+}

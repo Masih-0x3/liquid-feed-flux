@@ -1,5 +1,4 @@
-import { invokeAdminAction } from '@/api/adminActions';
-import { supabase } from '@/integrations/supabase/client';
+import { invokeAdminAction, invokeAdminRead } from '@/api/adminActions';
 
 export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high';
 export type Verbosity = 'low' | 'medium' | 'high';
@@ -430,31 +429,53 @@ export interface SettingsRow {
 }
 
 export async function fetchSettingsRows(keys: string[] = []): Promise<SettingsRow[]> {
-  const query = supabase.from('settings').select('key, value');
-  const { data, error } = keys.length > 0 ? await query.in('key', keys) : await query;
-  if (error) throw error;
-  return (data || []) as SettingsRow[];
+  const data = await invokeAdminRead<{ success?: boolean; error?: string; rows?: unknown[] }>({
+    action: 'get_settings',
+    ...(keys.length > 0 ? { keys } : {}),
+  });
+  if (data?.success && Array.isArray(data.rows)) return data.rows as SettingsRow[];
+  throw new Error(data?.error ?? 'Settings unavailable');
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+const PARTIAL_BASELINE_SETTING_KEYS = new Set([
+  'translation_prompt',
+  'telegram_config',
+  'message_template',
+]);
+
+function mergeSettingValue(key: string, stored: unknown, fallback: unknown): unknown {
+  if (isRecord(fallback)) {
+    if (!isRecord(stored)) return fallback;
+    return PARTIAL_BASELINE_SETTING_KEYS.has(key)
+      ? { ...fallback, ...stored }
+      : stored;
+  }
+  if (Array.isArray(fallback)) return Array.isArray(stored) ? stored : fallback;
+  return stored;
 }
 
 export async function fetchSettings() {
   const data = await fetchSettingsRows();
   const result = { ...defaults };
   data.forEach((s) => {
-    if (s.value && typeof s.value === 'object' && s.key in result) {
-      (result as Record<string, unknown>)[s.key] = s.value;
+    if (s.key in result) {
+      const settings = result as Record<string, unknown>;
+      settings[s.key] = mergeSettingValue(s.key, s.value, settings[s.key]);
     }
   });
   return result;
 }
 
 export async function fetchSampleTweets() {
-  const { data, error } = await supabase
-    .from('posts')
-    .select('tweet_id, text_original, text_translated, url, tweeted_at, has_media, accounts!inner(handle, display_name)')
-    .order('created_at', { ascending: false })
-    .limit(5);
-  if (error) throw error;
-  return (data || []) as Record<string, unknown>[];
+  const data = await invokeAdminRead<{ success?: boolean; error?: string; samples?: unknown[] }>({
+    action: 'get_settings_samples',
+  });
+  if (data?.success && Array.isArray(data.samples)) return data.samples as Record<string, unknown>[];
+  throw new Error(data?.error ?? 'Settings samples unavailable');
 }
 
 export interface SaveSettingsInput {
@@ -488,7 +509,6 @@ export interface PreviewTranslationResult {
   usage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null;
   duration_ms: number;
   used_filter: boolean;
-  raw?: unknown;
 }
 
 export async function previewTranslation(input: PreviewTranslationInput): Promise<PreviewTranslationResult> {

@@ -41,6 +41,8 @@ interface MonitoringRowProps {
   onInspectDuplicateMatch: (tweetId: string) => MaybePromise<void>;
   onRunDedupe: (entry: MonitoringEntry) => void;
   onClearDuplicate: (entry: MonitoringEntry) => void;
+  readOnly: boolean;
+  mutationDisabledTitle?: string;
 }
 
 function entryAuthor(entry: MonitoringEntry) {
@@ -88,6 +90,8 @@ function DuplicateClusterPanel({
   onOpenManualScore,
   onRunDedupe,
   onClearDuplicate,
+  readOnly,
+  mutationDisabledTitle,
 }: Pick<
   MonitoringRowProps,
   | 'entry'
@@ -98,6 +102,8 @@ function DuplicateClusterPanel({
   | 'onOpenManualScore'
   | 'onRunDedupe'
   | 'onClearDuplicate'
+  | 'readOnly'
+  | 'mutationDisabledTitle'
 >) {
   return (
     <MonitoringDuplicateClusterPanel
@@ -109,6 +115,8 @@ function DuplicateClusterPanel({
       onOpenManualScore={onOpenManualScore}
       onRunDedupe={onRunDedupe}
       onClearDuplicate={onClearDuplicate}
+      readOnly={readOnly}
+      mutationDisabledTitle={mutationDisabledTitle}
     />
   );
 }
@@ -127,6 +135,8 @@ export function MonitoringMobileCard({
   onInspectDuplicateMatch,
   onRunDedupe,
   onClearDuplicate,
+  readOnly,
+  mutationDisabledTitle,
 }: MonitoringRowProps) {
   const stage = monitoringStage(entry);
   const decision = formatDecisionReason(entry.decision_reason);
@@ -136,12 +146,14 @@ export function MonitoringMobileCard({
   return (
     <article className="space-y-3 p-3 sm:p-4">
       <div className="flex items-start justify-between gap-2">
-        <Checkbox
-          checked={isSelected}
-          onCheckedChange={(checked) => onSelectChange(entry.tweet_id, checked === true)}
-          onClick={(event) => event.stopPropagation()}
-          aria-label={`Select ${entry.tweet_id}`}
-        />
+        {!readOnly && (
+          <Checkbox
+            checked={isSelected}
+            onCheckedChange={(checked) => onSelectChange(entry.tweet_id, checked === true)}
+            onClick={(event) => event.stopPropagation()}
+            aria-label={`Select ${entry.tweet_id}`}
+          />
+        )}
         <div className="min-w-0 flex-1">
           <button onClick={() => onOpenDetails(entry.tweet_id)} className="block w-full text-left">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
@@ -184,6 +196,8 @@ export function MonitoringMobileCard({
         onOpenManualScore={onOpenManualScore}
         onRunDedupe={onRunDedupe}
         onClearDuplicate={onClearDuplicate}
+        readOnly={readOnly}
+        mutationDisabledTitle={mutationDisabledTitle}
       />
 
       <div className="grid grid-cols-2 gap-2 text-xs min-[520px]:grid-cols-4">
@@ -225,7 +239,14 @@ export function MonitoringMobileCard({
         <Button variant="outline" size="sm" className="h-9" onClick={() => onOpenDetails(entry.tweet_id)}>
           Details
         </Button>
-        <Button variant="outline" size="sm" className="h-9" onClick={() => onOpenManualScore(entry)}>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-9"
+          disabled={readOnly}
+          title={readOnly ? mutationDisabledTitle : undefined}
+          onClick={() => { if (!readOnly) onOpenManualScore(entry); }}
+        >
           Score
         </Button>
         {renderRowActions(entry, true)}
@@ -248,6 +269,8 @@ export function MonitoringTableEntryRows({
   onInspectDuplicateMatch,
   onRunDedupe,
   onClearDuplicate,
+  readOnly,
+  mutationDisabledTitle,
 }: MonitoringRowProps) {
   const stage = monitoringStage(entry);
   const decision = formatDecisionReason(entry.decision_reason);
@@ -258,12 +281,14 @@ export function MonitoringTableEntryRows({
     <Fragment>
       <TableRow className="align-top">
         <TableCell className="px-2 py-4">
-          <Checkbox
-            checked={isSelected}
-            onCheckedChange={(checked) => onSelectChange(entry.tweet_id, checked === true)}
-            onClick={(event) => event.stopPropagation()}
-            aria-label={`Select ${entry.tweet_id}`}
-          />
+          {!readOnly && (
+            <Checkbox
+              checked={isSelected}
+              onCheckedChange={(checked) => onSelectChange(entry.tweet_id, checked === true)}
+              onClick={(event) => event.stopPropagation()}
+              aria-label={`Select ${entry.tweet_id}`}
+            />
+          )}
         </TableCell>
         <TableCell className="px-3 py-4 text-xs">
           <div className="space-y-1">
@@ -335,6 +360,8 @@ export function MonitoringTableEntryRows({
               onOpenManualScore={onOpenManualScore}
               onRunDedupe={onRunDedupe}
               onClearDuplicate={onClearDuplicate}
+              readOnly={readOnly}
+              mutationDisabledTitle={mutationDisabledTitle}
             />
           </TableCell>
         </TableRow>

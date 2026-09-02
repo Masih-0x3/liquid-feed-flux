@@ -6,6 +6,7 @@ ENV NODE_ENV=production \
     FONTS_DIR=/usr/share/fonts
 
 RUN apt-get update \
+  && apt-get upgrade -y --no-install-recommends \
   && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
@@ -35,6 +36,11 @@ COPY src ./src
 COPY scripts ./scripts
 COPY README.md ./
 
+# npm is needed only while dependencies are installed. Keep the runtime image
+# to the renderer process and its production dependencies.
+RUN rm -rf /usr/local/lib/node_modules/npm \
+  && rm -f /usr/local/bin/npm /usr/local/bin/npx
+
 RUN mkdir -p /tmp/xot-video-renderer \
   && chown -R node:node /tmp/xot-video-renderer /app
 
@@ -45,4 +51,4 @@ EXPOSE 8787
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null || exit 1
 
-CMD ["npm", "start"]
+CMD ["node", "src/index.js"]

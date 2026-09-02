@@ -91,4 +91,20 @@ Deno.test("repairTranslationReadability preserves original text when repair fail
 
   assertEquals(result.repairStatus, "failed");
   assertEquals(result.text, "The Michael Knowles Show درباره ایران");
+  assertEquals(result.repairError, "translation_readability_openai_http_429");
+});
+
+Deno.test("repairTranslationReadability redacts thrown provider messages", async () => {
+  const result = await repairTranslationReadability({
+    apiKey: "key",
+    model: "gpt-5.4-mini",
+    originalText: "Source",
+    translatedText: "The Michael Knowles Show درباره ایران",
+    callOpenAI: async () => {
+      throw new Error("SECRET provider response");
+    },
+  });
+
+  assertEquals(result.repairStatus, "failed");
+  assertEquals(result.repairError, "translation_readability_openai_request_failed");
 });

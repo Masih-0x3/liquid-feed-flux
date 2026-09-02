@@ -3,6 +3,11 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "installCommand": "npm ci",
+  "git": {
+    "deploymentEnabled": {
+      "codex/xot-full-closure-candidate": false
+    }
+  },
   "headers": [
     {
       "source": "/(.*)",
@@ -22,6 +27,10 @@
         {
           "key": "Referrer-Policy",
           "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "Strict-Transport-Security",
+          "value": "max-age=31536000"
         }
       ]
     }

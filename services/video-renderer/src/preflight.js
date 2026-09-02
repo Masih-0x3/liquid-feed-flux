@@ -1,6 +1,12 @@
-import { spawn } from "node:child_process";
 import { DEFAULT_TESSERACT_LANG, normalizeTesseractLang } from "./config.js";
 import { detectCaptionBand, detectWatermarkOverlay } from "./ffmpeg.js";
+import { MAX_PROCESS_BINARY_STDOUT_BYTES, MAX_PROCESS_TEXT_STDOUT_BYTES, runManagedCommand } from "./processRunner.js";
+import {
+  delogoRegionsFromVision,
+  evaluateDelogoPlan,
+  protectDelogoRegionsFromLowerText,
+  selectDelogoRegions,
+} from "./preflightGeometry.js";
 
 const PLATFORM_PATTERNS = [
   /tiktok/i,
@@ -26,6 +32,12 @@ const PLATFORM_EXTRACTORS = [
 ];
 
 export { DEFAULT_TESSERACT_LANG } from "./config.js";
+export {
+  delogoRegionsFromVision,
+  evaluateDelogoPlan,
+  protectDelogoRegionsFromLowerText,
+  selectDelogoRegions,
+} from "./preflightGeometry.js";
 
 export function tesseractArgs(imagePath, outputFormat = null, options = {}) {
   const language = normalizeTesseractLang(options.tesseractLang);
@@ -405,24 +417,24 @@ export function extractPlatformMatches(text) {
   return [...new Set(found)];
 }
 
-export function runOptionalOcr(imagePath, options = {}) {
-  return new Promise((resolve) => {
-    const child = spawn("tesseract", tesseractArgs(imagePath, null, options), { stdio: ["ignore", "pipe", "pipe"] });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
-    child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
-    child.on("error", (error) => {
-      resolve({ available: false, text: "", matches: [], error: error.message });
+function processFailureCode(error) {
+  return typeof error?.code === "string" ? error.code : "process_failed";
+}
+
+export async function runOptionalOcr(imagePath, options = {}) {
+  try {
+    const result = await runManagedCommand({
+      bin: "tesseract",
+      args: tesseractArgs(imagePath, null, options),
+    }, {
+      label: "ocr_text",
+      stage: "ocr",
+      maxStdoutBytes: MAX_PROCESS_TEXT_STDOUT_BYTES,
     });
-    child.on("close", (code) => {
-      if (code !== 0) {
-        resolve({ available: false, text: "", matches: [], error: stderr.slice(-500) });
-        return;
-      }
-      resolve({ available: true, text: stdout.trim(), matches: extractPlatformMatches(stdout) });
-    });
-  });
+    return { available: true, text: result.stdout.trim(), matches: extractPlatformMatches(result.stdout) };
+  } catch (error) {
+    return { available: false, text: "", matches: [], error: processFailureCode(error) };
+  }
 }
 
 export function parseOcrTsv(tsv) {
@@ -463,48 +475,46 @@ function parseOcrPageDimensions(tsv) {
   return null;
 }
 
-function runOcrTsv(imagePath, options = {}) {
-  return new Promise((resolve) => {
-    const child = spawn("tesseract", tesseractArgs(imagePath, "tsv", options), { stdio: ["ignore", "pipe", "pipe"] });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
-    child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
-    child.on("error", (error) => {
-      resolve({ available: false, words: [], dimensions: null, error: error.message });
+async function runOcrTsv(imagePath, options = {}) {
+  try {
+    const result = await runManagedCommand({
+      bin: "tesseract",
+      args: tesseractArgs(imagePath, "tsv", options),
+    }, {
+      label: "ocr_tsv",
+      stage: "ocr",
+      maxStdoutBytes: MAX_PROCESS_TEXT_STDOUT_BYTES,
     });
-    child.on("close", (code) => {
-      if (code !== 0) {
-        resolve({ available: false, words: [], dimensions: null, error: stderr.slice(-500) });
-        return;
-      }
-      resolve({ available: true, words: parseOcrTsv(stdout), dimensions: parseOcrPageDimensions(stdout) });
-    });
-  });
+    return {
+      available: true,
+      words: parseOcrTsv(result.stdout),
+      dimensions: parseOcrPageDimensions(result.stdout),
+    };
+  } catch (error) {
+    return { available: false, words: [], dimensions: null, error: processFailureCode(error) };
+  }
 }
 
-function readGrayImage(imagePath, dimensions = {}) {
+async function readGrayImage(imagePath, dimensions = {}) {
   const width = Math.max(1, Number(dimensions.width ?? 0) || 1);
   const height = Math.max(1, Number(dimensions.height ?? 0) || 1);
-  return new Promise((resolve, reject) => {
-    const child = spawn("ffmpeg", [
+  const result = await runManagedCommand({
+    bin: "ffmpeg",
+    args: [
       "-hide_banner",
       "-v", "error",
       "-i", imagePath,
       "-vf", `scale=${width}:${height},format=gray`,
       "-f", "rawvideo",
       "pipe:1",
-    ], { stdio: ["ignore", "pipe", "pipe"] });
-    const stdout = [];
-    let stderr = "";
-    child.stdout.on("data", (chunk) => { stdout.push(chunk); });
-    child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      if (code !== 0) reject(new Error(`ocr_recovery_frame exited ${code}: ${stderr.slice(-500)}`));
-      else resolve(Buffer.concat(stdout));
-    });
+    ],
+  }, {
+    label: "ocr_recovery_frame",
+    stage: "analysis",
+    stdoutMode: "buffer",
+    maxStdoutBytes: MAX_PROCESS_BINARY_STDOUT_BYTES,
   });
+  return result.stdout;
 }
 
 function normalizedText(value) {
@@ -1743,176 +1753,10 @@ export function decideWatermarkOnlyBlock(watermarkOnly, delogoPlan) {
   return { blocked: false, reason: null };
 }
 
-function isUsableVisionBox(box) {
-  const rawX = Number(box?.x);
-  const rawY = Number(box?.y);
-  const rawW = Number(box?.w);
-  const rawH = Number(box?.h);
-  if (![rawX, rawY, rawW, rawH].every(Number.isFinite)) return false;
-  if (rawW <= 0 || rawH <= 0) return false;
-  const impossibleSentinel = rawX >= 0.95 && rawY >= 0.95 && rawW >= 0.9 && rawH >= 0.9;
-  if (impossibleSentinel) return false;
-  return true;
-}
-
 function isHandleLikeDelogo(value = {}) {
   const category = String(value.category ?? "unknown");
   return /(?:source_watermark|creator_watermark|platform_repost)/.test(category)
     || /(?:^|\s)@[\w.]+|\b[\w.-]+\.(?:com|net|org|io|ir|co)\b/i.test(String(value.text ?? ""));
-}
-
-export function delogoRegionsFromVision(vision, dimensions = {}, options = {}) {
-  const width = Math.max(1, Number(dimensions.width ?? 0) || 1);
-  const height = Math.max(1, Number(dimensions.height ?? 0) || 1);
-  const minConfidence = Number(options.minConfidence ?? 0.55);
-  const padX = Number(options.padX ?? 0.012);
-  const padY = Number(options.padY ?? 0.012);
-  const overlays = Array.isArray(vision?.overlays) ? vision.overlays : [];
-
-  return overlays
-    .filter((overlay) => overlay?.action === "delogo")
-    .filter((overlay) => Number(overlay?.confidence ?? 0) >= minConfidence)
-    .filter((overlay) => isUsableVisionBox(overlay?.box))
-    .map((overlay) => {
-      const category = String(overlay.category ?? "unknown");
-      const isHandleLike = isHandleLikeDelogo(overlay);
-      const rawW = clamp01(Number(overlay.box.w));
-      const rawH = clamp01(Number(overlay.box.h));
-      const needsAggressivePad = isHandleLike && rawW < 0.12 && rawH < 0.055;
-      const nearLowerFrame = isHandleLike && clamp01(Number(overlay.box.y)) >= 0.58;
-      const leftPad = isHandleLike ? Math.max(padX, needsAggressivePad ? 0.04 : 0.018) : padX;
-      const handleRightPad = needsAggressivePad ? 0.24 : rawW < 0.32 ? 0.20 : 0.12;
-      const rightPad = isHandleLike ? Math.max(padX, handleRightPad) : padX;
-      const handleTopPad = nearLowerFrame ? 0.065 : needsAggressivePad ? 0.045 : 0.018;
-      const topPad = isHandleLike ? Math.max(padY, handleTopPad) : padY;
-      const bottomPad = isHandleLike ? Math.max(padY, needsAggressivePad ? 0.06 : 0.025) : padY;
-      const x = clamp01(Number(overlay.box.x) - leftPad);
-      const y = clamp01(Number(overlay.box.y) - topPad);
-      const w = Math.min(1 - x, clamp01(rawW + leftPad + rightPad));
-      const paddedH = clamp01(rawH + topPad + bottomPad);
-      const h = Math.min(1 - y, isHandleLike ? Math.min(paddedH, 0.135) : paddedH);
-      const px = Math.min(Math.max(0, width - 2), Math.round(x * width));
-      const py = Math.min(Math.max(0, height - 2), Math.round(y * height));
-      const pw = Math.max(1, Math.min(Math.max(1, width - px - 1), Math.round(w * width)));
-      const ph = Math.max(1, Math.min(Math.max(1, height - py - 1), Math.round(h * height)));
-      const region = { x: px, y: py, w: pw, h: ph };
-      const center = { x: width * 0.25, y: height * 0.25, w: width * 0.5, h: height * 0.5 };
-      const areaRatio = rectArea(region) / Math.max(1, width * height);
-      return {
-        x: px,
-        y: py,
-        w: pw,
-        h: ph,
-        areaRatio,
-        centerOverlapRatio: rectOverlap(region, center) / Math.max(1, rectArea(region)),
-        text: String(overlay.text ?? ""),
-        category: String(overlay.category ?? "unknown"),
-        confidence: clamp01(overlay.confidence),
-      };
-    });
-}
-
-export function evaluateDelogoPlan(regions = [], dimensions = {}, options = {}) {
-  const width = Math.max(1, Number(dimensions.width ?? 0) || 1);
-  const height = Math.max(1, Number(dimensions.height ?? 0) || 1);
-  const baseMaxRegions = Number(options.maxDelogoRegions ?? 2);
-  const sameCreatorCleanup = regions.length <= 3 && regions.every((region) => {
-    const category = String(region?.category ?? "");
-    const reason = String(region?.reason ?? "");
-    return /(?:creator_handle|creator_watermark)/i.test(category) || /same creator brand/i.test(reason);
-  });
-  const maxRegions = sameCreatorCleanup ? Math.max(baseMaxRegions, 3) : baseMaxRegions;
-  const maxSingleAreaRatio = Number(options.maxSingleDelogoAreaRatio ?? 0.10);
-  const maxTotalAreaRatio = Number(options.maxTotalDelogoAreaRatio ?? 0.15);
-  const totalAreaRatio = regions.reduce((sum, region) => {
-    const ratio = Number.isFinite(Number(region?.areaRatio))
-      ? Number(region.areaRatio)
-      : rectArea(region) / Math.max(1, width * height);
-    return sum + ratio;
-  }, 0);
-  const largestAreaRatio = regions.reduce((max, region) => {
-    const ratio = Number.isFinite(Number(region?.areaRatio))
-      ? Number(region.areaRatio)
-      : rectArea(region) / Math.max(1, width * height);
-    return Math.max(max, ratio);
-  }, 0);
-
-  let reason = null;
-  if (options.requireDelogoCoordinates === true && regions.length === 0) reason = "delogo_coordinates_uncertain";
-  else if (regions.length > maxRegions) reason = "too_many_delogo_regions";
-  else if (largestAreaRatio > maxSingleAreaRatio) reason = "single_delogo_region_too_large";
-  else if (totalAreaRatio > maxTotalAreaRatio) reason = "total_delogo_area_too_large";
-
-  return {
-    blocked: Boolean(reason),
-    reason,
-    regionCount: regions.length,
-    maxRegions,
-    totalAreaRatio,
-    largestAreaRatio,
-  };
-}
-
-export function selectDelogoRegions({ recoveredRegions = [], modelRegions = [], requireLocalDelogoCoordinates = false, options = {} } = {}) {
-  if (!requireLocalDelogoCoordinates) return [];
-  if (Array.isArray(recoveredRegions) && recoveredRegions.length > 0) return recoveredRegions;
-
-  const candidates = Array.isArray(modelRegions) ? modelRegions : [];
-  if (candidates.length === 0) return [];
-
-  const maxRegions = Number(options.maxDelogoRegions ?? 2);
-  const minConfidence = Number(options.minModelDelogoFallbackConfidence ?? 0.95);
-  const minFrames = Number(options.minModelDelogoFallbackFrames ?? 2);
-  const maxSingleAreaRatio = Math.min(
-    Number(options.maxSingleDelogoAreaRatio ?? 0.10),
-    Number(options.maxModelDelogoFallbackAreaRatio ?? 0.04),
-  );
-  if (candidates.length > maxRegions) return [];
-
-  const safe = candidates.filter((region) => {
-    const confidence = Number(region?.confidence ?? 0);
-    const areaRatio = Number(region?.areaRatio ?? 1);
-    const frames = Array.isArray(region?.seenInFrames) ? region.seenInFrames.length : 0;
-    const hasWatermarkMarker = hasWatermarkTextMarker(region?.text) ||
-      /(?:repost|platform|domain|watermark|handle)/i.test(String(region?.category ?? ""));
-    return confidence >= minConfidence &&
-      areaRatio > 0 &&
-      areaRatio <= maxSingleAreaRatio &&
-      frames >= minFrames &&
-      hasWatermarkMarker;
-  });
-
-  return safe.length === candidates.length
-    ? safe.map((region) => ({ ...region, selectedBy: "model_delogo_fallback" }))
-    : [];
-}
-
-export function protectDelogoRegionsFromLowerText(regions = [], vision, dimensions = {}, options = {}) {
-  const height = Math.max(1, Number(dimensions.height ?? 0) || 1);
-  const lowerText = vision?.lowerTextRegion ?? null;
-  if (!lowerText?.detected || lowerText?.action !== "keep" || Number(lowerText.confidence ?? 0) < 0.75 || !lowerText.box) {
-    return regions;
-  }
-
-  const protectedTop = Math.round(clamp01(lowerText.box.y) * height);
-  if (protectedTop <= 0 || protectedTop >= height) return regions;
-  const gap = Math.max(2, Math.round(height * Number(options.lowerTextDelogoGap ?? 0.012)));
-  const handleOverlapAllowance = Math.round(height * Number(options.handleLowerTextOverlapAllowance ?? 0.035));
-
-  return regions.map((region) => {
-    const y = Math.max(0, Math.round(Number(region.y) || 0));
-    const h = Math.max(1, Math.round(Number(region.h) || 1));
-    const allowedBottom = isHandleLikeDelogo(region) && Number(region.areaRatio ?? 1) <= 0.08
-      ? protectedTop + handleOverlapAllowance
-      : protectedTop - gap;
-    if (y + h <= allowedBottom) return region;
-    const shiftedY = Math.max(0, allowedBottom - h);
-    return {
-      ...region,
-      y: shiftedY,
-      adjustedForLowerText: shiftedY !== y,
-    };
-  });
 }
 
 export function subtitlePlacementFromVision(vision, dimensions = {}, options = {}) {

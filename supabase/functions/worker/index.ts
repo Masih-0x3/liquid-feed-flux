@@ -37,6 +37,7 @@ import {
   requireInternalAuth,
   serviceRoleBearerHeader,
 } from "../_shared/internalAuth.ts";
+import { classifyXPosterResponse } from "../_shared/xPosterOutcome.ts";
 import {
   captureEdgeException,
   captureEdgeExceptionBackground,
@@ -73,6 +74,10 @@ import {
   shouldAutochain,
 } from "../_shared/workerAutochain.ts";
 import { applyRenderedVideoPreference } from "../_shared/videoRenderGate.ts";
+import {
+  resolveEffectiveThreshold,
+  type EffectiveThresholdEnvelope,
+} from "../_shared/effectiveThreshold.ts";
 import type { XMediaRow } from "../_shared/mediaSelection.ts";
 import {
   isProcessedRenderStoragePath,
@@ -84,20 +89,26 @@ import {
   extractMediaFromText,
   extractNumericTweetId,
   formatMessageWithTemplate,
-  hashUrl,
   isTelegramParseError,
   jobError,
   jobLane,
   jobTimingMeta,
+  laneCapacityFor,
   maxBatchSizeForJobTypes,
+  parseRetryAfterFromMessage,
+  runJobsWithLaneCapacity,
   stripMarkdownToPlain,
 } from "./workerUtils.ts";
 import {
   handleJobFailure,
   insertPipelineEvent,
+  JobStateWriteError,
+  claimEnvelopedPatch,
+  markJobProviderStarted,
   mergeJobResultMeta,
   NonRetryableJobError,
   recordPipelineEvent,
+  updateJobOrThrow,
 } from "./jobLifecycle.ts";
 import {
   enqueuePostDeliveryAfterRenderGate as enqueuePostDeliveryAfterRenderGateCore,
@@ -115,6 +126,12 @@ import {
   throwTelegramError,
 } from "./telegramDelivery.ts";
 import {
+  claimTelegramDelivery,
+  completeTelegramDelivery,
+  markTelegramDeliveryAmbiguous,
+  startTelegramDelivery,
+} from "./telegramDeliveryClaim.ts";
+import {
   buildHydratedTweetPatch,
   countDailyHydrationsUsed,
   getTwitterCreds,
@@ -130,6 +147,16 @@ import {
   rmFetchFromFx,
   rmFetchFromVx,
 } from "./mediaWorkflow.ts";
+import { filterReviewedRemoteMediaItems } from "../_shared/remoteMediaPolicy.ts";
+import {
+  fetchRuntimeControls,
+  type RuntimeControls,
+} from "../_shared/runtimeControls.ts";
+import { requireExternalPosting } from "../_shared/externalPostingGuard.ts";
+import {
+  DeliveryCutoverBlockedError,
+  requireDeliveryCutover,
+} from "../_shared/deliveryCutover.ts";
 import {
   buildClassifierToolFunction,
   buildScoringBaseDecisionState,
@@ -157,6 +184,72 @@ const corsHeaders = {
 };
 
 const SETTINGS_CACHE_MS = 45_000;
+const MAX_RESOLVE_MEDIA_SIGNAL_ROWS = 50;
+const ALL_WORKER_JOB_TYPES = [
+  "reprocess",
+  "dedupe",
+  "compute_signature",
+  "resolve_media",
+  "download_media",
+  "hydrate_tweet",
+  "translate",
+  "moderate",
+  "enrich",
+  "deliver",
+] as const;
+
+/** Build the claim filter from server-authoritative runtime controls. */
+export function filterWorkerJobTypes(
+  requested: string[] | null,
+  controls: Pick<RuntimeControls, "dedupe_enabled" | "translation_enabled">,
+): string[] | null {
+  const paused = new Set<string>();
+  if (!controls.dedupe_enabled) {
+    paused.add("dedupe");
+    paused.add("compute_signature");
+  }
+  if (!controls.translation_enabled) paused.add("translate");
+  if (requested !== null) return requested.filter((type) => !paused.has(type));
+  if (paused.size === 0) return null;
+  return ALL_WORKER_JOB_TYPES.filter((type) => !paused.has(type));
+}
+
+export function runtimeControlsNoopResponse(
+  reason = "runtime_controls_unavailable",
+): Response {
+  return new Response(JSON.stringify({
+    success: false,
+    status: "locked",
+    reason,
+    claimed: 0,
+    processed: 0,
+  }), {
+    status: 503,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+export type QueueInsertOutcome = "inserted" | "duplicate";
+export type QueueInsertFailureCode =
+  | "hydrate_dedupe_enqueue_failed"
+  | "dedupe_translate_enqueue_failed"
+  | "reprocess_dedupe_enqueue_failed";
+
+/** Classify the exact PostgREST representation from an idempotent queue insert. */
+export function classifyQueueInsertResult(
+  data: unknown,
+  failureCode: QueueInsertFailureCode,
+): QueueInsertOutcome {
+  if (!Array.isArray(data)) throw new Error(failureCode);
+  if (data.length === 0) return "duplicate";
+  if (data.length !== 1) throw new Error(failureCode);
+  const row = data[0];
+  if (!row || typeof row !== "object" || Array.isArray(row)) throw new Error(failureCode);
+  const id = (row as Record<string, unknown>).id;
+  if (typeof id !== "string" || id.trim() === "") throw new Error(failureCode);
+  return "inserted";
+}
+
 initSentryEdge();
 type ScoringDecisionLog = NonNullable<
   ReturnType<typeof buildScoringBaseDecisionState>["logEvent"]
@@ -184,11 +277,8 @@ async function loadScoringCalibrationExamples(
       .limit(8);
     if (error) throw error;
     return (data ?? []) as ScoringPolicyCalibrationExample[];
-  } catch (error) {
-    console.warn(
-      "worker: failed to load scoring calibration examples:",
-      error instanceof Error ? error.message : String(error),
-    );
+  } catch (_error) {
+    console.warn("worker: failed to load scoring calibration examples");
     return [];
   }
 }
@@ -206,6 +296,13 @@ class JobDeferred extends Error {
     this.name = "JobDeferred";
     this.nextRunAt = new Date(Date.now() + delayMs).toISOString();
     this.meta = meta;
+  }
+}
+
+class DeliveryCutoverBlockedNoWrite extends Error {
+  constructor(readonly reason: string) {
+    super(reason);
+    this.name = "DeliveryCutoverBlockedNoWrite";
   }
 }
 
@@ -275,13 +372,16 @@ async function loadConfig(
     classifierToolSchema: null as string | null,
     contentFilter: {
       enabled: false,
-      default_threshold: 12,
+      // Kept in sync with the shared effective-threshold default (14). The
+      // worker uses resolveEffectiveThreshold for the authoritative threshold.
+      default_threshold: 14,
       editorial_guidelines: "",
       priority_topics: [] as string[],
       low_priority_topics: [] as string[],
       author_rules: {} as Record<string, { rule: string; threshold?: number }>,
       score_only: false,
     },
+    thresholdEnvelope: resolveEffectiveThreshold([]) as EffectiveThresholdEnvelope,
     editorialProfile: null as null | {
       id: string;
       name: string;
@@ -304,7 +404,7 @@ async function loadConfig(
   };
 
   try {
-    const { data: settings } = await supabase
+    const { data: settings, error: settingsError } = await supabase
       .from("settings")
       .select("key, value")
       .in("key", [
@@ -317,6 +417,7 @@ async function loadConfig(
         "x_posting_config",
         "scoring_policy",
       ]);
+    if (settingsError) throw settingsError;
 
     if (settings) {
       // translation_prompt is the authoritative source for OpenAI parameters.
@@ -442,9 +543,14 @@ async function loadConfig(
           };
         }
         if (
-          s.key === "story_memory" && typeof s.value === "object" &&
-          s.value !== null
+          s.key === "story_memory"
         ) {
+          if (
+            s.value === null || typeof s.value !== "object" ||
+            Array.isArray(s.value)
+          ) {
+            throw new Error("worker_story_memory_invalid_response");
+          }
           defaults.storyMemory = normalizeDuplicateGateConfig({
             ...defaults.storyMemory,
             ...s.value as Record<string, unknown>,
@@ -486,11 +592,9 @@ async function loadConfig(
         }
       }
     }
+    defaults.thresholdEnvelope = resolveEffectiveThreshold(settings ?? []);
   } catch (e) {
-    console.warn(
-      "Failed to load config from settings, using defaults:",
-      (e as Error).message,
-    );
+    throw new Error("worker_settings_read_failed");
   }
 
   configCache = { expiresAt: Date.now() + SETTINGS_CACHE_MS, value: defaults };
@@ -503,10 +607,17 @@ async function handleDedupeJob(
   supabase: any,
   config: Awaited<ReturnType<typeof loadConfig>>,
   enqueueNext: boolean,
+  runtimeControls: RuntimeControls,
 ): Promise<boolean> {
   const payload = job.payload as Record<string, unknown>;
   const tweetId = payload.tweet_id as string;
   if (!tweetId) throw new Error("dedupe: missing tweet_id in job payload");
+  if (!runtimeControls.dedupe_enabled) {
+    throw new JobDeferred("dedupe_paused", 30_000, {
+      tweet_id: tweetId,
+      control: "dedupe_enabled",
+    });
+  }
   let workflowRunKey: string | null = null;
   let workflowFinalized = false;
   const finishDedupeWorkflow = async (
@@ -520,14 +631,10 @@ async function handleDedupeJob(
   };
   const sm = config.storyMemory;
   if (!sm?.enabled) {
-    if (enqueueNext) {
-      await queueTranslateFromDedupe(
-        supabase,
-        tweetId,
-        payload.post_hydrate === true,
-      );
-    }
-    return true;
+    throw new JobDeferred("dedupe_not_configured", 30_000, {
+      tweet_id: tweetId,
+      control: "story_memory.enabled",
+    });
   }
 
   const { data: post, error } = await supabase
@@ -650,6 +757,7 @@ async function handleDedupeJob(
         supabase,
         tweetId,
         payload.post_hydrate === true,
+        runtimeControls,
       );
     }
     await finishDedupeWorkflow("completed", {
@@ -672,10 +780,12 @@ async function handleDedupeJob(
     }));
     return true;
   } catch (error) {
+    if (error instanceof JobDeferred) throw error;
+    const e = workerBoundaryError(error, "dedupe_failed");
     await finishDedupeWorkflow("failed", {
       job_type: String(job.type),
-    }, error);
-    throw error;
+    }, e);
+    throw e;
   }
 }
 
@@ -684,13 +794,13 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const authError = await requireInternalAuth(req, corsHeaders);
+  if (authError) return authError;
+
   const supabase = createClient<any, any>(
     Deno.env.get("SUPABASE_URL") ?? "",
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
   );
-
-  const authError = await requireInternalAuth(req, supabase, corsHeaders);
-  if (authError) return authError;
 
   try {
     let requestBody: Record<string, unknown> = {};
@@ -721,6 +831,32 @@ serve(async (req) => {
       batch_cap: batchCap,
     }));
 
+    // Runtime controls are the claim admission boundary. A missing, duplicate,
+    // malformed, or unreadable row must stop before claim_jobs is called.
+    let runtimeControls: RuntimeControls;
+    try {
+      runtimeControls = await fetchRuntimeControls(supabase);
+    } catch (_error) {
+      console.error(JSON.stringify({
+        function: "worker",
+        action: "runtime_controls_unavailable",
+        error: "runtime_controls_unavailable",
+      }));
+      return runtimeControlsNoopResponse();
+    }
+    const claimJobTypes = filterWorkerJobTypes(requestedJobTypes, runtimeControls);
+    if (claimJobTypes !== null && claimJobTypes.length === 0) {
+      return new Response(JSON.stringify({
+        success: true,
+        status: "paused",
+        reason: "runtime_controls_paused_all_requested_types",
+        claimed: 0,
+        processed: 0,
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // Load runtime config
     const config = await loadConfig(supabase, {
       bypassCache: bypassSettingsCache,
@@ -730,8 +866,8 @@ serve(async (req) => {
     const { data: jobs, error: claimError } = await supabase
       .rpc("claim_jobs", {
         batch_size: requestedBatchSize,
-        job_types: requestedJobTypes,
-        worker_id: "worker-" + crypto.randomUUID().slice(0, 8),
+        job_types: claimJobTypes,
+        worker_id: "worker-" + crypto.randomUUID(),
       });
 
     if (claimError) {
@@ -739,10 +875,10 @@ serve(async (req) => {
         JSON.stringify({
           function: "worker",
           action: "claim_error",
-          error: claimError.message,
+          error: "worker_claim_failed",
         }),
       );
-      throw claimError;
+      throw new Error("worker_claim_failed");
     }
 
     if (!jobs || jobs.length === 0) {
@@ -799,34 +935,51 @@ serve(async (req) => {
           const shouldUpdate = !currentNext ||
             currentNext.getTime() < plannedTime.getTime();
           if (shouldUpdate) {
-            try {
-              await supabase
-                .from("jobs")
-                .update({
-                  next_run_at: plannedTime.toISOString(),
-                  status: "pending",
-                  locked_at: null,
-                  locked_by: null,
-                })
-                .eq("id", job.id);
-            } catch (_e) { /* best-effort */ }
+            await updateJobOrThrow(supabase, job.id, claimEnvelopedPatch(job, {
+              next_run_at: plannedTime.toISOString(),
+              status: "pending",
+              locked_at: null,
+              locked_by: null,
+              claim_state: "idle",
+              claim_token: null,
+              claim_generation: 0,
+            }), "deliver_spacing_defer", job.locked_by);
           }
         }
       }
     }
 
     const toRunJobs = [...otherJobs, ...deliverJobsToRun];
+    const laneSelected = { fast: 0, model: 0, delivery: 0 };
+    for (const job of toRunJobs) {
+      laneSelected[jobLane(String(job.type ?? "unknown"))] += 1;
+    }
+    const laneCapacity = {
+      fast: laneCapacityFor("fast"),
+      model: laneCapacityFor("model"),
+      delivery: laneCapacityFor("delivery"),
+    };
     console.log(
       JSON.stringify({
         function: "worker",
         action: "processing",
         count: toRunJobs.length,
         deferred: jobs.length - toRunJobs.length,
+        lane_capacity: laneCapacity,
+        lane_selected: laneSelected,
+        lane_saturated: {
+          fast: laneSelected.fast > laneCapacity.fast,
+          model: laneSelected.model > laneCapacity.model,
+          delivery: laneSelected.delivery > laneCapacity.delivery,
+        },
       }),
     );
 
-    // Process selected jobs in parallel
-    const jobPromises = toRunJobs.map(async (job: Record<string, unknown>) => {
+    // Process selected jobs with independent bounded lane workers. The claim/fetch
+    // batch remains a separate bound and is never used as implicit concurrency.
+    const results = await runJobsWithLaneCapacity(
+      toRunJobs,
+      async (job: Record<string, unknown>, laneMetrics) => {
       try {
         console.log(
           JSON.stringify({
@@ -837,14 +990,50 @@ serve(async (req) => {
           }),
         );
 
-        await recordPipelineEvent(supabase, job, "running");
+        await recordPipelineEvent(supabase, job, "running", undefined, laneMetrics);
 
         let success = false;
         const payload = job.payload as Record<string, unknown> | null;
         try {
+          // Durable provider-start boundary (SF1 / AIR-005): before ANY
+          // side-effect-capable handler runs, persist provider_started_at + the
+          // posting claim_state. A DB marker failure or stale rejection MUST abort
+          // the job with ZERO provider calls -- never run the provider first.
+          if (job.type !== "dedupe" && job.type !== "compute_signature" &&
+              job.type !== "resolve_media") {
+            let providerStarted = false;
+            try {
+              providerStarted = await markJobProviderStarted(supabase, job);
+            } catch (providerStartError) {
+              const err = workerBoundaryError(
+                providerStartError,
+                "job_provider_start_marker_failed",
+              );
+              await handleJobFailure(supabase, job, err, laneMetrics);
+              await recordPipelineEvent(supabase, job, "failed", err.message, laneMetrics);
+              return {
+                success: false,
+                jobId: job.id,
+                error: "job_provider_start_marker_failed",
+              };
+            }
+            if (!providerStarted) {
+              const err = workerBoundaryError(
+                new NonRetryableJobError("job_provider_start_marker_rejected"),
+                "job_provider_start_marker_rejected",
+              );
+              await handleJobFailure(supabase, job, err, laneMetrics);
+              await recordPipelineEvent(supabase, job, "failed", err.message, laneMetrics);
+              return {
+                success: false,
+                jobId: job.id,
+                error: "job_provider_start_marker_rejected",
+              };
+            }
+          }
           switch (job.type) {
             case "translate":
-              success = await handleTranslateJob(job, supabase, config);
+              success = await handleTranslateJob(job, supabase, config, runtimeControls);
               break;
             case "moderate":
               success = await handleModerateJob(job, supabase);
@@ -856,39 +1045,52 @@ serve(async (req) => {
               success = await handleDownloadMediaJob(job, supabase);
               break;
             case "reprocess":
-              success = await handleReprocessJob(job, supabase);
+              success = await handleReprocessJob(job, supabase, runtimeControls);
               break;
             case "hydrate_tweet":
-              success = await handleHydrateTweetJob(job, supabase);
+              success = await handleHydrateTweetJob(job, supabase, runtimeControls);
               break;
             case "resolve_media":
               success = await handleResolveMediaJob(job, supabase);
               break;
             case "dedupe":
-              success = await handleDedupeJob(job, supabase, config, true);
+              success = await handleDedupeJob(
+                job,
+                supabase,
+                config,
+                true,
+                runtimeControls,
+              );
               break;
             case "compute_signature":
-              success = await handleDedupeJob(job, supabase, config, false);
+              success = await handleDedupeJob(
+                job,
+                supabase,
+                config,
+                false,
+                runtimeControls,
+              );
               break;
             case "enrich":
-              success = await handleEnrichJob(job, supabase);
+              success = await handleEnrichJob(job, supabase, runtimeControls);
               break;
             default:
               throw new Error(`Unknown job type: ${String(job.type)}`);
           }
 
           if (success) {
-            await supabase
-              .from("jobs")
-              .update({
-                status: "completed",
-                last_error: null,
-                completed_at: new Date().toISOString(),
-              })
-              .eq("id", job.id);
-
-            const completionMeta = jobTimingMeta(job, "completed");
+            const completionMeta = jobTimingMeta(job, "completed", laneMetrics);
+            // Result metadata is still an active-claim write; persist it before
+            // the terminal state transition so the expected posting/preparing
+            // claim-state fence remains meaningful.
             await mergeJobResultMeta(supabase, job, completionMeta);
+            await updateJobOrThrow(supabase, job.id, claimEnvelopedPatch(job, {
+              status: "completed",
+              last_error: null,
+              completed_at: new Date().toISOString(),
+              claim_state: "posted",
+            }), "complete", job.locked_by);
+            job.claim_state = "posted";
             await recordPipelineEvent(
               supabase,
               job,
@@ -910,28 +1112,40 @@ serve(async (req) => {
             const failure = new Error(
               `${jt}: handler returned false (check worker logs for ${jt}_* / job_error)`,
             );
-            await handleJobFailure(
-              supabase,
-              job,
-              failure,
-            );
-            await recordPipelineEvent(supabase, job, "failed", failure.message);
+            await handleJobFailure(supabase, job, failure, laneMetrics);
+            await recordPipelineEvent(supabase, job, "failed", failure.message, laneMetrics);
             return { success: false, jobId: job.id };
           }
         } catch (error) {
+          if (error instanceof DeliveryCutoverBlockedNoWrite) {
+            console.log(JSON.stringify({
+              function: "worker",
+              action: "job_blocked_without_write",
+              job_id: job.id,
+              type: job.type,
+              reason: error.reason,
+            }));
+            return {
+              success: false,
+              blocked: true,
+              jobId: job.id,
+              reason: error.reason,
+            };
+          }
           if (error instanceof JobDeferred) {
-            await supabase
-              .from("jobs")
-              .update({
-                status: "pending",
-                next_run_at: error.nextRunAt,
-                locked_at: null,
-                locked_by: null,
-                lease_expires_at: null,
-                last_error: null,
-              })
-              .eq("id", job.id);
+            await updateJobOrThrow(supabase, job.id, claimEnvelopedPatch(job, {
+              status: "pending",
+              next_run_at: error.nextRunAt,
+              locked_at: null,
+              locked_by: null,
+              lease_expires_at: null,
+              last_error: null,
+              claim_state: "idle",
+              claim_token: null,
+              claim_generation: 0,
+            }), "defer", job.locked_by);
             await recordPipelineEvent(supabase, job, "queued", undefined, {
+              ...laneMetrics,
               deferred: true,
               next_run_at: error.nextRunAt,
               ...error.meta,
@@ -951,7 +1165,54 @@ serve(async (req) => {
               reason: error.message,
             };
           }
-          const err = jobError(error);
+          if (error instanceof JobStateWriteError && error.operation === "complete") {
+            const reconciliationError = new NonRetryableJobError(
+              "completion_persistence_unknown",
+            );
+            console.error(
+              JSON.stringify({
+                function: "worker",
+                action: "job_completion_persistence_unknown",
+                job_id: job.id,
+                type: job.type,
+                error: "completion_persistence_unknown",
+              }),
+            );
+            try {
+              await handleJobFailure(supabase, job, reconciliationError, laneMetrics);
+              await recordPipelineEvent(
+                supabase,
+                job,
+                "failed",
+                reconciliationError.message,
+                { ...laneMetrics, reconciliation_required: true },
+              );
+            } catch (_reconciliationPersistenceError) {
+              console.error(
+                JSON.stringify({
+                  function: "worker",
+                  action: "job_completion_reconciliation_persistence_failed",
+                  job_id: job.id,
+                  type: job.type,
+                  error: "worker_completion_reconciliation_persistence_failed",
+                }),
+              );
+              return {
+                success: false,
+                jobId: job.id,
+                error: reconciliationError.message,
+                reconciliation_required: true,
+                reconciliation_persistence_failed: true,
+              };
+            }
+            return {
+              success: false,
+              jobId: job.id,
+              error: reconciliationError.message,
+              reconciliation_required: true,
+            };
+          }
+          const err = workerBoundaryError(error, "worker_job_failed");
           console.error(
             JSON.stringify({
               function: "worker",
@@ -967,12 +1228,12 @@ serve(async (req) => {
             tags: { job_type: String(job.type ?? "unknown") },
             extra: { job_id: job.id, payload },
           });
-          await handleJobFailure(supabase, job, err);
-          await recordPipelineEvent(supabase, job, "failed", err.message);
+          await handleJobFailure(supabase, job, err, laneMetrics);
+          await recordPipelineEvent(supabase, job, "failed", err.message, laneMetrics);
           return { success: false, jobId: job.id, error: err.message };
         }
       } catch (error) {
-        const err = jobError(error);
+        const err = workerBoundaryError(error, "worker_outer_failed");
         console.error(
           JSON.stringify({
             function: "worker",
@@ -988,13 +1249,12 @@ serve(async (req) => {
           tags: { job_type: String(job.type ?? "unknown") },
           extra: { job_id: job.id },
         });
-        await handleJobFailure(supabase, job, err);
-        await recordPipelineEvent(supabase, job, "failed", err.message);
+        await handleJobFailure(supabase, job, err, laneMetrics);
+        await recordPipelineEvent(supabase, job, "failed", err.message, laneMetrics);
         return { success: false, jobId: job.id, error: err.message };
       }
-    });
-
-    const results = await Promise.allSettled(jobPromises);
+      },
+    );
 
     let processedCount = 0;
     let failedCount = 0;
@@ -1025,15 +1285,20 @@ serve(async (req) => {
     // Auto-chain due-now queue work with a hard depth cap. This cuts scheduler
     // wait without reintroducing unbounded DB-triggered function churn.
     try {
-      const autochainTypes = selectAutochainJobTypes(requestedJobTypes);
+      const autochainTypes = filterWorkerJobTypes(
+        selectAutochainJobTypes(requestedJobTypes),
+        runtimeControls,
+      ) ?? [];
       const dueCutoff = new Date(Date.now() + AUTOCHAIN_DUE_WINDOW_MS)
         .toISOString();
-      const { count: pendingCount, error: pendingError } = await supabase
-        .from("jobs")
-        .select("id", { count: "exact", head: true })
-        .eq("status", "pending")
-        .in("type", autochainTypes)
-        .or(`next_run_at.is.null,next_run_at.lte.${dueCutoff}`);
+      const { count: pendingCount, error: pendingError } = autochainTypes.length === 0
+        ? { count: 0, error: null }
+        : await supabase
+          .from("jobs")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "pending")
+          .in("type", autochainTypes)
+          .or(`next_run_at.is.null,next_run_at.lte.${dueCutoff}`);
 
       if (pendingError) throw pendingError;
       const duePendingCount = pendingCount ?? 0;
@@ -1068,7 +1333,43 @@ serve(async (req) => {
         JSON.stringify({
           function: "worker",
           action: "autochain_skipped",
-          error: jobError(error).message,
+          error: workerBoundaryError(error, "worker_autochain_failed").message,
+        }),
+      );
+    }
+
+    // SF7: expired-running claim reconciliation rides the existing worker
+    // maintenance tail (alongside autochain). Fully-qualified, service_role-only,
+    // closed search_path reconcile RPC returns 'running' leases that expired
+    // before any provider call back to pending (invalidating the stale token),
+    // and reports (never requeues) provider-started expired claims as ambiguous.
+    // Best-effort: a reconcile failure must not fail the worker invocation.
+    try {
+      const { data: reconcile } = await supabase.rpc(
+        "reconcile_expired_job_claims",
+        { p_max_claims: 200 },
+      );
+      if (reconcile && typeof reconcile === "object") {
+        const rc = reconcile as Record<string, unknown>;
+        if ((rc.requeued ?? 0) !== 0 || (rc.ambiguous ?? 0) !== 0) {
+          console.log(JSON.stringify({
+            function: "worker",
+            action: "reconcile_expired_job_claims",
+            requeued: rc.requeued,
+            ambiguous: rc.ambiguous,
+            reconciled_at: rc.reconciled_at,
+          }));
+        }
+      }
+    } catch (reconcileError) {
+      console.warn(
+        JSON.stringify({
+          function: "worker",
+          action: "reconcile_expired_job_claims_failed",
+          error: workerBoundaryError(
+            reconcileError,
+            "worker_claim_reconcile_failed",
+          ).message,
         }),
       );
     }
@@ -1087,14 +1388,15 @@ serve(async (req) => {
       },
     );
   } catch (error) {
+    const safeError = workerBoundaryError(error, "worker_fatal");
     console.error(
       JSON.stringify({
         function: "worker",
         action: "fatal",
-        error: jobError(error).message,
+        error: safeError.message,
       }),
     );
-    await captureEdgeException(error, {
+    await captureEdgeException(safeError, {
       functionName: "worker",
       action: "fatal",
       request: req,
@@ -1138,12 +1440,49 @@ function workerWorkflowRunKey(type: string, runId: string): string {
   return `worker:${type}:${runId}`;
 }
 
+function workerProviderFailureCode(operation: string, status: unknown): string {
+  const numericStatus = typeof status === "number" && Number.isInteger(status)
+    ? status
+    : null;
+  return numericStatus !== null && numericStatus >= 100 && numericStatus <= 599
+    ? `${operation}_http_${numericStatus}`
+    : `${operation}_request_failed`;
+}
+
+function workerBoundaryError(reason: unknown, fallbackCode: string): Error {
+  const sourceMessage = reason instanceof Error
+    ? reason.message
+    : typeof reason === "string"
+    ? reason
+    : "";
+  const retryAfterValue = reason && typeof reason === "object" &&
+      "retryAfterSeconds" in reason
+    ? (reason as { retryAfterSeconds?: unknown }).retryAfterSeconds
+    : null;
+  const parsedRetryAfter = typeof retryAfterValue === "number" &&
+      Number.isFinite(retryAfterValue)
+    ? retryAfterValue
+    : parseRetryAfterFromMessage(sourceMessage);
+  const retryAfter = parsedRetryAfter == null
+    ? null
+    : Math.max(1, Math.min(86_400, Math.floor(parsedRetryAfter)));
+  const safeMessage = retryAfter == null
+    ? fallbackCode
+    : `${fallbackCode}: retry after ${retryAfter}`;
+  const safeError = reason instanceof NonRetryableJobError
+    ? new NonRetryableJobError(safeMessage)
+    : new Error(safeMessage);
+  if (retryAfter != null) {
+    Object.assign(safeError, { retryAfterSeconds: retryAfter });
+  }
+  return safeError;
+}
+
 function thrownWorkerOpenAIResponse(
-  error: unknown,
+  _error: unknown,
   model: string,
 ): NormalizedOpenAIResponse {
-  const message = error instanceof Error ? error.message : String(error);
-  const raw = { error: { message } };
+  const raw = { error: { code: "worker_openai_request_failed" } };
   return {
     ok: false,
     status: 0,
@@ -1195,7 +1534,7 @@ async function callObservedWorkerOpenAI(
       foglampSkipReason,
       metadata: options.metadata,
     });
-    throw error;
+    throw new Error("worker_openai_request_failed");
   }
 
   await recordObservedOpenAICall(supabase, {
@@ -1222,11 +1561,18 @@ async function handleTranslateJob(
   job: Record<string, unknown>, // deno-lint-ignore no-explicit-any
   supabase: any,
   config: Awaited<ReturnType<typeof loadConfig>>,
+  runtimeControls: RuntimeControls,
 ): Promise<boolean> {
   let workflowRunKey: string | null = null;
   try {
     const payload = job.payload as Record<string, unknown>;
     const tweetId = payload.tweet_id as string;
+    if (!runtimeControls.translation_enabled) {
+      throw new JobDeferred("translation_paused", 30_000, {
+        tweet_id: tweetId,
+        control: "translation_enabled",
+      });
+    }
     const workflowRunId = workerWorkflowRunId(job, tweetId);
     workflowRunKey = workerWorkflowRunKey("translate", workflowRunId);
     await startWorkflowRun(supabase, {
@@ -1479,15 +1825,28 @@ async function handleTranslateJob(
     const scoringPolicyActive = scoringPolicyEnabled &&
       config.scoringPolicy?.enabled === true &&
       config.scoringPolicy?.mode === "active";
-    let splitDecisionState: FeedbackBiasResult | null = null;
+    const activeLegacyProfile = config.editorialProfile &&
+        config.thresholdEnvelope.source === "editorial_profile"
+      ? {
+        ...config.editorialProfile,
+        threshold: config.thresholdEnvelope.threshold,
+      }
+      : config.editorialProfile;
 
+    // Per-post threshold resolution: the shared envelope gives the system
+    // default, but legacy author_rules may still override it. This mirrors the
+    // pre-envelope resolveActiveFeedbackThreshold priority (profile, then
+    // author custom_threshold, then default) so feedback-bias re-evaluations
+    // use the same gate the original decision used.
     const activeFeedbackThreshold = () =>
       resolveActiveFeedbackThreshold({
-        editorialProfileThreshold: config.editorialProfile?.threshold,
+        editorialProfileThreshold: activeLegacyProfile?.threshold,
         authorHandle,
         authorRules: config.contentFilter.author_rules,
-        defaultThreshold: config.contentFilter.default_threshold,
+        defaultThreshold: config.thresholdEnvelope.threshold,
       });
+
+    let splitDecisionState: FeedbackBiasResult | null = null;
 
     const logBaseDecision = (logEvent: ScoringDecisionLog | null) => {
       if (!logEvent) return;
@@ -1545,10 +1904,10 @@ async function handleTranslateJob(
         filterEnabled,
         legacyFilterEnabled,
         scoreOnly,
-        editorialProfile: config.editorialProfile,
+        editorialProfile: activeLegacyProfile,
         authorHandle,
         authorRules: config.contentFilter.author_rules,
-        defaultThreshold: config.contentFilter.default_threshold,
+        defaultThreshold: config.thresholdEnvelope.threshold,
         textOriginal: String(post.text_original || ""),
       });
       importanceScore = result.scoringFields.importanceScore;
@@ -1655,7 +2014,7 @@ async function handleTranslateJob(
             : null,
         });
       } catch (biasErr) {
-        console.warn("feedback bias (non-fatal):", (biasErr as Error).message);
+        console.warn("worker: feedback_bias_failed (non-fatal)");
         return {
           ...state,
           baseScore: state.finalScore,
@@ -1721,9 +2080,7 @@ async function handleTranslateJob(
             )
           );
           if (!trResult.ok) {
-            throw new Error(
-              `OpenAI translation error: ${trResult.status} ${trResult.rawText}`,
-            );
+            throw new Error(workerProviderFailureCode("worker_translation", trResult.status));
           }
           translationUsage =
             (trResult.raw?.usage as Record<string, unknown> | undefined) ??
@@ -1823,11 +2180,7 @@ async function handleTranslateJob(
           )
         );
         if (!scoringPolicyResult.ok) {
-          throw new Error(
-            `OpenAI scoring v2 error: ${
-              scoringPolicyResult.error ?? scoringPolicyResult.audience_reason
-            }`,
-          );
+          throw new Error("worker_scoring_policy_failed");
         }
         await insertPipelineEvent(
           supabase,
@@ -1892,9 +2245,7 @@ async function handleTranslateJob(
         );
 
         if (!scoreResult.ok) {
-          throw new Error(
-            `OpenAI scoring error: ${scoreResult.status} ${scoreResult.rawText}`,
-          );
+          throw new Error(workerProviderFailureCode("worker_scoring", scoreResult.status));
         }
         scoringUsage =
           (scoreResult.raw?.usage as Record<string, unknown> | undefined) ??
@@ -1938,10 +2289,7 @@ async function handleTranslateJob(
               },
             );
           } catch (parseErr) {
-            console.warn(
-              "Failed to parse score tool call:",
-              (parseErr as Error).message,
-            );
+            console.warn("worker: score_tool_parse_failed");
           }
         }
       }
@@ -1989,9 +2337,7 @@ async function handleTranslateJob(
           )
         );
         if (!trResult.ok) {
-          throw new Error(
-            `OpenAI translation error: ${trResult.status} ${trResult.rawText}`,
-          );
+          throw new Error(workerProviderFailureCode("worker_translation", trResult.status));
         }
         translationUsage =
           (trResult.raw?.usage as Record<string, unknown> | undefined) ?? null;
@@ -2066,7 +2412,7 @@ async function handleTranslateJob(
       );
       scoringCallMs = scoringCallMs ?? translationCallMs;
       if (!result.ok) {
-        throw new Error(`OpenAI API error: ${result.status} ${result.rawText}`);
+        throw new Error(workerProviderFailureCode("worker_combined", result.status));
       }
       data = result.raw;
       if (result.toolCall) {
@@ -2110,10 +2456,7 @@ async function handleTranslateJob(
             },
           );
         } catch (parseErr) {
-          console.warn(
-            "Failed to parse tool call, falling back to content:",
-            (parseErr as Error).message,
-          );
+          console.warn("worker: translation_tool_parse_failed; using content fallback");
           translatedText = result.content;
           translationGeneratedThisRun = true;
         }
@@ -2139,7 +2482,7 @@ async function handleTranslateJob(
         )
       );
       if (!result.ok) {
-        throw new Error(`OpenAI API error: ${result.status} ${result.rawText}`);
+        throw new Error(workerProviderFailureCode("worker_translation", result.status));
       }
       data = result.raw;
       translatedText = result.content;
@@ -2247,12 +2590,7 @@ async function handleTranslateJob(
       scoringVersion: scoringPolicyResult ? SCORING_POLICY_VERSION : null,
       splitCalls: !!(filterEnabled && config.splitCalls),
     });
-    try {
-      await supabase.from("jobs").update({ result_meta: resultMeta }).eq(
-        "id",
-        job.id,
-      );
-    } catch (_e) { /* best-effort */ }
+    await mergeJobResultMeta(supabase, job, resultMeta);
 
     // Determine delivery decision based on active editorial profile or legacy
     // content filter. In split mode this was already computed before translation
@@ -2261,11 +2599,12 @@ async function handleTranslateJob(
       await applyFeedbackBiasToDecision(buildBaseDecisionState());
     let duplicatePatch: ReturnType<typeof duplicateDecisionPatch> = null;
     try {
-      const { data: latestDedupe } = await supabase
+      const { data: latestDedupe, error: latestDedupeError } = await supabase
         .from("posts")
         .select("dedupe_status, dup_of_tweet_id, dedupe_reason")
         .eq("tweet_id", tweetId)
         .maybeSingle();
+      if (latestDedupeError) throw latestDedupeError;
       duplicatePatch = duplicateDecisionPatch(
         latestDedupe as {
           dedupe_status?: string | null;
@@ -2274,10 +2613,7 @@ async function handleTranslateJob(
         } | null,
       );
     } catch (dedupeCheckErr) {
-      console.warn(
-        "latest dedupe check failed (continuing)",
-        (dedupeCheckErr as Error).message,
-      );
+      throw new NonRetryableJobError("translate_dedupe_state_unknown");
     }
     const deliveryDecision = duplicatePatch?.delivery_decision ??
       finalDecisionState.deliveryDecision;
@@ -2343,6 +2679,13 @@ async function handleTranslateJob(
     const isTruncated = (post as Record<string, unknown>).is_truncated === true;
     const alreadyHydrated = !!(post as Record<string, unknown>).hydrated_at;
     const hydrationCfg = await loadHydrationSettings(supabase);
+    if (!hydrationCfg.available) {
+      throw new JobDeferred(
+        "translate_hydration_settings_read_failed",
+        30_000,
+        { tweet_id: tweetId, check: "hydration_settings" },
+      );
+    }
     const shouldHydrateNow = shouldQueueHydrationAfterTranslation({
       deliveryDecision,
       isTruncated,
@@ -2354,18 +2697,32 @@ async function handleTranslateJob(
       // Enrichment is an optional X-draft layer. In manual-only mode the main
       // pipeline must continue with plain translation delivery.
       try {
-        const { data: enrichCfgRow } = await supabase
+        const { data: enrichCfgRow, error: enrichCfgError } = await supabase
           .from("settings")
           .select("value")
           .eq("key", "enrichment_config")
           .maybeSingle();
+        if (enrichCfgError) {
+          throw new JobDeferred(
+            "translate_enrichment_config_read_failed",
+            30_000,
+            { tweet_id: tweetId, check: "enrichment_config" },
+          );
+        }
         const enrichConfig = normalizeEnrichmentConfig(
           (enrichCfgRow?.value ?? { enabled: false }) as Partial<
             EnrichmentConfig
           >,
         );
         autoEnrichEnabled = isAutoEnrichmentEnabled(enrichConfig);
-      } catch (_e) { /* default to disabled */ }
+      } catch (error) {
+        if (error instanceof JobDeferred) throw error;
+        throw new JobDeferred(
+          "translate_enrichment_config_read_failed",
+          30_000,
+          { tweet_id: tweetId, check: "enrichment_config" },
+        );
+      }
     }
     const postTranslationRoute = choosePostTranslationRoute({
       tweetId,
@@ -2393,11 +2750,12 @@ async function handleTranslateJob(
         .upsert({
           ...postTranslationRoute.job,
           next_run_at: new Date().toISOString(),
-        }, { onConflict: "idempotency_key", ignoreDuplicates: true });
+      }, { onConflict: "idempotency_key", ignoreDuplicates: true });
       if (hydrateJobError) {
-        console.warn(
-          "Failed to create post-translate hydrate job:",
-          hydrateJobError,
+        throw new JobDeferred(
+          "hydrate_job_enqueue_failed",
+          30_000,
+          { tweet_id: tweetId, check: "post_translate_hydrate" },
         );
       } else {
         await insertPipelineEvent(
@@ -2418,9 +2776,14 @@ async function handleTranslateJob(
         .upsert({
           ...postTranslationRoute.enrichJob,
           next_run_at: new Date().toISOString(),
-        }, { onConflict: "idempotency_key", ignoreDuplicates: true });
+      }, { onConflict: "idempotency_key", ignoreDuplicates: true });
       if (enrichJobError) {
-        console.warn("Failed to enqueue enrich job:", enrichJobError);
+        console.warn(JSON.stringify({
+          function: "worker",
+          action: "enrich_enqueue_failed",
+          tweet_id: tweetId,
+          error: "enrich_job_enqueue_failed",
+        }));
       } else {
         await insertPipelineEvent(
           supabase,
@@ -2488,7 +2851,8 @@ async function handleTranslateJob(
     });
     return true;
   } catch (error) {
-    const e = jobError(error);
+    if (error instanceof JobDeferred) throw error;
+    const e = workerBoundaryError(error, "translate_failed");
     const tid = (job.payload as Record<string, unknown> | undefined)?.tweet_id;
     console.error(JSON.stringify({
       function: "worker",
@@ -2567,6 +2931,7 @@ async function handleModerateJob(
 
     const moderationStartedAt = new Date();
     let moderationHttpStatus: number | null = null;
+    let moderationErrorCode = "worker_moderation_request_failed";
     let data: Record<string, unknown>;
     try {
       const response = await fetch("https://api.openai.com/v1/moderations", {
@@ -2580,9 +2945,11 @@ async function handleModerateJob(
       moderationHttpStatus = response.status;
       const rawText = await response.text();
       if (!response.ok) {
-        throw new Error(
-          `OpenAI Moderation API error: ${response.statusText || response.status}`,
+        moderationErrorCode = workerProviderFailureCode(
+          "worker_moderation",
+          moderationHttpStatus,
         );
+        throw new Error(moderationErrorCode);
       }
       data = JSON.parse(rawText);
       await recordObservedProviderCall(supabase, {
@@ -2606,7 +2973,7 @@ async function handleModerateJob(
           subject_type: subjectType,
         },
       });
-    } catch (moderationError) {
+    } catch (_moderationError) {
       await recordObservedProviderCall(supabase, {
         workflowRunKey: workflowRunKey!,
         traceName: "moderation-pipeline",
@@ -2619,7 +2986,7 @@ async function handleModerateJob(
         usage: null,
         startedAt: moderationStartedAt,
         endedAt: new Date(),
-        error: moderationError,
+        error: new Error(moderationErrorCode),
         spanEstimate: 0,
         foglampExported: false,
         foglampSkipReason: "non_chat_endpoint",
@@ -2627,7 +2994,7 @@ async function handleModerateJob(
           subject_type: subjectType,
         },
       });
-      throw moderationError;
+      throw new Error(moderationErrorCode);
     }
     const moderation = Array.isArray(data.results) &&
         data.results[0] && typeof data.results[0] === "object"
@@ -2651,7 +3018,7 @@ async function handleModerateJob(
     });
     return true;
   } catch (error) {
-    const e = jobError(error);
+    const e = workerBoundaryError(error, "moderate_failed");
     if (workflowRunKey) {
       await finishWorkflowRun(supabase, workflowRunKey, "failed", {
         job_type: "moderate",
@@ -2684,6 +3051,24 @@ async function handleDeliverJob(
       }),
     );
 
+    const assertTelegramDeliveryGuards = async () => {
+      try {
+        // Historical or ambiguous lineage must stop before any delivery-path
+        // write, including a posting-mode deferral or pipeline event.
+        await requireDeliveryCutover(supabase, tweetId);
+        await requireExternalPosting(supabase);
+      } catch (error) {
+        if (error instanceof DeliveryCutoverBlockedError) {
+          throw new DeliveryCutoverBlockedNoWrite(error.message);
+        }
+        throw new JobDeferred("telegram_external_posting_blocked", 30_000, {
+          tweet_id: tweetId,
+          check: "external_posting_guard",
+        });
+      }
+    };
+    await assertTelegramDeliveryGuards();
+
     const telegramBotToken = Deno.env.get("TELEGRAM_BOT_TOKEN");
     const telegramChatId = Deno.env.get("TELEGRAM_CHAT_ID");
 
@@ -2701,25 +3086,39 @@ async function handleDeliverJob(
 
     if (postError || !post) throw new Error(`Post not found: ${tweetId}`);
 
-    const { data: account } = await supabase
+    const { data: account, error: accountError } = await supabase
       .from("accounts")
       .select("handle, display_name")
       .eq("id", post.account_id)
       .single();
+    if (accountError) {
+      throw new JobDeferred(
+        "telegram_account_read_failed",
+        30_000,
+        { tweet_id: tweetId, check: "account" },
+      );
+    }
 
     const messageTemplate = config.messageTemplate as Record<string, unknown>;
 
-    const { data: media } = await supabase
+    const { data: media, error: mediaError } = await supabase
       .from("media")
       .select(
         "id, kind, src_url, storage_path, ordering, downloaded_at, mime_type, file_size, duration_ms, width, height",
       )
       .eq("tweet_id", tweetId)
       .order("ordering");
+    if (mediaError) {
+      throw new JobDeferred(
+        "telegram_media_read_failed",
+        30_000,
+        { tweet_id: tweetId, check: "media" },
+      );
+    }
 
     // Idempotency: skip if already posted
     try {
-      const { data: existingDelivery } = await supabase
+      const { data: existingDelivery, error: existingDeliveryError } = await supabase
         .from("deliveries")
         .select("id")
         .eq("subject_type", "post")
@@ -2727,6 +3126,10 @@ async function handleDeliverJob(
         .eq("status", "posted")
         .eq("telegram_chat_id", telegramChatId)
         .limit(1);
+      if (existingDeliveryError) throw existingDeliveryError;
+      if (!Array.isArray(existingDelivery)) {
+        throw new Error("telegram_duplicate_check_invalid_response");
+      }
       if (existingDelivery && existingDelivery.length > 0) {
         console.log(
           JSON.stringify({
@@ -2748,19 +3151,36 @@ async function handleDeliverJob(
         );
         return true;
       }
-    } catch (_e) { /* best-effort */ }
+    } catch (_e) {
+      throw new JobDeferred(
+        "telegram_duplicate_check_failed",
+        30_000,
+        { tweet_id: tweetId, check: "posted_delivery" },
+      );
+    }
 
     // Cross-subject dedupe by canonical URL
     if (post.url) {
       try {
-        const { data: siblingPosts } = await supabase.from("posts").select(
+        const { data: siblingPosts, error: siblingPostsError } = await supabase.from("posts").select(
           "tweet_id",
         ).eq("url", post.url);
-        const siblingIds = (siblingPosts || []).map((
-          p: Record<string, unknown>,
-        ) => p.tweet_id as string);
+        if (siblingPostsError) throw siblingPostsError;
+        if (!Array.isArray(siblingPosts)) {
+          throw new Error("telegram_url_sibling_posts_invalid_response");
+        }
+        const siblingIds = (siblingPosts || []).map((p: unknown) => {
+          if (!p || typeof p !== "object" || Array.isArray(p)) {
+            throw new Error("telegram_url_sibling_posts_invalid_row");
+          }
+          const tweetIdValue = (p as Record<string, unknown>).tweet_id;
+          if (typeof tweetIdValue !== "string" || tweetIdValue.trim().length === 0) {
+            throw new Error("telegram_url_sibling_posts_invalid_row");
+          }
+          return tweetIdValue.trim();
+        });
         if (siblingIds.length > 0) {
-          const { data: siblingDeliveries } = await supabase
+          const { data: siblingDeliveries, error: siblingDeliveriesError } = await supabase
             .from("deliveries").select("id").eq("status", "posted").eq(
               "subject_type",
               "post",
@@ -2768,6 +3188,10 @@ async function handleDeliverJob(
               "telegram_chat_id",
               telegramChatId,
             ).limit(1);
+          if (siblingDeliveriesError) throw siblingDeliveriesError;
+          if (!Array.isArray(siblingDeliveries)) {
+            throw new Error("telegram_url_sibling_deliveries_invalid_response");
+          }
           if (siblingDeliveries && siblingDeliveries.length > 0) {
             console.log(
               JSON.stringify({
@@ -2791,7 +3215,13 @@ async function handleDeliverJob(
             return true;
           }
         }
-      } catch (_e) { /* best-effort */ }
+      } catch (_e) {
+        throw new JobDeferred(
+          "telegram_url_duplicate_check_failed",
+          30_000,
+          { tweet_id: tweetId, check: "url_delivery" },
+        );
+      }
     }
 
     // Duplicate Gate is expected to run before translation, but keep this
@@ -2842,7 +3272,15 @@ async function handleDeliverJob(
         finalGuard.error,
         finalGuard.meta,
       );
-      return false;
+      throw new JobDeferred(
+        "telegram_dedupe_assertion_failed",
+        30_000,
+        {
+          tweet_id: tweetId,
+          check: "final_dedupe_assertion",
+          ...finalGuard.meta,
+        },
+      );
     }
 
     const renderGate = await prepareVideoRenderGate(
@@ -2891,6 +3329,81 @@ async function handleDeliverJob(
       renderGate.decision,
     );
 
+    let telegramClaim: Awaited<ReturnType<typeof claimTelegramDelivery>>;
+    try {
+      telegramClaim = await claimTelegramDelivery(supabase, {
+        tweetId,
+        chatId: telegramChatId,
+        source: "worker:deliver",
+      });
+    } catch (_claimError) {
+      throw new JobDeferred(
+        "telegram_delivery_claim_failed",
+        30_000,
+        { tweet_id: tweetId, check: "claim" },
+      );
+    }
+    if (!telegramClaim.claimed) {
+      if (telegramClaim.reason.startsWith("delivery_cutover_blocked")) {
+        const reason = "delivery_cutover_blocked:telegram_claim";
+        throw new DeliveryCutoverBlockedNoWrite(reason);
+      }
+      if (telegramClaim.reason === "already_posted") {
+        await insertPipelineEvent(
+          supabase,
+          "post",
+          tweetId,
+          "deliver",
+          "completed",
+          null,
+          new Date().toISOString(),
+          null,
+          { skipped: "telegram_claim_already_posted" },
+        );
+        return true;
+      }
+      if (telegramClaim.reason === "ambiguous") {
+        throw new NonRetryableJobError(
+          "telegram_delivery_ambiguous_requires_reconciliation",
+        );
+      }
+      throw new JobDeferred(
+        `telegram_delivery_claim:${telegramClaim.reason}`,
+        30_000,
+        { tweet_id: tweetId, claim_reason: telegramClaim.reason },
+      );
+    }
+
+    const claimIdentity = {
+      deliveryId: telegramClaim.deliveryId as string,
+      claimToken: telegramClaim.claimToken as string,
+      claimGeneration: telegramClaim.claimGeneration as number,
+    };
+    let providerStarted = false;
+    const beforeTelegramProviderCall = async () => {
+      // This check runs for the initial request and every provider retry.
+      await assertTelegramDeliveryGuards();
+      if (providerStarted) return;
+      let started = false;
+      try {
+        started = await startTelegramDelivery(supabase, claimIdentity);
+      } catch (_error) {
+        throw new JobDeferred(
+          "telegram_delivery_claim_start_failed",
+          30_000,
+          { tweet_id: tweetId },
+        );
+      }
+      if (!started) {
+        throw new JobDeferred(
+          "telegram_delivery_claim_lost_before_provider",
+          30_000,
+          { tweet_id: tweetId },
+        );
+      }
+      providerStarted = true;
+    };
+
     const message = formatMessageWithTemplate(post, account, messageTemplate);
     let telegramMessageIds: string[] = [];
     const telegramStartedAt = Date.now();
@@ -2902,124 +3415,170 @@ async function handleDeliverJob(
     const deliveryMediaRecords = deliveryMedia as Array<
       Record<string, unknown>
     >;
-    if (deliveryMediaRecords && deliveryMediaRecords.length > 0) {
-      const images = deliveryMediaRecords.filter((m: Record<string, unknown>) =>
-        m.kind === "image"
-      );
-      const videos = deliveryMediaRecords.filter((m: Record<string, unknown>) =>
-        m.kind === "video"
-      );
-      const audios = deliveryMediaRecords.filter((m: Record<string, unknown>) =>
-        m.kind === "audio"
-      );
-
-      if (images.length > 0) {
-        if (images.length === 1) {
-          const image = images[0];
-          addTelegramMethod("sendPhoto");
-          const msgIds = await sendTelegramPhotoFromStorage(
-            supabase,
-            telegramBotToken,
-            telegramChatId,
-            image,
-            message,
-          );
-          telegramMessageIds.push(...msgIds);
-        } else {
-          addTelegramMethod("sendMediaGroup");
-          const msgIds = await sendTelegramPhotoGroupFromStorage(
-            supabase,
-            telegramBotToken,
-            telegramChatId,
-            images.slice(0, 10),
-            message,
-          );
-          telegramMessageIds.push(...msgIds);
-        }
-      }
-
-      for (const video of videos) {
-        addTelegramMethod("sendVideo");
-        const msgIds = await sendTelegramVideoFromStorage(
-          supabase,
-          telegramBotToken,
-          telegramChatId,
-          video,
-          message,
+    try {
+      if (deliveryMediaRecords && deliveryMediaRecords.length > 0) {
+        const images = deliveryMediaRecords.filter((m: Record<string, unknown>) =>
+          m.kind === "image"
         );
-        telegramMessageIds.push(...msgIds);
-      }
-
-      for (const audio of audios) {
-        addTelegramMethod("sendAudio");
-        const audioUrl = await getMediaUrl(supabase, audio);
-        const caption = images.length === 0 && videos.length === 0
-          ? message
-          : "Audio from tweet";
-        const msgIds = await sendTelegramMedia(
-          "sendAudio",
-          telegramBotToken,
-          telegramChatId,
-          { audio: audioUrl },
-          caption,
+        const videos = deliveryMediaRecords.filter((m: Record<string, unknown>) =>
+          m.kind === "video"
         );
-        telegramMessageIds.push(...msgIds);
-      }
-    } else {
-      addTelegramMethod("sendMessage");
-      const response = await fetch(
-        `https://api.telegram.org/bot${telegramBotToken}/sendMessage`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            chat_id: telegramChatId,
-            text: message,
-            parse_mode: "Markdown",
-            disable_web_page_preview: false,
-          }),
-        },
-      );
-      const result = await response.json();
-      if (result.ok) {
-        telegramMessageIds.push(String(result.result.message_id));
-      } else {
-        if (isTelegramParseError(result?.description ?? "")) {
-          const retryResp = await fetch(
-            `https://api.telegram.org/bot${telegramBotToken}/sendMessage`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                chat_id: telegramChatId,
-                text: stripMarkdownToPlain(message),
-                disable_web_page_preview: false,
-              }),
-            },
-          );
-          const retryRes = await retryResp.json();
-          if (retryRes?.ok) {
-            telegramMessageIds.push(String(retryRes.result.message_id));
+        const audios = deliveryMediaRecords.filter((m: Record<string, unknown>) =>
+          m.kind === "audio"
+        );
+
+        if (images.length > 0) {
+          if (images.length === 1) {
+            const image = images[0];
+            addTelegramMethod("sendPhoto");
+            const msgIds = await sendTelegramPhotoFromStorage(
+              supabase,
+              telegramBotToken,
+              telegramChatId,
+              image,
+              message,
+              beforeTelegramProviderCall,
+            );
+            telegramMessageIds.push(...msgIds);
           } else {
-            throwTelegramError("sendMessage", result, response.status);
+            addTelegramMethod("sendMediaGroup");
+            const msgIds = await sendTelegramPhotoGroupFromStorage(
+              supabase,
+              telegramBotToken,
+              telegramChatId,
+              images.slice(0, 10),
+              message,
+              beforeTelegramProviderCall,
+            );
+            telegramMessageIds.push(...msgIds);
           }
+        }
+
+        for (const video of videos) {
+          addTelegramMethod("sendVideo");
+          const msgIds = await sendTelegramVideoFromStorage(
+            supabase,
+            telegramBotToken,
+            telegramChatId,
+            video,
+            message,
+            beforeTelegramProviderCall,
+          );
+          telegramMessageIds.push(...msgIds);
+        }
+
+        for (const audio of audios) {
+          addTelegramMethod("sendAudio");
+          const audioUrl = await getMediaUrl(supabase, audio);
+          const caption = images.length === 0 && videos.length === 0
+            ? message
+            : "Audio from tweet";
+          const msgIds = await sendTelegramMedia(
+            "sendAudio",
+            telegramBotToken,
+            telegramChatId,
+            { audio: audioUrl },
+            caption,
+            beforeTelegramProviderCall,
+          );
+          telegramMessageIds.push(...msgIds);
+        }
+      } else {
+        addTelegramMethod("sendMessage");
+        await beforeTelegramProviderCall();
+        const response = await fetch(
+          `https://api.telegram.org/bot${telegramBotToken}/sendMessage`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              chat_id: telegramChatId,
+              text: message,
+              parse_mode: "Markdown",
+              disable_web_page_preview: false,
+            }),
+          },
+        );
+        const result = await response.json();
+        if (result.ok) {
+          telegramMessageIds.push(String(result.result.message_id));
         } else {
-          throwTelegramError("sendMessage", result, response.status);
+          let finalResult = result;
+          let finalStatus = response.status;
+          if (isTelegramParseError(result?.description ?? "")) {
+            await beforeTelegramProviderCall();
+            const retryResp = await fetch(
+              `https://api.telegram.org/bot${telegramBotToken}/sendMessage`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  chat_id: telegramChatId,
+                  text: stripMarkdownToPlain(message),
+                  disable_web_page_preview: false,
+                }),
+              },
+            );
+            const retryResult = await retryResp.json();
+            finalResult = retryResult;
+            finalStatus = retryResp.status;
+            if (retryResult?.ok) {
+              telegramMessageIds.push(String(retryResult.result.message_id));
+            }
+          }
+          if (!finalResult?.ok) {
+            throwTelegramError("sendMessage", finalResult, finalStatus);
+          }
         }
       }
+    } catch (error) {
+      if (providerStarted) {
+        try {
+          await markTelegramDeliveryAmbiguous(supabase, {
+            ...claimIdentity,
+            messageIds: telegramMessageIds,
+          });
+        } catch (_ambiguityError) {
+          // The non-retryable boundary remains authoritative if ambiguity persistence fails.
+        }
+        throw new NonRetryableJobError(
+          "telegram_delivery_ambiguous_requires_reconciliation",
+        );
+      }
+      throw error;
     }
 
-    // Record successful delivery
-    await supabase.from("deliveries").insert({
-      subject_type: "post",
-      subject_id: tweetId,
-      telegram_chat_id: telegramChatId,
-      telegram_message_ids: telegramMessageIds,
-      status: "posted",
-      posted_at: new Date().toISOString(),
-      last_attempt_at: new Date().toISOString(),
-      attempts: 1,
-    });
+    if (!providerStarted) {
+      throw new JobDeferred(
+        "telegram_delivery_no_provider_call",
+        30_000,
+        { tweet_id: tweetId, check: "sendable_media" },
+      );
+    }
+
+    let completed = false;
+    try {
+      completed = await completeTelegramDelivery(supabase, {
+        ...claimIdentity,
+        messageIds: telegramMessageIds,
+      });
+    } catch (_completionError) {
+      completed = false;
+    }
+    if (!completed) {
+      try {
+        await markTelegramDeliveryAmbiguous(supabase, {
+          ...claimIdentity,
+          messageIds: telegramMessageIds,
+          error: "telegram_delivery_completion_unknown",
+        });
+      } catch (_ambiguityError) {
+        // Do not turn an unknown provider outcome into an automatic retry.
+      }
+      throw new NonRetryableJobError(
+        "telegram_delivery_completion_unknown",
+      );
+    }
 
     await insertPipelineEvent(
       supabase,
@@ -3044,12 +3603,25 @@ async function handleDeliverJob(
       error instanceof StaleMediaObjectError &&
       !isProcessedRenderStoragePath(error.storagePath)
     ) {
-      await repairStaleMediaObject(supabase, {
-        tweetId,
-        mediaId: error.mediaId,
-        storagePath: error.storagePath,
-        source: "telegram_delivery",
-      });
+      try {
+        await repairStaleMediaObject(supabase, {
+          tweetId,
+          mediaId: error.mediaId,
+          storagePath: error.storagePath,
+          source: "telegram_delivery",
+        });
+      } catch (_repairError) {
+        throw new JobDeferred(
+          "stale_media_repair_failed",
+          30_000,
+          {
+            tweet_id: tweetId,
+            media_id: error.mediaId,
+            storage_path: error.storagePath,
+            check: "stale_media_repair",
+          },
+        );
+      }
       throw new JobDeferred(
         `stale_media_repair:${error.storagePath}`,
         VIDEO_RENDER_DEFER_MS,
@@ -3060,7 +3632,8 @@ async function handleDeliverJob(
         },
       );
     }
-    const e = jobError(error);
+    if (error instanceof JobDeferred) throw error;
+    const e = workerBoundaryError(error, "deliver_failed");
     console.error(
       JSON.stringify({
         function: "worker",
@@ -3081,9 +3654,17 @@ async function handleDeliverJob(
 async function handleEnrichJob(
   job: Record<string, unknown>,
   supabase: any,
+  runtimeControls: RuntimeControls,
 ): Promise<boolean> {
   const payload = job.payload as Record<string, unknown>;
   const tweetId = payload.tweet_id as string;
+  if (!runtimeControls.translation_enabled) {
+    throw new JobDeferred("translation_paused", 30_000, {
+      tweet_id: tweetId,
+      control: "translation_enabled",
+      stage: "enrich",
+    });
+  }
   const forceReview = payload.force_review === true;
   let workflowRunKey: string | null = null;
   if (!tweetId) throw new Error("enrich: missing tweet_id in job payload");
@@ -3113,20 +3694,34 @@ async function handleEnrichJob(
   }
 
   // Load enrichment_config
-  const { data: configRow } = await supabase
+  const { data: configRow, error: configError } = await supabase
     .from("settings")
     .select("value")
     .eq("key", "enrichment_config")
     .single();
+  if (configError) {
+    throw new JobDeferred(
+      "enrich_config_read_failed",
+      30_000,
+      { tweet_id: tweetId, check: "enrichment_config" },
+    );
+  }
   const enrichConfig = normalizeEnrichmentConfig(
     (configRow?.value ?? { enabled: false }) as Partial<EnrichmentConfig>,
   );
   if (!enrichConfig.enabled && !forceReview) {
     // Enrichment disabled -- mark skipped and pass through to deliver (unless manual test)
-    await supabase.from("posts").update({ enrich_status: "skipped" }).eq(
+    const { error: enrichSkipError } = await supabase.from("posts").update({ enrich_status: "skipped" }).eq(
       "tweet_id",
       tweetId,
     );
+    if (enrichSkipError) {
+      throw new JobDeferred(
+        "enrich_skip_status_write_failed",
+        30_000,
+        { tweet_id: tweetId, check: "skip_status" },
+      );
+    }
     await enqueueDeliverAfterEnrich(supabase, tweetId);
     console.log(
       JSON.stringify({
@@ -3139,12 +3734,26 @@ async function handleEnrichJob(
   }
 
   // Load @masihh voice guide/profile plus secondary voice samples.
-  const { data: voiceRows } = await supabase
+  const { data: voiceRows, error: voiceSettingsError } = await supabase
     .from("settings")
     .select("key, value")
     .in("key", ["voice_samples", "voice_guide", "personal_voice_profile"]);
+  if (voiceSettingsError) {
+    throw new JobDeferred(
+      "enrich_voice_settings_read_failed",
+      30_000,
+      { tweet_id: tweetId, check: "voice_settings" },
+    );
+  }
+  if (!Array.isArray(voiceRows)) {
+    throw new JobDeferred(
+      "enrich_voice_settings_invalid_response",
+      30_000,
+      { tweet_id: tweetId, check: "voice_settings" },
+    );
+  }
   const voiceSettings = new Map(
-    (voiceRows ?? []).map((
+    voiceRows.map((
       row: { key: string; value: unknown },
     ) => [row.key, row.value]),
   );
@@ -3186,10 +3795,17 @@ async function handleEnrichJob(
   }
 
   // Mark enrichment in progress
-  await supabase.from("posts").update({ enrich_status: "pending" }).eq(
+  const { error: enrichPendingError } = await supabase.from("posts").update({ enrich_status: "pending" }).eq(
     "tweet_id",
     tweetId,
   );
+  if (enrichPendingError) {
+    throw new JobDeferred(
+      "enrich_pending_status_write_failed",
+      30_000,
+      { tweet_id: tweetId, check: "pending_status" },
+    );
+  }
   const startedAt = new Date().toISOString();
   await insertPipelineEvent(
     supabase,
@@ -3265,7 +3881,7 @@ async function handleEnrichJob(
       },
     };
 
-    await supabase.from("posts").update({
+    const { error: enrichPostWriteError } = await supabase.from("posts").update({
       enrichment_version: enrichConfig.version,
       background_context: result.researcher ? result.researcher : null,
       editorial_commentary: result.analyst.commentary,
@@ -3291,8 +3907,13 @@ async function handleEnrichJob(
       enrich_tokens: result.totalTokens,
       enrich_duration_ms: result.durationMs,
     }).eq("tweet_id", tweetId);
+    if (enrichPostWriteError) {
+      throw new NonRetryableJobError(
+        "enrich_result_persistence_unknown:posts",
+      );
+    }
 
-    await supabase.from("post_enrichments").insert({
+    const { error: enrichmentInsertError } = await supabase.from("post_enrichments").insert({
       post_id: tweetId,
       version: enrichConfig.version,
       status: enrichStatus,
@@ -3319,6 +3940,11 @@ async function handleEnrichJob(
         publish_recommendation: result.publishRecommendation,
       },
     });
+    if (enrichmentInsertError) {
+      throw new NonRetryableJobError(
+        "enrich_result_persistence_unknown:post_enrichments",
+      );
+    }
 
     const endedAt = new Date().toISOString();
     await insertPipelineEvent(
@@ -3367,17 +3993,26 @@ async function handleEnrichJob(
     }));
     return true;
   } catch (e) {
-    const err = e instanceof Error ? e : new Error(String(e));
+    if (e instanceof JobDeferred) throw e;
+    const err = workerBoundaryError(e, "enrich_failed");
     if (workflowRunKey) {
       await finishWorkflowRun(supabase, workflowRunKey, "failed", {
         job_type: "enrich",
         post_count: 1,
       }, err);
     }
-    await supabase.from("posts").update({ enrich_status: "failed" }).eq(
+    const { error: enrichFailureStatusError } = await supabase.from("posts").update({ enrich_status: "failed" }).eq(
       "tweet_id",
       tweetId,
     );
+    if (enrichFailureStatusError) {
+      console.error(JSON.stringify({
+        function: "worker",
+        action: "enrich_failure_status_write_failed",
+        tweet_id: tweetId,
+        error: "enrich_failure_status_write_failed",
+      }));
+    }
     await insertPipelineEvent(
       supabase,
       "post",
@@ -3388,6 +4023,11 @@ async function handleEnrichJob(
       new Date().toISOString(),
       err.message,
     );
+    if (enrichFailureStatusError) {
+      throw new NonRetryableJobError(
+        "enrich_failure_status_persistence_unknown",
+      );
+    }
     throw err;
   }
 }
@@ -3432,7 +4072,16 @@ async function handleDownloadMediaJob(
       ),
     );
 
-    if (error) throw new Error(`Media processor error: ${error.message}`);
+    if (error) throw new Error("media_processor_invoke_failed");
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      throw new Error("media_processor_invalid_response");
+    }
+    const mediaProcessorResult = data as Record<string, unknown>;
+    const downloaded = typeof mediaProcessorResult.downloaded === "number" &&
+        Number.isSafeInteger(mediaProcessorResult.downloaded) &&
+        mediaProcessorResult.downloaded >= 0
+      ? Math.min(mediaProcessorResult.downloaded, 1000)
+      : null;
     await insertPipelineEvent(
       supabase,
       "post",
@@ -3444,12 +4093,17 @@ async function handleDownloadMediaJob(
       null,
       {
         media_download_ms: Date.now() - started,
-        result: data ?? null,
+        processor_success: mediaProcessorResult.success === true,
+        downloaded,
       },
     );
     return true;
   } catch (error) {
     const e = jobError(error);
+    const errorCode = e.message === "media_processor_invoke_failed" ||
+        e.message === "media_processor_invalid_response"
+      ? e.message
+      : "media_download_failed";
     await insertPipelineEvent(
       supabase,
       "post",
@@ -3458,102 +4112,95 @@ async function handleDownloadMediaJob(
       "failed",
       null,
       null,
-      e.message,
+      errorCode,
     );
-    throw new Error(`download_media[${tweetId}]: ${e.message}`);
+    throw new Error(`download_media[${tweetId}]: ${errorCode}`);
   }
 }
 
 async function handleReprocessJob(
   job: Record<string, unknown>, // deno-lint-ignore no-explicit-any
   supabase: any,
+  runtimeControls: RuntimeControls,
 ): Promise<boolean> {
   const payload = job.payload as Record<string, unknown>;
   const tweetId = payload.tweet_id as string;
+  if (!runtimeControls.dedupe_enabled) {
+    throw new JobDeferred("dedupe_paused", 30_000, {
+      tweet_id: tweetId,
+      control: "dedupe_enabled",
+    });
+  }
   try {
     const { data: post, error: postError } = await supabase
       .from("posts").select("tweet_id, text_original").eq("tweet_id", tweetId)
       .single();
-    if (postError || !post) throw new Error(`Post not found: ${tweetId}`);
+    if (postError || !post) throw new Error("reprocess_post_read_failed");
 
-    const mediaItems = extractMediaFromText(post.text_original || "");
-    await supabase.from("media").delete().eq("tweet_id", tweetId);
+    const extractedMediaItems = extractMediaFromText(post.text_original || "");
+    const { accepted: mediaItems, rejected: rejectedMediaItems } =
+      filterReviewedRemoteMediaItems(extractedMediaItems);
+    // Retain the live attachment set until its staged replacement can commit atomically.
+    await insertPipelineEvent(
+      supabase,
+      "post",
+      tweetId,
+      "media",
+      "skipped",
+      null,
+      new Date().toISOString(),
+      "reprocess_media_staging_required",
+      {
+        extracted_media_count: extractedMediaItems.length,
+        reviewed_media_count: mediaItems.length,
+        rejected_media_count: rejectedMediaItems,
+      },
+    );
 
-    if (mediaItems.length > 0) {
-      const mediaRows = await Promise.all(
-        mediaItems.map(async (media, index) => ({
-          tweet_id: tweetId,
-          kind: media.type,
-          src_url: media.url,
-          src_url_hash: await hashUrl(media.url),
-          width: media.width,
-          height: media.height,
-          duration_ms: media.duration,
-          ordering: index,
-        })),
-      );
-      await supabase.from("media").insert(mediaRows);
-      await supabase.from("posts").update({ has_media: true }).eq(
-        "tweet_id",
-        tweetId,
-      );
-      await supabase.from("jobs").upsert({
-        type: "download_media",
-        payload: { tweet_id: tweetId },
-        status: "pending",
-        idempotency_key: `download_media:reprocess:${tweetId}`,
-        next_run_at: new Date().toISOString(),
-      }, { onConflict: "idempotency_key", ignoreDuplicates: true });
-    } else {
-      await supabase.from("posts").update({ has_media: false }).eq(
-        "tweet_id",
-        tweetId,
-      );
+    const { data: insertedRows, error: enqueueError } = await supabase.from("jobs").upsert({
+      type: "dedupe",
+      payload: { tweet_id: tweetId, force: true, source: "reprocess" },
+      status: "pending",
+      priority: 30,
+      idempotency_key: `dedupe:reprocess:${tweetId}`,
+      next_run_at: new Date().toISOString(),
+    }, { onConflict: "idempotency_key", ignoreDuplicates: true }).select("id");
+    if (enqueueError) {
+      throw new Error("reprocess_dedupe_enqueue_failed");
     }
-
-    if (await isDuplicateGateEnabled(supabase)) {
-      await supabase.from("jobs").upsert({
-        type: "dedupe",
-        payload: { tweet_id: tweetId, force: true, source: "reprocess" },
-        status: "pending",
-        priority: 30,
-        idempotency_key: `dedupe:reprocess:${tweetId}`,
-        next_run_at: new Date().toISOString(),
-      }, { onConflict: "idempotency_key", ignoreDuplicates: true });
-      await markDedupePending(supabase, tweetId, "queued:reprocess");
-      await insertPipelineEvent(
-        supabase,
-        "post",
-        tweetId,
-        "dedupe",
-        "queued",
-        new Date().toISOString(),
-        null,
-        null,
-        { source: "reprocess" },
-      );
-    } else {
-      await supabase.from("jobs").upsert({
-        type: "translate",
-        payload: { tweet_id: tweetId },
-        status: "pending",
-        idempotency_key: `translate:reprocess:${tweetId}`,
-        next_run_at: new Date().toISOString(),
-      }, { onConflict: "idempotency_key", ignoreDuplicates: true });
-    }
+    if (classifyQueueInsertResult(insertedRows, "reprocess_dedupe_enqueue_failed") === "duplicate") return true;
+    await markDedupePending(supabase, tweetId, "queued:reprocess");
+    await insertPipelineEvent(
+      supabase,
+      "post",
+      tweetId,
+      "dedupe",
+      "queued",
+      new Date().toISOString(),
+      null,
+      null,
+      { source: "reprocess" },
+    );
 
     return true;
   } catch (error) {
+    if (error instanceof JobDeferred) throw error;
     const e = jobError(error);
+    const knownErrors = new Set([
+      "reprocess_post_read_failed",
+      "reprocess_media_staging_required",
+      "reprocess_dedupe_enqueue_failed",
+    ]);
+    const errorCode = knownErrors.has(e.message) ? e.message : "reprocess_failed";
     console.error(
       JSON.stringify({
         function: "worker",
         action: "reprocess_error",
         tweet_id: tweetId,
-        error: e.message,
+        error: errorCode,
       }),
     );
-    throw new Error(`reprocess[${tweetId}]: ${e.message}`);
+    throw new Error(`reprocess[${tweetId}]: ${errorCode}`);
   }
 }
 
@@ -3585,7 +4232,7 @@ async function dispatchXPosterForTarget( // deno-lint-ignore no-explicit-any
     },
     headers: serviceRoleBearerHeader(),
   } as Record<string, unknown>).then(
-    ({ error }: { error?: { message?: string } | null }) => {
+    ({ data, error }: { data?: unknown; error?: { message?: string } | null }) => {
       if (error) {
         return insertPipelineEvent(
           supabase,
@@ -3595,13 +4242,36 @@ async function dispatchXPosterForTarget( // deno-lint-ignore no-explicit-any
           "failed",
           null,
           new Date().toISOString(),
-          error.message ?? "x-poster invoke failed",
-          meta,
+          "x_poster_invoke_failed",
+          { ...meta, outcome_status: "failed", outcome_reason: "x_poster_invoke_failed" },
         );
       }
-      return undefined;
+      const outcome = classifyXPosterResponse(data, tweetId);
+      const eventStatus = outcome.status === "posted"
+        ? "completed"
+        : outcome.status === "failed"
+        ? "failed"
+        : outcome.status === "deferred"
+        ? "pending"
+        : "skipped";
+      return insertPipelineEvent(
+        supabase,
+        "post",
+        tweetId,
+        "x_dispatch",
+        eventStatus,
+        null,
+        new Date().toISOString(),
+        outcome.status === "failed" ? outcome.reason : null,
+        {
+          ...meta,
+          outcome_status: outcome.status,
+          outcome_reason: outcome.reason,
+          outcome_x_tweet_id: outcome.xTweetId,
+        },
+      );
     },
-  ).catch((error: unknown) =>
+  ).catch((_error: unknown) =>
     insertPipelineEvent(
       supabase,
       "post",
@@ -3610,8 +4280,8 @@ async function dispatchXPosterForTarget( // deno-lint-ignore no-explicit-any
       "failed",
       null,
       new Date().toISOString(),
-      error instanceof Error ? error.message : String(error),
-      meta,
+      "x_poster_invoke_failed",
+      { ...meta, outcome_status: "failed", outcome_reason: "x_poster_invoke_failed" },
     )
   );
 
@@ -3636,42 +4306,64 @@ async function queueTranslateAfterHydrate( // deno-lint-ignore no-explicit-any
   supabase: any,
   tweetId: string,
   fallback: boolean,
+  _runtimeControls: RuntimeControls,
 ): Promise<void> {
-  // CRITICAL: must use a key DISTINCT from the initial `translate:${tweetId}`
-  // job. Otherwise the upsert is ignored (idempotency collision) and the
-  // truncated translation is never replaced with the full hydrated text,
-  // causing the x-poster / Telegram pipeline to deliver stale truncated copy.
-  await supabase.from("jobs").upsert({
-    type: "translate",
+  // Hydration always hands off to dedupe. The claim filter, not this helper,
+  // pauses dedupe. This prevents a disabled dedupe control from bypassing to
+  // translation while keeping the canonical pending job visible.
+  try {
+    await queueDedupeAfterHydrate(supabase, tweetId, fallback);
+  } catch (error) {
+    if (error instanceof JobDeferred) throw error;
+    throw new Error("hydrate_translate_enqueue_failed");
+  }
+}
+
+async function queueDedupeAfterHydrate( // deno-lint-ignore no-explicit-any
+  supabase: any,
+  tweetId: string,
+  fallback = false,
+): Promise<void> {
+  const { data: insertedRows, error: enqueueError } = await supabase.from("jobs").upsert({
+    type: "dedupe",
     payload: { tweet_id: tweetId, post_hydrate: true },
     status: "pending",
-    priority: 10,
-    idempotency_key: `translate:hydrate:${tweetId}`,
+    priority: 30,
+    idempotency_key: `dedupe:hydrate:${tweetId}`,
     next_run_at: new Date().toISOString(),
     result_meta: fallback ? { fallback: "truncated" } : null,
-  }, { onConflict: "idempotency_key", ignoreDuplicates: true });
-
-  try {
-    await supabase.from("pipeline_events").insert({
-      subject_type: "post",
-      subject_id: tweetId,
-      step: "translate",
-      status: "queued",
-      started_at: new Date().toISOString(),
-      meta: { source: fallback ? "hydrate_fallback" : "hydrate" },
-    });
-  } catch { /* best-effort */ }
+  }, { onConflict: "idempotency_key", ignoreDuplicates: true }).select("id");
+  if (enqueueError) {
+    throw new Error("hydrate_dedupe_enqueue_failed");
+  }
+  // `ignoreDuplicates` returns an empty representation for an existing
+  // idempotency key. Do not reset a completed or running post when the
+  // canonical job already exists.
+  if (classifyQueueInsertResult(insertedRows, "hydrate_dedupe_enqueue_failed") === "duplicate") return;
+  await markDedupePending(supabase, tweetId, "queued:hydrate");
+  await insertPipelineEvent(
+    supabase,
+    "post",
+    tweetId,
+    "dedupe",
+    "queued",
+    new Date().toISOString(),
+    null,
+    null,
+    { source: fallback ? "hydrate_fallback" : "hydrate" },
+  );
 }
 
 async function queueTranslateFromDedupe( // deno-lint-ignore no-explicit-any
   supabase: any,
   tweetId: string,
   postHydrate = false,
+  _runtimeControls?: RuntimeControls,
 ): Promise<void> {
   const idempotencyKey = postHydrate
     ? `translate:hydrate:${tweetId}`
     : `translate:${tweetId}`;
-  await supabase.from("jobs").upsert({
+  const { data: insertedRows, error: enqueueError } = await supabase.from("jobs").upsert({
     type: "translate",
     payload: {
       tweet_id: tweetId,
@@ -3681,18 +4373,25 @@ async function queueTranslateFromDedupe( // deno-lint-ignore no-explicit-any
     priority: 10,
     idempotency_key: idempotencyKey,
     next_run_at: new Date().toISOString(),
-  }, { onConflict: "idempotency_key", ignoreDuplicates: true });
+  }, { onConflict: "idempotency_key", ignoreDuplicates: true }).select("id");
+  if (enqueueError) {
+    throw new Error("dedupe_translate_enqueue_failed");
+  }
+  // An ignored duplicate is already represented by the durable idempotency
+  // key. It must not create a second queue event or alter post state.
+  if (classifyQueueInsertResult(insertedRows, "dedupe_translate_enqueue_failed") === "duplicate") return;
 
-  try {
-    await supabase.from("pipeline_events").insert({
-      subject_type: "post",
-      subject_id: tweetId,
-      step: "translate",
-      status: "queued",
-      started_at: new Date().toISOString(),
-      meta: { source: postHydrate ? "dedupe_after_hydrate" : "dedupe" },
-    });
-  } catch { /* best-effort */ }
+  await insertPipelineEvent(
+    supabase,
+    "post",
+    tweetId,
+    "translate",
+    "queued",
+    new Date().toISOString(),
+    null,
+    null,
+    { source: postHydrate ? "dedupe_after_hydrate" : "dedupe" },
+  );
 }
 
 async function markDedupePending( // deno-lint-ignore no-explicit-any
@@ -3700,7 +4399,7 @@ async function markDedupePending( // deno-lint-ignore no-explicit-any
   tweetId: string,
   reason: string,
 ): Promise<void> {
-  await supabase
+  const { error } = await supabase
     .from("posts")
     .update({
       dedupe_status: "pending",
@@ -3709,59 +4408,55 @@ async function markDedupePending( // deno-lint-ignore no-explicit-any
       dedupe_reason: reason,
       dedupe_checked_at: null,
     })
-    .eq("tweet_id", tweetId)
-    .then(() => null, () => null);
+    .eq("tweet_id", tweetId);
+  if (error) {
+    throw new Error("dedupe_pending_update_failed");
+  }
 }
 
+// Legacy read-only seam retained for compatibility with existing lifecycle
+// source checks. RuntimeControls and the claim filter are authoritative; this
+// helper is not used for queue routing or pause decisions.
 async function isDuplicateGateEnabled( // deno-lint-ignore no-explicit-any
   supabase: any,
+  tweetId: string,
 ): Promise<boolean> {
-  try {
-    const { data } = await supabase.from("settings").select("value").eq(
-      "key",
-      "story_memory",
-    ).maybeSingle();
-    return normalizeDuplicateGateConfig(data?.value ?? DEFAULT_DUPLICATE_GATE)
-      .enabled;
-  } catch {
-    return DEFAULT_DUPLICATE_GATE.enabled;
+  const { data, error } = await supabase.from("settings").select("value").eq(
+    "key",
+    "story_memory",
+  ).maybeSingle();
+  if (error) {
+    throw new JobDeferred("duplicate_gate_config_read_failed", 30_000, {
+      tweet_id: tweetId,
+      check: "story_memory",
+    });
   }
+  if (data !== null && (typeof data !== "object" || Array.isArray(data))) {
+    throw new JobDeferred("duplicate_gate_config_invalid_response", 30_000, {
+      tweet_id: tweetId,
+      check: "story_memory",
+    });
+  }
+  return normalizeDuplicateGateConfig(data?.value ?? DEFAULT_DUPLICATE_GATE).enabled;
 }
 
 async function queueDedupeOrTranslateAfterHydrate( // deno-lint-ignore no-explicit-any
   supabase: any,
   tweetId: string,
+  _runtimeControls: RuntimeControls,
 ): Promise<void> {
-  if (!(await isDuplicateGateEnabled(supabase))) {
-    await queueTranslateAfterHydrate(supabase, tweetId, false);
-    return;
-  }
-
-  await supabase.from("jobs").upsert({
-    type: "dedupe",
-    payload: { tweet_id: tweetId, post_hydrate: true },
-    status: "pending",
-    priority: 30,
-    idempotency_key: `dedupe:hydrate:${tweetId}`,
-    next_run_at: new Date().toISOString(),
-  }, { onConflict: "idempotency_key", ignoreDuplicates: true });
-  await markDedupePending(supabase, tweetId, "queued:hydrate");
-
   try {
-    await supabase.from("pipeline_events").insert({
-      subject_type: "post",
-      subject_id: tweetId,
-      step: "dedupe",
-      status: "queued",
-      started_at: new Date().toISOString(),
-      meta: { source: "hydrate" },
-    });
-  } catch { /* best-effort */ }
+    await queueDedupeAfterHydrate(supabase, tweetId);
+  } catch (error) {
+    if (error instanceof JobDeferred) throw error;
+    throw new Error("hydrate_dedupe_enqueue_failed");
+  }
 }
 
 async function handleHydrateTweetJob(
   job: Record<string, unknown>, // deno-lint-ignore no-explicit-any
   supabase: any,
+  runtimeControls: RuntimeControls,
 ): Promise<boolean> {
   const payload = (job.payload || {}) as Record<string, unknown>;
   const tweetId = String(payload.tweet_id || "");
@@ -3778,12 +4473,8 @@ async function handleHydrateTweetJob(
     .maybeSingle();
 
   if (postErr || !post) {
-    console.error("hydrate_tweet: post not found", tweetId, postErr?.message);
-    throw new Error(
-      `hydrate_tweet[${tweetId}]: post not found${
-        postErr?.message ? `: ${postErr.message}` : ""
-      }`,
-    );
+    console.error("hydrate_tweet: post read failed", tweetId);
+    throw new Error("hydrate_post_read_failed");
   }
 
   if (post.hydrated_at) {
@@ -3791,7 +4482,7 @@ async function handleHydrateTweetJob(
       "hydrate_tweet: already hydrated, ensuring post-hydrate pipeline exists",
       tweetId,
     );
-    await queueDedupeOrTranslateAfterHydrate(supabase, tweetId);
+    await queueDedupeOrTranslateAfterHydrate(supabase, tweetId, runtimeControls);
     return true;
   }
 
@@ -3799,40 +4490,53 @@ async function handleHydrateTweetJob(
   // X-API budget is exhausted, mark the post as a budget fallback (no read
   // consumed) and let the existing flow continue with the truncated text.
   const hydrationCfg = await loadHydrationSettings(supabase);
+  if (!hydrationCfg.available) {
+    throw new JobDeferred(
+      "hydrate_settings_read_failed",
+      30_000,
+      { tweet_id: tweetId, check: "hydration_settings" },
+    );
+  }
   if (!hydrationCfg.enabled) {
     console.warn("hydrate_tweet: disabled by settings, falling back", tweetId);
-    await supabase.from("posts").update({
-      hydrated_at: new Date().toISOString(),
-      hydration_source: "disabled_fallback",
-    }).eq("tweet_id", tweetId);
-    await queueTranslateAfterHydrate(supabase, tweetId, true);
+    await markHydrationFallback(supabase, tweetId, "disabled_fallback");
+    await queueTranslateAfterHydrate(supabase, tweetId, true, runtimeControls);
     return true;
   }
   const used24h = await countDailyHydrationsUsed(supabase);
+  if (used24h === null) {
+    throw new JobDeferred(
+      "hydrate_usage_read_failed",
+      30_000,
+      { tweet_id: tweetId, check: "hydration_usage" },
+    );
+  }
   if (used24h >= hydrationCfg.daily_budget) {
     console.warn(
       `hydrate_tweet: daily budget exhausted (${used24h}/${hydrationCfg.daily_budget}), falling back`,
       tweetId,
     );
-    await supabase.from("posts").update({
-      hydrated_at: new Date().toISOString(),
-      hydration_source: "budget_exhausted_fallback",
-    }).eq("tweet_id", tweetId);
-    await queueTranslateAfterHydrate(supabase, tweetId, true);
-    try {
-      await supabase.from("pipeline_events").insert({
-        subject_type: "post",
-        subject_id: tweetId,
-        step: "hydrate",
-        status: "completed",
-        ended_at: new Date().toISOString(),
-        meta: {
-          fallback: "budget_exhausted",
-          used_24h: used24h,
-          budget: hydrationCfg.daily_budget,
-        },
-      });
-    } catch { /* best-effort */ }
+    await markHydrationFallback(
+      supabase,
+      tweetId,
+      "budget_exhausted_fallback",
+    );
+    await queueTranslateAfterHydrate(supabase, tweetId, true, runtimeControls);
+    await insertPipelineEvent(
+      supabase,
+      "post",
+      tweetId,
+      "hydrate",
+      "completed",
+      null,
+      new Date().toISOString(),
+      null,
+      {
+        fallback: "budget_exhausted",
+        used_24h: used24h,
+        budget: hydrationCfg.daily_budget,
+      },
+    );
     return true;
   }
 
@@ -3842,11 +4546,8 @@ async function handleHydrateTweetJob(
       "hydrate_tweet: cannot extract numeric tweet id, falling back to translate",
       tweetId,
     );
-    await supabase.from("posts").update({
-      hydrated_at: new Date().toISOString(),
-      hydration_source: "no_id_fallback",
-    }).eq("tweet_id", tweetId);
-    await queueTranslateAfterHydrate(supabase, tweetId, true);
+    await markHydrationFallback(supabase, tweetId, "no_id_fallback");
+    await queueTranslateAfterHydrate(supabase, tweetId, true, runtimeControls);
     return true;
   }
 
@@ -3856,11 +4557,8 @@ async function handleHydrateTweetJob(
       "hydrate_tweet: Twitter creds not configured, falling back to truncated translate",
       tweetId,
     );
-    await supabase.from("posts").update({
-      hydrated_at: new Date().toISOString(),
-      hydration_source: "no_creds_fallback",
-    }).eq("tweet_id", tweetId);
-    await queueTranslateAfterHydrate(supabase, tweetId, true);
+    await markHydrationFallback(supabase, tweetId, "no_creds_fallback");
+    await queueTranslateAfterHydrate(supabase, tweetId, true, runtimeControls);
     await recordXApiCall(supabase, "no_creds");
     return true;
   }
@@ -3884,32 +4582,28 @@ async function handleHydrateTweetJob(
       creds.at,
       creds.ats,
     );
-  } catch (e) {
-    console.error("hydrate_tweet: oauth signing failed", (e as Error).message);
-    throw new Error(
-      `hydrate_tweet[${tweetId}]: oauth_signing_failed: ${
-        (e as Error).message
-      }`,
-    );
+  } catch (_e) {
+    console.error("hydrate_tweet: oauth signing failed", tweetId);
+    throw new Error("hydrate_oauth_signing_failed");
   }
 
   let res: Response;
   try {
+    // Read-only X hydration is intentionally outside the external-posting
+    // breaker. The breaker protects media uploads and tweet writes.
     res = await fetch(fullUrl, {
       method: "GET",
       headers: { Authorization: auth },
     });
-  } catch (e) {
-    console.error("hydrate_tweet: network error", (e as Error).message);
+  } catch (_e) {
+    console.error("hydrate_tweet: network error", tweetId);
     await recordXApiCall(
       supabase,
-      `network: ${(e as Error).message}`,
+      "network_error",
       null,
       numericId,
     );
-    throw new Error(
-      `hydrate_tweet[${tweetId}]: network_error: ${(e as Error).message}`,
-    );
+    throw new Error("hydrate_x_api_network_failed");
   }
 
   await recordXApiCall(
@@ -3924,11 +4618,8 @@ async function handleHydrateTweetJob(
       "hydrate_tweet: tweet not found on X (404), falling back to truncated translate",
       tweetId,
     );
-    await supabase.from("posts").update({
-      hydrated_at: new Date().toISOString(),
-      hydration_source: "x_api_404",
-    }).eq("tweet_id", tweetId);
-    await queueTranslateAfterHydrate(supabase, tweetId, true);
+    await markHydrationFallback(supabase, tweetId, "x_api_404");
+    await queueTranslateAfterHydrate(supabase, tweetId, true, runtimeControls);
     return true;
   }
 
@@ -3938,52 +4629,34 @@ async function handleHydrateTweetJob(
       10,
     );
     const waitSec = retryAfter > 0
-      ? Math.max(60, retryAfter - Math.floor(Date.now() / 1000))
+      ? Math.min(86_400, Math.max(60, retryAfter - Math.floor(Date.now() / 1000)))
       : 900;
-    throw new Error(`hydrate_tweet rate limited, retry after ${waitSec}s`);
+    throw new Error(`hydrate_x_api_rate_limited: retry after ${waitSec}`);
   }
 
   if (res.status === 401 || res.status === 403) {
-    const txt = await res.text().catch(() => "");
-    console.error(
-      `hydrate_tweet: auth failed ${res.status}`,
-      txt.slice(0, 300),
-    );
-    throw new Error(
-      `hydrate_tweet[${tweetId}]: x_api_auth_${res.status}: ${
-        txt.slice(0, 500)
-      }`,
-    );
+    console.error("hydrate_tweet: X API authentication failed", res.status);
+    throw new Error(workerProviderFailureCode("hydrate_x_api_auth", res.status));
   }
 
   if (!res.ok) {
-    const txt = await res.text().catch(() => "");
-    console.error(`hydrate_tweet: HTTP ${res.status}`, txt.slice(0, 300));
-    throw new Error(
-      `hydrate_tweet[${tweetId}]: x_api_http_${res.status}: ${
-        txt.slice(0, 500)
-      }`,
-    );
+    console.error("hydrate_tweet: X API request failed", res.status);
+    throw new Error(workerProviderFailureCode("hydrate_x_api", res.status));
   }
 
   let json: Record<string, unknown>;
   try {
     json = await res.json();
-  } catch (e) {
-    console.error("hydrate_tweet: invalid JSON", (e as Error).message);
-    throw new Error(
-      `hydrate_tweet[${tweetId}]: invalid_x_api_json: ${(e as Error).message}`,
-    );
+  } catch (_e) {
+    console.error("hydrate_tweet: invalid X API response JSON", tweetId);
+    throw new Error("hydrate_x_api_invalid_json");
   }
 
   const hydratedPatch = buildHydratedTweetPatch(json);
   if (!hydratedPatch) {
     console.warn("hydrate_tweet: empty text from X API, falling back", tweetId);
-    await supabase.from("posts").update({
-      hydrated_at: new Date().toISOString(),
-      hydration_source: "x_api_empty",
-    }).eq("tweet_id", tweetId);
-    await queueTranslateAfterHydrate(supabase, tweetId, true);
+    await markHydrationFallback(supabase, tweetId, "x_api_empty");
+    await queueTranslateAfterHydrate(supabase, tweetId, true, runtimeControls);
     return true;
   }
 
@@ -3991,10 +4664,8 @@ async function handleHydrateTweetJob(
   const { error: updErr } = await supabase.from("posts").update(updatePayload)
     .eq("tweet_id", tweetId);
   if (updErr) {
-    console.error("hydrate_tweet: post update failed", updErr.message);
-    throw new Error(
-      `hydrate_tweet[${tweetId}]: post_update_failed: ${updErr.message}`,
-    );
+    console.error("hydrate_tweet: post update failed", tweetId);
+    throw new Error("hydrate_post_update_failed");
   }
 
   console.log(
@@ -4002,9 +4673,28 @@ async function handleHydrateTweetJob(
       (post.text_original || "").length
     } chars → full=${fullText.length} chars)`,
   );
-  await queueDedupeOrTranslateAfterHydrate(supabase, tweetId);
+  await queueDedupeOrTranslateAfterHydrate(supabase, tweetId, runtimeControls);
   await maybeEnqueueResolveMedia(supabase, tweetId, fullText);
   return true;
+}
+
+async function markHydrationFallback(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  tweetId: string,
+  hydrationSource: string,
+): Promise<void> {
+  const { error } = await supabase.from("posts").update({
+    hydrated_at: new Date().toISOString(),
+    hydration_source: hydrationSource,
+  }).eq("tweet_id", tweetId);
+  if (error) {
+    throw new JobDeferred(
+      "hydrate_fallback_status_write_failed",
+      30_000,
+      { tweet_id: tweetId, check: "fallback_status", source: hydrationSource },
+    );
+  }
 }
 
 // Inspect existing media rows + (optionally) hydrated text and enqueue a
@@ -4016,16 +4706,24 @@ async function maybeEnqueueResolveMedia( // deno-lint-ignore no-explicit-any
   extraText?: string,
 ): Promise<void> {
   try {
-    const { data: mediaRows } = await supabase
+    const { data: mediaRows, error: mediaQueryError } = await supabase
       .from("media")
       .select("kind, src_url")
-      .eq("tweet_id", tweetId);
+      .eq("tweet_id", tweetId)
+      .order("ordering", { ascending: true })
+      .limit(MAX_RESOLVE_MEDIA_SIGNAL_ROWS);
+    if (mediaQueryError) {
+      throw new Error("resolve_media_signal_read_failed");
+    }
+    if (!Array.isArray(mediaRows)) {
+      throw new Error("resolve_media_signal_invalid_response");
+    }
 
     const haystack: string[] = [];
     if (extraText) haystack.push(extraText);
     let hasVideoKind = false;
     for (
-      const m of (mediaRows || []) as Array<{ kind?: string; src_url?: string }>
+      const m of mediaRows as Array<{ kind?: string; src_url?: string }>
     ) {
       if (m.kind === "video" || m.kind === "gif") hasVideoKind = true;
       if (m.src_url) haystack.push(m.src_url);
@@ -4050,11 +4748,7 @@ async function maybeEnqueueResolveMedia( // deno-lint-ignore no-explicit-any
     }, { onConflict: "idempotency_key", ignoreDuplicates: true });
 
     if (jobErr) {
-      console.warn(
-        "maybeEnqueueResolveMedia: job upsert failed",
-        jobErr.message,
-      );
-      return;
+      throw new Error("resolve_media_enqueue_failed");
     }
     await insertPipelineEvent(
       supabase,
@@ -4071,11 +4765,9 @@ async function maybeEnqueueResolveMedia( // deno-lint-ignore no-explicit-any
       "maybeEnqueueResolveMedia: enqueued resolve_media for",
       tweetId,
     );
-  } catch (e) {
-    console.warn(
-      "maybeEnqueueResolveMedia: unexpected error",
-      (e as Error).message,
-    );
+  } catch (_e) {
+    console.error("maybeEnqueueResolveMedia failed");
+    throw new Error("resolve_media_enqueue_failed");
   }
 }
 
@@ -4097,12 +4789,8 @@ async function handleResolveMediaJob(
     .maybeSingle();
 
   if (postErr || !post) {
-    console.error("resolve_media: post not found", tweetId, postErr?.message);
-    throw new Error(
-      `resolve_media[${tweetId}]: post not found${
-        postErr?.message ? `: ${postErr.message}` : ""
-      }`,
-    );
+    console.error("resolve_media: post read failed", tweetId);
+    throw new Error("resolve_media_post_read_failed");
   }
 
   const numericId = extractNumericTweetId(tweetId, post.url as string | null);
@@ -4152,12 +4840,8 @@ async function handleResolveMediaJob(
   // would skip the row — causing x-poster to upload the thumbnail bytes as
   // the "video" and Telegram to send it as a document.
   const rows = await buildResolvedMediaRows(tweetId, resolved);
-
-  const { error: insErr } = await supabase.from("media").upsert(rows, {
-    onConflict: "tweet_id,ordering",
-  });
-  if (insErr) {
-    console.error("resolve_media: insert failed", insErr.message);
+  if (rows.length === 0) {
+    console.warn("resolve_media: proxy media rejected by reviewed-host policy", tweetId);
     await insertPipelineEvent(
       supabase,
       "post",
@@ -4166,26 +4850,47 @@ async function handleResolveMediaJob(
       "failed",
       null,
       new Date().toISOString(),
-      `upsert_failed: ${insErr.message}`,
+      "no_reviewed_media_url",
+      { source, resolved_count: resolved.length },
+    );
+    // Keep existing rows intact rather than pruning based on an unsafe proxy response.
+    return true;
+  }
+
+  const { error: insErr } = await supabase.from("media").upsert(rows, {
+    onConflict: "tweet_id,ordering",
+  });
+  if (insErr) {
+    console.error("resolve_media: insert failed", tweetId);
+    await insertPipelineEvent(
+      supabase,
+      "post",
+      tweetId,
+      "resolve_media",
+      "failed",
+      null,
+      new Date().toISOString(),
+      "media_upsert_failed",
       { handle, numericId, count: rows.length },
     );
-    throw new Error(
-      `resolve_media[${tweetId}]: media_upsert_failed: ${insErr.message}`,
-    );
+    throw new Error("resolve_media_upsert_failed");
   }
 
   // Prune any leftover higher-ordering rows from a previous (longer) resolution.
   const { error: prnErr } = await supabase.from("media")
     .delete().eq("tweet_id", tweetId).gte("ordering", rows.length);
   if (prnErr) {
-    console.warn("resolve_media: prune leftover rows failed", prnErr.message);
+    throw new Error("resolve_media_prune_failed");
   }
 
   // Make sure has_media is true so deliver attaches files.
-  await supabase.from("posts").update({ has_media: true }).eq(
+  const { error: mediaFlagErr } = await supabase.from("posts").update({ has_media: true }).eq(
     "tweet_id",
     tweetId,
   );
+  if (mediaFlagErr) {
+    throw new Error("resolve_media_flag_update_failed");
+  }
 
   // Trigger the existing download_media flow to pull bytes into temp-media.
   // Use a distinct idempotency key from the initial RSS-thumbnail download:
@@ -4201,10 +4906,7 @@ async function handleResolveMediaJob(
     buildResolveMediaDownloadJob(tweetId),
   );
   if (dlErr) {
-    console.warn(
-      "resolve_media: failed to enqueue download_media",
-      dlErr.message,
-    );
+    throw new Error("resolve_media_download_enqueue_failed");
   }
 
   await insertPipelineEvent(

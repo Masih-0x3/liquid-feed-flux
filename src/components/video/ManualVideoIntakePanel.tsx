@@ -23,7 +23,6 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -45,6 +44,7 @@ import {
   type ManualVideoIntakeRow,
   type ManualVideoSnapshot,
 } from '@/hooks/useManualVideoIntakeData';
+import { useAuth } from '@/contexts/AuthContext';
 
 function statusClass(status?: string | null): string {
   if (status === 'posted' || status === 'ready') return 'border-emerald-500/30 bg-emerald-500/15 text-emerald-500';
@@ -76,7 +76,7 @@ function formatMs(value: number | null | undefined): string {
 }
 
 function renderLabel(row: NonNullable<ManualVideoSnapshot['renders']>[number]): string {
-  const status = row.status ? row.status.replaceAll('_', ' ') : 'unknown';
+  const status = row.status ? row.status.replace(/_/g, ' ') : 'unknown';
   const language = row.source_language && row.target_language ? ` · ${row.source_language} to ${row.target_language}` : '';
   return `${status}${language} · ${row.id.slice(0, 8)}`;
 }
@@ -85,13 +85,23 @@ function rowTitle(row: ManualVideoIntakeRow): string {
   return row.source_handle ? `@${row.source_handle}` : row.tweet_id;
 }
 
+type PendingManualPostSnapshot = {
+  intakeId: string;
+  renderId: string;
+  caption: string;
+};
+
 export function ManualVideoIntakePanel() {
+  const { isAdmin, role } = useAuth();
+  const readOnly = role === 'read_only' && !isAdmin;
+  const mutationDisabledTitle = readOnly ? 'Read-only access: manual intake changes are disabled.' : undefined;
   const [tweetUrl, setTweetUrl] = useState('');
   const [selectedIntakeId, setSelectedIntakeId] = useState<string | null>(null);
   const [captionDraft, setCaptionDraft] = useState('');
   const [selectedRenderId, setSelectedRenderId] = useState<string>('');
   const [overrideChecked, setOverrideChecked] = useState(false);
   const [overrideReason, setOverrideReason] = useState('');
+  const [postSnapshot, setPostSnapshot] = useState<PendingManualPostSnapshot | null>(null);
 
   const list = useManualVideoIntakeList();
   const createIntake = useCreateManualVideoIntake();
@@ -107,16 +117,24 @@ export function ManualVideoIntakePanel() {
     [rows, selectedIntakeId],
   );
   const activeIntakeId = selectedIntakeId ?? selectedFromList?.id ?? null;
-  const detail = useManualVideoIntakeDetail({ intakeId: activeIntakeId, enabled: Boolean(activeIntakeId) });
+  const detail = useManualVideoIntakeDetail({
+    intakeId: activeIntakeId,
+    renderId: selectedRenderId || null,
+    enabled: Boolean(activeIntakeId),
+  });
   const snapshot = detail.data?.ok !== false ? detail.data : null;
   const intake = snapshot?.intake ?? selectedFromList;
+  const snapshotIntakeId = snapshot?.intake.id;
+  const savedCaption = snapshot?.caption.effective;
+  const savedDuplicateOverride = snapshot?.intake.duplicate_override;
+  const savedDuplicateOverrideReason = snapshot?.intake.duplicate_override_reason;
 
   const completedRenders = useMemo(
     () => (snapshot?.renders ?? []).filter((row) => row.status === 'completed' && row.output_storage_path),
     [snapshot?.renders],
   );
-  const defaultRender = completedRenders[0] ?? snapshot?.latest_render ?? null;
-  const selectedRender = (snapshot?.renders ?? []).find((row) => row.id === selectedRenderId) ?? defaultRender;
+  const defaultRender = completedRenders[0] ?? null;
+  const selectedRender = (snapshot?.renders ?? []).find((row) => row.id === selectedRenderId) ?? null;
   const previewUrl = snapshot?.preview.output_signed_url || snapshot?.preview.source_signed_url || null;
   const isOutputPreview = Boolean(snapshot?.preview.output_signed_url);
   const safety = snapshot?.safety ?? {};
@@ -124,7 +142,14 @@ export function ManualVideoIntakePanel() {
   const xPostingEnabled = safeBoolean(safety.x_posting_enabled);
   const xAllowVideo = safeBoolean(safety.x_allow_video);
   const captionTooLong = safeBoolean(safety.caption_too_long) || (snapshot ? captionDraft.length > snapshot.caption.max_chars : false);
-  const hasOutputVideo = Boolean(snapshot?.preview.output_signed_url);
+  const hasOutputVideo = Boolean(
+    selectedRender?.id &&
+      snapshot?.preview.render_id === selectedRender.id &&
+      snapshot.preview.output_signed_url,
+  );
+  const hasUnsavedCaption = Boolean(
+    snapshot && captionDraft.trim() !== snapshot.caption.effective.trim(),
+  );
   const isPosting = postIntake.isPending;
   const readyToPost = Boolean(
     snapshot &&
@@ -134,6 +159,7 @@ export function ManualVideoIntakePanel() {
       xPostingEnabled &&
       xAllowVideo &&
       captionDraft.trim() &&
+      !hasUnsavedCaption &&
       !captionTooLong &&
       intake.status !== 'posted' &&
       intake.status !== 'canceled' &&
@@ -145,17 +171,26 @@ export function ManualVideoIntakePanel() {
   }, [rows, selectedIntakeId]);
 
   useEffect(() => {
-    if (!snapshot) return;
-    setCaptionDraft(snapshot.caption.effective ?? '');
-    setOverrideChecked(snapshot.intake.duplicate_override === true);
-    setOverrideReason(snapshot.intake.duplicate_override_reason ?? '');
-  }, [snapshot?.intake.id, snapshot?.caption.effective, snapshot?.intake.duplicate_override, snapshot?.intake.duplicate_override_reason, snapshot]);
+    if (!snapshotIntakeId || savedCaption === undefined) return;
+    setCaptionDraft(savedCaption);
+    setOverrideChecked(savedDuplicateOverride === true);
+    setOverrideReason(savedDuplicateOverrideReason ?? '');
+  }, [savedCaption, savedDuplicateOverride, savedDuplicateOverrideReason, snapshotIntakeId]);
 
   useEffect(() => {
-    if (defaultRender?.id) setSelectedRenderId(defaultRender.id);
-  }, [defaultRender?.id]);
+    setSelectedRenderId((current) => (
+      completedRenders.some((row) => row.id === current)
+        ? current
+        : defaultRender?.id ?? ''
+    ));
+  }, [completedRenders, defaultRender?.id]);
+
+  useEffect(() => {
+    setPostSnapshot(null);
+  }, [snapshot?.intake.id]);
 
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
+    if (!isAdmin) return;
     event.preventDefault();
     const result = await createIntake.mutateAsync({ url: tweetUrl });
     setSelectedIntakeId(result.intake.id);
@@ -163,12 +198,14 @@ export function ManualVideoIntakePanel() {
   }
 
   async function handleSaveCaption() {
+    if (!isAdmin) return;
     if (!intake) return;
     const result = await saveCaption.mutateAsync({ intake_id: intake.id, caption: captionDraft });
     setCaptionDraft(result.caption.effective);
   }
 
   async function handleSaveOverride() {
+    if (!isAdmin) return;
     if (!intake) return;
     const result = await setDuplicateOverride.mutateAsync({
       intake_id: intake.id,
@@ -179,19 +216,40 @@ export function ManualVideoIntakePanel() {
     setOverrideReason(result.intake.duplicate_override_reason ?? '');
   }
 
-  async function handlePost() {
-    if (!intake || !selectedRender?.id) return;
-    await postIntake.mutateAsync({
-      intake_id: intake.id,
-      render_id: selectedRender.id,
-      caption: captionDraft,
+  function openPostConfirmation() {
+    if (!isAdmin) return;
+    if (!intake || !selectedRender?.id || !snapshot || !readyToPost) return;
+    setPostSnapshot({
+      intakeId: intake.id,
+      renderId: selectedRender.id,
+      caption: snapshot.caption.effective.trim(),
     });
-    await detail.refetch();
-    await list.refetch();
+  }
+
+  async function handlePost() {
+    if (!isAdmin) return;
+    if (!postSnapshot) return;
+    try {
+      await postIntake.mutateAsync({
+        intake_id: postSnapshot.intakeId,
+        render_id: postSnapshot.renderId,
+        caption: postSnapshot.caption,
+      });
+      setPostSnapshot(null);
+      await detail.refetch();
+      await list.refetch();
+    } catch {
+      // The mutation hook renders the actionable failure toast. Keep the frozen confirmation open.
+    }
   }
 
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(300px,0.8fr)_minmax(0,1.2fr)]">
+      {readOnly && (
+        <div role="note" className="xl:col-span-2 rounded-md border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+          Read-only access. Manual intake, caption, override, and posting changes are disabled. Existing status and previews remain available.
+        </div>
+      )}
       <Card className="glass-card">
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base">
@@ -211,7 +269,7 @@ export function ManualVideoIntakePanel() {
                 placeholder="https://x.com/account/status/123"
                 className="min-w-0"
               />
-              <Button type="submit" disabled={createIntake.isPending || !tweetUrl.trim()} className="sm:w-28">
+              <Button type="submit" disabled={readOnly || createIntake.isPending || !tweetUrl.trim()} title={mutationDisabledTitle} className="sm:w-28">
                 {createIntake.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Run'}
               </Button>
             </div>
@@ -244,7 +302,7 @@ export function ManualVideoIntakePanel() {
                         <p className="truncate text-sm font-medium">{rowTitle(row)}</p>
                         <p className="truncate text-xs text-muted-foreground">{row.tweet_id}</p>
                       </div>
-                      <Badge className={statusClass(row.status)}>{row.status.replaceAll('_', ' ')}</Badge>
+                      <Badge className={statusClass(row.status)}>{row.status.replace(/_/g, ' ')}</Badge>
                     </div>
                     <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
                       <span>{row.updated_at ? formatDistanceToNow(new Date(row.updated_at), { addSuffix: true }) : '-'}</span>
@@ -273,7 +331,7 @@ export function ManualVideoIntakePanel() {
                   <div className="min-w-0">
                     <CardTitle className="flex flex-wrap items-center gap-2 text-base">
                       {intake.source_handle ? `@${intake.source_handle}` : intake.tweet_id}
-                      <Badge className={statusClass(intake.status)}>{intake.status.replaceAll('_', ' ')}</Badge>
+                      <Badge className={statusClass(intake.status)}>{intake.status.replace(/_/g, ' ')}</Badge>
                     </CardTitle>
                     <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
                       <span className="break-all">{intake.tweet_id}</span>
@@ -286,8 +344,9 @@ export function ManualVideoIntakePanel() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => refreshIntake.mutate({ intake_id: intake.id })}
-                      disabled={refreshIntake.isPending}
+                      onClick={() => { if (isAdmin) refreshIntake.mutate({ intake_id: intake.id }); }}
+                      disabled={readOnly || refreshIntake.isPending}
+                      title={mutationDisabledTitle}
                     >
                       {refreshIntake.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
                       Refresh
@@ -295,8 +354,9 @@ export function ManualVideoIntakePanel() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => cancelIntake.mutate({ intake_id: intake.id })}
-                      disabled={cancelIntake.isPending || intake.status === 'posted' || intake.status === 'canceled'}
+                      onClick={() => { if (isAdmin) cancelIntake.mutate({ intake_id: intake.id }); }}
+                      disabled={readOnly || cancelIntake.isPending || intake.status === 'posted' || intake.status === 'canceled'}
+                      title={mutationDisabledTitle}
                     >
                       {cancelIntake.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
                     </Button>
@@ -396,6 +456,7 @@ export function ManualVideoIntakePanel() {
                             id="manual-caption"
                             value={captionDraft}
                             onChange={(event) => setCaptionDraft(event.target.value)}
+                            disabled={readOnly}
                             dir="auto"
                             className="min-h-40 resize-y"
                           />
@@ -404,7 +465,8 @@ export function ManualVideoIntakePanel() {
                               size="sm"
                               variant="outline"
                               onClick={handleSaveCaption}
-                              disabled={saveCaption.isPending || !captionDraft.trim() || captionDraft === snapshot?.caption.effective}
+                              disabled={readOnly || saveCaption.isPending || !captionDraft.trim() || captionDraft === snapshot?.caption.effective}
+                              title={mutationDisabledTitle}
                             >
                               {saveCaption.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
                               Save
@@ -417,6 +479,7 @@ export function ManualVideoIntakePanel() {
                             <Checkbox
                               id="manual-duplicate-override"
                               checked={overrideChecked}
+                              disabled={readOnly}
                               onCheckedChange={(checked) => setOverrideChecked(checked === true)}
                             />
                             <div className="grid gap-1">
@@ -430,6 +493,7 @@ export function ManualVideoIntakePanel() {
                             <Textarea
                               value={overrideReason}
                               onChange={(event) => setOverrideReason(event.target.value)}
+                              disabled={readOnly}
                               placeholder="Reason"
                               className="min-h-20"
                             />
@@ -439,7 +503,8 @@ export function ManualVideoIntakePanel() {
                               size="sm"
                               variant="outline"
                               onClick={handleSaveOverride}
-                              disabled={setDuplicateOverride.isPending || (overrideChecked && !overrideReason.trim())}
+                              disabled={readOnly || setDuplicateOverride.isPending || (overrideChecked && !overrideReason.trim())}
+                              title={mutationDisabledTitle}
                             >
                               {setDuplicateOverride.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldAlert className="mr-2 h-4 w-4" />}
                               Save override
@@ -448,23 +513,47 @@ export function ManualVideoIntakePanel() {
                         </div>
 
                         <div className="flex flex-col gap-2">
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <Button disabled={!readyToPost || isPosting} className="w-full">
-                                {isPosting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-                                Post to X
-                              </Button>
-                            </AlertDialogTrigger>
+                          <Button type="button" onClick={openPostConfirmation} disabled={readOnly || !readyToPost || isPosting} title={mutationDisabledTitle} className="w-full">
+                            {isPosting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                            Post to X
+                          </Button>
+                          <AlertDialog
+                            open={Boolean(postSnapshot)}
+                            onOpenChange={(open) => {
+                              if (!open && !isPosting) setPostSnapshot(null);
+                            }}
+                          >
                             <AlertDialogContent>
                               <AlertDialogHeader>
                                 <AlertDialogTitle>Post this video to X?</AlertDialogTitle>
                                 <AlertDialogDescription>
-                                  This creates a public X post from the selected rendered video and saved caption.
+                                  This creates one public X post from the frozen render and saved caption below.
                                 </AlertDialogDescription>
                               </AlertDialogHeader>
+                              {postSnapshot && (
+                                <div className="space-y-3 rounded-md border bg-muted/30 p-3 text-sm">
+                                  <div>
+                                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Render</p>
+                                    <p className="mt-1 break-all font-mono text-xs">{postSnapshot.renderId}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Saved caption</p>
+                                    <p dir="auto" className="mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap rounded border bg-background/70 p-2 text-sm">{postSnapshot.caption}</p>
+                                  </div>
+                                </div>
+                              )}
                               <AlertDialogFooter>
-                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                <AlertDialogAction onClick={handlePost}>Post</AlertDialogAction>
+                                <AlertDialogCancel disabled={readOnly || isPosting}>Cancel</AlertDialogCancel>
+                                <AlertDialogAction
+                                  disabled={readOnly || isPosting}
+                                  onClick={(event) => {
+                                    event.preventDefault();
+                                    void handlePost();
+                                  }}
+                                >
+                                  {isPosting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                  Post
+                                </AlertDialogAction>
                               </AlertDialogFooter>
                             </AlertDialogContent>
                           </AlertDialog>
@@ -476,7 +565,7 @@ export function ManualVideoIntakePanel() {
                           ) : (
                             <div className="flex items-center gap-2 text-xs text-muted-foreground">
                               <AlertTriangle className="h-3.5 w-3.5" />
-                              {captionTooLong ? 'Caption too long' : !hasOutputVideo ? 'Waiting for output video' : duplicateBlocked && intake.duplicate_override !== true ? 'Duplicate blocked' : 'Not ready'}
+                              {captionTooLong ? 'Caption too long' : hasUnsavedCaption ? 'Save caption before posting' : !hasOutputVideo ? 'Waiting for the selected output video' : duplicateBlocked && intake.duplicate_override !== true ? 'Duplicate blocked' : 'Not ready'}
                             </div>
                           )}
                         </div>

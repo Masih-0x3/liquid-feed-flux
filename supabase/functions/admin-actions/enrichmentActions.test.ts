@@ -150,7 +150,7 @@ function deps(overrides: Partial<EnrichmentActionDeps> = {}) {
     },
     dispatchWorkerForManualEnrich: async () => {
       calls.worker += 1;
-      return { ok: true, status: 200, processed: 1, message: "processed" };
+      return { ok: true, status: 200, processed: 1 };
     },
     readEnv: (key) => key === "OPENAI_API_KEY" ? "openai-key" : "",
     now: () => new Date("2026-01-01T00:00:00.000Z"),

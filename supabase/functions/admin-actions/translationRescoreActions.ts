@@ -12,6 +12,9 @@ import {
   startWorkflowRun,
 } from "../_shared/observability.ts";
 import {
+  DEFAULT_EFFECTIVE_THRESHOLD,
+} from "../_shared/effectiveThreshold.ts";
+import {
   repairTranslationReadability,
   translationReadabilityMeta,
   type TranslationReadabilityRepairResult,
@@ -152,8 +155,45 @@ function settingsRowsToMap(
   return settingsMap;
 }
 
+function checkedSettingsRows(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value) || value.some((row) => {
+    if (!row || typeof row !== "object" || Array.isArray(row)) return true;
+    const record = row as Record<string, unknown>;
+    return typeof record.key !== "string" ||
+      !record.value || typeof record.value !== "object" ||
+      Array.isArray(record.value);
+  })) {
+    throw new Error("scoring_settings_invalid_response");
+  }
+  return value as Array<Record<string, unknown>>;
+}
+
 function modelError(result: NormalizedOpenAIResponse): string {
-  return `OpenAI ${result.status}: ${result.rawText.slice(0, 500)}`;
+  const status = Number.isInteger(result.status) && result.status >= 100 &&
+      result.status <= 599
+    ? result.status
+    : 0;
+  return status > 0 ? `openai_http_${status}` : "openai_request_failed";
+}
+
+function safeUsageSnapshot(raw: unknown): Record<string, number> | null {
+  const usage = asRecord(asRecord(raw).usage);
+  const allowed = [
+    "prompt_tokens",
+    "completion_tokens",
+    "total_tokens",
+    "input_tokens",
+    "output_tokens",
+    "reasoning_tokens",
+  ];
+  const snapshot: Record<string, number> = {};
+  for (const key of allowed) {
+    const value = usage[key];
+    if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+      snapshot[key] = Math.floor(value);
+    }
+  }
+  return Object.keys(snapshot).length > 0 ? snapshot : null;
 }
 
 function defaultTranslationPrompt(): string {
@@ -210,11 +250,10 @@ function previewAgentName(step: string): string {
 }
 
 function thrownOpenAIResponse(
-  error: unknown,
+  _error: unknown,
   endpoint: NormalizedOpenAIResponse["endpoint"],
 ): NormalizedOpenAIResponse {
-  const message = error instanceof Error ? error.message : String(error);
-  const raw = { error: { message } };
+  const raw = { error: { code: "openai_request_failed" } };
   return {
     ok: false,
     status: 0,
@@ -391,7 +430,7 @@ export async function runRescore(
     return { ok: false, error: "Post has no original text to score" };
   }
 
-  const { data: settings } = await table(supabase, "settings")
+  const { data: settings, error: settingsError } = await table(supabase, "settings")
     .select("key, value")
     .in("key", [
       "translation_prompt",
@@ -401,7 +440,14 @@ export async function runRescore(
       "x_posting_config",
       "scoring_policy",
     ]);
-  const settingsMap = settingsRowsToMap(settings);
+  if (settingsError) return { ok: false, error: "scoring_settings_read_failed" };
+  let settingsRows: Array<Record<string, unknown>>;
+  try {
+    settingsRows = checkedSettingsRows(settings);
+  } catch {
+    return { ok: false, error: "scoring_settings_read_failed" };
+  }
+  const settingsMap = settingsRowsToMap(settingsRows);
   const tp = settingsMap.translation_prompt || {};
   const cf = settingsMap.content_filter || {};
 
@@ -495,10 +541,10 @@ export async function runRescore(
         ],
       },
     };
-  } catch (e) {
+  } catch {
     return {
       ok: false,
-      error: `Invalid classifier_tool_schema JSON: ${(e as Error).message}`,
+      error: "scoring_classifier_schema_invalid",
     };
   }
 
@@ -551,10 +597,10 @@ export async function runRescore(
   };
   try {
     args = JSON.parse(result.toolCall.arguments);
-  } catch (e) {
+  } catch {
     return {
       ok: false,
-      error: `Tool-call parse error: ${(e as Error).message}`,
+      error: "scoring_tool_call_invalid",
     };
   }
 
@@ -623,7 +669,7 @@ export async function runRescore(
           ? authorRule.threshold
           : (typeof cf.default_threshold === "number"
             ? cf.default_threshold
-            : 12);
+            : DEFAULT_EFFECTIVE_THRESHOLD);
         deliveryDecision = importanceScore >= threshold ? "deliver" : "skip";
         decisionReason = deliveryDecision === "deliver"
           ? `score_pass:${importanceScore}>=${threshold}`
@@ -638,7 +684,7 @@ export async function runRescore(
 
   const legacyThreshold = typeof cf.default_threshold === "number"
     ? cf.default_threshold
-    : 12;
+    : DEFAULT_EFFECTIVE_THRESHOLD;
   const thresholdOut = editorialProfile
     ? editorialProfile.threshold
     : legacyThreshold;
@@ -744,7 +790,7 @@ export async function runRescore(
   const { error: upErr } = await table(supabase, "posts").update(updatePayload)
     .eq("tweet_id", tweetId);
   if (upErr) {
-    return { ok: false, error: (upErr as { message?: string }).message };
+    return { ok: false, error: "rescore_post_update_failed" };
   }
 
   return {
@@ -779,16 +825,23 @@ export async function runTranslationOnly(
     .maybeSingle();
   const postRecord = asRecord(post);
   if (postErr || !post) {
-    return { ok: false, error: `Post not found: ${tweetId}` };
+    return { ok: false, error: "translation_post_read_failed" };
   }
   if (!postRecord.text_original) {
     return { ok: false, error: "Post has no original text to translate" };
   }
 
-  const { data: settings } = await table(supabase, "settings")
+  const { data: settings, error: settingsError } = await table(supabase, "settings")
     .select("key, value")
     .in("key", ["translation_prompt"]);
-  const row = (Array.isArray(settings) ? settings : []).find((setting) =>
+  if (settingsError) return { ok: false, error: "translation_settings_read_failed" };
+  let settingsRows: Array<Record<string, unknown>>;
+  try {
+    settingsRows = checkedSettingsRows(settings);
+  } catch {
+    return { ok: false, error: "translation_settings_read_failed" };
+  }
+  const row = settingsRows.find((setting) =>
     asRecord(setting).key === "translation_prompt"
   );
   const tp = asRecord(asRecord(row).value);
@@ -823,7 +876,7 @@ export async function runTranslationOnly(
       "translate",
       "failed",
       { mode: "translation_only", model },
-      `OpenAI ${result.status}`,
+      modelError(result),
     );
     return { ok: false, error: modelError(result) };
   }
@@ -860,7 +913,7 @@ export async function runTranslationOnly(
         ?.total_tokens ?? null,
   }).eq("tweet_id", tweetId);
   if (upErr) {
-    return { ok: false, error: (upErr as { message?: string }).message };
+    return { ok: false, error: "translation_post_update_failed" };
   }
   await deps.insertAdminPipelineEvent(
     supabase,
@@ -969,7 +1022,7 @@ export async function previewTranslationAdminAction(
   let importanceScore: number | null = null;
   let importanceTags: string[] | null = null;
   let reasoning: string | null = null;
-  let raw: Record<string, unknown> = {};
+  let usage: Record<string, number> | null = null;
   let usedEndpoint: "chat.completions" | "responses" = "chat.completions";
 
   try {
@@ -1017,16 +1070,14 @@ export async function previewTranslationAdminAction(
             ],
           },
         };
-      } catch (e) {
+      } catch {
         await finishPreviewWorkflow("failed", {
           failure_step: "classifier_schema",
-        }, e);
+        }, "classifier_schema_invalid");
         return {
           body: {
             ok: false,
-            error: `Invalid classifier_tool_schema JSON: ${
-              (e as Error).message
-            }`,
+            error: "classifier_schema_invalid",
           },
           status: 400,
         };
@@ -1050,19 +1101,20 @@ export async function previewTranslationAdminAction(
         maxOutputTokens: maxTokens,
         ...previewCallOptions(ts),
       });
-      raw = result.raw;
+      usage = safeUsageSnapshot(result.raw);
       usedEndpoint = result.endpoint;
       if (!result.ok) {
         await finishPreviewWorkflow("failed", {
           failure_step: "classify",
           endpoint: usedEndpoint,
-        }, result.raw);
+        }, modelError(result));
         return {
           body: {
             ok: false,
             error: modelError(result),
-            result: { raw, endpoint: usedEndpoint },
+            result: { endpoint: usedEndpoint },
           },
+          status: 502,
         };
       }
 
@@ -1080,7 +1132,7 @@ export async function previewTranslationAdminAction(
             : null;
         } catch (parseErr) {
           translatedText = result.content;
-          reasoning = `Tool-call parse error: ${(parseErr as Error).message}`;
+        reasoning = "classifier_tool_call_invalid";
         }
       } else {
         translatedText = result.content;
@@ -1099,19 +1151,20 @@ export async function previewTranslationAdminAction(
         maxOutputTokens: maxTokens,
         ...previewCallOptions(ts),
       });
-      raw = result.raw;
+      usage = safeUsageSnapshot(result.raw);
       usedEndpoint = result.endpoint;
       if (!result.ok) {
         await finishPreviewWorkflow("failed", {
           failure_step: "translate",
           endpoint: usedEndpoint,
-        }, result.raw);
+        }, modelError(result));
         return {
           body: {
             ok: false,
             error: modelError(result),
-            result: { raw, endpoint: usedEndpoint },
+            result: { endpoint: usedEndpoint },
           },
+          status: 502,
         };
       }
       translatedText = result.content;
@@ -1132,7 +1185,6 @@ export async function previewTranslationAdminAction(
     });
     translatedText = readability.text;
     const readabilityMeta = visibleReadabilityMeta(readability);
-    const usage = (raw as { usage?: Record<string, number> }).usage ?? null;
     await finishPreviewWorkflow("completed", {
       used_filter: filterEnabled,
       endpoint: usedEndpoint,
@@ -1152,13 +1204,13 @@ export async function previewTranslationAdminAction(
           duration_ms: nowMs(deps) - startedAt,
           used_filter: filterEnabled,
           ...(readabilityMeta ? { readability: readabilityMeta } : {}),
-          raw,
         },
       },
     };
-  } catch (e) {
-    await finishPreviewWorkflow("failed", { failure_step: "preview" }, e);
-    return { body: { ok: false, error: (e as Error).message } };
+  } catch {
+    const errorCode = "translation_preview_request_failed";
+    await finishPreviewWorkflow("failed", { failure_step: "preview" }, errorCode);
+    return { body: { ok: false, error: errorCode }, status: 502 };
   }
 }
 

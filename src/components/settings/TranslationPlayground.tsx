@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Loader2, Play, FlaskConical, Copy, Check } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslationPreview, type TranslationSettings, type PreviewTranslationResult } from '@/hooks/useSettingsData';
+import { persianContentAttributes } from '@/lib/contentLanguage';
 
 interface Props {
   translationSettings: TranslationSettings;
@@ -95,31 +96,25 @@ export default function TranslationPlayground({ translationSettings, contentFilt
 
       <div className="space-y-1">
         <div className="flex items-center justify-between">
-          <Label className="text-xs text-muted-foreground">Translated text</Label>
-          <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => copyText(res.translated_text)}>
+          <p className="text-xs text-muted-foreground">Translated text</p>
+          <Button type="button" size="sm" variant="ghost" className="h-7 px-2" onClick={() => copyText(res.translated_text)} title="Copy translated text" aria-label="Copy translated text">
             {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
           </Button>
         </div>
-        <div dir="rtl" className="p-3 rounded bg-background border border-border whitespace-pre-wrap text-sm leading-relaxed">
+        <div {...persianContentAttributes} className="p-3 rounded bg-background border border-border whitespace-pre-wrap text-sm leading-relaxed">
           {res.translated_text || <span className="text-muted-foreground italic">[empty]</span>}
         </div>
       </div>
 
       {res.reasoning && (
         <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">AI reasoning</Label>
+          <p className="text-xs text-muted-foreground">AI reasoning</p>
           <div className="p-3 rounded bg-background border border-border text-sm italic text-muted-foreground">
             {res.reasoning}
           </div>
         </div>
       )}
 
-      <details className="text-xs">
-        <summary className="cursor-pointer text-muted-foreground hover:text-foreground">Raw OpenAI response</summary>
-        <pre className="mt-2 p-3 rounded bg-background border border-border overflow-auto max-h-64 text-[11px]">
-          {JSON.stringify(res.raw, null, 2)}
-        </pre>
-      </details>
     </div>
   );
 
@@ -139,7 +134,7 @@ export default function TranslationPlayground({ translationSettings, contentFilt
             <Label htmlFor="playground_text">Test text (English)</Label>
             {sampleTweets.length > 0 && (
               <Select onValueChange={loadSample}>
-                <SelectTrigger className="w-48 h-8 text-xs"><SelectValue placeholder="Load sample tweet…" /></SelectTrigger>
+                <SelectTrigger aria-label="Load sample tweet" className="w-48 h-8 text-xs"><SelectValue placeholder="Load sample tweet…" /></SelectTrigger>
                 <SelectContent>
                   {sampleTweets.map((_, i) => <SelectItem key={i} value={i.toString()}>Sample {i + 1}</SelectItem>)}
                 </SelectContent>
@@ -162,9 +157,9 @@ export default function TranslationPlayground({ translationSettings, contentFilt
             <Input id="author_handle" value={authorHandle} onChange={(e) => setAuthorHandle(e.target.value)} placeholder="@example" className="glass-input h-9" />
           </div>
           <div className="space-y-2">
-            <Label className="text-xs">Filter mode</Label>
+            <Label id="translation-playground-filter-mode-label" className="text-xs">Filter mode</Label>
             <Select value={forceFilter} onValueChange={(v) => setForceFilter(v as 'auto' | 'on' | 'off')}>
-              <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+              <SelectTrigger aria-labelledby="translation-playground-filter-mode-label" className="h-9"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="auto">Auto (use saved filter setting)</SelectItem>
                 <SelectItem value="on">Force ON (translate + score)</SelectItem>
@@ -173,10 +168,15 @@ export default function TranslationPlayground({ translationSettings, contentFilt
             </Select>
           </div>
           <div className="space-y-2">
-            <Label className="text-xs">A/B compare</Label>
+            <Label id="translation-playground-ab-compare-label" className="text-xs">A/B compare</Label>
             <div className="flex items-center h-9 gap-2">
-              <Switch checked={keepPrevious} onCheckedChange={setKeepPrevious} />
-              <span className="text-sm text-muted-foreground">Keep previous result</span>
+              <Switch
+                aria-labelledby="translation-playground-ab-compare-label"
+                aria-describedby="translation-playground-ab-compare-description"
+                checked={keepPrevious}
+                onCheckedChange={setKeepPrevious}
+              />
+              <span id="translation-playground-ab-compare-description" className="text-sm text-muted-foreground">Keep previous result</span>
             </div>
           </div>
         </div>

@@ -10,13 +10,27 @@ export type { DashboardProcessHudPayload } from '@/api/dashboardProcessHud';
 
 export const DASHBOARD_PROCESS_HUD_QUERY_KEY = ['dashboard-process-hud'] as const;
 
-export function useDashboardProcessHudData() {
+export type DashboardProcessHudOptions = {
+  enabled: boolean;
+};
+
+export function useDashboardProcessHudData({ enabled }: DashboardProcessHudOptions) {
   const queryClient = useQueryClient();
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const enabledRef = useRef(enabled);
+
+  useEffect(() => {
+    enabledRef.current = enabled;
+    if (!enabled && timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  }, [enabled]);
 
   const query = useQuery<DashboardProcessHudPayload>({
     queryKey: DASHBOARD_PROCESS_HUD_QUERY_KEY,
     queryFn: fetchDashboardProcessHud,
+    enabled,
     staleTime: 10_000,
     gcTime: 2 * 60_000,
     refetchOnWindowFocus: false,
@@ -24,29 +38,38 @@ export function useDashboardProcessHudData() {
   });
 
   const debouncedInvalidate = useCallback(() => {
+    if (!enabledRef.current) return;
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
+      timerRef.current = null;
+      if (!enabledRef.current) return;
       queryClient.invalidateQueries({ queryKey: DASHBOARD_PROCESS_HUD_QUERY_KEY });
     }, 1000);
   }, [queryClient]);
 
   useEffect(() => {
-    const channels = [
-      supabase.channel('dash-hud-posts').on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, debouncedInvalidate).subscribe(),
-      supabase.channel('dash-hud-jobs').on('postgres_changes', { event: '*', schema: 'public', table: 'jobs' }, debouncedInvalidate).subscribe(),
-      supabase.channel('dash-hud-deliveries').on('postgres_changes', { event: '*', schema: 'public', table: 'deliveries' }, debouncedInvalidate).subscribe(),
-      supabase.channel('dash-hud-x-deliveries').on('postgres_changes', { event: '*', schema: 'public', table: 'x_deliveries' }, debouncedInvalidate).subscribe(),
-      supabase.channel('dash-hud-workflow-runs').on('postgres_changes', { event: '*', schema: 'public', table: 'workflow_runs' }, debouncedInvalidate).subscribe(),
-      supabase.channel('dash-hud-ai-call-ledger').on('postgres_changes', { event: '*', schema: 'public', table: 'ai_call_ledger' }, debouncedInvalidate).subscribe(),
-    ];
+    if (!enabled) {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      return;
+    }
+
+    const channel = supabase.channel('dashboard-process-hud-realtime');
+    for (const table of ['posts', 'jobs', 'deliveries', 'x_deliveries', 'workflow_runs', 'ai_call_ledger']) {
+      channel.on('postgres_changes', { event: '*', schema: 'public', table }, debouncedInvalidate);
+    }
+    channel.subscribe();
 
     return () => {
-      channels.forEach((channel) => {
-        supabase.removeChannel(channel);
-      });
-      if (timerRef.current) clearTimeout(timerRef.current);
+      supabase.removeChannel(channel);
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
     };
-  }, [debouncedInvalidate]);
+  }, [debouncedInvalidate, enabled]);
 
   return {
     ...query,

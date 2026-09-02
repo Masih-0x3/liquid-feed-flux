@@ -3,13 +3,15 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
   Activity,
   AlertTriangle,
   ArrowRight,
   BarChart3,
   CheckCircle,
+  ChevronDown,
   Clock,
   Database,
   DollarSign,
@@ -45,7 +47,7 @@ import { MonitoringProcessHud } from '@/components/monitoring/MonitoringProcessH
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { cn } from '@/lib/utils';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode, type SyntheticEvent } from 'react';
 
 function compactNumber(value: number | null | undefined): string {
   return typeof value === 'number' ? value.toLocaleString() : '-';
@@ -234,15 +236,31 @@ const EMPTY_PROCESS_OBSERVABILITY: ProcessObservabilitySummary = {
 };
 
 export default function Dashboard() {
+  return (
+    <TooltipProvider>
+      <DashboardContent />
+    </TooltipProvider>
+  );
+}
+
+function DashboardContent() {
   const { data, isLoading, isError, error, dataUpdatedAt, isFetching } = useDashboardData();
-  const processHudQuery = useDashboardProcessHudData();
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const [processHudOpen, setProcessHudOpen] = useState(false);
+  const processHudQuery = useDashboardProcessHudData({ enabled: processHudOpen });
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
+  const handleDiagnosticsToggle = (event: SyntheticEvent<HTMLDetailsElement>) => {
+    const open = event.currentTarget.open;
+    setDiagnosticsOpen(open);
+    if (!open) setProcessHudOpen(false);
+  };
+
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-    processHudQuery.refetch();
+    if (processHudOpen) processHudQuery.refetch();
   };
 
   if (isLoading) {
@@ -432,8 +450,6 @@ export default function Dashboard() {
     storagePct != null && storagePct >= STORAGE_WARNING_PCT
       ? { label: `Temp media ${storagePct}%`, className: storagePct >= STORAGE_CRITICAL_PCT ? 'border-destructive/30 text-destructive' : 'border-warning/30 text-warning' }
       : null,
-    { label: health.isOnline ? 'Online' : 'Offline', className: health.isOnline ? 'border-success/30 text-success' : 'border-destructive/30 text-destructive' },
-    { label: `Updated ${new Date(dataUpdatedAt).toLocaleTimeString()}`, className: 'border-border/60 text-muted-foreground' },
   ].filter(Boolean) as Array<{ label: string; className: string }>;
 
   const provenanceCopy = 'Supabase-local telemetry only; dashboard loads do not call X, hydrate tweets, sync official usage, or snapshot followers.';
@@ -482,7 +498,7 @@ export default function Dashboard() {
       ? new Error(processHudQuery.data.error)
       : null;
   const processHudEmptyReason = processHudQuery.data?.available === false
-    ? processHudQuery.data.partialReason?.replaceAll('_', ' ') ?? 'Process feed unavailable.'
+    ? processHudQuery.data.partialReason?.replace(/_/g, ' ') ?? 'Process feed unavailable.'
     : processHudQuery.data?.truncated
       ? 'Showing latest 30 process runs.'
       : 'Waiting for post processes.';
@@ -528,8 +544,8 @@ export default function Dashboard() {
           <p className="mt-1 max-w-3xl text-xs text-muted-foreground">{provenanceCopy}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="sm" onClick={refresh} disabled={isFetching || processHudQuery.isFetching}>
-            {isFetching || processHudQuery.isFetching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+          <Button variant="outline" size="sm" onClick={refresh} disabled={isFetching || (processHudOpen && processHudQuery.isFetching)}>
+            {isFetching || (processHudOpen && processHudQuery.isFetching) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
             Refresh
           </Button>
           <div className="flex items-center gap-2 rounded-md border border-border/60 px-3 py-2 text-sm">
@@ -540,61 +556,142 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div aria-label="Dashboard status" className="rounded-lg border border-border/60 bg-background/70 px-2 py-2">
-        <div className="flex flex-wrap items-center gap-2">
-          {statusItems.map((item) => (
-            <span key={item.label} className={cn('rounded-full border px-2.5 py-1 text-xs font-medium', item.className)}>
-              {item.label}
-            </span>
-          ))}
+      {statusItems.length > 0 && (
+        <div aria-label="Dashboard status" className="rounded-lg border border-border/60 bg-background/70 px-2 py-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {statusItems.map((item) => (
+              <span key={item.label} className={cn('rounded-full border px-2.5 py-1 text-xs font-medium', item.className)}>
+                {item.label}
+              </span>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
-      <Card className={`glass-card border ${severityClasses(primaryAlert.severity)}`}>
-        <CardContent className="flex flex-col gap-3 p-3 sm:p-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-start gap-3">
-            <span className={`mt-1 h-3 w-3 shrink-0 rounded-full ${statusDot(primaryAlert.severity)}`} />
-            <div>
-              <p className="text-sm font-semibold text-glass-foreground">{primaryAlert.title}</p>
-              <p className="text-xs text-muted-foreground">{primaryAlert.detail}</p>
+      <section aria-label="Workflow cockpit" className="space-y-3 rounded-xl border border-primary/30 bg-card/70 p-3 sm:p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-glass-foreground">Workflow cockpit</h2>
+            <p className="text-xs text-muted-foreground">Current pipeline posture and the next operator decision.</p>
+          </div>
+          <Activity className="h-5 w-5 shrink-0 text-primary" />
+        </div>
+
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-md border border-border/60 bg-background/30 p-3">
+            <p className="text-xs text-muted-foreground">Current ingest</p>
+            <p className="mt-1 text-lg font-semibold capitalize text-glass-foreground">{`${heartbeat.state} - ${formatAge(heartbeat.ageSeconds)} ago`}</p>
+            <p className="mt-1 text-xs text-muted-foreground">Last ingest heartbeat</p>
+          </div>
+          <div className="rounded-md border border-border/60 bg-background/30 p-3">
+            <p className="text-xs text-muted-foreground">Queue</p>
+            <p className="mt-1 text-lg font-semibold tabular-nums text-glass-foreground">{`${compactNumber(queueBreakdown.pending)} pending / ${compactNumber(queueBreakdown.running)} running`}</p>
+            <p className="mt-1 text-xs text-muted-foreground">Oldest pending {formatAge(oldestPendingSeconds)}</p>
+          </div>
+          <div className="rounded-md border border-border/60 bg-background/30 p-3">
+            <p className="text-xs text-muted-foreground">Delivery last 24h</p>
+            <div className="mt-1 grid grid-cols-2 gap-2 text-sm">
+              <div>
+                <p className="text-xs text-muted-foreground">Telegram last 24h</p>
+                <p className="text-lg font-semibold tabular-nums text-glass-foreground">{compactNumber(metrics.postsDelivered)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">X last 24h</p>
+                <p className="text-lg font-semibold tabular-nums text-glass-foreground">{compactNumber(metrics.xPosts24h)}</p>
+              </div>
             </div>
           </div>
-          <Button variant="outline" size="sm" onClick={() => navigate(primaryAlert.route)}>
-            {primaryAlert.ctaLabel}
-            <ArrowRight className="ml-2 h-4 w-4" />
-          </Button>
-        </CardContent>
-      </Card>
+          <div className="rounded-md border border-border/60 bg-background/30 p-3">
+            <p className="text-xs text-muted-foreground">Latest workflow</p>
+            {latestProcessRun ? (
+              <p className="mt-1 truncate text-lg font-semibold text-glass-foreground" title={`${latestProcessRun.workflowName} - ${latestProcessRun.status}`}>
+                {`${latestProcessRun.workflowName} - ${latestProcessRun.status}`}
+              </p>
+            ) : (
+              <p className="mt-1 text-sm text-muted-foreground">No recent workflow status observed.</p>
+            )}
+            <p className="mt-1 text-xs text-muted-foreground">Local workflow telemetry</p>
+          </div>
+        </div>
 
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
-        {triageCards.map((card) => (
-          <button
-            key={card.label}
-            type="button"
-            onClick={() => navigate(card.route)}
-            className="rounded-lg border bg-card p-2.5 text-left transition-colors hover:border-primary/50 hover:bg-muted/30 sm:p-3"
-          >
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-xs text-muted-foreground">{card.label}</p>
-              <card.icon className={`h-4 w-4 ${card.tone}`} />
+        <Card className={`glass-card border ${severityClasses(primaryAlert.severity)}`}>
+          <CardContent className="flex flex-col gap-3 p-3 sm:p-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-start gap-3">
+              <span className={`mt-1 h-3 w-3 shrink-0 rounded-full ${statusDot(primaryAlert.severity)}`} />
+              <div>
+                <p className="text-sm font-semibold text-glass-foreground">{primaryAlert.title}</p>
+                <p className="text-xs text-muted-foreground">{primaryAlert.detail}</p>
+              </div>
             </div>
-            <p className={`mt-2 text-2xl font-semibold tabular-nums ${card.tone}`}>{compactNumber(card.value)}</p>
-            <p className="mt-1 truncate text-xs text-muted-foreground">{card.context}</p>
-          </button>
-        ))}
-      </div>
+            <Button variant="outline" size="sm" onClick={() => navigate(primaryAlert.route)}>
+              {primaryAlert.ctaLabel}
+              <ArrowRight className="ml-2 h-4 w-4" />
+            </Button>
+          </CardContent>
+        </Card>
+      </section>
 
-      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <MonitoringProcessHud
-          entries={processHudQuery.entries}
-          isLoading={processHudQuery.isLoading}
-          error={processHudError}
-          emptyReason={processHudEmptyReason}
-          mode="dashboard"
-          maxEntries={30}
-          onRetry={() => processHudQuery.refetch()}
-          onOpenPost={(tweetId) => navigate(`/monitoring?search=${encodeURIComponent(tweetId)}`)}
-        />
+      <details open={diagnosticsOpen} onToggle={handleDiagnosticsToggle} className="rounded-xl border border-border/60 bg-card/50">
+        <summary aria-expanded={diagnosticsOpen} className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-glass-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60">
+          <span className="flex items-center justify-between gap-3">
+            <span>Diagnostics &amp; capacity</span>
+            <ChevronDown className={cn('h-4 w-4 transition-transform', diagnosticsOpen && 'rotate-180')} />
+          </span>
+        </summary>
+        <div className="space-y-4 border-t border-border/60 p-3">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
+            {triageCards.map((card) => (
+              <button
+                key={card.label}
+                type="button"
+                onClick={() => navigate(card.route)}
+                className="rounded-lg border bg-card p-2.5 text-left transition-colors hover:border-primary/50 hover:bg-muted/30 sm:p-3"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs text-muted-foreground">{card.label}</p>
+                  <card.icon className={`h-4 w-4 ${card.tone}`} />
+                </div>
+                <p className={`mt-2 text-2xl font-semibold tabular-nums ${card.tone}`}>{compactNumber(card.value)}</p>
+                <p className="mt-1 truncate text-xs text-muted-foreground">{card.context}</p>
+              </button>
+            ))}
+          </div>
+
+          <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <Collapsible open={processHudOpen} onOpenChange={setProcessHudOpen} className="overflow-hidden rounded-xl border border-border/60 bg-card/70">
+          <CollapsibleTrigger asChild>
+            <button
+              type="button"
+              className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+            >
+              <span className="flex min-w-0 items-center gap-3">
+                <Activity className="h-5 w-5 shrink-0 text-primary" />
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-semibold text-glass-foreground">Process trace detail</span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {processHudOpen ? 'Detailed post-run activity refreshes while this panel is open.' : 'Open only when you need detailed post-run activity.'}
+                  </span>
+                </span>
+              </span>
+              <span className="flex shrink-0 items-center gap-2 text-xs font-medium text-muted-foreground">
+                {processHudOpen ? 'Hide process HUD' : 'Open process HUD'}
+                <ChevronDown className={cn('h-4 w-4 transition-transform', processHudOpen && 'rotate-180')} />
+              </span>
+            </button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="border-t border-border/60 p-3">
+            <MonitoringProcessHud
+              entries={processHudQuery.entries}
+              isLoading={processHudQuery.isLoading}
+              error={processHudError}
+              emptyReason={processHudEmptyReason}
+              mode="dashboard"
+              maxEntries={30}
+              onRetry={() => processHudQuery.refetch()}
+              onOpenPost={(tweetId) => navigate(`/monitoring?search=${encodeURIComponent(tweetId)}`)}
+            />
+          </CollapsibleContent>
+        </Collapsible>
 
         <Card className="glass-card">
           <CardHeader className="pb-3">
@@ -667,9 +764,9 @@ export default function Dashboard() {
             </div>
           </CardContent>
         </Card>
-      </div>
+          </div>
 
-      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(380px,0.9fr)]">
+          <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(380px,0.9fr)]">
         <Card className="glass-card">
           <CardHeader className="pb-3">
             <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
@@ -781,82 +878,83 @@ export default function Dashboard() {
             </div>
           </CardContent>
         </Card>
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.75fr)]">
-        <Card className="glass-card">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg font-display text-glass-foreground">Pipeline Funnel</CardTitle>
-            <CardDescription>Local stage counts with derived drop-off.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {funnel.map((step) => (
-                <div key={step.label} className="rounded-md border border-border/60 p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <step.icon className="h-4 w-4 text-primary" />
-                      <p className="text-sm font-medium text-glass-foreground">{step.label}</p>
+          </div>
+          <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.75fr)]">
+            <Card className="glass-card">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-lg font-display text-glass-foreground">Pipeline Funnel</CardTitle>
+                <CardDescription>Local stage counts with derived drop-off.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {funnel.map((step) => (
+                    <div key={step.label} className="rounded-md border border-border/60 p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <step.icon className="h-4 w-4 text-primary" />
+                          <p className="text-sm font-medium text-glass-foreground">{step.label}</p>
+                        </div>
+                        <p className="text-lg font-semibold tabular-nums">{compactNumber(step.value)}</p>
+                      </div>
+                      <Progress value={step.value == null ? 0 : percent(step.value, maxPipeline)} className="mt-3 h-2" />
+                      <p className={cn('mt-2 text-xs', step.noteTone)}>{step.note}</p>
                     </div>
-                    <p className="text-lg font-semibold tabular-nums">{compactNumber(step.value)}</p>
-                  </div>
-                  <Progress value={step.value == null ? 0 : percent(step.value, maxPipeline)} className="mt-3 h-2" />
-                  <p className={cn('mt-2 text-xs', step.noteTone)}>{step.note}</p>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+              </CardContent>
+            </Card>
 
-        <Card className="glass-card">
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <CardTitle className="text-lg font-display text-glass-foreground">X Cost Guard</CardTitle>
-                <CardDescription>Latest local estimate</CardDescription>
-              </div>
-              <Badge variant="outline">{xLocalUsage.available ? 'Ledger' : 'Fallback'}</Badge>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Configured budget</span>
-                <span className={xLocalUsage.budgetUsedPct >= 90 ? 'font-semibold text-destructive' : xLocalUsage.budgetUsedPct >= 70 ? 'font-semibold text-warning' : 'font-semibold text-success'}>
-                  {xLocalUsage.budgetUsedPct}%
-                </span>
-              </div>
-              <Progress value={Math.min(100, xLocalUsage.budgetUsedPct)} className="mt-2 h-2" />
-              <p className="mt-1 text-xs text-muted-foreground">{compactNumber(xLocalUsage.monthlyPosts)} of {compactNumber(xLocalUsage.monthlyBudget)} configured posts</p>
-            </div>
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <div>
-                <p className="text-xs text-muted-foreground">Local posts 24h</p>
-                <p className="font-semibold">{compactNumber(xLocalUsage.posts24h)}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Failed posts 24h</p>
-                <p className={xLocalUsage.failedPosts24h > 0 ? 'font-semibold text-destructive' : 'font-semibold text-success'}>{compactNumber(xLocalUsage.failedPosts24h)}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Media uploads</p>
-                <p className="font-semibold">{compactNumber(xLocalUsage.mediaUploads24h)}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Hydration reads</p>
-                <p className="font-semibold">{compactNumber(xLocalUsage.hydrations24h)}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Failed attempts</p>
-                <p className={xLocalUsage.failedAttempts24h > 0 ? 'font-semibold text-warning' : 'font-semibold text-success'}>{compactNumber(xLocalUsage.failedAttempts24h)}</p>
-              </div>
-            </div>
-            <div className="rounded-md border border-border/60 bg-muted/20 p-3 text-xs text-muted-foreground">
-              Official X usage is not synced from Dashboard. My X follower/following reads are paused; use Settings for X automation controls.
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+            <Card className="glass-card">
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <CardTitle className="text-lg font-display text-glass-foreground">X Cost Guard</CardTitle>
+                    <CardDescription>Latest local estimate</CardDescription>
+                  </div>
+                  <Badge variant="outline">{xLocalUsage.available ? 'Ledger' : 'Fallback'}</Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Configured budget</span>
+                    <span className={xLocalUsage.budgetUsedPct >= 90 ? 'font-semibold text-destructive' : xLocalUsage.budgetUsedPct >= 70 ? 'font-semibold text-warning' : 'font-semibold text-success'}>
+                      {xLocalUsage.budgetUsedPct}%
+                    </span>
+                  </div>
+                  <Progress value={Math.min(100, xLocalUsage.budgetUsedPct)} className="mt-2 h-2" />
+                  <p className="mt-1 text-xs text-muted-foreground">{compactNumber(xLocalUsage.monthlyPosts)} of {compactNumber(xLocalUsage.monthlyBudget)} configured posts</p>
+                </div>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Local posts 24h</p>
+                    <p className="font-semibold">{compactNumber(xLocalUsage.posts24h)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Failed posts 24h</p>
+                    <p className={xLocalUsage.failedPosts24h > 0 ? 'font-semibold text-destructive' : 'font-semibold text-success'}>{compactNumber(xLocalUsage.failedPosts24h)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Media uploads</p>
+                    <p className="font-semibold">{compactNumber(xLocalUsage.mediaUploads24h)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Hydration reads</p>
+                    <p className="font-semibold">{compactNumber(xLocalUsage.hydrations24h)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Failed attempts</p>
+                    <p className={xLocalUsage.failedAttempts24h > 0 ? 'font-semibold text-warning' : 'font-semibold text-success'}>{compactNumber(xLocalUsage.failedAttempts24h)}</p>
+                  </div>
+                </div>
+                <div className="rounded-md border border-border/60 bg-muted/20 p-3 text-xs text-muted-foreground">
+                  Official X usage is not synced from Dashboard. My X follower/following reads are paused; use Settings for X automation controls.
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </details>
 
       <Tabs value={activeTab} onValueChange={setDashboardTab} className="space-y-3">
         <TabsList className="grid h-auto w-full grid-cols-3 gap-1 sm:inline-flex sm:w-auto">

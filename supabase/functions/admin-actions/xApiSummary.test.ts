@@ -131,6 +131,31 @@ function deps(loggedEvents: Array<Record<string, unknown>> = []) {
   };
 }
 
+Deno.test("read_only official usage sync is rejected before provider fetch or audit write", async () => {
+  const loggedEvents: Array<Record<string, unknown>> = [];
+  let providerFetches = 0;
+  const result = await getXApiSummary(
+    fakeSupabase(),
+    { sync_official_usage: true },
+    {
+      ...deps(loggedEvents),
+      role: "read_only",
+      fetchUsage: async () => {
+        providerFetches += 1;
+        return new Response("{}", { status: 200 });
+      },
+    },
+  );
+  assertEquals(result, {
+    success: false,
+    error: "admin_role_required",
+    code: "admin_role_required",
+    status: 403,
+  });
+  assertEquals(providerFetches, 0);
+  assertEquals(loggedEvents, []);
+});
+
 Deno.test("x api summary counts local events, deliveries, and configured budgets", async () => {
   const result = await getXApiSummary(fakeSupabase(), { window_hours: 48 }, deps());
 

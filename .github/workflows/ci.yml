@@ -11,26 +11,171 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
-      - run: npm ci
+      - run: node scripts/check-supply-chain-contract.mjs
+      - run: npm ci --ignore-scripts
+      - run: node scripts/check-supply-chain-contract.mjs
+      - run: npm --prefix services/video-renderer ci --ignore-scripts
+      - run: npm audit --omit=dev --audit-level=high
+      - run: npm --prefix services/video-renderer audit --omit=dev --audit-level=high
+      - run: node scripts/check-runtime-contract.mjs
+      - run: node --test scripts/check-runtime-contract.test.mjs
+      - run: node --test scripts/check-build-output-identity.test.mjs scripts/run-vite-build.test.mjs
+      - run: node --test scripts/check-supply-chain-contract.test.mjs
+      - run: npm rebuild --ignore-scripts=false deno
+      - run: npx --yes supabase@2.111.0 --version
+      - run: npm run check:remote-media-policy
+      - run: npm run check:remote-media-no-egress
+      - run: npm run test:remote-media-no-egress
+      - run: npm run check:x-quota-admission
+      - run: npm run check:admin-action-input-policy
+      - run: npm run check:admin-action-client-errors
+      - run: npm run check:admin-operation
+      - run: npm run test:admin-operation
+      - run: npm run check:admin-actions-cors
+      - run: npm run check:admin-actions-type-boundary
+      - run: npm run check:thread-delivery-containment
+      - run: npm run check:threads-selection-identity
+      - run: npm run check:client-media-access-containment
+      - run: npm run check:video-render-rls
+      - run: npm run test:video-render-rls
+      - run: npm run check:internal-edge-auth
+      - run: npm run check:admin-role-auth
+      - run: npm run check:rss-webhook-input-policy
+      - run: npm run check:rss-webhook-persistence
+      - run: npm run check:reprocess-staging
+      - run: npm run check:worker-lifecycle
+      - run: npm run check:worker-x-api-workflow
+      - run: npm run check:worker-delivery-deferred
+      - run: npm run check:telegram-delivery-claim
+      - run: npm run check:stale-media-repair
+      - run: npm run check:x-poster-stale-repair
+      - run: npm run check:telegram-delivery-fail-closed
+      - run: npm run check:dedupe-action-persistence
+      - run: npm run check:settings-write-fail-closed
+      - run: npm run check:settings-draft-protection
+      - run: npm run check:monitoring-mutation-fail-closed
+      - run: npm run check:basic-action-persistence
+      - run: npm run check:content-filter-author-stats
+      - run: npm run check:video-render-read-fail-closed
+      - run: npm run check:video-render-retry
+      - run: npm run check:video-render-feedback
+      - run: npm run check:video-render-polling
+      - run: npm run check:monitoring-timeline-identity
+      - run: npm run check:auth-state
+      - run: npm run check:content-language
+      - run: npm run check:prompt-editor-accessibility
+      - run: npm run check:translation-playground-accessibility
+      - run: npm run check:story-memory-accessibility
+      - run: npm run check:not-found-accessibility
+      - run: npm run check:glass-card-padding
+      - run: npm run check:primary-gradient
+      - run: npm run check:security-headers
+      - run: npm run check:toast-stack
+      - run: npm run check:sentry-lazy
+      - run: npm run check:stable-route-shell
+      - run: npm run check:radix-route-boundary
+      - run: npm run check:chunk-reload
+      - run: npm run check:final-dedupe-fail-closed
+      - run: npm run check:enrich-persistence
+      - run: npm run check:enrichment-error-redaction
+      - run: npm run check:observability-error-redaction
+      - run: npm run check:translation-readability-error
+      - run: npm run check:foglamp-openai-error
+      - run: npm run check:scoring-workflow-diagnostics
+      - run: npm run check:translation-routing-fail-closed
+      - run: npm run check:hydration-quota-fail-closed
+      - run: npm run check:hydration-fallback
+      - run: npm run check:worker-config-read
+      - run: npm run check:telegram-media-access
+      - run: npm run check:hydrate-queue-fail-closed
+      - run: npm run check:resolve-media-persistence
+      - run: npm run check:reprocess-queue-fail-closed
+      - run: npm run check:x-poster-self-heal
+      - run: npm run check:video-render-gate-queue
+      - run: npm run check:x-poster-ambiguity
+      - run: npm run check:x-poster-read-gates
+      - run: npm run check:x-api-credentials-read
+      - run: npm run check:x-followers-response
+      - run: npm run check:x-posting-diagnostics-bounds
+      - run: npm run check:x-post-delivery-claim
+      - run: npm run check:v1-delivery-cutover
+      - run: npm run check:b3a-job-fence
+      - run: npm run check:b3a-x-generation
+      - run: npm run check:b3b1-rss-receipt
+      - run: npm run check:b3b2-digest-checkpoint
+      - run: npm run check:b4-renderer-claim-fence
+      - run: npm run check:digest-persistence
+      - run: npm run check:digest-config-secret-boundary
+      - run: npm run check:digest-period
+      - run: npm run check:db-cleanup-fail-closed
+      - run: npm run check:media-cleanup-finalization
+      - run: npm run check:legacy-cleanup-order
+      - run: npm run check:media-object-cleanup
+      - run: npm run check:e6-disposable-acceptance
+      - run: npm run check:e7-disposable-boundary
+      - run: npm run test:e7-disposable-boundary-contract
+      - run: npm run test:e7-disposable-boundary-pure
+      - run: npm run check:media-processor-telemetry
+      - run: npm run check:media-processor-pipeline-events
+      - run: npm run check:admin-retry-errors
+      - run: npm run check:video-render-review-persistence
+      - run: npm run check:video-render-posted-persistence
+      - run: npm run check:x-api-ledger
+      - run: npm run check:stale-media-repair-idempotency
+      - run: npm run check:phase0-containment
+      - run: npm run check:air-ledger-coverage
+      - run: npm run check:maintenance-write
+      - run: npm run check:enrichment-admin-actions
+      - run: npm run check:manual-advance
+      - run: npm run check:renderer-capacity
+      - run: npm run check:renderer-request-policy
+      - run: npm run check:renderer-error-boundary
+      - run: npm run check:renderer-process-runner
+      - run: npm run check:renderer-boundary-typecheck
+      - run: npm --prefix services/video-renderer test
+      - run: npm run check:dashboard-hud-lazy
+      - run: npm run check:process-trace-status
+      - run: npm run check:manual-post-snapshot
+      - run: npm run check:dashboard-summary
+      - run: npm run check:monitoring-threshold
+      - run: npm run check:admin-feedback-persistence
+      - run: npm run check:manual-intake-persistence
+      - run: npm run check:translation-rescore-settings
+      - run: npm run check:scoring-action-boundary
+      - run: npm run check:monitoring-realtime
+      - run: npm run check:settings-fail-closed
+      - run: npm run check:telegram-fallback-final-response
+      - run: npm run check:telegram-error-redaction
+      - run: npm run check:webhook-self-test
       - run: npm run lint
       - run: npm run check:function-inventory
+      - run: npm run check:edge-suppressions
+      - run: npm run check:migration-baseline
+      - run: npm run test:migration-baseline
       - run: npm run lint:functions
       - run: npm run check:functions
+      - run: npm run test:functions
+      - run: npm run check:strict-project-contract
+      - run: npm run check:module-characterization
+      - run: npm run check:visual-layer-characterization
+      - run: npm run check:asset-weight-characterization
       - run: npm run check:strict
       - run: npm test
       - name: Validate frontend environment contract
         run: npm run check:vite-env
         env:
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
-          VITE_SUPABASE_PROJECT_ID: ${{ secrets.VITE_SUPABASE_PROJECT_ID }}
+          VITE_SUPABASE_URL: https://abcdefghijklmnopqrst.supabase.co
+          VITE_SUPABASE_PUBLISHABLE_KEY: eyJhbGciOiJIUzI1NiJ9.synthetic-public-payload.synthetic-signature
+          VITE_SUPABASE_PROJECT_ID: abcdefghijklmnopqrst
       - name: Build frontend
         run: npm run build
         env:
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
-          VITE_SUPABASE_PROJECT_ID: ${{ secrets.VITE_SUPABASE_PROJECT_ID }}
+          VITE_SUPABASE_URL: https://abcdefghijklmnopqrst.supabase.co
+          VITE_SUPABASE_PUBLISHABLE_KEY: eyJhbGciOiJIUzI1NiJ9.synthetic-public-payload.synthetic-signature
+          VITE_SUPABASE_PROJECT_ID: abcdefghijklmnopqrst

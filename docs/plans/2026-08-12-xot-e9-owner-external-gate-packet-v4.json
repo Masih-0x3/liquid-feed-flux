@@ -1,0 +1,346 @@
+{
+  "schema": "xot-e9-owner-external-gate-packet-v4",
+  "artifactKind": "gate_packet_not_acceptance_receipt",
+  "event": "e9_phase0_owner_decisions_local_phase1_authorization_successor_v4",
+  "phase": "E9 - Parallel Owner And External Gate Packet",
+  "status": "PHASE0_DECISIONS_RECORDED_LOCAL_PHASE1_ONLY_EXTERNAL_GATES_PENDING",
+  "release": "CLOSED",
+  "releaseGate": "CLOSED",
+  "riskTier": "HIGH",
+  "evidenceTier": "T0 candidate and predecessor binding plus owner design decisions; local Phase 1 authorization only; hosted, external and higher-tier evidence pending",
+  "deploymentState": "local_only_t0_t1_not_ci_not_staging_not_deployed_not_live",
+  "repository": "/Users/stevmq/Finalized XOT",
+  "branch": "codex/xot-remediation-convergence",
+  "head": "0bd578856016c06a10890339f93aa13b82ecae48",
+  "observedAt": "2026-08-12",
+  "directPlan": {
+    "path": "docs/plans/2026-08-12-xot-e10-preview-parity-implementation-plan.md",
+    "sha256": "c8101ec293168525c5245608e91737a1929687a6bd66a00c1bee2848da1d519a",
+    "section": "Phase 0 - Re-anchor and amend E9",
+    "lines": "274-295",
+    "executionBoundary": "Phase 0 records decisions and authorizes only local Phase 1 source/migration/test/runbook work; execution remains closed for hosted, external and production actions."
+  },
+  "route": {
+    "authorRouteRequired": "GPT-5.6 Luna High implementation owner; records only redacted receipts",
+    "inventoryInput": "none; no external inventory is an input or dependency",
+    "decisionsMade": true,
+    "ownersAssigned": false,
+    "externalStateAccessed": false,
+    "localRoutingContext": "Current candidate HEAD, immutable v3 predecessor, protected ledger row 541 snapshot, and predecessor source/E7/E8 bindings only; no owner, provider, database, browser, CI, staging, deploy, or live system was contacted.",
+    "tierRouting": {
+      "T0": "repository-local source, branch/HEAD observation, packet, plan and ledger hash binding",
+      "T1": "accepted local disposable E7 and bounded local E8 receipts inherited without promotion",
+      "T2": "staging evidence not present",
+      "T3": "live read-only evidence not present",
+      "T4": "operator-approved canary not authorized"
+    }
+  },
+  "predecessorBinding": {
+    "path": "docs/plans/2026-08-12-xot-e9-owner-external-gate-packet.json",
+    "sha256": "59e706752ca97bdab65c90f681038a32753fd8e9b8fde6baa381bca0493b95c7",
+    "bytes": 60575,
+    "immutable": true,
+    "neverEdit": true,
+    "verification": "Fresh live SHA-256 and byte count were recorded before authoring this successor; v3 is immutable and was not edited in place."
+  },
+  "candidateBinding": {
+    "reviewedBranch": "codex/xot-remediation-convergence",
+    "candidateHeadSha256": "0bd578856016c06a10890339f93aa13b82ecae48",
+    "candidateKind": "current_HEAD_commit_with_dirty_worktree",
+    "worktreeState": "pre-existing_dirty_changes_preserved; no unrelated path edited by this artifact",
+    "stagedIndex": "empty_before_authoring",
+    "network": "not_used"
+  },
+  "ledger": {
+    "path": "docs/plans/2026-07-14-xot-comprehensive-audit-remediation-implementation-ledger.jsonl",
+    "rowCount": 541,
+    "byteCount": 2286425,
+    "fullSha256": "b74be6d1c00eb1a3c6f040d2049bc84de4829f274d8def2848414caf17f3a888",
+    "rows525To527": [
+      {"line": 525, "event": "e7_aggregate_migration_rls_grant_type_boundary_local_t1_acceptance_row525", "status": "accepted_local_disposable_t1; independent_luna_high_accept_verified; higher_tiers deferred; release gate CLOSED", "noNewlineSha256": "4a34cb194fa10ce93c668dce95f3551e6367748b5762b8282849ce8f4666ee97", "prefixThroughRowSha256": "4f8e432fa8087dc0a7aa9ace1961fd29d53416da4d7a62179d0ccf9c7da1b6d5"},
+      {"line": 526, "event": "e6_e7_ledger_coverage_metadata_correction_row526", "status": "accepted_local_t0_t1_correction_only; technical E6 and E7 acceptances preserved; higher tiers deferred; release gate CLOSED", "noNewlineSha256": "3c2b98c92883ff07febb696126e5d6829edee1caedbe0dec0c89b27167345951", "prefixThroughRowSha256": "7586db06e2a9bb4da3051fdf79248fcdda6e5a910d13441863ec7f8c87733352"},
+      {"line": 527, "event": "e6_contract_schema_correction_row527", "status": "accepted_local_t0_t1_preserved; checker-schema and provenance correction only; release gate CLOSED", "noNewlineSha256": "f639a6bd4fc9ddf90de4df9e30cedf712480b4cb17a790d7037de9cb8c976135", "prefixThroughRowSha256": "d746d2fc59c49f3645dec86e29e9b9ad1667c3f4c60cfa5f74a4baed824f0cf4"}
+    ],
+    "currentRow": {
+      "line": 541,
+      "event": "e8a_admin_tweet_references_partial_local_t0_t1_acceptance_row541",
+      "status": "accepted partial local T0/T1 pure-module source/static and focused Vitest evidence; AIR-036 remains PARTIAL/open; Deno and higher tiers deferred; release gate CLOSED",
+      "noNewlineSha256": "2314034821175484f3ce82365b9d098ded8b75359ffa2cacad456d9ac8533954",
+      "prefixThroughRowSha256": "b74be6d1c00eb1a3c6f040d2049bc84de4829f274d8def2848414caf17f3a888"
+    },
+    "appendOnly": true,
+    "receiptRow": "none",
+    "mutation": "No ledger row was appended, changed, superseded, reserved, or claimed by this packet.",
+    "preservation": "Ledger row 541 snapshot and rows 1-541 remain predecessor-bound and immutable; this artifact does not authorize an append."
+  },
+  "sourceBindings": [
+    {"path": "docs/plans/2026-07-31-xot-audit-unfinished-dispositions.json", "sha256": "a15346c1898b85f32d373c14da3738f69c8b9b637ba2ce07793fba37f0557e2e", "role": "unfinished AIR dispositions and explicit no-claim rules"},
+    {"path": "docs/plans/2026-07-31-xot-production-first-reconciliation.json", "sha256": "b400e62ff04608d085bec75a8246e955f06a8ff9ea84ca4e98f5dbfef0bd6f80", "role": "production-first read-only reconciliation, advisor snapshot, backup and release limits"},
+    {"path": "docs/operations/supply-chain-gate.md", "sha256": "dca614c038822aae97a49991bfd85b227aad12ceb3f56f1a8c523afe02f50817", "role": "supply-chain scan gate and exception rules"},
+    {"path": "docs/operations/supply-chain-exceptions.json", "sha256": "3870960f592cfa40ed90a4275ded4de6dc5ade28c63bef4e055ce7a27e2622b5", "role": "current exception ledger; no waiver is inferred"},
+    {"path": "docs/operations/runtime-contract.md", "sha256": "6c6337b62bf42c76475b939c446e65b7b6b433e715e3d8a68193592d869c2b01", "role": "runtime and build contract documentation"},
+    {"path": "docs/operations/runtime-contract.json", "sha256": "02278424abb85d92f4d368ccf28832637bdd3480bb99ac774741db353b5b0e5d", "role": "runtime contract machine-readable evidence, including stale provenance boundary"},
+    {"path": "docs/plans/2026-07-14-xot-migration-equivalence-manifest.json", "sha256": "418fc0a4994565daf929244e47e77feb3b8c08728849057b5dce7888f6e96b78", "role": "protected migration equivalence manifest hash"},
+    {"path": "docs/plans/2026-07-14-xot-migration-equivalence-ledger.jsonl", "sha256": "2f3f7a48e0c67c78c189a9e08ce909855b51af211e950fa083a04fd5889079c2", "role": "migration equivalence observations; not proof of current production parity"},
+    {"path": "docs/plans/2026-07-14-xot-schema-privilege-diff.json", "sha256": "7f95aaacade0583983694783fa34ca27baf0bd9d1514b71db816a03c613a1f2c", "role": "schema, policy, privilege and grant-drift evidence"},
+    {"path": "docs/plans/2026-08-06-xot-b1-migration-type-evidence-reconciliation.json", "sha256": "1224c160980741fc05dc9b9c481374366695f79e15c717f0f4ce96d804228af5", "role": "B1 protected-input, migration-body, generated-type and replay limits"},
+    {"path": "docs/operations/backup-restore.md", "sha256": "5e063eb21a452502f89ed3caf4aee166729f7f1dc79a98873d0ecfcc671ed2fc", "role": "backup/PITR/restore runbook and readiness limits"},
+    {"path": "docs/operations/release-runbook.md", "sha256": "20dfb4c87d0d6c6e49a8f63dc43e0ee969e88e98e6274816b0aa7dc61ba27de1", "role": "release hold, cleanup containment and build provenance requirements"},
+    {"path": "docs/operations/phase0-containment-notice.md", "sha256": "c3d0d28b586ef3951f6fc362de330c1f779f7172f7dcbf9fa6c72b5b8a0e1a1e", "role": "phase-0 containment boundary"},
+    {"path": "docs/operations/runbooks.md", "sha256": "9abfce38f78bbbf24b10332dc6f1a45c700eb032348d72fc8082bb9f9c20f53d", "role": "operational rollback and safety procedures"},
+    {"path": "supabase/migrations/20260808110000_b3b2_digest_checkpoints.sql", "sha256": "83bc88b93f5017c8f664eac2b5abadbba8b0e559b71e8117862fc35ea2089758", "role": "AIR-010 local disabled-default source context; not an owner decision"},
+    {"path": ".env.example", "sha256": "153529c993f5b92beddfbbc62136cc70819690e4b6ef7863a7007acdd63101d3", "role": "public Vite variable-name shape only; values are deliberately excluded"},
+    {"path": "docs/plans/2026-08-11-xot-e7-aggregate-migration-rls-grant-type-boundary.json", "sha256": "19239b884f73a7eb606103695dd97184cd8ddb27772c8f427b06c6f3debc0f02", "role": "accepted local disposable E7 T1 aggregate receipt; does not establish production equivalence"},
+    {"path": "docs/plans/2026-08-11-xot-e7-disposable-runtime-acceptance.json", "sha256": "0671d8d9fcb803268e6c07570785bf05dacad33eb9bdaeb6b47f32a465217e5e", "role": "accepted local disposable E7 T1 runtime receipt; isolated local evidence only"},
+    {"path": "docs/plans/2026-08-11-xot-e8a-renderer-preflight-geometry-acceptance.json", "sha256": "e0135ab00a3e8769f94412f8e23c43fdb33fa7f4568b351efc3a4238309fb6bb", "bytes": 9035, "role": "E8a renderer geometry acceptance receipt"},
+    {"path": "docs/plans/2026-08-12-xot-e8a-tweet-normalizers-source-acceptance.json", "sha256": "50486a57a5128934dce15a62fcf8654bbbcb16fe636c5a8fb17f30fd02ede048", "bytes": 13609, "role": "E8a tweet normalizers source acceptance receipt"},
+    {"path": "docs/plans/2026-08-12-xot-e8a-dashboard-resource-metrics-acceptance.json", "sha256": "40b137873146b9817921e0130b8bd95750f9e63b35f4c77fcb3053289da2a279", "bytes": 15333, "role": "E8a dashboard resource metrics source acceptance receipt"},
+    {"path": "docs/plans/2026-08-12-xot-e8a-admin-tweet-references-acceptance.json", "sha256": "0d70db40d5191314efc1e58757a65c298bf7293c2f072a18f732d4563862693e", "bytes": 18149, "role": "E8a admin tweet references acceptance receipt"},
+    {"path": "docs/plans/2026-08-11-xot-e8b-bundle-asset-baseline.json", "sha256": "872de30f6fe940ec1f416f147dc89cca02f4aae774b66cda2e19dab48222ffb1", "bytes": 22270, "role": "E8b bundle asset baseline receipt"},
+    {"path": "docs/plans/2026-08-11-xot-e8b-brand-asset-optimization-acceptance.json", "sha256": "72f8e6302809969996d593ae02878ef6d34a2c090a44fdbca2f7e345f98ddaca", "bytes": 14086, "role": "E8b brand asset optimization acceptance receipt"},
+    {"path": "docs/plans/2026-08-11-xot-e8b-bundle-comparison-acceptance.json", "sha256": "5e66ef1623baaa158849aeb447b52575b3322f64ce6ce89acceea58cf9587a9c", "bytes": 36471, "role": "E8b bundle comparison acceptance receipt"},
+    {"path": "docs/plans/2026-08-12-xot-e8c-dashboard-hierarchy-acceptance.json", "sha256": "20a8e69fc4bb181b1d7fb126c9de6c22649f55f9c6f1e75ccf4c17797e6c830a", "bytes": 14729, "role": "E8c dashboard hierarchy acceptance receipt"},
+    {"path": "docs/plans/2026-08-11-xot-e8d-local-supply-build-inventory.json", "sha256": "13038f7c91d0fe03917b3b6c3b5ada48f022cf1abe83f314af9e6ff3757f0ff2", "bytes": 537063, "role": "E8d local supply build inventory"},
+    {"path": "docs/plans/2026-08-11-xot-e8d-local-supply-build-acceptance.json", "sha256": "5d7264b152be7920d2f702192f26cafb41f82fa3130757250b5886b9ed892bd0", "bytes": 10078, "role": "E8d local supply build acceptance receipt"}
+  ],
+  "ownerDecisions": {
+    "recordedBy": "current owner",
+    "recordedAt": "2026-08-12",
+    "decisionKind": "binding_product_release_database_security_design_decisions_only",
+    "air010": {
+      "id": "AIR-010",
+      "decision": "keep_disabled",
+      "state": "RESOLVED_OWNER_DECISION_KEEP_DISABLED",
+      "orderedThreadDelivery": "disabled",
+      "revalidation": "Required against the exact implementation SHA; no ordered consumer is authorized."
+    },
+    "air050": {
+      "id": "AIR-050",
+      "decision": "decide_after_full_preview_review",
+      "state": "OPEN_DEFERRED",
+      "visualAcceptance": false,
+      "note": "No E9, E10 or E11 completion claim is made."
+    },
+    "roles": {
+      "allowed": ["admin", "read_only"],
+      "exactlyOneRolePerUser": true,
+      "ownerAssignsRoles": true,
+      "selfRegistrationPromotionAndMultiRole": false,
+      "legacyRoles": "rejected_or_removed_from_active_E10_source",
+      "readOnlyCapabilities": {
+        "mayView": "all normal dashboard data and status surfaces",
+        "mayNotMutate": ["data", "settings", "jobs", "users", "provider state"],
+        "secretValues": "hidden from every dashboard user"
+      }
+    },
+    "preview": {
+      "capabilityAndApiParity": "all production product capabilities and APIs are present",
+      "fullProductionCapabilityAndApiParity": true,
+      "dataAndControlPlane": "isolated staging data and control plane; Preview never reads, writes, or controls production",
+      "isolatedStagingDataAndControlPlane": true,
+      "backendAndRenderer": "isolated_staging_backend_and_renderer",
+      "stagingOpenAIKeys": {
+        "placement": "staging_server_side_secret_stores_only",
+        "browserExposure": false,
+        "dashboardExposure": false,
+        "requiredWhilePaused": true
+      },
+      "externalPosting": "hard_blocked_and_not_dashboard_toggleable",
+      "postingBoundary": {
+        "mode": "blocked",
+        "dashboardToggle": false,
+        "databaseEditCanEnable": false,
+        "sharedGuard": "required immediately before every external network write",
+        "guardCallTiming": "immediately_before_network",
+        "requiredPathFamilies": ["X", "Telegram", "digest", "thread", "manual", "test", "retry", "force", "cron", "provider-write"],
+        "coveredPaths": ["X post", "X reply", "X thread", "Telegram send", "digest delivery", "manual post/send", "test post/send", "scheduled cron", "retry", "force", "provider write", "future publish/send/mutate actions"],
+        "guardConditions": ["ALLOW_EXTERNAL_POSTING == true", "runtime_controls.posting_mode == enabled"],
+        "missingMalformedOrUnreadableControls": "fail closed before network access",
+        "controlsUnavailableOrMalformed": "fail closed before network access",
+        "blockedOutcomes": "stable no-op for scheduled calls; clear locked response for manual and force calls"
+      },
+      "dedupe": {"enabledByDefault": false, "adminToggleable": true, "keysServerSide": true},
+      "translation": {"enabledByDefault": false, "adminToggleable": true, "keysServerSide": true}
+    }
+  },
+  "authorization": {
+    "owner": "current owner",
+    "localPhase1": {
+      "authorized": true,
+      "scope": ["local source edits", "local migrations", "local tests", "local runbook updates"],
+      "worktree": "/Users/stevmq/Finalized XOT",
+      "fileOwnership": "This packet author owns only this new packet; Phase 1 implementation must use separate owned files and preserve this artifact."
+    },
+    "e10Authorization": {
+      "authorized": "local_phase1_only",
+      "status": "HOSTED_EXTERNAL_AND_PRODUCTION_ACTIONS_CLOSED",
+      "prohibited": ["commit", "push", "Vercel mutation", "Supabase provisioning/link/push/deploy", "provider calls", "renderer hosting", "DNS", "cron mutation", "production mutation", "secret reads or writes", "branch creation", "cloud provisioning", "deployment", "external calls", "ledger append"],
+      "note": "This is implementation authorization for local Phase 1 only. It does not complete or close E9, E10 or E11."
+    }
+  },
+  "e10Authorization": {
+    "authorized": "local_phase1_only",
+    "status": "NOT_AUTHORIZED_FOR_HOSTED_EXTERNAL_OR_PRODUCTION_ACTIONS",
+    "authorizedScope": ["local Phase 1 source", "local migrations", "local tests", "local runbook implementation"],
+    "prohibited": ["commit", "push", "Vercel/Supabase/provider/renderer/DNS/production mutation", "secret reads/writes", "branch creation", "cloud provisioning", "deployment", "external calls", "ledger append"],
+    "note": "The owner authorizes only local Phase 1 work on the current worktree. E10 remains open and release remains CLOSED."
+  },
+  "gates": [
+    {"id": "AIR-010", "name": "ordered-thread delivery owner decision", "state": "RESOLVED_OWNER_DECISION_KEEP_DISABLED", "decision": "keep_disabled", "evidenceTier": "T0 owner design decision; exact-SHA revalidation pending"},
+    {"id": "AIR-017", "name": "query plans, workload metrics and database-owner approval", "state": "AWAITING_EXTERNAL_DATABASE_EVIDENCE"},
+    {"id": "AIR-050", "name": "operator task hierarchy review", "state": "OPEN_DEFERRED_DECIDE_AFTER_FULL_PREVIEW_REVIEW", "decision": "decide_after_full_preview_review", "visualAcceptance": false},
+    {"id": "AIR-052", "name": "hosted supply-chain scans and waiver adjudication", "state": "AWAITING_HOSTED_CURRENT_SHA_SCANS"},
+    {"id": "AIR-055", "name": "masked public Vite environment and Vercel provenance", "state": "AWAITING_MASKED_BUILD_AND_CURRENT_SHA_PROVENANCE"},
+    {"id": "AIR-065", "name": "canary and cleanup-schedule authorization", "state": "AWAITING_CANARY_AND_SCHEDULE_AUTHORIZATION"},
+    {"id": "SR-REL-00", "name": "backup, PITR and restore readiness", "state": "AWAITING_BACKUP_RESTORE_RECEIPT"},
+    {"id": "SR-MIG-01", "name": "protected migration bodies and schema evidence", "state": "AWAITING_OWNER_AND_EXTERNAL_MIGRATION_EVIDENCE"},
+    {"id": "SR-RLS-01", "name": "privilege, role and grant evidence", "state": "AWAITING_DATABASE_SECURITY_ROLE_EVIDENCE"},
+    {"id": "PAT-1", "name": "PAT alert #1 disposition", "state": "UNRESOLVED_AWAITING_SECURITY_OWNER"}
+  ],
+  "localE7AcceptedEvidence": {
+    "tier": "T1",
+    "status": "ACCEPTED_LOCAL_DISPOSABLE_T1",
+    "releaseGate": "CLOSED",
+    "aggregateSha256": "19239b884f73a7eb606103695dd97184cd8ddb27772c8f427b06c6f3debc0f02",
+    "runtimeSha256": "0671d8d9fcb803268e6c07570785bf05dacad33eb9bdaeb6b47f32a465217e5e",
+    "reviewedHeadObservation": "0bd578856016c06a10890339f93aa13b82ecae48",
+    "claimBoundary": "Local disposable evidence only; not owner approval, external evidence, production equivalence, CI, staging, deploy, live or release closure."
+  },
+  "localE8AcceptedEvidence": {
+    "tier": "T0/T1",
+    "status": "ACCEPTED_LOCAL_BOUNDED_HANDOFF_ONLY",
+    "releaseGate": "CLOSED",
+    "receiptHashesAndBytesPreserved": [
+      ["docs/plans/2026-08-11-xot-e8a-renderer-preflight-geometry-acceptance.json", "e0135ab00a3e8769f94412f8e23c43fdb33fa7f4568b351efc3a4238309fb6bb", 9035],
+      ["docs/plans/2026-08-12-xot-e8a-tweet-normalizers-source-acceptance.json", "50486a57a5128934dce15a62fcf8654bbbcb16fe636c5a8fb17f30fd02ede048", 13609],
+      ["docs/plans/2026-08-12-xot-e8a-dashboard-resource-metrics-acceptance.json", "40b137873146b9817921e0130b8bd95750f9e63b35f4c77fcb3053289da2a279", 15333],
+      ["docs/plans/2026-08-12-xot-e8a-admin-tweet-references-acceptance.json", "0d70db40d5191314efc1e58757a65c298bf7293c2f072a18f732d4563862693e", 18149],
+      ["docs/plans/2026-08-11-xot-e8b-bundle-asset-baseline.json", "872de30f6fe940ec1f416f147dc89cca02f4aae774b66cda2e19dab48222ffb1", 22270],
+      ["docs/plans/2026-08-11-xot-e8b-brand-asset-optimization-acceptance.json", "72f8e6302809969996d593ae02878ef6d34a2c090a44fdbca2f7e345f98ddaca", 14086],
+      ["docs/plans/2026-08-11-xot-e8b-bundle-comparison-acceptance.json", "5e66ef1623baaa158849aeb447b52575b3322f64ce6ce89acceea58cf9587a9c", 36471],
+      ["docs/plans/2026-08-12-xot-e8c-dashboard-hierarchy-acceptance.json", "20a8e69fc4bb181b1d7fb126c9de6c22649f55f9c6f1e75ccf4c17797e6c830a", 14729],
+      ["docs/plans/2026-08-11-xot-e8d-local-supply-build-inventory.json", "13038f7c91d0fe03917b3b6c3b5ada48f022cf1abe83f314af9e6ff3757f0ff2", 537063],
+      ["docs/plans/2026-08-11-xot-e8d-local-supply-build-acceptance.json", "5d7264b152be7920d2f702192f26cafb41f82fa3130757250b5886b9ed892bd0", 10078]
+    ],
+    "claimBoundary": "Bounded local handoff only; no owner approval, external evidence, production equivalence, hosted CI, staging, deployment, live verification or release acceptance."
+  },
+  "globalRevalidationAndSafety": {
+    "stalenessRule": "Every receipt must be revalidated against current branch, exact reviewed SHA, source hashes, provider observation time and relevant schema/dependency/config state. Any drift, missing provenance or expired waiver returns the gate to awaiting evidence.",
+    "redactionRule": "No secrets, tokens, credentials, private keys, raw environment values, private hosts, raw logs, sensitive query literals, unmasked screenshots, provider payloads, or database dumps may enter this packet or later receipts.",
+    "stopRules": ["missing owner or designated reviewer", "secret-bearing or unmasked evidence", "stale, diverged or SHA-unbound snapshot", "unknown destructive migration or privilege drift", "request expands into apply, database, provider, CI, staging, deploy, live, browser, canary or cleanup mutation without separate explicit authorization", "evidence conflicts with the append-only ledger, E7 hashes, or protected hashes", "any exception lacks a named owner and expiry", "any candidate SHA changes after acceptance"],
+    "globalStopKillConditions": ["unexpected or unattributed dirty path", "broken receipt predecessor/hash chain", "isolated test reaches DNS, network, provider, production or external state", "browser role gains raw video-table or privileged RPC access", "provider-unknown outcome is retried automatically"],
+    "releaseDecision": "CLOSED",
+    "nextResumeAction": "Collect and independently review redacted signed/dated owner/external receipts against these bindings; append no ledger row until acceptance criteria and predecessor binding pass."
+  },
+  "intakeAndReceiptContract": {
+    "appendOnly": true,
+    "completionRequirement": "Each gate requires an independently accepted, redacted, signed/dated decision or evidence receipt with gate ID, owner/reviewer role, reviewed branch/SHA, source paths, source receipt hash, observed/signed/reviewed times, staleness result, and redaction result.",
+    "ownerDecisionRule": "Null decision fields mean no decision was made. Local source defaults, prior snapshots, asserted roles, and E7 local T1 receipts must not be promoted to owner authorization or external evidence.",
+    "ledgerRule": "No ledger row is created until owner/external evidence is independently accepted. This packet has receiptRow none and does not authorize a ledger append.",
+    "supersession": "Later evidence supersedes stale or incomplete fields only through a new receipt that binds this packet hash and states the changed fields; existing packets and ledger rows are immutable.",
+    "ownerDecisionTemplate": {"gateId": null, "decision": null, "allowedValues": [], "ownerRole": null, "reviewedBranch": null, "reviewedSha": null, "signedAt": null, "sourceReceiptSha256": null, "expiryOrRevalidationAt": null},
+    "evidenceReceiptTemplate": {"gateId": null, "evidenceSummary": null, "reviewedBranch": null, "reviewedSha": null, "sourcePaths": [], "sourceReceiptSha256": null, "observedAt": null, "stalenessCheck": null, "redactionCheck": null, "reviewerRole": null, "reviewedAt": null},
+    "intakeTemplate": {"gateId": null, "decisionOrEvidence": null, "reviewedBranch": null, "reviewedSha": null, "sourcePaths": [], "sourceReceiptSha256": null, "signerRole": null, "signedAt": null, "observedAt": null, "stalenessCheck": null, "redactionCheck": null, "reviewerRole": null, "reviewedAt": null}
+  },
+  "protectedEvidence": {
+    "manifestSha256": "418fc0a4994565daf929244e47e77feb3b8c08728849057b5dce7888f6e96b78",
+    "comprehensiveLedgerSha256": "b74be6d1c00eb1a3c6f040d2049bc84de4829f274d8def2848414caf17f3a888",
+    "comprehensiveLedgerByteCount": 2286425,
+    "comprehensiveLedgerRowCount": 541,
+    "comprehensiveLedgerRow525NoNewlineSha256": "4a34cb194fa10ce93c668dce95f3551e6367748b5762b8282849ce8f4666ee97",
+    "comprehensiveLedgerRow526NoNewlineSha256": "3c2b98c92883ff07febb696126e5d6829edee1caedbe0dec0c89b27167345951",
+    "comprehensiveLedgerRow527NoNewlineSha256": "f639a6bd4fc9ddf90de4df9e30cedf712480b4cb17a790d7037de9cb8c976135",
+    "comprehensiveLedgerRow541NoNewlineSha256": "2314034821175484f3ce82365b9d098ded8b75359ffa2cacad456d9ac8533954",
+    "comprehensiveLedgerPrefixThroughRow527Sha256": "d746d2fc59c49f3645dec86e29e9b9ad1667c3f4c60cfa5f74a4baed824f0cf4",
+    "comprehensiveLedgerPrefixThroughRow541Sha256": "b74be6d1c00eb1a3c6f040d2049bc84de4829f274d8def2848414caf17f3a888",
+    "e7AggregateReceiptSha256": "19239b884f73a7eb606103695dd97184cd8ddb27772c8f427b06c6f3debc0f02",
+    "e7RuntimeReceiptSha256": "0671d8d9fcb803268e6c07570785bf05dacad33eb9bdaeb6b47f32a465217e5e",
+    "bodyAndSchemaRequirement": "Owner/external evidence must bind protected migration bodies, schema dump or equivalent read-only schema/policy/RLS/type evidence to an exact reviewed SHA. Local E7 receipt hashes do not establish remote or production equivalence.",
+    "currentForwardMigrationCaveat": "Current forward migrations remain local candidate inputs; no apply or deployment is authorized by this packet.",
+    "immediatePredecessorPacketPath": "docs/plans/2026-08-11-xot-e9-owner-external-gate-packet.json",
+    "immediatePredecessorPacketSha256": "6134f9e6cf1d2ae6afbf05732993649c3d984239acda889a3091d9d1501c13b9",
+    "immediatePredecessorPacketBytes": 47637,
+    "earlierPredecessorPacketPath": "docs/plans/2026-08-10-xot-e9-owner-external-gate-packet.json",
+    "earlierPredecessorPacketSha256": "255f46e319545f624acf71d54afc206a0497621b4a52f8de53275da45ae2d4e9",
+    "earlierPredecessorPacketBytes": 36488,
+    "noMutation": true
+  },
+  "e8Boundary": {
+    "handoff": "E8 bounded local tranche is sufficient for this E9 successor packet and does not authorize owner or external action.",
+    "status": "BOUNDED_LOCAL_HANDOFF_ONLY",
+    "doesNotClose": ["AIR-036", "AIR-037", "AIR-049", "AIR-050", "AIR-052", "AIR-055", "AIR-078", "higher tiers"],
+    "releaseGate": "CLOSED",
+    "noAcceptancePromotion": "E8 local T0/T1 receipt status is not promoted to owner approval, external evidence, production parity, hosted scan/build, staging, deployment, live, or release acceptance."
+  },
+  "priorE6Context": {
+    "path": "docs/plans/2026-08-10-xot-e6-b2b-b3a-disposable-acceptance-blocked.json",
+    "sha256": "be8485cc469be4d9f6a49c7fb1a605acc3a3f74d0e64b5458f78438ac5795ecf",
+    "lines": 517,
+    "status": "BLOCKED_LOCAL_DISPOSABLE_T1_NOT_ACHIEVED",
+    "releaseGate": "CLOSED",
+    "state": "separately_blocked_context_only",
+    "acceptanceClaim": false,
+    "note": "E6 remains separately blocked; this E9 packet neither accepts E6 nor changes its blocker."
+  },
+  "actionBoundary": {
+    "noDatabaseApplication": true,
+    "noCommit": true,
+    "noPush": true,
+    "noCI": true,
+    "noStaging": true,
+    "noDeployment": true,
+    "noLive": true,
+    "noBrowser": true,
+    "noProviderContact": true,
+    "noOwnerContact": true,
+    "noExternalStateAccess": true,
+    "noGitAuthorization": true,
+    "noLedgerRowOrReservation": true,
+    "noSecretReadsOrWrites": true
+  },
+  "requiredE9Gates": ["AIR-010", "AIR-017", "AIR-050", "AIR-052", "AIR-055", "AIR-065", "SR-REL-00", "SR-MIG-01", "SR-RLS-01", "PAT-1"],
+  "decisionsMade": true,
+  "ownersAssigned": false,
+  "externalStateAccessed": false,
+  "noGitAuthorization": true,
+  "noCheckpoint": true,
+  "noHostedScansOrBuild": true,
+  "validation": {
+    "performedAfterAuthoring": true,
+    "required": ["JSON validity", "current candidate SHA and predecessor hash/bytes", "predecessor immutability", "ledger row 541 snapshot", "source/E7/E8 binding preservation", "exact one-file diff/status", "staged empty", "whitespace-free final LF"],
+    "network": "none",
+    "targetContainsSecrets": false,
+    "targetSelfHash": "not embedded; detached outer SHA is recorded in the completion receipt",
+    "results": {
+      "jqEmpty": "GREEN; valid JSON",
+      "candidateHead": "GREEN; 0bd578856016c06a10890339f93aa13b82ecae48",
+      "predecessor": "GREEN; 59e706752ca97bdab65c90f681038a32753fd8e9b8fde6baa381bca0493b95c7 and 60575 bytes",
+      "ledger": "GREEN; 541 lines, 2286425 bytes, SHA-256 b74be6d1c00eb1a3c6f040d2049bc84de4829f274d8def2848414caf17f3a888; row 541 and prefix hashes preserved",
+      "sourceE7E8Bindings": "GREEN; all inherited source, E7 and E8 path hashes and declared bytes matched",
+      "whitespaceAndFinalLf": "GREEN; git diff --no-index --check emitted no diagnostics; final byte 0a",
+      "stagedIndex": "GREEN; git diff --cached --quiet exit 0",
+      "scope": "GREEN; one new untracked artifact path; predecessor, ledger, plan and all other dirty paths untouched",
+      "outerTargetReceipt": "SHA-256 and byte count are detached from this JSON to avoid a self-hash cycle; record them in the completion message."
+    }
+  },
+  "noFalseCompletionClaim": {
+    "AIR050": "open",
+    "E9": "not_complete",
+    "E10": "not_complete",
+    "E11": "not_complete",
+    "hostedAndExternalGates": "pending",
+    "release": "CLOSED"
+  },
+  "noMutation": true,
+  "noDatabaseApplication": true,
+  "noCommit": true,
+  "noPush": true,
+  "noCI": true,
+  "noStaging": true,
+  "noDeploy": true,
+  "noLive": true,
+  "noBrowser": true,
+  "noProviderContact": true,
+  "noOwnerContact": true,
+  "noLedgerRowOrReservation": true
+}

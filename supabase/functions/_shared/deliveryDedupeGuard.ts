@@ -25,18 +25,32 @@ export type FinalDedupeGuardDecision =
   };
 
 export interface FinalDedupeGuardParams {
-  // deno-lint-ignore no-explicit-any
-  supabase: any;
+  supabase: unknown;
   tweetId: string;
   storyMemory: unknown;
   source?: string;
   assertDuplicateState?: (
-    // deno-lint-ignore no-explicit-any
-    supabase: any,
+    supabase: unknown,
     tweetId: string,
     rawConfig: unknown,
     options?: DuplicateGateRunOptions,
   ) => Promise<FinalDuplicateAssertionResult>;
+}
+
+type DedupeLookupQuery = {
+  select(columns: string): DedupeLookupQuery;
+  eq(column: string, value: unknown): DedupeLookupQuery;
+  single(): PromiseLike<{ data?: unknown; error?: unknown }>;
+};
+
+type DedupeLookupClient = {
+  from(table: string): DedupeLookupQuery;
+};
+
+function checkedDedupeLookupClient(client: unknown): DedupeLookupClient | null {
+  if (!client || typeof client !== "object") return null;
+  const from = (client as { from?: unknown }).from;
+  return typeof from === "function" ? client as DedupeLookupClient : null;
 }
 
 export async function evaluateFinalDedupeGuard(params: FinalDedupeGuardParams): Promise<FinalDedupeGuardDecision> {
@@ -48,7 +62,12 @@ export async function evaluateFinalDedupeGuard(params: FinalDedupeGuardParams): 
 
   const assertDuplicateState = params.assertDuplicateState ?? assertFinalDuplicateState;
   try {
+    const lookupClient = checkedDedupeLookupClient(params.supabase);
+    if (!lookupClient) return failDecision(source, "dedupe_state_lookup_failed");
     const finalAssertion = await assertDuplicateState(params.supabase, params.tweetId, params.storyMemory, { source });
+    if (finalAssertion.outcome === "unknown") {
+      return failDecision(source, "dedupe_assertion_unknown");
+    }
     if (finalAssertion.blocked) {
       return {
         action: "skip",
@@ -62,13 +81,13 @@ export async function evaluateFinalDedupeGuard(params: FinalDedupeGuardParams): 
       };
     }
 
-    const { data: dupRow, error } = await params.supabase
+    const { data: dupRow, error } = await lookupClient
       .from("posts")
       .select("dedupe_status, dedupe_reason, dup_of_tweet_id, dup_similarity, story_cluster_id")
       .eq("tweet_id", params.tweetId)
       .single();
     if (error) {
-      return failDecision(source, `dedupe_state_lookup_failed:${error.message}`);
+      return failDecision(source, "dedupe_state_lookup_failed");
     }
 
     const duplicatePatch = duplicateDecisionPatch(dupRow as { dedupe_status?: string | null; dup_of_tweet_id?: string | null; dedupe_reason?: string | null } | null);
@@ -90,8 +109,8 @@ export async function evaluateFinalDedupeGuard(params: FinalDedupeGuardParams): 
     }
 
     return { action: "allow", reason: null, meta: { source, reason: finalAssertion.reason } };
-  } catch (e) {
-    return failDecision(source, (e as Error).message);
+  } catch (_e) {
+    return failDecision(source, "dedupe_assertion_failed");
   }
 }
 

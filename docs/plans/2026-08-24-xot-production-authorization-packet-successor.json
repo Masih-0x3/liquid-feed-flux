@@ -1,0 +1,22 @@
+{
+  "schema": "xot-full-closure-authorization-packet-v2",
+  "status": "TEMPLATE_BLOCKED_AUTHORITY",
+  "createdAt": "2026-08-24T20:44:31Z",
+  "predecessor": "docs/plans/2026-08-22-xot-full-closure-authorization-packet.json",
+  "plan": "docs/plans/2026-08-24-xot-production-reconciliation-replan.md",
+  "releaseGate": "CLOSED",
+  "candidate": {"branch": "codex/xot-full-closure-candidate", "head": "040fd0e99f9019997debab4bdc9466d07c98c2d0", "tree": "aca35558dcc5025ab4e2543b6cc233dd27bf8a9a"},
+  "targetAliases": {"production": "PROD_REF", "candidate": "CANDIDATE_REF", "renderer": "RENDERER_HOST", "frontend": "CURRENT_FRONTEND_DEPLOYMENT"},
+  "owner": null,
+  "approver": null,
+  "signedAt": null,
+  "expiresAt": null,
+  "spendingCap": {"currency": "USD", "maximum": null, "approved": false},
+  "rollbackAuthority": null,
+  "decisions": {"D-01": "BLOCKED_AUTHORITY", "D-02": "BLOCKED_AUTHORITY", "D-03": "BLOCKED_AUTHORITY", "D-04": "BLOCKED_AUTHORITY", "D-05": "BLOCKED_AUTHORITY", "D-06": "BLOCKED_AUTHORITY", "D-07": "BLOCKED_AUTHORITY", "D-08": "BLOCKED_AUTHORITY", "D-09": "BLOCKED_AUTHORITY", "D-10": "BLOCKED_AUTHORITY", "D-11": "BLOCKED_OWNER_DECISION", "D-12": "BLOCKED_OWNER_DECISION", "D-13": "BLOCKED_OWNER_DECISION", "D-14": "BLOCKED_AUTHORITY", "D-15": "BLOCKED_AUTHORITY"},
+  "blockingFields": ["human owner", "human approver", "signedAt", "expiresAt", "exact target", "time window", "spend cap", "rollback operator", "fixture and mutation limits"],
+  "allowedNow": ["read-only GitHub/Vercel/Supabase/renderer/provider checks", "append-only redacted receipts", "Orca metadata updates", "candidate-branch receipt commit and hosted CI"],
+  "forbiddenNow": ["production mutation", "merge", "deploy or promote", "secret disclosure", "destructive cleanup", "PR #69/main mutation"],
+  "productionChanged": false,
+  "notes": ["No owner, approver, signature, target, limit, expiry, or rollback authority is inferred from login state or prior Preview receipts.", "All dependent production tasks remain blocked until the named human fields are completed."]
+}

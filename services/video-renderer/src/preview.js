@@ -231,7 +231,7 @@ async function renderPreviewWithoutSubtitles({ result, outDir, inputPath, probe,
     preset: quality.preset,
     fontsDir: process.env.FONTS_DIR || "/usr/share/fonts",
   });
-  await runCommand(renderCommand, { label: useOpenCvDelogo ? "opencv_preview_render" : "preview_render" });
+  await runCommand(renderCommand, { label: useOpenCvDelogo ? "opencv_preview_render" : "preview_render", stage: "render" });
   console.log(JSON.stringify({
     ...nextResult,
     ...(extra.output ?? {}),
@@ -261,15 +261,15 @@ async function main() {
     inspectionPath: join(outDir, `vision-inspection-${index + 1}.jpg`),
     seekSeconds,
   }));
-  await runCommand(buildContactSheetCommand(inputPath, contactSheetPath), { label: "contact_sheet" });
+  await runCommand(buildContactSheetCommand(inputPath, contactSheetPath), { label: "contact_sheet", stage: "analysis" });
   await Promise.all(frameSpecs.map((frame) => runCommand(buildFrameSampleCommand(inputPath, frame.path, {
     seekSeconds: frame.seekSeconds,
     width: Number(process.env.WATERMARK_VISION_FRAME_WIDTH || 1440),
-  }), { label: `vision_frame_${frame.seekSeconds}` })));
+  }), { label: `vision_frame_${frame.seekSeconds}`, stage: "analysis" })));
   await Promise.all(frameSpecs.map((frame) => runCommand(buildWatermarkInspectionSheetCommand(frame.path, frame.inspectionPath, {
     tileWidth: Number(process.env.WATERMARK_INSPECTION_TILE_WIDTH || 720),
     tileHeight: Number(process.env.WATERMARK_INSPECTION_TILE_HEIGHT || 360),
-  }), { label: `vision_inspection_${frame.seekSeconds}` })));
+  }), { label: `vision_inspection_${frame.seekSeconds}`, stage: "analysis" })));
   const apiKey = process.env.OPENAI_API_KEY || "";
   let vision = null;
   let watermarkOnly = null;
@@ -382,7 +382,7 @@ async function main() {
     });
     return;
   }
-  await runCommand(buildAudioExtractCommand(inputPath, audioPath), { label: "audio_extract" });
+  await runCommand(buildAudioExtractCommand(inputPath, audioPath), { label: "audio_extract", stage: "analysis" });
   const transcription = await transcribeWithEnhancedAudioRetry({
     inputPath,
     audioPath,
@@ -531,7 +531,7 @@ async function main() {
     preset: quality.preset,
     fontsDir: process.env.FONTS_DIR || "/usr/share/fonts",
   });
-  await runCommand(renderCommand, { label: useOpenCvDelogo ? "opencv_preview_render" : "preview_render" });
+  await runCommand(renderCommand, { label: useOpenCvDelogo ? "opencv_preview_render" : "preview_render", stage: "render" });
 
   const nextPreflight = {
     ...preflight,

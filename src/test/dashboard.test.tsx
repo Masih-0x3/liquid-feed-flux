@@ -1,9 +1,9 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import Dashboard from "@/pages/Dashboard";
-import { useDashboardData } from "@/hooks/useDashboardData";
+import { type SystemPerformanceSummary, useDashboardData } from "@/hooks/useDashboardData";
 import { useDashboardProcessHudData } from "@/hooks/useDashboardProcessHudData";
 import { DashboardHealth } from "@/components/dashboard/DashboardHealth";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -24,6 +24,10 @@ vi.mock("@/hooks/useDashboardProcessHudData", async () => {
   };
 });
 
+vi.mock("@/contexts/AuthContext", () => ({
+  useAuth: () => ({ isAdmin: true, role: "admin" }),
+}));
+
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: {
     functions: { invoke: vi.fn() },
@@ -32,6 +36,7 @@ vi.mock("@/integrations/supabase/client", () => ({
 
 const mockedUseDashboardData = vi.mocked(useDashboardData);
 const mockedUseDashboardProcessHudData = vi.mocked(useDashboardProcessHudData);
+let processHudRefetch = vi.fn();
 
 function renderDashboard(initialEntries = ["/"]) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -46,12 +51,17 @@ function renderDashboard(initialEntries = ["/"]) {
   );
 }
 
-function renderHealthControls() {
+function renderHealthControls(systemPerformance?: SystemPerformanceSummary) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
-        <DashboardHealth health={dashboardData.health} queue={dashboardData.queueBreakdown} xUsage={dashboardData.xLocalUsage} />
+        <DashboardHealth
+          health={dashboardData.health}
+          queue={dashboardData.queueBreakdown}
+          xUsage={dashboardData.xLocalUsage}
+          systemPerformance={systemPerformance}
+        />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -301,6 +311,7 @@ const dashboardData = {
 describe("Dashboard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    processHudRefetch = vi.fn();
     mockedUseDashboardProcessHudData.mockReturnValue({
       data: {
         available: true,
@@ -317,7 +328,7 @@ describe("Dashboard", () => {
       isError: false,
       error: null,
       isFetching: false,
-      refetch: vi.fn(),
+      refetch: processHudRefetch,
     } as unknown as ReturnType<typeof useDashboardProcessHudData>);
   });
 
@@ -350,8 +361,13 @@ describe("Dashboard", () => {
 
     renderDashboard();
 
-    expect(screen.getByText("Pipeline Funnel")).toBeTruthy();
-    expect(screen.getByText("X Cost Guard")).toBeTruthy();
+    fireEvent.click(screen.getByText("Diagnostics & capacity"));
+    const diagnostics = screen.getByText("Diagnostics & capacity").closest("details");
+    expect(diagnostics).toBeTruthy();
+    expect(within(diagnostics as HTMLElement).getByText("Pipeline Funnel")).toBeTruthy();
+    expect(within(diagnostics as HTMLElement).getByText("X Cost Guard")).toBeTruthy();
+    expect(screen.getAllByText("Pipeline Funnel")).toHaveLength(1);
+    expect(screen.getAllByText("X Cost Guard")).toHaveLength(1);
     expect(screen.getByText("Pipeline Speed")).toBeTruthy();
     expect(screen.getByText("Resource Risk")).toBeTruthy();
     expect(screen.getByText("Needs attention")).toBeTruthy();
@@ -370,6 +386,38 @@ describe("Dashboard", () => {
 
     expect(screen.getByText(/Supabase-local telemetry only/)).toBeTruthy();
     expect(screen.getByText(/Official X usage is not synced from Dashboard/)).toBeTruthy();
+  });
+
+  it("puts the first viewport facts and primary exception in a workflow cockpit", () => {
+    mockedUseDashboardData.mockReturnValue({
+      data: dashboardData,
+      isLoading: false,
+      isError: false,
+      error: null,
+      dataUpdatedAt: Date.now(),
+      isFetching: false,
+    } as ReturnType<typeof useDashboardData>);
+
+    renderDashboard();
+
+    const cockpit = screen.getByRole("region", { name: "Workflow cockpit" });
+    expect(within(cockpit).getByText("Current ingest")).toBeTruthy();
+    expect(within(cockpit).getByText(/ok - 5m ago/i)).toBeTruthy();
+    expect(within(cockpit).getByText("Queue")).toBeTruthy();
+    expect(within(cockpit).getByText("4 pending / 1 running")).toBeTruthy();
+    expect(within(cockpit).getByText("Telegram last 24h")).toBeTruthy();
+    expect(within(cockpit).getByText("X last 24h")).toBeTruthy();
+    expect(within(cockpit).getByText("8")).toBeTruthy();
+    expect(within(cockpit).getByText("5")).toBeTruthy();
+    expect(within(cockpit).getByText("Latest workflow")).toBeTruthy();
+    expect(within(cockpit).getByText("rss-item-pipeline - completed")).toBeTruthy();
+    expect(within(cockpit).getByRole("button", { name: /Review 1 failed job/i })).toBeTruthy();
+    expect(screen.getAllByText("Online")).toHaveLength(1);
+    expect(screen.getAllByText(/^Updated /)).toHaveLength(1);
+
+    const diagnostics = screen.getByText("Diagnostics & capacity").closest("summary");
+    expect(diagnostics).toBeTruthy();
+    expect(diagnostics).toHaveAttribute("aria-expanded", "false");
   });
 
   it("keeps dashboard status in normal page flow instead of sticking over cards", () => {
@@ -409,7 +457,7 @@ describe("Dashboard", () => {
     expect(screen.getByText(/5 measured jobs - 2 retry attempts/)).toBeTruthy();
   });
 
-  it("shows the process HUD and local trace guardrail instead of Recent Activity", () => {
+  it("defers the process HUD until an operator opens it and retains the local trace guardrail", () => {
     mockedUseDashboardData.mockReturnValue({
       data: dashboardData,
       isLoading: false,
@@ -421,13 +469,49 @@ describe("Dashboard", () => {
 
     renderDashboard();
 
+    expect(mockedUseDashboardProcessHudData).toHaveBeenLastCalledWith({ enabled: false });
+    expect(screen.queryByText("Post process HUD")).toBeNull();
+    fireEvent.click(screen.getByText("Diagnostics & capacity"));
+    const processHudTrigger = screen.getByRole("button", { name: /open process hud/i });
+    expect(processHudTrigger).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(processHudTrigger);
+    expect(mockedUseDashboardProcessHudData).toHaveBeenLastCalledWith({ enabled: true });
     expect(screen.getByText("Post process HUD")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /hide process hud/i })).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("Limits & Trace Guard")).toBeTruthy();
     expect(screen.getByText("rss-item-pipeline")).toBeTruthy();
     expect(screen.getByText("120 / 8,000")).toBeTruthy();
     expect(screen.getByText(/Native HUD remains local/)).toBeTruthy();
     expect(screen.queryByText("Recent Activity")).toBeNull();
     expect(screen.queryByRole("tab", { name: "Activity" })).toBeNull();
+  });
+
+  it("disables the process HUD when diagnostics closes and skips HUD refresh", async () => {
+    mockedUseDashboardData.mockReturnValue({
+      data: dashboardData,
+      isLoading: false,
+      isError: false,
+      error: null,
+      dataUpdatedAt: Date.now(),
+      isFetching: false,
+    } as ReturnType<typeof useDashboardData>);
+
+    renderDashboard();
+
+    fireEvent.click(screen.getByText("Diagnostics & capacity"));
+    fireEvent.click(screen.getByRole("button", { name: /open process hud/i }));
+    expect(screen.getByText("Post process HUD")).toBeTruthy();
+
+    fireEvent.click(screen.getByText("Diagnostics & capacity"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Diagnostics & capacity").closest("summary")).toHaveAttribute("aria-expanded", "false");
+      expect(mockedUseDashboardProcessHudData).toHaveBeenLastCalledWith({ enabled: false });
+      expect(screen.queryByText("Post process HUD")).toBeNull();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /^Refresh$/i }));
+    expect(processHudRefetch).not.toHaveBeenCalled();
   });
 
   it("surfaces storage warning when no higher-priority issue is active", () => {
@@ -530,6 +614,7 @@ describe("Dashboard", () => {
 
     expect(screen.queryByText(/Temp media storage/i)).toBeNull();
     expect(screen.getByText("Pipeline is operating normally")).toBeTruthy();
+    expect(screen.queryByLabelText("Dashboard status")).toBeNull();
   });
 
   it("opens media storage controls from a storage alert", () => {
@@ -588,10 +673,50 @@ describe("Dashboard", () => {
     expect(screen.queryByText("Recent Activity")).toBeNull();
   });
 
-  it("keeps live pipeline testing behind a confirmation", () => {
+  it("keeps webhook validation behind a confirmation", () => {
     renderHealthControls();
-    fireEvent.click(screen.getByRole("button", { name: /live test pipeline/i }));
+    fireEvent.click(screen.getByRole("button", { name: /validate webhook/i }));
 
-    expect(screen.getByText("Send a production test webhook?")).toBeTruthy();
+    expect(screen.getByText("Validate the webhook safely?")).toBeTruthy();
+  });
+
+  it("labels paused cleanup schedules as an intentional safety hold", () => {
+    const systemPerformance = {
+      ...dashboardData.systemPerformance,
+      resources: {
+        ...dashboardData.systemPerformance.resources,
+        cronJobs: [
+          { jobname: "invoke-db-cleanup-daily", schedule: "0 3 * * *", active: false },
+          { jobname: "invoke-media-cleanup-6h", schedule: "0 */6 * * *", active: false },
+        ],
+      },
+    } as SystemPerformanceSummary;
+
+    renderHealthControls(systemPerformance);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Cleanup safety hold active");
+    expect(screen.getByRole("alert")).toHaveTextContent("intentionally paused");
+    expect(screen.getAllByText("Safety hold")).toHaveLength(2);
+    expect(screen.getByText(/does not certify shared paths as safe/i)).toBeTruthy();
+  });
+
+  it("names only the cleanup schedule that is actually paused", () => {
+    const systemPerformance = {
+      ...dashboardData.systemPerformance,
+      resources: {
+        ...dashboardData.systemPerformance.resources,
+        cronJobs: [
+          { jobname: "invoke-db-cleanup-daily", schedule: "0 3 * * *", active: true },
+          { jobname: "invoke-media-cleanup-6h", schedule: "0 */6 * * *", active: false },
+        ],
+      },
+    } as SystemPerformanceSummary;
+
+    renderHealthControls(systemPerformance);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Media cleanup is intentionally paused");
+    expect(screen.getByRole("alert")).not.toHaveTextContent("database retention are intentionally paused");
+    expect(screen.getByText("Active / daily")).toBeTruthy();
+    expect(screen.getAllByText("Safety hold")).toHaveLength(1);
   });
 });

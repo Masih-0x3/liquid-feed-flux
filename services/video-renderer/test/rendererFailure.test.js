@@ -63,24 +63,56 @@ test("records render failure with awaitable Supabase RPC builders that do not ex
   const supabase = {
     rpc(name, payload) {
       calls.push({ name, payload });
-      return thenableResult({ data: { queued_deliver: false }, error: null });
+      return thenableResult({ data: { accepted: true, queued_deliver: false }, error: null });
     },
   };
 
   const data = await recordRenderFailure(supabase, {
-    renderId: "render-1",
+    row: {
+      id: "render-1",
+      claim_token: "22222222-2222-4222-8222-222222222222",
+      claim_generation: 7,
+    },
+    rendererId: "renderer-a",
     error: new Error("primary render failure"),
     metrics: { total_ms: 123 },
   });
 
-  assert.deepEqual(data, { queued_deliver: false });
+  assert.deepEqual(data, { accepted: true, queued_deliver: false });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].name, "fail_video_render");
   assert.deepEqual(calls[0].payload, {
     p_render_id: "render-1",
+    p_worker_id: "renderer-a",
+    p_claim_token: "22222222-2222-4222-8222-222222222222",
+    p_claim_generation: 7,
     p_error: "primary render failure",
     p_metrics: { total_ms: 123 },
   });
+});
+
+test("does not surface a stale failure write as accepted", async () => {
+  const supabase = {
+    rpc() {
+      return thenableResult({
+        data: { accepted: false, reason: "stale_video_render_claim", queued_deliver: true },
+        error: null,
+      });
+    },
+  };
+
+  const data = await recordRenderFailure(supabase, {
+    row: {
+      id: "render-1",
+      claim_token: "22222222-2222-4222-8222-222222222222",
+      claim_generation: 7,
+    },
+    rendererId: "renderer-a",
+    error: new Error("late stale failure"),
+    metrics: {},
+  });
+
+  assert.equal(data, null);
 });
 
 test("detects missing Supabase storage object errors", () => {

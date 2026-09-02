@@ -1,0 +1,155 @@
+{
+  "schema": "xot-full-closure-authorization-packet-v1",
+  "status": "TEMPLATE_BLOCKED_AUTHORITY",
+  "createdAt": "2026-08-22",
+  "repository": "/Users/stevmq/Finalized XOT",
+  "plan": "docs/plans/2026-08-22-xot-full-closure-quality-orchestrated-goal-plan.md",
+  "releaseGate": "CLOSED",
+  "owner": null,
+  "approver": null,
+  "expiry": null,
+  "evidenceRoot": "docs/plans/",
+  "spendingCap": {
+    "currency": "USD",
+    "maximum": null,
+    "approved": false
+  },
+  "rollbackAuthority": null,
+  "areas": {
+    "githubRepository": {
+      "status": "BLOCKED_AUTHORITY",
+      "repositoryId": null,
+      "canonicalNamespace": null,
+      "allowedActions": ["read", "fetch", "one named successor branch", "one draft successor PR", "hosted checks", "logs", "artifacts", "one infrastructure rerun"],
+      "excludedActions": ["force-push", "direct-main-push", "tag", "branch-delete", "auto-merge", "mutate-pr-69", "merge-before-release-gate"],
+      "namedSuccessorBranch": "codex/xot-full-closure-candidate",
+      "successorBranchStatus": "PROPOSED_ONLY; branch creation and first push require explicit Git authority",
+      "mergeAfterAllGates": false
+    },
+    "githubCi": {
+      "status": "BLOCKED_AUTHORITY",
+      "allowedChanges": ["minimal test:functions coverage", "exact PR-head provenance", "existing supply-chain gate coverage"],
+      "requiredChecks": null,
+      "branchProtectionAccess": false,
+      "excludedChanges": ["unrelated-workflow-redesign", "secret-values-in-evidence"]
+    },
+    "supabaseStaging": {
+      "status": "BLOCKED_AUTHORITY",
+      "organization": null,
+      "region": null,
+      "projectName": "XOT Staging",
+      "projectRef": null,
+      "costCap": null,
+      "allowedActions": ["create-or-link", "approved-target-bound-migration-replay", "staging-auth-roles", "staging-storage-realtime-vault-names", "staging-functions", "disabled-cron", "sanitized-fixtures", "rollback"],
+      "excludedActions": ["production-data", "production-users", "production-objects", "production-endpoints", "production-keys", "broad-db-push"],
+      "replayMode": null,
+      "rollbackOperator": null
+    },
+    "rendererStaging": {
+      "status": "BLOCKED_AUTHORITY",
+      "host": null,
+      "account": null,
+      "costCap": null,
+      "registry": null,
+      "serviceId": "xot-staging-renderer",
+      "rendererId": "xot-staging-1",
+      "allowedReplicaCount": 1,
+      "allowedConcurrency": 1,
+      "rollbackOperator": null
+    },
+    "vercelPreview": {
+      "status": "BLOCKED_AUTHORITY",
+      "project": "xot",
+      "sourceBranch": "codex/xot-full-closure-candidate",
+      "immutableUrl": null,
+      "protectedAlias": null,
+      "autoDeploySuppressed": null,
+      "repoOwnedSuppression": {
+        "configPath": "vercel.json",
+        "property": "git.deploymentEnabled.codex/xot-full-closure-candidate",
+        "value": false,
+        "status": "LOCAL_CONFIG_PRESENT; hosted effect unverified until authorized first push"
+      },
+      "allowedActions": ["preview-deploy", "preview-rollback", "build-artifact-read"],
+      "excludedActions": ["production-variables", "production-alias", "production-dns"]
+    },
+    "browserAcceptance": {
+      "status": "BLOCKED_ACCESS",
+      "adminSession": null,
+      "readOnlySession": null,
+      "mfaBootstrap": null,
+      "nativeComputerUseRequired": true,
+      "credentialsRemainInBrowserSession": true
+    },
+    "previewProviders": {
+      "status": "BLOCKED_AUTHORITY",
+      "allowedProviderKeys": ["staging-only-openai", "staging-only-deepgram"],
+      "fixtureIds": [],
+      "maximumRequests": null,
+      "budget": null,
+      "postingWriteCount": 0,
+      "excludedCredentials": ["x-posting", "telegram-posting"]
+    },
+    "productionT3": {
+      "status": "BLOCKED_ACCESS",
+      "readOnly": true,
+      "targetIds": [],
+      "allowedSurfaces": ["vercel", "supabase", "functions", "renderer", "logs", "queues", "provider-ledgers", "migration-rls-grant-state", "backup-pitr", "pat-disposition"],
+      "mutationAllowed": false
+    },
+    "productionT4": {
+      "status": "BLOCKED_AUTHORITY",
+      "proposal": null,
+      "fixtureIds": [],
+      "maximumQueueClaims": 0,
+      "providerWriteEnvelope": "zero",
+      "timeWindow": null,
+      "soakWindow": null,
+      "rollbackOperators": []
+    },
+    "cleanup": {
+      "status": "BLOCKED_AUTHORITY",
+      "dryRun": true,
+      "boundedCanaryLimit": null,
+      "observationWindow": null,
+      "canonicalSchedule": null,
+      "allowedScheduleCount": 1,
+      "job17RemainsInactive": true,
+      "destructiveMutationAllowed": false
+    },
+    "ownerDecisions": {
+      "status": "BLOCKED_OWNER_DECISION",
+      "AIR-017": null,
+      "AIR-050": null,
+      "AIR-052": null,
+      "AIR-053": null,
+      "AIR-055": null,
+      "AIR-065": null,
+      "SR-REL-00": null,
+      "SR-MIG-01": null,
+      "SR-RLS-01": null,
+      "PAT-1": null
+    },
+    "billingRetention": {
+      "status": "BLOCKED_BILLING",
+      "supabaseCap": null,
+      "rendererCap": null,
+      "registryCap": null,
+      "vercelCap": null,
+      "providerFixtureCap": null,
+      "stagingRetention": null,
+      "teardownApproved": false
+    }
+  },
+  "secretPolicy": {
+    "secretValuesIncluded": false,
+    "secretNamesOnly": true,
+    "externalDelegatesReceiveSecrets": false,
+    "productionDataTransmitted": false
+  },
+  "notes": [
+    "Template created by Luna execution owner. Missing fields block only dependent nodes.",
+    "Do not infer authority from login state, stale receipts, draft PR state, or provider catalog labels.",
+    "Populate exact owner, approver, target, expiry, spending, rollback, and evidence fields before mutation."
+  ]
+}

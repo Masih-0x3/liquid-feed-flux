@@ -1,34 +1,38 @@
 /**
- * Internal Edge Function auth: WEBHOOK_SHARED_SECRET env, Bearer service role,
- * or x-internal-token matching Vault secret WEBHOOK_SHARED_SECRET (pg_cron path).
+ * Internal Edge Function auth is deliberately local and fail-closed.
+ *
+ * The previous Vault-RPC fallback required a service-role client before the
+ * request had been authenticated. Cron and Edge callers must keep the Vault
+ * and Edge WEBHOOK_SHARED_SECRET values aligned; an out-of-sync deployment
+ * now rejects rather than performing privileged work to recover auth.
  */
 
-// deno-lint-ignore no-explicit-any
+import {
+  buildRssWebhookSignatureInput,
+  readBoundedRssWebhookBody,
+} from './rssWebhookPayloadPolicy.ts';
+
+export type InternalAuthOptions = {
+  sharedSecret?: string;
+  serviceRoleKey?: string;
+};
+
 export async function requireInternalAuth(
   req: Request,
-  supabase: any,
   corsHeaders: Record<string, string>,
+  options: InternalAuthOptions = {},
 ): Promise<Response | null> {
   const token = (req.headers.get('x-internal-token') || '').trim();
-  const expected = (Deno.env.get('WEBHOOK_SHARED_SECRET') || '').trim();
+  const expected = typeof options.sharedSecret === 'string'
+    ? options.sharedSecret.trim()
+    : readOptionalEnv('WEBHOOK_SHARED_SECRET');
   const authHeader = req.headers.get('Authorization') || '';
-  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+  const serviceKey = typeof options.serviceRoleKey === 'string'
+    ? options.serviceRoleKey
+    : readOptionalEnv('SUPABASE_SERVICE_ROLE_KEY');
 
-  if (expected && token === expected) return null;
-  if (serviceKey && authHeader === `Bearer ${serviceKey}`) return null;
-
-  if (!token) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-      status: 401,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
-  }
-
-  const { data, error } = await supabase.rpc('verify_webhook_internal_token', { p_token: token });
-  if (error) {
-    console.error(JSON.stringify({ module: 'internalAuth', action: 'rpc_error', message: error.message }));
-  }
-  if (data === true) return null;
+  if (expected && timingSafeStringEqual(token, expected)) return null;
+  if (serviceKey && timingSafeStringEqual(authHeader, `Bearer ${serviceKey}`)) return null;
 
   return new Response(JSON.stringify({ error: 'Unauthorized' }), {
     status: 401,
@@ -49,6 +53,7 @@ export type RssWebhookToken = {
 
 export type RssAppWebhookSignatureOptions = {
   rawBody?: string;
+  rawBodyBytes?: Uint8Array;
   signingSecret?: string;
   nowMs?: () => number;
   toleranceSeconds?: number;
@@ -77,6 +82,21 @@ function readOptionalEnv(name: string): string {
   }
 }
 
+function readRssWebhookExpectedToken(): string {
+  return (
+    readOptionalEnv('RSSAPP_WEBHOOK_TOKEN')
+      || readOptionalEnv('RSSAPP_TOKEN')
+  );
+}
+
+function readRssAppSigningSecret(options: RssAppWebhookSignatureOptions = {}): string {
+  return (
+    options.signingSecret?.trim()
+    || readOptionalEnv('RSSAPP_SIGNING_SECRET')
+    || readOptionalEnv('RSSAPP_WEBHOOK_SECRET')
+  );
+}
+
 function parseRssAppSignatureHeader(header: string): ParsedRssAppSignature | null {
   const parts = new Map<string, string>();
   for (const part of header.split(',')) {
@@ -95,16 +115,25 @@ function parseRssAppSignatureHeader(header: string): ParsedRssAppSignature | nul
   return { timestamp, signature };
 }
 
-async function hmacSha256Hex(secret: string, value: string): Promise<string> {
+async function hmacSha256Hex(secret: string, value: string | Uint8Array): Promise<string> {
   const encoder = new TextEncoder();
+  const toArrayBuffer = (bytes: Uint8Array): ArrayBuffer => {
+    const buffer = new ArrayBuffer(bytes.byteLength);
+    new Uint8Array(buffer).set(bytes);
+    return buffer;
+  };
   const key = await crypto.subtle.importKey(
     'raw',
-    encoder.encode(secret),
+    toArrayBuffer(encoder.encode(secret)),
     { name: 'HMAC', hash: 'SHA-256' },
     false,
     ['sign'],
   );
-  const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(value));
+  const signature = await crypto.subtle.sign(
+    'HMAC',
+    key,
+    toArrayBuffer(typeof value === 'string' ? encoder.encode(value) : value),
+  );
   return Array.from(new Uint8Array(signature)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
@@ -121,14 +150,61 @@ function timingSafeHexEqual(left: string, right: string): boolean {
   return mismatch === 0;
 }
 
+function timingSafeStringEqual(left: string, right: string): boolean {
+  const maxLength = Math.max(left.length, right.length);
+  let mismatch = left.length === right.length ? 0 : 1;
+
+  for (let index = 0; index < maxLength; index++) {
+    mismatch |= (left.charCodeAt(index) || 0) ^ (right.charCodeAt(index) || 0);
+  }
+
+  return mismatch === 0;
+}
+
+export type RssWebhookAuthMode = 'signed' | 'token';
+
+/**
+ * Classifies the credential before body buffering. A syntactically invalid
+ * configured signature is deliberately rejected instead of falling through to
+ * a token, preserving the signature-first security contract.
+ */
+export function readRssWebhookAuthMode(
+  req: Request,
+  options: RssAppWebhookSignatureOptions = {},
+): RssWebhookAuthMode | null {
+  const signatureHeader = req.headers.get('RSSApp-Signature')?.trim() || '';
+  if (signatureHeader && readRssAppSigningSecret(options)) {
+    return parseRssAppSignatureHeader(signatureHeader) ? 'signed' : null;
+  }
+  return readRssWebhookToken(req).provided ? 'token' : null;
+}
+
+/**
+ * Header map for the no-write admin validation invoke. Prefer the dedicated
+ * RSS token; when signing is the only configured RSS credential, sign the
+ * exact programmatic JSON string sent to the webhook.
+ */
+export async function rssWebhookInternalAuthHeaders(rawBody: string): Promise<Record<string, string>> {
+  const token = readRssWebhookExpectedToken();
+  if (token) return { 'x-webhook-token': token };
+
+  const signingSecret = readRssAppSigningSecret();
+  if (!signingSecret) return {};
+  const timestamp = Math.floor(Date.now() / 1000);
+  const signature = await hmacSha256Hex(signingSecret, `${timestamp}.${rawBody}`);
+  return { 'RSSApp-Signature': `t=${timestamp},v1=${signature}` };
+}
+
 export async function verifyRssAppWebhookSignature({
   rawBody,
+  rawBodyBytes,
   header,
   signingSecret,
   nowMs,
   toleranceSeconds = 300,
 }: {
   rawBody: string;
+  rawBodyBytes?: Uint8Array;
   header: string;
   signingSecret: string;
   nowMs?: () => number;
@@ -140,7 +216,12 @@ export async function verifyRssAppWebhookSignature({
   const currentTimestamp = Math.floor((nowMs ? nowMs() : Date.now()) / 1000);
   if (Math.abs(currentTimestamp - parsed.timestamp) > toleranceSeconds) return false;
 
-  const expected = await hmacSha256Hex(signingSecret, `${parsed.timestamp}.${rawBody}`);
+  const expected = await hmacSha256Hex(
+    signingSecret,
+    rawBodyBytes
+      ? buildRssWebhookSignatureInput(parsed.timestamp, rawBodyBytes)
+      : `${parsed.timestamp}.${rawBody}`,
+  );
   return timingSafeHexEqual(parsed.signature, expected);
 }
 
@@ -149,17 +230,22 @@ async function verifySignedRssAppRequest(
   options: RssAppWebhookSignatureOptions,
 ): Promise<boolean> {
   const signatureHeader = req.headers.get('RSSApp-Signature')?.trim() || '';
-  const signingSecret = (
-    options.signingSecret?.trim()
-    || readOptionalEnv('RSSAPP_SIGNING_SECRET')
-    || readOptionalEnv('RSSAPP_WEBHOOK_SECRET')
-  );
+  const signingSecret = readRssAppSigningSecret(options);
 
   if (!signatureHeader || !signingSecret) return false;
 
-  const rawBody = options.rawBody ?? await req.clone().text();
+  // Production webhook handlers pass their one bounded body read here. The
+  // fallback keeps direct helper callers bounded too without consuming req.
+  let rawBody = options.rawBody;
+  let rawBodyBytes = options.rawBodyBytes;
+  if (rawBody === undefined) {
+    const boundedBody = await readBoundedRssWebhookBody(req.clone());
+    rawBody = boundedBody.text;
+    rawBodyBytes ??= boundedBody.bytes;
+  }
   return verifyRssAppWebhookSignature({
     rawBody,
+    rawBodyBytes,
     header: signatureHeader,
     signingSecret,
     nowMs: options.nowMs,
@@ -168,22 +254,18 @@ async function verifySignedRssAppRequest(
 }
 
 /**
- * RSS / webhook entry: signed RSS.app request or token in x-webhook-token / x-rssapp-token.
- * When no env token is configured, falls back to Vault WEBHOOK_SHARED_SECRET (same as cron).
+ * RSS / webhook entry: signed RSS.app request or a dedicated token in
+ * x-webhook-token / x-rssapp-token. It never falls back to the shared internal
+ * WEBHOOK_SHARED_SECRET or Vault token verifier.
  */
-// deno-lint-ignore no-explicit-any
 export async function requireRssWebhookAuth(
   req: Request,
-  supabase: any,
+  _supabase: unknown,
   corsHeaders: Record<string, string>,
   signatureOptions: RssAppWebhookSignatureOptions = {},
 ): Promise<Response | null> {
   const signatureHeader = req.headers.get('RSSApp-Signature')?.trim() || '';
-  const signingSecretConfigured = Boolean(
-    signatureOptions.signingSecret?.trim()
-    || readOptionalEnv('RSSAPP_SIGNING_SECRET')
-    || readOptionalEnv('RSSAPP_WEBHOOK_SECRET')
-  );
+  const signingSecretConfigured = Boolean(readRssAppSigningSecret(signatureOptions));
   if (signatureHeader && signingSecretConfigured) {
     if (await verifySignedRssAppRequest(req, signatureOptions)) {
       return null;
@@ -205,33 +287,14 @@ export async function requireRssWebhookAuth(
     });
   }
 
-  const expectedEnv = (
-    readOptionalEnv('WEBHOOK_SHARED_SECRET')
-      || readOptionalEnv('RSSAPP_WEBHOOK_TOKEN')
-      || readOptionalEnv('RSSAPP_TOKEN')
-  );
+  const expectedEnv = readRssWebhookExpectedToken();
 
-  if (expectedEnv) {
-    if (provided === expectedEnv) {
-      return null;
-    }
-    console.warn('Webhook token invalid (env configured)');
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-      status: 401,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
-  }
-
-  const { data, error } = await supabase.rpc('verify_webhook_internal_token', { p_token: provided });
-  if (error) {
-    console.error(JSON.stringify({ module: 'internalAuth', action: 'rss_vault_rpc', message: error.message }));
-  }
-  if (data === true) {
+  if (expectedEnv && timingSafeStringEqual(provided, expectedEnv)) {
     return null;
   }
 
-  console.error('Webhook secret not configured in env and token did not match Vault');
-  return new Response(JSON.stringify({ error: 'Webhook secret not configured' }), {
+  console.warn(expectedEnv ? 'Webhook token invalid' : 'Dedicated RSS webhook token not configured');
+  return new Response(JSON.stringify({ error: 'Unauthorized' }), {
     status: 401,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });

@@ -20,6 +20,8 @@ interface PromptEditorProps {
   onReset?: () => void;
   /** Force monospace + smaller font for prompt/JSON content. Default true. */
   mono?: boolean;
+  /** Prevent edits while retaining copy and fullscreen inspection. */
+  readOnly?: boolean;
 }
 
 export function PromptEditor({
@@ -32,6 +34,7 @@ export function PromptEditor({
   title = 'Edit prompt',
   onReset,
   mono = true,
+  readOnly = false,
 }: PromptEditorProps) {
   const [fullscreen, setFullscreen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -58,21 +61,22 @@ export function PromptEditor({
 
   return (
     <div className="space-y-2">
-      <div className="relative rounded-md border border-border bg-background/40 overflow-hidden">
+      <div className="relative overflow-hidden rounded-md border border-border bg-background/40 transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 focus-within:ring-offset-background">
         <Textarea
           id={id}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
+          readOnly={readOnly}
           spellCheck={false}
-          className={cn(textareaClass, 'border-0 rounded-none focus-visible:ring-0 focus-visible:ring-offset-0')}
+          className={cn(textareaClass, 'border-0 rounded-none pr-20')}
           style={{ height: `${minHeight}px`, maxHeight: '70vh', overflow: 'auto' }}
         />
         <div className="absolute top-2 right-2 flex items-center gap-1 opacity-70 hover:opacity-100 transition-opacity">
-          <Button type="button" size="icon" variant="ghost" className="h-7 w-7 bg-background/80 backdrop-blur" onClick={copy} title="Copy">
+          <Button type="button" size="icon" variant="ghost" className="h-7 w-7 bg-background/80 backdrop-blur" onClick={copy} title="Copy" aria-label="Copy prompt">
             {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
           </Button>
-          <Button type="button" size="icon" variant="ghost" className="h-7 w-7 bg-background/80 backdrop-blur" onClick={() => setFullscreen(true)} title="Expand">
+          <Button type="button" size="icon" variant="ghost" className="h-7 w-7 bg-background/80 backdrop-blur" onClick={() => setFullscreen(true)} title="Expand" aria-label="Expand prompt editor">
             <Maximize2 className="w-3.5 h-3.5" />
           </Button>
         </div>
@@ -80,7 +84,7 @@ export function PromptEditor({
 
       <div className="flex items-center justify-between gap-2 text-xs">
         <div className="flex items-center gap-2">
-          {onReset && (
+          {onReset && !readOnly && (
             <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={onReset}>
               <RotateCcw className="w-3 h-3 mr-1" />Reset to default
             </Button>
@@ -116,6 +120,7 @@ export function PromptEditor({
               value={value}
               onChange={(e) => onChange(e.target.value)}
               placeholder={placeholder}
+              readOnly={readOnly}
               spellCheck={false}
               className={cn(textareaClass, 'h-full resize-none')}
             />

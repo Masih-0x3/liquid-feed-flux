@@ -286,3 +286,42 @@ Deno.test("observed enrichment OpenAI records local ledger rows without prompt m
   assert(budgetRows.some((row) => row.provider === "openai" && row.unit === "token" && row.quantity === 17));
   assert(budgetRows.some((row) => row.provider === "foglamp" && row.unit === "estimated_span_skipped" && row.quantity === 2));
 });
+
+Deno.test("observed enrichment OpenAI redacts failed provider bodies", async () => {
+  const writes: RecordedWrite[] = [];
+  const callModel = observedEnrichmentOpenAI(
+    recordingSupabase(writes),
+    "worker:enrich:job-failed",
+    async () => ({
+      ok: false,
+      status: 500,
+      rawText: '{"error":{"message":"SECRET provider body"}}',
+      raw: { error: { message: "SECRET provider body" } },
+      content: "SECRET provider body",
+      toolCall: null,
+      webSearchResults: [],
+      outputItems: [],
+      usage: null,
+      endpoint: "responses",
+    }),
+  );
+
+  const response = await callModel({
+    apiKey: "test-key",
+    model: "gpt-5.4-mini",
+    messages: [{ role: "user", content: "SECRET prompt text" }],
+  }, {
+    operationName: "compose_post",
+    agentName: "composer",
+  });
+
+  assertEquals(response.raw, {
+    error: { message: "enrichment_openai_http_500" },
+  });
+  assertEquals(response.content, "");
+  const aiWrite = writes.find((write) => write.table === "ai_call_ledger");
+  assert(aiWrite && !Array.isArray(aiWrite.value));
+  const aiRow = aiWrite.value as Record<string, unknown>;
+  assertEquals(aiRow.error_message, "enrichment_openai_http_500");
+  assertEquals(JSON.stringify(aiRow).includes("SECRET"), false);
+});

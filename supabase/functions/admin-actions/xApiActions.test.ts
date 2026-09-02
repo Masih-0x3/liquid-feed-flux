@@ -19,6 +19,7 @@ type FakeCall = {
 
 type FakeConfig = {
   settings?: Record<string, unknown>;
+  runtimeControls?: Record<string, unknown>;
 };
 
 function fakeSupabase(config: FakeConfig = {}) {
@@ -28,11 +29,23 @@ function fakeSupabase(config: FakeConfig = {}) {
     x_self_id: {},
     ...(config.settings ?? {}),
   };
+  const runtimeControls = config.runtimeControls ?? {
+    singleton_id: true,
+    environment: "production",
+    dedupe_enabled: true,
+    translation_enabled: true,
+    posting_mode: "enabled",
+    updated_at: "2026-01-01T00:00:00.000Z",
+    updated_by: null,
+  };
   const client: SupabaseAdminClient & { calls: FakeCall[] } = {
     calls,
     from(tableName: string) {
       const filters: FakeCall[] = [];
       const resolve = () => {
+        if (tableName === "runtime_controls") {
+          return { data: [runtimeControls] };
+        }
         if (tableName === "settings") {
           const key = filters.find((call) =>
             call.op === "eq" && call.column === "key"
@@ -80,6 +93,9 @@ function fakeSupabase(config: FakeConfig = {}) {
         maybeSingle() {
           return Promise.resolve(resolve());
         },
+        limit() {
+          return builder;
+        },
       };
       return builder;
     },
@@ -94,6 +110,7 @@ function deps(
   responseBody: unknown = {
     data: { id: "u1", username: "masih", name: "Masih" },
   },
+  envOverrides: Record<string, string> = {},
 ) {
   const calls = {
     fetches: [] as Array<Record<string, unknown>>,
@@ -104,6 +121,9 @@ function deps(
     TWITTER_CONSUMER_SECRET: "cs",
     TWITTER_ACCESS_TOKEN: "at",
     TWITTER_ACCESS_TOKEN_SECRET: "ats",
+    XOT_ENVIRONMENT: "production",
+    ALLOW_EXTERNAL_POSTING: "true",
+    ...envOverrides,
   };
   const actionDeps: XApiActionDeps = {
     readEnv: (key) => env[key],
@@ -116,6 +136,10 @@ function deps(
       return new Response(JSON.stringify(responseBody), { status: 200 });
     },
     now: () => new Date("2026-01-01T00:00:00.000Z"),
+    externalPostingOptions: {
+      environment: "production",
+      allowExternalPosting: "true",
+    },
   };
   return { deps: actionDeps, calls };
 }
@@ -247,27 +271,47 @@ Deno.test("send test tweet validates payload before credentials", async () => {
   assertEquals(calls.fetches, []);
 });
 
-Deno.test("send test tweet posts JSON body and returns created id", async () => {
+Deno.test("send test tweet is disabled before any provider call", async () => {
   const supabase = fakeSupabase();
   const { deps: actionDeps, calls } = deps({
     data: { id: "tweet-1", text: "hi" },
   });
-
   const result = await sendTestTweetAdminAction(supabase, {
     text: " hi ",
     in_reply_to_tweet_id: "123",
+    tweet_id: "post-after-cutover",
   }, actionDeps);
 
-  assertEquals((result.body as Record<string, unknown>).ok, true);
-  assertEquals((result.body as Record<string, unknown>).tweet_id, "tweet-1");
-  assertEquals(calls.fetches[0].input, "https://api.x.com/2/tweets");
-  assertEquals(
-    JSON.parse(String((calls.fetches[0].init as RequestInit).body)),
-    {
-      text: "hi",
-      reply: { in_reply_to_tweet_id: "123" },
+  assertEquals(result.status, 409);
+  assertEquals((result.body as Record<string, unknown>).code, "delivery_cutover_blocked");
+  assertEquals(calls.fetches, []);
+  assertEquals(calls.oauth, []);
+});
+
+Deno.test("Preview blocks direct X test tweet before provider fetch", async () => {
+  const supabase = fakeSupabase({
+    runtimeControls: {
+      singleton_id: true,
+      environment: "preview",
+      dedupe_enabled: false,
+      translation_enabled: false,
+      posting_mode: "blocked",
+      updated_at: "2026-01-01T00:00:00.000Z",
+      updated_by: null,
     },
-  );
+  });
+  const { deps: actionDeps, calls } = deps(undefined, {
+    XOT_ENVIRONMENT: "preview",
+    ALLOW_EXTERNAL_POSTING: "true",
+  });
+  const result = await sendTestTweetAdminAction(supabase, { text: "hello" }, actionDeps);
+  assertEquals(result.body, {
+    ok: false,
+    locked: true,
+    code: "external_posting_blocked",
+    reason: "preview_environment",
+  });
+  assertEquals(calls.fetches, []);
 });
 
 Deno.test("test hydrate tweet validates numeric id and reads note tweet fields", async () => {
@@ -298,8 +342,5 @@ Deno.test("test hydrate tweet validates numeric id and reads note tweet fields",
     text: "short",
     lang: "en",
     note_tweet: "long note",
-    raw: {
-      data: { text: "short", lang: "en", note_tweet: { text: "long note" } },
-    },
   });
 });

@@ -227,12 +227,41 @@ type EnrichmentOpenAICaller = (
   context: EnrichmentOpenAICallContext,
 ) => Promise<NormalizedOpenAIResponse>;
 
+function enrichmentProviderFailureCode(
+  agent: string,
+  status: unknown,
+): string {
+  const numericStatus = typeof status === "number" && Number.isInteger(status)
+    ? status
+    : null;
+  return numericStatus !== null && numericStatus >= 100 && numericStatus <= 599
+    ? `enrichment_${agent}_http_${numericStatus}`
+    : `enrichment_${agent}_request_failed`;
+}
+
+function sanitizeEnrichmentOpenAIResponse(
+  response: NormalizedOpenAIResponse,
+): NormalizedOpenAIResponse {
+  if (response.ok) return response;
+  const code = enrichmentProviderFailureCode("openai", response.status);
+  const raw = { error: { message: code } };
+  return {
+    ...response,
+    rawText: JSON.stringify(raw),
+    raw,
+    content: "",
+    toolCall: null,
+    webSearchResults: [],
+    outputItems: [],
+  };
+}
+
 function thrownEnrichmentOpenAIResponse(
   error: unknown,
   model: string,
 ): NormalizedOpenAIResponse {
-  const message = error instanceof Error ? error.message : String(error);
-  const raw = { error: { message } };
+  void error;
+  const raw = { error: { message: "enrichment_openai_request_failed" } };
   return {
     ok: false,
     status: 0,
@@ -259,7 +288,7 @@ export function observedEnrichmentOpenAI(
     const startedAt = new Date();
     let response: NormalizedOpenAIResponse;
     try {
-      response = await callOpenAIImpl(params);
+      response = sanitizeEnrichmentOpenAIResponse(await callOpenAIImpl(params));
     } catch (error) {
       response = thrownEnrichmentOpenAIResponse(error, params.model);
       if (workflowRunKey) {
@@ -599,27 +628,32 @@ export async function generatePersonalVoiceProfile(params: {
     },
   };
 
-  const resp = await callOpenAI({
-    apiKey: params.apiKey,
-    model: params.model || "gpt-5.4-mini",
-    messages: [
-      {
-        role: "system",
-        content: "You convert a personal X style guide into a compact structured profile for an internal manual-review drafting tool. Preserve the sharp voice. Do not sanitize it. Risk notes are advisory only. Important runtime rule: each generated draft must use either Persian or English, never both in the same draft, and must use news first plus postscript take.",
-      },
-      {
-        role: "user",
-        content: `STYLE GUIDE:\n${params.voiceGuide.guide}${samples}`,
-      },
-    ],
-    tool,
-    maxOutputTokens: 2500,
-    reasoningEffort: "low",
-    verbosity: "low",
-  });
+  let resp: NormalizedOpenAIResponse;
+  try {
+    resp = sanitizeEnrichmentOpenAIResponse(await callOpenAI({
+      apiKey: params.apiKey,
+      model: params.model || "gpt-5.4-mini",
+      messages: [
+        {
+          role: "system",
+          content: "You convert a personal X style guide into a compact structured profile for an internal manual-review drafting tool. Preserve the sharp voice. Do not sanitize it. Risk notes are advisory only. Important runtime rule: each generated draft must use either Persian or English, never both in the same draft, and must use news first plus postscript take.",
+        },
+        {
+          role: "user",
+          content: `STYLE GUIDE:\n${params.voiceGuide.guide}${samples}`,
+        },
+      ],
+      tool,
+      maxOutputTokens: 2500,
+      reasoningEffort: "low",
+      verbosity: "low",
+    }));
+  } catch (_error) {
+    throw new Error("enrichment_voice_profile_request_failed");
+  }
 
   if (!resp.ok || !resp.toolCall) {
-    throw new Error(`Voice profile generation failed: HTTP ${resp.status} - ${resp.content?.slice(0, 300)}`);
+    throw new Error(enrichmentProviderFailureCode("voice_profile", resp.status));
   }
 
   const parsed = JSON.parse(resp.toolCall.arguments);
@@ -1060,7 +1094,10 @@ IMPORTANT RULES:
     });
 
     if (!resp.ok || !resp.toolCall) {
-      console.warn('Archivist failed:', resp.status, resp.content?.slice(0, 200));
+      console.warn('enrichment_agent_failed', {
+        agent: 'archivist',
+        error: enrichmentProviderFailureCode('archivist', resp.status),
+      });
       return { output: { has_callback: false, callback_type: null, callback_suggestion: null, referenced_post_id: null, narrative_summary: null }, usage: resp.usage?.total_tokens ?? 0 };
     }
 
@@ -1073,7 +1110,10 @@ IMPORTANT RULES:
     const rawRefId = parsed.referenced_post_id || null;
     const validatedRefId = (rawRefId && knownIds.has(rawRefId)) ? rawRefId : null;
     if (rawRefId && !validatedRefId) {
-      console.warn(`Archivist returned unknown referenced_post_id "${rawRefId}" -- discarding to prevent FK violation`);
+      console.warn('enrichment_agent_invalid_reference', {
+        agent: 'archivist',
+        error: 'enrichment_archivist_reference_invalid',
+      });
     }
 
     return {
@@ -1087,7 +1127,11 @@ IMPORTANT RULES:
       usage: resp.usage?.total_tokens ?? 0,
     };
   } catch (e) {
-    console.warn('Archivist error (non-fatal):', (e as Error).message);
+    void e;
+    console.warn('enrichment_agent_error', {
+      agent: 'archivist',
+      error: 'enrichment_archivist_request_failed',
+    });
     return null;
   }
 }
@@ -1155,7 +1199,10 @@ IMPORTANT RULES:
     });
 
     if (!resp.ok || !resp.toolCall) {
-      console.warn('Researcher failed:', resp.status, resp.content?.slice(0, 200));
+      console.warn('enrichment_agent_failed', {
+        agent: 'researcher',
+        error: enrichmentProviderFailureCode('researcher', resp.status),
+      });
       return null;
     }
 
@@ -1181,7 +1228,11 @@ IMPORTANT RULES:
 
     return { output, usage: resp.usage?.total_tokens ?? 0 };
   } catch (e) {
-    console.warn('Researcher error (non-fatal):', (e as Error).message);
+    void e;
+    console.warn('enrichment_agent_error', {
+      agent: 'researcher',
+      error: 'enrichment_researcher_request_failed',
+    });
     return null;
   }
 }
@@ -1253,7 +1304,7 @@ CRITICAL INSTRUCTIONS:
   });
 
   if (!resp.ok || !resp.toolCall) {
-    throw new Error(`Analyst agent failed: HTTP ${resp.status} - ${resp.content?.slice(0, 300)}`);
+    throw new Error(enrichmentProviderFailureCode("analyst", resp.status));
   }
 
   const parsed = JSON.parse(resp.toolCall.arguments);
@@ -1332,7 +1383,7 @@ ANTI-AI-DETECTION TECHNIQUES (apply at least 3):
   });
 
   if (!resp.ok || !resp.toolCall) {
-    throw new Error(`Humanizer agent failed: HTTP ${resp.status} - ${resp.content?.slice(0, 300)}`);
+    throw new Error(enrichmentProviderFailureCode("humanizer", resp.status));
   }
 
   const parsed = JSON.parse(resp.toolCall.arguments);
@@ -1505,7 +1556,7 @@ VARIETY IS CRITICAL. Each post should feel structurally different from the last.
   });
 
   if (!resp.ok || !resp.toolCall) {
-    throw new Error(`Composer agent failed: HTTP ${resp.status} - ${resp.content?.slice(0, 300)}`);
+    throw new Error(enrichmentProviderFailureCode("composer", resp.status));
   }
 
   const parsed = JSON.parse(resp.toolCall.arguments);

@@ -9,6 +9,12 @@ import type {
   RecordFeedbackFn,
   SupabaseAdminClient,
 } from "./types.ts";
+import {
+  fetchRuntimeControls,
+  type RuntimeControlsQueryClient,
+  type RuntimeControls,
+} from "../_shared/runtimeControls.ts";
+import { requireDeliveryCutover } from "../_shared/deliveryCutover.ts";
 
 type QueryResult = {
   data?: unknown;
@@ -46,18 +52,50 @@ function table(supabase: SupabaseAdminClient, name: string): TableQueryBuilder {
   return supabase.from(name) as TableQueryBuilder;
 }
 
-function errorMessage(error: unknown): string {
-  if (error && typeof error === "object" && "message" in error) {
-    return String((error as { message?: unknown }).message ?? error);
-  }
-  return String(error);
+async function loadDedupeRuntimeControls(
+  supabase: SupabaseAdminClient,
+): Promise<RuntimeControls> {
+  const runtimeControlsClient: RuntimeControlsQueryClient = {
+    from: () => {
+      const query = supabase.from("runtime_controls") as {
+        select: (columns: "*") => PromiseLike<QueryResult>;
+      };
+      return { select: (columns: "*") => query.select(columns) };
+    },
+  };
+  return await fetchRuntimeControls(runtimeControlsClient);
+}
+
+function dedupePausedResponse(
+  controls: RuntimeControls,
+  extra: Record<string, unknown> = {},
+) {
+  return {
+    ok: true,
+    paused: true,
+    status: "paused",
+    reason: "dedupe_disabled",
+    dedupe_enabled: controls.dedupe_enabled,
+    translation_enabled: controls.translation_enabled,
+    retained: 0,
+    enqueued: 0,
+    ...extra,
+  };
 }
 
 export async function loadDuplicateGateConfig(supabase: SupabaseAdminClient) {
-  const { data } = await table(supabase, "settings").select("value").eq(
+  const { data, error } = await table(supabase, "settings").select("value").eq(
     "key",
     "story_memory",
   ).maybeSingle();
+  if (error) {
+    throw new Error("duplicate_gate_config_read_failed");
+  }
+  if (data !== null && data !== undefined &&
+    (typeof data !== "object" || Array.isArray(data) ||
+      !("value" in (data as Record<string, unknown>)))) {
+    throw new Error("duplicate_gate_config_invalid_response");
+  }
   const row = data && typeof data === "object"
     ? data as Record<string, unknown>
     : null;
@@ -69,7 +107,7 @@ export async function markDedupePending(
   tweetId: string,
   reason: string,
 ) {
-  await table(supabase, "posts")
+  const { error } = await table(supabase, "posts")
     .update({
       dedupe_status: "pending",
       dedupe_method: null,
@@ -77,8 +115,10 @@ export async function markDedupePending(
       dedupe_reason: reason,
       dedupe_checked_at: null,
     })
-    .eq("tweet_id", tweetId)
-    .then(() => null, () => null);
+    .eq("tweet_id", tweetId);
+  if (error) {
+    throw new Error("dedupe_pending_write_failed");
+  }
 }
 
 export async function runDedupeAdminAction(
@@ -89,20 +129,45 @@ export async function runDedupeAdminAction(
   const tweetId = typeof body.tweet_id === "string" ? body.tweet_id.trim() : "";
   if (!tweetId) return { ok: false, error: "tweet_id is required" };
 
+  let runtimeControls: RuntimeControls;
+  try {
+    runtimeControls = await loadDedupeRuntimeControls(supabase);
+  } catch {
+    return { ok: false, error: "runtime_controls_unavailable" };
+  }
+  if (!runtimeControls.dedupe_enabled ||
+    (body.enqueue_next === true && !runtimeControls.translation_enabled)) {
+    return dedupePausedResponse(runtimeControls, {
+      tweet_id: tweetId,
+      count: 0,
+    });
+  }
+
   const { data: post, error } = await table(supabase, "posts")
     .select(
       "tweet_id, text_original, text_translated, author_handle, url, created_at, delivery_decision, decision_reason, feedback_locked",
     )
     .eq("tweet_id", tweetId)
     .maybeSingle();
-  if (error) return { ok: false, error: errorMessage(error) };
+  if (error) return { ok: false, error: "dedupe_post_read_failed" };
   if (!post || typeof post !== "object") {
     return { ok: false, error: "post not found" };
   }
 
-  const config = await loadDuplicateGateConfig(supabase);
+  let config: Awaited<ReturnType<typeof loadDuplicateGateConfig>>;
+  try {
+    config = await loadDuplicateGateConfig(supabase);
+  } catch {
+    return { ok: false, error: "duplicate_gate_config_read_failed" };
+  }
   const dryRun = body.dry_run === true;
-  if (!dryRun) await markDedupePending(supabase, tweetId, "running:admin");
+  if (!dryRun) {
+    try {
+      await markDedupePending(supabase, tweetId, "running:admin");
+    } catch {
+      return { ok: false, error: "dedupe_pending_write_failed" };
+    }
+  }
 
   const runGate = deps.runDuplicateGate ?? runDuplicateGate;
   const result = await runGate(
@@ -119,7 +184,7 @@ export async function runDedupeAdminAction(
   if (
     !dryRun && body.enqueue_next === true && result.should_enqueue_translate
   ) {
-    await table(supabase, "jobs").upsert({
+    const { error: enqueueError } = await table(supabase, "jobs").upsert({
       type: "translate",
       payload: { tweet_id: tweetId },
       status: "pending",
@@ -127,6 +192,15 @@ export async function runDedupeAdminAction(
       idempotency_key: `translate:dedupe-admin:${tweetId}`,
       next_run_at: (deps.now?.() ?? new Date()).toISOString(),
     }, { onConflict: "idempotency_key", ignoreDuplicates: true });
+    if (enqueueError) {
+      return {
+        ok: false,
+        tweet_id: tweetId,
+        config_enabled: config.enabled,
+        result,
+        error: "dedupe_translate_enqueue_failed",
+      };
+    }
   }
 
   return {
@@ -152,6 +226,22 @@ export async function backfillDedupeAdminAction(
   const dryRun = body.dry_run === true;
   const force = body.force === true;
   const now = deps.now?.() ?? new Date();
+  let runtimeControls: RuntimeControls;
+  try {
+    runtimeControls = await loadDedupeRuntimeControls(supabase);
+  } catch {
+    return { ok: false, error: "runtime_controls_unavailable" };
+  }
+  if (!runtimeControls.dedupe_enabled) {
+    return dedupePausedResponse(runtimeControls, {
+      dry_run: dryRun,
+      force,
+      hours,
+      max,
+      scanned: 0,
+      queued: 0,
+    });
+  }
   const since = new Date(now.getTime() - hours * 60 * 60 * 1000).toISOString();
 
   let query = table(supabase, "posts")
@@ -163,10 +253,21 @@ export async function backfillDedupeAdminAction(
   if (!force) query = query.is("dedupe_checked_at", null);
 
   const { data, error } = await query;
-  if (error) return { ok: false, error: errorMessage(error) };
-  const posts = Array.isArray(data)
-    ? data as Array<Record<string, unknown>>
-    : [];
+  if (error) return { ok: false, error: "dedupe_backfill_read_failed" };
+  if (!Array.isArray(data)) {
+    return { ok: false, error: "dedupe_backfill_invalid_response" };
+  }
+  const posts: Array<Record<string, unknown>> = [];
+  for (const post of data) {
+    if (!post || typeof post !== "object" || Array.isArray(post)) {
+      return { ok: false, error: "dedupe_backfill_invalid_row" };
+    }
+    const tweetId = (post as Record<string, unknown>).tweet_id;
+    if (typeof tweetId !== "string" || tweetId.trim().length === 0) {
+      return { ok: false, error: "dedupe_backfill_invalid_row" };
+    }
+    posts.push(post as Record<string, unknown>);
+  }
 
   let queued = 0;
   const stamp = now.getTime();
@@ -186,9 +287,32 @@ export async function backfillDedupeAdminAction(
         : `dedupe:backfill:${tweetId}`,
       next_run_at: (deps.now?.() ?? new Date()).toISOString(),
     }, { onConflict: "idempotency_key", ignoreDuplicates: true });
-    if (!jobError) {
+    if (jobError) {
+      return {
+        ok: false,
+        dry_run: dryRun,
+        force,
+        hours,
+        max,
+        scanned: posts.length,
+        queued,
+        error: "dedupe_backfill_enqueue_failed",
+      };
+    }
+    try {
       await markDedupePending(supabase, tweetId, "queued:backfill");
       queued += 1;
+    } catch {
+      return {
+        ok: false,
+        dry_run: dryRun,
+        force,
+        hours,
+        max,
+        scanned: posts.length,
+        queued,
+        error: "dedupe_pending_write_failed",
+      };
     }
   }
 
@@ -217,19 +341,42 @@ export async function auditDuplicateCandidatesAdminAction(
       ? Math.min(Math.max(body.candidate_min_similarity, 0.5), 0.99)
       : 0.78;
   const limit = typeof body.limit === "number" && body.limit > 0
-    ? Math.min(Math.floor(body.limit), 5000)
-    : 500;
+      ? Math.min(Math.floor(body.limit), 5000)
+      : 500;
+
+  let runtimeControls: RuntimeControls;
+  try {
+    runtimeControls = await loadDedupeRuntimeControls(supabase);
+  } catch {
+    return { ok: false, error: "runtime_controls_unavailable" };
+  }
+  if (!runtimeControls.dedupe_enabled) {
+    return dedupePausedResponse(runtimeControls, {
+      dry_run: true,
+      window_hours: windowHours,
+      candidate_min_similarity: candidateMinSimilarity,
+      count: 0,
+      rows: [],
+    });
+  }
 
   const { data, error } = await supabase.rpc("audit_duplicate_candidates", {
     window_hours: windowHours,
     candidate_min_similarity: candidateMinSimilarity,
     match_limit: limit,
   });
-  if (error) return { ok: false, error: errorMessage(error) };
+  if (error) return { ok: false, error: "duplicate_candidates_read_failed" };
 
-  const rows = Array.isArray(data)
-    ? data as Array<Record<string, unknown>>
-    : [];
+  if (!Array.isArray(data)) {
+    return { ok: false, error: "duplicate_candidates_invalid_response" };
+  }
+  const rows: Array<Record<string, unknown>> = [];
+  for (const row of data) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) {
+      return { ok: false, error: "duplicate_candidates_invalid_row" };
+    }
+    rows.push(row as Record<string, unknown>);
+  }
   const proposed = rows.reduce<Record<string, number>>((acc, row) => {
     const key = typeof row.proposed_status === "string"
       ? row.proposed_status
@@ -261,6 +408,38 @@ export async function clearDuplicateAdminAction(
   if (!tweetId) {
     return { body: { error: "tweet_id is required" }, status: 400 };
   }
+  try {
+    // Clearing a duplicate forces delivery eligibility. Historical posts must
+    // never be changed through this admin path.
+    await requireDeliveryCutover(supabase, tweetId);
+  } catch (error) {
+    return {
+      body: {
+        ok: false,
+        code: "delivery_cutover_blocked",
+        error: "delivery_cutover_blocked",
+      },
+      status: 409,
+    };
+  }
+
+  let runtimeControls: RuntimeControls;
+  try {
+    runtimeControls = await loadDedupeRuntimeControls(supabase);
+  } catch {
+    return {
+      body: { ok: false, error: "runtime_controls_unavailable" },
+      status: 503,
+    };
+  }
+  if (!runtimeControls.dedupe_enabled) {
+    return {
+      body: dedupePausedResponse(runtimeControls, {
+        tweet_id: tweetId,
+      }),
+      status: 200,
+    };
+  }
 
   const { error: clearError } = await table(supabase, "posts").update({
     dup_of_tweet_id: null,
@@ -275,32 +454,47 @@ export async function clearDuplicateAdminAction(
     decision_reason: "dup_cleared_by_admin",
     feedback_locked: true,
   }).eq("tweet_id", tweetId);
-  if (clearError) throw clearError;
+  if (clearError) throw new Error("duplicate_clear_post_update_failed");
 
   if (relatedTweetId) {
     const pairA = tweetId < relatedTweetId ? tweetId : relatedTweetId;
     const pairB = tweetId < relatedTweetId ? relatedTweetId : tweetId;
-    await table(supabase, "story_pair_blocklist").upsert(
+    const { error: blocklistError } = await table(supabase, "story_pair_blocklist").upsert(
       { tweet_a: pairA, tweet_b: pairB, reason: "not_duplicate_admin" },
       { onConflict: "tweet_a,tweet_b" },
-    ).then(
-      () => null,
-      (error: unknown) =>
-        (deps.warn ?? console.warn)(
-          "blocklist upsert failed",
-          error instanceof Error ? error.message : error,
-        ),
     );
+    if (blocklistError) {
+      (deps.warn ?? console.warn)("blocklist upsert failed");
+      return {
+        body: {
+          success: false,
+          error: "duplicate_pair_blocklist_write_failed",
+          partial_update: true,
+        },
+        status: 503,
+      };
+    }
   }
 
-  await deps.recordFeedback(
-    supabase,
-    tweetId,
-    "not_duplicate",
-    -2,
-    {},
-    relatedTweetId,
-  ).catch(() => {});
+  try {
+    await deps.recordFeedback(
+      supabase,
+      tweetId,
+      "not_duplicate",
+      -2,
+      {},
+      relatedTweetId,
+    );
+  } catch {
+    return {
+      body: {
+        success: false,
+        error: "duplicate_feedback_write_failed",
+        partial_update: true,
+      },
+      status: 503,
+    };
+  }
   return {
     body: {
       success: true,

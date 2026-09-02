@@ -12,12 +12,26 @@ import {
   selectMediaTier,
   type XMediaRow,
 } from "../_shared/mediaSelection.ts";
+import {
+  fetchReviewedRemoteJson,
+  filterReviewedRemoteMediaItems,
+  MAX_REMOTE_MEDIA_CANDIDATES_PER_POST,
+  RemoteMediaPolicyError,
+  type RemoteMediaDnsResolver,
+} from "../_shared/remoteMediaPolicy.ts";
+import { requireDeliveryCutover } from "../_shared/deliveryCutover.ts";
 import { loadActiveThreshold } from "./activeThreshold.ts";
+import {
+  ExternalPostingBlockedError,
+  requireExternalPosting,
+} from "../_shared/externalPostingGuard.ts";
+import type { RuntimeControlsQueryClient } from "../_shared/runtimeControls.ts";
 import type {
   AdminActionResponse,
   RecordFeedbackFn,
   SupabaseAdminClient,
 } from "./types.ts";
+import { addAdminOperationEnvelope } from "./adminOperation.ts";
 
 type QueryResult = {
   data?: unknown;
@@ -31,7 +45,7 @@ type TableQueryBuilder = PromiseLike<QueryResult> & {
   upsert(
     value: Record<string, unknown> | Array<Record<string, unknown>>,
     options?: Record<string, unknown>,
-  ): PromiseLike<QueryResult>;
+  ): TableQueryBuilder;
   eq(column: string, value: unknown): TableQueryBuilder;
   gt(column: string, value: unknown): TableQueryBuilder;
   gte(column: string, value: unknown): TableQueryBuilder;
@@ -83,6 +97,15 @@ export type ResolvedMedia = {
   qualityLabel?: string;
 };
 
+export type ResolvedMediaMetadata = Omit<ResolvedMedia, "url" | "thumbnail_url">;
+
+export type ResolvedXMediaMetadata = {
+  user_name: string;
+  user_screen_name: string;
+  tweetID: string;
+  media: ResolvedMediaMetadata[];
+};
+
 export type XDiagnosticBlocker = {
   code: string;
   label: string;
@@ -96,6 +119,7 @@ export type QueueHydrationDeps = {
 
 export type ResolveXMediaDeps = {
   fetchImpl?: FetchFn;
+  resolveDns?: RemoteMediaDnsResolver;
 };
 
 export type RunXPostDeps = QueueHydrationDeps & {
@@ -104,6 +128,17 @@ export type RunXPostDeps = QueueHydrationDeps & {
   fetchImpl?: FetchFn;
   readEnv?: ReadEnvFn;
 };
+
+function externalPostingOptions(deps: RunXPostDeps): {
+  environment: unknown;
+  allowExternalPosting: unknown;
+} {
+  const env = deps.readEnv ?? ((key: string) => Deno.env.get(key));
+  return {
+    environment: env("XOT_ENVIRONMENT"),
+    allowExternalPosting: env("ALLOW_EXTERNAL_POSTING"),
+  };
+}
 
 export type RehydrateRecentTruncatedDeps = {
   now?: () => Date;
@@ -131,11 +166,28 @@ function table(supabase: SupabaseAdminClient, name: string): TableQueryBuilder {
   return supabase.from(name) as TableQueryBuilder;
 }
 
+function runtimeControlsClient(
+  supabase: SupabaseAdminClient,
+): RuntimeControlsQueryClient {
+  return {
+    from: (tableName) => ({
+      select: (columns) =>
+        (supabase.from(tableName) as TableQueryBuilder).select(columns),
+    }),
+  };
+}
+
 function errorMessage(error: unknown): string {
   if (error && typeof error === "object" && "message" in error) {
     return String((error as { message?: unknown }).message ?? error);
   }
   return String(error);
+}
+
+function safeAdminActionErrorCode(error: unknown, fallback = "admin_action_failed"): string {
+  const message = errorMessage(error).trim();
+  const match = message.match(/^([a-z][a-z0-9_]{1,96})/);
+  return match?.[1] ?? fallback;
 }
 
 function nowIso(deps?: { now?: () => Date }): string {
@@ -164,12 +216,46 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function hasNonEmptyStringField(value: unknown, field: string): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const fieldValue = (value as Record<string, unknown>)[field];
+  return typeof fieldValue === "string" && fieldValue.trim().length > 0;
+}
+
 function asRecordArray(value: unknown): Array<Record<string, unknown>> {
   return Array.isArray(value)
     ? value.filter((item): item is Record<string, unknown> =>
       item !== null && typeof item === "object" && !Array.isArray(item)
     )
     : [];
+}
+
+function toResolveXMediaClientMetadata(tweet: {
+  user_name?: unknown;
+  user_screen_name?: unknown;
+  tweetID?: unknown;
+  media?: unknown;
+}): ResolvedXMediaMetadata {
+  const media: ResolvedMediaMetadata[] = asRecordArray(tweet.media).flatMap((item) => {
+    const type = item.type;
+    if (type !== "video" && type !== "gif" && type !== "image") return [];
+    return [{
+      type,
+      resolution: typeof item.resolution === "string" ? item.resolution : undefined,
+      bitrate: typeof item.bitrate === "number" && Number.isFinite(item.bitrate)
+        ? item.bitrate
+        : undefined,
+      qualityLabel: typeof item.qualityLabel === "string" ? item.qualityLabel : undefined,
+    }];
+  });
+  return {
+    user_name: typeof tweet.user_name === "string" ? tweet.user_name : "",
+    user_screen_name: typeof tweet.user_screen_name === "string"
+      ? tweet.user_screen_name
+      : "",
+    tweetID: typeof tweet.tweetID === "string" ? tweet.tweetID : "",
+    media,
+  };
 }
 
 function finiteNumber(value: unknown): number | null {
@@ -241,24 +327,16 @@ export function pickBestVideoVariant<
   return [...pool].sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0))[0];
 }
 
-async function fetchWithTimeout(
-  url: string,
-  timeoutMs = 8000,
-  fetchImpl: FetchFn = fetch,
-): Promise<Response> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetchImpl(url, {
-      signal: controller.signal,
-      headers: {
-        "Accept": "application/json",
-        "User-Agent": "XOT-admin-media-resolver/1.0",
-      },
-    });
-  } finally {
-    clearTimeout(timeout);
-  }
+function reviewedProxyMediaUrl(value: unknown): string | undefined {
+  const { accepted } = filterReviewedRemoteMediaItems([{ url: value }], 1);
+  const url = accepted[0]?.url;
+  return typeof url === "string" ? url : undefined;
+}
+
+function resolveXMediaErrorCode(error: unknown): string {
+  return error instanceof RemoteMediaPolicyError
+    ? error.code
+    : "resolve_x_media_fetch_failed";
 }
 
 export async function resolveXMedia(
@@ -268,13 +346,13 @@ export async function resolveXMedia(
 ) {
   const fetchImpl = deps.fetchImpl ?? fetch;
   try {
-    const res = await fetchWithTimeout(
+    const { body, response } = await fetchReviewedRemoteJson(
+      "fxtwitter",
       `https://api.fxtwitter.com/${username}/status/${tweetId}`,
-      8000,
-      fetchImpl,
+      { fetchImpl, resolveDns: deps.resolveDns },
     );
-    if (res.ok) {
-      const json = asRecord(await res.json());
+    if (response.ok) {
+      const json = asRecord(body);
       const t = asRecord(json.tweet);
       const mediaObject = asRecord(t.media);
       if (
@@ -284,8 +362,15 @@ export async function resolveXMedia(
       ) {
         const media: ResolvedMedia[] = [];
 
-        for (const v of asRecordArray(mediaObject.videos)) {
-          const variants = asRecordArray(v.variants).flatMap((variant) => {
+        for (const v of asRecordArray(mediaObject.videos).slice(
+          0,
+          MAX_REMOTE_MEDIA_CANDIDATES_PER_POST,
+        )) {
+          if (media.length >= MAX_REMOTE_MEDIA_CANDIDATES_PER_POST) break;
+          const variantCandidates = asRecordArray(v.variants).slice(
+            0,
+            MAX_REMOTE_MEDIA_CANDIDATES_PER_POST,
+          ).flatMap((variant) => {
             const url = typeof variant.url === "string" ? variant.url : "";
             if (!url) return [];
             return [{
@@ -298,7 +383,11 @@ export async function resolveXMedia(
                 : undefined,
             }];
           });
-          const fallbackUrl = typeof v.url === "string" ? v.url : "";
+          const { accepted: variants } = filterReviewedRemoteMediaItems(
+            variantCandidates,
+            MAX_REMOTE_MEDIA_CANDIDATES_PER_POST,
+          );
+          const fallbackUrl = reviewedProxyMediaUrl(v.url) ?? "";
           const best = pickBestVideoVariant(variants) ??
             (fallbackUrl ? { url: fallbackUrl, bitrate: undefined } : null);
           if (!best) continue;
@@ -307,9 +396,7 @@ export async function resolveXMedia(
           media.push({
             url: best.url,
             type: v.type === "gif" ? "gif" : "video",
-            thumbnail_url: typeof v.thumbnail_url === "string"
-              ? v.thumbnail_url
-              : undefined,
+            thumbnail_url: reviewedProxyMediaUrl(v.thumbnail_url),
             resolution: w && h ? `${w}x${h}` : undefined,
             bitrate: best.bitrate ? Math.round(best.bitrate / 1000) : undefined,
             qualityLabel: best.bitrate && h
@@ -320,7 +407,14 @@ export async function resolveXMedia(
           });
         }
 
-        for (const p of asRecordArray(mediaObject.photos)) {
+        const remainingMediaCandidates = Math.max(
+          0,
+          MAX_REMOTE_MEDIA_CANDIDATES_PER_POST - media.length,
+        );
+        for (const p of asRecordArray(mediaObject.photos).slice(
+          0,
+          remainingMediaCandidates,
+        )) {
           const url = typeof p.url === "string" ? p.url : "";
           if (!url) continue;
           const width = typeof p.width === "number" ? p.width : null;
@@ -333,18 +427,17 @@ export async function resolveXMedia(
           });
         }
 
-        if (media.length) {
+        const { accepted: reviewedMedia } = filterReviewedRemoteMediaItems(media);
+        if (reviewedMedia.length) {
           const author = asRecord(t.author);
           return {
             user_name: typeof author.name === "string" ? author.name : username,
             user_screen_name: typeof author.screen_name === "string"
               ? author.screen_name
               : username,
-            user_profile_image_url: typeof author.avatar_url === "string"
-              ? author.avatar_url
-              : undefined,
+            user_profile_image_url: reviewedProxyMediaUrl(author.avatar_url),
             tweetID: tweetId,
-            media,
+            media: reviewedMedia,
           };
         }
       }
@@ -355,22 +448,37 @@ export async function resolveXMedia(
       action: "resolve_x_media",
       provider: "fxtwitter",
       ok: false,
-      error: err instanceof Error ? err.message : String(err),
+      error: resolveXMediaErrorCode(err),
     }));
   }
 
-  const vxRes = await fetchWithTimeout(
-    `https://api.vxtwitter.com/${username}/status/${tweetId}`,
-    8000,
-    fetchImpl,
-  );
-  if (!vxRes.ok) {
+  let vx: Record<string, unknown>;
+  try {
+    const { body, response } = await fetchReviewedRemoteJson(
+      "vxtwitter",
+      `https://api.vxtwitter.com/${username}/status/${tweetId}`,
+      { fetchImpl, resolveDns: deps.resolveDns },
+    );
+    if (!response.ok) {
+      throw new Error("resolve_x_media_provider_not_ok");
+    }
+    vx = asRecord(body);
+  } catch (err) {
+    console.warn(JSON.stringify({
+      function: "admin-actions",
+      action: "resolve_x_media",
+      provider: "vxtwitter",
+      ok: false,
+      error: resolveXMediaErrorCode(err),
+    }));
     throw new Error(
       "Failed to fetch tweet. The post might be private, deleted, or rate-limited.",
     );
   }
-  const vx = asRecord(await vxRes.json());
-  const items: ResolvedMedia[] = asRecordArray(vx.media_extended).flatMap(
+  const candidates: ResolvedMedia[] = asRecordArray(vx.media_extended).slice(
+    0,
+    MAX_REMOTE_MEDIA_CANDIDATES_PER_POST,
+  ).flatMap(
     (m) => {
       const url = typeof m.url === "string" ? m.url : "";
       if (!url) return [];
@@ -384,22 +492,21 @@ export async function resolveXMedia(
       return [{
         url: isVideo ? url : upgradeImageUrl(url),
         type,
-        thumbnail_url: typeof m.thumbnail_url === "string"
-          ? m.thumbnail_url
-          : undefined,
+        thumbnail_url: reviewedProxyMediaUrl(m.thumbnail_url),
         resolution: width && height ? `${width}x${height}` : undefined,
         qualityLabel: isVideo ? "best available" : "original",
       }];
     },
   );
+  const { accepted: items } = filterReviewedRemoteMediaItems(candidates);
 
   if (!items.length) throw new Error("No media found in this post.");
 
   return {
     user_name: vx.user_name,
     user_screen_name: vx.user_screen_name,
-    user_profile_image_url: vx.user_profile_image_url,
-    tweetID: vx.tweetID ?? tweetId,
+    user_profile_image_url: reviewedProxyMediaUrl(vx.user_profile_image_url),
+    tweetID: tweetId,
     media: items,
   };
 }
@@ -410,16 +517,7 @@ export async function queueHydrationJob(
   source: string,
   deps: QueueHydrationDeps,
 ): Promise<{ queued: boolean; reason?: string }> {
-  const { data: pending } = await table(supabase, "jobs")
-    .select("id")
-    .eq("type", "hydrate_tweet")
-    .in("status", ["pending", "running"])
-    .filter("payload->>tweet_id", "eq", tweetId)
-    .limit(1);
-  if (Array.isArray(pending) && pending.length > 0) {
-    return { queued: false, reason: "hydrate_job_already_pending" };
-  }
-  const { error } = await table(supabase, "jobs").upsert({
+  const { data: insertedJob, error } = await table(supabase, "jobs").upsert({
     type: "hydrate_tweet",
     payload: { tweet_id: tweetId, source },
     status: "pending",
@@ -431,11 +529,14 @@ export async function queueHydrationJob(
     lease_expires_at: null,
     last_error: null,
     attempts: 0,
-  }, { onConflict: "idempotency_key", ignoreDuplicates: false });
+  }, { onConflict: "idempotency_key", ignoreDuplicates: true })
+    .select("id")
+    .maybeSingle();
   if (error) throw error;
-  await deps.insertAdminPipelineEvent(supabase, tweetId, "hydrate", "queued", {
-    source,
-  });
+  const inserted = insertedJob !== null && typeof insertedJob === "object" && !Array.isArray(insertedJob) && typeof (insertedJob as Record<string, unknown>).id === "string";
+  if (insertedJob !== null && !inserted) throw new Error("hydrate_enqueue_invalid_response");
+  if (!inserted) return { queued: false, reason: "hydrate_job_already_exists" };
+  await deps.insertAdminPipelineEvent(supabase, tweetId, "hydrate", "queued", { source });
   return { queued: true };
 }
 
@@ -461,6 +562,8 @@ export async function getXPostingDiagnostics(
   body: Record<string, unknown>,
   deps: { now?: () => Date } = {},
 ) {
+  const MAX_ACTIVE_JOBS_PER_DIAGNOSTIC = 50;
+  const MAX_MEDIA_ROWS_PER_DIAGNOSTIC = 50;
   const now = deps.now?.() ?? new Date();
   const tweetId = typeof body.tweet_id === "string" ? body.tweet_id.trim() : "";
   const limit = Math.min(Math.max(Number(body.limit) || 20, 1), 100);
@@ -470,10 +573,21 @@ export async function getXPostingDiagnostics(
       "x_rate_limits",
       "enrichment_config",
     ]),
-    loadActiveThreshold(supabase).catch(() => 14),
+    loadActiveThreshold(supabase),
   ]);
+  if (settingsRows.error) {
+    return { success: false, error: "x_diagnostics_settings_read_failed" };
+  }
+  if (!Array.isArray(settingsRows.data)) {
+    return { success: false, error: "x_diagnostics_settings_invalid_response" };
+  }
+  if (settingsRows.data.some((row) =>
+    !hasNonEmptyStringField(row, "key")
+  )) {
+    return { success: false, error: "x_diagnostics_settings_invalid_row" };
+  }
   const settings = Object.fromEntries(
-    (Array.isArray(settingsRows.data) ? settingsRows.data : []).map(
+    settingsRows.data.map(
       (
         row,
       ) => [
@@ -526,6 +640,9 @@ export async function getXPostingDiagnostics(
       since24h,
     ),
   ]);
+  if (posts1h.error || posts24h.error || posts30d.error || media24h.error) {
+    return { success: false, error: "x_diagnostics_quota_read_failed" };
+  }
   const quotaSnapshot = {
     posts_1h: posts1h.count ?? 0,
     posts_24h: posts24h.count ?? 0,
@@ -542,25 +659,35 @@ export async function getXPostingDiagnostics(
     .limit(limit);
   if (tweetId) q = q.eq("tweet_id", tweetId).limit(1);
   const { data: posts, error } = await q;
-  if (error) return { success: false, error: errorMessage(error) };
+  if (error) return { success: false, error: "x_diagnostics_posts_read_failed" };
+  if (!Array.isArray(posts)) {
+    return { success: false, error: "x_diagnostics_posts_invalid_response" };
+  }
+  if (posts.some((row) =>
+    !hasNonEmptyStringField(row, "tweet_id")
+  )) {
+    return { success: false, error: "x_diagnostics_posts_invalid_row" };
+  }
   const candidateRes = await supabase.rpc("get_x_post_candidates", {
     candidate_limit: limit,
     target_tweet_id: tweetId || null,
   }).then(
     (value) => value,
-    (candidateError: unknown) => ({ data: [], error: candidateError }),
+    (candidateError: unknown) => ({ data: null, error: candidateError }),
   );
+  if (candidateRes.error) {
+    return { success: false, error: "x_diagnostics_candidates_read_failed" };
+  }
+  if (!Array.isArray(candidateRes.data)) {
+    return { success: false, error: "x_diagnostics_candidates_invalid_response" };
+  }
   const sqlCandidatesById = new Map<string, Record<string, unknown>>();
-  if (!candidateRes.error) {
-    for (
-      const row
-        of (Array.isArray(candidateRes.data) ? candidateRes.data : []) as Array<
-          Record<string, unknown>
-        >
-    ) {
-      const id = String(row.tweet_id ?? "");
-      if (id) sqlCandidatesById.set(id, row);
+  for (const row of candidateRes.data as Array<Record<string, unknown>>) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) {
+      return { success: false, error: "x_diagnostics_candidates_invalid_row" };
     }
+    const id = String(row.tweet_id ?? "");
+    if (id) sqlCandidatesById.set(id, row);
   }
 
   const dedupeCutoff = new Date(
@@ -584,11 +711,7 @@ export async function getXPostingDiagnostics(
   ): value is string => !!value).sort().at(-1) ?? freshnessCutoff;
 
   const items: Array<Record<string, unknown>> = [];
-  for (
-    const post of (Array.isArray(posts) ? posts : []) as Array<
-      Record<string, unknown>
-    >
-  ) {
+  for (const post of posts as Array<Record<string, unknown>>) {
     const tid = post.tweet_id as string;
     const [latestX, activeJobs, mediaRows] = await Promise.all([
       table(supabase, "x_deliveries")
@@ -603,13 +726,21 @@ export async function getXPostingDiagnostics(
         .select("type, status, last_error, created_at")
         .in("status", ["pending", "running"])
         .filter("payload->>tweet_id", "eq", tid)
-        .order("created_at", { ascending: false }),
+        .order("created_at", { ascending: false })
+        .limit(MAX_ACTIVE_JOBS_PER_DIAGNOSTIC),
       table(supabase, "media")
         .select(
           "id, downloaded_at, storage_path, kind, mime_type, file_size, duration_ms, src_url",
         )
-        .eq("tweet_id", tid),
+        .eq("tweet_id", tid)
+        .limit(MAX_MEDIA_ROWS_PER_DIAGNOSTIC),
     ]);
+    if (latestX.error || activeJobs.error || mediaRows.error) {
+      return { success: false, error: "x_diagnostics_post_detail_read_failed" };
+    }
+    if (!Array.isArray(activeJobs.data) || !Array.isArray(mediaRows.data)) {
+      return { success: false, error: "x_diagnostics_post_detail_invalid_response" };
+    }
     const blockers: XDiagnosticBlocker[] = [];
     const notes: XDiagnosticBlocker[] = [];
     const {
@@ -920,8 +1051,8 @@ export async function hydratePostAdminAction(
   body: Record<string, unknown>,
   deps: QueueHydrationDeps,
 ): Promise<AdminActionResponse> {
-  const tweetId = typeof body.tweet_id === "string" ? body.tweet_id.trim() : "";
-  if (!tweetId) {
+  const tweetId = typeof body.tweet_id === "string" ? body.tweet_id : "";
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(tweetId)) {
     return { body: { ok: false, error: "tweet_id is required" }, status: 400 };
   }
   const result = await queueHydrationJob(
@@ -930,7 +1061,13 @@ export async function hydratePostAdminAction(
     "manual_monitoring",
     deps,
   );
-  return { body: { ok: true, queued: result.queued, reason: result.reason } };
+  return {
+    body: await addAdminOperationEnvelope(
+      supabase,
+      typeof body.operation_id === "string" ? body.operation_id : undefined,
+      { ok: true, queued: result.queued, reason: result.reason },
+    ),
+  };
 }
 
 export async function resolveXMediaAdminAction(
@@ -950,7 +1087,7 @@ export async function resolveXMediaAdminAction(
     };
   }
   const tweet = await resolveXMedia(username, tweetId, deps);
-  return { body: { success: true, tweet } };
+  return { body: { success: true, tweet: toResolveXMediaClientMetadata(tweet) } };
 }
 
 export async function runXPostAdminAction(
@@ -965,12 +1102,55 @@ export async function runXPostAdminAction(
   const supabaseUrl = readEnv("SUPABASE_URL", deps);
   const svcKey = readEnv("SUPABASE_SERVICE_ROLE_KEY", deps);
 
-  const { data: xPostingRow } = await table(supabase, "settings").select(
+  // Force/retry is a cost-bearing self-heal path. Check the shared breaker
+  // before any rescore, queue, or other downstream work.
+  if (action === "retry_x_post") {
+    try {
+      await requireExternalPosting(
+        runtimeControlsClient(supabase),
+        externalPostingOptions(deps),
+      );
+    } catch (error) {
+      if (error instanceof ExternalPostingBlockedError) {
+        return {
+          body: {
+            ok: false,
+            locked: true,
+            code: "external_posting_blocked",
+            reason: error.reason,
+            prep: { ran: false, ok: true },
+          },
+          status: 200,
+        };
+      }
+      throw error;
+    }
+  }
+
+  const { data: xPostingRow, error: xPostingConfigError } = await table(supabase, "settings").select(
     "value",
   )
     .eq("key", "x_posting_config")
     .maybeSingle();
-  const xPostingCfg = asRecord(asRecord(xPostingRow).value);
+  const xPostingValue = xPostingRow && typeof xPostingRow === "object" &&
+      !Array.isArray(xPostingRow)
+    ? (xPostingRow as Record<string, unknown>).value
+    : null;
+  if (
+    xPostingConfigError ||
+    xPostingRow === null ||
+    typeof xPostingRow !== "object" ||
+    Array.isArray(xPostingRow) ||
+    xPostingValue === null ||
+    typeof xPostingValue !== "object" ||
+    Array.isArray(xPostingValue)
+  ) {
+    return {
+      body: { ok: false, error: "x_posting_config_unavailable" },
+      status: 503,
+    };
+  }
+  const xPostingCfg = asRecord(xPostingValue);
   const xPostingEnabled = xPostingCfg.enabled === true;
   if (action === "retry_x_post" && !xPostingEnabled) {
     return {
@@ -993,13 +1173,40 @@ export async function runXPostAdminAction(
     hydrate?: string;
   } = { ran: false, ok: true };
 
-  if (tweetId && action === "retry_x_post") {
-    const { data: existing } = await table(supabase, "posts")
+  if (action === "retry_x_post") {
+    try {
+      await requireDeliveryCutover(supabase, tweetId ?? "");
+    } catch (error) {
+      return {
+        body: {
+          ok: false,
+          code: "delivery_cutover_blocked",
+          error: error instanceof Error ? error.message : String(error),
+        },
+        status: 409,
+      };
+    }
+    if (!tweetId) {
+      return { body: { ok: false, code: "delivery_cutover_blocked", error: "delivery_cutover_blocked:missing_tweet_id" }, status: 409 };
+    }
+    const { data: existing, error: existingError } = await table(supabase, "posts")
       .select(
         "text_translated, importance_score, final_score, base_score, learned_score, learned_delta, x_gate_score, learning_confidence, score_breakdown, is_truncated, hydrated_at, dedupe_status, dup_of_tweet_id, dedupe_reason",
       )
       .eq("tweet_id", tweetId)
       .maybeSingle();
+    if (existingError) {
+      return {
+        body: { ok: false, error: "x_post_preflight_read_failed", prep },
+        status: 503,
+      };
+    }
+    if (existing !== null && (typeof existing !== "object" || Array.isArray(existing))) {
+      return {
+        body: { ok: false, error: "x_post_preflight_read_failed", prep },
+        status: 503,
+      };
+    }
     const existingPost = asRecord(existing);
     const duplicateSkipReason = duplicateXSkipReason(
       existingPost as {
@@ -1036,24 +1243,30 @@ export async function runXPostAdminAction(
         ok: r.ok,
         score: r.score,
         decision: r.decision,
-        error: r.error,
+        error: r.ok ? undefined : "pre_post_rescore_failed",
       };
       if (!r.ok) {
         return {
           body: {
             ok: false,
-            error: `pre-post translate/score failed: ${r.error}`,
+            error: "pre_post_rescore_failed",
             prep,
           },
-          status: 200,
+          status: 502,
         };
       }
     }
 
-    const { data: afterPrep } = await table(supabase, "posts")
+    const { data: afterPrep, error: afterPrepError } = await table(supabase, "posts")
       .select("is_truncated, hydrated_at")
       .eq("tweet_id", tweetId)
       .maybeSingle();
+    if (afterPrepError || (afterPrep !== null && (typeof afterPrep !== "object" || Array.isArray(afterPrep)))) {
+      return {
+        body: { ok: false, error: "x_post_preflight_read_failed", prep },
+        status: 503,
+      };
+    }
     const postAfterPrep = asRecord(afterPrep);
     if (postAfterPrep.is_truncated === true && !postAfterPrep.hydrated_at) {
       const hydrate = await queueHydrationJob(
@@ -1080,6 +1293,26 @@ export async function runXPostAdminAction(
   }
 
   try {
+    try {
+      await requireExternalPosting(
+        runtimeControlsClient(supabase),
+        externalPostingOptions(deps),
+      );
+    } catch (error) {
+      if (error instanceof ExternalPostingBlockedError) {
+        return {
+          body: {
+            ok: false,
+            locked: true,
+            code: "external_posting_blocked",
+            reason: error.reason,
+            prep,
+          },
+          status: 200,
+        };
+      }
+      throw error;
+    }
     const resp = await (deps.fetchImpl ?? fetch)(
       `${supabaseUrl}/functions/v1/x-poster`,
       {
@@ -1109,26 +1342,68 @@ export async function runXPostAdminAction(
       return {
         body: {
           ok: false,
-          error: `x-poster ${resp.status}: ${text.slice(0, 300)}`,
-          raw: parsed,
+          error: "x_poster_request_failed",
+          code: "x_poster_http_failure",
           prep,
         },
-        status: 200,
+        status: 502,
+      };
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {
+        body: {
+          ok: false,
+          error: "x_poster_invalid_response",
+          code: "x_poster_invalid_response",
+          prep,
+        },
+        status: 502,
       };
     }
     const parsedObj = asRecord(parsed);
+    if (parsedObj.ok !== true) {
+      return {
+        body: {
+          ok: false,
+          error: "x_poster_unconfirmed",
+          code: "x_poster_unconfirmed",
+          prep,
+        },
+        status: 502,
+      };
+    }
     const results = Array.isArray(parsedObj.results)
       ? parsedObj.results as Array<Record<string, unknown>>
       : [];
     const result = tweetId ? results[0] ?? null : null;
+    if (
+      tweetId && action === "retry_x_post" &&
+      (!result || result.status === "failed" || result.status === "ambiguous")
+    ) {
+      return {
+        body: {
+          ok: false,
+          error: result?.status === "ambiguous"
+            ? "x_poster_ambiguous"
+            : "x_poster_failed",
+          code: result?.status === "ambiguous"
+            ? "x_poster_ambiguous"
+            : "x_poster_failed",
+          status: result?.status ?? "missing_result",
+          prep,
+        },
+        status: 502,
+      };
+    }
     if (tweetId && action === "retry_x_post" && result?.status === "posted") {
       await deps.recordFeedback(supabase, tweetId, "force_x", 1).catch(
         () => {},
       );
-      await table(supabase, "posts").update({ feedback_locked: true }).eq(
+      const { error: feedbackLockError } = await table(supabase, "posts").update({ feedback_locked: true }).eq(
         "tweet_id",
         tweetId,
       );
+      if (feedbackLockError) throw feedbackLockError;
     }
     return {
       body: {
@@ -1146,8 +1421,8 @@ export async function runXPostAdminAction(
     };
   } catch (e) {
     return {
-      body: { ok: false, error: (e as Error).message, prep },
-      status: 200,
+      body: { ok: false, error: safeAdminActionErrorCode(e), code: "x_poster_request_failed", prep },
+      status: 502,
     };
   }
 }
@@ -1210,11 +1485,12 @@ export async function rehydrateRecentTruncatedAdminAction(
     ? Math.floor(body.max)
     : null;
   const threshold = await loadActiveThreshold(supabase);
-  const { data: controlsRow } = await table(supabase, "settings").select(
+  const { data: controlsRow, error: controlsError } = await table(supabase, "settings").select(
     "value",
   )
     .eq("key", "x_api_controls")
     .maybeSingle();
+  if (controlsError) throw new Error("hydrate_backfill_controls_read_failed");
   const controls = asRecord(asRecord(controlsRow).value);
   const defaultMax = typeof controls.backfill_max_hydrate_jobs_per_run ===
       "number"
@@ -1233,12 +1509,18 @@ export async function rehydrateRecentTruncatedAdminAction(
     .limit(500);
 
   if (fetchErr) {
-    return { body: { ok: false, error: errorMessage(fetchErr) }, status: 500 };
+    return { body: { ok: false, error: "hydrate_backfill_posts_read_failed" }, status: 503 };
   }
 
-  const rows = (Array.isArray(posts) ? posts : []) as Array<
-    Record<string, unknown>
-  >;
+  if (!Array.isArray(posts) || posts.some((row) =>
+    !hasNonEmptyStringField(row, "tweet_id")
+  )) {
+    return {
+      body: { ok: false, error: "hydrate_backfill_posts_invalid_response" },
+      status: 503,
+    };
+  }
+  const rows = posts as Array<Record<string, unknown>>;
   const truncatedMatches = rows.filter((p) =>
     looksTruncatedForHydration(p.text_original as string | null)
   );
@@ -1255,13 +1537,23 @@ export async function rehydrateRecentTruncatedAdminAction(
 
   for (const p of matches) {
     const tweetId = p.tweet_id as string;
-    const { data: existingJob } = await table(supabase, "jobs")
+    const { data: pending, error: pendingError } = await table(supabase, "jobs")
       .select("id")
       .eq("type", "hydrate_tweet")
       .in("status", ["pending", "running"])
       .filter("payload->>tweet_id", "eq", tweetId)
       .limit(1);
-    if (Array.isArray(existingJob) && existingJob.length > 0) {
+    if (pendingError) throw pendingError;
+    if (!Array.isArray(pending)) throw new Error("hydrate_pending_jobs_invalid_response");
+    const existingJob = pending;
+    const existingJobError = pendingError;
+    if (existingJobError) {
+      throw new Error("hydrate_backfill_pending_job_read_failed");
+    }
+    if (!Array.isArray(existingJob)) {
+      throw new Error("hydrate_backfill_pending_job_invalid_response");
+    }
+    if (existingJob.length > 0) {
       skippedExisting++;
       continue;
     }
@@ -1275,7 +1567,7 @@ export async function rehydrateRecentTruncatedAdminAction(
       .update({ is_truncated: true })
       .eq("tweet_id", tweetId);
     if (upErr) {
-      errors.push(`update ${tweetId}: ${errorMessage(upErr)}`);
+      errors.push("hydrate_backfill_post_update_failed");
       continue;
     }
 
@@ -1290,7 +1582,7 @@ export async function rehydrateRecentTruncatedAdminAction(
       }, { onConflict: "idempotency_key", ignoreDuplicates: true });
 
     if (jobErr) {
-      errors.push(`job ${tweetId}: ${errorMessage(jobErr)}`);
+      errors.push("hydrate_backfill_enqueue_failed");
       continue;
     }
     queued++;

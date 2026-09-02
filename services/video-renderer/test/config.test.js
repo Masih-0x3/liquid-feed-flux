@@ -5,6 +5,7 @@ import {
   DEFAULT_TESSERACT_LANG,
   loadConfigFromEnv,
   loadServerRuntimeFromEnv,
+  parseRenderQueueCutoffAt,
 } from "../src/config.js";
 
 const REQUIRED_ENV = {
@@ -76,6 +77,8 @@ test("loads server runtime separately from render config", () => {
   const runtime = loadServerRuntimeFromEnv({
     VIDEO_RENDERER_TOKEN: "  dispatch-token  ",
     PORT: "9000",
+    RENDER_CONCURRENCY: "2",
+    RENDER_SHUTDOWN_GRACE_MS: "45000",
     POLL_INTERVAL_MS: "10",
     HEARTBEAT_INTERVAL_MS: "20",
     npm_package_version: "0.2.0",
@@ -85,6 +88,14 @@ test("loads server runtime separately from render config", () => {
   assert.equal(runtime.port, 9000);
   assert.equal(runtime.pollIntervalMs, 1000);
   assert.equal(runtime.heartbeatIntervalMs, 5000);
+  assert.equal(runtime.renderConcurrency, 2);
+  assert.equal(runtime.shutdownGraceMs, 45000);
+  assert.equal(runtime.renderPollingEnabled, false);
+  assert.equal(runtime.renderPollingEffective, false);
+  assert.equal(runtime.renderQueueCutoffValid, false);
+  assert.equal(runtime.renderQueueCutoffAt, null);
+  assert.equal(runtime.renderQueueCutoffBlockReason, null);
+  assert.equal(runtime.renderPollingBlockReason, null);
   assert.equal(runtime.version, "0.2.0");
 });
 
@@ -107,4 +118,44 @@ test("blank numeric env values keep defaults", () => {
   assert.equal(runtime.port, 8787);
   assert.equal(runtime.pollIntervalMs, 5000);
   assert.equal(runtime.heartbeatIntervalMs, 30000);
+  assert.equal(runtime.renderConcurrency, 1);
+  assert.equal(runtime.shutdownGraceMs, 30000);
+});
+
+test("fails closed for invalid renderer capacity and shutdown grace", () => {
+  assert.throws(
+    () => loadServerRuntimeFromEnv({ RENDER_CONCURRENCY: "0" }),
+    /RENDER_CONCURRENCY/,
+  );
+  assert.throws(
+    () => loadServerRuntimeFromEnv({ RENDER_CONCURRENCY: "5" }),
+    /RENDER_CONCURRENCY/,
+  );
+  assert.throws(
+    () => loadServerRuntimeFromEnv({ RENDER_SHUTDOWN_GRACE_MS: "999" }),
+    /RENDER_SHUTDOWN_GRACE_MS/,
+  );
+});
+
+test("automatic polling requires an explicit switch and UTC cutoff", () => {
+  const ready = loadServerRuntimeFromEnv({
+    RENDER_POLLING_ENABLED: "true",
+    RENDER_QUEUE_CUTOFF_AT: "2026-08-25T02:00:00Z",
+  });
+  assert.equal(ready.renderPollingEnabled, true);
+  assert.equal(ready.renderPollingEffective, true);
+  assert.equal(ready.renderQueueCutoffValid, true);
+  assert.equal(ready.renderQueueCutoffAt, "2026-08-25T02:00:00.000Z");
+  assert.equal(ready.renderQueueCutoffBlockReason, null);
+  assert.equal(ready.renderPollingBlockReason, null);
+
+  for (const cutoff of [undefined, "", "2026-08-25", "2026-08-25T02:00:00", "not-a-date"]) {
+    const blocked = loadServerRuntimeFromEnv({
+      RENDER_POLLING_ENABLED: "1",
+      RENDER_QUEUE_CUTOFF_AT: cutoff,
+    });
+    assert.equal(blocked.renderPollingEffective, false);
+    assert.equal(blocked.renderPollingBlockReason, "missing_or_invalid_render_queue_cutoff_at");
+  }
+  assert.equal(parseRenderQueueCutoffAt("2026-08-25T04:30:00+02:00"), "2026-08-25T02:30:00.000Z");
 });

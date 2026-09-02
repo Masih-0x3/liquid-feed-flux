@@ -256,7 +256,15 @@ export const DEFAULT_IRAN_FIRST_SCORING_PROFILE: ScoringPolicyProfile = {
     },
   ],
   review_only_exception_ids: ["global_mega_event"],
-  axis_weights: { ...DEFAULT_SCORING_V2_WEIGHTS },
+  axis_weights: {
+    focus_relevance: DEFAULT_SCORING_V2_WEIGHTS.focus_relevance,
+    geopolitical_weight: DEFAULT_SCORING_V2_WEIGHTS.geopolitical_weight,
+    audience_value: DEFAULT_SCORING_V2_WEIGHTS.audience_value,
+    materiality: DEFAULT_SCORING_V2_WEIGHTS.materiality,
+    freshness: DEFAULT_SCORING_V2_WEIGHTS.freshness,
+    credibility: DEFAULT_SCORING_V2_WEIGHTS.credibility,
+    noise_penalty: DEFAULT_SCORING_V2_WEIGHTS.noise_penalty,
+  },
   author_overrides: {},
 };
 
@@ -707,15 +715,40 @@ Content:
 ${input.text}`;
 }
 
+function scoringUsageSnapshot(
+  usage: Record<string, number> | null | undefined,
+): Record<string, number> | null {
+  if (!usage || typeof usage !== "object") return null;
+  const allowed = [
+    "prompt_tokens",
+    "completion_tokens",
+    "total_tokens",
+    "input_tokens",
+    "output_tokens",
+    "reasoning_tokens",
+  ];
+  const snapshot: Record<string, number> = {};
+  for (const key of allowed) {
+    const value = usage[key];
+    if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+      snapshot[key] = Math.floor(value);
+    }
+  }
+  return Object.keys(snapshot).length > 0 ? snapshot : null;
+}
+
 async function parseToolResult(response: NormalizedOpenAIResponse): Promise<Record<string, unknown>> {
   if (!response.ok) {
-    return { error: `OpenAI ${response.status}: ${response.rawText.slice(0, 500)}` };
+    const status = Number.isInteger(response.status) && response.status >= 100 && response.status <= 599
+      ? response.status
+      : 0;
+    return { error: status > 0 ? `scoring_openai_http_${status}` : "scoring_openai_request_failed" };
   }
   if (!response.toolCall?.arguments) return { error: "missing_score_tool_call" };
   try {
     return JSON.parse(response.toolCall.arguments) as Record<string, unknown>;
-  } catch (e) {
-    return { error: `invalid_score_tool_json:${(e as Error).message}` };
+  } catch {
+    return { error: "invalid_score_tool_json" };
   }
 }
 
@@ -760,7 +793,7 @@ export async function runScoringPolicy(
       profile_name: profile.name,
       audience_class: "off_topic",
       audience_confidence: 0,
-      audience_reason: String(rawArgs.error),
+      audience_reason: "scoring_policy_failed",
       global_exception_class: null,
       axes: {},
       raw_priority_score: 1,
@@ -773,14 +806,14 @@ export async function runScoringPolicy(
       tags: [],
       review_status: "needs_review",
       adjudicated: false,
-      usage: { scoring: scoringResponse.usage },
-      error: String(rawArgs.error),
+      usage: { scoring: scoringUsageSnapshot(scoringResponse.usage) },
+      error: "scoring_policy_failed",
     };
   }
 
   let result = finalizeScoringPolicyResult(rawArgs, policy, profile, input.author_handle, input.text);
-  result.usage.scoring = scoringResponse.usage;
-  result.raw = { scoring: scoringResponse.raw };
+  result.usage.scoring = scoringUsageSnapshot(scoringResponse.usage);
+  result.raw = { usage: scoringUsageSnapshot(scoringResponse.usage) };
 
   if ((opts.forceAdjudication || shouldAdjudicate(result, policy)) && policy.adjudication.enabled) {
     const adjudicationResponse = await call({
@@ -809,16 +842,22 @@ export async function runScoringPolicy(
           : stillNeedsReviewAfterAdjudication(next, policy) ? "needs_review" : "none",
         adjudicated: true,
         adjudication_reason: "borderline_or_low_confidence",
-        usage: { scoring: scoringResponse.usage, adjudication: adjudicationResponse.usage },
-        raw: { scoring: scoringResponse.raw, adjudication: adjudicationResponse.raw },
+        usage: {
+          scoring: scoringUsageSnapshot(scoringResponse.usage),
+          adjudication: scoringUsageSnapshot(adjudicationResponse.usage),
+        },
+        raw: { usage: scoringUsageSnapshot(scoringResponse.usage) },
       };
     } else {
       result = {
         ...result,
         review_status: "needs_review",
         adjudicated: false,
-        adjudication_reason: String(adjudicatedArgs.error),
-        usage: { scoring: scoringResponse.usage, adjudication: adjudicationResponse.usage },
+        adjudication_reason: "scoring_adjudication_failed",
+        usage: {
+          scoring: scoringUsageSnapshot(scoringResponse.usage),
+          adjudication: scoringUsageSnapshot(adjudicationResponse.usage),
+        },
       };
     }
   }

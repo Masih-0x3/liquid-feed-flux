@@ -9,9 +9,9 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Sparkles, Plus, X, Copy, Trash2, Save, Loader2, RefreshCw, ChevronDown } from 'lucide-react';
+import { Sparkles, X, Plus, Loader2, RefreshCw, ChevronDown } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { useSaveSettings, makeDefaultProfile, DEFAULT_AXIS_WEIGHTS, SCORE_AXIS_KEYS, type EditorialProfile, type ScoreAxisKey } from '@/hooks/useSettingsData';
+import { DEFAULT_AXIS_WEIGHTS, SCORE_AXIS_KEYS, type EditorialProfile, type ScoreAxisKey } from '@/hooks/useSettingsData';
 import { invokeAdminAction } from '@/api/adminActions';
 
 interface Props {
@@ -45,8 +45,8 @@ export default function EditorialProfilesCard({ profiles: initialProfiles, activ
   const [kwInputs, setKwInputs] = useState<Record<string, string>>({});
   const [rescoring, setRescoring] = useState(false);
   const [profileHelpOpen, setProfileHelpOpen] = useState(false);
-  const saveMutation = useSaveSettings();
   const { toast } = useToast();
+  const legacyReadOnly = true;
 
   useEffect(() => { setProfiles(initialProfiles); }, [initialProfiles]);
   useEffect(() => { setActiveId(initialActive); }, [initialActive]);
@@ -72,36 +72,6 @@ export default function EditorialProfilesCard({ profiles: initialProfiles, activ
     if (!editing) return;
     updateEditing({ [key]: editing[key].filter(x => x !== val) } as Partial<EditorialProfile>);
   };
-
-  const handleNew = () => {
-    const p = makeDefaultProfile(`Profile ${profiles.length + 1}`);
-    setProfiles([...profiles, p]);
-    setEditingId(p.id);
-  };
-  const handleDuplicate = () => {
-    if (!editing) return;
-    const p = { ...editing, id: crypto.randomUUID(), name: `${editing.name} (copy)` };
-    setProfiles([...profiles, p]);
-    setEditingId(p.id);
-  };
-  const handleDelete = () => {
-    if (!editing) return;
-    if (profiles.length <= 1) { toast({ title: 'Keep at least one profile', variant: 'destructive' }); return; }
-    const next = profiles.filter(p => p.id !== editing.id);
-    setProfiles(next);
-    setEditingId(next[0]?.id ?? null);
-    if (activeId === editing.id) setActiveId(next[0]?.id ?? null);
-  };
-
-  const handleSaveAll = async () => {
-    try {
-      await saveMutation.mutateAsync({ key: 'editorial_profiles', value: { profiles } });
-      await saveMutation.mutateAsync({ key: 'active_profile_id', value: { id: activeId } });
-      toast({ title: 'Editorial profiles saved' });
-    } catch { /* toast handled in hook */ }
-  };
-
-  const handleSetActive = (id: string) => setActiveId(id);
 
   const handleRescore = async () => {
     setRescoring(true);
@@ -130,11 +100,14 @@ export default function EditorialProfilesCard({ profiles: initialProfiles, activ
           )}
         </CardTitle>
         <CardDescription>
-          Day-to-day dial. Each profile bundles axis weights, threshold, and hard rules. Worker uses the active profile when set;
-          otherwise falls back to the legacy Content Filter below.
+          Legacy editorial profiles are retained for backwards-compatible reads. Scoring Studio is the only writable scoring policy;
+          these values are shown for migration and parity checks and are not applied as a second control plane.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
+        <div role="status" className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-muted-foreground">
+          Read-only legacy snapshot. Edit the canonical scoring policy in Scoring Studio above.
+        </div>
         <Collapsible open={profileHelpOpen} onOpenChange={setProfileHelpOpen}>
           <CollapsibleTrigger className="flex w-full items-center justify-between rounded-lg border border-border bg-muted/30 p-3 text-left text-sm font-medium hover:bg-muted/50">
             <span>How profile decisions are ordered (worker)</span>
@@ -173,9 +146,9 @@ export default function EditorialProfilesCard({ profiles: initialProfiles, activ
         {/* Profile selector + actions */}
         <div className="flex flex-wrap items-end gap-3">
           <div className="space-y-1 flex-1 min-w-[220px]">
-            <Label>Edit profile</Label>
-            <Select value={editingId ?? ''} onValueChange={setEditingId}>
-              <SelectTrigger><SelectValue placeholder="No profiles — click New" /></SelectTrigger>
+            <Label>Legacy profile snapshot</Label>
+            <Select value={editingId ?? ''} onValueChange={setEditingId} disabled={profiles.length === 0}>
+              <SelectTrigger aria-label="Legacy profile snapshot"><SelectValue placeholder="No profiles available" /></SelectTrigger>
               <SelectContent>
                 {profiles.map(p => (
                   <SelectItem key={p.id} value={p.id}>
@@ -185,15 +158,6 @@ export default function EditorialProfilesCard({ profiles: initialProfiles, activ
               </SelectContent>
             </Select>
           </div>
-          <Button variant="outline" size="sm" onClick={handleNew}><Plus className="w-4 h-4 mr-1" />New</Button>
-          <Button variant="outline" size="sm" onClick={handleDuplicate} disabled={!editing}><Copy className="w-4 h-4 mr-1" />Duplicate</Button>
-          <Button variant="outline" size="sm" onClick={handleDelete} disabled={!editing}><Trash2 className="w-4 h-4 mr-1" />Delete</Button>
-          <Button size="sm" onClick={() => editing && handleSetActive(editing.id)} disabled={!editing || activeId === editing?.id}>
-            Set active
-          </Button>
-          {activeId && (
-            <Button size="sm" variant="ghost" onClick={() => setActiveId(null)}>Clear active</Button>
-          )}
         </div>
 
         {editing && (
@@ -202,14 +166,14 @@ export default function EditorialProfilesCard({ profiles: initialProfiles, activ
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Profile name</Label>
-                <Input value={editing.name} onChange={(e) => updateEditing({ name: e.target.value })} />
+                <Input value={editing.name} onChange={(e) => updateEditing({ name: e.target.value })} disabled={legacyReadOnly} />
               </div>
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <Label>Threshold</Label>
                   <Badge variant="outline">{editing.threshold}/20</Badge>
                 </div>
-                <Slider value={[editing.threshold]} onValueChange={([v]) => updateEditing({ threshold: v })} min={0} max={20} step={1} />
+                <Slider value={[editing.threshold]} onValueChange={([v]) => updateEditing({ threshold: v })} min={0} max={20} step={1} disabled={legacyReadOnly} />
               </div>
             </div>
 
@@ -231,7 +195,7 @@ export default function EditorialProfilesCard({ profiles: initialProfiles, activ
                     <Slider
                       value={[editing.weights[k] ?? DEFAULT_AXIS_WEIGHTS[k]]}
                       onValueChange={([v]) => setWeight(k, v)}
-                      min={0} max={5} step={0.1}
+                      min={0} max={5} step={0.1} disabled={legacyReadOnly}
                     />
                   </div>
                 ))}
@@ -261,8 +225,9 @@ export default function EditorialProfilesCard({ profiles: initialProfiles, activ
                         }
                       }}
                       placeholder="Add and press Enter"
+                      disabled={legacyReadOnly}
                     />
-                    <Button variant="outline" size="icon" onClick={() => { addToList(key, kwInputs[key] ?? ''); setKwInputs({ ...kwInputs, [key]: '' }); }}>
+                    <Button variant="outline" size="icon" onClick={() => { addToList(key, kwInputs[key] ?? ''); setKwInputs({ ...kwInputs, [key]: '' }); }} disabled={legacyReadOnly}>
                       <Plus className="w-4 h-4" />
                     </Button>
                   </div>
@@ -278,7 +243,7 @@ export default function EditorialProfilesCard({ profiles: initialProfiles, activ
                         }
                       >
                         {v}
-                        <X className="w-3 h-3 cursor-pointer" onClick={() => removeFromList(key, v)} />
+                        {!legacyReadOnly && <X className="w-3 h-3 cursor-pointer" onClick={() => removeFromList(key, v)} />}
                       </Badge>
                     ))}
                   </div>
@@ -293,6 +258,7 @@ export default function EditorialProfilesCard({ profiles: initialProfiles, activ
                 onChange={(e) => updateEditing({ editorial_note: e.target.value })}
                 className="min-h-[80px]"
                 placeholder="e.g., War mode — focus on kinetic events and ceasefire signals today"
+                disabled={legacyReadOnly}
               />
             </div>
           </>
@@ -303,10 +269,6 @@ export default function EditorialProfilesCard({ profiles: initialProfiles, activ
           <Button variant="outline" onClick={handleRescore} disabled={rescoring} size="sm">
             {rescoring ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <RefreshCw className="w-4 h-4 mr-2" />}
             Re-score last 48h (missing axes only)
-          </Button>
-          <Button onClick={handleSaveAll} disabled={saveMutation.isPending} className="bg-gradient-primary hover:opacity-90 text-white">
-            {saveMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Save className="w-4 h-4 mr-2" />}
-            Save profiles & active selection
           </Button>
         </div>
       </CardContent>

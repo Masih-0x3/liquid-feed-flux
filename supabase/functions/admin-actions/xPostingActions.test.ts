@@ -9,6 +9,7 @@ import {
   type RunXPostDeps,
   upgradeImageUrl,
 } from "./xPostingActions.ts";
+import type { RemoteMediaDnsResolver } from "../_shared/remoteMediaPolicy.ts";
 import type { SupabaseAdminClient } from "./types.ts";
 
 type FakeCall = {
@@ -38,7 +39,21 @@ type FakeConfig = {
     media24h?: number;
   };
   rpcData?: unknown;
+  runtimeControls?: Record<string, unknown>;
+  rpcError?: { message: string };
 };
+
+const publicDnsResolver: RemoteMediaDnsResolver = async (_hostname, recordType) =>
+  recordType === "A"
+    ? ["93.184.216.34"]
+    : ["2606:2800:220:1:248:1893:25c8:1946"];
+
+function jsonResponse(body: Record<string, unknown>, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
 
 function fakeSupabase(config: FakeConfig = {}) {
   const calls: FakeCall[] = [];
@@ -58,6 +73,15 @@ function fakeSupabase(config: FakeConfig = {}) {
   const jobs = config.jobs ?? [];
   const media = config.media ?? [];
   const xDeliveries = config.xDeliveries ?? [];
+  const runtimeControls = config.runtimeControls ?? {
+    singleton_id: true,
+    environment: "production",
+    dedupe_enabled: true,
+    translation_enabled: true,
+    posting_mode: "enabled",
+    updated_at: "2026-01-01T00:00:00.000Z",
+    updated_by: null,
+  };
 
   const client: SupabaseAdminClient & { calls: FakeCall[] } = {
     calls,
@@ -131,6 +155,7 @@ function fakeSupabase(config: FakeConfig = {}) {
           }
           return { data: state.single ? xDeliveries[0] ?? null : xDeliveries };
         }
+        if (tableName === "runtime_controls") return { data: [runtimeControls] };
         return {};
       };
       const builder = {
@@ -160,7 +185,20 @@ function fakeSupabase(config: FakeConfig = {}) {
           args?: Record<string, unknown>,
         ) {
           calls.push({ table: tableName, op: "upsert", value, args });
-          return Promise.resolve({});
+          const row = Array.isArray(value) ? value[0] : value;
+          const existing = tableName === "jobs" && typeof row?.idempotency_key === "string" && jobs.some((job) => job.idempotency_key === row.idempotency_key);
+          if (tableName === "jobs" && !existing && row) jobs.push({ ...row, id: `job-${jobs.length + 1}` });
+          const upsertBuilder = {
+            select() { return upsertBuilder; },
+            maybeSingle() { return Promise.resolve({ data: existing ? null : { id: `job-${jobs.length}` }, error: null }); },
+            then<TResult1 = unknown, TResult2 = never>(
+              onfulfilled?: ((value: unknown) => TResult1 | PromiseLike<TResult1>) | null,
+              _onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+            ): PromiseLike<TResult1 | TResult2> {
+              return Promise.resolve({}).then(onfulfilled ?? ((value) => value as TResult1));
+            },
+          };
+          return upsertBuilder;
         },
         eq(column: string, value: unknown) {
           const call = { table: tableName, op: "eq", column, value };
@@ -221,13 +259,19 @@ function fakeSupabase(config: FakeConfig = {}) {
     },
     rpc(name: string, args?: Record<string, unknown>) {
       calls.push({ op: "rpc", name, args });
-      return Promise.resolve({ data: config.rpcData ?? [] });
+      return Promise.resolve({
+        data: config.rpcData ?? [],
+        error: config.rpcError ?? null,
+      });
     },
   };
   return client;
 }
 
-function fakeDeps(fetchBody: Record<string, unknown> = { results: [] }) {
+function fakeDeps(
+  fetchBody: Record<string, unknown> = { results: [] },
+  envOverrides: Record<string, string> = {},
+) {
   const calls = {
     feedback: [] as Array<Record<string, unknown>>,
     events: [] as Array<Record<string, unknown>>,
@@ -251,15 +295,18 @@ function fakeDeps(fetchBody: Record<string, unknown> = { results: [] }) {
       calls.rescore.push(tweetId);
       return { ok: true, score: 15, decision: "deliver" };
     },
-    readEnv: (key) =>
-      key === "SUPABASE_URL"
-        ? "https://project.supabase.co"
-        : key === "SUPABASE_SERVICE_ROLE_KEY"
-        ? "service-role"
-        : undefined,
+    readEnv: (key) => {
+      const defaults: Record<string, string> = {
+        SUPABASE_URL: "https://project.supabase.co",
+        SUPABASE_SERVICE_ROLE_KEY: "service-role",
+        XOT_ENVIRONMENT: "production",
+        ALLOW_EXTERNAL_POSTING: "true",
+      };
+      return envOverrides[key] ?? defaults[key];
+    },
     fetchImpl: async (input, init) => {
       calls.fetches.push({ input: String(input), init });
-      return new Response(JSON.stringify(fetchBody), { status: 200 });
+      return new Response(JSON.stringify({ ok: true, ...fetchBody }), { status: 200 });
     },
     now: () => new Date("2026-01-01T00:00:00.000Z"),
   };
@@ -274,7 +321,7 @@ Deno.test("upgrades twimg images to original quality", () => {
   assertEquals(upgradeImageUrl("not a url"), "not a url");
 });
 
-Deno.test("resolve media uses fxtwitter videos and validates input", async () => {
+Deno.test("resolve media returns reviewed metadata without exposing provider URLs", async () => {
   const invalid = await resolveXMediaAdminAction({
     username: "bad/name",
     tweet_id: "123",
@@ -285,48 +332,51 @@ Deno.test("resolve media uses fxtwitter videos and validates input", async () =>
     username: "masih",
     tweet_id: "123456",
   }, {
-    fetchImpl: async () =>
-      new Response(
-        JSON.stringify({
-          tweet: {
-            author: { name: "Name", screen_name: "masih", avatar_url: "a" },
-            media: {
-              videos: [{
-                type: "video",
-                width: 1280,
-                height: 720,
-                thumbnail_url: "thumb",
-                variants: [
-                  {
-                    url: "low.mp4",
-                    bitrate: 256000,
-                    content_type: "video/mp4",
-                  },
-                  {
-                    url: "high.mp4",
-                    bitrate: 1500000,
-                    content_type: "video/mp4",
-                  },
-                ],
-              }],
-            },
-          },
-        }),
-        { status: 200 },
-      ),
+    resolveDns: publicDnsResolver,
+    fetchImpl: async () => jsonResponse({
+      tweet: {
+        author: {
+          name: "Name",
+          screen_name: "masih",
+          avatar_url: "https://unreviewed.example/avatar.jpg",
+        },
+        media: {
+          videos: [{
+            type: "video",
+            width: 1280,
+            height: 720,
+            thumbnail_url: "https://unreviewed.example/thumb.jpg",
+            variants: [
+              {
+                url: "https://unreviewed.example/high.mp4",
+                bitrate: 9000000,
+                content_type: "video/mp4",
+              },
+              {
+                url: "https://video.twimg.com/ext_tw_video/high.mp4",
+                bitrate: 1500000,
+                content_type: "video/mp4",
+              },
+            ],
+          }],
+        },
+      },
+    }),
   });
 
   assertEquals(result.status, undefined);
   const body = result.body as {
     tweet: { media: Array<Record<string, unknown>> };
   };
-  assertEquals(body.tweet.media[0].url, "high.mp4");
   assertEquals(body.tweet.media[0].qualityLabel, "720p @ 1.5Mbps");
+  assertEquals("url" in body.tweet.media[0], false);
+  assertEquals("thumbnail_url" in body.tweet.media[0], false);
+  assertEquals("user_profile_image_url" in (result.body as { tweet: Record<string, unknown> }).tweet, false);
 });
 
 Deno.test("hydrate post validates tweet id and skips existing hydrate job", async () => {
   const supabase = fakeSupabase({
-    jobs: [{ type: "hydrate_tweet", payload: { tweet_id: "t1" } }],
+    jobs: [{ type: "hydrate_tweet", payload: { tweet_id: "t1" }, idempotency_key: "hydrate:manual_monitoring:t1" }],
   });
   const { deps, calls } = fakeDeps();
 
@@ -346,7 +396,7 @@ Deno.test("hydrate post validates tweet id and skips existing hydrate job", asyn
   assertEquals(result.body, {
     ok: true,
     queued: false,
-    reason: "hydrate_job_already_pending",
+    reason: "hydrate_job_already_exists",
   });
   assertEquals(calls.events, []);
 });
@@ -367,6 +417,64 @@ Deno.test("retry x post is blocked when posting is disabled", async () => {
   assertEquals(result.status, 200);
   assertEquals((result.body as Record<string, unknown>).skipped, true);
   assertEquals(calls.fetches.length, 0);
+});
+
+Deno.test("Preview retry blocks before rescore, downstream invoke, or mutation", async () => {
+  const supabase = fakeSupabase({
+    runtimeControls: {
+      singleton_id: true,
+      environment: "preview",
+      dedupe_enabled: false,
+      translation_enabled: false,
+      posting_mode: "blocked",
+      updated_at: "2026-01-01T00:00:00.000Z",
+      updated_by: null,
+    },
+  });
+  const { deps, calls } = fakeDeps({ results: [{ status: "posted" }] }, {
+    XOT_ENVIRONMENT: "preview",
+    ALLOW_EXTERNAL_POSTING: "true",
+  });
+  const result = await runXPostAdminAction(
+    supabase,
+    { tweet_id: "t1" },
+    "retry_x_post",
+    deps,
+  );
+  assertEquals((result.body as Record<string, unknown>).code, "external_posting_blocked");
+  assertEquals(calls.rescore, []);
+  assertEquals(calls.fetches, []);
+  assertEquals(supabase.calls.some((call) => call.op === "update" || call.op === "upsert"), false);
+});
+Deno.test("retry x post blocks missing or historical lineage before rescore or fetch", async () => {
+  const missingSupabase = fakeSupabase();
+  const { deps: missingDeps, calls: missingCalls } = fakeDeps();
+  const missing = await runXPostAdminAction(
+    missingSupabase,
+    { tweet_id: "" },
+    "retry_x_post",
+    missingDeps,
+  );
+  assertEquals((missing.body as Record<string, unknown>).code, "delivery_cutover_blocked");
+  assertEquals(missingCalls.rescore, []);
+  assertEquals(missingCalls.fetches, []);
+
+  const historicalSupabase = fakeSupabase({
+    rpcError: { message: "delivery_cutover_blocked:historical" },
+    postsByTweet: {
+      old: { text_translated: "translated", is_truncated: false },
+    },
+  });
+  const { deps: historicalDeps, calls: historicalCalls } = fakeDeps();
+  const historical = await runXPostAdminAction(
+    historicalSupabase,
+    { tweet_id: "old" },
+    "retry_x_post",
+    historicalDeps,
+  );
+  assertEquals((historical.body as Record<string, unknown>).code, "delivery_cutover_blocked");
+  assertEquals(historicalCalls.rescore, []);
+  assertEquals(historicalCalls.fetches, []);
 });
 
 Deno.test("retry x post duplicate gate skips before rescore or fetch", async () => {

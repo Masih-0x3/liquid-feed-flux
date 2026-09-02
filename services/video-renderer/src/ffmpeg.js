@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { MAX_PROCESS_BINARY_STDOUT_BYTES, runManagedCommand, runManagedPipeline } from "./processRunner.js";
 
 export function shouldEnableAdaptiveMask(result) {
   const score = Number(result?.captionBandScore ?? 0);
@@ -681,87 +681,20 @@ export function buildEnhancedAudioExtractCommand(inputPath, outputPath) {
 }
 
 export function runCommand(command, options = {}) {
+  const runnerOptions = { ...options, stage: options.stage ?? "analysis" };
   if (Array.isArray(command?.pipeline)) {
-    return runPipelineCommand(command, options);
+    return runManagedPipeline(command.pipeline, runnerOptions);
   }
-  return new Promise((resolve, reject) => {
-    const startedAt = Date.now();
-    const child = spawn(command.bin, command.args, { stdio: ["ignore", "pipe", "pipe"] });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
-    child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      const result = { code, stdout, stderr, durationMs: Date.now() - startedAt };
-      if (code === 0) resolve(result);
-      else reject(new Error(`${options.label ?? command.bin} exited ${code}: ${stderr.slice(-2000)}`));
-    });
-  });
-}
-
-function runPipelineCommand(command, options = {}) {
-  return new Promise((resolve, reject) => {
-    const [producerCommand, consumerCommand] = command.pipeline;
-    const startedAt = Date.now();
-    const producer = spawn(producerCommand.bin, producerCommand.args, { stdio: ["ignore", "pipe", "pipe"] });
-    const consumer = spawn(consumerCommand.bin, consumerCommand.args, { stdio: ["pipe", "pipe", "pipe"] });
-    let settled = false;
-    let stdout = "";
-    let stderr = "";
-    let producerCode = null;
-    let consumerCode = null;
-
-    function done(error) {
-      if (settled) return;
-      if (error) {
-        settled = true;
-        producer.kill("SIGTERM");
-        consumer.kill("SIGTERM");
-        reject(error);
-        return;
-      }
-      if (producerCode === null || consumerCode === null) return;
-      const result = { code: consumerCode, stdout, stderr, durationMs: Date.now() - startedAt };
-      if (producerCode === 0 && consumerCode === 0) {
-        settled = true;
-        resolve(result);
-      } else {
-        settled = true;
-        reject(new Error(`${options.label ?? command.bin} exited producer=${producerCode} consumer=${consumerCode}: ${stderr.slice(-2000)}`));
-      }
-    }
-
-    producer.stdout.pipe(consumer.stdin);
-    producer.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
-    consumer.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
-    consumer.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
-    producer.on("error", done);
-    consumer.on("error", done);
-    producer.on("close", (code) => {
-      producerCode = code;
-      done();
-    });
-    consumer.on("close", (code) => {
-      consumerCode = code;
-      done();
-    });
-  });
+  return runManagedCommand(command, runnerOptions);
 }
 
 function runBufferCommand(command, options = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command.bin, command.args, { stdio: ["ignore", "pipe", "pipe"] });
-    const stdout = [];
-    let stderr = "";
-    child.stdout.on("data", (chunk) => { stdout.push(chunk); });
-    child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      if (code === 0) resolve(Buffer.concat(stdout));
-      else reject(new Error(`${options.label ?? command.bin} exited ${code}: ${stderr.slice(-2000)}`));
-    });
-  });
+  return runManagedCommand(command, {
+    ...options,
+    stage: options.stage ?? "analysis",
+    stdoutMode: "buffer",
+    maxStdoutBytes: options.maxStdoutBytes ?? MAX_PROCESS_BINARY_STDOUT_BYTES,
+  }).then((result) => result.stdout);
 }
 
 export async function probeVideo(inputPath) {
@@ -775,7 +708,7 @@ export async function probeVideo(inputPath) {
       inputPath,
     ],
   };
-  const result = await runCommand(command, { label: "ffprobe" });
+  const result = await runCommand(command, { label: "ffprobe", stage: "probe" });
   const parsed = JSON.parse(result.stdout || "{}");
   const video = (parsed.streams || []).find((stream) => stream.codec_type === "video") || {};
   const duration = Number(video.duration ?? parsed.format?.duration ?? 0);
@@ -813,7 +746,7 @@ export async function detectCaptionBand(inputPath, probe, options = {}) {
 
   let bytes;
   try {
-    bytes = await runBufferCommand(command, { label: "caption_detect" });
+    bytes = await runBufferCommand(command, { label: "caption_detect", stage: "analysis" });
   } catch {
     return { captionBandScore: 0, textLikeRegions: 0, frames: 0 };
   }
@@ -903,7 +836,7 @@ export async function detectWatermarkOverlay(inputPath, probe, options = {}) {
 
   let bytes;
   try {
-    bytes = await runBufferCommand(command, { label: "watermark_detect" });
+    bytes = await runBufferCommand(command, { label: "watermark_detect", stage: "analysis" });
   } catch {
     return { stableOverlayScore: 0, regions: [], frames: 0 };
   }

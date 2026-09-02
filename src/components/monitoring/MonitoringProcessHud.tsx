@@ -6,6 +6,7 @@ import {
   ChevronRight,
   CircleDot,
   Code2,
+  Hand,
   Layers,
   List,
   Search,
@@ -21,6 +22,9 @@ import { cn } from "@/lib/utils";
 import type { MonitoringEntry } from "@/hooks/useMonitoringData";
 import {
   buildProcessTraceMap,
+  isProcessTraceRunning,
+  isProcessTraceWaiting,
+  processTraceTerminalStatus,
   type ProcessTraceMap,
   type ProcessTraceNode,
   type ProcessTraceStatus,
@@ -80,46 +84,20 @@ function formatDuration(value: number | null | undefined): string {
 }
 
 function statusToHud(status: ProcessTraceStatus): HudStatus {
-  if (status === "running" || status === "pending") return "run";
+  if (isProcessTraceRunning(status)) return "run";
   if (status === "failed") return "err";
   return "";
 }
 
-function isLive(status: ProcessTraceStatus): boolean {
-  return status === "running" || status === "pending";
-}
-
 function isAnimatingStatus(status: ProcessTraceStatus): boolean {
-  return status === "running";
-}
-
-function terminalStatus(entry: MonitoringEntry, traceMap: ProcessTraceMap): ProcessTraceStatus | null {
-  const telegramMessageIds = Array.isArray(entry.telegram_message_ids)
-    ? entry.telegram_message_ids
-    : [];
-  if (traceMap.summary.failed > 0 || entry.x_status === "failed" || entry.x_error || entry.delivery_error || entry.translation_error) {
-    return "failed";
-  }
-  if (
-    entry.x_status === "posted" ||
-    entry.monitoring_state?.x_state === "posted" ||
-    entry.monitoring_state?.code === "delivered" ||
-    entry.is_delivered ||
-    telegramMessageIds.length > 0 ||
-    entry.monitoring_state?.telegram_state === "delivered"
-  ) {
-    return "completed";
-  }
-  if (entry.dup_of_tweet_id || entry.dedupe_status === "duplicate" || entry.delivery_decision === "skip" || entry.monitoring_state?.code === "below_threshold") {
-    return "blocked";
-  }
-  return null;
+  return isProcessTraceRunning(status);
 }
 
 function traceSortScore(trace: HudTrace): number {
-  if (isLive(trace.status)) return 4;
-  if (trace.status === "failed") return 3;
-  if (trace.status === "blocked") return 2;
+  if (isProcessTraceRunning(trace.status)) return 5;
+  if (trace.status === "failed") return 4;
+  if (trace.status === "blocked") return 3;
+  if (isProcessTraceWaiting(trace.status)) return 2;
   return 1;
 }
 
@@ -138,7 +116,7 @@ function nodeEnd(node: ProcessTraceNode): number | null {
 }
 
 function traceDuration(trace: HudTrace): number {
-  if (isLive(trace.status)) {
+  if (isProcessTraceRunning(trace.status)) {
     return Math.max(Date.now() - trace.startedAt, trace.durationMs, 1);
   }
   return Math.max(trace.durationMs, 1);
@@ -151,6 +129,10 @@ function latestTime(values: number[]): number | null {
 function traceColor(key: string, status: ProcessTraceStatus): string {
   if (status === "failed") return "#f43f5e";
   if (status === "blocked") return "#f97316";
+  if (status === "running") return "#3b82f6";
+  if (status === "pending") return "#64748b";
+  if (status === "skipped") return "#475569";
+  if (status === "unknown") return "#4b5563";
   const palette = ["#10b981", "#3b82f6", "#f59e0b", "#8b5cf6", "#ec4899", "#06b6d4", "#14b8a6"];
   let hash = 0;
   for (let index = 0; index < key.length; index += 1) {
@@ -163,7 +145,8 @@ function toneColor(tone: ProcessTraceTone, status: ProcessTraceStatus): string {
   if (status === "failed" || tone === "bad") return "#f43f5e";
   if (status === "blocked" || tone === "warn") return "#f97316";
   if (status === "completed" || tone === "good") return "#10b981";
-  if (status === "running" || status === "pending" || tone === "info") return "#6366f1";
+  if (status === "pending") return "#64748b";
+  if (status === "running" || tone === "info") return "#3b82f6";
   return "#4b5563";
 }
 
@@ -180,7 +163,7 @@ function traceFromEntry(entry: MonitoringEntry): HudTrace {
   const title = entry.author_handle ? `@${entry.author_handle}` : entry.account_handle || entry.tweet_id;
   const toolCount = traceMap.nodes.filter((node) => node.status !== "unknown").length;
   const errorCount = traceMap.nodes.filter((node) => node.status === "failed").length;
-  const status = terminalStatus(entry, traceMap) ?? traceMap.summary.status;
+  const status = processTraceTerminalStatus(entry, traceMap.summary, traceMap.nodes);
 
   return {
     id: entry.tweet_id,
@@ -220,6 +203,7 @@ function ToolGlyph({ label, kind }: { label: string; kind?: ProcessTraceNode["ki
   const value = label.toLowerCase();
   const className = "h-3.5 w-3.5";
   if (kind === "ai") return <Sparkles className={className} />;
+  if (kind === "manual") return <Hand className={className} />;
   if (kind === "delivery" && value.includes("x")) return <Twitter className={className} />;
   if (kind === "delivery") return <Send className={className} />;
   if (value.includes("search") || value.includes("score")) return <Search className={className} />;
@@ -351,11 +335,11 @@ function NodeDetail({ node }: { node: ProcessTraceNode }) {
       </dl>
       <div className={cn("xot-hud-io", node.error && "err")}>
         <span>{node.error ? "Error" : node.skipReason ? "Skip reason" : "Detail"}</span>
-        <pre>{node.error ?? node.skipReason?.replaceAll("_", " ") ?? node.detail}</pre>
+        <pre>{node.error ?? node.skipReason?.replace(/_/g, " ") ?? node.detail}</pre>
       </div>
       {node.evidence.length > 0 && (
         <div className="xot-hud-evidence">
-          {node.evidence.slice(0, 6).map((item) => <span key={item}>{item.replaceAll("_", " ")}</span>)}
+          {node.evidence.slice(0, 6).map((item) => <span key={item}>{item.replace(/_/g, " ")}</span>)}
         </div>
       )}
     </div>
@@ -369,7 +353,7 @@ function TraceWaterfall({
 }) {
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
   const allTimes = traceMap.nodes.flatMap((node) => [nodeStart(node), nodeEnd(node)]).filter((value): value is number => value != null);
-  const hasLiveNodes = traceMap.nodes.some((node) => isLive(node.status));
+  const hasLiveNodes = traceMap.nodes.some((node) => isProcessTraceRunning(node.status));
   const traceStart = allTimes.length ? Math.min(...allTimes) : Date.now();
   const traceEnd = allTimes.length ? Math.max(...allTimes, hasLiveNodes ? Date.now() : 0) : Date.now() + traceMap.nodes.length * 1000;
   const traceSpan = Math.max(traceEnd - traceStart, traceMap.nodes.length * 1000, 1);
@@ -403,7 +387,7 @@ function TraceWaterfall({
               aria-expanded={isOpen}
               aria-label={`${node.label}: ${node.statusLabel}. ${node.detail}`}
             >
-              <span className={cn("xot-hud-wf-label", node.kind === "ai" && "ai")}>
+              <span className={cn("xot-hud-wf-label", node.kind === "ai" && "ai", node.kind === "manual" && "manual")}>
                 <span className={cn("xot-hud-wf-icon", node.status === "failed" && "err")}>
                   {node.status === "failed" ? <AlertTriangle className="h-3.5 w-3.5" /> : <ToolGlyph label={node.label} kind={node.kind} />}
                 </span>
@@ -472,9 +456,14 @@ export function MonitoringProcessTraceDetail({
 
       <div className="xot-hud-armory">
         {traceMap.nodes.map((node) => (
-          <span key={node.id} className={cn("xot-hud-chip", node.status !== "unknown" && "used", node.status === "failed" && "err")}>
+          <span
+            key={node.id}
+            className={cn("xot-hud-chip", `status-${node.status}`)}
+            title={`${node.label}: ${node.statusLabel}`}
+          >
             <ToolGlyph label={node.label} kind={node.kind} />
-            {node.shortLabel}
+            <span>{node.shortLabel}</span>
+            <span className="xot-hud-chip-status">{node.statusLabel}</span>
           </span>
         ))}
       </div>
@@ -515,7 +504,7 @@ export function MonitoringProcessHud({
       .sort((a, b) => traceSortScore(b) - traceSortScore(a) || b.startedAt - a.startedAt)
       .slice(0, maxEntries)
   ), [entries, maxEntries]);
-  const autoSelectedId = traces.find((trace) => isLive(trace.status))?.id ?? traces[0]?.id ?? null;
+  const autoSelectedId = traces.find((trace) => isProcessTraceRunning(trace.status))?.id ?? traces[0]?.id ?? null;
   const [selectedId, setSelectedId] = useState<string | null>(autoSelectedId);
   const [manualSelection, setManualSelection] = useState(false);
 

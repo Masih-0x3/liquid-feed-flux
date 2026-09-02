@@ -4,6 +4,7 @@ import {
   isStorageObjectNotFoundError,
   repairStaleMediaObject,
   StaleMediaObjectError,
+  staleMediaRepairIdempotencyKey,
   staleMediaObjectErrorForDownload,
 } from "./staleMediaRepair.ts";
 
@@ -13,12 +14,32 @@ type FakeCall = {
   value?: unknown;
 };
 
+type FakeQueryResult = { data: unknown; error: null };
+
+type FakeQueryBuilder = {
+  update(value: unknown): FakeQueryBuilder;
+  insert(value: unknown): PromiseLike<FakeQueryResult>;
+  select(value: unknown): FakeQueryBuilder;
+  in(column: string, value: unknown): FakeQueryBuilder;
+  filter(column: string, operator: string, value: unknown): FakeQueryBuilder;
+  eq(column: string, value: unknown): FakeQueryBuilder;
+  limit(value: unknown): FakeQueryBuilder;
+  then<TResult1 = FakeQueryResult, TResult2 = never>(
+    onfulfilled?:
+      | ((value: FakeQueryResult) => TResult1 | PromiseLike<TResult1>)
+      | null,
+    onrejected?:
+      | ((reason: unknown) => TResult2 | PromiseLike<TResult2>)
+      | null,
+  ): PromiseLike<TResult1 | TResult2>;
+};
+
 function createRepairSupabase(options: { pendingJobs?: Array<Record<string, unknown>> } = {}) {
   const calls: FakeCall[] = [];
   return {
     calls,
     from(table: string) {
-      const builder = {
+      const builder: FakeQueryBuilder = {
         update(value: unknown) {
           calls.push({ table, op: "update", value });
           return builder;
@@ -45,10 +66,19 @@ function createRepairSupabase(options: { pendingJobs?: Array<Record<string, unkn
         },
         limit(value: unknown) {
           calls.push({ table, op: "limit", value });
-          return Promise.resolve({ data: table === "jobs" ? options.pendingJobs ?? [] : [], error: null });
+          return builder;
         },
-        then(resolve: (value: unknown) => void) {
-          resolve({ data: null, error: null });
+        then<TResult1 = FakeQueryResult, TResult2 = never>(
+          onfulfilled,
+          onrejected,
+        ): PromiseLike<TResult1 | TResult2> {
+          return Promise.resolve({
+            data: table === "jobs" ? options.pendingJobs ?? [] : null,
+            error: null,
+          }).then(
+            onfulfilled,
+            onrejected,
+          );
         },
       };
       return builder;
@@ -97,7 +127,7 @@ Deno.test("repairStaleMediaObject clears guarded media pointer and queues downlo
   const job = jobInsert.value as Record<string, unknown>;
   assertEquals(job.type, "download_media");
   assertEquals((job.payload as Record<string, unknown>).repair, "stale_media_object");
-  assertStringIncludes(String(job.idempotency_key), "download_media:stale_storage:tweet-1:media-1:");
+  assertEquals(job.idempotency_key, staleMediaRepairIdempotencyKey("tweet-1", "media-1", "2026/6/tweet_0.mp4"));
 
   const eventInsert = supabase.calls.find((call) => call.table === "pipeline_events" && call.op === "insert");
   assert(eventInsert);

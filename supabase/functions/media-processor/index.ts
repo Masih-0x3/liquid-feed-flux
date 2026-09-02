@@ -1,7 +1,21 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
 import { requireInternalAuth } from "../_shared/internalAuth.ts";
+import {
+  type MediaDownloadEventMeta,
+  safeMediaDownloadErrorCode,
+  safeMediaDownloadEventMeta,
+  safeMediaUrlHash,
+  safeMediaUrlTelemetry,
+} from "../_shared/safeMediaTelemetry.ts";
+import {
+  fetchReviewedRemoteMedia,
+  MAX_REMOTE_MEDIA_ITEMS_PER_POST,
+  validateReviewedRemoteMediaUrl,
+} from "../_shared/remoteMediaPolicy.ts";
 import { captureEdgeException, initSentryEdge } from "../_shared/sentry.ts";
+import { createMediaProcessorHandler } from "./handler.ts";
+import { cleanupOldMedia } from "./cleanupOldMedia.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': Deno.env.get('ALLOWED_CORS_ORIGIN') ?? 'https://liquid-feed-flux.lovable.app',
@@ -9,92 +23,139 @@ const corsHeaders = {
 };
 initSentryEdge();
 
-serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
-  }
+type MediaProcessorQueryResult = {
+  data?: unknown;
+  error?: { message?: string } | null;
+};
 
-  const supabase = createClient<any, any>(
+type MediaProcessorQueryBuilder = PromiseLike<MediaProcessorQueryResult> & {
+  select(columns: string): MediaProcessorQueryBuilder;
+  eq(column: string, value: unknown): MediaProcessorQueryBuilder;
+  is(column: string, value: unknown): MediaProcessorQueryBuilder;
+  order(column: string, options?: Record<string, unknown>): MediaProcessorQueryBuilder;
+  limit(value: number): MediaProcessorQueryBuilder;
+  in(column: string, values: unknown[]): MediaProcessorQueryBuilder;
+  not(column: string, operator: string, value: unknown): MediaProcessorQueryBuilder;
+  update(values: Record<string, unknown>): MediaProcessorQueryBuilder;
+  insert(values: Record<string, unknown>): PromiseLike<MediaProcessorQueryResult>;
+  maybeSingle(): PromiseLike<MediaProcessorQueryResult>;
+};
+
+type MediaProcessorStorageBucket = {
+  upload(path: string, body: Uint8Array, options?: Record<string, unknown>): PromiseLike<MediaProcessorQueryResult>;
+  remove(paths: string[]): PromiseLike<MediaProcessorQueryResult>;
+};
+
+type MediaProcessorSupabaseClient = {
+  from(table: string): MediaProcessorQueryBuilder;
+  storage: {
+    from(bucket: string): MediaProcessorStorageBucket;
+  };
+};
+
+type MediaCleanupSupabaseClient = {
+  rpc(
+    name: string,
+    args?: Record<string, unknown>,
+  ): PromiseLike<{ data?: unknown; error?: unknown }>;
+  storage: {
+    from(bucket: string): {
+      remove(paths: string[]): PromiseLike<{ error?: unknown }>;
+    };
+  };
+  from(table: string): {
+    update(values: Record<string, unknown>): {
+      in(column: string, values: string[]): PromiseLike<unknown>;
+    };
+  };
+};
+
+function isMediaCleanupSupabaseClient(
+  value: unknown,
+): value is MediaCleanupSupabaseClient {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as {
+    rpc?: unknown;
+    storage?: unknown;
+    from?: unknown;
+  };
+  const storage = candidate.storage;
+  const storageFrom = storage && typeof storage === "object"
+    ? (storage as { from?: unknown }).from
+    : undefined;
+  if (
+    typeof candidate.rpc !== "function" ||
+    typeof candidate.from !== "function" ||
+    typeof storageFrom !== "function"
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function requireMediaCleanupSupabaseClient(
+  value: unknown,
+): MediaCleanupSupabaseClient {
+  if (!isMediaCleanupSupabaseClient(value)) {
+    throw new Error("media_cleanup_client_invalid");
+  }
+  return value;
+}
+
+const handler = createMediaProcessorHandler({
+  corsHeaders,
+  createSupabase: () => createClient<any, any>(
     Deno.env.get('SUPABASE_URL') ?? '',
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-  );
-
-  const authError = await requireInternalAuth(req, supabase, corsHeaders);
-  if (authError) return authError;
-
-  try {
-
-    const body = await req.json().catch(() => ({}));
-    const { action, tweet_id, media_ids, dry_run } = body;
-    
-    if (!action || typeof action !== 'string') {
-      return new Response(JSON.stringify({ error: 'Missing or invalid action parameter' }), {
-        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-
-    console.log(JSON.stringify({ function: 'media-processor', action }));
-
-    switch (action) {
-      case 'download_media':
-        if (!tweet_id || typeof tweet_id !== 'string') {
-          return new Response(JSON.stringify({ error: 'tweet_id is required' }), {
-            status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          });
-        }
-        return await downloadMediaForTweet(supabase, tweet_id, dry_run === true);
-      case 'cleanup_old_media': {
-        const daysOld = typeof (body as Record<string, unknown>).days_old === 'number'
-          ? Math.max(1, Math.min(365, Math.floor((body as Record<string, number>).days_old)))
-          : 1;
-        return await cleanupOldMedia(supabase, dry_run === true, daysOld);
-      }
-      case 'get_media_info':
-        if (!media_ids || !Array.isArray(media_ids)) {
-          return new Response(JSON.stringify({ error: 'media_ids array is required' }), {
-            status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          });
-        }
-        return await getMediaInfo(supabase, media_ids);
-      default:
-        return new Response(JSON.stringify({ error: `Unknown action: ${action}` }), {
-          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-    }
-
-  } catch (error) {
-    console.error(JSON.stringify({ function: 'media-processor', action: 'error', error: (error as Error).message }));
-    await captureEdgeException(error, {
-      functionName: "media-processor",
-      action: "error",
-      request: req,
-    });
-    return new Response(JSON.stringify({ error: 'Internal server error' }), {
-      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
-  }
+  ),
+  requireInternalAuth,
+  getEnv: (name) => Deno.env.get(name),
+  downloadMediaForTweet,
+  cleanupOldMedia: (supabase, dryRun, daysOld) =>
+    cleanupOldMedia(
+      requireMediaCleanupSupabaseClient(supabase),
+      dryRun,
+      daysOld,
+      corsHeaders,
+    ),
+  getMediaInfo,
+  captureException: captureEdgeException,
 });
 
-async function downloadMediaForTweet(// deno-lint-ignore no-explicit-any
-supabase: any, tweetId: string, dryRun: boolean) {
+serve(handler);
+
+async function downloadMediaForTweet(supabase: MediaProcessorSupabaseClient, tweetId: string, dryRun: boolean) {
   console.log(JSON.stringify({ function: 'media-processor', action: 'download_start', tweet_id: tweetId, dry_run: dryRun }));
   
   const { data: mediaItems, error: mediaError } = await supabase
     .from('media')
     .select('id, tweet_id, src_url, ordering, storage_path, src_url_hash')
     .eq('tweet_id', tweetId)
-    .is('storage_path', null);
+    .is('storage_path', null)
+    .order('ordering', { ascending: true })
+    .limit(MAX_REMOTE_MEDIA_ITEMS_PER_POST + 1);
 
-  if (mediaError) throw new Error(`Failed to fetch media: ${mediaError.message}`);
+  if (mediaError) throw new Error('media_query_failed');
+  if (!Array.isArray(mediaItems)) throw new Error('media_query_invalid_response');
 
-  if (!mediaItems || mediaItems.length === 0) {
+  const candidateMediaItems = mediaItems as Array<Record<string, unknown>>;
+  const boundedMediaItems = candidateMediaItems.slice(0, MAX_REMOTE_MEDIA_ITEMS_PER_POST);
+  const overLimitMediaItems = candidateMediaItems.slice(MAX_REMOTE_MEDIA_ITEMS_PER_POST);
+
+  if (boundedMediaItems.length === 0) {
     return new Response(JSON.stringify({ success: true, message: 'No media to download', downloaded: 0 }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 
   if (dryRun) {
-    return new Response(JSON.stringify({ success: true, dry_run: true, would_download: mediaItems.length, media_ids: mediaItems.map((m: Record<string, unknown>) => m.id) }), {
+    return new Response(JSON.stringify({
+      success: true,
+      dry_run: true,
+      would_download: boundedMediaItems.length,
+      skipped_over_limit: overLimitMediaItems.length,
+      media_ids: boundedMediaItems.map((media) => media.id),
+    }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
@@ -103,27 +164,36 @@ supabase: any, tweetId: string, dryRun: boolean) {
   let reusedCount = 0;
   let failedCount = 0;
   const startedAt = Date.now();
-  const hashes = [...new Set((mediaItems as Array<Record<string, unknown>>)
+  const hashes = [...new Set(boundedMediaItems
     .map((media) => typeof media.src_url_hash === 'string' ? media.src_url_hash : null)
     .filter(Boolean) as string[])];
   const existingByHash = new Map<string, string>();
   if (hashes.length > 0) {
-    const { data: existingRows } = await supabase
+    const { data: existingRows, error: existingRowsError } = await supabase
       .from('media')
       .select('src_url_hash, storage_path')
       .in('src_url_hash', hashes)
       .not('storage_path', 'is', null);
-    for (const row of (existingRows ?? []) as Array<Record<string, unknown>>) {
+    if (existingRowsError) throw new Error('media_reuse_lookup_failed');
+    if (!Array.isArray(existingRows)) throw new Error('media_reuse_lookup_invalid_response');
+    for (const row of existingRows as Array<Record<string, unknown>>) {
       const hash = typeof row.src_url_hash === 'string' ? row.src_url_hash : null;
       const storagePath = typeof row.storage_path === 'string' ? row.storage_path : null;
       if (hash && storagePath && !existingByHash.has(hash)) existingByHash.set(hash, storagePath);
     }
   }
 
-  await mapLimit(mediaItems as any[], 3, async (media) => {
+  for (const media of overLimitMediaItems) {
+    failedCount++;
+    await insertMediaDownloadEvent(supabase, media, 'failed', 'media_item_limit_exceeded', {
+      media_download_ms: 0,
+    });
+  }
+
+  await mapLimit(boundedMediaItems, 3, async (media) => {
     const itemStartedAt = Date.now();
     try {
-      if (!media.src_url || media.src_url.includes('pic.twitter.com')) {
+      if (typeof media.src_url !== 'string' || media.src_url.includes('pic.twitter.com')) {
         failedCount++;
         await insertMediaDownloadEvent(supabase, media, 'failed', 'unsupported_or_placeholder_url', {
           media_download_ms: Date.now() - itemStartedAt,
@@ -131,6 +201,7 @@ supabase: any, tweetId: string, dryRun: boolean) {
         return;
       }
 
+      const sourceUrl = validateReviewedRemoteMediaUrl(media.src_url);
       const reusableStoragePath = typeof media.src_url_hash === 'string' ? existingByHash.get(media.src_url_hash) : null;
       if (reusableStoragePath) {
         const updated = await guardedMediaUpdate(supabase, media, {
@@ -147,27 +218,27 @@ supabase: any, tweetId: string, dryRun: boolean) {
         }
         return;
       }
-      
-      const response = await fetch(media.src_url, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-      });
 
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-
-      const rawContentType = response.headers.get('content-type') || '';
-      const contentType = normalizeMime(rawContentType, media.src_url);
-      const fileExtension = getFileExtension(contentType, media.src_url);
-      const fileName = `${media.tweet_id.replace(/[^a-zA-Z0-9]/g, '_')}_${media.ordering}${fileExtension}`;
+      const remoteMedia = await fetchReviewedRemoteMedia(sourceUrl);
+      const contentType = remoteMedia.contentType;
+      const fileExtension = getFileExtension(contentType);
+      const safeTweetId = String(media.tweet_id ?? 'media')
+        .replace(/[^a-zA-Z0-9]/g, '_')
+        .slice(0, 128) || 'media';
+      const ordering = typeof media.ordering === 'number' && Number.isFinite(media.ordering)
+        ? Math.max(0, Math.floor(media.ordering))
+        : 0;
+      const fileName = `${safeTweetId}_${ordering}_${crypto.randomUUID()}${fileExtension}`;
       const storagePath = `${new Date().getFullYear()}/${new Date().getMonth() + 1}/${fileName}`;
 
-      const fileBuffer = await response.arrayBuffer();
+      const fileBuffer = remoteMedia.body;
       const fileSize = fileBuffer.byteLength;
 
       const { error: uploadError } = await supabase.storage
         .from('temp-media')
         .upload(storagePath, fileBuffer, { contentType, upsert: false });
 
-      if (uploadError) throw new Error(`Upload failed: ${uploadError.message}`);
+      if (uploadError) throw new Error('media_upload_failed');
 
       const updated = await guardedMediaUpdate(supabase, media, {
         storage_path: storagePath, downloaded_at: new Date().toISOString(),
@@ -187,9 +258,16 @@ supabase: any, tweetId: string, dryRun: boolean) {
         await supabase.storage.from('temp-media').remove([storagePath]);
       }
     } catch (error) {
-      console.error(JSON.stringify({ function: 'media-processor', action: 'download_fail', src_url: media.src_url, error: (error as Error).message }));
+      const errorCode = safeMediaDownloadErrorCode(error);
+      console.error(JSON.stringify({
+        function: 'media-processor',
+        action: 'download_fail',
+        media_id: media.id,
+        error_code: errorCode,
+        ...safeMediaUrlTelemetry(media.src_url, media.src_url_hash),
+      }));
       // Surface to pipeline_events so monitoring can see media download failures.
-      await insertMediaDownloadEvent(supabase, media, 'failed', (error as Error).message, {
+      await insertMediaDownloadEvent(supabase, media, 'failed', errorCode, {
         media_download_ms: Date.now() - itemStartedAt,
       });
       failedCount++;
@@ -203,6 +281,7 @@ supabase: any, tweetId: string, dryRun: boolean) {
     downloaded: downloadedCount,
     reused: reusedCount,
     failed: failedCount,
+    skipped_over_limit: overLimitMediaItems.length,
     download_ms: downloadMs,
   }));
 
@@ -211,8 +290,9 @@ supabase: any, tweetId: string, dryRun: boolean) {
     downloaded: downloadedCount,
     reused: reusedCount,
     failed: failedCount,
-    total: mediaItems.length,
-    media_items_total: mediaItems.length,
+    skipped_over_limit: overLimitMediaItems.length,
+    total: candidateMediaItems.length,
+    media_items_total: candidateMediaItems.length,
     media_downloaded: downloadedCount,
     media_reused: reusedCount,
     media_failed: failedCount,
@@ -235,38 +315,56 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, index: nu
   return results;
 }
 
-async function insertMediaDownloadEvent(// deno-lint-ignore no-explicit-any
-  supabase: any,
+async function insertMediaDownloadEvent(
+  supabase: MediaProcessorSupabaseClient,
   media: Record<string, unknown>,
   status: 'completed' | 'failed',
   error: string | null,
-  meta: Record<string, unknown>,
+  meta: MediaDownloadEventMeta,
 ): Promise<void> {
   try {
-    await supabase.from('pipeline_events').insert({
+    const { error: pipelineEventError } = await supabase.from('pipeline_events').insert({
       subject_type: 'post',
       subject_id: media.tweet_id,
       step: 'download_media',
       status,
       error,
-      meta: { src_url: media.src_url, media_id: media.id, ...meta },
+      meta: safeMediaDownloadEventMeta(
+        meta,
+        media.id,
+        media.src_url,
+        media.src_url_hash,
+      ),
     });
-  } catch (_e) { /* best-effort */ }
+    if (pipelineEventError) {
+      console.warn(JSON.stringify({
+        function: 'media-processor',
+        action: 'pipeline_event_insert_failed',
+        error: 'media_pipeline_event_insert_failed',
+      }));
+    }
+  } catch (_e) {
+    console.warn(JSON.stringify({
+      function: 'media-processor',
+      action: 'pipeline_event_insert_failed',
+      error: 'media_pipeline_event_insert_failed',
+    }));
+  }
 }
 
-async function markStaleMediaDownloadIgnored(// deno-lint-ignore no-explicit-any
-  supabase: any,
+async function markStaleMediaDownloadIgnored(
+  supabase: MediaProcessorSupabaseClient,
   media: Record<string, unknown>,
-  extra: Record<string, unknown> = {},
+  expectedSrcUrlHash: unknown = null,
 ): Promise<void> {
   await insertMediaDownloadEvent(supabase, media, 'completed', null, {
     event: 'stale_media_download_ignored',
-    ...extra,
+    expected_src_url_hash: safeMediaUrlHash(expectedSrcUrlHash),
   });
 }
 
-async function guardedMediaUpdate(// deno-lint-ignore no-explicit-any
-  supabase: any,
+async function guardedMediaUpdate(
+  supabase: MediaProcessorSupabaseClient,
   media: Record<string, unknown>,
   values: Record<string, unknown>,
 ): Promise<boolean> {
@@ -282,142 +380,27 @@ async function guardedMediaUpdate(// deno-lint-ignore no-explicit-any
   query = hash ? query.eq('src_url_hash', hash) : query.is('src_url_hash', null);
 
   const { data, error } = await query.select('id').maybeSingle();
-  if (error) throw new Error(`Media row update failed: ${error.message}`);
+  if (error) throw new Error('media_row_update_failed');
   if (!data) {
-    await markStaleMediaDownloadIgnored(supabase, media, { expected_src_url_hash: hash });
+    await markStaleMediaDownloadIgnored(supabase, media, hash);
     return false;
   }
   return true;
 }
 
-async function cleanupOldMedia(// deno-lint-ignore no-explicit-any
-supabase: any, dryRun: boolean, daysOld = 1) {
-  console.log(JSON.stringify({ function: 'media-processor', action: 'cleanup_start', dry_run: dryRun, days_old: daysOld }));
-
-  const { data: oldMedia, error: queryError } = await supabase.rpc('get_old_media', { days_old: daysOld });
-  const oldMediaArr: any[] = (oldMedia as any[]) ?? [];
-
-  if (queryError) throw new Error(`Failed to query old media: ${queryError.message}`);
-
-  const { data: expiredRenders, error: renderQueryError } = await supabase.rpc('get_expired_video_render_paths', { limit_count: 200 });
-  if (renderQueryError) throw new Error(`Failed to query expired video renders: ${renderQueryError.message}`);
-  const expiredRenderArr: any[] = (expiredRenders as any[]) ?? [];
-
-  if ((!oldMediaArr || oldMediaArr.length === 0) && expiredRenderArr.length === 0) {
-    return new Response(JSON.stringify({ success: true, message: 'No old media to cleanup', deleted: 0 }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
-  }
-
-  if (dryRun) {
-    return new Response(JSON.stringify({
-      success: true,
-      dry_run: true,
-      would_delete: oldMediaArr.length + expiredRenderArr.length,
-      would_delete_original_media: oldMediaArr.length,
-      would_delete_processed_video_renders: expiredRenderArr.length,
-    }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
-  }
-
-  const BATCH_SIZE = 100;
-  let deletedCount = 0;
-  let deletedProcessedCount = 0;
-  let failedCount = 0;
-
-  for (let i = 0; i < oldMediaArr.length; i += BATCH_SIZE) {
-    const batch = oldMediaArr.slice(i, i + BATCH_SIZE);
-    const paths = batch.map((m: Record<string, unknown>) => m.storage_path as string).filter(Boolean);
-    
-    if (paths.length > 0) {
-      const { error: storageError } = await supabase.storage.from('temp-media').remove(paths);
-      if (storageError) { failedCount += paths.length; } else { deletedCount += paths.length; }
-    }
-
-    const ids = batch.map((m: Record<string, unknown>) => m.id as string);
-    await supabase.from('media').update({
-      storage_path: null, downloaded_at: null, file_size: null, mime_type: null
-    }).in('id', ids);
-  }
-
-  for (let i = 0; i < expiredRenderArr.length; i += BATCH_SIZE) {
-    const batch = expiredRenderArr.slice(i, i + BATCH_SIZE);
-    const paths = batch.map((m: Record<string, unknown>) => m.output_storage_path as string).filter(Boolean);
-    const ids = batch.map((m: Record<string, unknown>) => m.id as string).filter(Boolean);
-
-    if (paths.length > 0) {
-      const { error: storageError } = await supabase.storage.from('temp-media').remove(paths);
-      if (storageError) {
-        failedCount += paths.length;
-        continue;
-      }
-      deletedProcessedCount += paths.length;
-    }
-    if (ids.length > 0) {
-      await supabase.rpc('mark_video_renders_expired', { render_ids: ids });
-    }
-  }
-
-  console.log(JSON.stringify({
-    function: 'media-processor',
-    action: 'cleanup_complete',
-    deleted: deletedCount,
-    deleted_processed: deletedProcessedCount,
-    failed: failedCount,
-  }));
-
-  return new Response(JSON.stringify({
-    success: true,
-    deleted: deletedCount + deletedProcessedCount,
-    deleted_original_media: deletedCount,
-    deleted_processed_video_renders: deletedProcessedCount,
-    failed: failedCount,
-    total: oldMediaArr.length + expiredRenderArr.length,
-  }), {
-    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-  });
-}
-
-async function getMediaInfo(// deno-lint-ignore no-explicit-any
-supabase: any, mediaIds: string[]) {
+async function getMediaInfo(supabase: MediaProcessorSupabaseClient, mediaIds: string[]) {
   const { data: mediaInfo, error } = await supabase.from('media').select('*').in('id', mediaIds);
-  if (error) throw new Error(`Failed to fetch media info: ${error.message}`);
+  if (error) throw new Error('media_info_read_failed');
   return new Response(JSON.stringify({ success: true, media: mediaInfo }), {
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
 }
 
-function getFileExtension(contentType: string, url: string): string {
+function getFileExtension(contentType: string): string {
   const typeMap: Record<string, string> = {
-    'image/jpeg': '.jpg', 'image/jpg': '.jpg', 'image/png': '.png', 'image/gif': '.gif',
-    'image/webp': '.webp', 'image/svg+xml': '.svg', 'video/mp4': '.mp4', 'video/webm': '.webm',
-    'video/quicktime': '.mov', 'audio/mpeg': '.mp3', 'audio/wav': '.wav', 'audio/ogg': '.ogg'
+    'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif',
+    'image/webp': '.webp', 'video/mp4': '.mp4', 'video/webm': '.webm',
+    'video/quicktime': '.mov',
   };
-  if (typeMap[contentType]) return typeMap[contentType];
-  const urlMatch = url.match(/\.([a-zA-Z0-9]+)(\?|$)/);
-  if (urlMatch) return '.' + urlMatch[1].toLowerCase();
-  if (contentType.startsWith('image/')) return '.jpg';
-  if (contentType.startsWith('video/')) return '.mp4';
-  if (contentType.startsWith('audio/')) return '.mp3';
-  return '.bin';
-}
-
-// Normalize Content-Type. Some CDNs return application/octet-stream or empty
-// values for video/image bytes. Without normalization, x-poster's tier
-// selection would not see "video/" prefix and would post text-only.
-function normalizeMime(rawCT: string, url: string): string {
-  const ct = (rawCT || '').toLowerCase().split(';')[0].trim();
-  const isUseful = ct.startsWith('image/') || ct.startsWith('video/') || ct.startsWith('audio/');
-  if (isUseful) return ct;
-  const m = (url || '').toLowerCase().match(/\.([a-z0-9]+)(\?|#|$)/);
-  const ext = m ? m[1] : '';
-  const extMap: Record<string, string> = {
-    mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime',
-    webm: 'video/webm', mkv: 'video/x-matroska',
-    jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
-    webp: 'image/webp', gif: 'image/gif',
-    mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg',
-  };
-  return extMap[ext] || ct || 'application/octet-stream';
+  return typeMap[contentType] ?? '.bin';
 }

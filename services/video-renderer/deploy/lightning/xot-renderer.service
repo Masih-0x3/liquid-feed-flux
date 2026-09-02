@@ -1,0 +1,29 @@
+# systemd user unit template for the XOT Lightning renderer.
+#
+# Install to: ~/.config/systemd/user/xot-renderer.service
+# Enable ONLY after final acceptance (see deploy/lightning/README.md).
+# Before acceptance, use bootstrap.sh --start manually with restart policy "no".
+#
+# This unit calls the persistent bootstrap script. It does NOT mount the Docker
+# socket, use host networking, or touch Hermes. The container's own restart
+# policy is the durability mechanism; this unit ensures the bootstrap runs at
+# user-session start on the Lightning Studio.
+#
+# Template only. Luna owns integration and acceptance.
+
+[Unit]
+Description=XOT Lightning video renderer (selected build)
+After=default.target
+Wants=default.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/teamspace/studios/this_studio/xot-renderer/control/deploy/lightning
+EnvironmentFile=/teamspace/studios/this_studio/xot-renderer/runtime/service.env
+ExecStart=/teamspace/studios/this_studio/xot-renderer/control/deploy/lightning/bootstrap.sh --service-env /teamspace/studios/this_studio/xot-renderer/runtime/service.env --start
+ExecStop=/usr/bin/docker compose -p xot-renderer -f /teamspace/studios/this_studio/xot-renderer/control/deploy/lightning/docker-compose.lightning.yml stop
+TimeoutStopSec=45
+
+[Install]
+WantedBy=default.target

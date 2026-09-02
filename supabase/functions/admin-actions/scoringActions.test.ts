@@ -88,7 +88,9 @@ function fakeSupabase(config: FakeConfig = {}) {
             call.column === "key" && call.op === "in"
           );
           const keys = Array.isArray(keyIn?.values)
-            ? keyIn?.values as string[]
+            ? (keyIn.values as string[]).filter((key) =>
+              Object.prototype.hasOwnProperty.call(settings, key)
+            )
             : Object.keys(settings);
           return { data: keys.map((key) => ({ key, value: settings[key] })) };
         }

@@ -31,7 +31,40 @@ vi.mock('@/components/video/VideoRenderDetailPanel', () => ({
   VideoRenderDetailPanel: () => <div>Render detail</div>,
 }));
 
+vi.mock('@/hooks/useDocumentVisibility', () => ({
+  useDocumentVisibility: () => true,
+}));
+
+vi.mock('@/contexts/AuthContext', () => ({
+  useAuth: () => ({ isAdmin: true, role: 'admin' }),
+}));
+
 import VideoRenders from '@/pages/VideoRenders';
+
+const EMPTY_TIMING_METRICS: VideoRenderQueueRow['metrics'] = {
+  total_ms: null,
+  config_load_ms: null,
+  source_lookup_ms: null,
+  post_context_lookup_ms: null,
+  download_ms: null,
+  probe_ms: null,
+  preflight_visual_ms: null,
+  contact_sheet_ms: null,
+  vision_frames_ms: null,
+  vision_inspection_sheets_ms: null,
+  local_ocr_ms: null,
+  watermark_vision_ms: null,
+  delogo_recovery_ms: null,
+  audio_extract_ms: null,
+  audio_extract_enhanced_ms: null,
+  audio_extract_early_ms: null,
+  transcription_ms: null,
+  transcript_cleanup_ms: null,
+  translation_ms: null,
+  subtitle_generate_ms: null,
+  encode_ms: null,
+  upload_ms: null,
+};
 
 function renderRow(id: string, status: 'failed' | 'blocked', reviewedAt: string | null = null): VideoRenderQueueRow {
   return {
@@ -41,15 +74,15 @@ function renderRow(id: string, status: 'failed' | 'blocked', reviewedAt: string 
     status,
     failure_policy: 'post_original',
     render_version: 'v1',
-    output_storage_path: null,
+    render_revision: 1,
     output_file_size: null,
     width: null,
     height: null,
     duration_ms: null,
     source_language: null,
     target_language: null,
-    metrics: {},
-    error: 'Historical renderer outage',
+    metrics: { ...EMPTY_TIMING_METRICS },
+    error: 'render_failed',
     block_reason: null,
     attempts: 1,
     queued_at: '2026-07-10T00:00:00.000Z',
@@ -61,7 +94,6 @@ function renderRow(id: string, status: 'failed' | 'blocked', reviewedAt: string 
     reviewed_by: reviewedAt ? '00000000-0000-4000-8000-000000000001' : null,
     updated_at: '2026-07-10T00:01:00.000Z',
     created_at: '2026-07-10T00:00:00.000Z',
-    preflight: {},
     action_label: status,
     activity_at: '2026-07-10T00:01:00.000Z',
     post: null,
@@ -99,6 +131,14 @@ describe('video renders review workflow', () => {
         output_bytes_7d: 0,
         oldest_queued_at: null,
         heartbeats: [],
+        renderer_health: {
+          state: 'unavailable',
+          server_observed_at: '2026-07-22T00:00:00.000Z',
+          last_seen_at: null,
+          age_ms: null,
+          renderer_id: null,
+          reported_status: null,
+        },
       },
       isFetching: false,
       refetch: vi.fn(),
@@ -114,7 +154,11 @@ describe('video renders review workflow', () => {
       isFetching: false,
       refetch: vi.fn(),
     });
-    videoHooks.useRetryVideoRender.mockReturnValue({ mutate: vi.fn(), isPending: false });
+    videoHooks.useRetryVideoRender.mockReturnValue({
+      mutate: vi.fn(),
+      isPending: false,
+      isPendingFor: vi.fn(() => false),
+    });
     videoHooks.useSetVideoRenderReviewed.mockReturnValue({ mutate: videoHooks.reviewMutate, isPending: false });
   });
 
@@ -124,7 +168,9 @@ describe('video renders review workflow', () => {
     expect(videoHooks.useVideoRenderQueue).toHaveBeenCalledWith(
       ['queued', 'running', 'failed', 'blocked'],
       'unreviewed',
+      { isVisible: true },
     );
+    expect(videoHooks.useVideoRenderOverview).toHaveBeenCalledWith({ isVisible: true });
     fireEvent.click(screen.getByRole('button', { name: 'Mark 2 reviewed' }));
     const dialog = screen.getByRole('alertdialog');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Mark reviewed' }));
@@ -146,6 +192,7 @@ describe('video renders review workflow', () => {
     expect(videoHooks.useVideoRenderQueue).toHaveBeenLastCalledWith(
       ['queued', 'running', 'failed', 'blocked'],
       'all',
+      { isVisible: true },
     );
   });
 });

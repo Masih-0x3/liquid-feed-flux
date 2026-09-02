@@ -1,0 +1,32 @@
+{
+  "schema": "xot-production-reconciliation-t3-receipt-v1",
+  "status": "T3_01_READ_ONLY_RECONCILED_T3_02_BLOCKED",
+  "createdAt": "2026-08-24T20:44:31Z",
+  "plan": "docs/plans/2026-08-24-xot-production-reconciliation-replan.md",
+  "predecessorTask": "task_1fbbeea96fa3",
+  "predecessorUpdate": "fb79283e-f2cc-4243-8de5-557fb09e0635",
+  "currentTask": "task_55b6547b8c9d",
+  "currentUpdate": "33020d74-b73e-49f5-b689-5ccefa5815fd",
+  "candidate": {"branch": "codex/xot-full-closure-candidate", "head": "040fd0e99f9019997debab4bdc9466d07c98c2d0", "tree": "aca35558dcc5025ab4e2543b6cc233dd27bf8a9a", "clean": true},
+  "production": {
+    "target": "PROD_REF",
+    "status": "ACTIVE_HEALTHY",
+    "productionChanged": false,
+    "migrations": "106 remote / 124 local; 29 matched, 77 remote-only, 95 local-only",
+    "schema": "39 production tables versus 43 generated tables; 4 generated-only",
+    "rls": "39/39 production tables RLS-enabled; 46 policies",
+    "runtimeControls": "absent",
+    "posting": "enabled in current production configuration",
+    "activeSchedules": ["worker", "reconcile", "learned-bias rebuild", "X poster"],
+    "backups": "8 completed WAL-G physical backups through 2026-08-24; PITR off",
+    "restoreDrill": "not proven",
+    "pat1": "unresolved",
+    "renderer": "host offline or stale; current digest, capacity, and rollback unverified"
+  },
+  "gateVerdict": {"SR-REL-00": "BLOCKED", "SR-MIG-01": "BLOCKED", "SR-RLS-01": "BLOCKED", "PAT-1": "BLOCKED", "AIR-010": "BLOCKED_PARTIAL", "AIR-017": "BLOCKED", "AIR-052": "BLOCKED", "AIR-055": "BLOCKED"},
+  "externalReviews": {
+    "glm": {"task": "task_eb0fe25620a4", "dispatch": "ctx_bbf7ef194e0d", "model": "glm-5-2", "effort": "high", "providerInvoked": true, "filesModified": [], "disposition": "ACCEPTED_CANDIDATE_ONLY"},
+    "swe": {"task": "task_e66cdb2d0d25", "dispatch": "ctx_ca9ba6aa4b0a", "model": "swe-1-7", "effort": "max", "providerInvoked": true, "filesModified": [], "disposition": "ACCEPTED_CANDIDATE_ONLY"}
+  },
+  "replan": {"mandatory": true, "scope": "Re-anchor semantic migration, schema, RLS, grant, type, restore, and owner evidence to the current candidate.", "productionMutation": false, "releaseGate": "CLOSED"}
+}

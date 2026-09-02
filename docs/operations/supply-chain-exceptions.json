@@ -1,0 +1,8 @@
+{
+  "schema_version": "xot-supply-chain-exceptions-v1",
+  "status": "awaiting_fresh_scan_evidence",
+  "last_scan_receipt": null,
+  "production_waivers": [],
+  "development_build_waivers": [],
+  "license_waivers": []
+}

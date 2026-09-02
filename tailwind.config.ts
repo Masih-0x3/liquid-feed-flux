@@ -79,6 +79,9 @@ export default {
 					ring: 'hsl(var(--sidebar-ring))'
 				}
 			},
+			backgroundImage: {
+				'gradient-primary': 'var(--gradient-primary)',
+			},
 			fontFamily: {
 				display: 'var(--font-display)',
 				body: 'var(--font-body)',

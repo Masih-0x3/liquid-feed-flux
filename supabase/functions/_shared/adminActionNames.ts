@@ -1,6 +1,7 @@
 export const ADMIN_ACTION_NAMES = [
   'version',
   'save_settings',
+  'get_recent_author_stats',
   'edit_translation',
   'retry_step',
   'reprocess',
@@ -16,6 +17,9 @@ export const ADMIN_ACTION_NAMES = [
   'dry_run_old_media_cleanup',
   'get_monitoring_overview',
   'get_monitoring_entries',
+  'get_pipeline_events',
+  'get_settings',
+  'get_settings_samples',
   'get_x_api_summary',
   'get_video_render_config',
   'update_video_render_config',
@@ -45,6 +49,9 @@ export const ADMIN_ACTION_NAMES = [
   'summarize_stale_x_pending',
   'hydrate_post',
   'get_post_pipeline_status',
+  'get_admin_operation_status',
+  'get_runtime_controls',
+  'update_runtime_controls',
   'resolve_x_media',
   'dry_run_x_post',
   'retry_x_post',
@@ -72,6 +79,51 @@ export const ADMIN_ACTION_NAMES = [
 ] as const;
 
 export type AdminActionName = typeof ADMIN_ACTION_NAMES[number];
+
+/**
+ * Actions that only read normal dashboard operational or status data.
+ *
+ * Keep this list explicit. Anything that is not listed is admin-only,
+ * including provider verification, dry runs, self-heal, and cost-bearing
+ * reads.
+ */
+export const READ_ONLY_ADMIN_ACTION_NAMES = [
+  'version',
+  'get_recent_author_stats',
+  'get_health',
+  'get_dashboard_summary',
+  'get_dashboard_process_hud',
+  'get_system_performance_summary',
+  'get_monitoring_overview',
+  'get_monitoring_entries',
+  'get_pipeline_events',
+  'get_settings',
+  'get_settings_samples',
+  'get_x_api_summary',
+  'get_video_render_config',
+  'get_video_render_overview',
+  'get_video_render_queue',
+  'get_video_render_detail',
+  'manual_video_intake_get',
+  'manual_video_intake_list',
+  'get_x_posting_diagnostics',
+  'get_admin_operation_status',
+  'get_post_pipeline_status',
+  'get_x_status',
+  'get_runtime_controls',
+] as const satisfies readonly AdminActionName[];
+
+export type ReadOnlyAdminActionName = typeof READ_ONLY_ADMIN_ACTION_NAMES[number];
+
+const READ_ONLY_ADMIN_ACTION_NAME_SET = new Set<string>(
+  READ_ONLY_ADMIN_ACTION_NAMES,
+);
+
+export function isReadOnlyAdminActionName(
+  value: string,
+): value is ReadOnlyAdminActionName {
+  return READ_ONLY_ADMIN_ACTION_NAME_SET.has(value);
+}
 
 const ADMIN_ACTION_NAME_SET = new Set<string>(ADMIN_ACTION_NAMES);
 

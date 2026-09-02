@@ -2,6 +2,11 @@ import {
   recordXApiEvent,
 } from "../_shared/xApiLedger.ts";
 import { isMyXEnabled } from "../_shared/myXControls.ts";
+import {
+  ExternalPostingBlockedError,
+  requireExternalPosting,
+} from "../_shared/externalPostingGuard.ts";
+import type { RuntimeControlsQueryClient } from "../_shared/runtimeControls.ts";
 import type { AdminActionResponse, SupabaseAdminClient } from "./types.ts";
 
 type QueryResult = {
@@ -41,7 +46,35 @@ export type XApiActionDeps = {
   readEnv?: ReadEnvFn;
   oauthHeader?: OAuthHeaderFn;
   now?: () => Date;
+  externalPostingOptions?: {
+    environment?: string;
+    allowExternalPosting?: string;
+  };
 };
+
+function externalPostingOptions(deps: XApiActionDeps): {
+  environment: unknown;
+  allowExternalPosting: unknown;
+} {
+  const env = deps.readEnv ?? ((key: string) => Deno.env.get(key));
+  return {
+    environment: env("XOT_ENVIRONMENT"),
+    allowExternalPosting: env("ALLOW_EXTERNAL_POSTING"),
+  };
+}
+
+function externalPostingBlockedResponse(error: unknown): AdminActionResponse | null {
+  if (!(error instanceof ExternalPostingBlockedError)) return null;
+  return {
+    body: {
+      ok: false,
+      locked: true,
+      code: "external_posting_blocked",
+      reason: error.reason,
+    },
+    status: 200,
+  };
+}
 
 type XCreds = { ck: string; cs: string; at: string; ats: string };
 
@@ -51,10 +84,41 @@ function table(supabase: SupabaseAdminClient, name: string): TableQueryBuilder {
   return supabase.from(name) as TableQueryBuilder;
 }
 
+function runtimeControlsClient(
+  supabase: SupabaseAdminClient,
+): RuntimeControlsQueryClient {
+  return {
+    from: (tableName) => ({
+      select: (columns) =>
+        (supabase.from(tableName) as TableQueryBuilder).select(columns),
+    }),
+  };
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
+}
+
+function boundedHttpStatus(value: unknown): number {
+  const status = typeof value === "number" ? value : Number(value);
+  return Number.isInteger(status) && status >= 100 && status <= 599 ? status : 0;
+}
+
+function xApiFailureCode(operation: string, status?: unknown): string {
+  const boundedStatus = boundedHttpStatus(status);
+  return boundedStatus > 0
+    ? `${operation}_http_${boundedStatus}`
+    : `${operation}_request_failed`;
+}
+
+function safeXApiEventError(value: unknown, fallback = "x_api_request_failed"): string {
+  if (typeof value !== "string") return fallback;
+  const normalized = value.trim();
+  return /^[a-z0-9][a-z0-9_.:-]{0,119}$/i.test(normalized)
+    ? normalized
+    : fallback;
 }
 
 function readEnv(key: string, deps?: Pick<XApiActionDeps, "readEnv">): string {
@@ -144,6 +208,9 @@ export async function recordAdminXApiAttempt(
   },
   response?: Response | null,
 ) {
+  const responseError = response && !response.ok
+    ? xApiFailureCode("x_api", response.status)
+    : null;
   await recordXApiEvent(supabase, {
     source: "admin-actions",
     sourceAction: input.action,
@@ -153,8 +220,9 @@ export async function recordAdminXApiAttempt(
     userId: input.userId ?? null,
     ok: response?.ok ?? false,
     status: response?.status ?? null,
-    error: input.error ??
-      (response && !response.ok ? `HTTP ${response.status}` : null),
+    error: input.error
+      ? safeXApiEventError(input.error)
+      : responseError,
     requestCounted: input.requestCounted,
     estimatedBillableUnit: input.estimatedBillableUnit ?? null,
   }, response ?? null);
@@ -181,18 +249,30 @@ export async function verifyXCredentialsAdminAction(
   supabase: SupabaseAdminClient,
   deps: XApiActionDeps = {},
 ): Promise<AdminActionResponse> {
-  const { data: controlsRow } = await table(supabase, "settings").select(
+  const { data: controlsRow, error: controlsError } = await table(supabase, "settings").select(
     "value",
   )
     .eq("key", "x_api_controls")
     .maybeSingle();
+  if (controlsError) {
+    return {
+      body: { ok: false, error: "x_api_controls_read_failed" },
+      status: 503,
+    };
+  }
   const controls = asRecord(asRecord(controlsRow).value);
   const cacheMinutes = typeof controls.verify_cache_minutes === "number"
     ? controls.verify_cache_minutes
     : 15;
-  const { data: cachedRow } = await table(supabase, "settings").select("value")
+  const { data: cachedRow, error: cachedError } = await table(supabase, "settings").select("value")
     .eq("key", "x_self_id")
     .maybeSingle();
+  if (cachedError) {
+    return {
+      body: { ok: false, error: "x_self_id_read_failed" },
+      status: 503,
+    };
+  }
   const cached = asRecord(asRecord(cachedRow).value);
   const cachedAt = typeof cached.cached_at === "string"
     ? new Date(cached.cached_at).getTime()
@@ -258,20 +338,28 @@ export async function verifyXCredentialsAdminAction(
       method: "GET",
     }, resp);
     if (!resp.ok) {
+      const errorCode = xApiFailureCode("x_credentials", resp.status);
       return {
         body: {
           ok: false,
-          error: `HTTP ${resp.status}: ${text.slice(0, 300)}`,
-          raw: parsedBody,
+          error: errorCode,
         },
+        status: 502,
       };
     }
     const user = (parsedBody as {
       data?: { id?: string; username?: string; name?: string };
     })?.data;
-    if (user?.id) {
+    if (!user || typeof user !== "object" || Array.isArray(user) ||
+      typeof user.id !== "string" || user.id.trim().length === 0) {
+      return {
+        body: { ok: false, error: "x_provider_invalid_response" },
+        status: 502,
+      };
+    }
+    if (user.id) {
       const stamp = now(deps).toISOString();
-      await table(supabase, "settings").upsert({
+      const { error: cacheWriteError } = await table(supabase, "settings").upsert({
         key: "x_self_id",
         value: {
           id: user.id,
@@ -281,6 +369,16 @@ export async function verifyXCredentialsAdminAction(
         },
         updated_at: stamp,
       }, { onConflict: "key" });
+      if (cacheWriteError) {
+        return {
+          body: {
+            ok: false,
+            provider_verified: true,
+            error: "x_self_id_cache_write_failed",
+          },
+          status: 503,
+        };
+      }
     }
     return {
       body: {
@@ -288,17 +386,17 @@ export async function verifyXCredentialsAdminAction(
         id: user?.id,
         handle: user?.username,
         name: user?.name,
-        raw: parsedBody,
       },
     };
   } catch (e) {
+    const errorCode = "x_credentials_request_failed";
     await recordAdminXApiAttempt(supabase, {
       action: "verify_credentials",
       endpoint: url,
       method: "GET",
-      error: (e as Error).message,
+      error: errorCode,
     }, null);
-    return { body: { ok: false, error: (e as Error).message } };
+    return { body: { ok: false, error: errorCode }, status: 502 };
   }
 }
 
@@ -326,69 +424,27 @@ export async function sendTestTweetAdminAction(
       status: 400,
     };
   }
-  const creds = getXCreds(deps);
-  if (!creds) {
-    return {
-      body: { ok: false, error: "One or more TWITTER_* secrets are missing" },
-      status: 200,
-    };
-  }
-  const url = "https://api.x.com/2/tweets";
-  const payload: Record<string, unknown> = { text };
-  if (replyTo) payload.reply = { in_reply_to_tweet_id: replyTo };
+  // Apply the environment/runtime guard before the synthetic-write lock so
+  // preview callers receive the stable external-posting response shape.
   try {
-    const oauth = deps.oauthHeader ?? xOauthHeader;
-    const auth = await oauth(
-      "POST",
-      url,
-      {},
-      creds.ck,
-      creds.cs,
-      creds.at,
-      creds.ats,
+    await requireExternalPosting(
+      runtimeControlsClient(supabase),
+      externalPostingOptions(deps),
     );
-    const resp = await (deps.fetchImpl ?? fetch)(url, {
-      method: "POST",
-      headers: { Authorization: auth, "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const respText = await resp.text();
-    let respBody: unknown;
-    try {
-      respBody = JSON.parse(respText);
-    } catch {
-      respBody = respText;
-    }
-    await recordAdminXApiAttempt(
-      supabase,
-      {
-        action: "send_test_tweet",
-        endpoint: url,
-        method: "POST",
-      },
-      resp,
-    );
-    if (!resp.ok) {
-      return {
-        body: {
-          ok: false,
-          error: `HTTP ${resp.status}: ${respText.slice(0, 300)}`,
-          response: respBody,
-        },
-      };
-    }
-    const created = (respBody as { data?: { id?: string; text?: string } })
-      ?.data;
-    return { body: { ok: true, tweet_id: created?.id, response: respBody } };
-  } catch (e) {
-    await recordAdminXApiAttempt(supabase, {
-      action: "send_test_tweet",
-      endpoint: url,
-      method: "POST",
-      error: (e as Error).message,
-    }, null);
-    return { body: { ok: false, error: (e as Error).message } };
+  } catch (error) {
+    const blocked = externalPostingBlockedResponse(error);
+    if (blocked) return blocked;
+    throw error;
   }
+  // Synthetic provider writes are forbidden during the immutable cutover.
+  return {
+    body: {
+      ok: false,
+      code: "delivery_cutover_blocked",
+      error: "Synthetic X test tweets are disabled during the immutable delivery cutover",
+    },
+    status: 409,
+  };
 }
 
 export async function testHydrateTweetAdminAction(
@@ -401,6 +457,28 @@ export async function testHydrateTweetAdminAction(
     return {
       body: { ok: false, error: "tweet_id must be a numeric tweet ID" },
       status: 400,
+    };
+  }
+  const { data: controlsRow, error: controlsError } = await table(supabase, "settings").select(
+    "value",
+  )
+    .eq("key", "x_api_controls")
+    .maybeSingle();
+  if (controlsError) {
+    return {
+      body: { ok: false, error: "x_api_controls_read_failed" },
+      status: 503,
+    };
+  }
+  if (!isMyXEnabled(asRecord(asRecord(controlsRow).value))) {
+    return {
+      body: {
+        ok: false,
+        disabled: true,
+        reason: "owned_reads_disabled",
+        error: "Owned X reads are disabled by x_api_controls.",
+      },
+      status: 200,
     };
   }
   const creds = getXCreds(deps);
@@ -445,17 +523,24 @@ export async function testHydrateTweetAdminAction(
       tweetId,
     }, resp);
     if (!resp.ok) {
+      const errorCode = xApiFailureCode("x_hydrate", resp.status);
       return {
         body: {
           ok: false,
-          error: `HTTP ${resp.status}: ${respText.slice(0, 300)}`,
-          raw: respBody,
+          error: errorCode,
         },
+        status: 502,
       };
     }
     const data = (respBody as {
       data?: { text?: string; lang?: string; note_tweet?: { text?: string } };
     })?.data;
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      return {
+        body: { ok: false, error: "x_provider_invalid_response" },
+        status: 502,
+      };
+    }
     return {
       body: {
         ok: true,
@@ -463,17 +548,17 @@ export async function testHydrateTweetAdminAction(
         text: data?.text,
         lang: data?.lang,
         note_tweet: data?.note_tweet?.text,
-        raw: respBody,
       },
     };
   } catch (e) {
+    const errorCode = "x_hydrate_request_failed";
     await recordAdminXApiAttempt(supabase, {
       action: "test_hydrate",
       endpoint: baseUrl,
       method: "GET",
       tweetId,
-      error: (e as Error).message,
+      error: errorCode,
     }, null);
-    return { body: { ok: false, error: (e as Error).message } };
+    return { body: { ok: false, error: errorCode }, status: 502 };
   }
 }

@@ -1,4 +1,4 @@
-import { invokeAdminAction } from '@/api/adminActions';
+import { invokeAdminRead } from '@/api/adminActions';
 
 export interface DashboardMetrics {
   postsIngested: number;
@@ -658,7 +658,7 @@ function normalizeProcessObservability(input: RpcResult['process_observability']
 }
 
 export async function fetchDashboardData() {
-  const data = await invokeAdminAction<{ success?: boolean; error?: string; dashboard: unknown }>({ action: 'get_dashboard_summary' });
+  const data = await invokeAdminRead<{ success?: boolean; error?: string; dashboard: unknown }>({ action: 'get_dashboard_summary' });
   if (!data?.success) throw new Error(data?.error || 'Failed to load dashboard summary');
   const rpc = data.dashboard as unknown as RpcResult;
 

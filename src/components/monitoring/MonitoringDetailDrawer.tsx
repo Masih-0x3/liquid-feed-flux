@@ -31,8 +31,12 @@ import { MonitoringDeliveryTimeline } from "@/components/monitoring/MonitoringDe
 import { MonitoringDuplicateGateCard } from "@/components/monitoring/MonitoringDuplicateGateCard";
 import { MonitoringDuplicateMatch } from "@/components/monitoring/MonitoringDuplicateEvidence";
 import { MonitoringProcessTraceMap } from "@/components/monitoring/MonitoringProcessTraceMap";
-import { VideoRenderDetailPanel } from "@/components/video/VideoRenderDetailPanel";
-import { buildProcessTraceMap } from "@/lib/processTraceMap";
+import {
+  buildProcessTraceMap,
+  normalizeProcessTraceStatus,
+  processTraceStatusTone,
+} from "@/lib/processTraceMap";
+import { contentLanguageAttributes, persianContentAttributes } from "@/lib/contentLanguage";
 
 function scoringReasonTagLabel(value: string | null | undefined): string {
   return value ? value.replace(/_/g, ' ') : 'No reason tag';
@@ -47,11 +51,7 @@ function scoringRuleLabel(value: string | null | undefined): string {
 }
 
 function processStatusTone(status: string | null | undefined): 'good' | 'warn' | 'bad' | 'muted' | 'info' {
-  if (status === 'completed') return 'good';
-  if (status === 'failed') return 'bad';
-  if (status === 'skipped') return 'muted';
-  if (status === 'running' || status === 'pending') return 'info';
-  return 'muted';
+  return processTraceStatusTone(normalizeProcessTraceStatus(status));
 }
 
 function compactNumber(value: number | null | undefined): string {
@@ -66,7 +66,7 @@ function formatDuration(value: number | null | undefined, unit: 'seconds' | 'mil
 }
 
 function processReasonLabel(value: string | null | undefined): string {
-  return value ? value.replaceAll('_', ' ') : 'not exported';
+  return value ? value.replace(/_/g, ' ') : 'not exported';
 }
 
 type ProcessObservability = NonNullable<MonitoringEntry['process_observability']>;
@@ -101,7 +101,7 @@ function ProcessObservabilityPanel({ observability }: { observability?: ProcessO
             <div className="flex flex-wrap items-center gap-2">
               {latestRun && (
                 <Badge className={toneClass(processStatusTone(latestRun.status))}>
-                  {latestRun.status.replaceAll('_', ' ')}
+                  {latestRun.status.replace(/_/g, ' ')}
                 </Badge>
               )}
               <Badge variant="outline">{observability?.source === 'workflow_runs' ? 'Local ledger' : 'Unavailable'}</Badge>
@@ -188,6 +188,9 @@ interface MonitoringDetailDrawerProps {
   tweetId: string | null;
   entry: MonitoringEntry | null;
   timeline: PipelineEvent[];
+  timelineLoading: boolean;
+  timelineError: boolean;
+  onRetryTimeline: () => void;
   deliverThreshold: number;
   xPostingEnabled: boolean;
   xDiagnostic: XPostingDiagnosticItem | undefined;
@@ -207,6 +210,8 @@ interface MonitoringDetailDrawerProps {
   onScoreFeedback: (entry: MonitoringEntry, feedback: AudienceFeedback, expectedAudienceClass?: AudienceClassValue | '') => void | Promise<void>;
   onEnrichmentFeedback: (entry: MonitoringEntry, feedback: EnrichmentFeedback) => void | Promise<void>;
   onSelectEnrichmentVariant: (entry: MonitoringEntry, variant: string) => void | Promise<void>;
+  readOnly: boolean;
+  mutationDisabledTitle?: string;
 }
 
 export function MonitoringDetailDrawer({
@@ -215,6 +220,9 @@ export function MonitoringDetailDrawer({
   tweetId,
   entry,
   timeline,
+  timelineLoading,
+  timelineError,
+  onRetryTimeline,
   deliverThreshold,
   xPostingEnabled,
   xDiagnostic,
@@ -234,6 +242,8 @@ export function MonitoringDetailDrawer({
   onScoreFeedback,
   onEnrichmentFeedback,
   onSelectEnrichmentVariant,
+  readOnly,
+  mutationDisabledTitle,
 }: MonitoringDetailDrawerProps) {
   const deliverySummary = useMemo(
     () => entry ? buildDeliverySummary(entry, timeline) : [],
@@ -259,6 +269,7 @@ export function MonitoringDetailDrawer({
   const selectedVoice = entry?.source_context?.voice ?? null;
   const selectedVoiceScores = selectedVoice?.critic?.variants ?? [];
   const isGenerating = entry ? enrichingTweetIds.has(entry.tweet_id) : false;
+  const disabledMutationTitle = readOnly ? mutationDisabledTitle : undefined;
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
@@ -336,7 +347,7 @@ export function MonitoringDetailDrawer({
                             </Badge>
                           )}
                           {xDiagnostic.enrichment?.pipeline_mode && (
-                            <Badge variant="outline">Enrichment: {xDiagnostic.enrichment.pipeline_mode.replaceAll('_', ' ')}</Badge>
+                            <Badge variant="outline">Enrichment: {xDiagnostic.enrichment.pipeline_mode.replace(/_/g, ' ')}</Badge>
                           )}
                         </div>
                         {xDiagnostic.blockers.length > 0 ? (
@@ -344,7 +355,7 @@ export function MonitoringDetailDrawer({
                             {xDiagnostic.blockers.map((blocker) => (
                               <div key={blocker.code} className="rounded-md border bg-muted/30 p-2">
                                 <p className="font-medium">{blocker.label}</p>
-                                <p className="text-xs text-muted-foreground">{blocker.code.replaceAll('_', ' ')}</p>
+                                <p className="text-xs text-muted-foreground">{blocker.code.replace(/_/g, ' ')}</p>
                               </div>
                             ))}
                           </div>
@@ -379,7 +390,7 @@ export function MonitoringDetailDrawer({
                               <Badge variant={xDiagnostic.candidate?.sql_gate_passed ? 'default' : 'outline'}>
                                 {xDiagnostic.candidate?.sql_gate_passed ? 'candidate' : 'not candidate'}
                               </Badge>
-                              {xDiagnostic.candidate?.reason && <span className="text-xs text-muted-foreground">{xDiagnostic.candidate.reason.replaceAll('_', ' ')}</span>}
+                              {xDiagnostic.candidate?.reason && <span className="text-xs text-muted-foreground">{xDiagnostic.candidate.reason.replace(/_/g, ' ')}</span>}
                               {xDiagnostic.candidate?.dispatch_source && <span className="text-xs text-muted-foreground">source {xDiagnostic.candidate.dispatch_source}</span>}
                               {typeof xDiagnostic.candidate?.age_ms === 'number' && <span className="text-xs text-muted-foreground">age {formatAge(Math.round(xDiagnostic.candidate.age_ms / 1000))}</span>}
                             </div>
@@ -391,7 +402,7 @@ export function MonitoringDetailDrawer({
                               <p className="text-xs font-medium text-muted-foreground">Media rows</p>
                               <Badge variant="outline">
                                 {xDiagnostic.media?.selected_tier ?? 'unknown'}
-                                {xDiagnostic.media?.selected_reason ? `: ${xDiagnostic.media.selected_reason.replaceAll('_', ' ')}` : ''}
+                                {xDiagnostic.media?.selected_reason ? `: ${xDiagnostic.media.selected_reason.replace(/_/g, ' ')}` : ''}
                               </Badge>
                             </div>
                             <div className="grid gap-2">
@@ -406,7 +417,7 @@ export function MonitoringDetailDrawer({
                                     </p>
                                   </div>
                                   <Badge className={row.sendable ? toneClass('good') : toneClass('warn')}>
-                                    {(row.role ?? 'not_sendable').replaceAll('_', ' ')}
+                                    {(row.role ?? 'not_sendable').replace(/_/g, ' ')}
                                   </Badge>
                                 </div>
                               ))}
@@ -414,13 +425,24 @@ export function MonitoringDetailDrawer({
                           </div>
                         )}
                         <div className="grid gap-2 sm:grid-cols-2">
-                          <Button size="sm" variant="outline" onClick={() => onGenerateEnrichment(entry.tweet_id)} disabled={isGenerating}>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={readOnly || isGenerating}
+                            title={disabledMutationTitle}
+                            onClick={() => { if (!readOnly) void onGenerateEnrichment(entry.tweet_id); }}
+                          >
                             {isGenerating
                               ? <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
                               : <Sparkles className="w-3 h-3 mr-1.5" />}
                             {isGenerating ? 'Generating draft' : 'Generate enrichment draft'}
                           </Button>
-                          <Button size="sm" disabled={!xPostingEnabled} onClick={() => onRequestAction({ type: 'force_x', entry })}>
+                          <Button
+                            size="sm"
+                            disabled={readOnly || !xPostingEnabled}
+                            title={disabledMutationTitle}
+                            onClick={() => { if (!readOnly) onRequestAction({ type: 'force_x', entry }); }}
+                          >
                             <Twitter className="w-3 h-3 mr-1.5" />Post plain to X
                           </Button>
                         </div>
@@ -433,7 +455,9 @@ export function MonitoringDetailDrawer({
 
                 <MonitoringDuplicateGateCard
                   entry={entry}
-                  onRunDedupe={(targetEntry) => onRequestAction({ type: 'run_dedupe', entry: targetEntry })}
+                  onRunDedupe={(targetEntry) => { if (!readOnly) onRequestAction({ type: 'run_dedupe', entry: targetEntry }); }}
+                  readOnly={readOnly}
+                  mutationDisabledTitle={mutationDisabledTitle}
                 />
 
                 <Card>
@@ -447,31 +471,40 @@ export function MonitoringDetailDrawer({
                       <div className="mb-1 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                         <p className="text-xs font-medium uppercase text-muted-foreground">Persian</p>
                         <div className="grid grid-cols-2 gap-2 sm:flex">
-                          <Button size="sm" variant="outline" className="justify-center" onClick={() => onRequestAction({ type: 'translate', entry })}>Get translation</Button>
-                          <Button size="sm" variant="outline" className="justify-center" onClick={() => onStartEditTranslation(entry)}>Edit</Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="justify-center"
+                            disabled={readOnly}
+                            title={disabledMutationTitle}
+                            onClick={() => { if (!readOnly) onRequestAction({ type: 'translate', entry }); }}
+                          >Get translation</Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="justify-center"
+                            disabled={readOnly}
+                            title={disabledMutationTitle}
+                            onClick={() => { if (!readOnly) onStartEditTranslation(entry); }}
+                          >Edit</Button>
                         </div>
                       </div>
                       {editingEntry === entry.tweet_id ? (
                         <div className="space-y-2">
-                          <Textarea value={editedContent} onChange={(event) => onEditedContentChange(event.target.value)} className="min-h-[120px]" dir="rtl" />
+                          <Textarea value={editedContent} onChange={(event) => onEditedContentChange(event.target.value)} disabled={readOnly} className="min-h-[120px]" {...persianContentAttributes} />
                           <div className="grid grid-cols-2 gap-2 sm:flex">
-                            <Button size="sm" onClick={onSaveEdit}>Save</Button>
+                            <Button size="sm" disabled={readOnly} title={disabledMutationTitle} onClick={() => { if (!readOnly) void onSaveEdit(); }}>Save</Button>
                             <Button size="sm" variant="outline" onClick={onCancelEdit}>Cancel</Button>
                           </div>
                         </div>
                       ) : (
-                        <div className="rounded-md border bg-card p-3 leading-relaxed" dir="rtl">{entry.text_translated || '[Not translated yet]'}</div>
+                        <div {...persianContentAttributes} className="rounded-md border bg-card p-3 leading-relaxed">{entry.text_translated || '[Not translated yet]'}</div>
                       )}
                     </div>
                   </CardContent>
                 </Card>
 
-                <MediaThumbnails tweetId={entry.tweet_id} />
-                {entry.has_media && (
-                  <div className="mt-4">
-                    <VideoRenderDetailPanel tweetId={entry.tweet_id} enabled={open} compact />
-                  </div>
-                )}
+                {entry.has_media && <MediaThumbnails />}
 
                 <Card>
                   <CardHeader className="pb-2"><CardTitle className="text-sm">Scoring</CardTitle></CardHeader>
@@ -569,7 +602,7 @@ export function MonitoringDetailDrawer({
                             <p className="font-medium">Manual scoring feedback</p>
                             <p className="text-muted-foreground">
                               {selectedManualScoringFeedback.reasonTag ? scoringReasonTagLabel(selectedManualScoringFeedback.reasonTag) : 'No reason tag'}
-                              {selectedManualScoringFeedback.feedback ? ` - ${selectedManualScoringFeedback.feedback.replaceAll('_', ' ')}` : ''}
+                              {selectedManualScoringFeedback.feedback ? ` - ${selectedManualScoringFeedback.feedback.replace(/_/g, ' ')}` : ''}
                             </p>
                             {selectedManualScoringFeedback.reason && <p className="mt-1 text-muted-foreground">{selectedManualScoringFeedback.reason}</p>}
                           </div>
@@ -599,22 +632,28 @@ export function MonitoringDetailDrawer({
                     {entry.audience_reason && <p className="rounded-md border bg-muted/30 p-2">{entry.audience_reason}</p>}
                     {entry.importance_reasoning && <p className="rounded-md border bg-muted/30 p-2">{entry.importance_reasoning}</p>}
                     <div className="flex flex-wrap gap-2">
-                      <Button size="sm" className="w-full sm:w-auto" onClick={() => onOpenManualScore(entry)}>
+                      <Button
+                        size="sm"
+                        className="w-full sm:w-auto"
+                        disabled={readOnly}
+                        title={disabledMutationTitle}
+                        onClick={() => { if (!readOnly) onOpenManualScore(entry); }}
+                      >
                         <SlidersHorizontal className="w-3 h-3 mr-1.5" />Manual score
                       </Button>
-                      <Button size="sm" variant="outline" onClick={() => onScoreFeedback(entry, 'should_pass_audience', (entry.audience_class as AudienceClassValue | null) ?? 'direct_focus')} disabled={feedbackLoading === `${entry.tweet_id}:should_pass_audience`}>
+                      <Button size="sm" variant="outline" onClick={() => { if (!readOnly) void onScoreFeedback(entry, 'should_pass_audience', (entry.audience_class as AudienceClassValue | null) ?? 'direct_focus'); }} disabled={readOnly || feedbackLoading === `${entry.tweet_id}:should_pass_audience`} title={disabledMutationTitle}>
                         Should pass
                       </Button>
-                      <Button size="sm" variant="outline" onClick={() => onScoreFeedback(entry, 'should_skip', (entry.audience_class as AudienceClassValue | null) ?? 'off_topic')} disabled={feedbackLoading === `${entry.tweet_id}:should_skip`}>
+                      <Button size="sm" variant="outline" onClick={() => { if (!readOnly) void onScoreFeedback(entry, 'should_skip', (entry.audience_class as AudienceClassValue | null) ?? 'off_topic'); }} disabled={readOnly || feedbackLoading === `${entry.tweet_id}:should_skip`} title={disabledMutationTitle}>
                         Should skip
                       </Button>
-                      <Button size="sm" variant="outline" onClick={() => onScoreFeedback(entry, 'wrong_relevance_class')} disabled={feedbackLoading === `${entry.tweet_id}:wrong_relevance_class`}>
+                      <Button size="sm" variant="outline" onClick={() => { if (!readOnly) void onScoreFeedback(entry, 'wrong_relevance_class'); }} disabled={readOnly || feedbackLoading === `${entry.tweet_id}:wrong_relevance_class`} title={disabledMutationTitle}>
                         Wrong class
                       </Button>
-                      <Button size="sm" variant="outline" onClick={() => onScoreFeedback(entry, 'global_exception_worth_covering', 'global_exception')} disabled={feedbackLoading === `${entry.tweet_id}:global_exception_worth_covering`}>
+                      <Button size="sm" variant="outline" onClick={() => { if (!readOnly) void onScoreFeedback(entry, 'global_exception_worth_covering', 'global_exception'); }} disabled={readOnly || feedbackLoading === `${entry.tweet_id}:global_exception_worth_covering`} title={disabledMutationTitle}>
                         Global exception
                       </Button>
-                      <Button size="sm" variant="outline" onClick={() => onScoreFeedback(entry, 'not_global_exception', 'off_topic')} disabled={feedbackLoading === `${entry.tweet_id}:not_global_exception`}>
+                      <Button size="sm" variant="outline" onClick={() => { if (!readOnly) void onScoreFeedback(entry, 'not_global_exception', 'off_topic'); }} disabled={readOnly || feedbackLoading === `${entry.tweet_id}:not_global_exception`} title={disabledMutationTitle}>
                         Not exception
                       </Button>
                     </div>
@@ -626,7 +665,7 @@ export function MonitoringDetailDrawer({
                     <CardHeader className="pb-2">
                       <div className="flex items-center justify-between">
                         <CardTitle className="text-sm">Enrichment Studio</CardTitle>
-                        <Button size="sm" variant="outline" onClick={() => onGenerateEnrichment(entry.tweet_id)} disabled={isGenerating}>
+                        <Button size="sm" variant="outline" onClick={() => { if (!readOnly) void onGenerateEnrichment(entry.tweet_id); }} disabled={readOnly || isGenerating} title={disabledMutationTitle}>
                           {isGenerating
                             ? <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
                             : <Sparkles className="w-3 h-3 mr-1.5" />}
@@ -646,7 +685,7 @@ export function MonitoringDetailDrawer({
                         <div className="grid gap-2 sm:grid-cols-3">
                           <div className="rounded-md border bg-muted/20 p-2">
                             <p className="text-xs text-muted-foreground">Intent</p>
-                            <p className="font-medium">{selectedVoice.intent?.replaceAll('_', ' ') || '—'}</p>
+                              <p className="font-medium">{selectedVoice.intent?.replace(/_/g, ' ') || '—'}</p>
                           </div>
                           <div className="rounded-md border bg-muted/20 p-2">
                             <p className="text-xs text-muted-foreground">Language</p>
@@ -654,7 +693,7 @@ export function MonitoringDetailDrawer({
                           </div>
                           <div className="rounded-md border bg-muted/20 p-2">
                             <p className="text-xs text-muted-foreground">Selected</p>
-                            <p className="font-medium">{selectedVoice.selected_variant?.replaceAll('_', ' ') || '—'}</p>
+                              <p className="font-medium">{selectedVoice.selected_variant?.replace(/_/g, ' ') || '—'}</p>
                           </div>
                         </div>
                       )}
@@ -665,7 +704,7 @@ export function MonitoringDetailDrawer({
                         </div>
                         <div>
                           <p className="mb-1 text-xs font-medium text-muted-foreground">Translation</p>
-                          <p dir="rtl" className="max-h-32 overflow-y-auto rounded-md border bg-muted/30 p-2">{entry.text_translated || '[No translation yet]'}</p>
+                          <p {...persianContentAttributes} className="max-h-32 overflow-y-auto rounded-md border bg-muted/30 p-2">{entry.text_translated || '[No translation yet]'}</p>
                         </div>
                       </div>
                       {entry.monetization_risk_flags && entry.monetization_risk_flags.length > 0 && (
@@ -686,12 +725,12 @@ export function MonitoringDetailDrawer({
                               return (
                                 <div key={variant.kind || variant.label} className={`rounded-md border bg-muted/20 p-3 ${selected ? 'border-primary/60' : ''}`}>
                                   <div className="mb-2 flex flex-wrap items-center gap-2">
-                                    <Badge variant={selected ? 'default' : 'outline'}>{variant.label || variant.kind?.replaceAll('_', ' ')}</Badge>
+                                    <Badge variant={selected ? 'default' : 'outline'}>{variant.label || variant.kind?.replace(/_/g, ' ')}</Badge>
                                     <Badge variant="outline">{variant.language_choice === 'english' ? 'News + P.S.' : 'خبر + پ.ن'}</Badge>
                                     {typeof score?.voice_match === 'number' && <Badge variant="outline">Voice {score.voice_match}</Badge>}
                                     {typeof score?.platform_risk === 'number' && <Badge className={score.platform_risk >= 70 ? toneClass('bad') : score.platform_risk >= 35 ? toneClass('warn') : toneClass('good')}>Risk {score.platform_risk}</Badge>}
                                   </div>
-                                  <p dir="auto" className="whitespace-pre-wrap rounded-md border bg-background/60 p-2 text-sm">{variant.final_x_text}</p>
+                                  <p {...contentLanguageAttributes(variant.language_choice)} className="whitespace-pre-wrap rounded-md border bg-background/60 p-2 text-sm">{variant.final_x_text}</p>
                                   <p className="mt-2 text-xs text-muted-foreground">{variant.voice_rationale}</p>
                                   {score?.rationale && <p className="mt-1 text-xs text-muted-foreground">{score.rationale}</p>}
                                   <div className="mt-2 grid grid-cols-2 gap-1 text-[11px] text-muted-foreground">
@@ -704,8 +743,9 @@ export function MonitoringDetailDrawer({
                                     size="sm"
                                     variant={selected ? 'secondary' : 'outline'}
                                     className="mt-2 w-full"
-                                    onClick={() => onSelectEnrichmentVariant(entry, variant.kind || 'raw_masihh')}
-                                    disabled={selected || feedbackLoading === `${entry.tweet_id}:variant:${variant.kind}`}
+                                    onClick={() => { if (!readOnly) void onSelectEnrichmentVariant(entry, variant.kind || 'raw_masihh'); }}
+                                    disabled={readOnly || selected || feedbackLoading === `${entry.tweet_id}:variant:${variant.kind}`}
+                                    title={disabledMutationTitle}
                                   >
                                     {selected ? 'Selected' : 'Use this preview'}
                                   </Button>
@@ -718,27 +758,27 @@ export function MonitoringDetailDrawer({
                       {entry.creator_angle && (
                         <div>
                           <p className="mb-1 text-xs font-medium text-muted-foreground">Creator angle</p>
-                          <p dir="rtl" className="rounded-md border bg-muted/30 p-2">{entry.creator_angle}</p>
+                          <p dir="auto" className="rounded-md border bg-muted/30 p-2">{entry.creator_angle}</p>
                         </div>
                       )}
                       {entry.why_it_matters && (
                         <div>
                           <p className="mb-1 text-xs font-medium text-muted-foreground">Why it matters</p>
-                          <p dir="rtl" className="rounded-md border bg-muted/30 p-2">{entry.why_it_matters}</p>
+                          <p dir="auto" className="rounded-md border bg-muted/30 p-2">{entry.why_it_matters}</p>
                         </div>
                       )}
                       {entry.final_x_text && (
                         <div>
                           <p className="mb-1 text-xs font-medium text-muted-foreground">Final X preview</p>
-                          <p dir="auto" className="whitespace-pre-wrap rounded-md border bg-muted/30 p-2">{entry.final_x_text}</p>
+                          <p {...contentLanguageAttributes(selectedVoice?.language_choice)} className="whitespace-pre-wrap rounded-md border bg-muted/30 p-2">{entry.final_x_text}</p>
                         </div>
                       )}
-                      {!entry.final_x_text && entry.composed_post_text && <p dir="rtl" className="rounded-md border bg-muted/30 p-2">{entry.composed_post_text}</p>}
+                      {!entry.final_x_text && entry.composed_post_text && <p dir="auto" className="rounded-md border bg-muted/30 p-2">{entry.composed_post_text}</p>}
                       {entry.algorithm_signal_scores && (
                         <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
                           {Object.entries(entry.algorithm_signal_scores).map(([key, value]) => (
                             <div key={key} className="rounded-md border bg-muted/20 p-2">
-                              <p className="text-muted-foreground">{key.replaceAll('_', ' ')}</p>
+                              <p className="text-muted-foreground">{key.replace(/_/g, ' ')}</p>
                               <p className="font-semibold">{value}/5</p>
                             </div>
                           ))}
@@ -748,10 +788,10 @@ export function MonitoringDetailDrawer({
                         <p className="text-xs text-muted-foreground">Sources checked: {entry.source_context.sources.slice(0, 3).join(' | ')}</p>
                       )}
                       <div className="grid gap-2 sm:grid-cols-2">
-                        <Button size="sm" onClick={() => onRequestAction({ type: 'approve_enrichment', entry })} disabled={entry.enrich_status === 'approved'}>
+                        <Button size="sm" onClick={() => { if (!readOnly) onRequestAction({ type: 'approve_enrichment', entry }); }} disabled={readOnly || entry.enrich_status === 'approved'} title={disabledMutationTitle}>
                           <Check className="w-3 h-3 mr-1.5" />Approve for X
                         </Button>
-                        <Button size="sm" variant="outline" onClick={() => onRequestAction({ type: 'reject_enrichment', entry })} disabled={entry.enrich_status === 'rejected'}>
+                        <Button size="sm" variant="outline" onClick={() => { if (!readOnly) onRequestAction({ type: 'reject_enrichment', entry }); }} disabled={readOnly || entry.enrich_status === 'rejected'} title={disabledMutationTitle}>
                           <Ban className="w-3 h-3 mr-1.5" />Reject
                         </Button>
                       </div>
@@ -767,7 +807,7 @@ export function MonitoringDetailDrawer({
                           ['strong_angle', 'Strong angle'],
                           ['too_risky', 'Too risky'],
                         ] as const).map(([value, label]) => (
-                          <Button key={value} size="sm" variant="outline" onClick={() => onEnrichmentFeedback(entry, value)} disabled={feedbackLoading === `${entry.tweet_id}:enrich:${value}`}>
+                          <Button key={value} size="sm" variant="outline" onClick={() => { if (!readOnly) void onEnrichmentFeedback(entry, value); }} disabled={readOnly || feedbackLoading === `${entry.tweet_id}:enrich:${value}`} title={disabledMutationTitle}>
                             {label}
                           </Button>
                         ))}
@@ -778,12 +818,28 @@ export function MonitoringDetailDrawer({
               </>
             )}
           </div>
-          <MonitoringDeliveryTimeline
-            deliverySummary={deliverySummary}
-            timelineGroups={timelineGroups}
-            eventCount={timeline.length}
-            showDeliverySummary={Boolean(entry)}
-          />
+          {timelineLoading ? (
+            <Card>
+              <CardContent className="flex min-h-40 items-center justify-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading timeline…
+              </CardContent>
+            </Card>
+          ) : timelineError ? (
+            <Card className="border-destructive/40">
+              <CardContent className="space-y-3 p-4 text-sm">
+                <p className="text-destructive">The timeline could not be loaded.</p>
+                <Button type="button" variant="outline" onClick={onRetryTimeline}>Retry timeline</Button>
+              </CardContent>
+            </Card>
+          ) : (
+            <MonitoringDeliveryTimeline
+              deliverySummary={deliverySummary}
+              timelineGroups={timelineGroups}
+              eventCount={timeline.length}
+              showDeliverySummary={Boolean(entry)}
+            />
+          )}
         </div>
         <DrawerFooter className="border-t bg-background/95 px-3 pb-[max(env(safe-area-inset-bottom),0.75rem)] pt-3 sm:px-4">
           <DrawerClose asChild><Button variant="outline">Close</Button></DrawerClose>

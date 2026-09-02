@@ -3,7 +3,9 @@ import {
   claimXPostDelivery,
   completeXPostDelivery,
   failXPostDelivery,
+  markXPostDeliveryProviderStarted,
   normalizeXPostDeliveryClaim,
+  releaseXPostDeliveryForRetry,
   xPostClaimRejection,
 } from "./xPostDeliveryClaim.ts";
 
@@ -38,12 +40,18 @@ Deno.test("normalizes claimed and rejected x post delivery claim payloads", () =
       reason: "claimed",
       existing_status: null,
       existing_x_tweet_id: null,
+      claim_generation: 2,
+      claim_state: "posting",
+      provider_started_at: "2026-06-17T00:00:05.000Z",
       claim_expires_at: "2026-06-17T00:00:00.000Z",
     }),
     {
       claimed: true,
       deliveryId: "d1",
       claimToken: "c1",
+      claimGeneration: 2,
+      claim_state: "posting",
+      providerStartedAt: "2026-06-17T00:00:05.000Z",
       reason: "claimed",
       existingStatus: null,
       existingXTweetId: null,
@@ -94,6 +102,46 @@ Deno.test("claim x post delivery calls the database claim before side effects", 
   }]);
 });
 
+Deno.test("concurrent claim callers preserve one winner and one fenced rejection", async () => {
+  let callCount = 0;
+  const client = {
+    rpc(name: string, _args?: Record<string, unknown>) {
+      assertEquals(name, "claim_x_post_delivery");
+      callCount += 1;
+      return Promise.resolve({
+        data: callCount === 1
+          ? {
+            claimed: true,
+            delivery_id: "delivery-winner",
+            claim_token: "claim-winner",
+            claim_generation: 1,
+            reason: "claimed",
+          }
+          : {
+            claimed: false,
+            reason: "already_posting",
+            delivery_id: "delivery-winner",
+            existing_status: "posting",
+            claim_generation: 1,
+          },
+      });
+    },
+  };
+
+  const claims = await Promise.all([
+    claimXPostDelivery(client, { postId: "tweet-race", source: "worker-a" }),
+    claimXPostDelivery(client, { postId: "tweet-race", source: "worker-b" }),
+  ]);
+
+  assertEquals(callCount, 2);
+  assertEquals(claims.filter((claim) => claim.claimed).length, 1);
+  assertEquals(claims.filter((claim) => !claim.claimed).length, 1);
+  assertEquals(xPostClaimRejection(claims.find((claim) => !claim.claimed)!), {
+    status: "deferred",
+    reason: "already_posting",
+  });
+});
+
 Deno.test("complete and fail x post delivery require the claim token", async () => {
   const { calls, client } = fakeRpcClient({
     complete_x_post_delivery: true,
@@ -104,6 +152,7 @@ Deno.test("complete and fail x post delivery require the claim token", async () 
     await completeXPostDelivery(client, {
       deliveryId: "delivery-1",
       claimToken: "claim-1",
+      claimGeneration: 3,
       xTweetId: "x1",
       mediaCount: 1,
       mediaBytes: 42,
@@ -120,6 +169,7 @@ Deno.test("complete and fail x post delivery require the claim token", async () 
     await failXPostDelivery(client, {
       deliveryId: "delivery-1",
       claimToken: "claim-1",
+      claimGeneration: 3,
       error: "tweet 500",
       apiResponse: { error: "rate_limited" },
       skipReason: "x_api_retriable",
@@ -131,9 +181,83 @@ Deno.test("complete and fail x post delivery require the claim token", async () 
   assertEquals(calls[0].name, "complete_x_post_delivery");
   assertEquals(calls[0].args?.p_delivery_id, "delivery-1");
   assertEquals(calls[0].args?.p_claim_token, "claim-1");
+  assertEquals(calls[0].args?.p_claim_generation, 3);
   assertEquals(calls[1].name, "fail_x_post_delivery");
   assertEquals(calls[1].args?.p_delivery_id, "delivery-1");
   assertEquals(calls[1].args?.p_claim_token, "claim-1");
+  assertEquals(calls[1].args?.p_claim_generation, 3);
+});
+
+Deno.test("mark provider started records the durable boundary before provider calls", async () => {
+  const { calls, client } = fakeRpcClient({
+    mark_x_delivery_provider_started: true,
+  });
+
+  const ok = await markXPostDeliveryProviderStarted(client, {
+    deliveryId: "delivery-1",
+    claimToken: "claim-1",
+    claimGeneration: 4,
+  });
+
+  assertEquals(ok, true);
+  assertEquals(calls, [{
+    name: "mark_x_delivery_provider_started",
+    args: {
+      p_delivery_id: "delivery-1",
+      p_claim_token: "claim-1",
+      p_claim_generation: 4,
+    },
+  }]);
+});
+
+Deno.test("pre-provider release returns a claim to the retryable state", async () => {
+  const { calls, client } = fakeRpcClient({
+    release_x_post_delivery_for_retry: true,
+  });
+
+  assertEquals(
+    await releaseXPostDeliveryForRetry(client, {
+      deliveryId: "delivery-1",
+      claimToken: "claim-1",
+      claimGeneration: 5,
+      error: "stale_media_repair_queued",
+      mediaKind: "video",
+    }),
+    true,
+  );
+  assertEquals(calls[0].name, "release_x_post_delivery_for_retry");
+  assertEquals(calls[0].args?.p_delivery_id, "delivery-1");
+  assertEquals(calls[0].args?.p_claim_token, "claim-1");
+  assertEquals(calls[0].args?.p_claim_generation, 5);
+  assertEquals(calls[0].args?.p_error, "stale_media_repair_queued");
+});
+
+Deno.test("provider start marker rejects a missing or stale generation fence", async () => {
+  const { client } = fakeRpcClient({});
+  await assertRejects(
+    () => markXPostDeliveryProviderStarted(client, {
+      deliveryId: "delivery-1",
+      claimToken: "claim-1",
+      claimGeneration: 0,
+    }),
+    Error,
+    "mark_x_delivery_provider_started_failed",
+  );
+});
+
+Deno.test("provider start marker surfaces database errors", async () => {
+  const { client } = fakeRpcClient({
+    mark_x_delivery_provider_started: new Error("permission denied"),
+  });
+  await assertRejects(
+    () => markXPostDeliveryProviderStarted(client, {
+      deliveryId: "delivery-1",
+      claimToken: "claim-1",
+      claimGeneration: 1,
+    }),
+    Error,
+    "mark_x_delivery_provider_started_failed",
+  );
 });
 
 Deno.test("claim helper surfaces database errors", async () => {
@@ -144,6 +268,6 @@ Deno.test("claim helper surfaces database errors", async () => {
   await assertRejects(
     () => claimXPostDelivery(client, { postId: "t1", source: "cron" }),
     Error,
-    "claim_x_post_delivery: permission denied",
+    "claim_x_post_delivery_failed",
   );
 });

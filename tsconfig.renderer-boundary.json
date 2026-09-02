@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": ["node"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "skipLibCheck": true,
+    "target": "ES2022"
+  },
+  "include": [
+    "services/video-renderer/src/rendererRequestPolicy.js",
+    "services/video-renderer/src/rendererCapacity.js",
+    "services/video-renderer/src/processRunner.js"
+  ]
+}

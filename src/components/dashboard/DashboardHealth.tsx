@@ -1,14 +1,16 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Activity, AlertTriangle, Eye, RefreshCw, Loader2, Settings, Wrench, Play, RotateCcw, Clock, HardDrive } from 'lucide-react';
 import type { PipelineHealth, QueueBreakdown, SystemPerformanceSummary, XLocalUsage } from '@/hooks/useDashboardData';
 import { useState } from 'react';
 import { invokeAdminAction } from '@/api/adminActions';
-import { invokeAdminRetry } from '@/api/adminRetry';
+import { invokeAdminRetry, isAdminRetryCutoverBlocked } from '@/api/adminRetry';
 import { useToast } from '@/hooks/use-toast';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -36,7 +38,18 @@ function storageTone(value: number | null | undefined): string {
   return 'text-success';
 }
 
+function cronActive(
+  cronJobs: Array<Record<string, unknown>>,
+  jobName: string,
+): boolean | null {
+  const job = cronJobs.find((item) => item.jobname === jobName);
+  return typeof job?.active === 'boolean' ? job.active : null;
+}
+
 export function DashboardHealth({ health, queue, xUsage, systemPerformance }: Props) {
+  const { isAdmin, role } = useAuth();
+  const readOnly = role === 'read_only' && !isAdmin;
+  const mutationDisabledTitle = readOnly ? 'Read-only access: maintenance actions are disabled.' : undefined;
   const { toast } = useToast();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -49,6 +62,7 @@ export function DashboardHealth({ health, queue, xUsage, systemPerformance }: Pr
   };
 
   const handleAction = async (action: string) => {
+    if (!isAdmin) return;
     setActionLoading(action);
     try {
       switch (action) {
@@ -73,18 +87,28 @@ export function DashboardHealth({ health, queue, xUsage, systemPerformance }: Pr
         case 'media-cleanup-dry-run': {
           const data = await invokeAdminAction<{ result?: { would_delete?: number } }>({ action: 'dry_run_old_media_cleanup', days_old: 1 });
           const wouldDelete = data?.result?.would_delete ?? 0;
-          toast({ title: 'Media cleanup dry run complete', description: `${wouldDelete} old media object(s) are currently safe to clean.` });
+          toast({
+            title: 'Media cleanup dry run complete',
+            description: `${wouldDelete} candidate row(s) reported; no deletion occurred. Shared-reference safety is not yet proven.`,
+          });
           invalidate();
           break;
         }
-        case 'test-pipeline': {
+        case 'validate-webhook': {
           await invokeAdminRetry({ action: 'test_webhook' });
-          toast({ title: 'Live test sent', description: 'A production test webhook was invoked.' });
-          invalidate();
+          toast({ title: 'Webhook validation completed', description: 'Authentication and payload parsing completed; no posts or jobs will be created.' });
           break;
         }
       }
-    } catch {
+    } catch (error) {
+      if (action === 'validate-webhook' && isAdminRetryCutoverBlocked(error)) {
+        toast({
+          title: 'Webhook validation blocked',
+          description: 'Validation is unavailable during the immutable delivery cutover. No webhook request was made.',
+          variant: 'destructive',
+        });
+        return;
+      }
       toast({ title: 'Action failed', description: `Failed to execute ${action}.`, variant: 'destructive' });
     } finally {
       setActionLoading(null);
@@ -98,9 +122,33 @@ export function DashboardHealth({ health, queue, xUsage, systemPerformance }: Pr
   ];
   const storage = systemPerformance?.resources;
   const storagePct = storage?.storageUsedPct ?? null;
+  const mediaCleanupActive = storage
+    ? cronActive(storage.cronJobs, 'invoke-media-cleanup-6h')
+    : null;
+  const dbCleanupActive = storage
+    ? cronActive(storage.cronJobs, 'invoke-db-cleanup-daily')
+    : null;
+  const cleanupSafetyHold = mediaCleanupActive === false || dbCleanupActive === false;
+  const pausedCleanupLabels = [
+    mediaCleanupActive === false ? 'media cleanup' : null,
+    dbCleanupActive === false ? 'database retention' : null,
+  ].filter((label): label is string => Boolean(label));
+  const pausedCleanupSummary = pausedCleanupLabels.length === 2
+    ? 'Media cleanup and database retention are'
+    : `${pausedCleanupLabels[0] === 'media cleanup' ? 'Media cleanup is' : 'Database retention is'}`;
 
   return (
     <div className="space-y-4">
+      {cleanupSafetyHold && (
+        <Alert className="border-warning/50 bg-warning/10">
+          <AlertTriangle className="h-4 w-4 !text-warning" />
+          <AlertTitle>Cleanup safety hold active</AlertTitle>
+          <AlertDescription className="text-muted-foreground">
+            {pausedCleanupSummary} intentionally paused to protect shared files. Dry-run inspection remains available; do not re-enable a paused schedule until the reference-aware cleaner passes canary validation.
+          </AlertDescription>
+        </Alert>
+      )}
+
       <Card className="glass-card">
         <CardHeader className="pb-3">
           <CardTitle className="text-base font-display text-glass-foreground flex items-center">
@@ -182,11 +230,19 @@ export function DashboardHealth({ health, queue, xUsage, systemPerformance }: Pr
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Cleanup cron</p>
-                <p className="font-semibold text-glass-foreground">Every 6h</p>
+                <p className={mediaCleanupActive === false ? 'font-semibold text-warning' : 'font-semibold text-glass-foreground'}>
+                  {mediaCleanupActive === false ? 'Safety hold' : mediaCleanupActive === true ? 'Active / 6h' : 'Unknown'}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">DB retention</p>
+                <p className={dbCleanupActive === false ? 'font-semibold text-warning' : 'font-semibold text-glass-foreground'}>
+                  {dbCleanupActive === false ? 'Safety hold' : dbCleanupActive === true ? 'Active / daily' : 'Unknown'}
+                </p>
               </div>
             </div>
             <div className="rounded-md border border-border/60 bg-muted/20 p-3 text-xs text-muted-foreground">
-              This check reads the Supabase temp-media bucket. Use the dry-run below to estimate old media cleanup without deleting objects.
+              This check reads the Supabase temp-media bucket. Dry-run reports legacy candidate rows without deleting objects; it does not certify shared paths as safe.
             </div>
           </CardContent>
         </Card>
@@ -200,6 +256,11 @@ export function DashboardHealth({ health, queue, xUsage, systemPerformance }: Pr
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          {readOnly && (
+            <p className="rounded-md border border-amber-400/30 bg-amber-500/10 p-3 text-xs text-amber-100" role="note">
+              Read-only access. Maintenance actions are disabled. Status and route links remain available.
+            </p>
+          )}
           <div className="grid grid-cols-2 gap-2">
             {safeRoutes.map((item) => (
               <Button key={item.label} variant="outline" className="justify-start" onClick={() => navigate(item.route)}>
@@ -214,7 +275,7 @@ export function DashboardHealth({ health, queue, xUsage, systemPerformance }: Pr
             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
               <AlertDialog>
                 <AlertDialogTrigger asChild>
-                  <Button variant="outline" className="justify-start" disabled={actionLoading === 'retry-deliveries'}>
+                  <Button variant="outline" className="justify-start" title={mutationDisabledTitle} disabled={readOnly || actionLoading === 'retry-deliveries'}>
                     {actionLoading === 'retry-deliveries' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
                     Retry deliveries
                   </Button>
@@ -228,14 +289,14 @@ export function DashboardHealth({ health, queue, xUsage, systemPerformance }: Pr
                   </AlertDialogHeader>
                   <AlertDialogFooter>
                     <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={() => handleAction('retry-deliveries')}>Queue retries</AlertDialogAction>
+                    <AlertDialogAction onClick={() => handleAction('retry-deliveries')} disabled={!isAdmin}>Queue retries</AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>
               </AlertDialog>
 
               <AlertDialog>
                 <AlertDialogTrigger asChild>
-                  <Button variant="outline" className="justify-start" disabled={actionLoading === 'reconcile-jobs'}>
+                  <Button variant="outline" className="justify-start" title={mutationDisabledTitle} disabled={readOnly || actionLoading === 'reconcile-jobs'}>
                     {actionLoading === 'reconcile-jobs' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
                     Reconcile jobs
                   </Button>
@@ -249,14 +310,14 @@ export function DashboardHealth({ health, queue, xUsage, systemPerformance }: Pr
                   </AlertDialogHeader>
                   <AlertDialogFooter>
                     <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={() => handleAction('reconcile-jobs')}>Reconcile</AlertDialogAction>
+                    <AlertDialogAction onClick={() => handleAction('reconcile-jobs')} disabled={!isAdmin}>Reconcile</AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>
               </AlertDialog>
 
               <AlertDialog>
                 <AlertDialogTrigger asChild>
-                  <Button variant="outline" className="justify-start" disabled={actionLoading === 'close-stale-x'}>
+                  <Button variant="outline" className="justify-start" title={mutationDisabledTitle} disabled={readOnly || actionLoading === 'close-stale-x'}>
                     {actionLoading === 'close-stale-x' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Clock className="mr-2 h-4 w-4" />}
                     Close stale X pending
                   </Button>
@@ -270,33 +331,33 @@ export function DashboardHealth({ health, queue, xUsage, systemPerformance }: Pr
                   </AlertDialogHeader>
                   <AlertDialogFooter>
                     <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={() => handleAction('close-stale-x')}>Close stale rows</AlertDialogAction>
+                    <AlertDialogAction onClick={() => handleAction('close-stale-x')} disabled={!isAdmin}>Close stale rows</AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>
               </AlertDialog>
 
-              <Button variant="outline" className="justify-start" disabled={actionLoading === 'media-cleanup-dry-run'} onClick={() => handleAction('media-cleanup-dry-run')}>
+              <Button variant="outline" className="justify-start" title={mutationDisabledTitle} disabled={readOnly || actionLoading === 'media-cleanup-dry-run'} onClick={() => handleAction('media-cleanup-dry-run')}>
                 {actionLoading === 'media-cleanup-dry-run' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Clock className="mr-2 h-4 w-4" />}
                 Dry-run media cleanup
               </Button>
 
               <AlertDialog>
                 <AlertDialogTrigger asChild>
-                  <Button variant="outline" className="justify-start border-destructive/40 text-destructive hover:text-destructive" disabled={actionLoading === 'test-pipeline'}>
-                    {actionLoading === 'test-pipeline' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
-                    Live test pipeline
+                  <Button variant="outline" className="justify-start border-primary/50 text-primary hover:bg-primary/10 hover:text-primary" title={mutationDisabledTitle} disabled={readOnly || actionLoading === 'validate-webhook'}>
+                    {actionLoading === 'validate-webhook' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+                    Validate webhook
                   </Button>
                 </AlertDialogTrigger>
                 <AlertDialogContent>
                   <AlertDialogHeader>
-                    <AlertDialogTitle>Send a production test webhook?</AlertDialogTitle>
+                    <AlertDialogTitle>Validate the webhook safely?</AlertDialogTitle>
                     <AlertDialogDescription>
-                      This may create sample content in the live pipeline. Use only when testing production wiring.
+                      Validation is currently blocked during the immutable delivery cutover. No webhook request will be made. No posts or jobs will be created.
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
                     <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={() => handleAction('test-pipeline')}>Send live test</AlertDialogAction>
+                    <AlertDialogAction onClick={() => handleAction('validate-webhook')} disabled={!isAdmin}>Validate webhook</AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>
               </AlertDialog>

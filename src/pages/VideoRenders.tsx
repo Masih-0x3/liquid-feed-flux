@@ -22,6 +22,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ManualVideoIntakePanel } from '@/components/video/ManualVideoIntakePanel';
 import { VideoRenderDetailPanel } from '@/components/video/VideoRenderDetailPanel';
+import { useDocumentVisibility } from '@/hooks/useDocumentVisibility';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   useRetryVideoRender,
   useSetVideoRenderReviewed,
@@ -55,9 +57,26 @@ function statusClass(status?: string): string {
   return 'border-muted-foreground/30 bg-muted text-muted-foreground';
 }
 
-function heartbeatFresh(lastSeenAt?: string | null): boolean {
-  if (!lastSeenAt) return false;
-  return Date.now() - new Date(lastSeenAt).getTime() < 90_000;
+function formatServerAge(value: number | null | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return '-';
+  const seconds = Math.floor(value / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
+function rendererHealthLabel(state?: string | null): string {
+  if (state === 'healthy') return 'Healthy';
+  if (state === 'stale') return 'Stale';
+  if (state === 'unavailable') return 'Unavailable';
+  if (state === 'blocked') return 'Blocked';
+  return 'Unknown';
+}
+
+function rendererHealthClass(state?: string | null): string {
+  if (state === 'healthy') return 'mt-2 text-2xl font-semibold text-emerald-500';
+  if (state === 'unavailable') return 'mt-2 text-2xl font-semibold text-red-500';
+  if (state === 'blocked' || state === 'stale') return 'mt-2 text-2xl font-semibold text-amber-500';
+  return 'mt-2 text-2xl font-semibold text-muted-foreground';
 }
 
 const STATUS_OPTIONS: Array<{ value: string; label: string; statuses?: VideoRenderStatus[] }> = [
@@ -71,11 +90,15 @@ const STATUS_OPTIONS: Array<{ value: string; label: string; statuses?: VideoRend
 ];
 
 export default function VideoRenders() {
+  const { isAdmin, role } = useAuth();
+  const readOnly = role === 'read_only' && !isAdmin;
+  const mutationDisabledTitle = readOnly ? 'Read-only access: render mutations are disabled.' : undefined;
   const [statusFilter, setStatusFilter] = useState('active');
   const [showReviewed, setShowReviewed] = useState(false);
   const statuses = STATUS_OPTIONS.find((item) => item.value === statusFilter)?.statuses;
-  const overview = useVideoRenderOverview();
-  const queue = useVideoRenderQueue(statuses, showReviewed ? 'all' : 'unreviewed');
+  const isVisible = useDocumentVisibility();
+  const overview = useVideoRenderOverview({ isVisible });
+  const queue = useVideoRenderQueue(statuses, showReviewed ? 'all' : 'unreviewed', { isVisible });
   const retry = useRetryVideoRender();
   const setReviewed = useSetVideoRenderReviewed();
   const [selectedRenderId, setSelectedRenderId] = useState<string | null>(null);
@@ -89,8 +112,8 @@ export default function VideoRenders() {
     () => rows.find((row) => row.id === selectedRenderId) ?? rows[0] ?? null,
     [rows, selectedRenderId],
   );
-  const heartbeat = overview.data?.heartbeats?.[0] ?? null;
-  const online = heartbeatFresh(heartbeat?.last_seen_at) && heartbeat?.status === 'online';
+  const rendererHealth = overview.data?.renderer_health ?? null;
+  const rendererState = rendererHealth?.state ?? 'unknown';
 
   return (
     <div className="w-full space-y-4 animate-fade-in-up">
@@ -116,6 +139,12 @@ export default function VideoRenders() {
         </div>
       </div>
 
+      {readOnly && (
+        <div role="note" className="rounded-md border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+          Read-only access. Review and status data remain available. Retry and review-state changes are disabled.
+        </div>
+      )}
+
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <Card className="glass-card">
           <CardContent className="p-4">
@@ -127,13 +156,22 @@ export default function VideoRenders() {
           </CardContent>
         </Card>
         <Card className="glass-card">
-          <CardContent className="p-4">
+          <CardContent className="p-4" aria-live="polite">
             <div className="flex items-center justify-between gap-2">
               <p className="text-sm text-muted-foreground">Renderer</p>
-              {online ? <Wifi className="h-4 w-4 text-emerald-500" /> : <WifiOff className="h-4 w-4 text-red-500" />}
+              {rendererState === 'healthy'
+                ? <Wifi className="h-4 w-4 text-emerald-500" />
+                : rendererState === 'unavailable'
+                  ? <WifiOff className="h-4 w-4 text-red-500" />
+                  : <AlertTriangle className="h-4 w-4 text-amber-500" />}
             </div>
-            <p className={online ? 'mt-2 text-2xl font-semibold text-emerald-500' : 'mt-2 text-2xl font-semibold text-red-500'}>{online ? 'Online' : 'Offline'}</p>
-            {heartbeat?.last_seen_at && <p className="mt-1 text-xs text-muted-foreground">Seen {formatDistanceToNow(new Date(heartbeat.last_seen_at), { addSuffix: true })}</p>}
+            <p className={rendererHealthClass(rendererState)}>{rendererHealthLabel(rendererState)}</p>
+            {typeof rendererHealth?.age_ms === 'number' && (
+              <p className="mt-1 text-xs text-muted-foreground">Heartbeat age at server check: {formatServerAge(rendererHealth.age_ms)}</p>
+            )}
+            {rendererHealth?.reported_status && (
+              <p className="mt-1 text-xs text-muted-foreground">Reported {rendererHealth.reported_status}</p>
+            )}
           </CardContent>
         </Card>
         <Card className="glass-card">
@@ -189,7 +227,7 @@ export default function VideoRenders() {
                     {unreviewedIssueRows.length > 0 && (
                       <AlertDialog>
                         <AlertDialogTrigger asChild>
-                          <Button size="sm" variant="outline" disabled={setReviewed.isPending}>
+                          <Button size="sm" variant="outline" title={mutationDisabledTitle} disabled={readOnly || setReviewed.isPending}>
                             {setReviewed.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCheck className="mr-2 h-4 w-4" />}
                             Mark {unreviewedIssueRows.length} reviewed
                           </Button>
@@ -203,7 +241,7 @@ export default function VideoRenders() {
                           </AlertDialogHeader>
                           <AlertDialogFooter>
                             <AlertDialogCancel>Cancel</AlertDialogCancel>
-                            <AlertDialogAction onClick={() => setReviewed.mutate({ render_ids: unreviewedIssueRows.map((row) => row.id), reviewed: true })}>
+                            <AlertDialogAction disabled={!isAdmin} onClick={() => { if (isAdmin) setReviewed.mutate({ render_ids: unreviewedIssueRows.map((row) => row.id), reviewed: true }); }}>
                               Mark reviewed
                             </AlertDialogAction>
                           </AlertDialogFooter>
@@ -244,7 +282,7 @@ export default function VideoRenders() {
                               <div className="space-y-1">
                                 <Badge className={statusClass(row.status)}>{row.status}</Badge>
                                 {row.reviewed_at && <Badge variant="outline" className="block w-fit border-emerald-500/30 text-[10px] text-emerald-500">Reviewed</Badge>}
-                                {row.latest_feedback?.label && <Badge variant="outline" className="block w-fit text-[10px]">{row.latest_feedback.label.replaceAll('_', ' ')}</Badge>}
+                                {row.latest_feedback?.label && <Badge variant="outline" className="block w-fit text-[10px]">{row.latest_feedback.label.replace(/_/g, ' ')}</Badge>}
                               </div>
                             </TableCell>
                             <TableCell className="max-w-[280px]">
@@ -263,15 +301,16 @@ export default function VideoRenders() {
                                   <Button
                                     size="sm"
                                     variant={row.reviewed_at ? 'ghost' : 'outline'}
-                                    onClick={() => setReviewed.mutate({ render_id: row.id, reviewed: !row.reviewed_at })}
-                                    disabled={setReviewed.isPending}
+                                    title={mutationDisabledTitle}
+                                    onClick={() => { if (isAdmin) setReviewed.mutate({ render_id: row.id, reviewed: !row.reviewed_at }); }}
+                                    disabled={readOnly || setReviewed.isPending}
                                   >
                                     {setReviewed.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : row.reviewed_at ? <Undo2 className="mr-2 h-4 w-4" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
                                     {row.reviewed_at ? 'Restore' : 'Mark reviewed'}
                                   </Button>
                                 )}
-                                <Button size="sm" variant="ghost" onClick={() => retry.mutate({ render_id: row.id })} disabled={retry.isPending}>
-                                  {retry.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                                <Button size="sm" variant="ghost" title={mutationDisabledTitle} onClick={() => { if (isAdmin) retry.mutate({ render_id: row.id }); }} disabled={readOnly || retry.isPendingFor({ render_id: row.id })}>
+                                  {retry.isPendingFor({ render_id: row.id }) ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                                 </Button>
                               </div>
                             </TableCell>
@@ -301,7 +340,14 @@ export default function VideoRenders() {
                   </div>
                 </CardContent>
               </Card>
-              <VideoRenderDetailPanel renderId={selected?.id ?? null} enabled={Boolean(selected)} compact />
+              <VideoRenderDetailPanel
+                renderId={selected?.id ?? null}
+                status={selected?.status ?? null}
+                enabled={Boolean(selected)}
+                isVisible={isVisible}
+                readOnly={readOnly}
+                mutationDisabledTitle={mutationDisabledTitle}
+              />
             </div>
           </div>
         </TabsContent>

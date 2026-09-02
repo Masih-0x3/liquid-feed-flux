@@ -86,13 +86,6 @@ function table(supabase: SupabaseAdminClient, name: string): TableQueryBuilder {
   return supabase.from(name) as TableQueryBuilder;
 }
 
-function errorMessage(error: unknown): string {
-  if (error && typeof error === "object" && "message" in error) {
-    return String((error as { message?: unknown }).message ?? error);
-  }
-  return String(error);
-}
-
 function nowIso(deps?: Pick<ScoringActionDeps, "now">): string {
   return (deps?.now?.() ?? new Date()).toISOString();
 }
@@ -101,6 +94,23 @@ function openAiApiKey(
   deps?: Pick<ScoringActionDeps, "getOpenAiApiKey">,
 ): string {
   return deps?.getOpenAiApiKey?.() ?? Deno.env.get("OPENAI_API_KEY") ?? "";
+}
+
+function checkedSettingValue(
+  data: unknown,
+  error: unknown,
+  failureCode: string,
+): Record<string, unknown> | null {
+  if (error) throw new Error(failureCode);
+  if (data === null || data === undefined) return null;
+  if (typeof data !== "object" || Array.isArray(data)) {
+    throw new Error(failureCode);
+  }
+  const value = (data as Record<string, unknown>).value;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(failureCode);
+  }
+  return value as Record<string, unknown>;
 }
 
 export function normalizeScoringFeedbackReasonTag(
@@ -124,25 +134,25 @@ export function isAudienceClass(value: unknown): value is AudienceClass {
 export async function loadScoringPolicyConfig(
   supabase: SupabaseAdminClient,
 ): Promise<ScoringPolicy> {
-  const { data } = await table(supabase, "settings").select("value").eq(
+  const { data, error } = await table(supabase, "settings").select("value").eq(
     "key",
     "scoring_policy",
   ).maybeSingle();
-  const row = data && typeof data === "object"
-    ? data as Record<string, unknown>
-    : null;
-  return normalizeScoringPolicy(row?.value ?? null);
+  return normalizeScoringPolicy(
+    checkedSettingValue(data, error, "scoring_policy_settings_read_failed"),
+  );
 }
 
 export async function loadScoringModelOptions(supabase: SupabaseAdminClient) {
-  const { data } = await table(supabase, "settings").select("value").eq(
+  const { data, error } = await table(supabase, "settings").select("value").eq(
     "key",
     "translation_prompt",
   ).maybeSingle();
-  const row = data && typeof data === "object"
-    ? data as Record<string, unknown>
-    : null;
-  const tp = (row?.value ?? {}) as Record<string, unknown>;
+  const tp = checkedSettingValue(
+    data,
+    error,
+    "scoring_model_settings_read_failed",
+  ) ?? {};
   const scoring = tp.scoring && typeof tp.scoring === "object"
     ? tp.scoring as Record<string, unknown>
     : {};
@@ -189,12 +199,8 @@ export async function loadScoringCalibrationExamples(
     return (Array.isArray(data)
       ? data
       : []) as ScoringPolicyCalibrationExample[];
-  } catch (error) {
-    console.warn(
-      "admin-actions: failed to load scoring calibration examples:",
-      error instanceof Error ? error.message : String(error),
-    );
-    return [];
+  } catch {
+    throw new Error("scoring_calibration_read_failed");
   }
 }
 
@@ -281,7 +287,7 @@ export async function promoteFeedbackToScoringExample(
     )
     .eq("tweet_id", tweetId)
     .maybeSingle();
-  if (error) return { ok: false, error: errorMessage(error) };
+  if (error) return { ok: false, error: "scoring_example_post_read_failed" };
   if (
     !post || typeof post !== "object" ||
     !(post as Record<string, unknown>).text_original
@@ -309,7 +315,7 @@ export async function promoteFeedbackToScoringExample(
       note: typeof body.note === "string" ? body.note.slice(0, 1000) : null,
       created_by: userId ?? null,
     }).select("id").single();
-  if (insertError) return { ok: false, error: errorMessage(insertError) };
+  if (insertError) return { ok: false, error: "scoring_example_insert_failed" };
   return {
     ok: true,
     example_id: (data as { id?: unknown } | null | undefined)?.id,
@@ -346,12 +352,15 @@ export async function setManualScore(
   }
 
   const threshold = await loadActiveThreshold(supabase);
-  const { data: post } = await table(supabase, "posts")
+  const { data: post, error: postReadError } = await table(supabase, "posts")
     .select(
       "tweet_id, final_score, importance_score, dup_of_tweet_id, score_breakdown, text_translated, translated_at",
     )
     .eq("tweet_id", tweetId)
     .maybeSingle();
+  if (postReadError) {
+    return { ok: false, error: "manual_score_post_read_failed" };
+  }
   if (!post || typeof post !== "object") {
     return { ok: false, error: `Post not found: ${tweetId}` };
   }
@@ -423,19 +432,41 @@ export async function setManualScore(
 
   const { error: upErr } = await table(supabase, "posts").update(updatePayload)
     .eq("tweet_id", tweetId);
-  if (upErr) return { ok: false, error: errorMessage(upErr) };
+  if (upErr) return { ok: false, error: "manual_score_post_update_failed" };
 
   if (overrideDuplicate && relatedTweetId) {
     const pairA = tweetId < relatedTweetId ? tweetId : relatedTweetId;
     const pairB = tweetId < relatedTweetId ? relatedTweetId : tweetId;
-    await table(supabase, "story_pair_blocklist").upsert(
+    const { error: blocklistError } = await table(supabase, "story_pair_blocklist").upsert(
       { tweet_a: pairA, tweet_b: pairB, reason: "manual_score_override" },
       { onConflict: "tweet_a,tweet_b" },
-    ).then(() => null, () => null);
-    await deps.recordFeedback(supabase, tweetId, "not_duplicate", -2, {
-      source: "manual_score",
-    }, relatedTweetId)
-      .catch(() => {});
+    );
+    if (blocklistError) {
+      return {
+        ok: false,
+        tweet_id: tweetId,
+        score,
+        threshold,
+        decision,
+        partial_update: true,
+        error: "manual_score_blocklist_write_failed",
+      };
+    }
+    try {
+      await deps.recordFeedback(supabase, tweetId, "not_duplicate", -2, {
+        source: "manual_score",
+      }, relatedTweetId);
+    } catch {
+      return {
+        ok: false,
+        tweet_id: tweetId,
+        score,
+        threshold,
+        decision,
+        partial_update: true,
+        error: "manual_score_duplicate_feedback_failed",
+      };
+    }
   }
 
   const polarity = oldScore == null
@@ -445,26 +476,50 @@ export async function setManualScore(
     : score < oldScore - 0.5
     ? -2
     : 0;
-  await deps.recordFeedback(supabase, tweetId, "manual_score", polarity, {
-    old_score: oldScore,
-    manual_score: score,
-    threshold,
-    reason_tag: reasonTag,
-    reason,
-    override_duplicate: overrideDuplicate,
-    decision,
-    expected_audience_class: expectedAudienceClass,
-  }).catch(() => {});
-  if (expectedAudienceClass) {
-    await promoteFeedbackToScoringExample(supabase, {
+  try {
+    await deps.recordFeedback(supabase, tweetId, "manual_score", polarity, {
+      old_score: oldScore,
+      manual_score: score,
+      threshold,
+      reason_tag: reasonTag,
+      reason,
+      override_duplicate: overrideDuplicate,
+      decision,
+      expected_audience_class: expectedAudienceClass,
+    });
+  } catch {
+    return {
+      ok: false,
       tweet_id: tweetId,
-      expected_class: expectedAudienceClass,
-      expected_decision: passes ? "deliver" : "skip",
-      expected_score: score,
-      note: [reasonTag, reason].filter(Boolean).join(": ") ||
-        "Manual score label",
-      source: "manual_score",
-    }).catch(() => null);
+      score,
+      threshold,
+      decision,
+      partial_update: true,
+      error: "manual_score_feedback_write_failed",
+    };
+  }
+  if (expectedAudienceClass) {
+    try {
+      await promoteFeedbackToScoringExample(supabase, {
+        tweet_id: tweetId,
+        expected_class: expectedAudienceClass,
+        expected_decision: passes ? "deliver" : "skip",
+        expected_score: score,
+        note: [reasonTag, reason].filter(Boolean).join(": ") ||
+          "Manual score label",
+        source: "manual_score",
+      });
+    } catch {
+      return {
+        ok: false,
+        tweet_id: tweetId,
+        score,
+        threshold,
+        decision,
+        partial_update: true,
+        error: "manual_score_example_write_failed",
+      };
+    }
   }
   await deps.insertAdminPipelineEvent(supabase, tweetId, "score", "completed", {
     mode: "manual_score",
@@ -561,7 +616,8 @@ export async function recordScoreFeedback(
   } else {
     reviewPatch.score_review_status = "approved";
   }
-  await table(supabase, "posts").update(reviewPatch).eq("tweet_id", tweetId);
+  const { error: reviewUpdateError } = await table(supabase, "posts").update(reviewPatch).eq("tweet_id", tweetId);
+  if (reviewUpdateError) throw new Error("score_feedback_post_update_failed");
 
   const expectedClass = isAudienceClass(body.expected_audience_class)
     ? body.expected_audience_class
@@ -582,13 +638,23 @@ export async function recordScoreFeedback(
       feedback === "should_skip" || feedback === "not_global_exception"
         ? "skip"
         : "deliver";
-    await promoteFeedbackToScoringExample(supabase, {
-      tweet_id: tweetId,
-      expected_class: inferredClass,
-      expected_decision: expectedDecision,
-      note: [reasonTag, reason || feedback].filter(Boolean).join(": "),
-      source: "score_feedback",
-    }).catch(() => null);
+    try {
+      await promoteFeedbackToScoringExample(supabase, {
+        tweet_id: tweetId,
+        expected_class: inferredClass,
+        expected_decision: expectedDecision,
+        note: [reasonTag, reason || feedback].filter(Boolean).join(": "),
+        source: "score_feedback",
+      });
+    } catch {
+      return {
+        ok: false,
+        tweet_id: tweetId,
+        feedback,
+        partial_update: true,
+        error: "score_feedback_example_write_failed",
+      };
+    }
   }
   await deps.insertAdminPipelineEvent(
     supabase,
@@ -637,7 +703,7 @@ export async function scorePostV2(
     )
     .eq("tweet_id", tweetId)
     .maybeSingle();
-  if (error) return { ok: false, error: errorMessage(error) };
+  if (error) return { ok: false, error: "scoring_post_read_failed" };
   if (
     !post || typeof post !== "object" ||
     !(post as Record<string, unknown>).text_original
@@ -676,7 +742,7 @@ export async function scorePostV2(
     },
   );
   if (!result.ok) {
-    return { ok: false, error: result.error ?? result.audience_reason, result };
+    return { ok: false, error: "scoring_policy_failed" };
   }
 
   const active = policy.mode === "active";
@@ -684,7 +750,7 @@ export async function scorePostV2(
     const { error: updateError } = await table(supabase, "posts")
       .update(scoringPolicyPostUpdate(result, active))
       .eq("tweet_id", tweetId);
-    if (updateError) return { ok: false, error: errorMessage(updateError) };
+    if (updateError) return { ok: false, error: "scoring_post_update_failed" };
     await deps.insertAdminPipelineEvent(
       supabase,
       tweetId,
@@ -763,10 +829,21 @@ export async function backfillScoreV2(
     .limit(max);
   if (!force) query = query.is("scoring_version", null);
   const { data, error } = await query;
-  if (error) return { ok: false, error: errorMessage(error) };
-  const posts = Array.isArray(data)
-    ? data as Array<Record<string, unknown>>
-    : [];
+  if (error) return { ok: false, error: "scoring_backfill_read_failed" };
+  if (!Array.isArray(data)) {
+    return { ok: false, error: "scoring_backfill_invalid_response" };
+  }
+  const posts: Array<Record<string, unknown>> = [];
+  for (const post of data) {
+    if (!post || typeof post !== "object" || Array.isArray(post)) {
+      return { ok: false, error: "scoring_backfill_invalid_row" };
+    }
+    const tweetId = (post as Record<string, unknown>).tweet_id;
+    if (typeof tweetId !== "string" || tweetId.trim().length === 0) {
+      return { ok: false, error: "scoring_backfill_invalid_row" };
+    }
+    posts.push(post as Record<string, unknown>);
+  }
   if (dryRun) {
     return {
       ok: true,
@@ -794,7 +871,18 @@ export async function backfillScoreV2(
       idempotency_key: `score-v2:${tweetId}:${stamp}`,
       next_run_at: (deps.now?.() ?? new Date()).toISOString(),
     }, { onConflict: "idempotency_key", ignoreDuplicates: true });
-    if (!jobError) queued += 1;
+    if (jobError) {
+      return {
+        ok: false,
+        dry_run: false,
+        matched: posts.length,
+        queued,
+        hours,
+        max,
+        error: "scoring_backfill_enqueue_failed",
+      };
+    }
+    queued += 1;
   }
   return {
     ok: true,
@@ -829,10 +917,23 @@ export async function runScoringEval(
     query = query.in("id", body.case_ids.slice(0, limit));
   }
   const { data, error } = await query;
-  if (error) return { ok: false, error: errorMessage(error) };
-  const examples = Array.isArray(data)
-    ? data as Array<Record<string, unknown>>
-    : [];
+  if (error) return { ok: false, error: "scoring_eval_read_failed" };
+  if (!Array.isArray(data)) {
+    return { ok: false, error: "scoring_eval_invalid_response" };
+  }
+  const examples: Array<Record<string, unknown>> = [];
+  for (const example of data) {
+    if (!example || typeof example !== "object" || Array.isArray(example)) {
+      return { ok: false, error: "scoring_eval_invalid_row" };
+    }
+    const id = (example as Record<string, unknown>).id;
+    const text = (example as Record<string, unknown>).text_original;
+    if (typeof id !== "string" || id.trim().length === 0 ||
+      typeof text !== "string" || text.trim().length === 0) {
+      return { ok: false, error: "scoring_eval_invalid_row" };
+    }
+    examples.push(example as Record<string, unknown>);
+  }
   const apiKey = openAiApiKey(deps);
   if (!apiKey) return { ok: false, error: "OPENAI_API_KEY is not configured" };
   const model = await loadScoringModelOptions(supabase);
@@ -908,7 +1009,7 @@ export async function runScoringEval(
   if (insertError) {
     return {
       ok: false,
-      error: errorMessage(insertError),
+      error: "scoring_eval_insert_failed",
       summary,
       results: rows,
     };

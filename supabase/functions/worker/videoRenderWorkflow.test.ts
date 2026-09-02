@@ -21,7 +21,7 @@ type FakeSupabase = {
   rpc: (
     name: string,
     payload: unknown,
-  ) => Promise<{ data: unknown; error: null }>;
+  ) => Promise<{ data: unknown; error: { message: string } | null }>;
 };
 
 const sourceVideo: XMediaRow = {
@@ -71,6 +71,7 @@ function createFakeSupabase(options: {
   renderRows?: VideoRenderRow[];
   deliveries?: Array<Record<string, unknown>>;
   rpcData?: Record<string, unknown>;
+  rpcError?: { message: string };
 } = {}): FakeSupabase {
   const calls: FakeCall[] = [];
   return {
@@ -140,7 +141,7 @@ function createFakeSupabase(options: {
       calls.push({ table: "rpc", action: name, payload });
       return Promise.resolve({
         data: options.rpcData?.[name] ?? null,
-        error: null,
+        error: options.rpcError ?? null,
       });
     },
   };
@@ -307,6 +308,7 @@ Deno.test("enqueuePostDeliveryAfterRenderGate dispatches X only when delivery is
         dispatchXPosterForTarget: async (_supabase, tweetId, source) => {
           xDispatches.push([tweetId, source]);
         },
+        requireExternalPosting: async () => {},
       },
     );
   });
@@ -317,6 +319,64 @@ Deno.test("enqueuePostDeliveryAfterRenderGate dispatches X only when delivery is
   assertEquals(job.next_run_at, "2026-01-01T00:00:00.000Z");
   assertEquals(xDispatches, [["tweet-1", "ready-test"]]);
   assertEquals(callsFor(supabase.calls, "deliveries", "insert").length, 1);
+});
+
+Deno.test("blocked posting control prevents render release queue and delivery event", async () => {
+  const supabase = createFakeSupabase({
+    settingsValue: { mode: "enabled" },
+    mediaRows: [],
+    renderRows: [],
+  });
+  const xDispatches: string[] = [];
+
+  await enqueuePostDeliveryAfterRenderGate(
+    supabase,
+    "tweet-1",
+    "posting-blocked",
+    true,
+    {
+      dispatchXPosterForTarget: async (_supabase, tweetId) => {
+        xDispatches.push(tweetId);
+      },
+      requireExternalPosting: async () => {
+        throw new Error("external_posting_blocked:database_control");
+      },
+    },
+  );
+
+  assertEquals(callsFor(supabase.calls, "jobs", "upsert"), []);
+  assertEquals(callsFor(supabase.calls, "pipeline_events", "insert"), []);
+  assertEquals(xDispatches, []);
+});
+
+Deno.test("render completion skips historical delivery without creating a job or dispatching X", async () => {
+  const supabase = createFakeSupabase({
+    settingsValue: { mode: "enabled" },
+    mediaRows: [],
+    renderRows: [],
+    rpcError: { message: "delivery_cutover_blocked:historical" },
+  });
+  const xDispatches: string[] = [];
+
+  await enqueuePostDeliveryAfterRenderGate(
+    supabase,
+    "tweet-1",
+    "historical-render",
+    true,
+    {
+      dispatchXPosterForTarget: async (_supabase, tweetId) => {
+        xDispatches.push(tweetId);
+      },
+      requireExternalPosting: async () => {},
+      },
+  );
+
+  assertEquals(callsFor(supabase.calls, "jobs", "upsert"), []);
+  assertEquals(callsFor(supabase.calls, "deliveries", "insert"), []);
+  assertEquals(xDispatches, []);
+  const event = callsFor(supabase.calls, "pipeline_events", "insert").at(-1)
+    ?.payload as Record<string, unknown>;
+  assertEquals((event.meta as Record<string, unknown>).skipped, "delivery_cutover_blocked");
 });
 
 Deno.test("enqueuePostDeliveryAfterRenderGate defers delivery while active render is pending", async () => {
@@ -338,6 +398,7 @@ Deno.test("enqueuePostDeliveryAfterRenderGate defers delivery while active rende
           dispatchXPosterForTarget: async (_supabase, tweetId, source) => {
             xDispatches.push([tweetId, source]);
           },
+          requireExternalPosting: async () => {},
         },
       );
     });

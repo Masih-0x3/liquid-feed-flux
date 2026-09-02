@@ -1,4 +1,9 @@
 import { supabase } from '@/integrations/supabase/client';
+import {
+  createAdminActionResponseError,
+  createAdminActionTransportError,
+  withNormalizedAdminActionTransport,
+} from './adminActionErrors';
 
 export type AdminRetryBody = { action: string } & Record<string, unknown>;
 
@@ -7,14 +12,23 @@ type InvokeAdminRetryOptions = {
   throwOnFailure?: boolean;
 };
 
+export function isAdminRetryCutoverBlocked(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'status' in error
+    && (error as { status?: unknown }).status === 409;
+}
+
 export async function invokeAdminRetry<T>(
   body: AdminRetryBody,
   options: InvokeAdminRetryOptions = {},
 ): Promise<T> {
-  const { data, error } = await supabase.functions.invoke('admin-retry', { body });
-  if (error) throw error;
+  const { data, error } = await withNormalizedAdminActionTransport(
+    () => supabase.functions.invoke('admin-retry', { body }),
+  );
+  if (error) throw createAdminActionTransportError(error);
   if (options.throwOnFailure !== false && (data?.ok === false || data?.success === false)) {
-    throw new Error(data.error ?? options.failureMessage ?? 'Admin retry action failed');
+    throw createAdminActionResponseError(options);
   }
   return data as T;
 }

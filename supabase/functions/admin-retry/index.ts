@@ -1,6 +1,23 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
 import { captureEdgeException, initSentryEdge } from "../_shared/sentry.ts";
+import {
+  ExternalPostingBlockedError,
+  requireExternalPosting,
+} from "../_shared/externalPostingGuard.ts";
+import { resolveCurrentUserRole, type AppRole } from "../_shared/appRole.ts";
+import {
+  adminRetryActionError,
+  ADMIN_RETRY_INBOUND_INGEST_ACTION,
+  classifyAdminRetryAction,
+  isAdminRetryAction,
+  isRetryableFailedTelegramDelivery,
+} from "./adminRetryPolicy.ts";
+import {
+  evaluateExternalPosting,
+  externalPostingBlockedResponse,
+} from "../_shared/externalPostingGuard.ts";
+import { requireDeliveryCutover } from "../_shared/deliveryCutover.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': Deno.env.get('ALLOWED_CORS_ORIGIN') ?? 'https://liquid-feed-flux.lovable.app',
@@ -8,8 +25,10 @@ const corsHeaders = {
 };
 initSentryEdge();
 
-// Helper: validate JWT and check admin role
-async function requireAdmin(req: Request): Promise<{ userId: string } | Response> {
+// Validate JWT and resolve the caller-bound canonical role.
+async function requireAuthenticatedAppRole(
+  req: Request,
+): Promise<{ userId: string; role: AppRole; authClient: any } | Response> {
   const authHeader = req.headers.get('Authorization');
   if (!authHeader?.startsWith('Bearer ')) {
     return new Response(JSON.stringify({ error: 'Unauthorized: missing token' }), {
@@ -33,28 +52,84 @@ async function requireAdmin(req: Request): Promise<{ userId: string } | Response
     });
   }
 
-  // Check admin role using service client (bypasses RLS)
-  const serviceClient = createClient<any, any>(
-    Deno.env.get('SUPABASE_URL') ?? '',
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-  );
-
-  const { data: roleData } = await serviceClient
-    .from('user_roles')
-    .select('role')
-    .eq('user_id', data.user.id)
-    .eq('role', 'admin')
-    .limit(1)
-    .maybeSingle();
-
-  if (!roleData) {
-    return new Response(JSON.stringify({ error: 'Forbidden: admin role required' }), {
+  const role = await resolveCurrentUserRole(supabaseAuth);
+  if (!role || role !== "admin") {
+    return new Response(JSON.stringify({
+      error: 'Forbidden: admin role required',
+      code: 'admin_role_required',
+    }), {
       status: 403,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 
-  return { userId: data.user.id };
+  return { userId: data.user.id, role, authClient: supabaseAuth };
+}
+
+function lockedResponse(reason: string): Response {
+  return new Response(JSON.stringify({
+    success: false,
+    locked: true,
+    code: "external_posting_blocked",
+    reason,
+  }), {
+    status: 200,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
+}
+
+async function requireRetryPostingGuard(supabase: any): Promise<Response | null> {
+  try {
+    await requireExternalPosting(supabase);
+    return null;
+  } catch (error) {
+    if (error instanceof ExternalPostingBlockedError) {
+      return lockedResponse(error.reason);
+    }
+    return lockedResponse("controls_unavailable");
+  }
+}
+
+function safeAdminRetryErrorCode(error: unknown): string {
+  const message = error instanceof Error ? error.message.trim() : "";
+  const match = message.match(/^([a-z][a-z0-9_]{1,96})$/);
+  return match?.[1] ?? "admin_retry_failed";
+}
+
+type AdminRetryPipelineWriter = {
+  from(table: string): {
+    insert(rows: Record<string, unknown> | Record<string, unknown>[]): PromiseLike<{
+      error?: unknown | null;
+    }>;
+  };
+};
+
+// Pipeline events are observational; never let their failure change the
+// already-authoritative job response, but do make loss visible with a stable
+// diagnostic and never forward the database exception text.
+async function recordAdminRetryPipelineEvents(
+  supabase: unknown,
+  rows: Record<string, unknown> | Record<string, unknown>[],
+): Promise<void> {
+  try {
+    const writer = supabase as AdminRetryPipelineWriter;
+    const { error: pipelineEventError } = await writer
+      .from('pipeline_events')
+      .insert(rows);
+    if (pipelineEventError) {
+      console.warn(JSON.stringify({
+        function: 'admin-retry',
+        action: 'pipeline_event_insert_failed',
+        error: 'admin_retry_pipeline_event_insert_failed',
+      }));
+    }
+  } catch (_e) {
+    console.warn(JSON.stringify({
+      function: 'admin-retry',
+      action: 'pipeline_event_insert_failed',
+      error: 'admin_retry_pipeline_event_insert_failed',
+    }));
+  }
 }
 
 serve(async (req) => {
@@ -63,8 +138,8 @@ serve(async (req) => {
   }
 
   try {
-    // Require admin auth for all actions
-    const authResult = await requireAdmin(req);
+    // Require admin auth for all actions.
+    const authResult = await requireAuthenticatedAppRole(req);
     if (authResult instanceof Response) return authResult;
 
     const supabase = createClient<any, any>(
@@ -73,7 +148,29 @@ serve(async (req) => {
     );
 
     const body = await req.json();
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return new Response(JSON.stringify({ success: false, error: "Invalid request body" }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
     const { delivery_id, action, tweet_id, post, template, settings } = body;
+    if (!isAdminRetryAction(action)) {
+      const invalid = adminRetryActionError(action);
+      return new Response(JSON.stringify(invalid.body), {
+        status: invalid.status,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    const actionClass = classifyAdminRetryAction(action);
+    if ((action as string) === 'test_template') {
+      return new Response(JSON.stringify({
+        success: false,
+        code: 'delivery_cutover_blocked',
+        error: 'Synthetic Telegram template tests are disabled during the immutable delivery cutover',
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 409 });
+    }
+
 
     console.log(JSON.stringify({ function: 'admin-retry', action: action || 'retry_delivery', admin_user: authResult.userId }));
 
@@ -88,6 +185,18 @@ serve(async (req) => {
           status: 400
         });
       }
+
+      try {
+        await requireDeliveryCutover(supabase, String(tweet_id));
+      } catch (error) {
+        return new Response(JSON.stringify({
+          success: false,
+          code: "delivery_cutover_blocked",
+          error: error instanceof Error ? error.message : String(error),
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 409 });
+      }
+      const locked = await requireRetryPostingGuard(supabase);
+      if (locked) return locked;
 
       const { data: postData, error: postError } = await supabase
         .from('posts')
@@ -107,17 +216,21 @@ serve(async (req) => {
 
       const { error: jobError } = await supabase
         .from('jobs')
-        .insert({
+        .upsert({
           type: 'deliver',
           payload: { 
             tweet_id: tweet_id,
             account_id: postData.account_id
           },
           status: 'pending',
-          next_run_at: new Date().toISOString()
-        })
-        .select()
-        .single();
+          next_run_at: new Date().toISOString(),
+          // A stable operation key makes repeated explicit admin requests
+          // idempotent. The action remains mandatory; there is no implicit
+          // retry path.
+          idempotency_key: `deliver:admin-resend:${tweet_id}`,
+        }, { onConflict: 'idempotency_key', ignoreDuplicates: true })
+        .select('id')
+        .maybeSingle();
 
       if (jobError) {
         console.error('Error creating delivery job:', jobError);
@@ -130,18 +243,14 @@ serve(async (req) => {
         });
       }
 
-      try {
-        await supabase
-          .from('pipeline_events')
-          .insert({
-            subject_type: 'post',
-            subject_id: tweet_id,
-            step: 'deliver',
-            status: 'queued',
-            started_at: new Date().toISOString(),
-            meta: { source: 'admin-retry', admin_user: authResult.userId }
-          });
-      } catch (_e) {}
+      await recordAdminRetryPipelineEvents(supabase, {
+        subject_type: 'post',
+        subject_id: tweet_id,
+        step: 'deliver',
+        status: 'queued',
+        started_at: new Date().toISOString(),
+        meta: { source: 'admin-retry', admin_user: authResult.userId }
+      });
 
       return new Response(JSON.stringify({ 
         success: true, 
@@ -154,6 +263,9 @@ serve(async (req) => {
 
     // Handle retry failed deliveries action
     if (action === 'retry_failed_deliveries') {
+      const locked = await requireRetryPostingGuard(supabase);
+      if (locked) return locked;
+
       const { data: failedDeliveries, error: deliveryError } = await supabase
         .from('deliveries')
         .select('*')
@@ -169,17 +281,67 @@ serve(async (req) => {
         });
       }
 
-      const retryJobs = (failedDeliveries || []).map(delivery => ({
+      const failedRows = failedDeliveries || [];
+      const failedTweetIds = Array.from(new Set(
+        failedRows.map((delivery) => String(delivery.subject_id ?? '')).filter(Boolean),
+      ));
+      const { data: cutoverAt, error: cutoverError } = await supabase.rpc(
+        'get_delivery_cutover',
+      );
+      if (cutoverError || typeof cutoverAt !== 'string') {
+        return new Response(JSON.stringify({
+          success: false,
+          code: 'delivery_cutover_unavailable',
+          error: cutoverError?.message ?? 'delivery cutover is not initialized',
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 503,
+        });
+      }
+      const { data: lineageRows, error: lineageError } = await supabase
+        .from('posts')
+        .select('tweet_id, created_at')
+        .in('tweet_id', failedTweetIds);
+      if (lineageError) {
+        return new Response(JSON.stringify({
+          success: false,
+          code: 'delivery_cutover_lineage_unavailable',
+          error: lineageError.message,
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 503,
+        });
+      }
+      const eligibleIds = new Set(
+        (lineageRows || [])
+          .filter((row) => new Date(String(row.created_at)).getTime() > new Date(cutoverAt).getTime())
+          .map((row) => String(row.tweet_id)),
+      );
+      const cutoverEligibleFailedRows = failedRows.filter((delivery) =>
+        eligibleIds.has(String(delivery.subject_id ?? '')) &&
+        new Date(String(delivery.created_at)).getTime() > new Date(cutoverAt).getTime()
+      );
+      const historicalCount = failedRows.filter(
+        (delivery) => !cutoverEligibleFailedRows.includes(delivery),
+      ).length;
+      const ambiguousCount = cutoverEligibleFailedRows.filter(
+        (delivery) => !isRetryableFailedTelegramDelivery(delivery),
+      ).length;
+      const eligibleFailedRows = cutoverEligibleFailedRows.filter(
+        isRetryableFailedTelegramDelivery,
+      );
+      const retryJobs = eligibleFailedRows.map(delivery => ({
         type: 'deliver',
         payload: { tweet_id: delivery.subject_id },
         status: 'pending',
-        next_run_at: new Date().toISOString()
+        next_run_at: new Date().toISOString(),
+        idempotency_key: `deliver:admin-failed:${String(delivery.id)}`,
       }));
 
       if (retryJobs.length > 0) {
         const { error: jobError } = await supabase
           .from('jobs')
-          .insert(retryJobs);
+          .upsert(retryJobs, { onConflict: 'idempotency_key', ignoreDuplicates: true });
 
         if (jobError) {
           return new Response(JSON.stringify({ 
@@ -191,32 +353,32 @@ serve(async (req) => {
           });
         }
 
-        try {
-          const uniqueSubjects = Array.from(new Set((failedDeliveries || []).map(d => d.subject_id)));
-          if (uniqueSubjects.length > 0) {
-            const rows = uniqueSubjects.map(sid => ({
-              subject_type: 'post',
-              subject_id: sid,
-              step: 'deliver',
-              status: 'queued',
-              started_at: new Date().toISOString(),
-              meta: { source: 'admin-retry', admin_user: authResult.userId }
-            }));
-            await supabase.from('pipeline_events').insert(rows);
-          }
-        } catch (_e) {}
+        const uniqueSubjects = Array.from(new Set(eligibleFailedRows.map(d => d.subject_id)));
+        if (uniqueSubjects.length > 0) {
+          const rows = retryJobs.map((job) => ({
+            subject_type: 'post',
+            subject_id: (job.payload as { tweet_id?: string }).tweet_id,
+            step: 'deliver',
+            status: 'queued',
+            started_at: new Date().toISOString(),
+            meta: { source: 'admin-retry', admin_user: authResult.userId }
+          }));
+          await recordAdminRetryPipelineEvents(supabase, rows);
+        }
       }
 
       return new Response(JSON.stringify({ 
         success: true, 
-        message: `Created ${retryJobs.length} retry jobs for failed deliveries`
+        message: `Created ${retryJobs.length} retry jobs for eligible deliveries`,
+        historical_skipped: historicalCount,
+        ambiguous_skipped: ambiguousCount,
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
     // Handle test template action
-    if (action === 'test_template') {
+    if (actionClass === "telegram_provider_write") {
       if (!post || !template) {
         return new Response(JSON.stringify({ 
           success: false, 
@@ -256,6 +418,9 @@ serve(async (req) => {
         .replace(/{media_info}/g, post.has_media ? '📸 تصویر' : '');
 
       const telegramUrl = `https://api.telegram.org/bot${botToken}/sendMessage`;
+
+      const locked = await requireRetryPostingGuard(supabase);
+      if (locked) return locked;
       
       const telegramResponse = await fetch(telegramUrl, {
         method: 'POST',
@@ -281,38 +446,28 @@ serve(async (req) => {
       });
     }
 
-    // Handle test webhook action
-    if (action === 'test_webhook') {
-      const testRSSItem = {
-        guid: `test-tweet-${Date.now()}`,
-        title: 'Breaking: Major tech announcement today',
-        description: '<p>Exciting news from the tech world.</p>',
-        content: 'Exciting news from the tech world. #TechNews #Innovation',
-        link: 'https://twitter.com/example/status/123456789',
-        pubDate: new Date().toISOString()
-      };
-
-      const webhookResponse = await supabase.functions.invoke('webhooks-rssapp', {
-        body: { items_new: [testRSSItem], test: true }
-      });
-
-      if (webhookResponse.error) {
-        throw new Error(`Webhook test failed: ${webhookResponse.error.message}`);
-      }
-
-      return new Response(JSON.stringify({ 
-        success: true, 
-        message: 'Test webhook completed',
-        data: webhookResponse.data 
+    // Handle the inbound RSS validation route.  It remains named after the
+    // deployed function for routing clarity, but synthetic validation is
+    // disabled during the immutable delivery cutover.
+    if (action === ADMIN_RETRY_INBOUND_INGEST_ACTION && actionClass === 'inbound_rss_ingest') {
+      const inboundFunction = 'webhooks-rssapp';
+      return new Response(JSON.stringify({
+        success: false,
+        code: 'delivery_cutover_blocked',
+        error: 'delivery_cutover_blocked',
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 409,
       });
     }
-    
+
     // Original retry logic
     if (!delivery_id) {
       throw new Error('delivery_id is required');
     }
+
+    const locked = await requireRetryPostingGuard(supabase);
+    if (locked) return locked;
 
     const { data: delivery, error: deliveryError } = await supabase
       .from('deliveries')
@@ -324,17 +479,57 @@ serve(async (req) => {
       throw new Error('Delivery not found');
     }
 
+    // The original delivery_id retry path is a second admin bypass. Require
+    // one real post-T post lineage and keep the delivery row itself post-T;
+    // otherwise neither the old row nor a replacement job may be mutated.
+    const deliveryTweetId = delivery.subject_type === 'post' &&
+        typeof delivery.subject_id === 'string'
+      ? delivery.subject_id
+      : '';
+    if (!deliveryTweetId) {
+      return new Response(JSON.stringify({
+        success: false,
+        code: 'delivery_cutover_blocked',
+        error: 'v1 delivery retry supports post deliveries only; non-post lineage is unsupported',
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 409,
+      });
+    }
+    try {
+      await requireDeliveryCutover(supabase, deliveryTweetId);
+      const { data: cutoverAt, error: cutoverError } = await supabase.rpc(
+        'get_delivery_cutover',
+      );
+      if (
+        cutoverError || typeof cutoverAt !== 'string' ||
+        typeof delivery.created_at !== 'string' ||
+        new Date(delivery.created_at).getTime() <= new Date(cutoverAt).getTime()
+      ) {
+        throw new Error('delivery_cutover_blocked:historical_delivery');
+      }
+    } catch (error) {
+      return new Response(JSON.stringify({
+        success: false,
+        code: 'delivery_cutover_blocked',
+        error: error instanceof Error ? error.message : String(error),
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 409,
+      });
+    }
+
     const { error: jobError } = await supabase
       .from('jobs')
-      .insert([{
+      .upsert([{
         type: 'deliver',
         payload: {
-          subject_type: delivery.subject_type,
-          subject_id: delivery.subject_id
+          tweet_id: deliveryTweetId,
         },
         status: 'pending',
-        next_run_at: new Date().toISOString()
-      }]);
+        next_run_at: new Date().toISOString(),
+        idempotency_key: `deliver:admin-retry:${String(delivery_id)}`,
+      }], { onConflict: 'idempotency_key', ignoreDuplicates: true });
 
     if (jobError) throw jobError;
 
@@ -342,7 +537,6 @@ serve(async (req) => {
       .from('deliveries')
       .update({
         status: 'pending',
-        attempts: 0,
         last_error: null
       })
       .eq('id', delivery_id);
@@ -357,8 +551,9 @@ serve(async (req) => {
     });
 
   } catch (error) {
-    console.error(JSON.stringify({ function: 'admin-retry', action: 'error', error: (error as Error).message }));
-    await captureEdgeException(error, {
+    const errorCode = safeAdminRetryErrorCode(error);
+    console.error(JSON.stringify({ function: 'admin-retry', action: 'error', error: errorCode }));
+    await captureEdgeException(new Error(errorCode), {
       functionName: "admin-retry",
       action: "error",
       request: req,

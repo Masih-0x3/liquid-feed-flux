@@ -10,6 +10,8 @@ const monitoringHooks = vi.hoisted(() => ({
   useXApiSummary: vi.fn(),
 }));
 
+const authMock = vi.hoisted(() => ({ useAuth: vi.fn() }));
+
 vi.mock("@/hooks/useMonitoringData", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/hooks/useMonitoringData")>();
   return {
@@ -22,6 +24,10 @@ vi.mock("@/hooks/useMonitoringData", async (importOriginal) => {
 
 vi.mock("@/hooks/use-toast", () => ({
   useToast: () => ({ toast: vi.fn() }),
+}));
+
+vi.mock("@/contexts/AuthContext", () => ({
+  useAuth: authMock.useAuth,
 }));
 
 function settingsQuery() {
@@ -63,6 +69,8 @@ describe("monitoring page", () => {
     monitoringHooks.useMonitoringDataSearchWithScore.mockReset();
     monitoringHooks.useMonitoringOverview.mockReset();
     monitoringHooks.useXApiSummary.mockReset();
+    authMock.useAuth.mockReset();
+    authMock.useAuth.mockReturnValue({ isAdmin: true, role: "admin" });
 
     monitoringHooks.useMonitoringDataSearchWithScore.mockReturnValue({
       entries: [],
@@ -240,5 +248,69 @@ describe("monitoring page", () => {
     expect(screen.getAllByText("@FirstSquawk").length).toBeGreaterThan(0);
     expect(screen.getAllByRole("button", { name: /details/i }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("button", { name: /row actions/i }).length).toBeGreaterThan(0);
+  });
+
+  it("removes mutation-only controls for read-only users but keeps refresh and details", () => {
+    authMock.useAuth.mockReturnValue({ isAdmin: false, role: "read_only" });
+    monitoringHooks.useMonitoringDataSearchWithScore.mockReturnValue({
+      entries: [{
+        tweet_id: "post-read-only",
+        text_original: "Read-only source post",
+        text_translated: "",
+        url: "https://example.com/post-read-only",
+        created_at: new Date(Date.now() - 20_000).toISOString(),
+        has_media: false,
+        account_handle: "source",
+        author_handle: "source",
+        delivery_status: "pending",
+        telegram_message_ids: [],
+        is_translated: false,
+        is_delivered: false,
+        translation_job_status: "pending",
+        delivery_job_status: "pending",
+        translation_error: "",
+        delivery_error: "",
+        importance_score: 15,
+        final_score: 15,
+        delivery_decision: "deliver",
+        decision_reason: null,
+        x_status: null,
+        x_tweet_id: null,
+        x_posted_at: null,
+        x_error: null,
+        x_skip_reason: null,
+        dup_of_tweet_id: null,
+        duplicate_of: null,
+        duplicate_cluster: null,
+        hidden_in_cluster: false,
+        monitoring_state: {
+          code: "translation_queue",
+          stage_label: "Translation queue",
+          tone: "info",
+          decision_label: "Queued",
+          primary_blocker: "Awaiting translation",
+          translation_state: "queued",
+          telegram_state: "none",
+          x_state: "none",
+          needs_attention: false,
+          next_actions: ["translate"],
+        },
+      }] as unknown as MonitoringEntry[],
+      isLoading: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      isFetchingNextPage: false,
+      isFetching: false,
+      error: null,
+    });
+
+    renderMonitoring();
+
+    expect(screen.queryByRole("button", { name: /maintenance/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /select all visible/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /row actions/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^refresh$/i })).toBeEnabled();
+    expect(screen.getAllByRole("button", { name: /^details$/i })[0]).toBeEnabled();
   });
 });

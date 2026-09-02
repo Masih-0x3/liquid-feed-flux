@@ -1,0 +1,297 @@
+{
+  "schema": "xot-e8a-dashboard-resource-metrics-acceptance-receipt-v1",
+  "event": "e8a_dashboard_resource_metrics_source_acceptance",
+  "phase": "E8a dashboard resource metrics pure module extraction",
+  "status": "ACCEPTED_PARTIAL_LOCAL_SOURCE_T0_T1",
+  "release": "CLOSED",
+  "releaseGate": "CLOSED",
+  "riskTier": "HIGH",
+  "repository": "/Users/stevmq/Finalized XOT",
+  "branch": "codex/xot-remediation-convergence",
+  "head": "0bd578856016c06a10890339f93aa13b82ecae48",
+  "observedAt": "2026-08-12",
+  "claimBoundary": "E8a T0/T1 local pure-module source, static, and focused Vitest evidence only; Deno runtime, broader AIR-036 closure, hosted CI, full build, browser, staging, deploy, live, production-equivalence, owner, and higher-tier evidence are deferred.",
+  "directPlan": {
+    "path": "docs/plans/2026-08-08-xot-post-b4-execution-sequence.md",
+    "sha256": "24feff64abe2a221ca69cb9f52e1a03eb53d707ec024367fa8aa3e75cf0dea4c",
+    "bytes": 33797,
+    "lfLines": 440,
+    "section": "E8 - Post-Correctness Source Tranches / E8a",
+    "lines": "307-325",
+    "targetTier": "T0/T1 only",
+    "mapping": ["AIR-036", "BR-MOD-01", "BR-MOD-02", "FE-QUALITY-01"],
+    "requiredShape": "characterization first, then one pure module move per receipt",
+    "deferredByPlan": [
+      "browser paint, responsive, and operator proof",
+      "hosted scans and current-SHA CI",
+      "real build, staging, deploy, live, and production-equivalence artifact"
+    ]
+  },
+  "predecessor": {
+    "ledgerPath": "docs/plans/2026-07-14-xot-comprehensive-audit-remediation-implementation-ledger.jsonl",
+    "row": 537,
+    "rowNoNewlineSha256": "b06c908d480e86f3ef8978c07a27901a1723732c95fb6b1735268b68569f7e91",
+    "rowBytes": 9528,
+    "prefixThroughRow537Sha256": "3175946f22b407422733b8594b125b4b8cf72cdf11898fc999f370753e33c606",
+    "prefixIncludesTrailingNewline": true,
+    "event": "e8c_dashboard_hierarchy_air_coverage_claim_correction_row537"
+  },
+  "preExtraction": {
+    "dashboardSummaries": {
+      "binding": "planner-start pre-extraction source",
+      "sha256": "3d2798baced7991ebfb510db9c4359b128b02b50c163aed78aa87994099bf04b",
+      "bytes": 47662,
+      "lfLines": 1417,
+      "functionDeclarations": ["estimateMonthlyRuns", "cronCadenceSeconds", "percentUsed"]
+    },
+    "red": {
+      "status": "RED",
+      "evidence": "Before this slice, dashboardResourceMetrics.ts was absent and the planned focused import had no resolvable module target; the pre-move route was therefore module-not-found rather than a runtime pass.",
+      "expectedFailure": "ERR_MODULE_NOT_FOUND for ./dashboardResourceMetrics.ts",
+      "accepted": true
+    }
+  },
+  "sourceBindings": [
+    {
+      "path": "supabase/functions/admin-actions/dashboardSummaries.ts",
+      "role": "existing dashboard summary consumer with compatibility import/re-export seam plus unrelated pre-existing dirty correctness changes",
+      "sha256": "6a2763f1d2279d5177798f8d89693c4b0f544d420126685ede94ad0fd828f730",
+      "bytes": 46699,
+      "lfLines": 1393,
+      "crlf": 0,
+      "finalLf": true
+    },
+    {
+      "path": "supabase/functions/admin-actions/dashboardResourceMetrics.ts",
+      "role": "new pure module containing the three extracted resource metric helpers",
+      "sha256": "f7ca47d465c73bf58d17e999d995764c8e7f89910c39fb11e829de376c3eddfb",
+      "bytes": 1136,
+      "lfLines": 29,
+      "crlf": 0,
+      "finalLf": true
+    },
+    {
+      "path": "src/test/dashboard-resource-metrics.test.ts",
+      "role": "new focused Vitest source and fail-closed extraction contract",
+      "sha256": "3669e87c9e63d78f9fd08a33732b8aa70ebe6a9514292531bbf24e2d7a8a0503",
+      "bytes": 6095,
+      "lfLines": 172,
+      "crlf": 0,
+      "finalLf": true
+    },
+    {
+      "path": "supabase/functions/admin-actions/dashboardSummaries.test.ts",
+      "role": "pre-existing Deno dashboard summary test retained unchanged",
+      "sha256": "c807ef2d3df76430787ead9d8c688dab53a41ddf447a4e25a491dfa0ff3bd6c7",
+      "bytes": 8356,
+      "lfLines": 309,
+      "crlf": 0,
+      "finalLf": true,
+      "unchanged": true
+    },
+    {
+      "path": "scripts/check-module-characterization-contract.mjs",
+      "role": "E8a 11-hotspot characterization source contract and mutation self-test",
+      "sha256": "b1a0f83c508688c721aad3b22d51309aff5d8f77dafb43bab002f90aaef86fd6",
+      "bytes": 4180,
+      "lfLines": 127
+    }
+  ],
+  "scopeCompleted": [
+    "Moved estimateMonthlyRuns, cronCadenceSeconds, and percentUsed byte-for-byte from dashboardSummaries.ts into dashboardResourceMetrics.ts.",
+    "Preserved dashboardSummaries.ts as the import and named re-export compatibility seam; existing consumers remain unchanged.",
+    "Added one focused Vitest contract covering helper behavior, exact declaration hashes, the compatibility seam, and fail-closed mutations.",
+    "Kept dashboardSummaries.test.ts unchanged and excluded unrelated pre-existing dashboard correctness edits from this receipt.",
+    "This receipt accepts one pure resource-metrics family only and does not claim closure of the remaining AIR-036 hotspots."
+  ],
+  "architectureEvidence": {
+    "green": {
+      "status": "GREEN",
+      "evidence": "The new module has exactly one implementation of each named helper, each declaration hash matches the pre-extraction declaration, dashboardSummaries.ts has zero declarations for the family, and its import/re-export sets are exactly the three expected names.",
+      "functionDeclarationHashes": {
+        "estimateMonthlyRuns": "ae0d923bd921838b7c2944bf2a8d1f09534e79f2be3c755ed1e51589b5273ee9",
+        "cronCadenceSeconds": "2e35abfd3860ca78cc39e35814d83ec874bdc728fbf692d3359eb09595477c2a",
+        "percentUsed": "bbbad23d7ae9ebc886010a586d61df9d8a20272f165e385b836d833a6aebc47b"
+      },
+      "compatibilityImportNames": ["cronCadenceSeconds", "estimateMonthlyRuns", "percentUsed"],
+      "compatibilityReExportNames": ["cronCadenceSeconds", "estimateMonthlyRuns", "percentUsed"]
+    }
+  },
+  "inverseReconstruction": {
+    "status": "EXACT_PASS",
+    "method": "Remove the six-line dashboardResourceMetrics import/re-export seam from the current dashboardSummaries.ts, recover the three declarations from the new module through the TypeScript parser, and insert the declarations at the original pre-extraction location before loadPerformanceWindow.",
+    "separatorLfConflictResolution": "The first reconstruction variants produced 47661 bytes/1416 LF lines or 47662 bytes/1417 LF lines with a different hash. The exact planner-start binding is obtained only by retaining the existing pre-block separator and appending two LF bytes after the recovered percentUsed declaration before async function loadPerformanceWindow.",
+    "reconstructedSha256": "3d2798baced7991ebfb510db9c4359b128b02b50c163aed78aa87994099bf04b",
+    "reconstructedBytes": 47662,
+    "reconstructedLfLines": 1417,
+    "matchesPreExtractionBinding": true,
+    "functionParity": "3/3 declaration hashes exact"
+  },
+  "validation": {
+    "focusedVitestNormal": {
+      "command": "npx vitest run src/test/dashboard-resource-metrics.test.ts",
+      "result": "PASS; 1 test file, 2 tests passed, exit 0"
+    },
+    "focusedVitestMutation": {
+      "command": "MUTATION_TEST=1 npx vitest run src/test/dashboard-resource-metrics.test.ts",
+      "result": "PASS; 1 test file, 2 tests passed, exit 0; body and missing-re-export mutations fail closed"
+    },
+    "standaloneTypescript": {
+      "command": "npx tsc --noEmit --target ES2022 --module ESNext --moduleResolution Bundler --allowImportingTsExtensions --skipLibCheck --types node,vitest/globals supabase/functions/admin-actions/dashboardResourceMetrics.ts src/test/dashboard-resource-metrics.test.ts",
+      "result": "PASS; exit 0"
+    },
+    "moduleCharacterizationNormal": {
+      "command": "npm run check:module-characterization",
+      "result": "PASS; MODULE_CHARACTERIZATION_SOURCE_CONTRACT_PASS files=11 reviewSignals=2 mutation=skipped"
+    },
+    "moduleCharacterizationMutation": {
+      "command": "MUTATION_TEST=1 npm run check:module-characterization",
+      "result": "PASS; MODULE_CHARACTERIZATION_SOURCE_CONTRACT_PASS files=11 reviewSignals=2 mutation=pass"
+    },
+    "dashboardSummaryNormal": {
+      "command": "npm run check:dashboard-summary",
+      "result": "PASS; DASHBOARD_SUMMARY_SOURCE_CONTRACT_PASS rowShapes=failClosed degradedSections=preserved selfTest=skipped"
+    },
+    "ownedFileEslint": {
+      "command": "npx eslint --no-ignore supabase/functions/admin-actions/dashboardResourceMetrics.ts src/test/dashboard-resource-metrics.test.ts",
+      "result": "PASS; exit 0"
+    },
+    "standaloneDashboardSummariesTypescript": {
+      "command": "npx tsc --noEmit --target ES2022 --module ESNext --moduleResolution Bundler --allowImportingTsExtensions --skipLibCheck supabase/functions/admin-actions/dashboardSummaries.ts",
+      "result": "BLOCKED/FAIL; exit 2 from pre-existing/transitive observability.ts Deno global and object-property diagnostics at observability.ts:120,183; no dashboard extraction error was isolated"
+    },
+    "fullNoIgnoreLint": {
+      "command": "npx eslint --no-ignore supabase/functions/admin-actions/dashboardSummaries.ts supabase/functions/admin-actions/dashboardResourceMetrics.ts src/test/dashboard-resource-metrics.test.ts",
+      "result": "BLOCKED/FAIL; exit 1 from ten pre-existing explicit-any errors in dashboardSummaries.ts; owned new module and focused test remain clean"
+    },
+    "scopedWhitespace": {
+      "command": "git diff --check dashboardSummaries.ts plus git diff --no-index --check /dev/null against new dashboardResourceMetrics.ts and dashboard-resource-metrics.test.ts",
+      "result": "PASS; no whitespace diagnostics; untracked comparisons returned expected exit 1"
+    },
+    "finalLf": {
+      "command": "explicit byte probe over all bound source/test/checker files",
+      "result": "PASS; CRLF=0, final LF=true, no trailing whitespace"
+    },
+    "stagedIndex": {
+      "command": "git diff --cached --quiet",
+      "result": "PASS; exit 0; staged index empty"
+    },
+    "denoDashboardSummaryTest": {
+      "command": "deno test --no-check supabase/functions/admin-actions/dashboardSummaries.test.ts",
+      "result": "DEFERRED/NOT RUN; Deno executable unavailable in this environment; no green Deno runtime claim"
+    }
+  },
+  "adversarialReviews": [
+    {
+      "route": "Claude Code via Zro",
+      "requestedModel": "deepseek-v4-flash-0731",
+      "requestedReasoning": "xhigh",
+      "status": "BLOCKED_BEFORE_STARTUP",
+      "result": "Exact Claude DeepSeek route was unavailable after two earlier Zro pre-start auth-fetch failures; no Claude banner or review output was received for this slice.",
+      "accepted": false,
+      "superseded": false
+    },
+    {
+      "route": "Luna High receipt-author static verification",
+      "requestedModel": "GPT-5.6 Luna",
+      "requestedReasoning": "high",
+      "status": "ACCEPTED_FOR_SCOPED_RECEIPT",
+      "result": "Accepted exact source parity, inverse reconstruction, focused normal/mutation Vitest, standalone module/test TypeScript, characterization, lint, whitespace, final-LF, and staged-index evidence; Deno and transitive full-dashboard gates remain deferred or blocked.",
+      "accepted": true,
+      "runtimeTelemetry": {
+        "identity": "unknown",
+        "model": "unknown",
+        "reasoning": "unknown",
+        "fast": "unknown",
+        "subagentsUsed": false,
+        "note": "Runtime identity/model telemetry was not exposed to this receipt author."
+      }
+    }
+  ],
+  "airDispositions": {
+    "AIR-036": {
+      "status": "PARTIAL",
+      "localDisposition": "One pure dashboard resource-metrics family was extracted with exact declaration parity, compatibility seam, static contracts, and focused Vitest evidence.",
+      "deferred": "Remaining AIR-036 hotspots, Deno runtime, broader behavior traces, owner review, higher-tier evidence, and external release gates remain open.",
+      "ownerAssigned": false,
+      "deadlineAssigned": false
+    }
+  },
+  "achieved": ["T0 source/static", "T1 focused Vitest"],
+  "deferred": ["Deno runtime", "T2", "T3", "T4"],
+  "notClaimed": [
+    "No Deno dashboardSummaries.test.ts run, Deno check, or Deno format result; the executable is unavailable.",
+    "No closure of AIR-036, BR-MOD-01, BR-MOD-02, or FE-QUALITY-01; only this pure resource-metrics slice is accepted.",
+    "No browser, responsive, accessibility, authenticated runtime, provider, database, network, Docker, hosted CI, full build, staging, deploy, live, production-equivalence, or owner-approval evidence.",
+    "No claim that Claude DeepSeek reviewed this slice; no route substitution was made.",
+    "No ledger append, commit, push, deployment, or external mutation."
+  ],
+  "externalState": {
+    "network": false,
+    "provider": false,
+    "database": false,
+    "ci": false,
+    "staging": false,
+    "deploy": false,
+    "live": false,
+    "browser": false,
+    "docker": false,
+    "productionEquivalence": false,
+    "ownerDecision": false,
+    "ledgerAction": false
+  },
+  "worktree": {
+    "beforeReceipt": {
+      "statusFormat": "porcelain-v1 -uall sorted",
+      "totalEntries": 418,
+      "trackedOrModifiedEntries": 156,
+      "untrackedEntries": 262,
+      "stagedEntries": 0,
+      "sortedStatusSha256": "5b6f40c09ca355d4d1b56cdfa2c0481cb84c6590f99b25a467a45fa45110e536"
+    },
+    "afterReceipt": {
+      "statusFormat": "porcelain-v1 -uall sorted",
+      "delta": "one new untracked receipt path only",
+      "stagedEntries": 0,
+      "stagedIndexEmpty": true,
+      "receiptPathPresent": true
+    },
+    "preexistingDirtyWorkPreserved": true,
+    "otherFilesEdited": false,
+    "branch": "codex/xot-remediation-convergence",
+    "head": "0bd578856016c06a10890339f93aa13b82ecae48"
+  },
+  "ledger": {
+    "path": "docs/plans/2026-07-14-xot-comprehensive-audit-remediation-implementation-ledger.jsonl",
+    "appended": false,
+    "changed": false,
+    "predecessorRow": 537,
+    "appendDeferred": "Ledger append is a separate conductor-controlled step after receipt review."
+  },
+  "rollback_kill_receipt": "No rollback or kill action was authorized or run; source files, tests, checker, and all pre-existing dirty work remain preserved. Any later rollback requires explicit review of this receipt file only.",
+  "receiptScope": {
+    "allowedPath": "docs/plans/2026-08-12-xot-e8a-dashboard-resource-metrics-acceptance.json",
+    "newFileOnly": true,
+    "sourceFilesUnchangedAfterBinding": true,
+    "checkerFilesUnchangedAfterBinding": true,
+    "ledgerUnchanged": true,
+    "noCommit": true,
+    "noPush": true,
+    "noDeploy": true,
+    "noNetworkOrExternalMutation": true,
+    "noSecretsOrRawEnvironmentValues": true
+  },
+  "doneClaim": {
+    "status": "complete_for_scoped_local_source_receipt",
+    "receiptPath": "docs/plans/2026-08-12-xot-e8a-dashboard-resource-metrics-acceptance.json",
+    "sourceBindingsRecorded": true,
+    "commandsAndResultsRecorded": true,
+    "deferralsRecorded": true,
+    "releaseAndReleaseGateClosed": true,
+    "receiptArtifact": {
+      "sha256": "fc076e674cc716665103028efa666f7aed5cd77aacdd1082a79cfec3e3be3027",
+      "bytes": 13229,
+      "hashScope": "canonical UTF-8 compact JSON payload with doneClaim.receiptArtifact omitted, followed by one LF"
+    }
+  }
+}

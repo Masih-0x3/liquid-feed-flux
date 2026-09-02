@@ -1,4 +1,6 @@
-project_id = "jzirqfzzvlbxwfzndaer"
+# Local configuration marker only. Remote commands must provide an explicit
+# Preview project ref through the deployment wrapper; this is not a link target.
+project_id = "xotlocalvalidation00"
 
 [functions.webhooks-rssapp]
 verify_jwt = false

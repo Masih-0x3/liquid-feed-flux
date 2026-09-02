@@ -1,0 +1,265 @@
+{
+  "schema": "xot-e8d-local-supply-build-acceptance-receipt-v1",
+  "event": "e8d_local_supply_build_acceptance",
+  "phase": "E8d - local supply, build, inventory, and source contract",
+  "status": "ACCEPTED_PARTIAL_LOCAL_INVENTORY_SOURCE_CONTRACT",
+  "release": "CLOSED",
+  "releaseGate": "CLOSED",
+  "riskTier": "HIGH",
+  "repository": "/Users/stevmq/Finalized XOT",
+  "branch": "codex/xot-remediation-convergence",
+  "head": "0bd578856016c06a10890339f93aa13b82ecae48",
+  "observedAt": "2026-08-11",
+  "directPlan": {
+    "path": "docs/plans/2026-08-08-xot-post-b4-execution-sequence.md",
+    "sha256": "24feff64abe2a221ca69cb9f52e1a03eb53d707ec024367fa8aa3e75cf0dea4c",
+    "bytes": 33797,
+    "section": "E8 - Post-Correctness Source Tranches / E8d",
+    "lines": "307-325",
+    "targetTier": "T0/T1 only",
+    "deferredByPlan": [
+      "browser paint, responsive, and operator proof",
+      "hosted scans",
+      "real build and deploy artifact"
+    ]
+  },
+  "acceptedInputs": {
+    "d0Inventory": {
+      "path": "docs/plans/2026-08-11-xot-e8d-local-supply-build-inventory.json",
+      "sha256": "13038f7c91d0fe03917b3b6c3b5ada48f022cf1abe83f314af9e6ff3757f0ff2",
+      "bytes": 537063,
+      "status": "ACCEPTED_LOCAL_T0_T1",
+      "release": "CLOSED",
+      "releaseGate": "CLOSED",
+      "claimBoundary": "deterministic local inventory only; no hosted scan or production equivalence"
+    },
+    "d1LocalContracts": {
+      "status": "ACCEPTED_PARTIAL_LOCAL_INVENTORY_SOURCE_CONTRACT",
+      "claimBoundary": "focused local contract tests and synthetic public-name validation only"
+    }
+  },
+  "sourceBindings": [
+    {
+      "path": "scripts/build-e8-local-supply-build-inventory.mjs",
+      "role": "E8d inventory builder",
+      "sha256": "c7aa5148d5158b90bf876fdcec6a3d46f68c596055a1323751ae510bc54f8bef",
+      "bytes": 19429
+    },
+    {
+      "path": "scripts/build-e8-local-supply-build-inventory.test.mjs",
+      "role": "E8d builder and deterministic inventory tests",
+      "sha256": "a51d8361fb8a16af1e917d6e68a87131ee4dbf04b0062ca6cf856f0c8c5abb25",
+      "bytes": 9631
+    },
+    {
+      "path": "scripts/check-supply-chain-contract.mjs",
+      "role": "independent supply-chain source contract checker",
+      "sha256": "0f768d7cbb52a5f9fc7da3071cc4c9170fbd08acbca0c842a75d39ce41afb401",
+      "bytes": 32843
+    },
+    {
+      "path": "scripts/check-supply-chain-contract.test.mjs",
+      "role": "independent supply-chain normal and mutation tests",
+      "sha256": "9a91eeb19142858376aa1bb7a386408ff42cabd73962395702c32f58862f9018",
+      "bytes": 22634
+    },
+    {
+      "path": "scripts/check-vite-env.mjs",
+      "role": "public Vite environment source contract checker",
+      "sha256": "8049d3017aff1b51680e771b756323ac34b7a2c75e956d593447c74da93cc5f8",
+      "bytes": 7259
+    },
+    {
+      "path": "scripts/check-vite-env.test.mjs",
+      "role": "public Vite environment normal and mutation tests",
+      "sha256": "7224aaa40338a11d728374940ac2c4f301cd301fd3cc5f0a835d936986874a67",
+      "bytes": 6595
+    },
+    {
+      "path": "docs/plans/2026-08-11-xot-e8d-local-supply-build-inventory.json",
+      "role": "checked-in deterministic inventory",
+      "sha256": "13038f7c91d0fe03917b3b6c3b5ada48f022cf1abe83f314af9e6ff3757f0ff2",
+      "bytes": 537063
+    },
+    {
+      "path": "docs/operations/runtime-contract.json",
+      "role": "runtime contract bound by the runtime checker",
+      "sha256": "02278424abb85d92f4d368ccf28832637bdd3480bb99ac774741db353b5b0e5d",
+      "bytes": 6816
+    }
+  ],
+  "achieved": [
+    "T0",
+    "T1"
+  ],
+  "deferred": [
+    "T2",
+    "T3",
+    "T4"
+  ],
+  "validation": {
+    "d1ViteContractTests": {
+      "command": "node --test scripts/check-vite-env.test.mjs",
+      "result": "30 passed, 0 failed"
+    },
+    "builderTests": {
+      "command": "node --test scripts/build-e8-local-supply-build-inventory.test.mjs",
+      "result": "33 passed, 0 failed",
+      "deterministicInventory": "generated inventory equals checked-in projection"
+    },
+    "independentSupplyCheckerTests": {
+      "command": "npm run test:supply-chain-contract",
+      "result": "55 passed, 0 failed",
+      "mutationCoverage": "inventory omissions, source projection drift, secret-like/value fields, and claim inflation rejected"
+    },
+    "supplyCheckerNormal": {
+      "command": "node scripts/check-supply-chain-contract.mjs",
+      "result": "SUPPLY_CHAIN_SOURCE_CONTRACT_PASS rootPackages=647 rendererPackages=32 denoRemote=13 waivers=0 scanStatus=awaiting_fresh_scan_evidence"
+    },
+    "viteSyntheticNormal": {
+      "command": "synthetic valid public Vite environment through node scripts/check-vite-env.mjs",
+      "result": "Frontend env contract OK; nine reviewed public names accepted; values not recorded"
+    },
+    "viteSyntheticMutation": {
+      "command": "synthetic valid public Vite environment with MUTATION_TEST=1 through node scripts/check-vite-env.mjs",
+      "result": "VITE_ENV_SOURCE_CONTRACT_PASS selfTest=pass"
+    },
+    "runtimeChecker": {
+      "command": "node scripts/check-runtime-contract.mjs",
+      "result": "Runtime contract PASS; node 22.23.1 observed; deployment selector 20.x; frozen root/renderer/Deno/Edge versions retained"
+    },
+    "syntax": {
+      "command": "node --check on the six E8d builder/checker/test scripts",
+      "result": "exit 0"
+    },
+    "scopedWhitespace": {
+      "command": "git diff --no-index --check /dev/null docs/plans/2026-08-11-xot-e8d-local-supply-build-acceptance.json",
+      "result": "clean receipt whitespace; expected exit 1 for untracked-file comparison"
+    },
+    "stagedIndex": {
+      "command": "git diff --cached --quiet",
+      "result": "exit 0; staged index empty"
+    },
+    "processState": {
+      "command": "node --test scripts/check-runtime-contract.test.mjs",
+      "scope": "E8d focused commands only",
+      "status": "terminated_excluded",
+      "result": "the runtime-contract test invocation did not complete promptly, was terminated, and was excluded from acceptance; no pass or test count is claimed",
+      "noLingeringProcess": true,
+      "accepted": false
+    }
+  },
+  "worktree": {
+    "beforeReceipt": {
+      "statusFormat": "porcelain-v1 -uall",
+      "totalEntries": 396,
+      "trackedEntries": 155,
+      "untrackedEntries": 241,
+      "stagedEntries": 0,
+      "sortedStatusSha256": "1e70aec34f9a44f90f1685ddd7004d99c1e130ddeb41f5aeeeae594e9c41e70b"
+    },
+    "afterReceipt": {
+      "statusFormat": "porcelain-v1 -uall",
+      "totalEntries": 397,
+      "trackedEntries": 155,
+      "untrackedEntries": 242,
+      "delta": "one new untracked receipt path only",
+      "stagedEntries": 0,
+      "sortedStatusSha256": "4d69569783fe11cc1c3c27b267861e67049f8fd48f719b782bd4d208e65e9a96"
+    },
+    "branch": "codex/xot-remediation-convergence",
+    "head": "0bd578856016c06a10890339f93aa13b82ecae48",
+    "stagedIndexEmpty": true,
+    "preexistingDirtyWorkPreserved": true,
+    "otherFilesEdited": false
+  },
+  "independentReview": {
+    "role": "independent acceptance/security worker",
+    "requestedAssignedRoute": {
+      "model": "GPT-5.6 Luna",
+      "reasoning": "high",
+      "fast": "N/A"
+    },
+    "runtimeTelemetry": {
+      "identity": "unknown",
+      "model": "unknown",
+      "reasoning": "unknown",
+      "note": "runtime identity, model, and reasoning telemetry were not exposed"
+    },
+    "subagentsUsed": false,
+    "subagentTelemetry": "none",
+    "sourceReviewOutputDisposition": "accepted",
+    "verdict": "ACCEPT",
+    "findings": [],
+    "scope": "E8d receipt bindings, local evidence, conservative claims, and deferrals",
+    "evidenceBoundary": "source-review acceptance only; no runtime identity or model proof is claimed"
+  },
+  "airDispositions": [
+    {
+      "id": "AIR-052",
+      "localDisposition": "local inventory and source contract only",
+      "deferred": "hosted SBOM, dependency/container/Deno audits, license evidence, CI evidence, and waiver adjudication",
+      "ownerAssigned": false,
+      "deadlineAssigned": false
+    },
+    {
+      "id": "AIR-055",
+      "localDisposition": "public-name/source contract plus synthetic nonsecret validation only",
+      "deferred": "masked production-shaped Vercel provenance, build artifacts, and owner evidence",
+      "ownerAssigned": false,
+      "deadlineAssigned": false
+    },
+    {
+      "id": "AIR-078",
+      "localDisposition": "source inventory coverage only",
+      "deferred": "hosted and higher-tier validation",
+      "ownerAssigned": false,
+      "deadlineAssigned": false
+    }
+  ],
+  "notClaimed": [
+    "no scan, audit, SBOM generation, provider contact, environment value capture, credential capture, secret capture, or raw log capture",
+    "no provider, environment, or secret values",
+    "no private hosts or network contact",
+    "no CI, staging, deploy, live, browser, Docker, or production contact",
+    "no production equivalence",
+    "no waiver decision",
+    "no owner assignment or deadline",
+    "no ledger append"
+  ],
+  "externalState": {
+    "network": false,
+    "provider": false,
+    "database": false,
+    "ci": false,
+    "staging": false,
+    "deploy": false,
+    "live": false,
+    "browser": false,
+    "docker": false,
+    "productionEquivalence": false
+  },
+  "ledger": {
+    "path": "docs/plans/2026-07-14-xot-comprehensive-audit-remediation-implementation-ledger.jsonl",
+    "appended": false,
+    "changed": false,
+    "note": "No ledger append is made by this receipt."
+  },
+  "rollback": {
+    "path": "docs/plans/2026-08-11-xot-e8d-local-supply-build-acceptance.json",
+    "scope": "this receipt file only under explicit review",
+    "command": null,
+    "authorized": false,
+    "inventoryAndSourceFiles": "not rollback-authorized",
+    "otherDirtyFiles": "not included and not to be reverted"
+  },
+  "receiptScope": {
+    "allowedPath": "docs/plans/2026-08-11-xot-e8d-local-supply-build-acceptance.json",
+    "newFileOnly": true,
+    "inventoryUnchanged": true,
+    "sourceFilesUnchanged": true,
+    "noCommit": true,
+    "noPush": true,
+    "noDeploy": true
+  }
+}

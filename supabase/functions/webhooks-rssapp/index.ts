@@ -1,7 +1,24 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
-import { requireRssWebhookAuth, serviceRoleBearerHeader } from "../_shared/internalAuth.ts";
+import {
+  readRssWebhookAuthMode,
+  requireRssWebhookAuth,
+  serviceRoleBearerHeader,
+} from "../_shared/internalAuth.ts";
 import { filterSendableIngestMedia } from "../_shared/mediaSelection.ts";
+import { filterReviewedRemoteMediaItems } from "../_shared/remoteMediaPolicy.ts";
+import {
+  normalizeRssWebhookText,
+  parseBoundedRssItemMedia,
+} from "../_shared/rssWebhookItemParser.ts";
+import {
+  extractBoundedRssWebhookItems,
+  isRssWebhookPayloadError,
+  parseBoundedRssWebhookJson,
+  readBoundedRssWebhookBody,
+  RssWebhookPayloadError,
+  rssWebhookPayloadErrorStatus,
+} from "../_shared/rssWebhookPayloadPolicy.ts";
 import {
   captureEdgeException,
   captureEdgeExceptionBackground,
@@ -14,10 +31,80 @@ const corsHeaders = {
 };
 initSentryEdge();
 
+function webhookPayloadErrorResponse(error: RssWebhookPayloadError): Response {
+  return new Response(JSON.stringify({
+    error: 'Webhook payload rejected',
+    code: error.code,
+  }), {
+    status: rssWebhookPayloadErrorStatus(error),
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
+}
+
+function webhookUnauthorizedResponse(): Response {
+  return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+    status: 401,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
+}
+
 async function hashUrl(url: string): Promise<string> {
   const data = new TextEncoder().encode(url);
   const digest = await crypto.subtle.digest('SHA-256', data);
   return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+const MAX_RSS_WEBHOOK_ITEM_ID_LENGTH = 1_024;
+
+class RssWebhookPersistenceError extends Error {
+  constructor(readonly code: string) {
+    super(code);
+    this.name = 'RssWebhookPersistenceError';
+  }
+}
+
+type RssWebhookQueryResult = {
+  data?: unknown;
+  error?: { message?: string } | null;
+};
+
+type RssWebhookQueryBuilder = PromiseLike<RssWebhookQueryResult> & {
+  select(columns?: string): RssWebhookQueryBuilder;
+  eq(column: string, value: unknown): RssWebhookQueryBuilder;
+  limit(count: number): RssWebhookQueryBuilder;
+  maybeSingle(): PromiseLike<RssWebhookQueryResult>;
+  upsert(values: unknown, options?: Record<string, unknown>): RssWebhookQueryBuilder;
+  update(values: Record<string, unknown>): RssWebhookQueryBuilder;
+  insert(values: unknown): RssWebhookQueryBuilder;
+  single(): PromiseLike<RssWebhookQueryResult>;
+};
+
+type RssWebhookSupabaseClient = {
+  from(table: string): RssWebhookQueryBuilder;
+  rpc(name: string, args?: Record<string, unknown>): PromiseLike<RssWebhookQueryResult>;
+  functions: {
+    invoke(name: string, options?: Record<string, unknown>): PromiseLike<RssWebhookQueryResult>;
+  };
+};
+
+// The durable receipt RPCs only ever call rpc(), so they are bounded to the narrow
+// structural slice of the client that provides it. Keeping receipt helpers off the
+// full RssWebhookSupabaseClient type preserves the module's stable 5 bounded helpers.
+type RssReceiptRpcClient = Pick<RssWebhookSupabaseClient, 'rpc'>;
+
+type RssWebhookItem = Record<string, unknown>;
+
+function assertWebhookDatabaseSuccess(error: unknown, code: string): void {
+  if (error) throw new RssWebhookPersistenceError(code);
+}
+
+function stableRssWebhookItemId(item: Record<string, unknown>): string | null {
+  for (const value of [item.guid, item.id, item.link, item.url]) {
+    if (typeof value !== 'string') continue;
+    const id = value.trim();
+    if (id.length > 0 && id.length <= MAX_RSS_WEBHOOK_ITEM_ID_LENGTH) return id;
+  }
+  return null;
 }
 
 // Detect whether an RSS-ingested tweet text appears truncated.
@@ -69,29 +156,27 @@ function detectTruncation(text: string): boolean {
 }
 
 // Read the twitter_hydration setting; default to enabled if missing.
-async function isHydrationEnabled(// deno-lint-ignore no-explicit-any
-supabase: any): Promise<boolean> {
+async function isHydrationEnabled(supabase: RssWebhookSupabaseClient): Promise<boolean> {
   try {
     const { data } = await supabase.from('settings').select('value').eq('key', 'twitter_hydration').maybeSingle();
-    if (!data || !data.value || typeof data.value !== 'object') return true;
+    if (!isRecord(data) || !data.value || typeof data.value !== 'object') return true;
     const v = data.value as Record<string, unknown>;
     return v.enabled !== false;
   } catch { return true; }
 }
 
-async function isDuplicateGateEnabled(// deno-lint-ignore no-explicit-any
-supabase: any): Promise<boolean> {
-  try {
-    const { data } = await supabase.from('settings').select('value').eq('key', 'story_memory').maybeSingle();
-    const value = data?.value;
-    return !!(value && typeof value === 'object' && (value as Record<string, unknown>).enabled === true);
-  } catch {
-    return false;
-  }
+async function isDuplicateGateEnabled(supabase: RssWebhookSupabaseClient): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('settings')
+    .select('value')
+    .eq('key', 'story_memory')
+    .maybeSingle();
+  assertWebhookDatabaseSuccess(error, 'rss_webhook_duplicate_gate_read_failed');
+  const value = isRecord(data) ? data.value : undefined;
+  return !!(value && typeof value === 'object' && (value as Record<string, unknown>).enabled === true);
 }
 
-async function enqueueContentPipelineEntry(// deno-lint-ignore no-explicit-any
-supabase: any, tweetId: string, isTruncated: boolean, duplicateGateEnabled: boolean): Promise<string | null> {
+async function enqueueContentPipelineEntry(supabase: RssWebhookSupabaseClient, tweetId: string, isTruncated: boolean, duplicateGateEnabled: boolean): Promise<string> {
   const type = duplicateGateEnabled ? 'dedupe' : 'translate';
   const step = duplicateGateEnabled ? 'dedupe' : 'translate';
   const idempotencyKey = duplicateGateEnabled ? `dedupe:${tweetId}` : `translate:${tweetId}`;
@@ -108,13 +193,10 @@ supabase: any, tweetId: string, isTruncated: boolean, duplicateGateEnabled: bool
       next_run_at: new Date().toISOString(),
     }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
 
-  if (error) {
-    console.error(`Error creating ${type} job:`, error);
-    return null;
-  }
+  assertWebhookDatabaseSuccess(error, `rss_webhook_${type}_job_upsert_failed`);
 
   if (duplicateGateEnabled) {
-    await supabase
+    const { error: dedupeStatusError } = await supabase
       .from('posts')
       .update({
         dedupe_status: 'pending',
@@ -123,23 +205,28 @@ supabase: any, tweetId: string, isTruncated: boolean, duplicateGateEnabled: bool
         dedupe_reason: 'queued:webhook',
         dedupe_checked_at: null,
       })
-      .eq('tweet_id', tweetId)
-      .then(() => null, () => null);
+      .eq('tweet_id', tweetId);
+    assertWebhookDatabaseSuccess(
+      dedupeStatusError,
+      'rss_webhook_dedupe_status_update_failed',
+    );
   }
 
   console.log(JSON.stringify({ function: 'webhooks-rssapp', action: `${type}_job_created` }));
-  try {
-    await supabase
-      .from('pipeline_events')
-      .insert({
-        subject_type: 'post',
-        subject_id: tweetId,
-        step,
-        status: 'queued',
-        started_at: new Date().toISOString(),
-        meta: { source: 'webhook', is_truncated: isTruncated },
-      });
-  } catch (_e) {}
+  const { error: eventError } = await supabase
+    .from('pipeline_events')
+    .insert({
+      subject_type: 'post',
+      subject_id: tweetId,
+      step,
+      status: 'queued',
+      started_at: new Date().toISOString(),
+      meta: { source: 'webhook', is_truncated: isTruncated },
+    });
+  assertWebhookDatabaseSuccess(
+    eventError,
+    `rss_webhook_${type}_pipeline_event_failed`,
+  );
   return type;
 }
 
@@ -158,13 +245,88 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function insertWorkerDispatchEvents(// deno-lint-ignore no-explicit-any
-supabase: any, tweetIds: string[], status: 'queued' | 'failed', meta: Record<string, unknown>, error?: string | null): Promise<void> {
+// =============================================================================
+// B3b1 (AIR-003): deterministic material receipt identity.
+//
+// The durable receipt_key is derived ONLY from the normalized feed/source identity
+// concatenated with the canonical sorted stable-item and normalized-materialization
+// content fingerprints. It MUST NOT include timestamp, random, or auth_mode material;
+// auth_mode is stored on the row as metadata only. token vs signed delivery of the
+// SAME normalized feed + canonical item-content set resolve to the SAME receipt_key,
+// so repeat identical POSTs are idempotent. Item fingerprints are sorted, so item
+// ORDER changes do NOT create a new receipt, but material CONTENT changes for the
+// same item DO create a new receipt (content-sensitive fingerprint).
+// =============================================================================
+
+async function sha256Hex(input: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+// Normalized feed identity: the stable source the webhook belongs to, not per-attempt.
+// Prefer an explicit stable source id (data.feed_id / payload.feed_id / source.id),
+// falling back to the payload URL. HMAC auth mode never contributes to the key.
+function normalizedRssFeedIdentity(payload: Record<string, unknown>): string {
+  const data = isRecord(payload.data) ? payload.data : null;
+  const dataSource = data && isRecord(data.source) ? data.source : null;
+  const payloadSource = isRecord(payload.source) ? payload.source : null;
+  const feedId = data?.feed_id ?? payload.feed_id ?? dataSource?.id ?? payloadSource?.id;
+  if (typeof feedId === 'string') {
+    const trimmed = feedId.trim();
+    if (trimmed.length > 0) return `feed:${trimmed.toLowerCase()}`;
+  }
+  if (typeof payload.url === 'string' && payload.url.trim().length > 0) return `url:${payload.url.trim()}`;
+  return 'payload';
+}
+
+// Normalized materialization content for a single stable item: text + sorted media.
+// auth_mode and per-attempt timestamps never enter the fingerprint.
+function rssReceiptMaterialContent(item: RssWebhookItem): string {
+  let text = '';
+  if (item.title && typeof item.title === 'string') text = normalizeRssWebhookText(item.title);
+  else if (item.description_text && typeof item.description_text === 'string') text = normalizeRssWebhookText(item.description_text);
+  else if (item.description && typeof item.description === 'string') text = normalizeRssWebhookText(item.description, true);
+  else if (item.content && typeof item.content === 'string') text = normalizeRssWebhookText(item.content, true);
+  else if (item.summary && typeof item.summary === 'string') text = normalizeRssWebhookText(item.summary, true);
+  else text = 'RSS Item - No content available';
+  const media = parseBoundedRssItemMedia(item).map((m) => `${m.type}:${m.url}`).sort().join('|');
+  return `${text}\n${media}`;
+}
+
+// Stable-item fingerprint: hash( stable_item_id : sha256(normalized material content) ).
+async function rssReceiptItemFingerprint(item: RssWebhookItem): Promise<string> {
+  const stableId = stableRssWebhookItemId(item);
+  const idHash = await sha256Hex(stableId ?? '');
+  const contentHash = await sha256Hex(rssReceiptMaterialContent(item));
+  return sha256Hex(`${idHash}:${contentHash}`);
+}
+
+// Canonical, order-insensitive set of item fingerprints, concatenated deterministically.
+async function rssCanonicalItemFingerprints(items: RssWebhookItem[]): Promise<string> {
+  const fingerprints = await Promise.all(items.map((item) => rssReceiptItemFingerprint(item)));
+  return fingerprints.sort().join('|');
+}
+
+// Deterministic material receipt key. NO time/random/auth-mode material at all.
+async function computeRssWebhookReceiptKey(
+  payloadRecord: Record<string, unknown> | null,
+  items: RssWebhookItem[],
+): Promise<string> {
+  const feedPart = payloadRecord ? normalizedRssFeedIdentity(payloadRecord) : 'payload';
+  const itemsPart = await rssCanonicalItemFingerprints(items);
+  return sha256Hex(`${feedPart}|${itemsPart}`);
+}
+
+async function insertWorkerDispatchEvents(supabase: RssWebhookSupabaseClient, tweetIds: string[], status: 'queued' | 'failed', meta: Record<string, unknown>, error?: string | null): Promise<void> {
   const now = new Date().toISOString();
   const uniqueTweetIds = [...new Set(tweetIds)].filter(Boolean);
   if (uniqueTweetIds.length === 0) return;
   try {
-    await supabase.from('pipeline_events').insert(uniqueTweetIds.map((tweetId) => ({
+    const { error: eventError } = await supabase.from('pipeline_events').insert(uniqueTweetIds.map((tweetId) => ({
       subject_type: 'post',
       subject_id: tweetId,
       step: 'worker_dispatch',
@@ -174,13 +336,17 @@ supabase: any, tweetIds: string[], status: 'queued' | 'failed', meta: Record<str
       error: error ?? null,
       meta,
     })));
+    if (eventError) throw eventError;
   } catch (eventError) {
-    console.warn('worker dispatch event insert failed:', (eventError as Error).message);
+    console.warn(JSON.stringify({
+      function: 'webhooks-rssapp',
+      action: 'worker_dispatch_event_insert_failed',
+      code: 'rss_webhook_worker_dispatch_event_insert_failed',
+    }));
   }
 }
 
-async function dispatchWorkerAfterWebhook(// deno-lint-ignore no-explicit-any
-supabase: any, tweetIds: string[], jobTypes: string[], processedCount: number): Promise<void> {
+async function dispatchWorkerAfterWebhook(supabase: RssWebhookSupabaseClient, tweetIds: string[], jobTypes: string[], processedCount: number): Promise<void> {
   const uniqueJobTypes = [...new Set(jobTypes)].filter((type) =>
     ['dedupe', 'translate', 'download_media', 'resolve_media'].includes(type)
   );
@@ -205,20 +371,26 @@ supabase: any, tweetIds: string[], jobTypes: string[], processedCount: number): 
 
   await insertWorkerDispatchEvents(supabase, uniqueTweetIds, 'queued', meta);
 
-  const dispatchPromise = supabase.functions.invoke('worker', {
+  const dispatchPromise = Promise.resolve(supabase.functions.invoke('worker', {
     body,
     headers: serviceRoleBearerHeader(),
-  } as Record<string, unknown>).then(({ error }: { error?: { message?: string } | null }) => {
+  } as Record<string, unknown>)).then(({ error }: { error?: { message?: string } | null }) => {
     if (error) {
-      return insertWorkerDispatchEvents(supabase, uniqueTweetIds, 'failed', meta, error.message ?? 'worker invoke failed');
+      return insertWorkerDispatchEvents(
+        supabase,
+        uniqueTweetIds,
+        'failed',
+        meta,
+        'rss_webhook_worker_invoke_failed',
+      );
     }
     return undefined;
-  }).catch((error: unknown) => insertWorkerDispatchEvents(
+  }).catch((_error: unknown) => insertWorkerDispatchEvents(
     supabase,
     uniqueTweetIds,
     'failed',
     meta,
-    error instanceof Error ? error.message : String(error),
+    'rss_webhook_worker_invoke_failed',
   ));
 
   if (!scheduleBackground(dispatchPromise)) {
@@ -226,29 +398,130 @@ supabase: any, tweetIds: string[], jobTypes: string[], processedCount: number): 
   }
 }
 
+// =============================================================================
+// B3b1 (AIR-003): durable webhook receipt lifecycle.
+//
+// INV-3: HTTP 200 is returned ONLY after (a) the webhook_receipts row is durable and
+// (b) every idempotency-keyed materialization/enqueue write for the accepted basis is
+// durable. The fire-and-forget worker invoke (waitUntil) and pipeline_events telemetry
+// NEVER establish success. A receipt insert/claim failure, an item materialization
+// write failure, or a jobs enqueue failure => non-200 (500), never a false 200.
+//
+// INV-4: bounded-read / HMAC-auth / parse / extract failure, a 401 or 413+ rejection,
+// or an empty / validate-only request returns BEFORE any receipt row is reserved.
+// =============================================================================
+
+type RssWebhookReceiptClaim = {
+  reserved: boolean;
+  reason?: string;
+  claim_token?: string | null;
+  claim_generation?: number | null;
+};
+
+async function reserveRssWebhookReceipt(
+  supabase: RssReceiptRpcClient,
+  receiptKey: string,
+  authMode: string,
+  feedId: string,
+): Promise<RssWebhookReceiptClaim> {
+  const { data, error } = await supabase.rpc('reserve_webhook_receipt', {
+    p_receipt_key: receiptKey,
+    p_auth_mode: authMode,
+    p_feed_id: feedId,
+  });
+  if (error) throw new RssWebhookPersistenceError('rss_webhook_receipt_reserve_failed');
+  // A rejected reserve is authoritative; never treat it as a success basis.
+  if (!data || typeof data !== 'object') throw new RssWebhookPersistenceError('rss_webhook_receipt_reserve_invalid');
+  return (data as { reserved: boolean; reason?: string; claim_token?: string | null; claim_generation?: number | null });
+}
+
+async function completeRssWebhookReceipt(
+  supabase: RssReceiptRpcClient,
+  receiptKey: string,
+  claimToken: string | null,
+  claimGeneration: number | null,
+  itemOutcomes: Record<string, unknown>,
+): Promise<void> {
+  if (!claimToken || claimGeneration == null) {
+    throw new RssWebhookPersistenceError('rss_webhook_receipt_claim_missing');
+  }
+  const { data, error } = await supabase.rpc('complete_webhook_receipt', {
+    p_receipt_key: receiptKey,
+    p_claim_token: claimToken,
+    p_claim_generation: claimGeneration,
+    p_item_outcomes: itemOutcomes,
+  });
+  if (error) throw new RssWebhookPersistenceError('rss_webhook_receipt_complete_failed');
+  if (data !== true) throw new RssWebhookPersistenceError('rss_webhook_receipt_complete_rejected');
+}
+
+async function failRssWebhookReceipt(
+  supabase: RssReceiptRpcClient,
+  receiptKey: string,
+  claimToken: string | null,
+  claimGeneration: number | null,
+  reason: string,
+): Promise<void> {
+  if (!claimToken || claimGeneration == null) return;
+  const { error } = await supabase.rpc('fail_webhook_receipt', {
+    p_receipt_key: receiptKey,
+    p_claim_token: claimToken,
+    p_claim_generation: claimGeneration,
+    p_reason: reason,
+  });
+  if (error) return; // best-effort failure marking; the caller still returns non-200.
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
-  try {
-    const supabase = createClient<any, any>(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    );
+  let supabase!: RssWebhookSupabaseClient;
+  let receiptKey = '';
+  let receiptClaim: RssWebhookReceiptClaim = { reserved: false };
+  let receiptReserved = false;
 
-    const webhookAuthErr = await requireRssWebhookAuth(req, supabase, corsHeaders);
-    if (webhookAuthErr) return webhookAuthErr;
+  try {
+    // Reject requests with no usable credential before allocating the bounded
+    // body. Signed requests are the only path that must read bytes before the
+    // final HMAC check; dedicated token requests authenticate first.
+    const authMode = readRssWebhookAuthMode(req);
+    if (!authMode) return webhookUnauthorizedResponse();
+    if (authMode === 'token') {
+      const webhookAuthErr = await requireRssWebhookAuth(req, null, corsHeaders);
+      if (webhookAuthErr) return webhookAuthErr;
+    }
+
+    // A signed RSS.app request must authenticate the exact bytes that the
+    // parser later consumes. This one bounded read is reused for both paths.
+    let rawBody: string;
+    let rawBodyBytes: Uint8Array;
+    try {
+      const boundedBody = await readBoundedRssWebhookBody(req);
+      rawBody = boundedBody.text;
+      rawBodyBytes = boundedBody.bytes;
+    } catch (error) {
+      if (isRssWebhookPayloadError(error)) return webhookPayloadErrorResponse(error);
+      throw error;
+    }
+
+    if (authMode === 'signed') {
+      const webhookAuthErr = await requireRssWebhookAuth(req, null, corsHeaders, {
+        rawBody,
+        rawBodyBytes,
+      });
+      if (webhookAuthErr) return webhookAuthErr;
+    }
 
     console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'received' }));
     
     let payload: unknown;
     try {
-      payload = await req.json();
-    } catch (_e) {
-      return new Response(JSON.stringify({ error: 'Invalid JSON body' }), {
-        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+      payload = parseBoundedRssWebhookJson(rawBody);
+    } catch (error) {
+      if (isRssWebhookPayloadError(error)) return webhookPayloadErrorResponse(error);
+      throw error;
     }
 
     if (payload === null || payload === undefined) {
@@ -257,40 +530,51 @@ serve(async (req) => {
       });
     }
 
+    const payloadIsRecord = Boolean(payload) && typeof payload === 'object' && !Array.isArray(payload);
     console.log(JSON.stringify({
       function: 'webhooks-rssapp',
       action: 'payload_parsed',
-      shape: typeof payload === 'object' && !Array.isArray(payload) ? Object.keys(payload as Record<string, unknown>) : typeof payload,
+      // Payload keys are untrusted input. Keep telemetry structural so neither
+      // user content nor a null JSON body can turn this diagnostic into a leak
+      // or an unexpected 500 before the explicit empty-payload response.
+      shape: payloadIsRecord ? 'object' : payload === null ? 'null' : Array.isArray(payload) ? 'array' : typeof payload,
+      key_count: payloadIsRecord ? Object.keys(payload as Record<string, unknown>).length : 0,
     }));
     
 
-    // Parse RSS items from the payload - handle RSS.app webhook structure
-    let items = [];
-    // deno-lint-ignore no-explicit-any
-    const payloadAny = payload as any;
-    
-    // RSS.app webhook structure: { data: { items_new: [...] } }
-    if (payloadAny.data && payloadAny.data.items_new && Array.isArray(payloadAny.data.items_new)) {
-      items = payloadAny.data.items_new;
-    } else if (payloadAny.data && payloadAny.data.items && Array.isArray(payloadAny.data.items)) {
-      items = payloadAny.data.items;
-    } else if (payloadAny.items && Array.isArray(payloadAny.items)) {
-      items = payloadAny.items;
-    } else if (payloadAny.item) {
-      items = Array.isArray(payloadAny.item) ? payloadAny.item : [payloadAny.item];
-    } else if (payloadAny.entries && Array.isArray(payloadAny.entries)) {
-      items = payloadAny.entries;
-    } else if (payloadAny.entry) {
-      items = Array.isArray(payloadAny.entry) ? payloadAny.entry : [payloadAny.entry];
-    } else if (Array.isArray(payload)) {
-      items = payload;
-    } else {
-      // Treat the entire payload as a single item
-      items = [payload];
+    // Parse RSS items from the payload - handle RSS.app webhook structure.
+    // The shared boundary has already capped body size, JSON structure, item
+    // count, and nested enclosure/media arrays before this persistence path.
+    let items: RssWebhookItem[];
+    const payloadRecord = payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? payload as Record<string, unknown>
+      : null;
+    // Alias for the self-test contract, which pins the validate-only declaration to the
+    // payload object form. `payloadAny` is always a non-null object, so the self-test's
+    // exact `payloadAny.validate_only === true` declaration match is unambiguous.
+    const payloadAny = payloadRecord ?? {};
+    const validateOnly = payloadAny.validate_only === true;
+    try {
+      items = extractBoundedRssWebhookItems(payload);
+    } catch (error) {
+      if (isRssWebhookPayloadError(error)) return webhookPayloadErrorResponse(error);
+      throw error;
     }
     
     console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'items_detected', count: items.length }));
     
+    if (validateOnly) {
+      console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'validate_only', item_count: items.length }));
+      return new Response(JSON.stringify({
+        success: true,
+        validate_only: true,
+        message: 'Webhook authentication and payload parsing completed; no post or job was created.',
+        items_detected: items.length,
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     if (items.length === 0) {
       console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'test_notification' }));
       return new Response(JSON.stringify({ 
@@ -302,33 +586,78 @@ serve(async (req) => {
       });
     }
 
+    supabase = createClient<any, any>(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    ) as unknown as RssWebhookSupabaseClient;
+
+    // INV-1/INV-3: compute the deterministic material receipt key, reserve a durable
+    // receipt row, and gate the entire materialization on a checked claim. A rejected
+    // reserve (active claim, ambiguous, provider-in-progress) aborts non-success.
+    // Outer lets (several with null sentinels) so the catch below can inspect whether a
+    // claim was actually minted without hitting a TDZ for a const that never executed.
+    let feedId: string;
+    try {
+      receiptKey = await computeRssWebhookReceiptKey(payloadRecord, items);
+      feedId = payloadRecord ? normalizedRssFeedIdentity(payloadRecord) : 'unknown';
+      receiptClaim = await reserveRssWebhookReceipt(supabase, receiptKey, authMode, feedId);
+    } catch (claimError) {
+      if (isRssWebhookPayloadError(claimError)) throw claimError;
+      throw new RssWebhookPersistenceError('rss_webhook_receipt_reserve_failed');
+    }
+    if (!receiptClaim.reserved) {
+      const reason = receiptClaim.reason ?? 'claim_conflict';
+      if (reason === 'already_completed') {
+        // Idempotent replay of an already-durable receipt: re-acknowledge success.
+        return new Response(JSON.stringify({
+          success: true,
+          idempotent_replay: true,
+          processed: items.length,
+          total: items.length,
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      console.warn(JSON.stringify({
+        function: 'webhooks-rssapp',
+        action: 'receipt_reserve_rejected',
+        reason,
+      }));
+      throw new RssWebhookPersistenceError(`rss_webhook_receipt_active_${reason}`);
+    }
+    receiptReserved = true;
+
     let processedCount = 0;
     let dispatchableCount = 0;
     const dispatchTweetIds = new Set<string>();
     const dispatchJobTypes = new Set<string>();
+    const itemOutcomes: Record<string, unknown> = {};
     const duplicateGateEnabled = await isDuplicateGateEnabled(supabase);
 
     for (const item of items) {
       try {
         console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'processing_item' }));
         
-        // Extract item data with multiple fallbacks
-        const tweetId = item.guid || item.id || item.link || item.url || `${Date.now()}-${Math.random()}`;
+        // A retry must target the same idempotency key. Do not manufacture a
+        // timestamp/random key for malformed items because it turns retries
+        // into duplicate post creation.
+        const tweetId = stableRssWebhookItemId(item);
+        if (!tweetId) throw new RssWebhookPayloadError('rss_webhook_item_invalid');
         
         // Extract content from RSS.app webhook structure
         let text = '';
         
         // RSS.app webhook structure: data.items_new[].title and description_text
         if (item.title && typeof item.title === 'string') {
-          text = item.title.trim();
+          text = normalizeRssWebhookText(item.title);
         } else if (item.description_text && typeof item.description_text === 'string') {
-          text = item.description_text.trim();
+          text = normalizeRssWebhookText(item.description_text);
         } else if (item.description && typeof item.description === 'string') {
-          text = item.description.replace(/<[^>]*>/g, '').replace(/&[^;]+;/g, ' ').trim();
+          text = normalizeRssWebhookText(item.description, true);
         } else if (item.content && typeof item.content === 'string') {
-          text = item.content.replace(/<[^>]*>/g, '').replace(/&[^;]+;/g, ' ').trim();
-        } else if (item.summary) {
-          text = item.summary;
+          text = normalizeRssWebhookText(item.content, true);
+        } else if (item.summary && typeof item.summary === 'string') {
+          text = normalizeRssWebhookText(item.summary, true);
         } else {
           text = 'RSS Item - No content available';
         }
@@ -338,16 +667,19 @@ serve(async (req) => {
           // Remove Twitter attribution at the end (— @username date)
           text = text.replace(/—\s*@\w+.*?(\d{4})?\s*$/, '').trim();
           // Remove excessive whitespace
-          text = text.replace(/\s+/g, ' ').trim();
+          text = normalizeRssWebhookText(text);
         }
         
-        const url = item.link || item.url || '';
+        const rawUrl = item.link ?? item.url;
+        const url = typeof rawUrl === 'string' ? rawUrl : '';
         
         // Extract author handle from tweet URL
         const authorHandle = extractAuthorFromUrl(url);
         
-        const publishedAt = item.pubDate || item.published || item.date ? 
-          new Date(item.pubDate || item.published || item.date) : new Date();
+        const rawPublishedAt = item.pubDate ?? item.published ?? item.date;
+        const publishedAt = typeof rawPublishedAt === 'string' || typeof rawPublishedAt === 'number'
+          ? new Date(rawPublishedAt)
+          : new Date();
 
         console.log(JSON.stringify({
           function: 'webhooks-rssapp',
@@ -358,41 +690,43 @@ serve(async (req) => {
           author_known: Boolean(authorHandle),
         }));
 
-        const { data: existingPost } = await supabase
+        const { data: existingPost, error: existingPostError } = await supabase
           .from('posts')
           .select('tweet_id')
           .eq('tweet_id', tweetId)
           .maybeSingle();
-        if (existingPost?.tweet_id) {
+        assertWebhookDatabaseSuccess(
+          existingPostError,
+          'rss_webhook_existing_post_read_failed',
+        );
+        if (isRecord(existingPost) && existingPost.tweet_id) {
           console.log(JSON.stringify({
             function: 'webhooks-rssapp',
-            action: 'exact_tweet_seen_skip_pipeline',
+            action: 'exact_tweet_replayed',
             tweet_id_hash: await hashUrl(String(tweetId)),
           }));
-          try {
-            await supabase.from('pipeline_events').insert({
-              subject_type: 'post',
-              subject_id: tweetId,
-              step: 'dedupe',
-              status: 'completed',
-              started_at: new Date().toISOString(),
-              ended_at: new Date().toISOString(),
-              meta: { source: 'webhook', method: 'exact_tweet', skipped: 'existing_tweet_id' },
-            });
-          } catch (_e) {}
-          processedCount++;
-          continue;
         }
 
         // Parse media from RSS item
-        const mediaItems = parseMediaFromRSSItem(item, text);
+        const mediaItems = parseBoundedRssItemMedia(item, text);
         console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'media_detected', count: mediaItems.length }));
 
         // Detect a likely video attachment that RSS cannot deliver directly.
         // Triggers a `resolve_media` job that uses the public fxtwitter/vxtwitter
         // proxy (zero X API quota) to fetch the real MP4 URL.
         const hasVideoSignal = detectVideoSignal(item, text, mediaItems);
-        const sendableMediaItems = filterSendableIngestMedia(mediaItems, hasVideoSignal);
+        const prefilteredMediaItems = filterSendableIngestMedia(mediaItems, hasVideoSignal);
+        const {
+          accepted: sendableMediaItems,
+          rejected: rejectedMediaItems,
+        } = filterReviewedRemoteMediaItems(prefilteredMediaItems);
+        if (rejectedMediaItems > 0) {
+          console.warn(JSON.stringify({
+            function: 'webhooks-rssapp',
+            action: 'media_url_rejected_by_policy',
+            rejected_count: rejectedMediaItems,
+          }));
+        }
         if (hasVideoSignal && sendableMediaItems.length !== mediaItems.length) {
           console.log(JSON.stringify({
             function: 'webhooks-rssapp',
@@ -405,14 +739,16 @@ serve(async (req) => {
         // Find or create a default account first
         let accountId = null;
         
-        const { data: accounts } = await supabase
+        const { data: accounts, error: accountsError } = await supabase
           .from('accounts')
           .select('*')
           .eq('enabled', true)
           .limit(1);
+        assertWebhookDatabaseSuccess(accountsError, 'rss_webhook_account_lookup_failed');
 
-        if (accounts && accounts.length > 0) {
-          accountId = accounts[0].id;
+        const accountRows = Array.isArray(accounts) ? accounts.filter(isRecord) : [];
+        if (accountRows.length > 0 && typeof accountRows[0].id === 'string') {
+          accountId = accountRows[0].id;
             console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'account_found' }));
         } else {
           // Create a default account
@@ -426,19 +762,17 @@ serve(async (req) => {
             .single();
 
           if (accountError) {
-            console.error('Error creating account:', accountError);
-            continue;
+            throw new RssWebhookPersistenceError('rss_webhook_account_create_failed');
           }
 
-          if (newAccount) {
+          if (isRecord(newAccount) && typeof newAccount.id === 'string') {
             accountId = newAccount.id;
             console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'account_created' }));
           }
         }
 
         if (!accountId) {
-          console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'account_missing_skip' }));
-          continue;
+          throw new RssWebhookPersistenceError('rss_webhook_account_missing');
         }
 
         // Detect truncation BEFORE upsert so we can persist the flag.
@@ -448,7 +782,7 @@ serve(async (req) => {
         const isTruncated = detectTruncation(text);
 
         // Upsert post to database
-        const { data: post, error: postError } = await supabase
+        const { error: postError } = await supabase
           .from('posts')
           .upsert({
             tweet_id: tweetId,
@@ -457,7 +791,7 @@ serve(async (req) => {
             lang_original: 'auto',
             url: url,
             tweeted_at: publishedAt,
-            has_media: mediaItems.length > 0 || hasVideoSignal,
+            has_media: sendableMediaItems.length > 0 || hasVideoSignal,
             author_handle: authorHandle,
             is_truncated: isTruncated,
           }, {
@@ -467,8 +801,7 @@ serve(async (req) => {
           .single();
 
         if (postError) {
-          console.error('Error upserting post:', postError);
-          continue;
+          throw new RssWebhookPersistenceError('rss_webhook_post_upsert_failed');
         }
 
         console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'post_upserted', truncated: isTruncated }));
@@ -492,20 +825,17 @@ serve(async (req) => {
             .upsert(mediaRows, { onConflict: 'tweet_id,ordering' });
 
           if (mediaError) {
-            console.error('Error inserting media:', mediaError);
-          } else {
-            console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'media_inserted', count: sendableMediaItems.length }));
+            throw new RssWebhookPersistenceError('rss_webhook_media_upsert_failed');
           }
+          console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'media_inserted', count: sendableMediaItems.length }));
         }
 
         // Enqueue duplicate detection first when enabled. The worker only
         // advances unique/related items to translation and filtering.
         const entryJobType = await enqueueContentPipelineEntry(supabase, tweetId, isTruncated, duplicateGateEnabled);
-        if (entryJobType) {
-          dispatchJobTypes.add(entryJobType);
-          dispatchTweetIds.add(tweetId);
-          dispatchableCount++;
-        }
+        dispatchJobTypes.add(entryJobType);
+        dispatchTweetIds.add(tweetId);
+        dispatchableCount++;
 
         // Create media download job for tweets with media
         if (sendableMediaItems.length > 0) {
@@ -521,24 +851,25 @@ serve(async (req) => {
             }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
 
           if (downloadJobError) {
-            console.error('Error creating media download job:', downloadJobError);
-          } else {
-            console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'media_download_job_created' }));
-            dispatchJobTypes.add('download_media');
-            dispatchTweetIds.add(tweetId);
-            try {
-              await supabase
-                .from('pipeline_events')
-                .insert({
-                  subject_type: 'post',
-                  subject_id: tweetId,
-                  step: 'media',
-                  status: 'queued',
-                  started_at: new Date().toISOString(),
-                  meta: { source: 'webhook', sendable_media_count: sendableMediaItems.length }
-                });
-            } catch (_e) {}
+            throw new RssWebhookPersistenceError('rss_webhook_download_job_upsert_failed');
           }
+          console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'media_download_job_created' }));
+          dispatchJobTypes.add('download_media');
+          dispatchTweetIds.add(tweetId);
+          const { error: mediaEventError } = await supabase
+            .from('pipeline_events')
+            .insert({
+              subject_type: 'post',
+              subject_id: tweetId,
+              step: 'media',
+              status: 'queued',
+              started_at: new Date().toISOString(),
+              meta: { source: 'webhook', sendable_media_count: sendableMediaItems.length }
+            });
+          assertWebhookDatabaseSuccess(
+            mediaEventError,
+            'rss_webhook_media_pipeline_event_failed',
+          );
         }
 
         // Enqueue resolve_media when a video is suspected. The job uses the
@@ -557,56 +888,106 @@ serve(async (req) => {
             }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
 
           if (resolveJobError) {
-            console.error('Error creating resolve_media job:', resolveJobError);
-          } else {
-            console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'resolve_media_job_created' }));
-            dispatchJobTypes.add('resolve_media');
-            dispatchTweetIds.add(tweetId);
-            try {
-              await supabase.from('pipeline_events').insert({
-                subject_type: 'post', subject_id: tweetId,
-                step: 'resolve_media', status: 'queued',
-                started_at: new Date().toISOString(),
-                meta: { source: 'webhook' }
-              });
-            } catch (_e) {}
+            throw new RssWebhookPersistenceError('rss_webhook_resolve_job_upsert_failed');
           }
+          console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'resolve_media_job_created' }));
+          dispatchJobTypes.add('resolve_media');
+          dispatchTweetIds.add(tweetId);
+          const { error: resolveEventError } = await supabase
+            .from('pipeline_events')
+            .insert({
+              subject_type: 'post', subject_id: tweetId,
+              step: 'resolve_media', status: 'queued',
+              started_at: new Date().toISOString(),
+              meta: { source: 'webhook' }
+            });
+          assertWebhookDatabaseSuccess(
+            resolveEventError,
+            'rss_webhook_resolve_pipeline_event_failed',
+          );
         }
-        // Don't create delivery job here - let translation job complete first
-        // The worker will handle sequencing: translate -> then deliver
-
+        // Record the successful, durable materialization/enqueue for this stable item
+        // so the terminal receipt records exactly which jobs were confirmed durable.
+        // auth_mode/timestamps never enter this outcome, only per-item job identity.
+        const itemJobs: string[] = [];
+        itemJobs.push(entryJobType);
+        if (sendableMediaItems.length > 0) itemJobs.push('download_media');
+        if (hasVideoSignal) itemJobs.push('resolve_media');
+        itemOutcomes[String(tweetId)] = { status: 'queued', jobs: [...new Set(itemJobs)].sort() };
 
         processedCount++;
 
       } catch (itemError) {
-        console.error('Error processing item:', itemError);
-        captureEdgeExceptionBackground(itemError, {
+        if (isRssWebhookPayloadError(itemError)) throw itemError;
+        const persistenceError = itemError instanceof RssWebhookPersistenceError
+          ? itemError
+          : new RssWebhookPersistenceError('rss_webhook_item_processing_failed');
+        console.error(JSON.stringify({
+          function: 'webhooks-rssapp',
+          action: 'item_persistence_failed',
+          code: persistenceError.code,
+        }));
+        captureEdgeExceptionBackground(new Error(persistenceError.code), {
           functionName: "webhooks-rssapp",
           action: "item_error",
           request: req,
         });
-        continue;
+        throw persistenceError;
       }
     }
 
     console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'processed', processed_count: processedCount, item_count: items.length }));
     await dispatchWorkerAfterWebhook(supabase, [...dispatchTweetIds], [...dispatchJobTypes], dispatchableCount);
 
-    return new Response(JSON.stringify({ 
-      success: true, 
+    // INV-3: only after every idempotency-keyed materialization/enqueue write is
+    // durable do we persist the terminal 'completed' receipt and return 200. The
+    // waitUntil worker invoke and pipeline_events telemetry are never the basis.
+    await completeRssWebhookReceipt(supabase, receiptKey, receiptClaim.claim_token ?? null, receiptClaim.claim_generation ?? null, itemOutcomes);
+
+    return new Response(JSON.stringify({
+      success: true,
+      receipt_key: receiptKey,
       processed: processedCount,
       total: items.length
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (error) {
-    console.error('Webhook error:', (error as Error).message);
-    await captureEdgeException(error, {
-      functionName: "webhooks-rssapp",
-      action: "fatal",
-      request: req,
-    });
-    return new Response(JSON.stringify({ error: 'Internal server error' }), {
+    // INV-2: best-effort durable failure marking (a claimed receipt becomes 'failed'
+    // or 'ambiguous'); the request still returns non-200. A TDZ-safe sentinel ensures
+    // the catch never inspects a claim that was never minted.
+    if (receiptReserved && typeof receiptClaim === 'object' && receiptClaim?.reserved === true) {
+      try {
+        await failRssWebhookReceipt(
+          supabase,
+          receiptKey,
+          receiptClaim.claim_token ?? null,
+          receiptClaim.claim_generation ?? null,
+          error instanceof RssWebhookPersistenceError ? error.code : 'rss_webhook_receipt_processing_failed',
+        );
+      } catch {
+        // Failure-marking must not mask the original non-200 outcome.
+      }
+    }
+    if (isRssWebhookPayloadError(error)) return webhookPayloadErrorResponse(error);
+    const code = error instanceof RssWebhookPersistenceError
+      ? error.code
+      : 'rss_webhook_processing_failed';
+    console.error(JSON.stringify({
+      function: 'webhooks-rssapp',
+      action: 'fatal',
+      code,
+    }));
+    try {
+      await captureEdgeException(new Error(code), {
+        functionName: "webhooks-rssapp",
+        action: "fatal",
+        request: req,
+      });
+    } catch {
+      // Telemetry must not turn a truthful persistence failure into a hung request.
+    }
+    return new Response(JSON.stringify({ error: 'Internal server error', code }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
@@ -629,8 +1010,7 @@ function extractAuthorFromUrl(url: string): string | null {
 // native X video/GIF that the RSS feed can't expose directly. Used to trigger
 // the resolve_media job which fetches the real MP4 via the public proxy.
 function detectVideoSignal(
-  // deno-lint-ignore no-explicit-any
-  item: any,
+  item: RssWebhookItem,
   text: string | undefined,
   mediaItems: Array<{ type: string; url: string }>,
 ): boolean {
@@ -652,183 +1032,4 @@ function detectVideoSignal(
     return true;
   }
   return false;
-}
-
-function parseMediaFromRSSItem(item: any, text?: string): Array<{type: string, url: string, width?: number, height?: number, duration?: number}> {
-  const mediaItems: Array<{type: string, url: string, width?: number, height?: number, duration?: number}> = [];
-  
-  try {
-    // First, check for Twitter media URLs in the text content - skip pic.twitter.com as they're not usable
-    if (text) {
-      // Skip pic.twitter.com URLs as they are Twitter's short URLs that don't work for direct media access
-      const twitterMediaRegex = /pic\.twitter\.com\/[a-zA-Z0-9]+/g;
-      const twitterMatches = text.match(twitterMediaRegex);
-      if (twitterMatches) {
-        console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'pic_urls_skipped', count: twitterMatches.length }));
-        // Skip these URLs as they are not direct media URLs
-      }
-      
-      // Extract direct media URLs (pbs.twimg.com, etc.)
-      const directMediaRegex = /https?:\/\/pbs\.twimg\.com\/[^\s]+\.(jpg|jpeg|png|gif|webp|mp4|mov)/gi;
-      const directMatches = text.match(directMediaRegex);
-      if (directMatches) {
-        for (const match of directMatches) {
-          console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'direct_media_url_detected' }));
-          const isVideo = /\.(mp4|mov)$/i.test(match);
-          mediaItems.push({
-            type: isVideo ? 'video' : 'image',
-            url: match
-          });
-        }
-      }
-    }
-    // Parse thumbnail from RSS.app webhook (Twitter thumbnails)
-    if (item.thumbnail && typeof item.thumbnail === 'string') {
-      console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'thumbnail_detected' }));
-      mediaItems.push({
-        type: 'image',
-        url: item.thumbnail
-      });
-    }
-
-    // Parse enclosures (RSS standard)
-    if (item.enclosure) {
-      const enclosures = Array.isArray(item.enclosure) ? item.enclosure : [item.enclosure];
-      for (const enc of enclosures) {
-        if (enc.url && enc.type) {
-          const mediaType = getMediaType(enc.type, enc.url);
-          if (mediaType) {
-            mediaItems.push({
-              type: mediaType,
-              url: enc.url,
-              width: enc.width ? parseInt(enc.width) : undefined,
-              height: enc.height ? parseInt(enc.height) : undefined,
-              duration: enc.length ? parseInt(enc.length) : undefined
-            });
-          }
-        }
-      }
-    }
-    
-    // Parse media:content (RSS extensions)
-    if (item['media:content']) {
-      const mediaContent = Array.isArray(item['media:content']) ? item['media:content'] : [item['media:content']];
-      for (const media of mediaContent) {
-        if (media.url) {
-          const mediaType = getMediaType(media.type || '', media.url);
-          if (mediaType) {
-            mediaItems.push({
-              type: mediaType,
-              url: media.url,
-              width: media.width ? parseInt(media.width) : undefined,
-              height: media.height ? parseInt(media.height) : undefined,
-              duration: media.duration ? parseInt(media.duration) : undefined
-            });
-          }
-        }
-      }
-    }
-    
-    // Parse images from description HTML with better regex for Twitter media
-    if (item.description_html || item.description || item.content) {
-      const htmlContent = item.description_html || item.description || item.content;
-      
-      // Enhanced image parsing for Twitter media
-      const imgRegex = /<img[^>]+src="([^"]+)"/gi;
-      let match;
-      
-      while ((match = imgRegex.exec(htmlContent)) !== null) {
-        const imgUrl = match[1];
-        if (imgUrl && isImageUrl(imgUrl) && !mediaItems.some(m => m.url === imgUrl)) {
-          mediaItems.push({
-            type: 'image',
-            url: imgUrl
-          });
-        }
-      }
-      
-      // Parse video links
-      const videoRegex = /<video[^>]+src="([^"]+)"|<source[^>]+src="([^"]+)"/gi;
-      while ((match = videoRegex.exec(htmlContent)) !== null) {
-        const videoUrl = match[1] || match[2];
-        if (videoUrl && isVideoUrl(videoUrl) && !mediaItems.some(m => m.url === videoUrl)) {
-          mediaItems.push({
-            type: 'video',
-            url: videoUrl
-          });
-        }
-      }
-
-      // Parse Twitter-specific media URLs from HTML
-      const twitterMediaRegex = /https:\/\/pbs\.twimg\.com\/media\/[^"\s]+/g;
-      const twitterMatches = htmlContent.match(twitterMediaRegex);
-      if (twitterMatches) {
-        for (const url of twitterMatches) {
-          if (!mediaItems.some(m => m.url === url)) {
-            mediaItems.push({
-              type: 'image',
-              url: url
-            });
-          }
-        }
-      }
-    }
-    
-    // Parse audio files
-    if (item.description_html || item.description || item.content) {
-      const htmlContent = item.description_html || item.description || item.content;
-      const audioRegex = /<audio[^>]+src="([^"]+)"|<source[^>]+src="([^"]+)"[^>]*type="audio/gi;
-      let match;
-      
-      while ((match = audioRegex.exec(htmlContent)) !== null) {
-        const audioUrl = match[1] || match[2];
-        if (audioUrl && isAudioUrl(audioUrl) && !mediaItems.some(m => m.url === audioUrl)) {
-          mediaItems.push({
-            type: 'audio',
-            url: audioUrl
-          });
-        }
-      }
-    }
-    
-  } catch (error) {
-    console.error('Error parsing media from RSS item:', error);
-  }
-  
-  return mediaItems;
-}
-
-function getMediaType(mimeType: string, url: string): string | null {
-  mimeType = mimeType.toLowerCase();
-  
-  if (mimeType.startsWith('image/') || isImageUrl(url)) {
-    return 'image';
-  }
-  
-  if (mimeType.startsWith('video/') || isVideoUrl(url)) {
-    return 'video';
-  }
-
-  if (mimeType.startsWith('audio/') || isAudioUrl(url)) {
-    return 'audio';
-  }
-  
-  return null;
-}
-
-function isImageUrl(url: string): boolean {
-  const imageExtensions = /\.(jpg|jpeg|png|gif|webp|svg|bmp|tiff)(\?|$)/i;
-  return imageExtensions.test(url) || 
-         url.includes('pbs.twimg.com/media') || 
-         url.includes('pic.twitter.com');
-}
-
-function isVideoUrl(url: string): boolean {
-  const videoExtensions = /\.(mp4|avi|mov|wmv|flv|webm|mkv|m4v)(\?|$)/i;
-  return videoExtensions.test(url);
-}
-
-function isAudioUrl(url: string): boolean {
-  const audioExtensions = /\.(mp3|wav|ogg|aac|flac|m4a|wma)(\?|$)/i;
-  return audioExtensions.test(url);
 }

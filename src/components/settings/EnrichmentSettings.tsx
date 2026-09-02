@@ -9,7 +9,7 @@ import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ChevronDown, Plus, X, Sparkles, Search, PenTool, Wand2, Layout, BookOpen, Loader2, Save } from 'lucide-react';
+import { AlertTriangle, ChevronDown, Plus, X, Sparkles, Search, PenTool, Wand2, Layout, BookOpen, Loader2, RefreshCw, Save } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { invokeAdminAction } from '@/api/adminActions';
 import { fetchSettingsRows, saveSetting } from '@/api/settingsData';
@@ -157,12 +157,161 @@ CRITICAL EDITORIAL GUIDELINES:
   min_creator_angle_chars: 80,
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parseStringArray(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+
+  const parsed: string[] = [];
+  for (const item of value) {
+    if (typeof item !== 'string') return null;
+    parsed.push(item);
+  }
+  return parsed;
+}
+
+function parseStringRecord(value: unknown): Record<string, string> | null {
+  if (!isRecord(value)) return null;
+
+  const parsed: Record<string, string> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (typeof item !== 'string') return null;
+    Object.defineProperty(parsed, key, {
+      value: item,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  }
+  return parsed;
+}
+
+function parsePersonalVoiceProfile(value: unknown): PersonalVoiceProfile | null {
+  if (!isRecord(value)) return null;
+
+  const profile: PersonalVoiceProfile = {};
+  for (const key of ['version', 'summary'] as const) {
+    const field = value[key];
+    if (field === undefined) continue;
+    if (typeof field !== 'string') return null;
+    profile[key] = field;
+  }
+
+  for (const key of ['language_rules', 'tone_rules', 'avoid_rules', 'risk_notes', 'hashtags'] as const) {
+    const field = value[key];
+    if (field === undefined) continue;
+    const rules = parseStringArray(field);
+    if (!rules) return null;
+    profile[key] = rules;
+  }
+
+  if (value.intent_rules !== undefined) {
+    const intentRules = parseStringRecord(value.intent_rules);
+    if (!intentRules) return null;
+    profile.intent_rules = intentRules;
+  }
+
+  const updatedAt = value.updated_at;
+  if (updatedAt !== undefined) {
+    if (updatedAt === null) {
+      profile.updated_at = null;
+    } else if (typeof updatedAt === 'string') {
+      profile.updated_at = updatedAt;
+    } else {
+      return null;
+    }
+  }
+
+  return profile;
+}
+
+function parseEnrichmentConfig(value: unknown): EnrichmentConfig | null {
+  if (!isRecord(value)) return null;
+
+  const parsed: EnrichmentConfig = {
+    ...DEFAULT_CONFIG,
+    banned_phrases: [...DEFAULT_CONFIG.banned_phrases],
+  };
+  const target = parsed as unknown as Record<string, unknown>;
+  const strings = [
+    'model',
+    'version',
+    'analyst_prompt',
+    'researcher_prompt',
+    'humanizer_prompt',
+    'archivist_prompt',
+    'composer_prompt',
+    'critic_prompt',
+  ];
+  const numbers = [
+    'max_research_tokens',
+    'max_analysis_tokens',
+    'max_humanizer_tokens',
+    'max_archivist_tokens',
+    'max_composer_tokens',
+    'max_critic_tokens',
+    'skip_research_below_score',
+    'archivist_lookback_days',
+    'archivist_max_posts',
+    'thread_above_score',
+    'aggregator_review_threshold',
+    'aggregator_reject_threshold',
+    'ai_voice_review_threshold',
+    'ai_voice_reject_threshold',
+    'same_source_window_hours',
+    'same_source_review_threshold',
+    'research_cache_hours',
+    'min_creator_angle_chars',
+  ];
+
+  for (const key of strings) {
+    if (value[key] === undefined) continue;
+    if (typeof value[key] !== 'string') return null;
+    target[key] = value[key];
+  }
+  for (const key of numbers) {
+    if (value[key] === undefined) continue;
+    if (typeof value[key] !== 'number' || !Number.isFinite(value[key])) return null;
+    target[key] = value[key];
+  }
+  for (const key of ['enabled', 'require_approval']) {
+    if (value[key] === undefined) continue;
+    if (typeof value[key] !== 'boolean') return null;
+    target[key] = value[key];
+  }
+
+  const enumFields: Array<[string, readonly string[]]> = [
+    ['mode', ['creator_analysis', 'legacy']],
+    ['pipeline_mode', ['manual_only', 'shadow_review', 'required_for_x']],
+    ['review_mode', ['shadow_review', 'auto_high_confidence', 'manual_only']],
+    ['source_attribution_policy', ['compact', 'always', 'none']],
+  ];
+  for (const [key, allowed] of enumFields) {
+    if (value[key] === undefined) continue;
+    if (typeof value[key] !== 'string' || !allowed.includes(value[key] as string)) return null;
+    target[key] = value[key];
+  }
+
+  if (value.banned_phrases !== undefined) {
+    if (!Array.isArray(value.banned_phrases) || !value.banned_phrases.every((phrase) => typeof phrase === 'string')) {
+      return null;
+    }
+    parsed.banned_phrases = [...value.banned_phrases];
+  }
+
+  return parsed;
+}
+
 export default function EnrichmentSettings() {
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [saving, setSaving] = useState(false);
   const [generatingProfile, setGeneratingProfile] = useState(false);
-  const [config, setConfig] = useState<EnrichmentConfig>(DEFAULT_CONFIG);
+  const [config, setConfig] = useState<EnrichmentConfig | null>(null);
+  const [usingDefaultBaseline, setUsingDefaultBaseline] = useState(false);
   const [voiceSamples, setVoiceSamples] = useState<VoiceSamples>({ samples: [], updated_at: null });
   const [voiceGuide, setVoiceGuide] = useState<VoiceGuide>({ guide: DEFAULT_MASIH_VOICE_GUIDE, updated_at: null });
   const [voiceProfile, setVoiceProfile] = useState<PersonalVoiceProfile | null>(null);
@@ -176,26 +325,68 @@ export default function EnrichmentSettings() {
 
   async function loadSettings() {
     setLoading(true);
+    setLoadError(false);
+    setConfig(null);
+    setUsingDefaultBaseline(false);
+    setVoiceSamples({ samples: [], updated_at: null });
+    setVoiceGuide({ guide: DEFAULT_MASIH_VOICE_GUIDE, updated_at: null });
+    setVoiceProfile(null);
     try {
       const data = await fetchSettingsRows(['enrichment_config', 'voice_samples', 'voice_guide', 'personal_voice_profile']);
-      if (data) {
-        for (const row of data) {
-          if (row.key === 'enrichment_config' && row.value) setConfig({ ...DEFAULT_CONFIG, ...(row.value as object) });
-          if (row.key === 'voice_samples' && row.value) setVoiceSamples(row.value as unknown as VoiceSamples);
-          if (row.key === 'voice_guide' && row.value) {
-            const value = row.value as Partial<VoiceGuide>;
-            setVoiceGuide({ guide: value.guide || DEFAULT_MASIH_VOICE_GUIDE, updated_at: value.updated_at || null });
+      const byKey = new Map(data.map((row) => [row.key, row.value]));
+      const enrichmentConfig = byKey.get('enrichment_config');
+      const parsedConfig = enrichmentConfig === undefined || enrichmentConfig === null
+        ? {
+            ...DEFAULT_CONFIG,
+            banned_phrases: [...DEFAULT_CONFIG.banned_phrases],
           }
-          if (row.key === 'personal_voice_profile' && row.value) setVoiceProfile(row.value as unknown as PersonalVoiceProfile);
-        }
+        : parseEnrichmentConfig(enrichmentConfig);
+      if (!parsedConfig) {
+        throw new Error('invalid_enrichment_config');
       }
-    } catch (e) {
-      console.error('Failed to load enrichment settings:', e);
+      setConfig(parsedConfig);
+      setUsingDefaultBaseline(enrichmentConfig === undefined || enrichmentConfig === null);
+
+      const samples = byKey.get('voice_samples');
+      if (samples !== undefined && samples !== null) {
+        if (!isRecord(samples) || !Array.isArray(samples.samples) || !samples.samples.every((sample) => typeof sample === 'string')) {
+          throw new Error('invalid_voice_samples');
+        }
+        setVoiceSamples({
+          samples: samples.samples,
+          updated_at: typeof samples.updated_at === 'string' ? samples.updated_at : null,
+        });
+      }
+
+      const guide = byKey.get('voice_guide');
+      if (guide !== undefined && guide !== null) {
+        if (!isRecord(guide) || (guide.guide !== undefined && typeof guide.guide !== 'string')) {
+          throw new Error('invalid_voice_guide');
+        }
+        setVoiceGuide({
+          guide: typeof guide.guide === 'string' && guide.guide.trim() ? guide.guide : DEFAULT_MASIH_VOICE_GUIDE,
+          updated_at: typeof guide.updated_at === 'string' ? guide.updated_at : null,
+        });
+      }
+
+      const profile = byKey.get('personal_voice_profile');
+      if (profile !== undefined && profile !== null) {
+        const parsedProfile = parsePersonalVoiceProfile(profile);
+        if (!parsedProfile) throw new Error('invalid_personal_voice_profile');
+        setVoiceProfile(parsedProfile);
+      }
+    } catch {
+      setConfig(null);
+      setUsingDefaultBaseline(false);
+      setLoadError(true);
+      console.warn(JSON.stringify({ component: 'EnrichmentSettings', action: 'settings_load_failed' }));
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   async function saveConfig() {
+    if (!config) return;
     setSaving(true);
     try {
       await saveSetting({ key: 'enrichment_config', value: config });
@@ -231,12 +422,14 @@ export default function EnrichmentSettings() {
   async function generateVoiceProfile() {
     setGeneratingProfile(true);
     try {
-      const data = await invokeAdminAction<{ ok?: boolean; error?: string; profile?: PersonalVoiceProfile; usage?: unknown }>(
+      const data = await invokeAdminAction<{ ok?: boolean; error?: string; profile?: unknown; usage?: unknown }>(
         { action: 'generate_voice_profile', guide: voiceGuide.guide },
         { throwOnFailure: false },
       );
       if (data?.ok === false) throw new Error(data.error ?? 'Voice profile generation failed');
-      setVoiceProfile(data.profile as PersonalVoiceProfile);
+      const profile = parsePersonalVoiceProfile(data?.profile);
+      if (!profile) throw new Error('invalid_personal_voice_profile');
+      setVoiceProfile(profile);
       setVoiceGuide({ guide: voiceGuide.guide, updated_at: new Date().toISOString() });
       toast({ title: 'Profile generated', description: `GPT-5.4 Mini used ${data.usage ?? 'unknown'} tokens.` });
     } catch (e) {
@@ -259,6 +452,7 @@ export default function EnrichmentSettings() {
   }
 
   function addBannedPhrase() {
+    if (!config) return;
     const phrase = newBannedPhrase.trim();
     if (!phrase || config.banned_phrases.includes(phrase)) return;
     setConfig({ ...config, banned_phrases: [...config.banned_phrases, phrase] });
@@ -266,6 +460,7 @@ export default function EnrichmentSettings() {
   }
 
   function removeBannedPhrase(phrase: string) {
+    if (!config) return;
     setConfig({ ...config, banned_phrases: config.banned_phrases.filter((item) => item !== phrase) });
   }
 
@@ -277,8 +472,36 @@ export default function EnrichmentSettings() {
     );
   }
 
+  if (loadError || !config) {
+    return (
+      <Card className="glass-card border-destructive/40">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-glass-foreground">
+            <AlertTriangle className="h-5 w-5 text-destructive" />
+            Enrichment settings are unavailable
+          </CardTitle>
+          <CardDescription>
+            An authoritative configuration baseline could not be loaded. Editing and provider actions remain disabled.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button type="button" variant="outline" onClick={() => { void loadSettings(); }} disabled={loading}>
+            {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+            Retry loading settings
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <div className="space-y-6">
+      {usingDefaultBaseline && (
+        <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-muted-foreground">
+          No saved enrichment configuration exists yet. You are viewing the authoritative default baseline; saving will create the first record.
+        </div>
+      )}
+
       {/* Master Toggle */}
       <Card>
         <CardHeader>
@@ -541,7 +764,7 @@ export default function EnrichmentSettings() {
         <CardContent className="space-y-3">
           {voiceSamples.samples.map((sample, i) => (
             <div key={i} className="flex items-start gap-2 p-3 bg-muted/40 rounded-lg border">
-              <p className="text-sm flex-1 text-right" dir="rtl">{sample}</p>
+              <p dir="auto" className="text-sm flex-1 text-right">{sample}</p>
               <Button variant="ghost" size="icon" className="shrink-0" onClick={() => removeSample(i)}>
                 <X className="w-4 h-4" />
               </Button>
@@ -554,7 +777,7 @@ export default function EnrichmentSettings() {
                 onChange={(e) => setNewSample(e.target.value)}
                 rows={2}
                 placeholder="Paste one of your real tweets here..."
-                dir="rtl"
+                dir="auto"
                 className="flex-1"
               />
               <Button onClick={addSample} disabled={!newSample.trim()} className="shrink-0">

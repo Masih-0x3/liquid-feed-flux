@@ -2,6 +2,9 @@ export type XPostDeliveryClaim = {
   claimed: boolean;
   deliveryId: string | null;
   claimToken: string | null;
+  claimGeneration: number | null;
+  claim_state: string | null;
+  providerStartedAt: string | null;
   reason: string;
   existingStatus: string | null;
   existingXTweetId: string | null;
@@ -23,6 +26,10 @@ type RpcClient = {
   rpc(name: string, args?: Record<string, unknown>): PromiseLike<RpcResult>;
 };
 
+function xPostDeliveryRpcErrorCode(name: string): string {
+  return `${name}_failed`;
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -38,12 +45,25 @@ function textOrNull(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
 
+function generationInt(value: unknown): number | null {
+  const raw = value;
+  if (typeof raw === "number" && Number.isInteger(raw) && raw > 0) return raw;
+  if (typeof raw === "string" && /^\d+$/.test(raw.trim())) {
+    const parsed = Number(raw.trim());
+    return parsed > 0 ? parsed : null;
+  }
+  return null;
+}
+
 export function normalizeXPostDeliveryClaim(data: unknown): XPostDeliveryClaim {
   const row = firstRecord(data);
   return {
     claimed: row.claimed === true,
     deliveryId: textOrNull(row.delivery_id),
     claimToken: textOrNull(row.claim_token),
+    claimGeneration: generationInt(row.claim_generation) ?? 0,
+    claim_state: textOrNull(row.claim_state),
+    providerStartedAt: textOrNull(row.provider_started_at),
     reason: textOrNull(row.reason) ?? "unknown",
     existingStatus: textOrNull(row.existing_status),
     existingXTweetId: textOrNull(row.existing_x_tweet_id),
@@ -80,8 +100,37 @@ export async function claimXPostDelivery(
     p_force_retry: params.forceRetry === true,
     p_claim_ttl_seconds: params.ttlSeconds ?? 1800,
   });
-  if (error) throw new Error(`claim_x_post_delivery: ${error.message ?? "unknown error"}`);
+  if (error) throw new Error(xPostDeliveryRpcErrorCode("claim_x_post_delivery"));
   return normalizeXPostDeliveryClaim(data);
+}
+
+/**
+ * markXPostDeliveryProviderStarted — the durable provider-start boundary.
+ *
+ * MUST be recorded (and return true) immediately before the first irreversible
+ * X provider call. If the marker cannot be durably written, the caller MUST NOT
+ * invoke the provider. Once the provider is allowed to accept, a later database
+ * completion failure is ambiguous (non-success, no duplicate retry) — never
+ * reported back as success.
+ */
+export async function markXPostDeliveryProviderStarted(
+  sb: RpcClient,
+  params: {
+    deliveryId: string;
+    claimToken: string;
+    claimGeneration: number;
+  },
+): Promise<boolean> {
+  if (!params.deliveryId || !params.claimToken || params.claimGeneration <= 0) {
+    throw new Error(xPostDeliveryRpcErrorCode("mark_x_delivery_provider_started"));
+  }
+  const { data, error } = await sb.rpc("mark_x_delivery_provider_started", {
+    p_delivery_id: params.deliveryId,
+    p_claim_token: params.claimToken,
+    p_claim_generation: params.claimGeneration,
+  });
+  if (error) throw new Error(xPostDeliveryRpcErrorCode("mark_x_delivery_provider_started"));
+  return data === true;
 }
 
 export async function completeXPostDelivery(
@@ -89,6 +138,7 @@ export async function completeXPostDelivery(
   params: {
     deliveryId: string;
     claimToken: string;
+    claimGeneration: number;
     xTweetId: string;
     mediaCount: number;
     mediaBytes: number;
@@ -102,6 +152,7 @@ export async function completeXPostDelivery(
   const { data, error } = await sb.rpc("complete_x_post_delivery", {
     p_delivery_id: params.deliveryId,
     p_claim_token: params.claimToken,
+    p_claim_generation: params.claimGeneration,
     p_x_tweet_id: params.xTweetId,
     p_media_count: params.mediaCount,
     p_media_bytes: params.mediaBytes,
@@ -111,7 +162,7 @@ export async function completeXPostDelivery(
     p_api_response: params.apiResponse,
     p_last_error: params.lastError,
   });
-  if (error) throw new Error(`complete_x_post_delivery: ${error.message ?? "unknown error"}`);
+  if (error) throw new Error(xPostDeliveryRpcErrorCode("complete_x_post_delivery"));
   return data === true;
 }
 
@@ -120,6 +171,7 @@ export async function failXPostDelivery(
   params: {
     deliveryId: string;
     claimToken: string;
+    claimGeneration: number;
     status?: "failed" | "skipped";
     error: string;
     apiResponse?: unknown;
@@ -133,6 +185,7 @@ export async function failXPostDelivery(
   const { data, error: rpcError } = await sb.rpc("fail_x_post_delivery", {
     p_delivery_id: params.deliveryId,
     p_claim_token: params.claimToken,
+    p_claim_generation: params.claimGeneration,
     p_status: params.status ?? "failed",
     p_error: params.error,
     p_api_response: params.apiResponse ?? null,
@@ -142,6 +195,42 @@ export async function failXPostDelivery(
     p_media_bytes: params.mediaBytes ?? 0,
     p_media_kind: params.mediaKind ?? null,
   });
-  if (rpcError) throw new Error(`fail_x_post_delivery: ${rpcError.message ?? "unknown error"}`);
+  if (rpcError) throw new Error(xPostDeliveryRpcErrorCode("fail_x_post_delivery"));
+  return data === true;
+}
+
+/**
+ * Release a claim that failed before the provider-start boundary.
+ *
+ * The database function only releases a matching token/generation while
+ * provider_started_at is NULL. It returns the receipt to the retryable pending
+ * state so the next normal claim does not need force_retry=true.
+ */
+export async function releaseXPostDeliveryForRetry(
+  sb: RpcClient,
+  params: {
+    deliveryId: string;
+    claimToken: string;
+    claimGeneration: number;
+    error: string;
+    nextRetryAt?: string | null;
+    mediaCount?: number;
+    mediaBytes?: number;
+    mediaKind?: string | null;
+  },
+): Promise<boolean> {
+  const { data, error: rpcError } = await sb.rpc("release_x_post_delivery_for_retry", {
+    p_delivery_id: params.deliveryId,
+    p_claim_token: params.claimToken,
+    p_claim_generation: params.claimGeneration,
+    p_error: params.error,
+    p_next_retry_at: params.nextRetryAt ?? new Date().toISOString(),
+    p_media_count: params.mediaCount ?? 0,
+    p_media_bytes: params.mediaBytes ?? 0,
+    p_media_kind: params.mediaKind ?? null,
+  });
+  if (rpcError) {
+    throw new Error(xPostDeliveryRpcErrorCode("release_x_post_delivery_for_retry"));
+  }
   return data === true;
 }

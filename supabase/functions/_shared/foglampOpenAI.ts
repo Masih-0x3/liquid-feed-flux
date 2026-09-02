@@ -177,11 +177,11 @@ function normalizeToolCall(
 }
 
 function errorResponse(
-  message: string,
+  code: string,
   endpoint: NormalizedOpenAIResponse["endpoint"],
   status = 500,
 ): NormalizedOpenAIResponse {
-  const raw = { error: { message } };
+  const raw = { error: { message: code } };
   return {
     ok: false,
     status,
@@ -208,7 +208,7 @@ export async function callOpenAIWithFoglamp(
 
   if (p.builtInTools?.length) {
     return errorResponse(
-      "Foglamp AI SDK adapter does not support built-in OpenAI tools for this preview path",
+      "foglamp_builtin_tools_unsupported",
       endpoint,
       400,
     );
@@ -282,7 +282,8 @@ export async function callOpenAIWithFoglamp(
       endpoint,
     };
   } catch (error) {
-    return errorResponse((error as Error).message, endpoint);
+    void error;
+    return errorResponse("foglamp_openai_request_failed", endpoint);
   } finally {
     await fogWrappedAi.flush();
   }

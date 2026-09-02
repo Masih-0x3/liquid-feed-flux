@@ -1,6 +1,4 @@
 import { Toaster } from "@/components/ui/toaster";
-import { Toaster as Sonner } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
@@ -8,27 +6,26 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { lazy, Suspense } from "react";
 import { AlertTriangle, Loader2 } from "lucide-react";
 import { supabaseConfigError, missingSupabaseEnv } from "@/integrations/supabase/client";
+import { loadChunkWithRecovery } from "@/lib/chunkReloadRecovery";
 import AuthPage from "./pages/AuthPage";
 import NotFound from "./pages/NotFound";
 
 // Wrap dynamic import to auto-recover from stale chunk errors after deploys/HMR.
-// If a code-split chunk 404s (because the build hash changed), force a one-time reload.
+// If a code-split chunk 404s (because the build hash changed), force one reload per build.
+const chunkReloadBuildSha =
+  typeof __APP_VERSION_SHA__ === "string" && __APP_VERSION_SHA__.trim()
+    ? __APP_VERSION_SHA__
+    : "unknown";
+const chunkReloadRuntime = {
+  buildSha: chunkReloadBuildSha,
+  getStorage: () => sessionStorage,
+  reload: () => window.location.reload(),
+};
+
 function lazyWithRetry<T extends React.ComponentType<unknown>>(
   factory: () => Promise<{ default: T }>
 ) {
-  return lazy(async () => {
-    try {
-      return await factory();
-    } catch (err) {
-      const reloadKey = "xot_chunk_reloaded";
-      if (!sessionStorage.getItem(reloadKey)) {
-        sessionStorage.setItem(reloadKey, "1");
-        window.location.reload();
-        return new Promise<{ default: T }>(() => {});
-      }
-      throw err;
-    }
-  });
+  return lazy(() => loadChunkWithRecovery(factory, chunkReloadRuntime));
 }
 
 // Lazy-loaded pages (Issue 39: route-level code splitting)
@@ -97,26 +94,25 @@ const App = () => (
   supabaseConfigError ? <ConfigErrorScreen /> :
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
-      <TooltipProvider>
-        <Toaster />
-        <Sonner />
-        <BrowserRouter>
-          <FoglampHUDMount />
-          <Suspense fallback={<PageLoader />}>
-            <Routes>
-              <Route path="/auth" element={<AuthPage />} />
-              <Route path="/" element={<AppLayout><Dashboard /></AppLayout>} />
-              <Route path="/monitoring" element={<AppLayout><Monitoring /></AppLayout>} />
-              <Route path="/video-renders" element={<AppLayout><VideoRenders /></AppLayout>} />
-              <Route path="/threads" element={<AppLayout><Threads /></AppLayout>} />
-              <Route path="/x-account" element={<AppLayout><XAccountDisabled /></AppLayout>} />
-              <Route path="/downloader" element={<AppLayout><Downloader /></AppLayout>} />
-              <Route path="/settings" element={<AppLayout><Settings /></AppLayout>} />
-              <Route path="*" element={<NotFound />} />
-            </Routes>
-          </Suspense>
-        </BrowserRouter>
-      </TooltipProvider>
+      <Toaster />
+      <BrowserRouter>
+        <FoglampHUDMount />
+        <Suspense fallback={<PageLoader />}>
+          <Routes>
+            <Route path="/auth" element={<AuthPage />} />
+            <Route element={<AppLayout />}>
+              <Route index element={<Dashboard />} />
+              <Route path="monitoring" element={<Monitoring />} />
+              <Route path="video-renders" element={<VideoRenders />} />
+              <Route path="threads" element={<Threads />} />
+              <Route path="x-account" element={<XAccountDisabled />} />
+              <Route path="downloader" element={<Downloader />} />
+              <Route path="settings" element={<Settings />} />
+            </Route>
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </Suspense>
+      </BrowserRouter>
     </AuthProvider>
   </QueryClientProvider>
 );

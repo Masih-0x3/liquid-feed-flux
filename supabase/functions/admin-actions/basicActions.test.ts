@@ -3,6 +3,7 @@ import {
   bulkReprocessAdminAction,
   cancelPendingJobsAdminAction,
   editTranslationAdminAction,
+  postThreadAdminAction,
   reconcileStuckJobsAdminAction,
   reprocessAdminAction,
   retryStepAdminAction,
@@ -23,6 +24,7 @@ type FakeCall = {
 function fakeSupabase(
   selectRows: Array<Record<string, unknown>> = [],
   rpcData: unknown = { ok: true },
+  rpcError?: { name?: string; message?: string },
 ) {
   const calls: FakeCall[] = [];
   const client: SupabaseAdminClient & { calls: FakeCall[] } = {
@@ -54,7 +56,17 @@ function fakeSupabase(
           options?: Record<string, unknown>,
         ) {
           calls.push({ op: "upsert", table: tableName, value, args: options });
-          return Promise.resolve({});
+          const upsertBuilder = {
+            select() { return upsertBuilder; },
+            maybeSingle() { return Promise.resolve({ data: { id: "job-1" }, error: null }); },
+            then<TResult1 = { error?: unknown }, TResult2 = never>(
+              onfulfilled?: ((value: { error?: unknown }) => TResult1 | PromiseLike<TResult1>) | null,
+              _onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+            ): PromiseLike<TResult1 | TResult2> {
+              return Promise.resolve({ error: null }).then(onfulfilled ?? ((value) => value as TResult1));
+            },
+          };
+          return upsertBuilder;
         },
         eq(column: string, value: unknown) {
           calls.push({ op: "eq", table: tableName, column, value });
@@ -73,6 +85,9 @@ function fakeSupabase(
     },
     rpc(name: string, args?: Record<string, unknown>) {
       calls.push({ op: "rpc", name, args });
+      if (!rpcError || rpcError.name === name) {
+        return Promise.resolve({ error: rpcError ?? null, data: rpcData });
+      }
       return Promise.resolve({ data: rpcData });
     },
   };
@@ -111,6 +126,11 @@ Deno.test("retry deliver records force feedback and locks the post", async () =>
   assertEquals(supabase.calls.filter((call) => call.op === "rpc"), [
     {
       op: "rpc",
+      name: "assert_delivery_cutover_post",
+      args: { p_tweet_id: "t1" },
+    },
+    {
+      op: "rpc",
       name: "retry_step",
       args: { tweet_id: "t1", step: "deliver" },
     },
@@ -125,6 +145,36 @@ Deno.test("retry deliver records force feedback and locks the post", async () =>
       call.op === "update" && call.table === "posts"
     ),
     true,
+  );
+});
+
+Deno.test("retry deliver returns a structured cutoff block before retry RPC", async () => {
+  const supabase = fakeSupabase([], { ok: true }, {
+    name: "assert_delivery_cutover_post",
+    message: "delivery_cutover_blocked:missing_or_historical_lineage",
+  });
+  const feedback: RecordFeedbackFn = async () => {};
+
+  const result = await retryStepAdminAction(supabase, {
+    tweet_id: "old",
+    step: "deliver",
+  }, feedback);
+
+  assertEquals(result, {
+    body: {
+      ok: false,
+      code: "delivery_cutover_blocked",
+      error: "delivery_cutover_blocked:delivery_cutover_blocked:missing_or_historical_lineage",
+    },
+    status: 409,
+  });
+  assertEquals(
+    supabase.calls.filter((call) => call.op === "rpc").map((call) => call.name),
+    ["assert_delivery_cutover_post"],
+  );
+  assertEquals(
+    supabase.calls.some((call) => call.op === "update"),
+    false,
   );
 });
 
@@ -152,13 +202,37 @@ Deno.test("reprocess queues operator-priority jobs", async () => {
     call.op === "upsert" && call.table === "jobs"
   );
 
-  assertEquals(result.body, { success: true, message: "Reprocess job queued" });
+  assertEquals(result.body, {
+    success: true,
+    message: "Reprocess job queued. Existing media will be preserved until staged media refresh is available.",
+  });
   assertEquals((upsert?.value as Record<string, unknown>).priority, 20);
   assertEquals(feedbackCalls, [{
     tweetId: "t1",
     feedbackAction: "reprocess",
     polarity: 0,
   }]);
+});
+
+Deno.test("reprocess refuses ambiguous or historical lineage before enqueue", async () => {
+  const supabase = fakeSupabase([], {}, {
+    name: "assert_delivery_cutover_post",
+    message: "delivery_cutover_blocked:missing_or_historical_lineage",
+  });
+  const result = await reprocessAdminAction(
+    supabase,
+    { tweet_id: "old-or-ambiguous" },
+    async () => {},
+  );
+  assertEquals(result, {
+    body: {
+      ok: false,
+      code: "delivery_cutover_blocked",
+      error: "delivery_cutover_blocked:delivery_cutover_blocked:missing_or_historical_lineage",
+    },
+    status: 409,
+  });
+  assertEquals(supabase.calls.some((call) => call.op === "upsert"), false);
 });
 
 Deno.test("bulk reprocess trims and de-duplicates tweet ids", async () => {
@@ -174,7 +248,8 @@ Deno.test("bulk reprocess trims and de-duplicates tweet ids", async () => {
     success: true,
     requested: 5,
     queued: 2,
-    message: "2 reprocess job(s) queued",
+    skipped_historical: 0,
+    message: "2 reprocess job(s) queued. Existing media will be preserved until staged media refresh is available.",
   });
   assertEquals(
     (upsert?.value as Array<Record<string, unknown>>).map((job) =>
@@ -190,25 +265,71 @@ Deno.test("bulk reprocess trims and de-duplicates tweet ids", async () => {
   );
 });
 
-Deno.test("cancel pending jobs summarizes canceled rows by type", async () => {
-  const supabase = fakeSupabase([{ type: "translate" }, { type: "translate" }, {
-    type: "deliver",
-  }]);
-  const result = await cancelPendingJobsAdminAction(supabase, {
-    include_running: false,
-    types: ["translate"],
+Deno.test("reprocess input is bounded before it can queue work", async () => {
+  const feedback: RecordFeedbackFn = async () => {};
+  const single = await reprocessAdminAction(fakeSupabase(), {
+    tweet_id: "   ",
+  }, feedback);
+  assertEquals(single, {
+    body: { error: "tweet_id is required" },
+    status: 400,
   });
 
-  assertEquals(result.body, {
-    success: true,
-    canceled: 3,
-    by_type: { translate: 2, deliver: 1 },
-    message: "Canceled 3 job(s)",
+  const supabase = fakeSupabase();
+  const bulk = await bulkReprocessAdminAction(supabase, {
+    tweet_ids: Array.from({ length: 101 }, (_, index) => `t${index}`),
   });
-  assertEquals(supabase.calls.filter((call) => call.op === "in"), [
-    { op: "in", table: "jobs", column: "status", values: ["pending"] },
-    { op: "in", table: "jobs", column: "type", values: ["translate"] },
-  ]);
+  assertEquals(bulk, {
+    body: { error: "tweet_ids may contain at most 100 items" },
+    status: 400,
+  });
+  assertEquals(supabase.calls, []);
+});
+
+Deno.test("thread delivery is fail-closed until an ordered delivery consumer exists", async () => {
+  const supabase = fakeSupabase();
+
+  const result = await postThreadAdminAction(supabase, { thread_id: "thread-1" });
+
+  assertEquals(result, {
+    body: {
+      ok: false,
+      error: "thread_delivery_unavailable",
+      code: "delivery_cutover_blocked",
+      reason: "Thread delivery requires a real post-T tweet_id lineage",
+    },
+    status: 409,
+  });
+  assertEquals(supabase.calls, []);
+});
+
+Deno.test("cancel pending jobs filters historical deliver rows but keeps processing jobs cancellable", async () => {
+  const supabase = fakeSupabase([
+    { id: "translate-1", type: "translate", created_at: "2026-01-01T00:00:00.000Z" },
+    {
+      id: "deliver-1",
+      type: "deliver",
+      created_at: "2026-01-01T00:00:00.000Z",
+      payload: { tweet_id: "old" },
+    },
+    {
+      id: "deliver-2",
+      type: "deliver",
+      created_at: "2026-06-01T00:00:00.001Z",
+      payload: { tweet_id: "new" },
+    },
+  ], "2026-06-01T00:00:00.000Z");
+  const result = await cancelPendingJobsAdminAction(supabase, {
+    include_running: false,
+  });
+
+  assertEquals((result.body as Record<string, unknown>).success, true);
+  assertEquals((result.body as Record<string, unknown>).canceled, 2);
+  assertEquals((result.body as Record<string, unknown>).skipped_historical, 1);
+  assertEquals(
+    supabase.calls.filter((call) => call.op === "update").length,
+    2,
+  );
 });
 
 Deno.test("reconcile stuck jobs records an admin pipeline event", async () => {

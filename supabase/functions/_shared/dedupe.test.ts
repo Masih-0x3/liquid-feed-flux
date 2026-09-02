@@ -477,6 +477,31 @@ Deno.test("assertFinalDuplicateState blocks a late high-confidence duplicate bef
   assertEquals(supabase.updates.at(-1)?.update.delivery_decision, "skip");
 });
 
+Deno.test("assertFinalDuplicateState remains unknown when delivery coverage cannot be read", async () => {
+  const supabase = makeFakeSupabase({
+    currentPost: {
+      ...basePost(),
+      dedupe_status: "coverage_gap",
+      dup_of_tweet_id: "older",
+    },
+    canonicalPost: {
+      tweet_id: "older",
+      delivery_decision: "skip",
+      decision_reason: "below_threshold:4<14",
+    },
+    selectErrors: { deliveries: "database unavailable" },
+  });
+
+  const result = await assertFinalDuplicateState(supabase, "newer", {
+    enabled: true,
+    action: "skip",
+  });
+
+  assertEquals(result.outcome, "unknown");
+  assertEquals(result.blocked, false);
+  assertEquals(result.reason, "dedupe_coverage_unknown:canonical_coverage_lookup_failed");
+});
+
 Deno.test("runDuplicateGate preserves related-new-info items for translation", async () => {
   const supabase = makeFakeSupabase({
     candidates: [candidate({ similarity: 0.86 })],
@@ -635,6 +660,7 @@ function makeFakeSupabase(options: {
   insertErrors?: Record<string, string>;
   upsertErrors?: Record<string, string>;
   rpcErrors?: Record<string, string>;
+  selectErrors?: Record<string, string>;
 } = {}) {
   const state = {
     updates: [] as Array<
@@ -696,6 +722,7 @@ class FakeBuilder {
       updateErrorsByDedupeStatus?: Record<string, string>;
       insertErrors?: Record<string, string>;
       upsertErrors?: Record<string, string>;
+      selectErrors?: Record<string, string>;
     },
   ) {}
 
@@ -814,6 +841,13 @@ class FakeBuilder {
         return;
       }
       resolve({ data: null, error: null });
+      return;
+    }
+    if (this.options.selectErrors?.[this.table]) {
+      resolve({
+        data: null,
+        error: { message: this.options.selectErrors[this.table] },
+      });
       return;
     }
     resolve({ data: this.resolveSelectData(), error: null });

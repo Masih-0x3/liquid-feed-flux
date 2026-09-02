@@ -1,0 +1,126 @@
+{
+  "schemaVersion": 1,
+  "preparedAt": "2026-08-31T05:35:36Z",
+  "productionMutated": false,
+  "target": {
+    "host": "lightning-studio-1",
+    "architecture": "linux/amd64",
+    "composeWorkingDirectory": "/teamspace/studios/this_studio/xot-renderer/source/deploy/lightning",
+    "composeFile": "docker-compose.lightning.yml",
+    "runtimeEnvFile": "/teamspace/studios/this_studio/xot-renderer/runtime/renderer.env",
+    "service": "xot-video-renderer"
+  },
+  "source": {
+    "repository": "/Users/stevmq/xot-v2-composite-release",
+    "branch": "codex/xot-v2-composite-release",
+    "rendererTree": "657e88c1acbeb4aa975d7fca23a9357ff2604bed",
+    "rendererDiffSha256": "35fd55ee03a8d0e8f16384817c6adfb520e87bea61fbe18b09b68feba6a9872e",
+    "combinedSourceSha256": "fe3e78a2f20f575b72ab60169ce186118bcb47eb8cfe94d08746b3d4f952a49e",
+    "dockerfileSha256": "4ef0c39a776b49e09d84d6b32fe4a8776bd57313473d1007b3b1bb3c6bdac179"
+  },
+  "prior": {
+    "tag": "xot-video-renderer:render-only-20260825t030216z",
+    "imageId": "sha256:5d6514bb7dac43f53c1c098127f70f81735ec441fbde8b671fbdd321d5d4cd20",
+    "architecture": "linux/amd64",
+    "sizeBytes": 1291249740,
+    "user": "node",
+    "command": ["npm", "start"],
+    "archiveConfigDigest": "sha256:5d6514bb7dac43f53c1c098127f70f81735ec441fbde8b671fbdd321d5d4cd20",
+    "localImportNote": "The Docker save archive binds Config to the exact live image ID. Docker Desktop stored the imported image under local wrapper ID sha256:792c97f8f4c49b48285728c0a4f76127600640661d7a0af5f707ee943f3263ce.",
+    "liveObservation": {
+      "container": "xot-renderer-xot-video-renderer-1",
+      "status": "running",
+      "health": "healthy",
+      "restartPolicy": "unless-stopped",
+      "running": 0,
+      "processed": 29,
+      "failed": 2,
+      "lastError": null,
+      "renderPollingEnabled": true,
+      "renderPollingEffective": true
+    }
+  },
+  "candidate": {
+    "tag": "xot-video-renderer:prep4-fe3e78a2f20f-amd64",
+    "imageId": "sha256:a3a414f1a56e2a0348c9f8c91278b2f1a874ef2fd3f1d6af2cfc421db00636fa",
+    "architecture": "linux/amd64",
+    "sizeBytes": 491946111,
+    "user": "node",
+    "command": ["node", "src/index.js"],
+    "sourceLabel": "fe3e78a2f20f575b72ab60169ce186118bcb47eb8cfe94d08746b3d4f952a49e",
+    "branchLabel": "codex/xot-v2-composite-release"
+  },
+  "localSmoke": {
+    "platform": "linux/amd64",
+    "network": "none",
+    "restartPolicy": "no",
+    "health": "healthy",
+    "uid": 1000,
+    "npmPresent": false,
+    "renderPollingEnabled": false,
+    "renderPollingEffective": false,
+    "running": 0,
+    "processed": 0,
+    "failed": 0,
+    "expectedIsolationNote": "The health endpoint reported renderer_error after the startup heartbeat could not reach the deliberately network-isolated local Supabase URL. The service and Docker health checks passed and no queue polling or provider call was possible.",
+    "cleanup": "The task-owned xot-prep4-amd64-smoke container was removed and no xot-prep4 container remains."
+  },
+  "security": {
+    "policy": "zero fixable HIGH or CRITICAL vulnerabilities",
+    "policyPassed": true,
+    "fixableHighOrCritical": 0,
+    "remainingBySeverity": {
+      "CRITICAL": 19,
+      "HIGH": 257,
+      "MEDIUM": 538,
+      "LOW": 543,
+      "UNKNOWN": 79
+    },
+    "remainingNote": "The recorded High and Critical findings have no fixed version in the scanned Debian package line.",
+    "scanner": {
+      "tool": "Trivy",
+      "image": "aquasec/trivy@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969",
+      "artifact": "docs/plans/artifacts/xot-renderer-prep4-fe3e78a2f20f-amd64-trivy.json",
+      "artifactBytes": 5478479,
+      "artifactSha256": "b3d166a16798377f0a517f75d88bbb8a687e2c88b924606bf5476dd9ef654fa4"
+    },
+    "sbom": {
+      "tool": "Syft",
+      "image": "anchore/syft@sha256:95fe0835e5bebc6f8b1f8acef68d47d63d594ef4c0f25c097ff853b23cbac74c",
+      "format": "SPDX-2.3",
+      "packages": 508,
+      "files": 8785,
+      "artifact": "docs/plans/artifacts/xot-renderer-prep4-fe3e78a2f20f-amd64.spdx.json",
+      "artifactBytes": 8009749,
+      "artifactSha256": "9b7918df2e76ad3b0282706f6456a8da33e1faa8a46cbf529a4a095b6bad58c1"
+    }
+  },
+  "cutover": {
+    "preconditions": [
+      "Production authority is separately granted.",
+      "The live container has zero running renders.",
+      "The protected runtime env sets RENDER_POLLING_ENABLED=0 before either image is started.",
+      "The selected local image ID exactly matches the recorded immutable image ID."
+    ],
+    "candidateCommand": "cd /teamspace/studios/this_studio/xot-renderer/source/deploy/lightning && XOT_RENDERER_IMAGE_TAG=xot-video-renderer:prep4-fe3e78a2f20f-amd64 XOT_RENDERER_ENV_FILE=/teamspace/studios/this_studio/xot-renderer/runtime/renderer.env docker compose -f docker-compose.lightning.yml up -d --no-build --no-deps xot-video-renderer",
+    "candidateProbe": "docker inspect xot-renderer-xot-video-renderer-1 --format 'image={{.Image}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' && docker exec xot-renderer-xot-video-renderer-1 curl -fsS http://127.0.0.1:8787/health",
+    "rollbackCommand": "cd /teamspace/studios/this_studio/xot-renderer/source/deploy/lightning && XOT_RENDERER_IMAGE_TAG=xot-video-renderer:render-only-20260825t030216z XOT_RENDERER_ENV_FILE=/teamspace/studios/this_studio/xot-renderer/runtime/renderer.env docker compose -f docker-compose.lightning.yml up -d --no-build --no-deps xot-video-renderer",
+    "rollbackProbe": "docker inspect xot-renderer-xot-video-renderer-1 --format 'image={{.Image}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' && docker exec xot-renderer-xot-video-renderer-1 curl -fsS http://127.0.0.1:8787/health"
+  },
+  "rehearsal": {
+    "candidateStart": "passed locally on linux/amd64 with polling disabled",
+    "priorStart": "passed locally on linux/amd64 with polling disabled",
+    "priorLocalSmoke": {
+      "health": "healthy",
+      "uid": 1000,
+      "renderPollingEnabled": false,
+      "renderPollingEffective": false,
+      "running": 0,
+      "processed": 0,
+      "failed": 0,
+      "expectedIsolationNote": "The health endpoint recorded the expected heartbeat fetch error because the container had no network. Queue polling remained disabled and no provider call was possible."
+    },
+    "transfer": "The prior image was copied read-only with docker image save and fast compression. The archive bound Config to the exact live Production image ID. No remote container, image, file, or service changed.",
+    "disposition": "PASS: scan policy, SBOM, provenance, exact prior and candidate identities, and polling-disabled local starts for both images are complete."
+  }
+}

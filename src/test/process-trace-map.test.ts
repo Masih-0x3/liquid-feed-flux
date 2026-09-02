@@ -207,6 +207,116 @@ describe("process trace map view-model", () => {
     expect(node(map, "x-post")).toMatchObject({ status: "skipped", skipReason: "duplicate" });
   });
 
+  it("lets a terminal skip decision override stale downstream pending fields", () => {
+    const map = buildProcessTraceMap(entry({
+      delivery_decision: "skip",
+      delivery_status: "pending",
+      delivery_job_status: "pending",
+      x_status: "pending",
+      monitoring_state: {
+        code: "below_threshold",
+        stage_label: "Below threshold",
+        tone: "muted",
+        decision_label: "Skipped",
+        primary_blocker: null,
+        translation_state: "translated",
+        telegram_state: "pending",
+        x_state: "pending",
+        needs_attention: false,
+        next_actions: ["details"],
+      },
+    }));
+
+    expect(node(map, "telegram")).toMatchObject({ status: "skipped", skipReason: "below_threshold" });
+    expect(node(map, "x-dispatch")).toMatchObject({ status: "skipped", skipReason: "below_threshold" });
+    expect(node(map, "x-post")).toMatchObject({ status: "skipped", skipReason: "below_threshold" });
+    expect(map.summary.status).toBe("skipped");
+  });
+
+  it("marks an uncertain duplicate gate as blocked review rather than active work", () => {
+    const map = buildProcessTraceMap(entry({
+      dedupe_status: "uncertain",
+      dedupe_reason: "needs manual duplicate review",
+    }));
+
+    expect(node(map, "dedupe")).toMatchObject({ status: "blocked", tone: "warn" });
+    expect(map.summary.status).toBe("blocked");
+  });
+
+  it("keeps actual delivery and posting evidence dominant over a contradictory terminal skip", () => {
+    const map = buildProcessTraceMap(entry({
+      delivery_decision: "skip",
+      delivery_status: "pending",
+      is_delivered: true,
+      telegram_message_ids: ["123"],
+      x_status: "posted",
+      x_tweet_id: "2056",
+      x_posted_at: "2026-05-23T14:05:00.000Z",
+      monitoring_state: {
+        code: "below_threshold",
+        stage_label: "Below threshold",
+        tone: "muted",
+        decision_label: "Skipped",
+        primary_blocker: null,
+        translation_state: "translated",
+        telegram_state: "delivered",
+        x_state: "posted",
+        needs_attention: false,
+        next_actions: ["details"],
+      },
+    }));
+
+    expect(node(map, "telegram")).toMatchObject({ status: "completed" });
+    expect(node(map, "x-dispatch")).toMatchObject({ status: "completed" });
+    expect(node(map, "x-post")).toMatchObject({ status: "completed" });
+  });
+
+  it("keeps timeline-backed delivery evidence dominant over a stale terminal skip", () => {
+    const map = buildProcessTraceMap(
+      entry({
+        delivery_decision: "skip",
+        delivery_status: "pending",
+        monitoring_state: {
+          code: "below_threshold",
+          stage_label: "Below threshold",
+          tone: "muted",
+          decision_label: "Skipped",
+          primary_blocker: null,
+          translation_state: "translated",
+          telegram_state: null,
+          x_state: null,
+          needs_attention: false,
+          next_actions: ["details"],
+        },
+      }),
+      [
+        event({
+          step: "telegram_delivery",
+          status: "completed",
+          started_at: "2026-05-23T14:04:00.000Z",
+          ended_at: "2026-05-23T14:05:00.000Z",
+          error: null,
+          meta: {},
+        }),
+      ],
+    );
+
+    expect(node(map, "telegram")).toMatchObject({ status: "completed" });
+    expect(map.summary.status).toBe("completed");
+  });
+
+  it("keeps pending separate from active running work", () => {
+    const map = buildProcessTraceMap(entry({
+      delivery_decision: "deliver",
+      translation_job_status: "pending",
+    }));
+
+    expect(node(map, "translate")).toMatchObject({ status: "pending", tone: "muted" });
+    expect(map.summary.running).toBe(0);
+    expect(map.summary.pending).toBeGreaterThan(0);
+    expect(map.summary.status).toBe("pending");
+  });
+
   it("does not keep posted items running when hosted trace evidence is absent", () => {
     const map = buildProcessTraceMap(entry({
       final_score: 16,
@@ -247,6 +357,7 @@ describe("process trace map view-model", () => {
     expect(enrich).toMatchObject({
       label: "Manual enrichment",
       shortLabel: "Manual enrich",
+      kind: "manual",
       status: "blocked",
       skipReason: "manual_review",
     });

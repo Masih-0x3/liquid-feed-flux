@@ -137,17 +137,17 @@ Deno.test("loadHydrationSettings reads kill switch and daily budget", async () =
 
   const settings = await loadHydrationSettings(supabase);
 
-  assertEquals(settings, { enabled: false, daily_budget: 12 });
+  assertEquals(settings, { enabled: false, daily_budget: 12, available: true });
 });
 
-Deno.test("loadHydrationSettings falls back to defaults when settings reads fail", async () => {
+Deno.test("loadHydrationSettings reports unavailable when settings reads fail", async () => {
   const supabase = createSettingsSupabase({
     throwForKeys: ["twitter_hydration", "x_rate_limits"],
   });
 
   const settings = await loadHydrationSettings(supabase);
 
-  assertEquals(settings, { enabled: true, daily_budget: 100 });
+  assertEquals(settings, { enabled: true, daily_budget: 100, available: false });
 });
 
 Deno.test("countDailyHydrationsUsed counts x_api hydrations from the last day", async () => {
@@ -165,10 +165,10 @@ Deno.test("countDailyHydrationsUsed counts x_api hydrations from the last day", 
   });
 });
 
-Deno.test("countDailyHydrationsUsed returns zero when the count query fails", async () => {
+Deno.test("countDailyHydrationsUsed reports unavailable when the count query fails", async () => {
   const supabase = createCountSupabase({ throws: true });
 
-  assertEquals(await countDailyHydrationsUsed(supabase), 0);
+  assertEquals(await countDailyHydrationsUsed(supabase), null);
 });
 
 Deno.test("buildHydratedTweetPatch prefers note tweet text and preserves hydration fields", () => {

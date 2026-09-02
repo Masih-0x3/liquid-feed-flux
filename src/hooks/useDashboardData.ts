@@ -46,6 +46,7 @@ export function useDashboardData() {
     return () => {
       supabase.removeChannel(ch1);
       if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = null;
     };
   }, [debouncedInvalidate]);
 

@@ -144,9 +144,9 @@
     backdrop-filter: blur(var(--blur-lg));
   }
 
-  /* Glass card variations */
+  /* Glass card surface; CardHeader/CardContent own their spacing. */
   .glass-card {
-    @apply glass-panel p-6;
+    @apply glass-panel;
     background: var(--gradient-glass);
   }
 
@@ -385,15 +385,43 @@
     @apply inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px];
   }
 
-  .xot-hud-chip.used {
+  .xot-hud-chip.status-completed {
     color: oklch(0.72 0.15 162);
     background: oklch(0.30 0.05 162);
     border-color: transparent;
   }
 
-  .xot-hud-chip.err {
+  .xot-hud-chip.status-running {
+    color: oklch(0.72 0.13 250);
+    background: oklch(0.30 0.05 250);
+    border-color: transparent;
+  }
+
+  .xot-hud-chip.status-pending {
+    color: oklch(0.72 0.02 260);
+    background: oklch(0.27 0.01 260);
+    border-color: oklch(0.35 0.01 260);
+  }
+
+  .xot-hud-chip.status-blocked {
+    color: oklch(0.78 0.14 70);
+    background: oklch(0.30 0.05 70);
+    border-color: transparent;
+  }
+
+  .xot-hud-chip.status-skipped {
+    color: oklch(0.62 0 0);
+    background: oklch(0.25 0 0);
+    border-color: oklch(0.31 0 0);
+  }
+
+  .xot-hud-chip.status-failed {
     color: oklch(0.68 0.2 16);
     background: oklch(0.30 0.06 16);
+  }
+
+  .xot-hud-chip-status {
+    @apply text-[10px] font-medium opacity-80;
   }
 
   .xot-hud-tree {
@@ -425,8 +453,13 @@
     @apply flex w-[8.25rem] shrink-0 items-center gap-1.5;
   }
 
-  .xot-hud-wf-label.ai {
+  .xot-hud-wf-label.ai,
+  .xot-hud-wf-label.manual {
     @apply pl-3;
+  }
+
+  .xot-hud-wf-label.manual .xot-hud-wf-icon {
+    color: oklch(0.78 0.14 70);
   }
 
   .xot-hud-wf-label b {

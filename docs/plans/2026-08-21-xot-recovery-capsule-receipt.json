@@ -1,0 +1,65 @@
+{
+  "schema": "xot-recovery-capsule-preservation-receipt-v1",
+  "event": "xot_recovery_capsule_verified",
+  "createdAt": "2026-08-22T05:49:49.385Z",
+  "repository": "/Users/stevmq/Finalized XOT",
+  "branch": "codex/xot-remediation-convergence",
+  "head": "0bd578856016c06a10890339f93aa13b82ecae48",
+  "capsule": {
+    "path": "/Users/stevmq/xot-recovery-capsule-20260821-r1",
+    "mode": "0700",
+    "bytesOnDisk": 14639104,
+    "payloadBytes": 13135639,
+    "manifestSha256": "5e89e063e0d31a421bf8928ef295c061537fc6ea901a85f8e51c80e9775c648d",
+    "bundleSha256": "ef0347511ef39301da7c964fdbc739ea3230965d04785fdf4ee627f19e762aad",
+    "trackedPatchSha256": "410f607daf1e2a45e450d839e3f3a193554bdfa60f76c7aaece01af14514a9ee"
+  },
+  "sourceSnapshot": {
+    "statusEntries": 498,
+    "modified": 175,
+    "deleted": 2,
+    "untracked": 321,
+    "staged": 0,
+    "statusSha256": "0e0f58a11a7f265a80430c72e548cf99d54a24aa69529e63f5d24105624b0565",
+    "stagedIndexEmpty": true,
+    "statusStableBeforeAndAfterCapture": true,
+    "statusStableAfterIndependentRestoreTest": true
+  },
+  "recoverySurfaces": {
+    "unreachableCommits": [
+      "711f6781558407559fb8394aaca6af730adebbf5",
+      "9a7dc54bc1c028ac04b277f3dec7ff4adbad53c2",
+      "f0ba6c4173c2108a381620158b76b2422de39437"
+    ],
+    "stashRef": "c04dc652f89dc53dc362d5768f429a070de91a0d",
+    "sourceRefsMutated": false,
+    "ignoredFilesIncludedInSanitizedBundle": false,
+    "denylistHits": []
+  },
+  "validation": {
+    "focusedTests": {
+      "status": "PASS",
+      "passed": 20,
+      "failed": 0,
+      "command": "node --test scripts/create-xot-recovery-capsule.test.mjs scripts/verify-xot-recovery-capsule.test.mjs"
+    },
+    "eslint": {
+      "status": "PASS",
+      "command": "npx eslint scripts/create-xot-recovery-capsule.mjs scripts/create-xot-recovery-capsule.test.mjs scripts/verify-xot-recovery-capsule.mjs scripts/verify-xot-recovery-capsule.test.mjs"
+    },
+    "independentRestore": {
+      "status": "PASS",
+      "command": "node scripts/verify-xot-recovery-capsule.mjs --capsule /Users/stevmq/xot-recovery-capsule-20260821-r1",
+      "pathsChecked": 498,
+      "restoredCheckoutCleaned": true
+    },
+    "novita": {
+      "status": "INELIGIBLE",
+      "reason": "The repo allowlist does not include the new capsule commands or files."
+    }
+  },
+  "residuals": [
+    "The source worktree remains intentionally dirty at this checkpoint.",
+    "Classification, integration commits, clean reconstruction, push, CI, staging, deployment, and production work remain out of scope for R0-R1."
+  ]
+}

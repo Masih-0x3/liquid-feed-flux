@@ -7,7 +7,7 @@ import type {
 
 export type ProcessTraceStatus = "completed" | "running" | "pending" | "failed" | "skipped" | "blocked" | "unknown";
 export type ProcessTraceTone = "good" | "info" | "warn" | "bad" | "muted";
-export type ProcessTraceNodeKind = "system" | "ai" | "delivery" | "export";
+export type ProcessTraceNodeKind = "system" | "ai" | "manual" | "delivery" | "export";
 
 export type ProcessTraceNodeId =
   | "ingest"
@@ -58,6 +58,7 @@ export interface ProcessTraceSummary {
   statusLabel: string;
   completed: number;
   running: number;
+  pending: number;
   failed: number;
   blocked: number;
   skipped: number;
@@ -82,26 +83,21 @@ type NodePatch = Partial<Omit<ProcessTraceNode, "id" | "label" | "shortLabel" | 
   evidenceItems?: string[];
   aiCall?: MonitoringProcessAiCall;
   aiCalls?: MonitoringProcessAiCall[];
+  preserveCompleted?: boolean;
 };
 
-const STATUS_LABELS: Record<ProcessTraceStatus, string> = {
-  completed: "Completed",
-  running: "Running",
-  pending: "Pending",
-  failed: "Failed",
-  skipped: "Skipped",
-  blocked: "Blocked",
-  unknown: "No evidence",
-};
-
-const STATUS_PRIORITY: Record<ProcessTraceStatus, number> = {
-  failed: 70,
-  running: 60,
-  blocked: 55,
-  pending: 50,
-  skipped: 40,
-  completed: 30,
-  unknown: 0,
+const PROCESS_TRACE_STATUS_PRESENTATION: Record<ProcessTraceStatus, {
+  label: string;
+  tone: ProcessTraceTone;
+  priority: number;
+}> = {
+  completed: { label: "Completed", tone: "good", priority: 30 },
+  running: { label: "Running", tone: "info", priority: 60 },
+  pending: { label: "Pending", tone: "muted", priority: 50 },
+  failed: { label: "Failed", tone: "bad", priority: 70 },
+  skipped: { label: "Skipped", tone: "muted", priority: 40 },
+  blocked: { label: "Blocked", tone: "warn", priority: 55 },
+  unknown: { label: "No evidence", tone: "muted", priority: 0 },
 };
 
 const CANONICAL_NODES: Array<Pick<ProcessTraceNode, "id" | "label" | "shortLabel" | "kind" | "optional">> = [
@@ -109,7 +105,7 @@ const CANONICAL_NODES: Array<Pick<ProcessTraceNode, "id" | "label" | "shortLabel
   { id: "dedupe", label: "Duplicate gate", shortLabel: "Dedupe", kind: "system" },
   { id: "score", label: "Scoring agent", shortLabel: "Score", kind: "ai" },
   { id: "translate", label: "Translation agent", shortLabel: "Translate", kind: "ai" },
-  { id: "enrich", label: "Manual enrichment", shortLabel: "Manual enrich", kind: "ai", optional: true },
+  { id: "enrich", label: "Manual enrichment", shortLabel: "Manual enrich", kind: "manual", optional: true },
   { id: "media", label: "Media preparation", shortLabel: "Media", kind: "system", optional: true },
   { id: "telegram", label: "Telegram delivery", shortLabel: "Telegram", kind: "delivery" },
   { id: "x-dispatch", label: "X dispatch gate", shortLabel: "X gate", kind: "delivery" },
@@ -122,7 +118,7 @@ function createNode(definition: Pick<ProcessTraceNode, "id" | "label" | "shortLa
     ...definition,
     status: "unknown",
     tone: "muted",
-    statusLabel: STATUS_LABELS.unknown,
+    statusLabel: PROCESS_TRACE_STATUS_PRESENTATION.unknown.label,
     detail: "No captured evidence yet.",
     evidence: [],
     startedAt: null,
@@ -138,51 +134,73 @@ function createNode(definition: Pick<ProcessTraceNode, "id" | "label" | "shortLa
   };
 }
 
-function toneForStatus(status: ProcessTraceStatus): ProcessTraceTone {
-  if (status === "completed") return "good";
-  if (status === "failed") return "bad";
-  if (status === "running" || status === "pending") return "info";
-  if (status === "blocked") return "warn";
-  return "muted";
+export function processTraceStatusTone(status: ProcessTraceStatus): ProcessTraceTone {
+  return PROCESS_TRACE_STATUS_PRESENTATION[status].tone;
+}
+
+export function processTraceStatusLabel(status: ProcessTraceStatus): string {
+  return PROCESS_TRACE_STATUS_PRESENTATION[status].label;
+}
+
+export function isProcessTraceRunning(status: ProcessTraceStatus): boolean {
+  return status === "running";
+}
+
+export function isProcessTraceWaiting(status: ProcessTraceStatus): boolean {
+  return status === "pending" || status === "blocked";
+}
+
+export function processTraceStatusPriority(status: ProcessTraceStatus): number {
+  return PROCESS_TRACE_STATUS_PRESENTATION[status].priority;
 }
 
 function setNodeStatus(node: ProcessTraceNode, status: ProcessTraceStatus, tone?: ProcessTraceTone) {
   node.status = status;
-  node.tone = tone ?? toneForStatus(status);
-  node.statusLabel = STATUS_LABELS[status];
+  node.tone = tone ?? processTraceStatusTone(status);
+  node.statusLabel = processTraceStatusLabel(status);
 }
 
 function updateNode(node: ProcessTraceNode, patch: NodePatch) {
+  const preserveCompletedTerminalEvidence = Boolean(
+    patch.preserveCompleted &&
+      patch.status &&
+      node.status === "completed" &&
+      patch.status !== "completed" &&
+      patch.status !== "failed",
+  );
+
   if (patch.status) {
     const shouldReplace =
       node.status === "unknown" ||
-      STATUS_PRIORITY[patch.status] >= STATUS_PRIORITY[node.status] ||
+      processTraceStatusPriority(patch.status) >= processTraceStatusPriority(node.status) ||
       patch.status === "completed";
-    if (shouldReplace) {
+    if (shouldReplace && !preserveCompletedTerminalEvidence) {
       setNodeStatus(node, patch.status, patch.tone);
     }
   } else if (patch.tone) {
     node.tone = patch.tone;
   }
 
-  if (patch.statusLabel) node.statusLabel = patch.statusLabel;
-  if (patch.detail) node.detail = patch.detail;
-  if (patch.startedAt) node.startedAt = patch.startedAt;
-  if (patch.endedAt) node.endedAt = patch.endedAt;
-  if (patch.durationMs != null) node.durationMs = patch.durationMs;
-  if (patch.tokens != null) node.tokens = patch.tokens;
-  if (patch.model) node.model = patch.model;
-  if (patch.endpoint) node.endpoint = patch.endpoint;
-  if (patch.agentName) node.agentName = patch.agentName;
-  if (patch.error) node.error = patch.error;
-  if (patch.skipReason) node.skipReason = patch.skipReason;
+  if (!preserveCompletedTerminalEvidence) {
+    if (patch.statusLabel) node.statusLabel = patch.statusLabel;
+    if (patch.detail) node.detail = patch.detail;
+    if (patch.startedAt) node.startedAt = patch.startedAt;
+    if (patch.endedAt) node.endedAt = patch.endedAt;
+    if (patch.durationMs != null) node.durationMs = patch.durationMs;
+    if (patch.tokens != null) node.tokens = patch.tokens;
+    if (patch.model) node.model = patch.model;
+    if (patch.endpoint) node.endpoint = patch.endpoint;
+    if (patch.agentName) node.agentName = patch.agentName;
+    if (patch.error) node.error = patch.error;
+    if (patch.skipReason) node.skipReason = patch.skipReason;
+  }
   if (patch.evidence) node.evidence.push(patch.evidence);
   if (patch.evidenceItems) node.evidence.push(...patch.evidenceItems);
   if (patch.aiCall) node.aiCalls.push(patch.aiCall);
   if (patch.aiCalls) node.aiCalls.push(...patch.aiCalls);
 }
 
-function normalizeStatus(status: string | null | undefined): ProcessTraceStatus {
+export function normalizeProcessTraceStatus(status: string | null | undefined): ProcessTraceStatus {
   const value = (status ?? "").toLowerCase();
   if (["completed", "complete", "done", "success", "succeeded", "delivered", "posted", "approved"].includes(value)) {
     return "completed";
@@ -251,6 +269,32 @@ function isBelowThresholdSkip(entry: MonitoringEntry): boolean {
   return entry.delivery_decision === "skip" || entry.monitoring_state?.code === "below_threshold";
 }
 
+const DOWNSTREAM_DELIVERY_NODE_IDS: ProcessTraceNodeId[] = ["telegram", "x-dispatch", "x-post"];
+
+function terminalDownstreamSkip(entry: MonitoringEntry): { reason: string; detail: string } | null {
+  if (isDuplicateBlocked(entry)) {
+    return { reason: "duplicate", detail: "Skipped after duplicate gate." };
+  }
+  if (isBelowThresholdSkip(entry)) {
+    return { reason: "below_threshold", detail: "Skipped because this item was not selected for delivery." };
+  }
+  return null;
+}
+
+function applyTerminalDownstreamSkip(nodes: Map<ProcessTraceNodeId, ProcessTraceNode>, entry: MonitoringEntry) {
+  const skip = terminalDownstreamSkip(entry);
+  if (!skip) return;
+
+  for (const nodeId of DOWNSTREAM_DELIVERY_NODE_IDS) {
+    const node = nodes.get(nodeId);
+    if (!node || node.status === "failed" || node.status === "completed") continue;
+    setNodeStatus(node, "skipped");
+    node.detail = skip.detail;
+    node.skipReason = skip.reason;
+    node.evidence.push(`entry:terminal_delivery_skip:${skip.reason}`);
+  }
+}
+
 function shouldShowEnrichment(entry: MonitoringEntry, node: ProcessTraceNode): boolean {
   return Boolean(
     entry.enrich_status ||
@@ -286,16 +330,38 @@ function isTerminalDelivery(entry: MonitoringEntry): boolean {
   );
 }
 
+function hasCompletedDeliveryNode(nodes: readonly Pick<ProcessTraceNode, "id" | "status">[] | undefined): boolean {
+  return Boolean(
+    nodes?.some((node) => (
+      (node.id === "telegram" || node.id === "x-post") && node.status === "completed"
+    )),
+  );
+}
+
+export function processTraceTerminalStatus(
+  entry: MonitoringEntry,
+  summary: Pick<ProcessTraceSummary, "status" | "failed">,
+  nodes?: readonly Pick<ProcessTraceNode, "id" | "status">[],
+): ProcessTraceStatus {
+  if (summary.failed > 0 || entry.x_status === "failed" || entry.x_error || entry.delivery_error || entry.translation_error) {
+    return "failed";
+  }
+  if (isTerminalDelivery(entry) || hasCompletedDeliveryNode(nodes)) return "completed";
+  if (isDuplicateBlocked(entry)) return "blocked";
+  if (isBelowThresholdSkip(entry)) return "skipped";
+  return summary.status;
+}
+
 function applyTimelineEvents(nodes: Map<ProcessTraceNodeId, ProcessTraceNode>, events: PipelineEvent[]) {
   for (const event of events) {
     const nodeId = eventNodeId(event);
     if (!nodeId) continue;
     const node = nodes.get(nodeId);
     if (!node) continue;
-    const status = normalizeStatus(event.status);
+    const status = normalizeProcessTraceStatus(event.status);
     updateNode(node, {
       status,
-      detail: event.error || `${event.step.replaceAll("_", " ")} ${event.status.replaceAll("_", " ")}`,
+      detail: event.error || `${event.step.replace(/_/g, " ")} ${event.status.replace(/_/g, " ")}`,
       startedAt: event.started_at,
       endedAt: event.ended_at,
       durationMs: durationMs(event.started_at, event.ended_at),
@@ -313,7 +379,7 @@ function applyAiCalls(nodes: Map<ProcessTraceNodeId, ProcessTraceNode>, observab
     const node = nodes.get(nodeId);
     if (!node) continue;
     updateNode(node, {
-      status: normalizeStatus(call.status),
+      status: normalizeProcessTraceStatus(call.status),
       detail: call.operation_name,
       startedAt: call.started_at,
       endedAt: call.ended_at,
@@ -362,8 +428,7 @@ function applyEntryState(nodes: Map<ProcessTraceNodeId, ProcessTraceNode>, entry
     });
   } else if (entry.dedupe_status === "uncertain") {
     updateNode(dedupe, {
-      status: "pending",
-      tone: "warn",
+      status: "blocked",
       detail: entry.dedupe_reason ?? "Duplicate gate needs review.",
       endedAt: entry.dedupe_checked_at,
       evidence: "entry:dedupe_uncertain",
@@ -372,7 +437,7 @@ function applyEntryState(nodes: Map<ProcessTraceNodeId, ProcessTraceNode>, entry
     updateNode(dedupe, {
       status: "completed",
       tone: entry.dedupe_status === "coverage_gap" ? "warn" : "good",
-      detail: entry.dedupe_reason ?? (entry.dedupe_status ? entry.dedupe_status.replaceAll("_", " ") : "Duplicate gate checked."),
+        detail: entry.dedupe_reason ?? (entry.dedupe_status ? entry.dedupe_status.replace(/_/g, " ") : "Duplicate gate checked."),
       endedAt: entry.dedupe_checked_at,
       evidence: "entry:dedupe_status",
     });
@@ -410,11 +475,11 @@ function applyEntryState(nodes: Map<ProcessTraceNodeId, ProcessTraceNode>, entry
       evidence: "entry:translated",
     });
   } else {
-    const translationStatus = normalizeStatus(entry.translation_job_status);
+    const translationStatus = normalizeProcessTraceStatus(entry.translation_job_status);
     if (translationStatus !== "unknown") {
       updateNode(translate, {
         status: translationStatus,
-        detail: `Translation job ${entry.translation_job_status.replaceAll("_", " ")}.`,
+        detail: `Translation job ${entry.translation_job_status.replace(/_/g, " ")}.`,
         evidence: "entry:translation_job_status",
       });
     } else if (isDuplicateBlocked(entry) || isBelowThresholdSkip(entry)) {
@@ -432,14 +497,14 @@ function applyEntryState(nodes: Map<ProcessTraceNodeId, ProcessTraceNode>, entry
     const enrichStatus = entry.enrich_status === "awaiting_approval"
       ? "blocked"
       : entry.enrich_status
-        ? normalizeStatus(entry.enrich_status)
+        ? normalizeProcessTraceStatus(entry.enrich_status)
         : "completed";
     updateNode(enrich, {
       status: enrichStatus === "unknown" ? "pending" : enrichStatus,
       detail: entry.enrich_status === "awaiting_approval"
         ? "Manual enrichment is awaiting approval."
         : entry.enrich_status
-          ? `Manual enrichment ${entry.enrich_status.replaceAll("_", " ")}.`
+          ? `Manual enrichment ${entry.enrich_status.replace(/_/g, " ")}.`
           : "Manual enriched X copy is available.",
       durationMs: entry.enrich_duration_ms,
       tokens: entry.enrich_tokens,
@@ -480,16 +545,18 @@ function applyEntryState(nodes: Map<ProcessTraceNodeId, ProcessTraceNode>, entry
       evidence: "entry:telegram_delivered",
     });
   } else {
-    const status = normalizeStatus(entry.delivery_status || entry.delivery_job_status || entry.monitoring_state?.telegram_state);
+    const status = normalizeProcessTraceStatus(entry.delivery_status || entry.delivery_job_status || entry.monitoring_state?.telegram_state);
     if (status !== "unknown") {
       updateNode(telegram, {
         status,
+        preserveCompleted: true,
         detail: `Telegram state ${entry.delivery_status || entry.delivery_job_status || entry.monitoring_state?.telegram_state}.`,
         evidence: "entry:telegram_status",
       });
     } else if (isDuplicateBlocked(entry) || isBelowThresholdSkip(entry)) {
       updateNode(telegram, {
         status: "skipped",
+        preserveCompleted: true,
         detail: isDuplicateBlocked(entry) ? "Skipped after duplicate gate." : "Skipped because this item was not selected for delivery.",
         skipReason: isDuplicateBlocked(entry) ? "duplicate" : "below_threshold",
         evidence: "entry:telegram_skipped",
@@ -524,17 +591,19 @@ function applyEntryState(nodes: Map<ProcessTraceNodeId, ProcessTraceNode>, entry
       evidence: "entry:x_failed",
     });
   } else {
-    const xStatus = normalizeStatus(entry.x_status ?? entry.monitoring_state?.x_state);
+    const xStatus = normalizeProcessTraceStatus(entry.x_status ?? entry.monitoring_state?.x_state);
     if (xStatus !== "unknown") {
       updateNode(xDispatch, {
         status: xStatus === "skipped" ? "skipped" : xStatus,
+        preserveCompleted: true,
         detail: `X gate state ${entry.x_status ?? entry.monitoring_state?.x_state}.`,
         skipReason: entry.x_skip_reason ?? undefined,
         evidence: "entry:x_dispatch_status",
       });
       updateNode(xPost, {
         status: xStatus,
-        detail: entry.x_skip_reason ? entry.x_skip_reason.replaceAll("_", " ") : `X post state ${entry.x_status ?? entry.monitoring_state?.x_state}.`,
+        preserveCompleted: true,
+        detail: entry.x_skip_reason ? entry.x_skip_reason.replace(/_/g, " ") : `X post state ${entry.x_status ?? entry.monitoring_state?.x_state}.`,
         skipReason: entry.x_skip_reason ?? undefined,
         evidence: "entry:x_status",
       });
@@ -542,18 +611,22 @@ function applyEntryState(nodes: Map<ProcessTraceNodeId, ProcessTraceNode>, entry
       const reason = entry.x_skip_reason ?? (isDuplicateBlocked(entry) ? "duplicate" : "below_threshold");
       updateNode(xDispatch, {
         status: "skipped",
-        detail: reason.replaceAll("_", " "),
+        preserveCompleted: true,
+        detail: reason.replace(/_/g, " "),
         skipReason: reason,
         evidence: "entry:x_dispatch_skipped",
       });
       updateNode(xPost, {
         status: "skipped",
-        detail: reason.replaceAll("_", " "),
+        preserveCompleted: true,
+        detail: reason.replace(/_/g, " "),
         skipReason: reason,
         evidence: "entry:x_post_skipped",
       });
     }
   }
+
+  applyTerminalDownstreamSkip(nodes, entry);
 
   const traceExport = nodes.get("trace-export")!;
   const latestRun = observability?.latest_run ?? null;
@@ -567,7 +640,7 @@ function applyEntryState(nodes: Map<ProcessTraceNodeId, ProcessTraceNode>, entry
   } else if (latestRun || (observability?.ai_calls ?? 0) > 0 || (observability?.foglamp_skipped ?? 0) > 0) {
     updateNode(traceExport, {
       status: "skipped",
-      detail: firstSkipReason ? firstSkipReason.replaceAll("_", " ") : "Local-only trace captured; hosted export did not run.",
+      detail: firstSkipReason ? firstSkipReason.replace(/_/g, " ") : "Local-only trace captured; hosted export did not run.",
       skipReason: firstSkipReason ?? "local_only",
       evidence: "observability:foglamp_skipped",
     });
@@ -581,18 +654,14 @@ function applyEntryState(nodes: Map<ProcessTraceNodeId, ProcessTraceNode>, entry
   } else {
     updateNode(traceExport, {
       status: "unknown",
-      detail: observability?.partial_reason ? observability.partial_reason.replaceAll("_", " ") : "No workflow ledger evidence yet.",
+      detail: observability?.partial_reason ? observability.partial_reason.replace(/_/g, " ") : "No workflow ledger evidence yet.",
       evidence: "observability:no_trace",
     });
   }
 }
 
 function edgeToneFromNode(node: ProcessTraceNode): ProcessTraceTone {
-  if (node.status === "failed") return "bad";
-  if (node.status === "blocked") return "warn";
-  if (node.status === "running" || node.status === "pending") return "info";
-  if (node.status === "completed") return "good";
-  return "muted";
+  return processTraceStatusTone(node.status);
 }
 
 function buildEdges(nodes: ProcessTraceNode[]): ProcessTraceEdge[] {
@@ -642,18 +711,32 @@ function unique(values: string[]): string[] {
 
 function buildSummary(nodes: ProcessTraceNode[], observability: MonitoringProcessObservability | null | undefined): ProcessTraceSummary {
   const failed = nodes.filter((node) => node.status === "failed").length;
-  const running = nodes.filter((node) => node.status === "running" || node.status === "pending").length;
+  const running = nodes.filter((node) => node.status === "running").length;
+  const pending = nodes.filter((node) => node.status === "pending").length;
   const blocked = nodes.filter((node) => node.status === "blocked").length;
   const skipped = nodes.filter((node) => node.status === "skipped").length;
   const completed = nodes.filter((node) => node.status === "completed").length;
-  const status: ProcessTraceStatus = failed > 0 ? "failed" : running > 0 ? "running" : blocked > 0 ? "blocked" : completed > 0 ? "completed" : "unknown";
+  const status: ProcessTraceStatus = failed > 0
+    ? "failed"
+    : running > 0
+      ? "running"
+      : blocked > 0
+        ? "blocked"
+        : pending > 0
+          ? "pending"
+          : completed > 0
+            ? "completed"
+            : skipped > 0
+              ? "skipped"
+              : "unknown";
   const latestRun = observability?.latest_run ?? null;
 
   return {
     status,
-    statusLabel: STATUS_LABELS[status],
+    statusLabel: processTraceStatusLabel(status),
     completed,
     running,
+    pending,
     failed,
     blocked,
     skipped,
@@ -696,14 +779,18 @@ export function buildProcessTraceMap(
   }
 
   const partialReasons = unique([
-    observability?.partial_reason ? observability.partial_reason.replaceAll("_", " ") : "",
-    ...visibleNodes.flatMap((node) => [node.error, node.skipReason ? node.skipReason.replaceAll("_", " ") : ""]),
+    observability?.partial_reason ? observability.partial_reason.replace(/_/g, " ") : "",
+    ...visibleNodes.flatMap((node) => [node.error ?? "", node.skipReason ? node.skipReason.replace(/_/g, " ") : ""]),
   ]);
+  const summary = buildSummary(visibleNodes, observability);
+  const terminalStatus = processTraceTerminalStatus(entry, summary, visibleNodes);
+  summary.status = terminalStatus;
+  summary.statusLabel = processTraceStatusLabel(terminalStatus);
 
   return {
     nodes: visibleNodes,
     edges: buildEdges(visibleNodes),
-    summary: buildSummary(visibleNodes, observability),
+    summary,
     partialReasons,
   };
 }

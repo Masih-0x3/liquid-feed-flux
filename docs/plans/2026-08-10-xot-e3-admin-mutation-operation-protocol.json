@@ -1,0 +1,397 @@
+{
+  "schema": "xot-e3-admin-mutation-operation-protocol-receipt-v1",
+  "event": "e3-admin-mutation-operation-protocol-review-ready-local-only",
+  "phase": "split-e3-review-ready-local-only",
+  "status": "REVIEW_READY_LOCAL_T0_T1",
+  "riskTier": "high",
+  "airIds": [
+    "AIR-032"
+  ],
+  "brIds": [
+    "FE-API-01",
+    "BR-DASH-02"
+  ],
+  "supports": [
+    "AIR-058"
+  ],
+  "repository": "/Users/stevmq/Finalized XOT",
+  "branch": "codex/xot-remediation-convergence",
+  "head": "0bd578856016c06a10890339f93aa13b82ecae48",
+  "plan": {
+    "path": "docs/plans/2026-08-08-xot-post-b4-execution-sequence.md",
+    "sha256": "24feff64abe2a221ca69cb9f52e1a03eb53d707ec024367fa8aa3e75cf0dea4c"
+  },
+  "predecessor": {
+    "path": "docs/plans/2026-08-10-xot-e2-renderer-subprocess-containment.json",
+    "receiptSha256": "ce2de1c80b027e640b942f20ba83f3874d1c11c98180aeadcaec70b24e360cf7",
+    "status": "REVIEW_READY_LOCAL_T0_T1",
+    "ledgerBinding": {
+      "row": 520,
+      "event": "e2_renderer_subprocess_containment_acceptance_provenance_correction_local_t0_t1_row520",
+      "row520NoNewlineSha256": "fbfb5e965a2f3af5add4c4eca8564b4fca42737c26ac603288814311aa251684",
+      "predecessorRow": 519,
+      "predecessorRowNoNewlineSha256": "adb2c416778571d279ab5fbf4defa4a78d4ed795505d8182171dc823490f3056"
+    },
+    "checker": {
+      "path": "scripts/check-renderer-process-runner-contract.mjs",
+      "sha256": "b7fbcde71c3a729455e2d1c339455046f2dabe3b3399c47639b23595eafa9532"
+    }
+  },
+  "ledger": {
+    "path": "docs/plans/2026-07-14-xot-comprehensive-audit-remediation-implementation-ledger.jsonl",
+    "currentRowCount": 520,
+    "currentFileSha256": "d8db00ce221d61ae17b908ec52c519e134735be973622bb37569ea07610866af",
+    "row520": {
+      "event": "e2_renderer_subprocess_containment_acceptance_provenance_correction_local_t0_t1_row520",
+      "lineNoNewlineSha256": "fbfb5e965a2f3af5add4c4eca8564b4fca42737c26ac603288814311aa251684",
+      "predecessor": {
+        "row": 519,
+        "lineSha256": "adb2c416778571d279ab5fbf4defa4a78d4ed795505d8182171dc823490f3056",
+        "event": "e2_renderer_subprocess_containment_accepted_local_t0_t1_row519"
+      }
+    },
+    "state": "append_only_authority_current_520_rows; no E3 row appended",
+    "acceptance": "pending_append_acceptance",
+    "releaseGate": "CLOSED"
+  },
+  "reviewState": {
+    "status": "REVIEW_READY_LOCAL_T0_T1",
+    "ledgerAcceptance": "pending",
+    "independentLunaHighAcceptance": "assigned_route_requested_runtime_identity_unverified",
+    "coordinatorAuthority": true,
+    "localAcceptanceDoesNotCloseExternalRelease": true
+  },
+  "authoring": {
+    "authorHandle": "/root/e3_admin_operation_implementation",
+    "route": {
+      "model": "GPT-5.6 Luna",
+      "reasoning": "high",
+      "routeStatus": "used"
+    },
+    "coordinatorAuthority": "coordinator retained acceptance and receipt authority",
+    "independentAcceptance": {
+      "handle": "/root/e3_independent_acceptance",
+      "verdict": "ACCEPT",
+      "assignedRoute": "GPT-5.6 Luna high",
+      "runtimeModelReasoningTelemetry": "unknown; assigned route requested but runtime identity not independently confirmed",
+      "acceptanceScope": "local E3 T0+T1 code, tests, and receipt"
+    },
+    "claudeFinalReview": {
+      "reportPath": "/tmp/xot-e3-final-review.md",
+      "reportSha256": "5eae26430a5c3fc5d02f5d272ef04151a5badcc4d7c3ee1606b4a505bd324433",
+      "route": "Claude Code DeepSeek V4 Flash 0731 /effort ultracode (xhigh)",
+      "taskId": null,
+      "dispatchId": null,
+      "runId": null,
+      "terminalId": null,
+      "lifecycleFacts": "The report exposes no task, dispatch, run, terminal, or worker_done identifiers; these facts are unknown/unverified and are not inferred.",
+      "mode": "read-only",
+      "verdict": "ACCEPT local T0+T1",
+      "twoEvidencedReadOnlySubreviews": [
+        {
+          "scope": "timeout, late completion, reconcile, no automatic retry",
+          "result": "confirmed",
+          "handle": null
+        },
+        {
+          "scope": "hydration source scoping, duplicate delivery, single-row/single-effect",
+          "result": "confirmed",
+          "handle": null
+        }
+      ],
+      "noAdditionalClaudeSubagentClaim": true
+    }
+  },
+  "scope": {
+    "selectedMutations": [
+      "reprocess",
+      "hydrate_post"
+    ],
+    "hydrationSource": "manual_monitoring",
+    "canonicalOperationKeys": [
+      "reprocess:<tweet>",
+      "hydrate:manual_monitoring:<tweet>"
+    ],
+    "tweetGrammar": "[A-Za-z0-9_-]{1,128}",
+    "guarantees": [
+      "same-key duplicate delivery is one durable jobs row and one pipeline effect",
+      "stable operation identity and existing jobs.idempotency_key uniqueness gate mutation effects",
+      "client timeout is unknown outcome, not cancellation and not a safe automatic retry",
+      "reconciliation reports committed, failed, still_running, or unknown without re-invoking the mutation",
+      "manual hydration is source-scoped; a different source key is a distinct operation outside this guarantee"
+    ],
+    "ownedPaths": [
+      {
+        "path": ".github/workflows/ci.yml",
+        "sha256": "b5a64493124836151d5e93403ee526cccc58d692fdc53b0538cfa8b614a281d8"
+      },
+      {
+        "path": "package.json",
+        "sha256": "50ca558448ed97b9773a8df570f3555b5b2785fbb4e8c8081a13b69239d0b54e"
+      },
+      {
+        "path": "src/api/adminOperationClient.ts",
+        "sha256": "379d4298dfbcac60eb656b77377392cd7555bf07542add32a95b3fd55b75296b"
+      },
+      {
+        "path": "src/lib/monitoringActions.ts",
+        "sha256": "fa69de29e62341a5acde833cb972a6206517015307cc2e301bed28f13db4d74c"
+      },
+      {
+        "path": "src/pages/Monitoring.tsx",
+        "sha256": "3f25554ef6aaf684eecab4912a6aea2f077614e750efb84cffc097891699fa15"
+      },
+      {
+        "path": "src/test/admin-operation.test.ts",
+        "sha256": "d94f56a13ed171616832e36f32d758867095dc4b4a11f07c9a680f506087faeb"
+      },
+      {
+        "path": "src/test/monitoring-actions.test.ts",
+        "sha256": "863aaf2f7437767267599c371b690fb0485384a0a7aac7364f5bb135102fed96"
+      },
+      {
+        "path": "supabase/functions/_shared/adminActionNames.ts",
+        "sha256": "884e9e55613ac582bf6a8aaa47246f21e8a5c047d5185cfc497caa304939730a"
+      },
+      {
+        "path": "supabase/functions/admin-actions/adminOperation.ts",
+        "sha256": "4cb99aa7f30e477f1f5ff778c2ef25bd84836d38a038494f46c1492577508d9c"
+      },
+      {
+        "path": "supabase/functions/admin-actions/adminOperation.test.ts",
+        "sha256": "86414613296a972528f8f8c3ca8adbc15a966dc5e6e2484f6e9929498b9f17b5"
+      },
+      {
+        "path": "supabase/functions/admin-actions/adminOperationProtocol.test.ts",
+        "sha256": "c1a5b8df39ecc56724617a68988dbf4ca7308c54a049aeafd090312f101bd53a"
+      },
+      {
+        "path": "supabase/functions/admin-actions/basicActions.ts",
+        "sha256": "c21fef6b10a1ac69f34d53d4ee08ed685e70fa351891877c57dbefa4abcff291"
+      },
+      {
+        "path": "supabase/functions/admin-actions/basicActions.test.ts",
+        "sha256": "bdd361ba5c7aff3e7bc53950474dd72663585d59b90e5fa18e632bfc9a755baf"
+      },
+      {
+        "path": "supabase/functions/admin-actions/index.ts",
+        "sha256": "9170f970afcda8ae9fba05a057eea56d1d458e0f455a6370c5e1cf20d47c7095"
+      },
+      {
+        "path": "supabase/functions/admin-actions/xPostingActions.ts",
+        "sha256": "8b67f6dc61bcdb07b9e6080a85253c73f15a815773b007792d556a96a648b954"
+      },
+      {
+        "path": "supabase/functions/admin-actions/xPostingActions.test.ts",
+        "sha256": "821bbdcb8c800c203fd7265c35b70cd3c3c85aaf8127ba34622ae4542183a180"
+      },
+      {
+        "path": "scripts/check-admin-operation-contract.mjs",
+        "sha256": "23884a3fcf7b32e7ab0ddcb3ea2cd56bde76ef86b2ac4b11d248859d964f3e0a"
+      }
+    ],
+    "excluded": [
+      "bulk mutations",
+      "provider-facing X, Telegram, or LLM mutations",
+      "render mutations",
+      "direct-write mutations",
+      "run_dedupe",
+      "migrations",
+      "schema changes",
+      "generated types",
+      "full call-site rollout",
+      "real runtime late-success proof (T2)"
+    ],
+    "preE3DirtyAttribution": {
+      "path": "src/test/admin-actions.test.ts",
+      "currentSha256": "370a5327b1889e9c592042863a7a2344d27fd7d08291a888526c337b9eed52d8",
+      "owned": false,
+      "note": "Included by the author validation command but is pre-E3 dirty-work attribution, not one of the 17 E3-owned paths."
+    }
+  },
+  "migrationRationale": {
+    "changed": false,
+    "reason": "The bounded representative mutations reuse the existing unique jobs.idempotency_key upsert and status seam; no new operation table, migration, schema, or generated-type change was needed.",
+    "currentCandidateChain": "No E3 schema addition joined the current-candidate chain; any future schema addition must precede E7 and receive a separate receipt."
+  },
+  "verifiedBehavior": [
+    "Reads retain bounded deadlines.",
+    "Mutations carry strict stable operation identity and idempotency semantics.",
+    "Duplicate pending/completed deliveries do not create a second row or pipeline effect.",
+    "Timeout is classified as unknown and no automatic retry is issued.",
+    "Explicit reconcile is read-only and cannot re-invoke the mutation.",
+    "Hydration's manual source key does not suppress a distinct background source key."
+  ],
+  "validation": {
+    "commands": [
+      {
+        "command": "npx vitest run src/test/admin-operation.test.ts src/test/admin-actions.test.ts src/test/monitoring-actions.test.ts src/test/monitoring-page.test.tsx src/test/monitoring-components.test.tsx --reporter=dot",
+        "result": "39/39 passed"
+      },
+      {
+        "command": "npm run test:admin-operation",
+        "result": "7/7 focused Deno protocol tests passed"
+      },
+      {
+        "command": "npx --yes deno test --cached-only supabase/functions/admin-actions/adminOperation.test.ts supabase/functions/admin-actions/adminOperationProtocol.test.ts --no-check",
+        "result": "7/7 passed"
+      },
+      {
+        "command": "npx --yes deno test --cached-only supabase/functions/admin-actions/xPostingActions.test.ts --no-check --filter 'hydrate post validates'",
+        "result": "1/1 passed"
+      },
+      {
+        "command": "node scripts/check-admin-operation-contract.mjs",
+        "result": "passed"
+      },
+      {
+        "command": "MUTATION_TEST=1 node scripts/check-admin-operation-contract.mjs",
+        "result": "passed; nine probes/decoys rejected"
+      },
+      {
+        "command": "npx tsc --noEmit -p tsconfig.strict.json",
+        "result": "passed"
+      },
+      {
+        "command": "npx eslint src/api/adminOperationClient.ts src/lib/monitoringActions.ts src/pages/Monitoring.tsx src/test/admin-operation.test.ts src/test/monitoring-actions.test.ts src/test/admin-actions.test.ts scripts/check-admin-operation-contract.mjs",
+        "result": "passed"
+      },
+      {
+        "command": "npx --yes deno lint supabase/functions/admin-actions/adminOperation.ts supabase/functions/admin-actions/adminOperation.test.ts supabase/functions/admin-actions/adminOperationProtocol.test.ts supabase/functions/admin-actions/basicActions.ts supabase/functions/admin-actions/basicActions.test.ts supabase/functions/admin-actions/index.ts supabase/functions/admin-actions/xPostingActions.ts supabase/functions/admin-actions/xPostingActions.test.ts",
+        "result": "checked 8 files, passed"
+      },
+      {
+        "command": "git diff --check",
+        "result": "clean"
+      },
+      {
+        "command": "git diff --cached --quiet",
+        "result": "exit 0; staged index empty"
+      }
+    ],
+    "claudeReproductionCountNote": "The Claude final report separately records the adminOperation/adminOperationProtocol Deno pair as 6/6 plus reprocess 1/1 and hydrate 1/1; the author doneclaim records the focused package/direct pair as 7/7 and 7/7. Both reports record passing results; the count difference is preserved rather than silently normalized.",
+    "protectedHashChecks": [
+      {
+        "path": "docs/plans/2026-07-14-xot-comprehensive-audit-remediation-implementation-ledger.jsonl",
+        "currentSha256": "d8db00ce221d61ae17b908ec52c519e134735be973622bb37569ea07610866af",
+        "expectedSha256": "d8db00ce221d61ae17b908ec52c519e134735be973622bb37569ea07610866af",
+        "unchanged": true
+      },
+      {
+        "path": "docs/plans/2026-08-10-xot-e2-renderer-subprocess-containment.json",
+        "currentSha256": "ce2de1c80b027e640b942f20ba83f3874d1c11c98180aeadcaec70b24e360cf7",
+        "expectedSha256": "ce2de1c80b027e640b942f20ba83f3874d1c11c98180aeadcaec70b24e360cf7",
+        "unchanged": true
+      },
+      {
+        "path": "docs/plans/2026-08-08-xot-post-b4-execution-sequence.md",
+        "currentSha256": "24feff64abe2a221ca69cb9f52e1a03eb53d707ec024367fa8aa3e75cf0dea4c",
+        "expectedSha256": "24feff64abe2a221ca69cb9f52e1a03eb53d707ec024367fa8aa3e75cf0dea4c",
+        "unchanged": true
+      },
+      {
+        "path": "scripts/check-renderer-process-runner-contract.mjs",
+        "currentSha256": "b7fbcde71c3a729455e2d1c339455046f2dabe3b3399c47639b23595eafa9532",
+        "expectedSha256": "b7fbcde71c3a729455e2d1c339455046f2dabe3b3399c47639b23595eafa9532",
+        "unchanged": true
+      }
+    ],
+    "stagedIndex": "empty",
+    "noProductStateMutation": true,
+    "npxDenoTooling": "npx --yes deno downloaded prescribed local tooling/test dependencies earlier; this was tooling access only and caused no product-state mutation."
+  },
+  "tddAndReworkHistory": [
+    "Initial E3 implementation was followed by a first Luna rework for strict grammar, function/handler ownership, atomic existing-key upsert behavior, checker AST/live-node coverage, focused CI command, and explicit unknown reconciliation semantics.",
+    "Second Luna rework tightened checker placement/function scope, removed completed-to-committed and unknownResult mutation gaps, moved caller guards, tested hydration cross-source behavior, and added deferred timeout-to-unknown/late-completion/reconcile/no-retry proof.",
+    "Claude final read-only review accepted the local T0+T1 result; no further rework was required.",
+    "No Claude internal subagent claim is made beyond the two evidenced read-only subreviews in the final full-delta report."
+  ],
+  "claudeAdvisories": [
+    "Mutation probes are not CI-wired: MUTATION_TEST=1 was run manually, while the CI check runs only the base assertion.",
+    "The protocol test fake DB is synchronous/non-concurrent and does not prove real Postgres concurrency atomicity; the production INSERT..ON CONFLICT DO NOTHING RETURNING path was source-reviewed, not runtime-proven here.",
+    "The orphaned late mutation promise lacks a catch; a later transport rejection could surface as an unhandled rejection.",
+    "Reconcile timeout/availability handling is asymmetric: invocation maps deadline to unknown, while reconcile can throw; a point-in-time read can transiently report still_running before a late completion.",
+    "Local acceptance does not close hosted CI, staging, deployment, browser, provider, database, production, or external release gates."
+  ],
+  "deferrals": {
+    "T2": [
+      "live-runtime late-success proof",
+      "host/container runtime limits and representative production-like metrics"
+    ],
+    "hostedCI": "deferred and not run",
+    "staging": "deferred and not run",
+    "deployment": "deferred and not run",
+    "browser": "deferred and not run",
+    "provider": "no X, Telegram, LLM, or other provider contact",
+    "database": "no production or remote database application; no live-DB concurrency proof",
+    "production": "not contacted; no production equivalence or release completion",
+    "other": [
+      "full call-site rollout",
+      "aggregate RLS/migration/type/owner/PAT gates",
+      "commit",
+      "push"
+    ]
+  },
+  "isolation": {
+    "noLiveContactDeclaration": true,
+    "noDatabaseApplication": true,
+    "noExternalWrite": true,
+    "network": "No product/provider/database/browser/CI/staging/deploy/live contact; npx Deno tooling download was the only dependency access noted.",
+    "dirtyWorktree": "All unrelated dirty and untracked work was preserved.",
+    "stagedIndex": "empty"
+  },
+  "rollout": {
+    "state": "no rollout performed",
+    "localCandidate": "review-ready local T0+T1 only",
+    "requiredBeforeAnyExternalRollout": [
+      "ledger append-only acceptance",
+      "hosted CI",
+      "staging and authenticated browser evidence",
+      "provider/database/production gates",
+      "operator-authorized deployment"
+    ]
+  },
+  "rollback": {
+    "noStaging": true,
+    "noProduction": true,
+    "noCommit": true,
+    "noPush": true,
+    "noDeploy": true,
+    "revertPaths": [
+      ".github/workflows/ci.yml",
+      "package.json",
+      "src/api/adminOperationClient.ts",
+      "src/lib/monitoringActions.ts",
+      "src/pages/Monitoring.tsx",
+      "src/test/admin-operation.test.ts",
+      "src/test/monitoring-actions.test.ts",
+      "supabase/functions/_shared/adminActionNames.ts",
+      "supabase/functions/admin-actions/adminOperation.ts",
+      "supabase/functions/admin-actions/adminOperation.test.ts",
+      "supabase/functions/admin-actions/adminOperationProtocol.test.ts",
+      "supabase/functions/admin-actions/basicActions.ts",
+      "supabase/functions/admin-actions/basicActions.test.ts",
+      "supabase/functions/admin-actions/index.ts",
+      "supabase/functions/admin-actions/xPostingActions.ts",
+      "supabase/functions/admin-actions/xPostingActions.test.ts",
+      "scripts/check-admin-operation-contract.mjs"
+    ],
+    "procedure": "If later evidence overturns this local result, revert only the E3-owned paths through an explicit additive correction workflow, then append a correcting ledger row; never rewrite ledger history."
+  },
+  "releaseGate": "CLOSED",
+  "evidenceSources": {
+    "authorDoneclaim": {
+      "path": "/tmp/xot-e3-author-doneclaim.md",
+      "sha256": "b598ca20357b9e604c8931125cd7dfad1429c5a9540301436950076397d5630e"
+    },
+    "claudeFullDeltaReview": {
+      "path": "/tmp/xot-e3-review-fulldelta.md",
+      "sha256": "9fc9f5fcbab758df31ad3b4085b8b953c1edd3814a260f67cf91c01b953f19af"
+    },
+    "claudeFinalReview": {
+      "path": "/tmp/xot-e3-final-review.md",
+      "sha256": "5eae26430a5c3fc5d02f5d272ef04151a5badcc4d7c3ee1606b4a505bd324433"
+    }
+  },
+  "receiptAuthoringNote": "This E3 receipt is the only file authored by this task. No ledger row was appended; no other repository or temporary file was edited."
+}

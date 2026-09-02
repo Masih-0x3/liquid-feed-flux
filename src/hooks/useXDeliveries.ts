@@ -34,9 +34,10 @@ export function useXDeliveries() {
   });
 }
 
-export function useXMonthlyPostsCount() {
+export function useXMonthlyPostsCount(enabled = true) {
   return useQuery({
     queryKey: ['x_deliveries', 'monthly_count'],
+    enabled,
     queryFn: async (): Promise<number> => {
       const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
       const { count, error } = await (supabase as unknown as {

@@ -1,0 +1,65 @@
+{
+  "schema": "xot-e10-preview-migration-boundary-successor-v1",
+  "event": "e10_preview_migration_boundary_successor_local_sql_t1_acceptance",
+  "phase": "preview-migration-boundary-local-only",
+  "status": "ACCEPTED_LOCAL_SQL_T1",
+  "release": "CLOSED",
+  "releaseGate": "CLOSED",
+  "repository": ".",
+  "branch": "codex/xot-remediation-convergence",
+  "predecessor": {
+    "path": "docs/plans/2026-08-12-xot-e10-preview-migration-boundary.json",
+    "sha256": "9611541708fa67b207f61e4466086f72c51beab4e37961e1352f65e66b088021"
+  },
+  "currentCandidateOverrides": {},
+  "evidenceOverrides": {
+    "supabase/functions/_shared/runtimeControls.ts": "38d6f6e8852b9abf61d87b301f2da523ee3651189ab733e69242117998583e36",
+    "supabase/functions/_shared/e10PreviewParityFoundation.test.ts": "4760427806432ab9bafca0931ebf1f85d6e3f7b9f9bc28f5c7065f3e697f568b",
+    "package.json": "bb4b106825ce09eeb7e2cd6fc550d4ae8f35ce78edbffe79a44053af80986936",
+    "scripts/check-migration-baseline.mjs": "805d67c46c93b316c2fc4b60817c2a3d3158c9890defdadff30d5a9ec0db1fbc",
+    ".github/workflows/ci.yml": "7f14ac3f2a198ebb3f4a8fd3b72b1fad1038fb2fb10edbc6ad0401bc0a6d847f"
+  },
+  "supersession": {
+    "reason": "Accepted successor after source and package metadata drift in later local work; predecessor remains immutable.",
+    "changedPaths": [
+      "supabase/functions/_shared/runtimeControls.ts",
+      "supabase/functions/_shared/e10PreviewParityFoundation.test.ts",
+      "package.json",
+      "package-lock.json",
+      "deno.lock",
+      "scripts/check-migration-baseline.mjs",
+      ".github/workflows/ci.yml"
+    ],
+    "ledgerRow": 544,
+    "validation": [
+      "migration baseline normal and mutation checker",
+      "E10 SQL runtime receipt checker"
+    ],
+    "evidenceTier": {
+      "achieved": [
+        "T0",
+        "T1"
+      ],
+      "deferred": [
+        "T2",
+        "T3",
+        "T4"
+      ]
+    },
+    "releaseState": "CLOSED"
+  },
+  "claims": {
+    "productionSchema": "not_claimed",
+    "ownership": "not_claimed",
+    "grants": "not_claimed",
+    "generatedTypes": "not_claimed",
+    "hostedCi": "not_claimed",
+    "staging": "not_claimed",
+    "deployment": "not_claimed",
+    "liveVerification": "not_claimed"
+  },
+  "notClosed": [
+    "Hosted CI, staging, deployment, live and production equivalence remain unverified.",
+    "Release gate remains CLOSED."
+  ]
+}

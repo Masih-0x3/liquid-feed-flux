@@ -1,4 +1,5 @@
 import type { SupabaseAdminClient } from "./types.ts";
+import type { AppRole } from "../_shared/appRole.ts";
 
 type QueryResult = { data?: unknown; count?: number | null; error?: unknown };
 
@@ -51,6 +52,7 @@ export type XApiSummaryDependencies = {
   recordXApiEvent: RecordXApiEventFn;
   readEnv?: (key: string) => string | undefined;
   fetchUsage?: typeof fetch;
+  role?: AppRole;
 };
 
 function table(supabase: SupabaseAdminClient, name: string): TableQueryBuilder {
@@ -66,6 +68,14 @@ export async function getXApiSummary(
   body: Record<string, unknown>,
   deps: XApiSummaryDependencies,
 ) {
+  if (body.sync_official_usage === true && deps.role === "read_only") {
+    return {
+      success: false,
+      error: "admin_role_required",
+      code: "admin_role_required",
+      status: 403,
+    };
+  }
   const windowHours = Math.min(Math.max(Number(body.window_hours) || 24, 1), 720);
   const since = new Date(Date.now() - windowHours * 60 * 60 * 1000).toISOString();
   const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
@@ -148,18 +158,22 @@ export async function getXApiSummary(
           method: "GET",
           estimatedBillableUnit: "official_usage_lookup",
         }, resp);
+        const status = Number.isInteger(resp.status) && resp.status >= 100 && resp.status <= 599
+          ? resp.status
+          : 0;
         officialUsage = resp.ok
           ? { synced: true, data: parsed }
-          : { synced: false, reason: `HTTP ${resp.status}`, raw: parsed };
+          : { synced: false, reason: `official_usage_http_${status}` };
       } catch (e) {
+        const errorCode = "official_usage_request_failed";
         await deps.recordAdminXApiAttempt(supabase, {
           action: "usage_sync",
           endpoint,
           method: "GET",
           estimatedBillableUnit: "official_usage_lookup",
-          error: e instanceof Error ? e.message : String(e),
+          error: errorCode,
         }, null);
-        officialUsage = { synced: false, reason: e instanceof Error ? e.message : String(e) };
+        officialUsage = { synced: false, reason: errorCode };
       }
     }
   }

@@ -231,11 +231,8 @@ export function buildClassifierToolFunction(
     base = classifierToolSchema
       ? JSON.parse(classifierToolSchema)
       : fallbackClassifierTool();
-  } catch (e) {
-    console.warn(
-      "Invalid classifier_tool_schema, using fallback:",
-      (e as Error).message,
-    );
+  } catch (_error) {
+    console.warn("scoring_classifier_schema_invalid");
     base = {
       name: "classify_importance",
       parameters: {

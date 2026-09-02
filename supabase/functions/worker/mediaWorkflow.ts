@@ -3,6 +3,13 @@ import {
   rmPickBestVariant,
   rmUpgradeImageUrl,
 } from "./workerUtils.ts";
+import {
+  fetchReviewedRemoteJson,
+  filterReviewedRemoteMediaItems,
+  MAX_REMOTE_MEDIA_CANDIDATES_PER_POST,
+  type RemoteMediaDnsResolver,
+  RemoteMediaPolicyError,
+} from "../_shared/remoteMediaPolicy.ts";
 
 type ResolvedMediaRow = {
   kind: "video" | "image" | "gif";
@@ -38,25 +45,47 @@ type FxTwitterVariant = {
   content_type?: string;
 };
 
+function boundedRecordRows(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item) => item && typeof item === "object" && !Array.isArray(item))
+    .slice(0, MAX_REMOTE_MEDIA_CANDIDATES_PER_POST) as Array<Record<string, unknown>>;
+}
+
+function safeProxyLookupErrorCode(error: unknown): string {
+  return error instanceof RemoteMediaPolicyError
+    ? error.code
+    : "proxy_media_lookup_failed";
+}
+
 export async function rmFetchFromFx(
   handle: string,
   id: string,
   fetchImpl: FetchFn = fetch,
+  resolveDns?: RemoteMediaDnsResolver,
 ): Promise<ResolvedMediaRow[] | null> {
   try {
-    const res = await fetchImpl(
+    const { body, response } = await fetchReviewedRemoteJson(
+      "fxtwitter",
       `https://api.fxtwitter.com/${handle}/status/${id}`,
+      { fetchImpl, resolveDns },
     );
-    if (!res.ok) return null;
-    const json = await res.json() as Record<string, unknown>;
+    if (!response.ok) return null;
+    const json = body as Record<string, unknown>;
     const t = (json?.tweet ?? {}) as Record<string, unknown>;
     const media = (t.media ?? {}) as Record<string, unknown>;
     const out: ResolvedMediaRow[] = [];
 
-    const videos =
-      (media.videos as Array<Record<string, unknown>> | undefined) ?? [];
+    const videos = boundedRecordRows(media.videos);
     for (const v of videos) {
-      const variants = (v.variants as FxTwitterVariant[] | undefined) ?? [];
+      if (out.length >= MAX_REMOTE_MEDIA_CANDIDATES_PER_POST) break;
+      const variants = boundedRecordRows(v.variants)
+        .map((variant) => ({
+          url: typeof variant.url === "string" ? variant.url : "",
+          bitrate: typeof variant.bitrate === "number" ? variant.bitrate : undefined,
+          content_type: typeof variant.content_type === "string"
+            ? variant.content_type
+            : undefined,
+        })) as FxTwitterVariant[];
       let url = (v.url as string) || "";
       if (variants.length) {
         const best = rmPickBestVariant(variants);
@@ -78,9 +107,9 @@ export async function rmFetchFromFx(
       });
     }
 
-    const photos =
-      (media.photos as Array<Record<string, unknown>> | undefined) ?? [];
+    const photos = boundedRecordRows(media.photos);
     for (const p of photos) {
+      if (out.length >= MAX_REMOTE_MEDIA_CANDIDATES_PER_POST) break;
       const url = p.url as string | undefined;
       if (!url) continue;
       out.push({
@@ -90,9 +119,10 @@ export async function rmFetchFromFx(
         height: p.height as number | undefined,
       });
     }
-    return out.length ? out : null;
+    const { accepted } = filterReviewedRemoteMediaItems(out);
+    return accepted.length ? accepted : null;
   } catch (e) {
-    console.warn("resolve_media: fxtwitter failed", (e as Error).message);
+    console.warn("resolve_media: fxtwitter failed", safeProxyLookupErrorCode(e));
     return null;
   }
 }
@@ -101,17 +131,20 @@ export async function rmFetchFromVx(
   handle: string,
   id: string,
   fetchImpl: FetchFn = fetch,
+  resolveDns?: RemoteMediaDnsResolver,
 ): Promise<ResolvedMediaRow[] | null> {
   try {
-    const res = await fetchImpl(
+    const { body, response } = await fetchReviewedRemoteJson(
+      "vxtwitter",
       `https://api.vxtwitter.com/${handle}/status/${id}`,
+      { fetchImpl, resolveDns },
     );
-    if (!res.ok) return null;
-    const json = await res.json() as Record<string, unknown>;
-    const extended =
-      (json.media_extended as Array<Record<string, unknown>> | undefined) ?? [];
+    if (!response.ok) return null;
+    const json = body as Record<string, unknown>;
+    const extended = boundedRecordRows(json.media_extended);
     const out: ResolvedMediaRow[] = [];
     for (const m of extended) {
+      if (out.length >= MAX_REMOTE_MEDIA_CANDIDATES_PER_POST) break;
       const type = String(m.type || "");
       const url = m.url as string | undefined;
       if (!url) continue;
@@ -125,9 +158,10 @@ export async function rmFetchFromVx(
         out.push({ kind: "image", url: rmUpgradeImageUrl(url) });
       }
     }
-    return out.length ? out : null;
+    const { accepted } = filterReviewedRemoteMediaItems(out);
+    return accepted.length ? accepted : null;
   } catch (e) {
-    console.warn("resolve_media: vxtwitter failed", (e as Error).message);
+    console.warn("resolve_media: vxtwitter failed", safeProxyLookupErrorCode(e));
     return null;
   }
 }
@@ -136,7 +170,8 @@ export async function buildResolvedMediaRows(
   tweetId: string,
   resolved: ResolvedMediaRow[],
 ): Promise<MediaUpsertRow[]> {
-  return await Promise.all(resolved.map(async (media, index) => ({
+  const { accepted } = filterReviewedRemoteMediaItems(resolved);
+  return await Promise.all(accepted.map(async (media, index) => ({
     tweet_id: tweetId,
     kind: media.kind,
     src_url: media.url,

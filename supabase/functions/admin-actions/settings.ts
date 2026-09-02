@@ -5,9 +5,16 @@ import type { AdminActionResponse, SupabaseAdminClient } from "./types.ts";
 type SettingsQueryBuilder = {
   select(columns: string): SettingsQueryBuilder;
   eq(column: string, value: unknown): SettingsQueryBuilder;
+  in(column: string, values: readonly string[]): SettingsQueryBuilder;
   maybeSingle(): Promise<
     { data?: { value?: unknown } | null; error?: unknown }
   >;
+  order(column: string, options?: Record<string, unknown>): SettingsQueryBuilder;
+  limit(value: number): SettingsQueryBuilder;
+  then(
+    onfulfilled?: ((value: { data?: unknown; error?: unknown }) => unknown) | null,
+    onrejected?: ((reason: unknown) => unknown) | null,
+  ): PromiseLike<{ data?: unknown; error?: unknown }>;
   upsert(
     value: Record<string, unknown>,
     options?: Record<string, unknown>,
@@ -29,6 +36,108 @@ export const SETTINGS_ALLOWED_KEYS = [
   "story_memory",
   "scoring_policy",
 ] as const;
+
+/**
+ * Browser settings reads must use the admin-actions boundary. Keep this
+ * allowlist separate from the write validator: historical voice settings are
+ * reviewable, but remain intentionally unwritable through this surface.
+ */
+export const SETTINGS_READ_KEYS = [
+  ...SETTINGS_ALLOWED_KEYS,
+  "voice_samples",
+  "voice_guide",
+  "personal_voice_profile",
+] as const;
+
+type SettingsReadKey = typeof SETTINGS_READ_KEYS[number];
+
+function isSettingsReadKey(value: unknown): value is SettingsReadKey {
+  return typeof value === "string" &&
+    (SETTINGS_READ_KEYS as readonly string[]).includes(value);
+}
+
+function asSettingsReadRows(value: unknown): Array<{ key: SettingsReadKey; value: unknown }> {
+  if (!Array.isArray(value)) throw new Error("settings_read_invalid_rows");
+  return value.flatMap((row) => {
+    if (!row || typeof row !== "object" || Array.isArray(row)) {
+      throw new Error("settings_read_invalid_row");
+    }
+    const record = row as Record<string, unknown>;
+    if (!isSettingsReadKey(record.key)) return [];
+    return [{ key: record.key, value: record.value }];
+  });
+}
+
+function requestedSettingsReadKeys(body: Record<string, unknown>): SettingsReadKey[] {
+  if (!Array.isArray(body.keys)) return [...SETTINGS_READ_KEYS];
+  return [...new Set(body.keys.filter(isSettingsReadKey))] as SettingsReadKey[];
+}
+
+/** Read-only settings projection used by Settings and other review surfaces. */
+export async function getSettingsAdminAction(
+  supabase: SupabaseAdminClient,
+  body: Record<string, unknown> = {},
+): Promise<AdminActionResponse> {
+  const keys = requestedSettingsReadKeys(body);
+  const query = supabase.from("settings") as SettingsQueryBuilder;
+  const { data, error } = await query.select("key, value").in("key", keys);
+  if (error) {
+    return { body: { success: false, error: "settings_read_failed" }, status: 503 };
+  }
+  try {
+    return { body: { success: true, rows: asSettingsReadRows(data) } };
+  } catch {
+    return { body: { success: false, error: "settings_read_invalid_response" }, status: 503 };
+  }
+}
+
+type SettingsSampleQueryBuilder = SettingsQueryBuilder & {
+  select(columns: string): SettingsSampleQueryBuilder;
+};
+
+function settingsSampleRow(row: unknown): Record<string, unknown> {
+  if (!row || typeof row !== "object" || Array.isArray(row)) {
+    throw new Error("settings_samples_invalid_row");
+  }
+  const source = row as Record<string, unknown>;
+  const accounts = source.accounts;
+  if (!accounts || typeof accounts !== "object" || Array.isArray(accounts)) {
+    throw new Error("settings_samples_invalid_row");
+  }
+  const account = accounts as Record<string, unknown>;
+  return {
+    tweet_id: typeof source.tweet_id === "string" ? source.tweet_id : "",
+    text_original: typeof source.text_original === "string" ? source.text_original : "",
+    text_translated: typeof source.text_translated === "string" ? source.text_translated : "",
+    url: typeof source.url === "string" ? source.url : "",
+    tweeted_at: typeof source.tweeted_at === "string" ? source.tweeted_at : null,
+    has_media: source.has_media === true,
+    accounts: {
+      handle: typeof account.handle === "string" ? account.handle : "",
+      display_name: typeof account.display_name === "string" ? account.display_name : "",
+    },
+  };
+}
+
+/** Return only the bounded post fields needed for Settings previews. */
+export async function getSettingsSamplesAdminAction(
+  supabase: SupabaseAdminClient,
+): Promise<AdminActionResponse> {
+  const query = supabase.from("posts") as SettingsSampleQueryBuilder;
+  const { data, error } = await query
+    .select("tweet_id, text_original, text_translated, url, tweeted_at, has_media, accounts!inner(handle, display_name)")
+    .order("created_at", { ascending: false })
+    .limit(5);
+  if (error) {
+    return { body: { success: false, error: "settings_samples_read_failed" }, status: 503 };
+  }
+  try {
+    if (!Array.isArray(data)) throw new Error("settings_samples_invalid_rows");
+    return { body: { success: true, samples: data.map(settingsSampleRow) } };
+  } catch {
+    return { body: { success: false, error: "settings_samples_invalid_response" }, status: 503 };
+  }
+}
 
 export function validateSettingsValue(
   key: string,
@@ -236,9 +345,20 @@ export function validateSettingsValue(
       if (
         v.max_posts_per_run !== undefined &&
         (typeof v.max_posts_per_run !== "number" ||
+          !Number.isSafeInteger(v.max_posts_per_run) ||
           v.max_posts_per_run < 1 ||
           v.max_posts_per_run > 20)
       ) return "x_posting_config.max_posts_per_run must be 1-20";
+      const nonNegativeQuotaConfig = ["daily_budget", "min_spacing_minutes"];
+      for (const f of nonNegativeQuotaConfig) {
+        const value = v[f];
+        if (
+          value !== undefined &&
+          (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0)
+        ) {
+          return `x_posting_config.${f} must be a non-negative whole number`;
+        }
+      }
       const strs: Array<[string, number]> = [["post_template", 1000], [
         "leading_emoji",
         32,
@@ -279,14 +399,16 @@ export function validateSettingsValue(
         ["posts_per_day", 1, 10000],
         ["monthly_post_budget", 1, 1000000],
         ["media_uploads_per_day", 1, 10000],
+        ["hydrations_per_day", 1, 10000],
       ];
       for (const [f, min, max] of nums) {
+        const value = v[f];
         if (
-          v[f] !== undefined &&
-          (typeof v[f] !== "number" || (v[f] as number) < min ||
-            (v[f] as number) > max)
+          value !== undefined &&
+          (typeof value !== "number" || !Number.isSafeInteger(value) || value < min ||
+            value > max)
         ) {
-          return `x_rate_limits.${f} must be ${min}-${max}`;
+          return `x_rate_limits.${f} must be a whole number ${min}-${max}`;
         }
       }
       break;
@@ -514,7 +636,7 @@ export function validateSettingsValue(
       try {
         normalizeScoringPolicy(v);
       } catch (e) {
-        return `invalid scoring_policy: ${(e as Error).message}`;
+        return "invalid scoring_policy";
       }
       break;
     }
@@ -652,11 +774,42 @@ export async function saveSettingsAdminAction(
   let valueToSave = value;
   if (key === "x_posting_config" && value && typeof value === "object") {
     const settings = supabase.from("settings") as SettingsQueryBuilder;
-    const { data: prev } = await settings.select("value").eq(
+    const { data: prev, error: previousSettingsError } = await settings.select("value").eq(
       "key",
       "x_posting_config",
     ).maybeSingle();
-    const prevCfg = (prev?.value ?? {}) as Record<string, unknown>;
+    if (previousSettingsError) {
+      return {
+        body: {
+          error: "x_posting_config_previous_read_failed",
+          code: "x_posting_config_previous_read_failed",
+        },
+        status: 503,
+      };
+    }
+    if (prev !== null && prev !== undefined &&
+      (typeof prev !== "object" || Array.isArray(prev) || !("value" in prev))) {
+      return {
+        body: {
+          error: "x_posting_config_previous_invalid_response",
+          code: "x_posting_config_previous_invalid_response",
+        },
+        status: 503,
+      };
+    }
+    const previousValue = prev?.value;
+    if (previousValue !== undefined &&
+      (previousValue === null || typeof previousValue !== "object" ||
+        Array.isArray(previousValue))) {
+      return {
+        body: {
+          error: "x_posting_config_previous_invalid_response",
+          code: "x_posting_config_previous_invalid_response",
+        },
+        status: 503,
+      };
+    }
+    const prevCfg = (previousValue ?? {}) as Record<string, unknown>;
     const nextCfg = value as Record<string, unknown>;
 
     if (shouldRestampXPostingStart(prevCfg, nextCfg)) {

@@ -1,0 +1,633 @@
+{
+  "schema": "xot-e9-owner-external-gate-packet-v1",
+  "artifactKind": "gate_packet_not_acceptance_receipt",
+  "event": "e9_parallel_owner_external_gate_packet_local_t0_routing_context",
+  "phase": "E9 - Parallel Owner And External Gate Packet",
+  "status": "AWAITING_OWNER_AND_EXTERNAL_EVIDENCE",
+  "release": "CLOSED",
+  "releaseGate": "CLOSED",
+  "riskTier": "HIGH",
+  "evidenceTier": "T0 repository-local routing context only",
+  "deploymentState": "local_only_not_ci_not_staging_not_deployed_not_live",
+  "repository": "/Users/stevmq/Finalized XOT",
+  "branch": "codex/xot-remediation-convergence",
+  "head": "0bd578856016c06a10890339f93aa13b82ecae48",
+  "observedAt": "2026-08-10",
+  "directPlan": {
+    "path": "docs/plans/2026-08-08-xot-post-b4-execution-sequence.md",
+    "sha256": "24feff64abe2a221ca69cb9f52e1a03eb53d707ec024367fa8aa3e75cf0dea4c",
+    "section": "E9 - Parallel Owner And External Gate Packet",
+    "lines": "329-347",
+    "parallelism": "E9 may proceed in parallel with E1-E8 without blocking safe local work.",
+    "unblockRule": "E9 does not unblock E10 until the packet is sufficiently complete and its required owner/external evidence is independently accepted."
+  },
+  "route": {
+    "authorRouteRequired": "GPT-5.6 Luna High coordinator; records only redacted receipts",
+    "inventoryInput": {
+      "path": "/tmp/xot-e9-claude-inventory.md",
+      "sha256": "e44e2c7bc27d7669387c9a362c1a589cbf0ae7bf9046da98812707381595cf64",
+      "readOnly": true
+    },
+    "claudeInventoryDispatch": {
+      "runId": "run_126b845ec732",
+      "taskId": "task_f3f14b5e6651",
+      "dispatchContext": "ctx_267019912c8b",
+      "visibleRoute": "Claude Code through Orca",
+      "executorModel": "DeepSeek V4 Flash 0731",
+      "workflow": "Ultracode",
+      "effort": "xhigh",
+      "routeLimitation": "The inventory normalizes redacted local observations only; independent route-model acceptance is not claimed.",
+      "subagents": "none"
+    },
+    "decisionsMade": false,
+    "ownersAssigned": false,
+    "externalStateAccessed": false
+  },
+  "ledger": {
+    "path": "docs/plans/2026-07-14-xot-comprehensive-audit-remediation-implementation-ledger.jsonl",
+    "rowCount": 523,
+    "fullSha256": "16a15af79e01c9494e5a8950400552a860cda648980e0dde2c0ed4cf7a876f04",
+    "row523": {
+      "lineNoNewlineSha256": "5ac8b183552c95cbae9f13e83da39aad8d2ee5363fca817c1a8b6f9b096337e8"
+    },
+    "appendOnly": true,
+    "receiptRow": "none",
+    "mutation": "No ledger row was appended, changed, superseded, or reserved by this packet.",
+    "supersessionRule": "A later owner/external receipt must append an independently accepted, predecessor-hash-bound record; this packet remains immutable context and is not silently rewritten."
+  },
+  "sourceBindings": [
+    {
+      "path": "docs/plans/2026-07-31-xot-audit-unfinished-dispositions.json",
+      "sha256": "a15346c1898b85f32d373c14da3738f69c8b9b637ba2ce07793fba37f0557e2e",
+      "role": "unfinished AIR dispositions and explicit no-claim rules"
+    },
+    {
+      "path": "docs/plans/2026-07-31-xot-production-first-reconciliation.json",
+      "sha256": "b400e62ff04608d085bec75a8246e955f06a8ff9ea84ca4e98f5dbfef0bd6f80",
+      "role": "production-first read-only reconciliation, advisor snapshot, backup and release limits"
+    },
+    {
+      "path": "docs/operations/supply-chain-gate.md",
+      "sha256": "dca614c038822aae97a49991bfd85b227aad12ceb3f56f1a8c523afe02f50817",
+      "role": "supply-chain scan gate and exception rules"
+    },
+    {
+      "path": "docs/operations/supply-chain-exceptions.json",
+      "sha256": "3870960f592cfa40ed90a4275ded4de6dc5ade28c63bef4e055ce7a27e2622b5",
+      "role": "current exception ledger; no waiver is inferred"
+    },
+    {
+      "path": "docs/operations/runtime-contract.md",
+      "sha256": "6c6337b62bf42c76475b939c446e65b7b6b433e715e3d8a68193592d869c2b01",
+      "role": "runtime and build contract documentation"
+    },
+    {
+      "path": "docs/operations/runtime-contract.json",
+      "sha256": "03a4e49ac378e207307c6d7a27f33c77873a2b7dd9dc71f6413dd93212c7912e",
+      "role": "runtime contract machine-readable evidence, including stale provenance boundary"
+    },
+    {
+      "path": "docs/plans/2026-07-14-xot-migration-equivalence-manifest.json",
+      "sha256": "418fc0a4994565daf929244e47e77feb3b8c08728849057b5dce7888f6e96b78",
+      "role": "protected migration equivalence manifest hash"
+    },
+    {
+      "path": "docs/plans/2026-07-14-xot-migration-equivalence-ledger.jsonl",
+      "sha256": "2f3f7a48e0c67c78c189a9e08ce909855b51af211e950fa083a04fd5889079c2",
+      "role": "migration equivalence observations; not proof of current production parity"
+    },
+    {
+      "path": "docs/plans/2026-07-14-xot-schema-privilege-diff.json",
+      "sha256": "7f95aaacade0583983694783fa34ca27baf0bd9d1514b71db816a03c613a1f2c",
+      "role": "schema, policy, privilege and grant-drift evidence"
+    },
+    {
+      "path": "docs/plans/2026-08-06-xot-b1-migration-type-evidence-reconciliation.json",
+      "sha256": "1224c160980741fc05dc9b9c481374366695f79e15c717f0f4ce96d804228af5",
+      "role": "B1 protected-input, migration-body, generated-type and replay limits"
+    },
+    {
+      "path": "docs/operations/backup-restore.md",
+      "sha256": "5e063eb21a452502f89ed3caf4aee166729f7f1dc79a98873d0ecfcc671ed2fc",
+      "role": "backup/PITR/restore runbook and readiness limits"
+    },
+    {
+      "path": "docs/operations/release-runbook.md",
+      "sha256": "20dfb4c87d0d6c6e49a8f63dc43e0ee969e88e98e6274816b0aa7dc61ba27de1",
+      "role": "release hold, cleanup containment and build provenance requirements"
+    },
+    {
+      "path": "docs/operations/phase0-containment-notice.md",
+      "sha256": "c3d0d28b586ef3951f6fc362de330c1f779f7172f7dcbf9fa6c72b5b8a0e1a1e",
+      "role": "phase-0 containment boundary"
+    },
+    {
+      "path": "docs/operations/runbooks.md",
+      "sha256": "9abfce38f78bbbf24b10332dc6f1a45c700eb032348d72fc8082bb9f9c20f53d",
+      "role": "operational rollback and safety procedures"
+    },
+    {
+      "path": "supabase/migrations/20260808110000_b3b2_digest_checkpoints.sql",
+      "sha256": "83bc88b93f5017c8f664eac2b5abadbba8b0e559b71e8117862fc35ea2089758",
+      "role": "AIR-010 local disabled-default source context; not an owner decision"
+    },
+    {
+      "path": ".env.example",
+      "sha256": "153529c993f5b92beddfbbc62136cc70819690e4b6ef7863a7007acdd63101d3",
+      "role": "public Vite variable-name shape only; values are deliberately excluded"
+    }
+  ],
+  "protectedEvidence": {
+    "manifestSha256": "418fc0a4994565daf929244e47e77feb3b8c08728849057b5dce7888f6e96b78",
+    "comprehensiveLedgerSha256": "16a15af79e01c9494e5a8950400552a860cda648980e0dde2c0ed4cf7a876f04",
+    "comprehensiveLedgerRow523Sha256": "5ac8b183552c95cbae9f13e83da39aad8d2ee5363fca817c1a8b6f9b096337e8",
+    "bodyAndSchemaRequirement": "Owner/external evidence must bind protected migration bodies, schema dump or equivalent read-only schema proof, generated types, policy/RLS, grants and role evidence to an exact reviewed SHA. Local paths and hashes in this packet do not establish remote or production equivalence.",
+    "currentForwardMigrationCaveat": "The current post-lockdown forward migrations remain local candidate inputs outside the protected historical manifest until independently adopted and reviewed; no apply or deployment is authorized by this packet.",
+    "noMutation": true
+  },
+  "gates": [
+    {
+      "id": "AIR-010",
+      "name": "ordered-thread delivery owner decision",
+      "state": "AWAITING_OWNER_DECISION",
+      "evidenceTier": "T0 local source context only",
+      "currentLocalEvidence": [
+        {
+          "path": "supabase/migrations/20260808110000_b3b2_digest_checkpoints.sql",
+          "sha256": "83bc88b93f5017c8f664eac2b5abadbba8b0e559b71e8117862fc35ea2089758",
+          "location": "delivery_state default/check constraint",
+          "state": "current_local_source_context",
+          "supports": "The local candidate defaults delivery state to disabled and keeps ordered delivery separately gated; this is not a signed owner decision or runtime proof."
+        },
+        {
+          "path": "docs/plans/2026-07-31-xot-audit-unfinished-dispositions.json",
+          "sha256": "a15346c1898b85f32d373c14da3738f69c8b9b637ba2ce07793fba37f0557e2e",
+          "location": "AIR-010 disposition",
+          "state": "deferred_stale_for_decision",
+          "supports": "The decision is outstanding."
+        }
+      ],
+      "requiredOwnerRole": "product and delivery reliability owner",
+      "missingEvidence": [
+        "Signed and dated choice: keep ordered thread delivery disabled, or authorize a revision-bound ordered consumer.",
+        "If authorized, a separate revision-bound plan/spec, effective reviewed branch/SHA, exactly-once provider-negative proof, and its own implementation batch; this packet does not authorize implementation."
+      ],
+      "decisionTemplate": {
+        "decision": null,
+        "allowedValues": ["keep_disabled", "authorize_revision_bound_ordered_consumer"],
+        "specIdIfAuthorized": null,
+        "reviewedSha": null,
+        "signerRole": null,
+        "signedAt": null,
+        "sourceReceiptSha256": null
+      },
+      "stalenessRevalidation": "Revalidate the source and runtime disabled state against the exact reviewed SHA on receipt; any enabled or ambiguous path invalidates the disabled choice and stops release.",
+      "redactionRule": "Record decision, role, date, reviewed SHA and redacted receipt hash only; never include provider credentials, tokens, payloads or raw private endpoint data.",
+      "stopKillCondition": "Missing owner, any secret-bearing output, any unreviewed consumer authorization, or any evidence of ordered delivery enabled without a revision-bound plan.",
+      "nextAction": "Owner signs one allowed decision. If keep_disabled, preserve fail-closed state. If authorize, open a separate revision-bound AIR-010 plan and batch."
+    },
+    {
+      "id": "AIR-017",
+      "name": "query plans, workload metrics and database-owner approval",
+      "state": "AWAITING_EXTERNAL_DATABASE_EVIDENCE",
+      "evidenceTier": "T3 prior read-only advisor context plus T0 local routing record; no current plan/metrics proof",
+      "currentLocalEvidence": [
+        {
+          "path": "docs/plans/2026-07-31-xot-production-first-reconciliation.json",
+          "sha256": "b400e62ff04608d085bec75a8246e955f06a8ff9ea84ca4e98f5dbfef0bd6f80",
+          "location": "advisors and authority_decision",
+          "state": "prior_read_only_snapshot_stale_for_current_approval",
+          "supports": "Advisor findings and deferred disposition are recorded; representative EXPLAIN plans and workload metrics are absent."
+        }
+      ],
+      "requiredOwnerRole": "database owner, with security review where RLS or grants change",
+      "missingEvidence": [
+        "Redacted representative EXPLAIN plans bound to the reviewed production SHA and named query shape.",
+        "Redacted workload metrics with capture time/window, representative volume and observed impact.",
+        "Signed and dated database-owner approval for each index, RLS or policy rewrite, or explicit rejection/defer decision."
+      ],
+      "decisionTemplate": {
+        "planReceiptSha256": null,
+        "metricReceiptSha256": null,
+        "migrationOrPolicyRevision": null,
+        "decision": null,
+        "signerRole": null,
+        "signedAt": null,
+        "sourceReceiptSha256": null
+      },
+      "stalenessRevalidation": "Re-capture when the reviewed SHA, schema, workload window, query plan, index or policy changes; prior advisor snapshots cannot be reused as current approval.",
+      "redactionRule": "Keep table/query shape and aggregate metrics sufficient for review, but remove credentials, private hosts, identifiers, raw logs and sensitive query literals.",
+      "stopKillCondition": "Missing owner approval, stale or non-representative plans, unexplained broad grants/RLS drift, or a request to apply changes before approval.",
+      "nextAction": "Database owner supplies redacted plans and metrics, then signs the index/policy decision against the exact reviewed SHA."
+    },
+    {
+      "id": "AIR-050",
+      "name": "operator task hierarchy review",
+      "state": "AWAITING_OPERATOR_REVIEW",
+      "evidenceTier": "T0 source/disposition context only; no visual acceptance",
+      "currentLocalEvidence": [
+        {
+          "path": "docs/plans/2026-07-31-xot-audit-unfinished-dispositions.json",
+          "sha256": "a15346c1898b85f32d373c14da3738f69c8b9b637ba2ce07793fba37f0557e2e",
+          "location": "AIR-050 disposition",
+          "state": "deferred_operator_review",
+          "supports": "Source-only hierarchy work exists without a rendered visual or operator approval claim."
+        }
+      ],
+      "requiredOwnerRole": "product/operator owner and frontend-UI reviewer",
+      "missingEvidence": [
+        "Operator review of the task-first first-viewport hierarchy and interaction priority.",
+        "Desktop and mobile screenshots or equivalent visual receipts, each bound to the exact reviewed SHA and viewport dimensions.",
+        "Signed and dated approve/rework decision."
+      ],
+      "decisionTemplate": {
+        "decision": null,
+        "operatorRole": null,
+        "taskHierarchyRevision": null,
+        "desktopScreenshotSha256": null,
+        "mobileScreenshotSha256": null,
+        "reviewedSha": null,
+        "signedAt": null
+      },
+      "stalenessRevalidation": "Re-review screenshots whenever layout, route shell, content density, responsive breakpoints or the reviewed SHA changes.",
+      "redactionRule": "Screenshots must be SHA-bound and redacted for private data, tokens, credentials and sensitive account content.",
+      "stopKillCondition": "No operator reviewer, screenshot not bound to current SHA, visual evidence with private data, or source-only claim presented as visual acceptance.",
+      "nextAction": "Operator reviews the task hierarchy and supplies SHA-bound desktop/mobile screenshots plus signed approve/rework receipt."
+    },
+    {
+      "id": "AIR-052",
+      "name": "hosted supply-chain scans and waiver adjudication",
+      "state": "AWAITING_HOSTED_CURRENT_SHA_SCANS",
+      "evidenceTier": "T0 source contract and empty waiver ledger; no hosted scan evidence",
+      "currentLocalEvidence": [
+        {
+          "path": "docs/operations/supply-chain-gate.md",
+          "sha256": "dca614c038822aae97a49991bfd85b227aad12ceb3f56f1a8c523afe02f50817",
+          "state": "current_local_contract",
+          "supports": "Scan and exception receipt contract is documented."
+        },
+        {
+          "path": "docs/operations/supply-chain-exceptions.json",
+          "sha256": "3870960f592cfa40ed90a4275ded4de6dc5ade28c63bef4e055ce7a27e2622b5",
+          "state": "current_local_empty_or_awaiting_scan",
+          "supports": "No waiver or current scan receipt is accepted by this packet."
+        }
+      ],
+      "requiredOwnerRole": "security/release owner; waiver adjudication owner per finding if actionable findings exist",
+      "missingEvidence": [
+        "Hosted CI SBOM, dependency, container and Deno scans against the exact pushed reviewed SHA.",
+        "For every actionable finding: redacted finding ID, disposition, named waiver owner role, signed date and expiry. If no findings, a signed no-waiver receipt.",
+        "Current-SHA scan provenance and tool versions."
+      ],
+      "decisionTemplate": {
+        "reviewedSha": null,
+        "scanReceiptSha256": null,
+        "findingsCount": null,
+        "waiverOwnerRoleIfNeeded": null,
+        "waiverEntries": [],
+        "expiresAt": null,
+        "signerRole": null,
+        "signedAt": null
+      },
+      "stalenessRevalidation": "Run again for any dependency, lockfile, container, Deno, CI workflow or reviewed-SHA change; waivers expire at their recorded expiry and cannot be carried forward silently.",
+      "redactionRule": "Include finding IDs, packages/images and versions only to the minimum reviewable extent; omit tokens, private hosts, credentials, raw logs and secret-bearing scanner output.",
+      "stopKillCondition": "Hosted scan missing, scan not bound to current SHA, actionable finding without owner/expiry, expired waiver, or secret-bearing output.",
+      "nextAction": "Run hosted current-SHA scans after explicit Git/CI authorization; obtain signed no-waiver or per-finding waiver receipts."
+    },
+    {
+      "id": "AIR-055",
+      "name": "masked public Vite environment and Vercel provenance",
+      "state": "AWAITING_MASKED_BUILD_AND_CURRENT_SHA_PROVENANCE",
+      "evidenceTier": "T0 variable-name shape plus stale provenance context; no current build/deploy proof",
+      "currentLocalEvidence": [
+        {
+          "path": ".env.example",
+          "sha256": "153529c993f5b92beddfbbc62136cc70819690e4b6ef7863a7007acdd63101d3",
+          "state": "local_name_shape_only",
+          "supports": "The required public variable names are represented; no values are included in this packet."
+        },
+        {
+          "path": "docs/operations/runtime-contract.json",
+          "sha256": "03a4e49ac378e207307c6d7a27f33c77873a2b7dd9dc71f6413dd93212c7912e",
+          "state": "stale_provenance_context",
+          "supports": "A prior Vercel provenance snapshot exists but is not bound to current HEAD; it cannot establish current deployment readiness."
+        },
+        {
+          "path": "docs/plans/2026-07-31-xot-audit-unfinished-dispositions.json",
+          "sha256": "a15346c1898b85f32d373c14da3738f69c8b9b637ba2ce07793fba37f0557e2e",
+          "state": "deferred_build_evidence",
+          "supports": "The local build/provenance gate remains deferred."
+        }
+      ],
+      "requiredOwnerRole": "release/build owner",
+      "missingEvidence": [
+        "Masked production-shaped evidence for exactly these public variable names: VITE_SUPABASE_URL, VITE_SUPABASE_PUBLISHABLE_KEY, VITE_SUPABASE_PROJECT_ID. Values must never appear in this packet or receipt.",
+        "Current-SHA Vercel provenance and build receipt, with reviewed SHA, build result, artifact hash and deployment provenance sufficient to revalidate; no private host or credential disclosure.",
+        "Signed and dated release/build-owner decision."
+      ],
+      "decisionTemplate": {
+        "reviewedSha": null,
+        "publicVariableNames": ["VITE_SUPABASE_URL", "VITE_SUPABASE_PUBLISHABLE_KEY", "VITE_SUPABASE_PROJECT_ID"],
+        "maskedShapeReceiptSha256": null,
+        "vercelProvenanceReceiptSha256": null,
+        "buildArtifactSha256": null,
+        "buildResult": null,
+        "signerRole": null,
+        "signedAt": null
+      },
+      "stalenessRevalidation": "Rebuild and rebind provenance for every source, lockfile, config, public variable-name, Vercel deployment or reviewed-SHA change; prior diverged-SHA provenance is stale.",
+      "redactionRule": "Only the three required public variable names, masked shape/type, hashes and current-SHA provenance may be recorded. Never record values, keys, DSNs, private hosts, tokens or raw environment output.",
+      "stopKillCondition": "Any unmasked value, missing variable, stale/diverged provenance, build not bound to current SHA, or request to treat local shape as deployment proof.",
+      "nextAction": "Release owner supplies masked shape plus current-SHA Vercel provenance/build receipt without values, then signs the decision."
+    },
+    {
+      "id": "AIR-065",
+      "name": "canary and cleanup-schedule authorization",
+      "state": "AWAITING_CANARY_AND_SCHEDULE_AUTHORIZATION",
+      "evidenceTier": "T0 local containment/runbook context; no canary authorization",
+      "currentLocalEvidence": [
+        {
+          "path": "docs/operations/release-runbook.md",
+          "sha256": "20dfb4c87d0d6c6e49a8f63dc43e0ee969e88e98e6274816b0aa7dc61ba27de1",
+          "state": "local_containment_hold",
+          "supports": "Cleanup schedules are documented as contained/paused and source guards are not deployment proof."
+        },
+        {
+          "path": "docs/operations/phase0-containment-notice.md",
+          "sha256": "c3d0d28b586ef3951f6fc362de330c1f779f7172f7dcbf9fa6c72b5b8a0e1a1e",
+          "state": "local_containment_boundary",
+          "supports": "Phase-0 safety hold remains the local operating boundary."
+        }
+      ],
+      "requiredOwnerRole": "database operations/release owner",
+      "missingEvidence": [
+        "Explicit signed canary authorization with bounded scope, reviewed SHA, rollback/kill trigger and observation window.",
+        "Explicit cleanup-schedule authorization selecting exactly one canonical schedule and recording the cleanup/rollback plan.",
+        "Current provider schedule state receipt after authorization; no mutation is authorized by this packet."
+      ],
+      "decisionTemplate": {
+        "canaryId": null,
+        "reviewedSha": null,
+        "canaryAuthorized": null,
+        "cleanupScheduleChosen": null,
+        "cleanupScheduleAuthorized": null,
+        "rollbackKillTrigger": null,
+        "sourceReceiptSha256": null,
+        "signerRole": null,
+        "signedAt": null
+      },
+      "stalenessRevalidation": "Revalidate provider schedule and guard state immediately before any authorized canary; revoke authorization on SHA, schedule, guard, schema or owner change.",
+      "redactionRule": "Record schedule identifiers and aggregate state only; omit credentials, private hosts, raw logs, payloads and sensitive provider responses.",
+      "stopKillCondition": "No explicit authorization, more than one canonical schedule, unexpected active cleanup, missing rollback trigger, or any mutation without a separately authorized canary.",
+      "nextAction": "Database-operations owner signs bounded canary and exactly-one-schedule choice; keep containment hold until then."
+    },
+    {
+      "id": "SR-MIG-01",
+      "name": "protected migration bodies and schema evidence",
+      "state": "AWAITING_OWNER_AND_EXTERNAL_MIGRATION_EVIDENCE",
+      "evidenceTier": "T0 local manifest/ledger/diff and B1 routing context; no production equivalence",
+      "currentLocalEvidence": [
+        {
+          "paths": [
+            "docs/plans/2026-07-14-xot-migration-equivalence-manifest.json",
+            "docs/plans/2026-07-14-xot-migration-equivalence-ledger.jsonl",
+            "docs/plans/2026-07-14-xot-schema-privilege-diff.json",
+            "docs/plans/2026-08-06-xot-b1-migration-type-evidence-reconciliation.json"
+          ],
+          "sha256": [
+            "418fc0a4994565daf929244e47e77feb3b8c08728849057b5dce7888f6e96b78",
+            "2f3f7a48e0c67c78c189a9e08ce909855b51af211e950fa083a04fd5889079c2",
+            "7f95aaacade0583983694783fa34ca27baf0bd9d1514b71db816a03c613a1f2c",
+            "1224c160980741fc05dc9b9c481374366695f79e15c717f0f4ce96d804228af5"
+          ],
+          "state": "local_protected_context_only",
+          "supports": "Historical equivalence, schema/privilege drift and B1 limits are bound; remote body, current production parity and owner approval remain absent."
+        },
+        {
+          "path": "src/integrations/supabase/types.ts",
+          "sha256": "07dc603ba54bc23989ec448036e2f57a86c41b4fe3a6221da3e91fe6ff7e1470",
+          "state": "local_generated_types_staleness_unresolved",
+          "supports": "Current generated types require independent schema binding; hash is context, not acceptance."
+        }
+      ],
+      "requiredOwnerRole": "database owner and security/RLS reviewer",
+      "missingEvidence": [
+        "Owner-approved complete forward migration body inventory, including remote-body availability and hash binding.",
+        "Protected schema dump or equivalent read-only schema/policy/RLS/type evidence bound to the reviewed SHA and production observation.",
+        "Exact replay/equivalence receipt with no-egress proof, owner/grant proof and no broad database push."
+      ],
+      "decisionTemplate": {
+        "reviewedSha": null,
+        "protectedManifestSha256": "418fc0a4994565daf929244e47e77feb3b8c08728849057b5dce7888f6e96b78",
+        "migrationBodyReceiptSha256": null,
+        "schemaReceiptSha256": null,
+        "typeReceiptSha256": null,
+        "ownerRole": null,
+        "signedAt": null
+      },
+      "stalenessRevalidation": "Recompute body, schema, policy, grant and type hashes whenever migrations or generated types change; remote/production evidence must be freshly observed for the reviewed SHA.",
+      "redactionRule": "Record versions, hashes, object names and aggregate role outcomes only; never include credentials, raw connection strings, private hosts, secret-bearing SQL literals or raw dumps.",
+      "stopKillCondition": "Missing remote body, unknown destructive drift, broad/default privilege ambiguity, stale types, owner absence or request for production apply before independent acceptance.",
+      "nextAction": "Database/security owner supplies protected body/schema/type/privilege receipts and signs equivalence disposition; do not apply migrations."
+    },
+    {
+      "id": "SR-REL-00",
+      "name": "backup, PITR and restore readiness",
+      "state": "AWAITING_BACKUP_RESTORE_RECEIPT",
+      "evidenceTier": "T0 runbook plus prior read-only provider context; current restore state unknown",
+      "currentLocalEvidence": [
+        {
+          "path": "docs/operations/backup-restore.md",
+          "sha256": "5e063eb21a452502f89ed3caf4aee166729f7f1dc79a98873d0ecfcc671ed2fc",
+          "state": "local_runbook_prior_snapshot",
+          "supports": "The runbook records backup/PITR limitations and requires a restore drill; it is not a current success receipt."
+        },
+        {
+          "path": "docs/plans/2026-07-31-xot-production-first-reconciliation.json",
+          "sha256": "b400e62ff04608d085bec75a8246e955f06a8ff9ea84ca4e98f5dbfef0bd6f80",
+          "state": "prior_read_only_provider_snapshot",
+          "supports": "Previous backup/PITR observations are stale/unknown for current readiness."
+        }
+      ],
+      "requiredOwnerRole": "database owner with release/security review",
+      "missingEvidence": [
+        "Signed approval for an isolated disposable restore target.",
+        "Successful restore-drill receipt with redacted RPO/RTO observations and exact source/target hashes.",
+        "Storage-object recovery validation and cleanup receipt."
+      ],
+      "decisionTemplate": {
+        "disposableTargetApproved": null,
+        "backupReceiptSha256": null,
+        "restoreReceiptSha256": null,
+        "storageObjectReceiptSha256": null,
+        "rpo": null,
+        "rto": null,
+        "signerRole": null,
+        "signedAt": null
+      },
+      "stalenessRevalidation": "Re-run after backup policy, PITR, schema, storage, provider or reviewed-SHA changes; a prior snapshot cannot establish current restore readiness.",
+      "redactionRule": "Record only plan/state labels, timestamps, aggregate RPO/RTO and hashes; omit private hosts, credentials, object paths, raw logs and identifiers.",
+      "stopKillCondition": "No disposable-target approval, failed or partial restore, unknown RPO/RTO, missing Storage-object recovery, or any attempt to use production as the drill target.",
+      "nextAction": "Database owner approves a disposable target and supplies a successful backup/PITR/restore plus Storage-object receipt."
+    },
+    {
+      "id": "SR-RLS-01",
+      "name": "privilege, role and grant evidence",
+      "state": "AWAITING_DATABASE_SECURITY_ROLE_EVIDENCE",
+      "evidenceTier": "T0 local privilege diff; no current owner approval",
+      "currentLocalEvidence": [
+        {
+          "path": "docs/plans/2026-07-14-xot-schema-privilege-diff.json",
+          "sha256": "7f95aaacade0583983694783fa34ca27baf0bd9d1514b71db816a03c613a1f2c",
+          "state": "blocked_pending_owner_review",
+          "supports": "Historical privilege/default-privilege divergence is recorded; it is not accepted or repaired by this packet."
+        },
+        {
+          "path": "docs/plans/2026-08-06-xot-b1-migration-type-evidence-reconciliation.json",
+          "sha256": "1224c160980741fc05dc9b9c481374366695f79e15c717f0f4ce96d804228af5",
+          "state": "local_reconciliation_limits",
+          "supports": "B1 records protected input and owner/grant proof gaps."
+        }
+      ],
+      "requiredOwnerRole": "database owner and security/RLS owner",
+      "missingEvidence": [
+        "Role matrix evidence for anon, viewer/authenticated, admin, service-role and renderer roles as applicable.",
+        "Forward privilege migration review with exact grants/defaults and SECURITY DEFINER ownership/search_path evidence.",
+        "Signed and dated owner disposition for every privilege drift item."
+      ],
+      "decisionTemplate": {
+        "reviewedSha": null,
+        "roleMatrixReceiptSha256": null,
+        "privilegeDiffReceiptSha256": null,
+        "forwardMigration": null,
+        "decision": null,
+        "signerRole": null,
+        "signedAt": null
+      },
+      "stalenessRevalidation": "Recompute role/grant evidence after every migration, role change, generated type update or reviewed-SHA change; historical counts are not current proof.",
+      "redactionRule": "Use role names, grant class, object class and hashes only; omit credentials, private hosts and raw SQL/query literals containing sensitive data.",
+      "stopKillCondition": "Broad grant, dynamic/default privilege ambiguity, missing owner, stale matrix or any database mutation before signed review.",
+      "nextAction": "Database/security owner supplies exact-SHA role and grant receipts and signs the disposition."
+    },
+    {
+      "id": "PAT-1",
+      "name": "PAT alert #1 disposition",
+      "state": "UNRESOLVED_AWAITING_SECURITY_OWNER",
+      "evidenceTier": "T0 repeated local references only; no alert closure evidence",
+      "currentLocalEvidence": [
+        {
+          "path": "docs/plans/2026-07-31-xot-audit-unfinished-dispositions.json",
+          "sha256": "a15346c1898b85f32d373c14da3738f69c8b9b637ba2ce07793fba37f0557e2e",
+          "state": "unresolved_reference",
+          "supports": "PAT alert #1 is an independent release-security item with no closure record in the local evidence."
+        },
+        {
+          "path": "docs/plans/2026-08-06-xot-b1-migration-type-evidence-reconciliation.json",
+          "sha256": "1224c160980741fc05dc9b9c481374366695f79e15c717f0f4ce96d804228af5",
+          "state": "unresolved_reference",
+          "supports": "B1 retains the alert as not closed."
+        }
+      ],
+      "requiredOwnerRole": "security owner",
+      "missingEvidence": [
+        "Named owner and signed/dated disposition for PAT alert #1.",
+        "Redacted evidence of revocation, rotation, containment or other verified remediation, or an explicit accepted-risk decision with expiry.",
+        "Independent verification receipt bound to the current reviewed release SHA where relevant."
+      ],
+      "decisionTemplate": {
+        "alertId": "PAT-1",
+        "disposition": null,
+        "remediationReceiptSha256": null,
+        "verifiedAt": null,
+        "ownerRole": null,
+        "expiresAt": null,
+        "signedAt": null
+      },
+      "stalenessRevalidation": "Revalidate after any credential, repository, CI, deployment or release-SHA change; an old alert reference never constitutes closure.",
+      "redactionRule": "Never record PAT values, token fragments, credential names that reveal secrets, private hosts or raw alert payloads; use alert ID, status, hash, role and dates only.",
+      "stopKillCondition": "No named owner, no verified remediation, expired accepted risk, any secret-bearing output, or any release claim that omits this unresolved item.",
+      "nextAction": "Security owner supplies a redacted verified disposition with owner, date and expiry/remediation evidence."
+    }
+  ],
+  "e6Context": {
+    "path": "docs/plans/2026-08-10-xot-e6-b2b-b3a-disposable-acceptance-blocked.json",
+    "sha256": "be8485cc469be4d9f6a49c7fb1a605acc3a3f74d0e64b5458f78438ac5795ecf",
+    "lines": 517,
+    "status": "BLOCKED_LOCAL_DISPOSABLE_T1_NOT_ACHIEVED",
+    "releaseGate": "CLOSED",
+    "state": "separately_blocked_context_only",
+    "acceptanceClaim": false,
+    "note": "E6 remains separately blocked; this E9 packet neither accepts E6 nor changes its blocker."
+  },
+  "intakeAndReceiptContract": {
+    "completionRequirement": "Each gate requires an independently accepted, redacted, signed/dated decision or evidence receipt with reviewer role, source hash, reviewed branch/SHA, observed-at time and revalidation result.",
+    "intakeTemplate": {
+      "gateId": null,
+      "decisionOrEvidence": null,
+      "reviewedBranch": null,
+      "reviewedSha": null,
+      "sourcePaths": [],
+      "sourceReceiptSha256": null,
+      "signerRole": null,
+      "signedAt": null,
+      "observedAt": null,
+      "stalenessCheck": null,
+      "redactionCheck": null,
+      "reviewerRole": null,
+      "reviewedAt": null
+    },
+    "appendOnly": true,
+    "supersession": "Later evidence may supersede a stale or incomplete field only by appending a new receipt that explicitly binds the predecessor packet/receipt hash and states what changed. Existing packets and ledger rows are never edited in place.",
+    "ledgerRule": "No ledger row is created until the owner/external evidence is independently accepted. This packet has receiptRow none and does not authorize a ledger append.",
+    "ownerDecisionRule": "Null decision fields mean no decision was made. Local source defaults, prior snapshots, asserted roles and inventory observations must not be promoted to owner authorization."
+  },
+  "globalRevalidationAndSafety": {
+    "stalenessRule": "Every receipt must be revalidated against current branch, exact reviewed SHA, source hashes, provider observation time and relevant schema/dependency/config state. Any drift, missing provenance or expired waiver returns the gate to awaiting evidence.",
+    "redactionRule": "No secrets, tokens, credentials, private keys, raw environment values, private hosts, raw logs, sensitive query literals, unmasked screenshots or provider payloads may enter this packet or its later receipts.",
+    "globalStopKillConditions": [
+      "missing owner or designated reviewer",
+      "secret-bearing output or unmasked evidence",
+      "stale, diverged or SHA-unbound snapshot",
+      "unknown destructive migration or privilege drift",
+      "request expands into apply, deploy, staging, canary, cleanup, provider or database mutation without separate explicit authorization",
+      "evidence conflicts with the append-only ledger or protected hashes",
+      "any exception lacks a named owner and expiry"
+    ],
+    "releaseDecision": "CLOSED",
+    "nextResumeAction": "Collect and independently review the redacted signed/dated gate receipts in this packet, then append no ledger row until acceptance criteria and predecessor binding pass."
+  },
+  "validation": {
+    "performedAfterAuthoring": true,
+    "json": {
+      "command": "jq empty docs/plans/2026-08-10-xot-e9-owner-external-gate-packet.json",
+      "result": "GREEN; valid JSON"
+    },
+    "hashes": {
+      "required": [
+        "sha256 every sourceBindings path",
+        "verify directPlan sha256",
+        "verify ledger fullSha256 and row523 lineNoNewlineSha256",
+        "verify Claude inventory sha256",
+        "verify protected manifest sha256",
+        "verify frozen E6 receipt sha256 and line count"
+      ],
+      "result": "GREEN; all recorded source, plan, ledger, row-523, inventory, protected and frozen E6 hashes matched"
+    },
+    "gitDiffNoIndexWhitespace": {
+      "command": "git diff --no-index --check /dev/null docs/plans/2026-08-10-xot-e9-owner-external-gate-packet.json",
+      "expected": "exit 1 because the artifact is untracked, with no whitespace diagnostics",
+      "result": "GREEN; exit 1 was expected for untracked-file comparison and emitted no whitespace diagnostics"
+    },
+    "stagedIndex": {
+      "command": "git diff --cached --quiet",
+      "expected": "GREEN; staged index empty",
+      "result": "GREEN; staged index empty"
+    },
+    "scope": {
+      "allowedPath": "docs/plans/2026-08-10-xot-e9-owner-external-gate-packet.json",
+      "otherFilesEdited": false,
+      "ledgerChanged": false,
+      "deploymentOrExternalMutation": false
+    }
+  }
+}

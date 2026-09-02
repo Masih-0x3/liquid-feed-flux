@@ -16,9 +16,10 @@ import {
 } from '@/components/ui/alert-dialog';
 
 import { useToast } from '@/hooks/use-toast';
-import { invokeAdminRetry } from '@/api/adminRetry';
+import { useAuth } from '@/contexts/AuthContext';
+import { invokeAdminRetry, isAdminRetryCutoverBlocked } from '@/api/adminRetry';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Activity, Brain, MessageSquare, Eye, Code, Sparkles, Send, Shield, Loader2, Filter, AtSign, ChevronDown, Info, Film } from 'lucide-react';
+import { Activity, AlertTriangle, Brain, MessageSquare, Eye, Code, Sparkles, Send, Shield, Loader2, Filter, AtSign, ChevronDown, Info, Film } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   useSettingsData, useSaveSettings, openaiModels, messagePlaceholders, promptPlaceholders,
@@ -27,6 +28,7 @@ import {
 import type { ContentFilterConfig } from '@/components/settings/ContentFilterSettings';
 import type { EditorialProfile } from '@/hooks/useSettingsData';
 import PromptEditor from '@/components/settings/PromptEditor';
+import RuntimeControlsPanel from '@/components/settings/RuntimeControlsPanel';
 
 const ContentFilterSettings = lazy(() => import('@/components/settings/ContentFilterSettings'));
 const EditorialProfilesCard = lazy(() => import('@/components/settings/EditorialProfilesCard'));
@@ -74,6 +76,47 @@ function tabIdFromHash(hash: string): SettingsTabId | null {
   return (SETTINGS_TAB_IDS as readonly string[]).includes(id) ? (id as SettingsTabId) : null;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isTranslationSettingsBaseline(value: unknown): value is TranslationSettings {
+  return isRecord(value)
+    && typeof value.system_prompt === 'string'
+    && typeof value.user_prompt_template === 'string'
+    && typeof value.model === 'string'
+    && isFiniteNumber(value.temperature)
+    && isFiniteNumber(value.max_completion_tokens)
+    && isFiniteNumber(value.top_p)
+    && isFiniteNumber(value.frequency_penalty)
+    && isFiniteNumber(value.presence_penalty);
+}
+
+function isTelegramSettingsBaseline(value: unknown): value is TelegramSettings {
+  return isRecord(value) && typeof value.parse_mode === 'string';
+}
+
+function isMessageTemplateBaseline(value: unknown): value is MessageTemplateSettings {
+  return isRecord(value)
+    && typeof value.template === 'string'
+    && typeof value.include_source_link === 'boolean'
+    && typeof value.include_hashtags === 'boolean'
+    && typeof value.include_media_caption === 'boolean'
+    && typeof value.source_link_text === 'string'
+    && typeof value.custom_hashtags === 'string';
+}
+
+function hasSettingsBaseline(value: unknown): boolean {
+  return isRecord(value)
+    && isTranslationSettingsBaseline(value.translation_prompt)
+    && isTelegramSettingsBaseline(value.telegram_config)
+    && isMessageTemplateBaseline(value.message_template);
+}
+
 function insertPlaceholder(placeholder: string, textareaId: string, getter: string, setter: (val: string) => void) {
   const textarea = document.getElementById(textareaId) as HTMLTextAreaElement;
   if (textarea) {
@@ -94,6 +137,9 @@ function SettingsPanelFallback() {
 
 export default function Settings() {
   const { toast } = useToast();
+  const { role, isAdmin } = useAuth();
+  const isReadOnly = role === 'read_only';
+  const canMutate = isAdmin === true && !isReadOnly;
   const location = useLocation();
   const { settingsQuery, samplesQuery } = useSettingsData();
   const saveMutation = useSaveSettings();
@@ -121,6 +167,7 @@ export default function Settings() {
   // Local state for editing (initialized from query data)
   const settings = settingsQuery.data;
   const sampleTweets = samplesQuery.data || [];
+  const hasAuthoritativeSettingsBaseline = hasSettingsBaseline(settings);
 
   const [translationSettings, setTranslationSettings] = useState<TranslationSettings | null>(null);
   const [telegramSettings, setTelegramSettings] = useState<TelegramSettings | null>(null);
@@ -139,11 +186,38 @@ export default function Settings() {
     );
   }
 
+  if (settingsQuery.isError || settingsQuery.error || !hasAuthoritativeSettingsBaseline) {
+    return (
+      <div className="mx-auto flex min-h-[400px] w-full max-w-2xl items-center px-4 py-8">
+        <Alert className="border-destructive/40 bg-destructive/10">
+          <AlertTriangle className="h-4 w-4 text-destructive" />
+          <AlertTitle>Settings are unavailable</AlertTitle>
+          <AlertDescription className="space-y-3">
+            <p>We could not load an authoritative settings baseline. Nothing can be changed until the read succeeds.</p>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => { void settingsQuery.refetch(); }}
+              disabled={settingsQuery.isFetching}
+            >
+              {settingsQuery.isFetching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Retry loading settings
+            </Button>
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+
   if (!ts || !tgs || !mt) return null;
 
   const selectedModel = openaiModels.find(m => m.id === ts.model);
   const cappedTranslationMaxTokens = clampOpenAiCompletionTokens(ts.max_completion_tokens, 1000);
-  const saveTranslationPrompt = () => saveMutation.mutate({ key: 'translation_prompt', value: prepareTranslationSettingsForSave(ts) });
+  const saveSetting = (input: Parameters<typeof saveMutation.mutate>[0]) => {
+    if (!canMutate) return;
+    saveMutation.mutate(input);
+  };
+  const saveTranslationPrompt = () => saveSetting({ key: 'translation_prompt', value: prepareTranslationSettingsForSave(ts) });
 
   const getPlaceholderValue = (key: string, tweet: Record<string, unknown>) => {
     const accounts = tweet?.accounts as Record<string, unknown> | undefined;
@@ -189,6 +263,16 @@ export default function Settings() {
         <p className="text-muted-foreground mt-1">Configure your pipeline integrations and translation prompts</p>
       </div>
 
+      {isReadOnly && (
+        <Alert className="border-amber-400/30 bg-amber-500/10 text-amber-100" role="status">
+          <Shield className="h-4 w-4 text-amber-300" aria-hidden="true" />
+          <AlertTitle>Read-only access</AlertTitle>
+          <AlertDescription>Settings are available for review. Editing and test actions are disabled.</AlertDescription>
+        </Alert>
+      )}
+
+      <RuntimeControlsPanel />
+
       <Tabs value={settingsTab} onValueChange={(v) => goToSettingsTab(v as SettingsTabId)} className="w-full">
         <TabsList className="flex h-auto w-full justify-start gap-1 overflow-x-auto p-1">
           <TabsTrigger value="translation" className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><Brain className="w-4 h-4" />Translation</TabsTrigger>
@@ -200,6 +284,8 @@ export default function Settings() {
           <TabsTrigger value="enrichment" className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><Sparkles className="w-4 h-4" />Enrichment</TabsTrigger>
           <TabsTrigger value="observability" className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><Activity className="w-4 h-4" />Observability</TabsTrigger>
         </TabsList>
+
+        <fieldset disabled={!canMutate} className="min-w-0 space-y-6 disabled:cursor-not-allowed">
 
         {/* Translation Tab */}
         <TabsContent value="translation" className="space-y-6">
@@ -505,14 +591,14 @@ export default function Settings() {
               </div>
               <Separator />
               <div className="space-y-4">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-0">
                   <Label htmlFor="user_prompt_template">User Prompt Template</Label>
                   <div className="flex items-center gap-2"><Eye className="w-4 h-4" /><span className="text-sm text-muted-foreground">Available Placeholders</span></div>
                 </div>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {promptPlaceholders.map(p => (
-                    <Button key={p.key} variant="outline" size="sm" onClick={() => insertPlaceholder(p.key, 'user_prompt_template', ts.user_prompt_template, (v) => setTranslationSettings({ ...ts, user_prompt_template: v }))} className="justify-start h-auto p-3">
-                      <div className="text-left"><div className="font-mono text-xs text-primary">{p.key}</div><div className="text-xs text-muted-foreground">{p.description}</div></div>
+                    <Button key={p.key} variant="outline" size="sm" onClick={() => insertPlaceholder(p.key, 'user_prompt_template', ts.user_prompt_template, (v) => setTranslationSettings({ ...ts, user_prompt_template: v }))} className="justify-start h-auto p-3 w-full whitespace-normal min-w-0 break-words">
+                      <div className="text-left min-w-0 w-full break-words"><div className="font-mono text-xs text-primary">{p.key}</div><div className="text-xs text-muted-foreground whitespace-normal break-words">{p.description}</div></div>
                     </Button>
                   ))}
                 </div>
@@ -551,24 +637,35 @@ export default function Settings() {
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
                     <Button variant="outline" disabled={saveMutation.isPending} className="border-primary/50 hover:bg-primary/10 w-full sm:w-auto">
-                      Test Pipeline
+                      Validate Webhook
                     </Button>
                   </AlertDialogTrigger>
                   <AlertDialogContent>
                     <AlertDialogHeader>
-                      <AlertDialogTitle>Send a live pipeline test?</AlertDialogTitle>
+                      <AlertDialogTitle>Validate the webhook safely?</AlertDialogTitle>
                       <AlertDialogDescription>
-                        This invokes the production test webhook and may create sample content in the live pipeline.
+                        This checks the production webhook's authentication and payload parsing when validation is available. It does not create posts or jobs. Validation is currently blocked during the immutable delivery cutover.
                       </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
                       <AlertDialogCancel>Cancel</AlertDialogCancel>
                       <AlertDialogAction onClick={async () => {
                         try {
+                          if (!canMutate) return;
                           await invokeAdminRetry({ action: 'test_webhook' });
-                          toast({ title: 'Test webhook sent!', description: 'Check the Posts page for new sample content' });
-                        } catch { toast({ title: 'Test failed', variant: 'destructive' }); }
-                      }}>Send test</AlertDialogAction>
+                          toast({ title: 'Webhook validation completed', description: 'Authentication and payload parsing completed; no post or job was created.' });
+                        } catch (error) {
+                          if (isAdminRetryCutoverBlocked(error)) {
+                            toast({
+                              title: 'Webhook validation blocked',
+                              description: 'Validation is unavailable during the immutable delivery cutover. No webhook request was made.',
+                              variant: 'destructive',
+                            });
+                            return;
+                          }
+                          toast({ title: 'Webhook validation failed', description: 'The webhook could not be validated.', variant: 'destructive' });
+                        }
+                      }}>Validate webhook</AlertDialogAction>
                     </AlertDialogFooter>
                   </AlertDialogContent>
                 </AlertDialog>
@@ -646,14 +743,14 @@ export default function Settings() {
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="space-y-4">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-0">
                   <Label htmlFor="message_template">Message Template</Label>
                   <div className="flex items-center gap-2"><Eye className="w-4 h-4" /><span className="text-sm text-muted-foreground">Available Placeholders</span></div>
                 </div>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {messagePlaceholders.map(p => (
-                    <Button key={p.key} variant="outline" size="sm" onClick={() => insertPlaceholder(p.key, 'message_template', mt.template, (v) => setMessageTemplate({ ...mt, template: v }))} className="justify-start h-auto p-3">
-                      <div className="text-left"><div className="font-mono text-xs text-primary">{p.key}</div><div className="text-xs text-muted-foreground">{p.description}</div></div>
+                    <Button key={p.key} variant="outline" size="sm" onClick={() => insertPlaceholder(p.key, 'message_template', mt.template, (v) => setMessageTemplate({ ...mt, template: v }))} className="justify-start h-auto p-3 w-full whitespace-normal min-w-0 break-words">
+                      <div className="text-left min-w-0 w-full break-words"><div className="font-mono text-xs text-primary">{p.key}</div><div className="text-xs text-muted-foreground whitespace-normal break-words">{p.description}</div></div>
                     </Button>
                   ))}
                 </div>
@@ -688,7 +785,7 @@ export default function Settings() {
                 </div>
               )}
               <div className="flex flex-col gap-3 sm:flex-row">
-                <Button onClick={() => saveMutation.mutate({ key: 'message_template', value: mt })} disabled={saveMutation.isPending} className="bg-gradient-primary hover:opacity-90 text-white w-full sm:flex-1">Save Message Template</Button>
+                <Button onClick={() => saveSetting({ key: 'message_template', value: mt })} disabled={saveMutation.isPending} className="bg-gradient-primary hover:opacity-90 text-white w-full sm:flex-1">Save Message Template</Button>
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
                     <Button variant="outline" disabled={saveMutation.isPending || sampleTweets.length === 0} className="border-primary/50 hover:bg-primary/10 w-full sm:w-auto">
@@ -711,6 +808,7 @@ export default function Settings() {
                       <AlertDialogCancel>Cancel</AlertDialogCancel>
                       <AlertDialogAction onClick={async () => {
                         try {
+                          if (!canMutate) return;
                           await invokeAdminRetry({ action: 'test_template', post: sampleTweets[selectedSample], template: mt.template, settings: { include_source_links: mt.include_source_link, custom_hashtags: mt.custom_hashtags } });
                           toast({ title: 'Test message sent!', description: 'Check your Telegram channel' });
                         } catch { toast({ title: 'Test failed', variant: 'destructive' }); }
@@ -749,7 +847,7 @@ export default function Settings() {
                   </SelectContent>
                 </Select>
               </div>
-              <Button onClick={() => saveMutation.mutate({ key: 'telegram_config', value: tgs })} disabled={saveMutation.isPending} className="bg-gradient-primary hover:opacity-90 text-white w-full">Save Telegram Config</Button>
+              <Button onClick={() => saveSetting({ key: 'telegram_config', value: tgs })} disabled={saveMutation.isPending} className="bg-gradient-primary hover:opacity-90 text-white w-full">Save Telegram Config</Button>
             </CardContent>
           </Card>
         </TabsContent>
@@ -786,6 +884,7 @@ export default function Settings() {
             <ObservabilitySettings />
           </Suspense>
         </TabsContent>
+        </fieldset>
       </Tabs>
     </div>
   );

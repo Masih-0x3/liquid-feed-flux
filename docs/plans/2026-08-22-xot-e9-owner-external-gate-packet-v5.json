@@ -1,0 +1,107 @@
+{
+  "schema": "xot-e9-owner-external-gate-packet-v5",
+  "artifactKind": "append-only-successor-gate-packet",
+  "status": "SUCCESSOR_DRAFT_BLOCKED_AUTHORITY",
+  "release": "CLOSED",
+  "releaseGate": "CLOSED",
+  "riskTier": "HIGH",
+  "evidenceTier": "T0 local successor draft; hosted, external, staging, deploy, live, and production evidence pending",
+  "repository": "/Users/stevmq/Finalized XOT",
+  "branch": "codex/xot-remediation-convergence",
+  "proposedSuccessorBranch": "codex/xot-full-closure-candidate",
+  "proposedSuccessorBranchSuppression": {
+    "configPath": "vercel.json",
+    "property": "git.deploymentEnabled.codex/xot-full-closure-candidate",
+    "value": false,
+    "status": "REPO_OWNED_LOCAL_CONFIG_ONLY; first push and hosted verification blocked"
+  },
+  "candidateBinding": {
+    "head": "179ed27219660159086597f98298bb9b1c652777",
+    "tree": "bd170b760c4a60a87e3cff491291edcaf3de889c",
+    "worktree": "dirty only by plan plus this execution packet, authorization template, and implementation ledger; preserve all paths",
+    "network": "read-only GitHub metadata was queried; no repository mutation"
+  },
+  "predecessorBinding": {
+    "path": "docs/plans/2026-08-12-xot-e9-owner-external-gate-packet-v4.json",
+    "immutable": true,
+    "neverEdit": true,
+    "relationship": "v5 is an append-only successor draft; it does not rewrite or supersede v4 acceptance evidence"
+  },
+  "directPlan": {
+    "path": "docs/plans/2026-08-22-xot-full-closure-quality-orchestrated-goal-plan.md",
+    "section": "13. Exact implementation handoff",
+    "executionBoundary": "Local Luna implementation and bounded candidate review only until the authorization packet is approved"
+  },
+  "authority": {
+    "owner": null,
+    "approver": null,
+    "expiry": null,
+    "target": null,
+    "rollbackOperator": null,
+    "spendingCap": null,
+    "proposedGitHubSuccessorBranch": "codex/xot-full-closure-candidate",
+    "status": "BLOCKED_AUTHORITY",
+    "authorizationPacket": "docs/plans/2026-08-22-xot-full-closure-authorization-packet.json",
+    "missingRequiredFields": ["owner", "approver", "target", "expiry", "rollbackOperator", "spendingCap", "GitHub successor branch authority and first push", "Supabase staging target", "renderer host", "Vercel Preview target", "browser sessions", "owner decisions"]
+  },
+  "allowedActionsNow": [
+    "read-only local and public Git metadata",
+    "local source/config/docs/tests edits owned by Luna",
+    "bounded candidate review after exact route gates",
+    "append-only evidence ledger writes",
+    "local no-egress or sanitized replay design and validation"
+  ],
+  "blockedActions": [
+    "commit or push",
+    "branch creation or PR mutation",
+    "PR #69 mutation",
+    "hosted CI rerun",
+    "Supabase provisioning/link/migration/function deploy",
+    "renderer hosting or registry write",
+    "Vercel deployment or alias/variable change",
+    "browser authentication or production access",
+    "provider writes",
+    "production merge/deploy/canary",
+    "destructive cleanup or schedule activation",
+    "secret reads or writes"
+  ],
+  "requiredGates": ["AIR-010", "AIR-017", "AIR-050", "AIR-052", "AIR-053", "AIR-055", "AIR-065", "SR-REL-00", "SR-MIG-01", "SR-RLS-01", "PAT-1"],
+  "ownerDecisions": {
+    "AIR-010": "keep_disabled; revalidate on exact candidate",
+    "AIR-050": "open; decide after protected Preview review",
+    "AIR-017": null,
+    "AIR-052": null,
+    "AIR-053": null,
+    "AIR-055": null,
+    "AIR-065": null,
+    "SR-REL-00": null,
+    "SR-MIG-01": null,
+    "SR-RLS-01": null,
+    "PAT-1": null
+  },
+  "routeSettlement": {
+    "Devin-swe-1-7": "ROUTE_CALLABLE_NOT_EXACT_HIGHEST_EFFORT; canary and Free catalog passed, effective effort unknown",
+    "Devin-glm-5-2": "ROUTE_CALLABLE_NOT_EXACT_HIGHEST_EFFORT; canary and Free catalog passed, effective effort unknown",
+    "AGY-gemini-3.7-flash-high": "INELIGIBLE; canary timed out after provider login/model resolution while codegraph MCP hung",
+    "Command-Code-deepseek-v4-flash": "ROUTE_CALLABLE_EXACT_MODEL_EFFORT; canary passed but current CLI 1.32.1 differs from stored 1.23.2 adapter; no task dispatch",
+    "Luna": "ACTIVE_OWNER; retains implementation, integration, validation, and acceptance"
+  },
+  "noFalseCompletionClaim": {
+    "E9": "not_complete",
+    "E10": "not_complete",
+    "AIR050": "open",
+    "hostedExternalProduction": "pending",
+    "release": "CLOSED"
+  },
+  "redaction": {
+    "secretValues": false,
+    "privateProviderIdentity": false,
+    "productionData": false,
+    "rawLogs": false,
+    "externalDelegatesReceiveSecrets": false
+  },
+  "appendOnly": true,
+  "selfHash": "not_embedded; detached receipt required",
+  "createdBy": "GPT-5.6 Luna High",
+  "createdAt": "2026-08-22"
+}

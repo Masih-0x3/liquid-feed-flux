@@ -126,6 +126,12 @@ export interface DuplicateGateRunOptions {
 export interface FinalDuplicateAssertionResult {
   checked: boolean;
   blocked: boolean;
+  /**
+   * Whether the final assertion established a delivery decision.  An
+   * unknown outcome is never equivalent to "not a duplicate"; callers must
+   * defer/fail closed before invoking an external delivery provider.
+   */
+  outcome: "disabled" | "allowed" | "blocked" | "unknown";
   reason: string | null;
   result: DuplicateGateResult | null;
 }
@@ -138,12 +144,78 @@ type StoryEmbeddingFetchResult = {
   status: number;
 };
 
-function thrownDedupeOpenAIResponse(
+function dedupeHttpFailureCode(operation: string, status: unknown): string {
+  const numericStatus = typeof status === "number" && Number.isInteger(status)
+    ? status
+    : null;
+  return numericStatus !== null && numericStatus >= 100 && numericStatus <= 599
+    ? `${operation}_http_${numericStatus}`
+    : `${operation}_request_failed`;
+}
+
+function safeDedupeErrorCode(
   error: unknown,
+  fallback = "dedupe_failed",
+): string {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  if (message === "OPENAI_API_KEY is not configured") {
+    return "dedupe_openai_key_missing";
+  }
+  const httpStatus = message.match(/^(?:embedding_error|dedupe_ai_error):(\d{3}):/);
+  if (httpStatus) {
+    const lowerMessage = message.toLowerCase();
+    if (message.startsWith("embedding_error") && (
+      lowerMessage.includes("insufficient_quota") ||
+      lowerMessage.includes("exceeded your current quota") ||
+      lowerMessage.includes("check your plan and billing details")
+    )) {
+      return "embedding_quota_exhausted";
+    }
+    return dedupeHttpFailureCode(
+      message.startsWith("embedding_error") ? "embedding" : "dedupe_ai",
+      Number(httpStatus[1]),
+    );
+  }
+  const stableHttpStatus = message.match(/^(embedding|dedupe_ai)_http_(\d{3})$/);
+  if (stableHttpStatus) {
+    return dedupeHttpFailureCode(
+      stableHttpStatus[1],
+      Number(stableHttpStatus[2]),
+    );
+  }
+  if (message === "embedding_error:invalid_json" || message === "embedding_invalid_json") {
+    return "embedding_invalid_json";
+  }
+  if (message === "embedding_error:missing_embedding" || message === "embedding_missing_embedding") {
+    return "embedding_missing_embedding";
+  }
+  if (message === "embedding_quota_exhausted") return "embedding_quota_exhausted";
+  if (message === "dedupe_ai_error:missing_tool_call" || message === "dedupe_ai_missing_tool_call") {
+    return "dedupe_ai_missing_tool_call";
+  }
+  if (
+    message.startsWith("dedupe_ai_error:invalid_tool_json") ||
+    message === "dedupe_ai_invalid_tool_json"
+  ) return "dedupe_ai_invalid_tool_json";
+  if (message === "dedupe_openai_request_failed") return message;
+  for (const prefix of [
+    "exact_url_lookup_failed",
+    "find_story_candidates_v3_failed",
+    "canonical_coverage_error",
+    "dedupe_post_update_failed",
+    "dedupe_event_insert_failed",
+    "story_signature_upsert_failed",
+  ]) {
+    if (message === prefix || message.startsWith(`${prefix}:`)) return prefix;
+  }
+  return fallback;
+}
+
+function thrownDedupeOpenAIResponse(
+  _error: unknown,
   model: string,
 ): NormalizedOpenAIResponse {
-  const message = error instanceof Error ? error.message : String(error);
-  const raw = { error: { message } };
+  const raw = { error: { code: "dedupe_openai_request_failed" } };
   return {
     ok: false,
     status: 0,
@@ -190,7 +262,20 @@ export function observedDedupeOpenAI(
           metadata,
         });
       }
-      throw error;
+      throw new Error("dedupe_openai_request_failed");
+    }
+
+    if (!response.ok) {
+      const code = dedupeHttpFailureCode("dedupe_ai", response.status);
+      response = {
+        ...response,
+        rawText: JSON.stringify({ error: { code } }),
+        raw: { error: { code } },
+        content: "",
+        toolCall: null,
+        webSearchResults: [],
+        outputItems: [],
+      };
     }
 
     if (workflowRunKey) {
@@ -330,18 +415,24 @@ async function fetchStoryEmbeddingResult(
   });
   const rawText = await resp.text();
   if (!resp.ok) {
-    throw new Error(`embedding_error:${resp.status}:${rawText.slice(0, 300)}`);
+    const lowerRawText = rawText.toLowerCase();
+    if (lowerRawText.includes("insufficient_quota") ||
+      lowerRawText.includes("exceeded your current quota") ||
+      lowerRawText.includes("check your plan and billing details")) {
+      throw new Error("embedding_quota_exhausted");
+    }
+    throw new Error(dedupeHttpFailureCode("embedding", resp.status));
   }
   let data: Record<string, unknown> = {};
   try {
     data = JSON.parse(rawText);
   } catch {
-    throw new Error("embedding_error:invalid_json");
+    throw new Error("embedding_invalid_json");
   }
   const embedding = (data?.data as Array<{ embedding?: number[] }> | undefined)
     ?.[0]?.embedding;
   if (!Array.isArray(embedding)) {
-    throw new Error("embedding_error:missing_embedding");
+    throw new Error("embedding_missing_embedding");
   }
   return {
     embedding,
@@ -354,7 +445,8 @@ async function fetchStoryEmbeddingResult(
 
 function embeddingErrorStatus(error: unknown): number | null {
   const message = error instanceof Error ? error.message : String(error);
-  const match = message.match(/^embedding_error:(\d+):/);
+  const match = message.match(/^embedding_error:(\d+):/) ??
+    message.match(/^embedding_http_(\d{3})$/);
   return match ? Number(match[1]) : null;
 }
 
@@ -409,7 +501,7 @@ export async function fetchObservedStoryEmbedding(params: {
         usage: null,
         startedAt,
         endedAt: new Date(),
-        error,
+        error: safeDedupeErrorCode(error, "embedding_failed"),
         spanEstimate: 0,
         foglampExported: false,
         foglampSkipReason: "non_chat_endpoint",
@@ -645,7 +737,7 @@ export async function runDuplicateGate(
     }
     return result;
   } catch (e) {
-    const message = (e as Error).message;
+    const message = safeDedupeErrorCode(e);
     const failure = classifyDedupeFailure(message);
     const result = baseResult({
       ok: false,
@@ -704,6 +796,7 @@ export async function assertFinalDuplicateState(
     return {
       checked: false,
       blocked: false,
+      outcome: "disabled",
       reason: "duplicate_gate_disabled",
       result: null,
     };
@@ -721,7 +814,8 @@ export async function assertFinalDuplicateState(
     return {
       checked: true,
       blocked: false,
-      reason: `post_lookup_failed:${error?.message ?? "not_found"}`,
+      outcome: "unknown",
+      reason: "post_lookup_failed",
       result: null,
     };
   }
@@ -740,6 +834,7 @@ export async function assertFinalDuplicateState(
     return {
       checked: true,
       blocked: true,
+      outcome: "blocked",
       reason: `duplicate_gate:${postRecord.dup_of_tweet_id ?? "duplicate"}`,
       result: null,
     };
@@ -748,6 +843,7 @@ export async function assertFinalDuplicateState(
     return {
       checked: true,
       blocked: false,
+      outcome: "allowed",
       reason: "related_new_info",
       result: null,
     };
@@ -759,6 +855,15 @@ export async function assertFinalDuplicateState(
       supabase,
       postRecord.dup_of_tweet_id,
     );
+    if (coverage.state === "unknown") {
+      return {
+        checked: true,
+        blocked: false,
+        outcome: "unknown",
+        reason: `dedupe_coverage_unknown:${coverage.reason}`,
+        result: null,
+      };
+    }
     if (coverage.safe_to_block) {
       const result: DuplicateGateResult = {
         ok: true,
@@ -785,11 +890,18 @@ export async function assertFinalDuplicateState(
           options.source ?? "final_assertion",
         );
       }
-      return { checked: true, blocked: true, reason: result.reason, result };
+      return {
+        checked: true,
+        blocked: true,
+        outcome: "blocked",
+        reason: result.reason,
+        result,
+      };
     }
     return {
       checked: true,
       blocked: false,
+      outcome: "allowed",
       reason: `coverage_gap:${coverage.reason}`,
       result: null,
     };
@@ -798,6 +910,7 @@ export async function assertFinalDuplicateState(
     return {
       checked: true,
       blocked: false,
+      outcome: "allowed",
       reason: "uncertain_duplicate_review",
       result: null,
     };
@@ -809,6 +922,7 @@ export async function assertFinalDuplicateState(
     return {
       checked: true,
       blocked: false,
+      outcome: "allowed",
       reason: "too_little_text",
       result: null,
     };
@@ -837,7 +951,8 @@ export async function assertFinalDuplicateState(
       return {
         checked: true,
         blocked: false,
-        reason: `final_assertion_embedding_failed:${(e as Error).message}`,
+        outcome: "unknown",
+        reason: safeDedupeErrorCode(e, "final_assertion_embedding_failed"),
         result: null,
       };
     }
@@ -854,6 +969,7 @@ export async function assertFinalDuplicateState(
     return {
       checked: true,
       blocked: false,
+      outcome: "allowed",
       reason: top
         ? `below_final_duplicate_threshold:${top.similarity.toFixed(3)}`
         : "no_semantic_candidates",
@@ -891,6 +1007,7 @@ export async function assertFinalDuplicateState(
       return {
         checked: true,
         blocked: false,
+        outcome: "unknown",
         reason: "final_assertion_openai_key_missing",
         result: null,
       };
@@ -938,6 +1055,11 @@ export async function assertFinalDuplicateState(
   return {
     checked: true,
     blocked: result.status === "duplicate",
+    outcome: result.status === "duplicate"
+      ? "blocked"
+      : result.status === "failed"
+      ? "unknown"
+      : "allowed",
     reason: result.reason,
     result,
   };
@@ -960,6 +1082,20 @@ async function preventUncoveredDuplicateSkip(
     supabase,
     result.dup_of_tweet_id as string,
   );
+  if (coverage.state === "unknown") {
+    const reason = `dedupe_coverage_unknown:${coverage.reason}`;
+    return {
+      ...result,
+      ok: false,
+      status: "failed",
+      reason,
+      error: reason,
+      failure_phase: "coverage_check",
+      retryable: true,
+      should_enqueue_translate: false,
+      coverage,
+    };
+  }
   if (coverage.safe_to_block) {
     return {
       ...result,
@@ -988,9 +1124,9 @@ async function loadDuplicateCoverage(
   try {
     const [
       { data: postRows, error: postError },
-      { data: telegramRows },
-      { data: xRows },
-      { data: jobRows },
+      { data: telegramRows, error: telegramError },
+      { data: xRows, error: xError },
+      { data: jobRows, error: jobError },
     ] = await Promise.all([
       supabase
         .from("posts")
@@ -1020,11 +1156,11 @@ async function loadDuplicateCoverage(
         .limit(10),
     ]);
 
-    if (postError) {
+    if (postError || telegramError || xError || jobError) {
       return {
         safe_to_block: false,
         state: "unknown",
-        reason: `canonical_lookup_failed:${postError.message}`,
+        reason: "canonical_coverage_lookup_failed",
       };
     }
     const canonical = Array.isArray(postRows)
@@ -1038,12 +1174,24 @@ async function loadDuplicateCoverage(
       };
     }
 
-    const telegramStatuses = Array.isArray(telegramRows)
-      ? telegramRows.map((r) => (r as Record<string, unknown>).status)
-      : [];
-    const xStatuses = Array.isArray(xRows)
-      ? xRows.map((r) => (r as Record<string, unknown>).status)
-      : [];
+    if (!Array.isArray(telegramRows) || !Array.isArray(xRows) || !Array.isArray(jobRows)) {
+      return {
+        safe_to_block: false,
+        state: "unknown",
+        reason: "canonical_coverage_invalid_response",
+      };
+    }
+
+    const telegramStatuses = readCoverageStatuses(telegramRows);
+    const xStatuses = readCoverageStatuses(xRows);
+    const jobStatuses = readCoverageStatuses(jobRows);
+    if (!telegramStatuses || !xStatuses || !jobStatuses) {
+      return {
+        safe_to_block: false,
+        state: "unknown",
+        reason: "canonical_coverage_invalid_row",
+      };
+    }
     if (telegramStatuses.includes("posted") || xStatuses.includes("posted")) {
       return {
         safe_to_block: true,
@@ -1054,10 +1202,7 @@ async function loadDuplicateCoverage(
 
     const hasActiveDelivery = telegramStatuses.some(isActiveStatusValue) ||
       xStatuses.some(isActiveStatusValue);
-    const hasActiveJob = Array.isArray(jobRows) &&
-      jobRows.some((row) =>
-        isActiveStatusValue((row as Record<string, unknown>).status)
-      );
+    const hasActiveJob = jobStatuses.some(isActiveStatusValue);
     if (
       canonical.delivery_decision === "deliver" || hasActiveDelivery ||
       hasActiveJob
@@ -1090,9 +1235,21 @@ async function loadDuplicateCoverage(
     return {
       safe_to_block: false,
       state: "unknown",
-      reason: `canonical_coverage_error:${(e as Error).message}`,
+      reason: "canonical_coverage_error",
     };
   }
+}
+
+function readCoverageStatuses(rows: unknown): string[] | null {
+  if (!Array.isArray(rows)) return null;
+  const statuses: string[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) return null;
+    const status = (row as Record<string, unknown>).status;
+    if (typeof status !== "string" || status.trim().length === 0) return null;
+    statuses.push(status);
+  }
+  return statuses;
 }
 
 function isActiveStatusValue(status: unknown): boolean {
@@ -1207,19 +1364,15 @@ async function adjudicateWithModel(
   });
 
   if (!result.ok) {
-    throw new Error(
-      `dedupe_ai_error:${result.status}:${result.rawText.slice(0, 300)}`,
-    );
+    throw new Error(dedupeHttpFailureCode("dedupe_ai", result.status));
   }
   if (!result.toolCall) throw new Error("dedupe_ai_error:missing_tool_call");
 
   let args: Record<string, unknown>;
   try {
     args = JSON.parse(result.toolCall.arguments);
-  } catch (e) {
-    throw new Error(
-      `dedupe_ai_error:invalid_tool_json:${(e as Error).message}`,
-    );
+  } catch (_e) {
+    throw new Error("dedupe_ai_invalid_tool_json");
   }
 
   const top = candidates[0];
@@ -1342,7 +1495,7 @@ async function findExactUrlDuplicate(
     .gte("created_at", since)
     .order("created_at", { ascending: true })
     .limit(1);
-  if (error) throw new Error(`exact_url_lookup_failed:${error.message}`);
+  if (error) throw new Error("exact_url_lookup_failed");
   const row = data?.[0] as Record<string, unknown> | undefined;
   if (!row) return null;
   return {
@@ -1374,7 +1527,7 @@ async function findSemanticCandidates(
     match_limit: 10,
   });
   if (error) {
-    throw new Error(`find_story_candidates_v3_failed:${error.message}`);
+    throw new Error("find_story_candidates_v3_failed");
   }
   return (data ?? []).map((row: Record<string, unknown>) => ({
     tweet_id: String(row.tweet_id),
@@ -1553,12 +1706,27 @@ async function upsertStorySignature(
   const { error } = await supabase.from("story_signatures").upsert(payload, {
     onConflict: "tweet_id",
   });
-  if (error) throw new Error(`story_signature_upsert_failed:${error.message}`);
+  if (error) throw new Error("story_signature_upsert_failed");
   if (result.status === "duplicate" && result.dup_of_tweet_id) {
-    await supabase.rpc("bump_coverage_count", {
-      p_tweet_id: result.dup_of_tweet_id,
-    })
-      .then(() => null, () => null);
+    try {
+      const { error: coverageCountError } = await supabase.rpc(
+        "bump_coverage_count",
+        { p_tweet_id: result.dup_of_tweet_id },
+      );
+      if (coverageCountError) {
+        console.warn(JSON.stringify({
+          function: "dedupe",
+          action: "coverage_count_update_failed",
+          error: "dedupe_coverage_count_update_failed",
+        }));
+      }
+    } catch (_error) {
+      console.warn(JSON.stringify({
+        function: "dedupe",
+        action: "coverage_count_update_failed",
+        error: "dedupe_coverage_count_update_failed",
+      }));
+    }
   }
 }
 
@@ -1575,7 +1743,7 @@ async function upsertBareStorySignature(
     embedding: embeddingLiteral,
     normalized_text: normalized,
   }, { onConflict: "tweet_id" });
-  if (error) throw new Error(`story_signature_upsert_failed:${error.message}`);
+  if (error) throw new Error("story_signature_upsert_failed");
 }
 
 async function persistDedupeResult(
@@ -1641,7 +1809,7 @@ async function updatePostDedupeState(
     "tweet_id",
     tweetId,
   );
-  if (error) throw new Error(`dedupe_post_update_failed:${error.message}`);
+  if (error) throw new Error("dedupe_post_update_failed");
 }
 
 async function insertDedupeEvent(
@@ -1652,18 +1820,32 @@ async function insertDedupeEvent(
   meta: Record<string, unknown>,
   options: { throwOnError?: boolean } = {},
 ): Promise<void> {
-  const { error } = await supabase.from("pipeline_events").insert({
-    subject_type: "post",
-    subject_id: tweetId,
-    step: "dedupe",
-    status,
-    started_at: status === "running" ? new Date().toISOString() : null,
-    ended_at: status !== "running" ? new Date().toISOString() : null,
-    error: status === "failed" ? String(meta.error ?? "dedupe failed") : null,
-    meta,
-  });
-  if (error && options.throwOnError) {
-    throw new Error(`dedupe_event_insert_failed:${error.message}`);
+  try {
+    const { error } = await supabase.from("pipeline_events").insert({
+      subject_type: "post",
+      subject_id: tweetId,
+      step: "dedupe",
+      status,
+      started_at: status === "running" ? new Date().toISOString() : null,
+      ended_at: status !== "running" ? new Date().toISOString() : null,
+      error: status === "failed" ? String(meta.error ?? "dedupe failed") : null,
+      meta,
+    });
+    if (error) {
+      if (options.throwOnError) throw new Error("dedupe_event_insert_failed");
+      console.warn(JSON.stringify({
+        function: "dedupe",
+        action: "pipeline_event_insert_failed",
+        error: "dedupe_event_insert_failed",
+      }));
+    }
+  } catch (_error) {
+    if (options.throwOnError) throw new Error("dedupe_event_insert_failed");
+    console.warn(JSON.stringify({
+      function: "dedupe",
+      action: "pipeline_event_insert_failed",
+      error: "dedupe_event_insert_failed",
+    }));
   }
 }
 
@@ -1741,39 +1923,46 @@ function serializeCoverage(
 function classifyDedupeFailure(
   message: string,
 ): { phase: DedupeFailurePhase; retryable: boolean } {
-  if (
-    message.startsWith("embedding_error:") ||
-    message === "OPENAI_API_KEY is not configured"
-  ) {
+  if (message.startsWith("embedding_http_") || message.startsWith("embedding_")) {
     return {
       phase: "embedding",
-      retryable: message.startsWith("embedding_error:") &&
-        isRetryableProviderError(message),
+      retryable: message !== "embedding_quota_exhausted" &&
+        isRetryableDedupeHttpCode(message),
     };
   }
+  if (message === "dedupe_openai_key_missing") {
+    return { phase: "embedding", retryable: false };
+  }
   if (
-    message.startsWith("find_story_candidates_v3_failed:") ||
-    message.startsWith("exact_url_lookup_failed:")
+    message === "find_story_candidates_v3_failed" ||
+    message === "exact_url_lookup_failed"
   ) {
     return { phase: "candidate_lookup", retryable: true };
   }
-  if (message.startsWith("canonical_coverage_error:")) {
+  if (message === "canonical_coverage_error") {
     return { phase: "coverage_check", retryable: true };
   }
-  if (message.startsWith("dedupe_post_update_failed:")) {
+  if (message === "dedupe_post_update_failed") {
     return { phase: "post_update", retryable: false };
   }
-  if (message.startsWith("dedupe_event_insert_failed:")) {
+  if (message === "dedupe_event_insert_failed") {
     return { phase: "event_insert", retryable: false };
   }
-  if (message.startsWith("story_signature_upsert_failed:")) {
+  if (message === "story_signature_upsert_failed") {
     return { phase: "signature_upsert", retryable: false };
   }
-  if (message.startsWith("dedupe_ai_error:")) {
+  if (message.startsWith("dedupe_ai_http_") || message === "dedupe_openai_request_failed") {
     return {
       phase: "adjudicator",
-      retryable: isRetryableProviderError(message),
+      retryable: message === "dedupe_openai_request_failed" ||
+        isRetryableDedupeHttpCode(message),
     };
   }
   return { phase: "unknown", retryable: false };
+}
+
+function isRetryableDedupeHttpCode(message: string): boolean {
+  const match = message.match(/_http_(\d{3})$/);
+  if (!match) return false;
+  return isRetryableProviderError(`http:${match[1]}`);
 }

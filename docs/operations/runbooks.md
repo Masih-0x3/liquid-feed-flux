@@ -43,7 +43,7 @@ Changes take effect on next translation/delivery (existing posts unaffected).
 
 ### Internal cron and Edge auth
 
-`WEBHOOK_SHARED_SECRET` and matching Vault/cron tokens secure internal invokes. Validation uses the Postgres RPC `verify_webhook_internal_token` (migration `20260513180000_verify_webhook_internal_token.sql`).
+`WEBHOOK_SHARED_SECRET` and matching Vault/cron tokens secure internal invokes. Validation is local and fail-closed before a service-role client is created; the Edge secret and Vault/cron value must remain aligned. The historical `verify_webhook_internal_token` RPC is not an authentication fallback.
 
 Function-by-function auth mode, caller, required secret, and hardening details are tracked in [`function-auth-matrix.md`](./function-auth-matrix.md). Update that matrix before changing any `verify_jwt` flag, internal token behavior, RSS webhook token behavior, or function caller path.
 

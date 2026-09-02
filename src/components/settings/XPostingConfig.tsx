@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/hooks/use-toast';
 import { invokeAdminAction } from '@/api/adminActions';
 import { useSaveSettings } from '@/hooks/useSettingsData';
+import { useRuntimeControls } from '@/hooks/useRuntimeControls';
 import { PromptEditor } from '@/components/settings/PromptEditor';
 import { Newspaper, Save, Sparkles, Loader2, ImageIcon, Eye, RefreshCw, Hash } from 'lucide-react';
 
@@ -90,16 +91,30 @@ function pickHashtags(pool: string[], n: number): string {
 
 interface Props {
   initial?: Partial<XPostingConfigValue>;
+  isAdmin?: boolean;
 }
 
-export default function XPostingConfig({ initial }: Props) {
+export default function XPostingConfig({ initial, isAdmin = false }: Props) {
   const { toast } = useToast();
   const save = useSaveSettings();
+  const { controls: runtimeControls, loading: runtimeLoading, error: runtimeError } = useRuntimeControls();
   const [cfg, setCfg] = useState<XPostingConfigValue>({ ...DEFAULTS, ...(initial ?? {}) });
   const [dryRunLoading, setDryRunLoading] = useState(false);
   const [dryRunResult, setDryRunResult] = useState<{ results?: Array<Record<string, unknown>> } | null>(null);
   const [hashtagPoolText, setHashtagPoolText] = useState<string>(((initial?.hashtag_pool ?? DEFAULTS.hashtag_pool) || []).join('\n'));
   const [previewSeed, setPreviewSeed] = useState(0);
+  const runtimePostingBlocked = runtimeLoading
+    || runtimeControls === null
+    || runtimeControls.environment === 'preview'
+    || runtimeControls.posting_mode === 'blocked';
+  const canMutate = isAdmin === true && !runtimePostingBlocked;
+  const runtimeStatusLabel = runtimeLoading
+    ? 'Checking runtime posting controls…'
+    : runtimeControls?.environment === 'preview'
+      ? 'Posting controls are disabled in Preview.'
+      : runtimeControls?.posting_mode === 'blocked'
+        ? `Posting is blocked in ${runtimeControls.environment === 'production' ? 'Production' : 'the current runtime'}.`
+        : runtimeError ?? 'Runtime posting state is unavailable; controls are disabled.';
 
   useEffect(() => {
     const next = { ...DEFAULTS, ...(initial ?? {}) };
@@ -120,6 +135,7 @@ export default function XPostingConfig({ initial }: Props) {
   };
 
   const handleEnabledChange = (enabled: boolean) => {
+    if (!canMutate) return;
     setCfg((current) => {
       const next = { ...current, enabled };
       if (enabled && !current.enabled) {
@@ -129,7 +145,10 @@ export default function XPostingConfig({ initial }: Props) {
     });
   };
 
-  const handleSave = () => save.mutate({ key: 'x_posting_config', value: { ...cfg, hashtag_pool: parsePool(hashtagPoolText) } });
+  const handleSave = () => {
+    if (!canMutate) return;
+    save.mutate({ key: 'x_posting_config', value: { ...cfg, hashtag_pool: parsePool(hashtagPoolText) } });
+  };
 
   const insertPlaceholder = (ph: string) => update({ post_template: cfg.post_template + ' ' + ph });
 
@@ -150,10 +169,11 @@ export default function XPostingConfig({ initial }: Props) {
     .slice(0, Math.max(1, cfg.max_chars - 1));
 
   const runDryRun = async () => {
+    if (!canMutate) return;
     setDryRunLoading(true);
     setDryRunResult(null);
     try {
-      const data = await invokeAdminAction<{ results?: unknown[] }>({ action: 'dry_run_x_post' });
+      const data = await invokeAdminAction<{ results?: Array<Record<string, unknown>> }>({ action: 'dry_run_x_post' });
       setDryRunResult(data);
       toast({ title: 'Dry-run complete', description: `${data?.results?.length ?? 0} candidates evaluated.` });
     } catch (e) {
@@ -175,6 +195,13 @@ export default function XPostingConfig({ initial }: Props) {
       </CardHeader>
 
       <CardContent className="space-y-6">
+        <div
+          role="status"
+          data-testid="x-posting-runtime-status"
+          className="rounded-lg border border-amber-400/30 bg-amber-500/10 p-3 text-sm text-amber-100"
+        >
+          {runtimeStatusLabel}
+        </div>
         {/* Enable */}
         <div className="flex items-center justify-between p-3 bg-muted/40 rounded-lg">
           <div>
@@ -184,7 +211,7 @@ export default function XPostingConfig({ initial }: Props) {
               Telegram delivery and the translate/score pipeline are unchanged.
             </p>
           </div>
-          <Switch id="x_enabled" checked={cfg.enabled} onCheckedChange={handleEnabledChange} />
+          <Switch id="x_enabled" checked={cfg.enabled} onCheckedChange={handleEnabledChange} disabled={!canMutate} />
         </div>
 
         {/* Score gate */}
@@ -335,10 +362,10 @@ export default function XPostingConfig({ initial }: Props) {
 
         {/* Actions */}
         <div className="flex flex-wrap gap-2">
-          <Button onClick={handleSave} disabled={save.isPending} className="bg-gradient-primary hover:opacity-90 text-white">
+          <Button onClick={handleSave} disabled={!canMutate || save.isPending} className="bg-gradient-primary hover:opacity-90 text-white">
             {save.isPending ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Saving...</> : <><Save className="w-4 h-4 mr-2" />Save configuration</>}
           </Button>
-          <Button onClick={runDryRun} disabled={dryRunLoading} variant="outline">
+          <Button onClick={runDryRun} disabled={!canMutate || dryRunLoading} variant="outline">
             {dryRunLoading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Running...</> : <><Sparkles className="w-4 h-4 mr-2" />Dry-run on latest eligible</>}
           </Button>
         </div>
@@ -354,9 +381,9 @@ export default function XPostingConfig({ initial }: Props) {
                 <div className="flex gap-2 items-center">
                   <Badge variant={r.status === 'dry_run' ? 'default' : 'secondary'}>{String(r.status)}</Badge>
                   <code>{String(r.tweet_id)}</code>
-                  {r.reason && <span className="text-muted-foreground">— {String(r.reason)}</span>}
+                  {typeof r.reason === 'string' && r.reason.length > 0 && <span className="text-muted-foreground">— {r.reason}</span>}
                 </div>
-                {r.preview_text && <div className="whitespace-pre-wrap p-2 bg-background/50 rounded">{String(r.preview_text)}</div>}
+                {typeof r.preview_text === 'string' && r.preview_text.length > 0 && <div className="whitespace-pre-wrap p-2 bg-background/50 rounded">{r.preview_text}</div>}
               </div>
             ))}
           </div>

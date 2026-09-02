@@ -1,0 +1,106 @@
+{
+  "schema": "xot-e7-disposable-runtime-acceptance-receipt-v1",
+  "event": "e7_aggregate_migration_rls_grant_type_boundary_local_t1_acceptance",
+  "phase": "split-e7-aggregate-disposable-t1-local-only",
+  "status": "ACCEPTED_LOCAL_DISPOSABLE_T1",
+  "release": "CLOSED",
+  "releaseGate": "CLOSED",
+  "riskTier": "HIGH",
+  "repository": "/Users/stevmq/Finalized XOT",
+  "branch": "codex/xot-remediation-convergence",
+  "runtimeAcceptance": {
+    "tier": "T1",
+    "classification": "local disposable PostgreSQL replay with catalog, RLS/grant probes, and checked-in type generation",
+    "engine": "orbstack",
+    "postgresImage": "public.ecr.aws/supabase/postgres@sha256:99b1729aeb0bac314445024fc149fbd39306170b61dd50800ccf180327ab3459",
+    "pgMetaImage": "public.ecr.aws/supabase/postgres-meta@sha256:a84cc713585eea7b401e4a2561ec4a1e48c87083d1c7ecb4502f204bb4391300",
+    "pgMetaTag": "public.ecr.aws/supabase/postgres-meta:v0.96.6",
+    "migrationCount": 123,
+    "orderedInventorySha256": "ed1bdf811e3e65828b55624064af64229733772cc8c68d759ddafb9a9c7a6e51",
+    "negativeProbes": {
+      "total": 34,
+      "crud": 32,
+      "rpc": 2,
+      "sqlstate": "42501",
+      "allDenied": true
+    },
+    "acceptedRun": {
+      "command": "E7_EMIT_TYPES_BASE64=1 npm run test:e7-disposable-boundary",
+      "captureExitCode": 0,
+      "acceptedFinalRunOnly": true,
+      "captureParser": "exact BEGIN/DATA/END/final PASS",
+      "runnerPass": true
+    },
+    "generatedTypes": {
+      "sha256": "091aa7e6634c17b795eea76ccfb8220ae441a2babde2507b07f5946754e87cfe",
+      "bytes": 102811,
+      "lines": 3325,
+      "base64Chars": 137084,
+      "promotedCheckedIn": true,
+      "checkedInPath": "src/integrations/supabase/types.ts"
+    },
+    "cleanup": {
+      "xotContainers": 0,
+      "xotVolumes": 0,
+      "xotNetworks": 0,
+      "port8080": "unbound",
+      "skillmapUnchanged": true,
+      "captureTemporaryFilesDeletedAfterPromotion": true
+    }
+  },
+  "excludedNonAcceptanceEvidence": [
+    {
+      "id": "f5ad",
+      "classification": "global_container_false_positive_harness_attempt",
+      "disposition": "excluded_nonacceptance",
+      "reason": "The prior global-container harness result was a false positive and was not used to establish the accepted final run."
+    },
+    {
+      "id": "zsh-status-reserved-variable",
+      "classification": "zsh_reserved_variable_wrapper_attempt",
+      "disposition": "excluded_nonacceptance",
+      "reason": "The wrapper used the zsh-reserved status variable; its corrected wrapper attempt is retained only as failure-history context. The accepted final run is the explicit E7_EMIT_TYPES_BASE64 command above."
+    }
+  ],
+  "claims": {
+    "productionSchema": "not_claimed",
+    "ownership": "not_claimed",
+    "grants": "not_claimed",
+    "productionTypes": "not_claimed",
+    "hostedCi": "not_claimed",
+    "staging": "not_claimed",
+    "deployment": "not_claimed",
+    "liveVerification": "not_claimed"
+  },
+  "isolation": {
+    "localOnly": true,
+    "noExternalContact": true,
+    "noProductContact": true,
+    "noProductionContact": true,
+    "noProviderContact": true,
+    "noBrowserContact": true,
+    "noDatabaseApplication": true,
+    "captureTempsDeletedAfterPromotion": true
+  },
+  "achieved": [
+    "disposable 123-migration PostgreSQL replay completed on OrbStack",
+    "34 negative CRUD/RPC probes returned SQLSTATE 42501",
+    "generated public types matched the exact promoted checked-in digest",
+    "exact generated-types capture parser accepted one BEGIN/DATA/END envelope followed by the final PASS",
+    "bounded cleanup left zero XOT containers, volumes, and networks with port 8080 unbound"
+  ],
+  "deferred": [
+    "production schema, ownership, grants, and type equivalence",
+    "owner approvals and hosted CI",
+    "remote migration bodies and restore rehearsal",
+    "staging, deployment, and live verification"
+  ],
+  "validation": {
+    "runtime": "accepted final run only; capture_rc0",
+    "inventory": "123 migrations; ordered inventory SHA-256 ed1bdf811e3e65828b55624064af64229733772cc8c68d759ddafb9a9c7a6e51",
+    "negativeProbes": "34 total (32 CRUD + 2 RPC), SQLSTATE 42501",
+    "generatedTypes": "091aa7e6634c17b795eea76ccfb8220ae441a2babde2507b07f5946754e87cfe; 102811 bytes; 3325 lines; 137084 base64 chars",
+    "cleanup": "xot containers/volumes/networks=0; port8080=unbound; skillmapUnchanged=true",
+    "contactBoundary": "no external, product, production, provider, or browser contact"
+  }
+}

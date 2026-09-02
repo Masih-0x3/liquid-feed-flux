@@ -35,6 +35,9 @@ const DEFAULT_RENDER_SETTINGS = {
   },
 };
 
+export const RENDER_SETTINGS_ERROR_MARKER = "renderer_error";
+const VALID_RENDER_MODES = ["disabled", "shadow", "enabled"];
+
 function isRecord(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -48,6 +51,16 @@ function clampNumber(value, min, max, fallback) {
 function oneOf(value, allowed, fallback) {
   const raw = String(value ?? "").toLowerCase();
   return allowed.includes(raw) ? raw : fallback;
+}
+
+function hasValidSettingsEnvelope(data) {
+  // The row/value envelope and mode decide whether work may run. Optional
+  // nested settings remain normalization-tolerant below, so one malformed
+  // cosmetic/provider field cannot silently turn a valid mode into a read
+  // failure.
+  return isRecord(data) &&
+    isRecord(data.value) &&
+    VALID_RENDER_MODES.includes(String(data.value.mode ?? "").toLowerCase());
 }
 
 function hexColor(value, fallback) {
@@ -105,6 +118,7 @@ export async function loadRenderSettings(supabase) {
     .eq("key", "video_render_config")
     .maybeSingle();
   if (error) throw error;
+  if (!hasValidSettingsEnvelope(data)) throw new Error(RENDER_SETTINGS_ERROR_MARKER);
   return normalizeRenderSettings(data?.value);
 }
 
@@ -112,7 +126,7 @@ export async function loadRenderSettingsOrDefault(supabase, metrics = null) {
   try {
     return await loadRenderSettings(supabase);
   } catch (error) {
-    if (metrics) metrics.video_render_config_error = error instanceof Error ? error.message : String(error);
+    if (metrics) metrics.video_render_config_error = RENDER_SETTINGS_ERROR_MARKER;
     return normalizeRenderSettings();
   }
 }

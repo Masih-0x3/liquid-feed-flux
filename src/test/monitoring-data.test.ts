@@ -1,17 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchMonitoringEntries, sanitizeMonitoringSearch } from "@/api/monitoringData";
-import { invokeAdminAction } from "@/api/adminActions";
+import { invokeAdminRead } from "@/api/adminActions";
 import { FILTERS } from "@/lib/monitoringViewModel";
 
 vi.mock("@/api/adminActions", () => ({
-  invokeAdminAction: vi.fn(),
+  invokeAdminRead: vi.fn(),
 }));
 
 describe("monitoring data API", () => {
-  const invokeAdminActionMock = vi.mocked(invokeAdminAction);
+  const invokeAdminReadMock = vi.mocked(invokeAdminRead);
 
   beforeEach(() => {
-    invokeAdminActionMock.mockReset();
+    invokeAdminReadMock.mockReset();
   });
 
   it("sanitizes monitoring search for admin-action inputs", () => {
@@ -19,7 +19,7 @@ describe("monitoring data API", () => {
   });
 
   it("loads monitoring entries through admin-actions", async () => {
-    invokeAdminActionMock.mockResolvedValueOnce({
+    invokeAdminReadMock.mockResolvedValueOnce({
       success: true,
       entries: [{ tweet_id: "admin-row" }],
       next_cursor: 50,
@@ -35,7 +35,7 @@ describe("monitoring data API", () => {
     expect(result.source).toBe("admin_actions");
     expect(result.nextCursor).toBe(50);
     expect(result.entries).toEqual([{ tweet_id: "admin-row" }]);
-    expect(invokeAdminActionMock).toHaveBeenCalledWith({
+    expect(invokeAdminReadMock).toHaveBeenCalledWith({
       action: "get_monitoring_entries",
       filter: "all",
       search: "admin search",
@@ -46,7 +46,7 @@ describe("monitoring data API", () => {
   });
 
   it.each(FILTERS.map((filter) => filter.value))("forwards %s filtering to admin-actions", async (filter) => {
-    invokeAdminActionMock.mockResolvedValueOnce({
+    invokeAdminReadMock.mockResolvedValueOnce({
       success: true,
       entries: [],
       next_cursor: null,
@@ -59,7 +59,7 @@ describe("monitoring data API", () => {
       scoreBucket: "any",
     });
 
-    expect(invokeAdminActionMock).toHaveBeenCalledWith({
+    expect(invokeAdminReadMock).toHaveBeenCalledWith({
       action: "get_monitoring_entries",
       filter,
       search: undefined,
@@ -70,7 +70,7 @@ describe("monitoring data API", () => {
   });
 
   it("surfaces admin-action errors", async () => {
-    invokeAdminActionMock.mockResolvedValueOnce({ success: false, error: "monitoring unavailable" });
+    invokeAdminReadMock.mockResolvedValueOnce({ success: false, error: "monitoring unavailable" });
 
     await expect(fetchMonitoringEntries({
       pageParam: 0,

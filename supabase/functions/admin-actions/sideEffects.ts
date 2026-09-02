@@ -61,7 +61,7 @@ export async function recordFeedback(
   relatedTweetId?: string | null,
   deps: SideEffectDeps = {},
 ) {
-  await table(supabase, "feedback_events").insert({
+  const { error: feedbackInsertError } = await table(supabase, "feedback_events").insert({
     tweet_id: tweetId,
     related_tweet_id: relatedTweetId ?? null,
     action: feedbackAction,
@@ -69,6 +69,7 @@ export async function recordFeedback(
     meta: meta ?? {},
     source: "admin_action",
   });
+  if (feedbackInsertError) throw feedbackInsertError;
 
   if (
     polarity === 0 ||
@@ -77,17 +78,22 @@ export async function recordFeedback(
     return;
   }
 
-  const { data: post } = await table(supabase, "posts")
+  const { data: post, error: postError } = await table(supabase, "posts")
     .select("author_handle, importance_tags")
     .eq("tweet_id", tweetId)
     .maybeSingle();
+  if (postError) throw postError;
   const postRecord = asRecord(post);
   if (!post) return;
 
-  const { data: biasRow } = await table(supabase, "settings")
+  const { data: biasRow, error: biasReadError } = await table(supabase, "settings")
     .select("value")
     .eq("key", "learned_biases")
     .maybeSingle();
+  if (biasReadError) throw biasReadError;
+  if (biasRow !== null && (typeof biasRow !== "object" || Array.isArray(biasRow))) {
+    throw new Error("learned_biases_invalid_response");
+  }
   const biases = (asRecord(biasRow).value ?? {
     author_bias: {},
     tag_bias: {},
@@ -126,11 +132,12 @@ export async function recordFeedback(
     }
   }
 
-  await table(supabase, "settings").upsert({
+  const { error: biasWriteError } = await table(supabase, "settings").upsert({
     key: "learned_biases",
     value: biases,
     updated_at: nowIso(deps),
   }, { onConflict: "key" });
+  if (biasWriteError) throw biasWriteError;
 }
 
 export async function insertAdminPipelineEvent(
@@ -142,17 +149,32 @@ export async function insertAdminPipelineEvent(
   error?: string | null,
   deps: SideEffectDeps = {},
 ) {
-  await table(supabase, "pipeline_events").insert({
-    subject_type: "post",
-    subject_id: tweetId,
-    step,
-    status,
-    started_at: nowIso(deps),
-    ended_at: status === "completed" || status === "failed" ||
-        status === "skipped"
-      ? nowIso(deps)
-      : null,
-    error: error ?? null,
-    meta: { source: "admin-actions", ...(meta ?? {}) },
-  }).then(() => null, () => null);
+  try {
+    const { error: pipelineEventError } = await table(supabase, "pipeline_events").insert({
+      subject_type: "post",
+      subject_id: tweetId,
+      step,
+      status,
+      started_at: nowIso(deps),
+      ended_at: status === "completed" || status === "failed" ||
+          status === "skipped"
+        ? nowIso(deps)
+        : null,
+      error: error ?? null,
+      meta: { source: "admin-actions", ...(meta ?? {}) },
+    });
+    if (pipelineEventError) {
+      console.warn(JSON.stringify({
+        function: "admin-actions",
+        action: "pipeline_event_insert_failed",
+        error: "admin_pipeline_event_insert_failed",
+      }));
+    }
+  } catch (_error) {
+    console.warn(JSON.stringify({
+      function: "admin-actions",
+      action: "pipeline_event_insert_failed",
+      error: "admin_pipeline_event_insert_failed",
+    }));
+  }
 }

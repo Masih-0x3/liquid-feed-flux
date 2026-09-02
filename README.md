@@ -60,17 +60,28 @@ RPCs: `claim_jobs`, `get_post_pipeline_status`, `retry_step`, `get_system_health
 
 - Node.js 20+
 - npm 10.8+
-- Supabase project (connected via `.env`)
+- A reviewed set of public environment values for the bounded checks you run
+
+Local work is a disposable source-editing and validation lane. It does not
+require, or represent, a persistent Supabase project, renderer, data plane, or
+full-stack parity environment. The one complete non-production system is the
+protected Vercel Preview + isolated Supabase staging + isolated staging
+renderer described in [`docs/operations/vercel-cutover.md`](docs/operations/vercel-cutover.md).
 
 ### Setup
 
 ```bash
 git clone <repo-url>
 cd liquid-feed-flux
-cp .env.example .env   # fill in your Supabase credentials
+cp .env.example .env   # fill in reviewed isolated public values for a bounded check
 npm install
-npm run dev
+npm run lint
+npm test
+npm run build
 ```
+
+Use `npm run dev` only for a bounded local UI check. Stop it after the check;
+it is not the Preview environment and does not provide full-stack acceptance.
 
 ### Environment Variables
 
@@ -81,8 +92,12 @@ Copy `.env.example` to `.env` and populate:
 | `VITE_SUPABASE_URL` | Supabase project URL |
 | `VITE_SUPABASE_PUBLISHABLE_KEY` | Supabase anon/public key |
 | `VITE_SUPABASE_PROJECT_ID` | Supabase project ref |
+| `XOT_ENVIRONMENT` | Runtime identity; `preview` for the protected Preview lane |
+| `RENDERER_ID` | Isolated staging renderer identity (`xot-staging-1` in Preview) |
+| `VIDEO_RENDERER_URL` | Isolated staging renderer URL; never a production service URL |
+| `ALLOW_EXTERNAL_POSTING` | Server-side posting breaker; `false` in Preview |
 | `VITE_SENTRY_DSN` | Optional Sentry DSN for the `xot-web` browser project |
-| `VITE_SENTRY_ENVIRONMENT` | Sentry environment label, usually `production` |
+| `VITE_SENTRY_ENVIRONMENT` | Sentry environment label (`preview` in Preview) |
 | `VITE_SENTRY_TRACES_SAMPLE_RATE` | Browser tracing sample rate, default `0.1` |
 | `VITE_SENTRY_REPLAYS_SESSION_SAMPLE_RATE` | Session replay baseline sample rate, default `0` |
 | `VITE_SENTRY_REPLAYS_ERROR_SAMPLE_RATE` | Session replay sample rate after errors, default `1` |
@@ -103,7 +118,7 @@ values fail the build instead of producing a blank browser screen.
 | `RSSAPP_SIGNING_SECRET` | Preferred RSS.app signed-webhook secret; verifies `RSSApp-Signature` HMAC requests |
 | `RSSAPP_WEBHOOK_TOKEN` | Optional dedicated RSS.app webhook token; accepted only in `x-webhook-token` or `x-rssapp-token` header fallback |
 | `SENTRY_DSN` | Optional Sentry DSN for Edge Functions (`xot-edge`) or the video renderer (`xot-renderer`) |
-| `SENTRY_ENVIRONMENT` | Sentry environment label, usually `production` |
+| `SENTRY_ENVIRONMENT` | Sentry environment label (`preview` in Preview) |
 | `SENTRY_TRACES_SAMPLE_RATE` | Runtime tracing sample rate, default `0.1` |
 | `SENTRY_RELEASE` | Optional release name; falls back to deploy SHA/version when available |
 | `FOGLAMP_API_KEY` | Optional hosted Foglamp ingest key for AI SDK traces; XOT local ledgers still work without it |
@@ -121,6 +136,8 @@ values fail the build instead of producing a blank browser screen.
 | `npm run dev` | Start dev server |
 | `npm run build` | Production build |
 | `npm run check:vite-env` | Validate required frontend environment variables |
+| `npm run check:runtime-contract` | Verify and print the frozen Node/npm/Supabase runtime matrix |
+| `npm run test:runtime-contract` | Run adversarial runtime-drift guard tests |
 | `npm run lint` | ESLint check |
 | `npm test` | Run Vitest tests |
 | `npm run test:watch` | Watch mode tests |
@@ -128,24 +145,57 @@ values fail the build instead of producing a blank browser screen.
 
 ## CI/CD
 
-GitHub Actions (`.github/workflows/ci.yml`) runs lint → test → env validation → build on push/PR to `main`.
+GitHub Actions (`.github/workflows/ci.yml`) runs runtime, migration, lint, type,
+function, test, environment, and build gates on push/PR to `main`.
 Set `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, and `VITE_SUPABASE_PROJECT_ID`
 as GitHub repository secrets before relying on CI builds.
 Pre-commit hooks (husky + lint-staged) run ESLint and TypeScript checks on staged files.
 
 ## Deployment
 
-The frontend is hosted on Vercel. Vercel should be connected to this GitHub repo
+The frontend is hosted on Vercel. The complete non-production acceptance system
+is a protected Vercel Preview connected to isolated Supabase staging and an
+isolated staging renderer. No claim is made that this staging system currently
+exists. Vercel should be connected to this GitHub repo
 with the Vite framework preset, `npm run build` as the build command, and `dist`
 as the output directory. The committed `vercel.json` includes SPA rewrites so
 direct route refreshes like `/monitoring` and `/x-account` resolve to `index.html`.
 
 Supabase remains the backend for Auth, Postgres, Storage, Edge Functions, and cron.
-Deploy Edge Functions separately with:
+Preview must use its isolated staging project and must never use the production
+project ref. Preview external posting is hard-disabled; dedupe and translation
+start paused and are admin-toggleable. The only application roles are `admin`
+and `read_only`.
+Phase 2 may run the Preview function preflight only as a dry run, after the
+complete fail-closed identity tuple is set in the protected deployment context:
 
 ```bash
-./scripts/deploy-functions.sh
+DEPLOY_FUNCTIONS_DRY_RUN=1 ./scripts/deploy-functions.sh
 ```
+
+The tuple is `XOT_ENVIRONMENT=preview`, a non-production
+`SUPABASE_PROJECT_REF`/`SUPABASE_URL` pair, the designated non-production
+`XOT_PREVIEW_BRANCH`, `VERCEL_DEPLOYMENT_TARGET=preview`, and the protected
+`XOT_PREVIEW_ORIGIN`. This dry run changes no CLI state, secret, or function;
+real deployment is a Phase 5 action after staging gates pass.
+
+Release-state inventory is also Preview-only in Phase 2. Set the same complete
+tuple and use the explicit non-network render form:
+
+```bash
+XOT_ENVIRONMENT=preview \
+SUPABASE_PROJECT_REF="${PREVIEW_SUPABASE_PROJECT_REF}" \
+SUPABASE_URL="https://${PREVIEW_SUPABASE_PROJECT_REF}.supabase.co/" \
+XOT_PREVIEW_BRANCH="${PREVIEW_BRANCH}" \
+VERCEL_DEPLOYMENT_TARGET=preview \
+XOT_PREVIEW_ORIGIN="${PREVIEW_ORIGIN}" \
+./scripts/check-release-state.sh --target preview --mode render
+```
+
+Do not use a bare release-state command or inferred target. Production mode is
+later and owner-controlled, with a separate identity contract and acknowledgement.
+Release-state rendering is not pre-build output validation; the post-build
+identity check runs after Vite completes.
 
 After changing the production Vercel URL or custom domain, update Supabase Auth
 URL configuration and the Edge Function `ALLOWED_CORS_ORIGIN` secret.

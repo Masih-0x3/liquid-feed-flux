@@ -1,0 +1,312 @@
+{
+  "schema": "xot-e10-phase2-preview-safety-acceptance-receipt-v1",
+  "event": "e10_phase2_preview_safety_acceptance_accepted",
+  "phase": "e10-phase2-preview-preparation",
+  "status": "ACCEPTED_PREVIEW_PREPARATION_T1",
+  "release": "CLOSED",
+  "releaseGate": "CLOSED",
+  "repository": ".",
+  "branch": "codex/xot-remediation-convergence",
+  "head": "0bd578856016c06a10890339f93aa13b82ecae48",
+  "scope": {
+    "localDisposableLaneOnly": true,
+    "noPersistentLocalFullStack": true,
+    "sourceConfigRunbookChangesOnly": true,
+    "noPush": true,
+    "noCommit": true,
+    "noDeploy": true,
+    "noCloudMutation": true,
+    "noStagingMutation": true,
+    "noProviderWrite": true,
+    "noProductionContact": true,
+    "noBrowserContact": true,
+    "stagedIndexEmpty": true,
+    "noExternalContactClaim": false
+  },
+  "topology": {
+    "local": "disposable repository editing and deterministic validation only",
+    "preview": "one complete protected hosted Preview/staging plane in later phases",
+    "production": "untouched; separately gated"
+  },
+  "phase2Tasks": [
+    {
+      "id": "P2-01",
+      "name": "shared Preview identity tuple and fail-closed identity validation",
+      "status": "ACCEPTED_LOCAL",
+      "evidence": [
+        "scripts/preview-identity.mjs",
+        "scripts/preview-identity.test.mjs"
+      ]
+    },
+    {
+      "id": "P2-02",
+      "name": "function deploy and release-state guards",
+      "status": "ACCEPTED_LOCAL",
+      "evidence": [
+        "scripts/deploy-functions.sh",
+        "scripts/deploy-functions.test.mjs",
+        "scripts/check-release-state.sh",
+        "scripts/check-release-state.test.mjs"
+      ]
+    },
+    {
+      "id": "P2-03",
+      "name": "Vite environment, build output, and runtime contract guards",
+      "status": "ACCEPTED_LOCAL",
+      "evidence": [
+        "scripts/check-vite-env.mjs",
+        "scripts/check-vite-env.test.mjs",
+        "scripts/check-build-contract.mjs",
+        "scripts/check-build-output-identity.mjs",
+        "scripts/check-build-output-identity.test.mjs",
+        "scripts/run-vite-build.mjs",
+        "scripts/run-vite-build.test.mjs",
+        "scripts/check-runtime-contract.mjs",
+        "scripts/check-runtime-contract.test.mjs"
+      ]
+    },
+    {
+      "id": "P2-04",
+      "name": "Preview configuration, runbooks, and UI safety wording",
+      "status": "ACCEPTED_LOCAL",
+      "evidence": [
+        ".env.example",
+        "README.md",
+        "docs/operations/function-auth-matrix.md",
+        "docs/operations/release-runbook.md",
+        "docs/operations/runtime-contract.json",
+        "docs/operations/vercel-cutover.md",
+        "supabase/config.toml",
+        "src/components/settings/XAutomationSettings.tsx",
+        "src/test/x-automation-settings.test.ts",
+        "package.json"
+      ]
+    }
+  ],
+  "controls": {
+    "roles": [
+      "admin",
+      "read_only"
+    ],
+    "exactlyOneRolePerUser": true,
+    "posting": {
+      "state": "hard_blocked",
+      "dashboardToggle": false,
+      "databaseOverride": false,
+      "environmentBreaker": false
+    },
+    "translation": {
+      "initialState": "paused",
+      "adminToggleable": true,
+      "readOnlyToggle": false
+    },
+    "dedupe": {
+      "initialState": "paused",
+      "adminToggleable": true,
+      "readOnlyToggle": false
+    }
+  },
+  "validation": {
+    "focusedGuardTests": {
+      "status": "PASS",
+      "testFiles": [
+        "scripts/preview-identity.test.mjs",
+        "scripts/deploy-functions.test.mjs",
+        "scripts/check-vite-env.test.mjs",
+        "scripts/check-build-output-identity.test.mjs",
+        "scripts/run-vite-build.test.mjs",
+        "scripts/check-release-state.test.mjs",
+        "scripts/check-runtime-contract.test.mjs",
+        "src/test/x-automation-settings.test.ts"
+      ],
+      "scope": "identity, deploy, Vite, build, release, runtime, and settings guard tests"
+    },
+    "denoFunctionChecks": {
+      "status": "PASS",
+      "runtime": "local",
+      "version": "2.9.5",
+      "passed": 444,
+      "failed": 0,
+      "skipped": 0
+    },
+    "frontendTests": {
+      "status": "PASS",
+      "files": 32,
+      "tests": 202,
+      "scope": "local frontend tests"
+    },
+    "rendererTests": {
+      "status": "PASS",
+      "tests": 202,
+      "scope": "local renderer tests"
+    },
+    "lint": {
+      "status": "PASS",
+      "errors": 0,
+      "warnings": 10
+    },
+    "strictTypecheck": {
+      "status": "PASS"
+    },
+    "npmBuild": {
+      "status": "PASS",
+      "mode": "official-isolated",
+      "distFiles": 82,
+      "totalBytes": 1969568,
+      "previewRefPresentCount": 4,
+      "productionRefPresentCount": 0,
+      "existingDistUnchanged": true
+    },
+    "adversarialFinal": {
+      "status": "PASS",
+      "decision": "ACCEPT",
+      "p0": 0,
+      "p1": 0,
+      "p2": 0
+    },
+    "incident": {
+      "evidenceStatus": "REJECTED",
+      "command": "scripts/check-release-state.sh --target preview --mode execute",
+      "attemptedReadOnlyCommands": [
+        "gh",
+        "curl",
+        "npx supabase functions list"
+      ],
+      "mutationOccurred": false,
+      "resolution": "RESOLVED_NO_MUTATION",
+      "phaseWideZeroExternalContactClaim": false,
+      "laterCleanValidation": "used no external commands"
+    }
+  },
+  "claims": {
+    "committed": false,
+    "pushed": false,
+    "deployed": false,
+    "staging": false,
+    "browserAcceptance": false,
+    "live": false,
+    "production": false
+  },
+  "blockers": [
+    "Phase 3 requires explicit external provisioning authority for isolated Supabase staging"
+  ],
+  "nextPhase": {
+    "id": "E10-P3",
+    "name": "isolated Supabase staging",
+    "status": "NOT_STARTED",
+    "authorization": "REQUIRES_EXPLICIT_EXTERNAL_PROVISIONING_AUTHORITY"
+  },
+  "excludedClaims": [
+    "commit",
+    "push",
+    "deployment",
+    "hosted CI",
+    "staging",
+    "Vercel Preview",
+    "browser acceptance",
+    "live acceptance",
+    "production readiness"
+  ],
+  "evidence": {
+    ".env.example": {
+      "sha256": "b7c8dbcfb8dd74b72ac144304259dfab37c61eb67e11397b6f7a15828121a08b",
+      "bytes": 1200
+    },
+    "README.md": {
+      "sha256": "211c310699210e84a97d0d3f9c2596040c901e1a8072f69fcabffc0ad9ed9309",
+      "bytes": 11179
+    },
+    "docs/operations/function-auth-matrix.md": {
+      "sha256": "578932cf5a53f85087098de600490aead045bc6d6ece55f21023c17cb100eb7d",
+      "bytes": 12777
+    },
+    "docs/operations/release-runbook.md": {
+      "sha256": "2769912a9d7fc4862954ac61f52d1c2ad34accae71d7de8cb641ff4ab2779a69",
+      "bytes": 76533
+    },
+    "docs/operations/runtime-contract.json": {
+      "sha256": "0a7bd0bbc6ac5acb639c565604bb4996ae1a1d5be67e4c0014730c156ecd50c4",
+      "bytes": 7460
+    },
+    "docs/operations/vercel-cutover.md": {
+      "sha256": "23d3d612acc34d5f59c72ded503e77811ce1e30ef65693f5d065de4c8839b9f2",
+      "bytes": 6995
+    },
+    "package.json": {
+      "sha256": "98a7a06abd936090d187ebc32cf6f0af27e7bff131737eb39acfa941ef6eeb7a",
+      "bytes": 17056
+    },
+    "scripts/check-build-contract.mjs": {
+      "sha256": "7959d9345395856258f9b79efe655dc57f5e14f3a67cb7ce3c87bf742313249d",
+      "bytes": 410
+    },
+    "scripts/check-build-output-identity.mjs": {
+      "sha256": "d6da662b96a2e048044f994192f1413a4d5b21f8014059009750c0da2e3c0b30",
+      "bytes": 4373
+    },
+    "scripts/check-build-output-identity.test.mjs": {
+      "sha256": "6256bb6ec39326ed63abfa0b0b7b7a5b8dd4a1ef14c8e517fea284bc31660a86",
+      "bytes": 6987
+    },
+    "scripts/check-release-state.sh": {
+      "sha256": "869d9cbe91799ba7768a12edbfadf0f1864845095e4919e2ed70548f914216d5",
+      "bytes": 10947
+    },
+    "scripts/check-release-state.test.mjs": {
+      "sha256": "3c5d1415c04818b54df06251b5d86b21192de314262e5fd1e3d67b43956ca9f5",
+      "bytes": 4679
+    },
+    "scripts/check-runtime-contract.mjs": {
+      "sha256": "7a385de676c567170221f2903e84dd68f20dc3bbc0a9722ae2aaed1d88b64833",
+      "bytes": 25751
+    },
+    "scripts/check-runtime-contract.test.mjs": {
+      "sha256": "68bf4e177cd307972e515e3c6d441a173a5665483903af6ab074f843f348d896",
+      "bytes": 19386
+    },
+    "scripts/check-vite-env.mjs": {
+      "sha256": "67aab2bd3de633fbf665bb88f069e195d0bea879907b888778316d21d75b8e87",
+      "bytes": 15703
+    },
+    "scripts/check-vite-env.test.mjs": {
+      "sha256": "35c7ab95c2fdc20053bbf1e50755f456e66e27a297a5ce1cfaca4af5198fde95",
+      "bytes": 11712
+    },
+    "scripts/deploy-functions.sh": {
+      "sha256": "9406828ed4382815d43fc78cf2288eea6639402165dbaac0ad76f5fc8925480f",
+      "bytes": 5538
+    },
+    "scripts/deploy-functions.test.mjs": {
+      "sha256": "2e7a0df46f1cd4ac461bdc3e47b47032a4c4c5787611ed669b225ebb7ae3cfea",
+      "bytes": 8866
+    },
+    "scripts/preview-identity.mjs": {
+      "sha256": "a0c00c671978ab8858cc62ae4e59ba0fd8673a70257bc9caad43636d70238fe1",
+      "bytes": 12407
+    },
+    "scripts/preview-identity.test.mjs": {
+      "sha256": "70af56af80f140d2851f77853a4a43548f43ae952c09f7d3e0ae21244e96aa5c",
+      "bytes": 8831
+    },
+    "scripts/run-vite-build.mjs": {
+      "sha256": "c0e3f969226819c478ba9a7f26d4cf7c147f910169f16474dc55b7522aaa2072",
+      "bytes": 2847
+    },
+    "scripts/run-vite-build.test.mjs": {
+      "sha256": "83da7d3e7fd19372408148c4a55f3db79f4a0702f572f2e250382a4f39d6e06a",
+      "bytes": 5277
+    },
+    "src/components/settings/XAutomationSettings.tsx": {
+      "sha256": "10240a93acc53823811acc8a5d2b46986793c6c45b6d2aea2efa004f6fa2115b",
+      "bytes": 26539
+    },
+    "src/test/x-automation-settings.test.ts": {
+      "sha256": "7f88912a1df0aa938bee7d5567efbadf51b657836d84549a5889ee684c36d702",
+      "bytes": 2135
+    },
+    "supabase/config.toml": {
+      "sha256": "1afdc488f73ff9f29b5377827c3afac9a6ff3e80b362ac5cb90880960864b68b",
+      "bytes": 647
+    }
+  }
+}
