@@ -1,0 +1,176 @@
+{
+  "schema": "xot-air-052-hosted-supply-owner-receipt-v1",
+  "artifactKind": "detached-owner-attestation",
+  "airId": "AIR-052",
+  "status": "ACCEPTED_OWNER_DISPOSITION_EVIDENCE_ONLY",
+  "release": "OWNER_ACCEPTED_EVIDENCE_ONLY",
+  "releaseGate": "OWNER_ACCEPTED_EVIDENCE_ONLY; DEPLOYMENT_AND_MERGE_NOT_AUTHORIZED",
+  "claimBoundary": "This receipt closes the owner-decision evidence gap for the hosted scan. It does not claim deployment, Production, or full release closure.",
+  "repository": "Masih-0x3/liquid-feed-flux",
+  "branch": "codex/video-render-workspace-redesign",
+  "reviewedSha": "e2d2a062370d22e03b7affdee99cc7a73bbb7941",
+  "gateId": "AIR-052",
+  "ownerRole": "release-owner:Masih-0x3",
+  "reviewedBranch": "codex/video-render-workspace-redesign",
+  "sourceReceiptSha256": "bd5f6e097bc6846c1572eea8412dddab944e1661d16f145030f26875e616ebb7",
+  "observedAt": "2026-09-02T19:06:20Z",
+  "signedAt": "2026-09-02T20:42:21Z",
+  "reviewedAt": "2026-09-02T20:58:50Z",
+  "expiryOrRevalidationAt": "2026-10-02",
+  "reviewerRole": "release-owner:Masih-0x3",
+  "signerRole": "release-owner:Masih-0x3",
+  "sourcePaths": [
+    "artifact-manifest.json",
+    "validation.json",
+    "root-npm-audit.json",
+    "root-dev-npm-audit.json",
+    "renderer-npm-audit.json",
+    "renderer-dev-npm-audit.json",
+    "root-sbom.spdx.json",
+    "renderer-sbom.spdx.json",
+    "renderer-image-sbom.spdx.json",
+    "renderer-image-trivy.json",
+    "renderer-image-provenance.json",
+    "license-inventory.json",
+    "deno-import-evidence.json",
+    "provenance.json",
+    "owner-disposition.json"
+  ],
+  "evidenceSummary": "Hosted run 33671047471 passed technical validation. npm audits found no HIGH/CRITICAL findings; Trivy retained 321 HIGH/CRITICAL findings, all nonfixable with zero actionable IDs; Deno frozen resolution passed for 10 entrypoints.",
+  "decisionOrEvidence": "Owner disposition accepted for the exact reviewed SHA, with no vulnerability waivers and upstream nonfixable base-image classification.",
+  "stalenessCheck": {
+    "status": "passed",
+    "exactReviewedShaRequired": true,
+    "sourceArtifactObservedAt": "2026-09-02T19:06:20Z",
+    "revalidateBy": "2026-10-02",
+    "revalidateImmediatelyOn": ["any dependency change", "any base-image change"],
+    "artifactExpiresAt": "2026-12-01T19:04:00Z",
+    "result": "Source manifest and all retained source identities match the reviewed SHA; no expiry reached at review time."
+  },
+  "redactionCheck": {
+    "status": "passed",
+    "rawLogs": false,
+    "secrets": false,
+    "credentials": false,
+    "providerData": false,
+    "result": "Only redacted metadata and deterministic receipt fields are retained."
+  },
+  "source": {
+    "runId": 33671047471,
+    "artifactId": 9862580565,
+    "artifactName": "xot-supply-chain-e2d2a062370d22e03b7affdee99cc7a73bbb7941",
+    "artifactExpiresAt": "2026-12-01T19:04:00Z",
+    "downloadCommand": "gh run download 33671047471 --repo Masih-0x3/liquid-feed-flux --name xot-supply-chain-e2d2a062370d22e03b7affdee99cc7a73bbb7941",
+    "originalArtifactManifestSha256": "bd5f6e097bc6846c1572eea8412dddab944e1661d16f145030f26875e616ebb7",
+    "originalOwnerDispositionSha256": "baba0c61f0b29000f4cb4cb21f1b91b6fe31e821420ec8e9c2e6a8944694a7a0"
+  },
+  "derivedAcceptedBundle": {
+    "artifactCount": 13,
+    "ownerDispositionSha256": "bdf256b7ec1512a0f459aa45b39ed9e9492acaf35ebdfe434383afb0fc47c761",
+    "artifactManifestSha256": "97d5780a23e5dfd4f40a70912b28c53529fecccd6b444f79fbbb60ff6a5cc706",
+    "bundleSha256": "eaae02c987621a9fcdf045e62a196bf4e6754fbeee40bf59dea819cf082c05fe",
+    "bundleDigestAlgorithm": "SHA-256 over retained canonical files in lexicographic path order: UTF-8 path NUL byte-length NUL exact decoded bytes",
+    "originalHostedArtifactPreserved": true,
+    "persistedInRepository": false,
+    "retainedCanonicalFiles": {
+      "artifact-manifest.json": {
+        "encoding": "base64 UTF-8",
+        "byteLength": 1984,
+        "sha256": "97d5780a23e5dfd4f40a70912b28c53529fecccd6b444f79fbbb60ff6a5cc706",
+        "bytesBase64": "ewogICJzY2hlbWEiOiAieG90LWhvc3RlZC1zdXBwbHktYXJ0aWZhY3QtbWFuaWZlc3QtdjEiLAogICJyZXZpZXdlZFNoYSI6ICJlMmQyYTA2MjM3MGQyMmUwM2I3YWZmZGVlOTljYzdhNzNiYmI3OTQxIiwKICAiY2hlY2tvdXRTaGEiOiAiZTJkMmEwNjIzNzBkMjJlMDNiN2FmZmRlZTk5Y2M3YTczYmJiNzk0MSIsCiAgImFydGlmYWN0cyI6IFsKICAgIHsKICAgICAgInBhdGgiOiAicm9vdC1ucG0tYXVkaXQuanNvbiIsCiAgICAgICJzaGEyNTYiOiAiOTE3ZjdlMTIwNTM4NzdjYTI4MzUzZjg4ZTE4MDExZDg3NDBiYWJjNWIyYzIwM2IzNjRiY2UzNzBiZmY3OTJhMCIKICAgIH0sCiAgICB7CiAgICAgICJwYXRoIjogInJlbmRlcmVyLW5wbS1hdWRpdC5qc29uIiwKICAgICAgInNoYTI1NiI6ICJmOTk2ZWU0NzZlMjViOGQ3ZTQ5NWYzNmEwYjY3Yjc3Yjg3ZjhkNzM3MTZhMDU3ZmY2NTY2NTU5ZjM4YjAwM2ZmIgogICAgfSwKICAgIHsKICAgICAgInBhdGgiOiAicm9vdC1kZXYtbnBtLWF1ZGl0Lmpzb24iLAogICAgICAic2hhMjU2IjogIjE0ZDQyZjQ5NDFjOWQ4YTI5ZmNiYmE3MGIyYzZhNTQ0YjljMTQyNzQ3ZGZkN2M0MzU2ZmNlMDAwODgzNzM5ZDciCiAgICB9LAogICAgewogICAgICAicGF0aCI6ICJyZW5kZXJlci1kZXYtbnBtLWF1ZGl0Lmpzb24iLAogICAgICAic2hhMjU2IjogImFmZTAwNmFmNDdkNDJmMzRhMzkyYzAzNzcyMDEwN2E2Y2I1ZmJjN2ZhZDlmZmYyN2NiMDI3OTM4MmQ1OTY1NWEiCiAgICB9LAogICAgewogICAgICAicGF0aCI6ICJyb290LXNib20uc3BkeC5qc29uIiwKICAgICAgInNoYTI1NiI6ICJhZGJhMDAyNGEzMDBmMDhjOWQ4MTc4OGM3MWUxNTljMDdjMzU3ZjkxOWY4YWQxYzAyZmQ2NTI5MjFiMWRlYTVlIgogICAgfSwKICAgIHsKICAgICAgInBhdGgiOiAicmVuZGVyZXItc2JvbS5zcGR4Lmpzb24iLAogICAgICAic2hhMjU2IjogImY4MjgzZDg2Y2RjYzA4ZGFjOWMyZWUxYzI5ODQwOGJmZGFiNGM0MzYwMTdjMDhlZTkyMDgxNjVjZTE4ZmY2NDQiCiAgICB9LAogICAgewogICAgICAicGF0aCI6ICJsaWNlbnNlLWludmVudG9yeS5qc29uIiwKICAgICAgInNoYTI1NiI6ICIwNjY3NWE5MzYwNzc5Y2ZmN2RiYWJmODQ0NGQ3YmFkYjA4NmYwOTA2ZDM3NzFmNDI2M2E2ODkyOWM4OTA2ZTA3IgogICAgfSwKICAgIHsKICAgICAgInBhdGgiOiAiZGVuby1pbXBvcnQtZXZpZGVuY2UuanNvbiIsCiAgICAgICJzaGEyNTYiOiAiYjMzMGFjYmFmMmQ1YmQyYjljYjk3OWNlMTkxZDlhZDliYTg4YjYyMGJhNmNhMmY3YmE3MDM2NGE4YmE1YWMzYyIKICAgIH0sCiAgICB7CiAgICAgICJwYXRoIjogInJlbmRlcmVyLWltYWdlLXByb3ZlbmFuY2UuanNvbiIsCiAgICAgICJzaGEyNTYiOiAiOGUzZWExZDY0YWU2YWEyMzFiZjEwZWNlMmE1MjNjZDE5YWIxNmJjMDhhYzRlOWIzMTcwNWZmYTY5M2U1MDRhMSIKICAgIH0sCiAgICB7CiAgICAgICJwYXRoIjogInJlbmRlcmVyLWltYWdlLXRyaXZ5Lmpzb24iLAogICAgICAic2hhMjU2IjogIjIyMzJmMWY1NDQ5YzkwYThiODk3ZWM5MTQxMTQ5YmUwN2I1Nzc5NDU0NjkzYTQwOGVlY2I0MTQ5NzJhMzYyNTAiCiAgICB9LAogICAgewogICAgICAicGF0aCI6ICJyZW5kZXJlci1pbWFnZS1zYm9tLnNwZHguanNvbiIsCiAgICAgICJzaGEyNTYiOiAiYjM4YWU1MTQwZGNhNGMyMGRmZGM5MWFhNDVmMDRkZjNmMTU2MWNjNzZiZmU0NDJmNTg0OGU1MmU4NzJhY2RkYiIKICAgIH0sCiAgICB7CiAgICAgICJwYXRoIjogInByb3ZlbmFuY2UuanNvbiIsCiAgICAgICJzaGEyNTYiOiAiNjI2NmY2MmQwZGIzOTg0Zjg2ODI0Y2RjYzgxYmFlYTllNzYzYjVkOGQ4NzQxOTkwMDMyODk0MDFhYzM5ZDA4YiIKICAgIH0sCiAgICB7CiAgICAgICJwYXRoIjogIm93bmVyLWRpc3Bvc2l0aW9uLmpzb24iLAogICAgICAic2hhMjU2IjogImJkZjI1NmI3ZWMxNTEyYTBmNDU5YWE0NWIzOWVkOWU5NDkyYWNhZjM1ZWJkZmU0MzQzODNhZmIwZmM0N2M3NjEiCiAgICB9CiAgXQp9Cg=="
+      },
+      "owner-disposition.json": {
+        "encoding": "base64 UTF-8",
+        "byteLength": 1031,
+        "sha256": "bdf256b7ec1512a0f459aa45b39ed9e9492acaf35ebdfe434383afb0fc47c761",
+        "bytesBase64": "ewogICJzY2hlbWEiOiAieG90LWhvc3RlZC1zdXBwbHktb3duZXItZGlzcG9zaXRpb24tdjEiLAogICJyZXZpZXdlZFNoYSI6ICJlMmQyYTA2MjM3MGQyMmUwM2I3YWZmZGVlOTljYzdhNzNiYmI3OTQxIiwKICAic3RhdHVzIjogInJldmlld2VkIiwKICAiZGVjaXNpb24iOiAiYWNjZXB0ZWQiLAogICJvd25lciI6ICJyZWxlYXNlLW93bmVyOk1hc2loLTB4MyIsCiAgInNpZ25lZEF0IjogIjIwMjYtMDktMDJUMjA6NDI6MjFaIiwKICAicmF0aW9uYWxlIjogIkFjY2VwdGVkIGhvc3RlZCBzdXBwbHktY2hhaW4gZXZpZGVuY2UgZm9yIHRoaXMgZXhhY3QgcmVsZWFzZSBjYW5kaWRhdGUuIEFsbCBvYnNlcnZlZCBISUdIL0NSSVRJQ0FMIGZpbmRpbmdzIGFyZSBub25maXhhYmxlIGF0IHNjYW4gdGltZTsgbm8gdnVsbmVyYWJpbGl0eSB3YWl2ZXJzIGFyZSBncmFudGVkLiIsCiAgInJlY2hlY2tBdCI6ICIyMDI2LTEwLTAyIiwKICAicmVjaGVja1RyaWdnZXJzIjogWwogICAgImFueSBkZXBlbmRlbmN5IGNoYW5nZSIsCiAgICAiYW55IGJhc2UtaW1hZ2UgY2hhbmdlIgogIF0sCiAgImhpZ2hPckNyaXRpY2FsIjogMCwKICAib2JzZXJ2ZWRIaWdoT3JDcml0aWNhbCI6IDMyMSwKICAibm9uZml4YWJsZUhpZ2hPckNyaXRpY2FsIjogMzIxLAogICJhY3Rpb25hYmxlSWRzIjogW10sCiAgInJlcXVpcmVkT3duZXIiOiAic2VjdXJpdHkvcmVsZWFzZSBvd25lciIsCiAgIm5vV2FpdmVyUmVjZWlwdCI6IHsKICAgICJkZWNpc2lvbiI6ICJub193YWl2ZXJzIiwKICAgICJyZXZpZXdlZFNoYSI6ICJlMmQyYTA2MjM3MGQyMmUwM2I3YWZmZGVlOTljYzdhNzNiYmI3OTQxIiwKICAgICJvd25lciI6ICJyZWxlYXNlLW93bmVyOk1hc2loLTB4MyIsCiAgICAic2lnbmVkQXQiOiAiMjAyNi0wOS0wMlQyMDo0MjoyMVoiLAogICAgImJhc2VJbWFnZUNsYXNzaWZpY2F0aW9uIjogInVwc3RyZWFtIGJhc2UtaW1hZ2UgZmluZGluZ3Mgd2l0aCBubyBhdmFpbGFibGUgZml4IGF0IHNjYW4gdGltZSIKICB9LAogICJ3YWl2ZXJFbnRyaWVzIjogW10KfQo="
+      }
+    }
+  },
+  "technicalEvidence": {
+    "validation": {
+      "sourceRecord": "validation.json",
+      "sourceStatus": "passed_pending_owner_review",
+      "sourceErrors": [],
+      "derivedRequireOwnerValidation": "passed"
+    },
+    "npmAudit": {
+      "root": {"status": "passed_with_findings", "commandStatus": 1, "findings": 3, "highCritical": {"total": 0, "actionable": 0, "nonfixable": 0}},
+      "rootDev": {"status": "passed_with_findings", "commandStatus": 1, "findings": 4, "highCritical": {"total": 0, "actionable": 0, "nonfixable": 0}},
+      "renderer": {"status": "passed", "commandStatus": 0, "findings": 0, "highCritical": {"total": 0, "actionable": 0, "nonfixable": 0}},
+      "rendererDev": {"status": "passed", "commandStatus": 0, "findings": 0, "highCritical": {"total": 0, "actionable": 0, "nonfixable": 0}}
+    },
+    "trivy": {
+      "status": "passed",
+      "resultCount": 2,
+      "retainedFindings": 1480,
+      "severityCounts": {"LOW": 547, "MEDIUM": 535, "UNKNOWN": 77, "HIGH": 302, "CRITICAL": 19},
+      "highCritical": {"total": 321, "actionable": 0, "nonfixable": 321},
+      "actionableIds": []
+    },
+    "deno": {
+      "status": "passed",
+      "version": "2.9.5",
+      "entrypointCount": 10,
+      "commandStatus": 0,
+      "timedOut": false,
+      "lockSha256": "8844272d24d59d2221350fd06e434a7c40c0269f41891d16ff459aa1f83237f9",
+      "scanMode": "non-executing-frozen-lock-resolution"
+    },
+    "provenance": {
+      "node": "v20.20.2",
+      "npm": "10.8.2",
+      "docker": "28.0.4",
+      "trivy": "aquasec/trivy@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969",
+      "syft": "anchore/syft@sha256:95fe0835e5bebc6f8b1f8acef68d47d63d594ef4c0f25c097ff853b23cbac74c",
+      "workflowActionsShaPinned": 3
+    }
+  },
+  "ownerDecision": {
+    "owner": "release-owner:Masih-0x3",
+    "decision": "accepted",
+    "signedAt": "2026-09-02T20:42:21Z",
+    "rationale": "Accepted hosted supply-chain evidence for this exact release candidate. All observed HIGH/CRITICAL findings are nonfixable at scan time; no vulnerability waivers are granted.",
+    "baseImageClassification": "upstream base-image findings with no available fix at scan time",
+    "recheckBy": "2026-10-02",
+    "recheckTriggers": ["any dependency change", "any base-image change"],
+    "actionableHighCritical": 0,
+    "observedHighCritical": 321,
+    "nonfixableHighCritical": 321,
+    "actionableIds": [],
+    "noVulnerabilityWaivers": true,
+    "waiverEntries": []
+  },
+  "attestation": {
+    "method": "named-owner approval recorded in this detached receipt",
+    "cryptographicSignatureClaimed": false,
+    "binds": [
+      "derivedAcceptedBundle.artifactManifestSha256",
+      "reviewedSha",
+      "source.runId",
+      "source.artifactId",
+      "ownerDecision"
+    ]
+  },
+  "predecessor": {
+    "path": "docs/plans/2026-09-02-xot-air-current-closure-successor.json#rows[AIR-052]",
+    "priorState": "external_blocked",
+    "historicalReceiptUnchanged": true,
+    "supersession": "This append-only receipt adds current hosted evidence and the approved owner decision; it does not rewrite the predecessor row."
+  },
+  "ciConsumptionBoundary": "Run 33671047471 passed technical validation but its final owner step failed before this detached receipt existed. The current workflow collector creates a pending owner-disposition and has no input for an external accepted bundle; independent revalidation or a future CI ingestion change is required before that historical run can turn green.",
+  "redaction": {
+    "rawLogsIncluded": false,
+    "secretsIncluded": false,
+    "providerDataIncluded": false
+  },
+  "noMutation": true,
+  "mutationsPerformed": {
+    "production": false,
+    "supabase": false,
+    "providers": false,
+    "deployment": false,
+    "merge": false,
+    "ledgerAppend": false
+  }
+}
