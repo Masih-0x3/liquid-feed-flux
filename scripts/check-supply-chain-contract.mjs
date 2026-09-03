@@ -72,6 +72,9 @@ const REQUIRED_CI_POST_EVIDENCE_RUNS = REQUIRED_CI_RUNS.slice(4);
 const HOSTED_EVIDENCE_COLLECT_RUN = 'node scripts/collect-supply-chain-evidence.mjs --collect-only --output-dir "$RUNNER_TEMP/xot-supply-chain"';
 const HOSTED_EVIDENCE_TECHNICAL_VALIDATE_RUN = 'node scripts/collect-supply-chain-evidence.mjs --validate-only --technical-only --output-dir "$RUNNER_TEMP/xot-supply-chain"';
 const HOSTED_EVIDENCE_OWNER_VALIDATE_RUN = 'node scripts/collect-supply-chain-evidence.mjs --validate-only --output-dir "$RUNNER_TEMP/xot-supply-chain"';
+const OWNER_POLICY_MODE = "exact-head";
+const OWNER_POLICY_VARIABLE = "XOT_SUPPLY_OWNER_POLICY_B64";
+const REVIEWED_RENDERER_DOCKER_BASE = "node:20-bookworm-slim@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0";
 const SHA_RE = /^[a-f0-9]{40}$/;
 
 const WAIVER_COLLECTIONS = [
@@ -214,10 +217,11 @@ function validateCi(root, errors) {
   }), "every CI workflow action must use the official actions/* namespace and an immutable SHA");
   const collectorIndexes = steps.flatMap((step, index) => step.run === HOSTED_EVIDENCE_COLLECT_RUN ? [index] : []);
   const uploadIndexes = steps.flatMap((step, index) => step.block.some((line) => line.includes("uses: actions/upload-artifact@")) ? [index] : []);
+  const acceptedUploadIndexes = steps.flatMap((step, index) => step.block.some((line) => line.includes("name: xot-supply-chain-accepted-${{ github.event.pull_request.head.sha || github.sha }}")) ? [index] : []);
   const technicalValidatorIndexes = steps.flatMap((step, index) => step.run === HOSTED_EVIDENCE_TECHNICAL_VALIDATE_RUN ? [index] : []);
   const ownerValidatorIndexes = steps.flatMap((step, index) => step.run === HOSTED_EVIDENCE_OWNER_VALIDATE_RUN ? [index] : []);
-  assertCondition(errors, collectorIndexes.length === 1 && uploadIndexes.length === 1 && technicalValidatorIndexes.length === 1 && ownerValidatorIndexes.length === 1, "CI must contain one hosted supply-chain collection, upload, technical validation, and final owner validation sequence");
-  if (collectorIndexes.length === 1 && uploadIndexes.length === 1 && technicalValidatorIndexes.length === 1 && ownerValidatorIndexes.length === 1) {
+  assertCondition(errors, collectorIndexes.length === 1 && uploadIndexes.length === 2 && acceptedUploadIndexes.length === 1 && technicalValidatorIndexes.length === 1 && ownerValidatorIndexes.length === 1, "CI must contain hosted supply-chain collection, technical validation, final owner validation, and accepted-bundle upload sequence");
+  if (collectorIndexes.length === 1 && uploadIndexes.length === 2 && acceptedUploadIndexes.length === 1 && technicalValidatorIndexes.length === 1 && ownerValidatorIndexes.length === 1) {
     const [collectorIndex] = collectorIndexes;
     let collectorSource = "";
     try { collectorSource = readFileSync(join(root, "scripts/collect-supply-chain-evidence.mjs"), "utf8"); } catch { /* inventory/source checks report missing paths separately */ }
@@ -236,10 +240,15 @@ function validateCi(root, errors) {
     const hasBypass = (block) => block.some((line) => /(?:^|\s)["']?(?:if|continue-on-error)["']?:/.test(line));
     assertCondition(errors, !hasBypass(steps[collectorIndex].block) && !hasBypass(steps[technicalValidatorIndexes[0]].block) && !hasBypass(steps[ownerValidatorIndexes[0]].block), "hosted supply-chain collection and validation must remain blocking");
     assertCondition(errors, REQUIRED_CI_POST_EVIDENCE_RUNS.every((run, index) => steps[technicalValidatorIndexes[0] + 1 + index]?.run === run), "CI must run the mutable Node/runtime commands only after technical hosted evidence validation");
-    assertCondition(errors, ownerValidatorIndexes[0] === steps.length - 1 && ownerValidatorIndexes[0] > technicalValidatorIndexes[0], "CI must run final owner disposition validation after all mutable Node/runtime, test, and build commands");
+    assertCondition(errors, ownerValidatorIndexes[0] === acceptedUploadIndexes[0] - 1 && acceptedUploadIndexes[0] === steps.length - 1 && ownerValidatorIndexes[0] > technicalValidatorIndexes[0], "CI must run final owner validation immediately before the accepted-bundle upload");
+    assertCondition(errors, steps[ownerValidatorIndexes[0]].block.some((line) => line.includes(`XOT_SUPPLY_OWNER_POLICY_MODE: ${OWNER_POLICY_MODE}`)), "final hosted supply-chain validation must enable the exact-head owner policy mode");
+    const expectedOwnerPolicyVariable = `${OWNER_POLICY_VARIABLE}: $` + `{{ vars.${OWNER_POLICY_VARIABLE} }}`;
+    assertCondition(errors, steps[ownerValidatorIndexes[0]].block.some((line) => line.includes(expectedOwnerPolicyVariable)), "final hosted supply-chain validation must read the owner policy only from the reviewed repository variable");
     assertCondition(errors, collectorIndex > 0 && collectorIndex < steps.findIndex((step) => step.run === "node scripts/check-runtime-contract.mjs"), "hosted supply-chain evidence must complete before mutable runtime/test commands");
     assertCondition(errors, uploadIndexes[0] === collectorIndex + 1 && technicalValidatorIndexes[0] === collectorIndex + 2, "hosted supply-chain collection, upload, and technical validation steps must remain contiguous");
     assertCondition(errors, steps[uploadIndexes[0]].block.some((line) => /uses: actions\/upload-artifact@[a-f0-9]{40}/.test(line)), "hosted supply-chain artifact upload must use an immutable action SHA");
+    assertCondition(errors, uploadIndexes[1] === acceptedUploadIndexes[0] && !hasBypass(steps[acceptedUploadIndexes[0]].block), "accepted hosted supply-chain upload must follow successful final validation without a bypass");
+    assertCondition(errors, steps[acceptedUploadIndexes[0]].block.some((line) => line.includes("path: ${{ runner.temp }}/xot-supply-chain")) && steps[acceptedUploadIndexes[0]].block.some((line) => line.includes("if-no-files-found: error")), "accepted hosted supply-chain upload must retain the complete evidence directory");
   }
 }
 
@@ -315,7 +324,7 @@ function validateRendererDockerfile(root, errors) {
   }
 
   const baseImage = dockerfile.match(/^FROM\s+(\S+)\s*$/m)?.[1] ?? null;
-  assertCondition(errors, baseImage === "node:20-bookworm-slim", "renderer Docker base selector must stay aligned with the reviewed runtime contract");
+  assertCondition(errors, baseImage === REVIEWED_RENDERER_DOCKER_BASE, "renderer Docker base selector must stay aligned with the reviewed immutable runtime contract");
   assertCondition(errors, dockerfile.includes("apt-get install -y --no-install-recommends"), "renderer Dockerfile must retain its explicit APT package installation boundary");
   assertCondition(errors, dockerfile.includes("rm -rf /var/lib/apt/lists/*"), "renderer Dockerfile must clear transient APT metadata");
   assertCondition(errors, dockerfile.includes("COPY package.json package-lock.json ./"), "renderer Dockerfile must install from its lockfile");

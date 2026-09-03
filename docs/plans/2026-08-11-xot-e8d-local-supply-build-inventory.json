@@ -10,7 +10,7 @@
   "source_files": [
     {
       "path": ".github/workflows/ci.yml",
-      "sha256": "ba6d684e0bfc6d3aecd9b311738c5a2596494c114c45ff8ee51761e17e6bbb73"
+      "sha256": "2fa3915bec2f47288b51fd535bf5685a71cc882ff5e00591fc04d7951ea6e1ff"
     },
     {
       "path": "deno.lock",
@@ -34,11 +34,11 @@
     },
     {
       "path": "scripts/check-supply-chain-contract.mjs",
-      "sha256": "a9a6caba5e25c87cf7cc788fb91d0efa6d519938e30b9db9907e336ae7233320"
+      "sha256": "d7869e0438b6df3f6e9e2b69b6d3ee483e84a643f68e2fded0f0cd1790754a05"
     },
     {
       "path": "scripts/check-supply-chain-contract.test.mjs",
-      "sha256": "b30e333412b6f4a858a9ba1b6bbcb0a9129f8e5a47e1953d2763cd460ffe3fd8"
+      "sha256": "02445f03e185a85b0a318b22ab25a1e0d05304774ecf317fff5fcd2b01b8843d"
     },
     {
       "path": "scripts/check-vite-env.mjs",
@@ -50,15 +50,15 @@
     },
     {
       "path": "scripts/collect-supply-chain-evidence.mjs",
-      "sha256": "b21375301c8a916c1da7cb079e637cea48687cad7a3d6e4e21d16effb59aa6fa"
+      "sha256": "ad84b9759292e50b5bd65a0b9185c0e3f74c61536eb606b92247eb654907a96e"
     },
     {
       "path": "scripts/collect-supply-chain-evidence.test.mjs",
-      "sha256": "b760f8bb2f948b6669dfe5d55a08b9a3d19bc193c935fd81ad01326ceb652675"
+      "sha256": "c3f4acbba96914d9a325a335db84d8b71b311b2c8ea8ba1a0e83f11cebb0246a"
     },
     {
       "path": "services/video-renderer/Dockerfile",
-      "sha256": "4ef0c39a776b49e09d84d6b32fe4a8776bd57313473d1007b3b1bb3c6bdac179"
+      "sha256": "c73f54dc624781cf657023b05d689edb7e2d8be694190a1a254e6a27fe36ccdc"
     },
     {
       "path": "services/video-renderer/package-lock.json",
@@ -9924,15 +9924,15 @@
     "docker": {
       "source_file": {
         "path": "services/video-renderer/Dockerfile",
-        "sha256": "4ef0c39a776b49e09d84d6b32fe4a8776bd57313473d1007b3b1bb3c6bdac179"
+        "sha256": "c73f54dc624781cf657023b05d689edb7e2d8be694190a1a254e6a27fe36ccdc"
       },
       "base_images": [
         {
           "name": "node:20-bookworm-slim",
           "path": "services/video-renderer/Dockerfile",
-          "version_or_ref": "node:20-bookworm-slim",
+          "version_or_ref": "sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0",
           "integrity_or_source_hash": null,
-          "source_file_sha256": "4ef0c39a776b49e09d84d6b32fe4a8776bd57313473d1007b3b1bb3c6bdac179"
+          "source_file_sha256": "c73f54dc624781cf657023b05d689edb7e2d8be694190a1a254e6a27fe36ccdc"
         }
       ],
       "apt_packages": [
@@ -9941,98 +9941,98 @@
           "path": "services/video-renderer/Dockerfile",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "4ef0c39a776b49e09d84d6b32fe4a8776bd57313473d1007b3b1bb3c6bdac179"
+          "source_file_sha256": "c73f54dc624781cf657023b05d689edb7e2d8be694190a1a254e6a27fe36ccdc"
         },
         {
           "name": "curl",
           "path": "services/video-renderer/Dockerfile",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "4ef0c39a776b49e09d84d6b32fe4a8776bd57313473d1007b3b1bb3c6bdac179"
+          "source_file_sha256": "c73f54dc624781cf657023b05d689edb7e2d8be694190a1a254e6a27fe36ccdc"
         },
         {
           "name": "ffmpeg",
           "path": "services/video-renderer/Dockerfile",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "4ef0c39a776b49e09d84d6b32fe4a8776bd57313473d1007b3b1bb3c6bdac179"
+          "source_file_sha256": "c73f54dc624781cf657023b05d689edb7e2d8be694190a1a254e6a27fe36ccdc"
         },
         {
           "name": "fontconfig",
           "path": "services/video-renderer/Dockerfile",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "4ef0c39a776b49e09d84d6b32fe4a8776bd57313473d1007b3b1bb3c6bdac179"
+          "source_file_sha256": "c73f54dc624781cf657023b05d689edb7e2d8be694190a1a254e6a27fe36ccdc"
         },
         {
           "name": "fonts-noto-core",
           "path": "services/video-renderer/Dockerfile",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "4ef0c39a776b49e09d84d6b32fe4a8776bd57313473d1007b3b1bb3c6bdac179"
+          "source_file_sha256": "c73f54dc624781cf657023b05d689edb7e2d8be694190a1a254e6a27fe36ccdc"
         },
         {
           "name": "python3",
           "path": "services/video-renderer/Dockerfile",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "4ef0c39a776b49e09d84d6b32fe4a8776bd57313473d1007b3b1bb3c6bdac179"
+          "source_file_sha256": "c73f54dc624781cf657023b05d689edb7e2d8be694190a1a254e6a27fe36ccdc"
         },
         {
           "name": "python3-numpy",
           "path": "services/video-renderer/Dockerfile",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "4ef0c39a776b49e09d84d6b32fe4a8776bd57313473d1007b3b1bb3c6bdac179"
+          "source_file_sha256": "c73f54dc624781cf657023b05d689edb7e2d8be694190a1a254e6a27fe36ccdc"
         },
         {
           "name": "python3-opencv",
           "path": "services/video-renderer/Dockerfile",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "4ef0c39a776b49e09d84d6b32fe4a8776bd57313473d1007b3b1bb3c6bdac179"
+          "source_file_sha256": "c73f54dc624781cf657023b05d689edb7e2d8be694190a1a254e6a27fe36ccdc"
         },
         {
           "name": "tesseract-ocr",
           "path": "services/video-renderer/Dockerfile",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "4ef0c39a776b49e09d84d6b32fe4a8776bd57313473d1007b3b1bb3c6bdac179"
+          "source_file_sha256": "c73f54dc624781cf657023b05d689edb7e2d8be694190a1a254e6a27fe36ccdc"
         },
         {
           "name": "tesseract-ocr-ara",
           "path": "services/video-renderer/Dockerfile",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "4ef0c39a776b49e09d84d6b32fe4a8776bd57313473d1007b3b1bb3c6bdac179"
+          "source_file_sha256": "c73f54dc624781cf657023b05d689edb7e2d8be694190a1a254e6a27fe36ccdc"
         },
         {
           "name": "tesseract-ocr-eng",
           "path": "services/video-renderer/Dockerfile",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "4ef0c39a776b49e09d84d6b32fe4a8776bd57313473d1007b3b1bb3c6bdac179"
+          "source_file_sha256": "c73f54dc624781cf657023b05d689edb7e2d8be694190a1a254e6a27fe36ccdc"
         },
         {
           "name": "tesseract-ocr-fas",
           "path": "services/video-renderer/Dockerfile",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "4ef0c39a776b49e09d84d6b32fe4a8776bd57313473d1007b3b1bb3c6bdac179"
+          "source_file_sha256": "c73f54dc624781cf657023b05d689edb7e2d8be694190a1a254e6a27fe36ccdc"
         },
         {
           "name": "tesseract-ocr-heb",
           "path": "services/video-renderer/Dockerfile",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "4ef0c39a776b49e09d84d6b32fe4a8776bd57313473d1007b3b1bb3c6bdac179"
+          "source_file_sha256": "c73f54dc624781cf657023b05d689edb7e2d8be694190a1a254e6a27fe36ccdc"
         }
       ]
     },
     "ci": {
       "source_file": {
         "path": ".github/workflows/ci.yml",
-        "sha256": "ba6d684e0bfc6d3aecd9b311738c5a2596494c114c45ff8ee51761e17e6bbb73"
+        "sha256": "2fa3915bec2f47288b51fd535bf5685a71cc882ff5e00591fc04d7951ea6e1ff"
       },
       "action_refs": [
         {
@@ -10040,21 +10040,28 @@
           "path": ".github/workflows/ci.yml",
           "version_or_ref": "11bd71901bbe5b1630ceea73d27597364c9af683",
           "integrity_or_source_hash": null,
-          "source_file_sha256": "ba6d684e0bfc6d3aecd9b311738c5a2596494c114c45ff8ee51761e17e6bbb73"
+          "source_file_sha256": "2fa3915bec2f47288b51fd535bf5685a71cc882ff5e00591fc04d7951ea6e1ff"
         },
         {
           "name": "actions/setup-node",
           "path": ".github/workflows/ci.yml",
           "version_or_ref": "49933ea5288caeca8642d1e84afbd3f7d6820020",
           "integrity_or_source_hash": null,
-          "source_file_sha256": "ba6d684e0bfc6d3aecd9b311738c5a2596494c114c45ff8ee51761e17e6bbb73"
+          "source_file_sha256": "2fa3915bec2f47288b51fd535bf5685a71cc882ff5e00591fc04d7951ea6e1ff"
         },
         {
           "name": "actions/upload-artifact",
           "path": ".github/workflows/ci.yml",
           "version_or_ref": "ea165f8d65b6e75b540449e92b4886f43607fa02",
           "integrity_or_source_hash": null,
-          "source_file_sha256": "ba6d684e0bfc6d3aecd9b311738c5a2596494c114c45ff8ee51761e17e6bbb73"
+          "source_file_sha256": "2fa3915bec2f47288b51fd535bf5685a71cc882ff5e00591fc04d7951ea6e1ff"
+        },
+        {
+          "name": "actions/upload-artifact",
+          "path": ".github/workflows/ci.yml",
+          "version_or_ref": "ea165f8d65b6e75b540449e92b4886f43607fa02",
+          "integrity_or_source_hash": null,
+          "source_file_sha256": "2fa3915bec2f47288b51fd535bf5685a71cc882ff5e00591fc04d7951ea6e1ff"
         }
       ]
     },

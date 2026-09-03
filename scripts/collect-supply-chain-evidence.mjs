@@ -11,6 +11,13 @@ const TRIVY_IMAGE = "aquasec/trivy@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2
 const SYFT_IMAGE = "anchore/syft@sha256:95fe0835e5bebc6f8b1f8acef68d47d63d594ef4c0f25c097ff853b23cbac74c";
 const SHA_RE = /^[a-f0-9]{40}$/;
 const SHA256_RE = /^[a-f0-9]{64}$/;
+const OWNER_POLICY_SCHEMA = "xot-hosted-supply-owner-policy-v1";
+const OWNER_POLICY_ENV = "XOT_SUPPLY_OWNER_POLICY_B64";
+const OWNER_POLICY_MODE_ENV = "XOT_SUPPLY_OWNER_POLICY_MODE";
+const OWNER_POLICY_MODE = "exact-head";
+const MAX_OWNER_POLICY_B64_LENGTH = 64 * 1024;
+const OWNER_POLICY_DECISION = "accept_zero_actionable_no_waivers";
+const OWNER_POLICY_BASE_IMAGE_CLASSIFICATIONS = Object.freeze(["reviewed-non-actionable"]);
 const BASE_EVIDENCE_ARTIFACTS = Object.freeze([
   "root-npm-audit.json",
   "renderer-npm-audit.json",
@@ -219,6 +226,130 @@ function validateOwnerDisposition(value, now = Date.now(), { requireAccepted = f
   return errors;
 }
 
+function decodeBase64Json(value) {
+  if (typeof value !== "string" || value.length === 0) throw new Error("exact-head owner policy is missing");
+  if (value.length > MAX_OWNER_POLICY_B64_LENGTH || value.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) {
+    throw new Error("exact-head owner policy base64 is malformed");
+  }
+  const decoded = Buffer.from(value, "base64");
+  if (decoded.length === 0 || decoded.toString("base64") !== value) throw new Error("exact-head owner policy base64 is malformed");
+  try {
+    return JSON.parse(decoded.toString("utf8"));
+  } catch {
+    throw new Error("exact-head owner policy JSON is malformed");
+  }
+}
+
+function validateOwnerPolicy(value, {
+  reviewedSha,
+  checkoutSha,
+  actionableHighOrCritical,
+  observedHighOrCritical,
+  nonfixableHighOrCritical,
+  actionableIds,
+  observedIds,
+  nonfixableIds,
+  now = Date.now(),
+} = {}) {
+  const errors = [];
+  if (!isPlainObject(value)) return ["exact-head owner policy must be an object"];
+  const expectedKeys = [
+    "schema", "reviewedSha", "owner", "signedAt", "expiresAt", "decision",
+    "actionableHighOrCritical", "observedHighOrCritical", "nonfixableHighOrCritical",
+    "actionableIds", "observedIds", "nonfixableIds", "baseImageClassification", "waiverEntries",
+  ];
+  const unexpectedKeys = Object.keys(value).filter((key) => !expectedKeys.includes(key));
+  if (unexpectedKeys.length > 0) errors.push("exact-head owner policy schema contains unexpected fields");
+  if (value.schema !== OWNER_POLICY_SCHEMA) errors.push("exact-head owner policy schema is invalid");
+  if (value.reviewedSha !== reviewedSha || checkoutSha !== reviewedSha || !SHA_RE.test(value.reviewedSha ?? "")) errors.push("exact-head owner policy is not bound to the exact reviewed SHA");
+  if (value.decision !== OWNER_POLICY_DECISION) errors.push("exact-head owner policy decision must explicitly accept zero actionable findings and no waivers");
+  if (typeof value.owner !== "string" || value.owner.trim().length === 0) errors.push("exact-head owner policy requires a named owner");
+  const signedAt = Date.parse(value.signedAt ?? "");
+  if (!Number.isFinite(signedAt) || signedAt > now + 5 * 60 * 1000) errors.push("exact-head owner policy requires a valid dated signature");
+  const expiresAt = Date.parse(value.expiresAt ?? "");
+  if (!Number.isFinite(expiresAt) || expiresAt <= now || (Number.isFinite(signedAt) && expiresAt <= signedAt)) errors.push("exact-head owner policy requires a future expiry");
+  if (!OWNER_POLICY_BASE_IMAGE_CLASSIFICATIONS.includes(value.baseImageClassification)) errors.push("exact-head owner policy base-image classification is invalid");
+  if (!Number.isInteger(value.actionableHighOrCritical) || value.actionableHighOrCritical !== 0 || value.actionableHighOrCritical !== actionableHighOrCritical) errors.push("exact-head owner policy must match zero current actionable findings");
+  if (!Number.isInteger(value.observedHighOrCritical) || value.observedHighOrCritical < 0 || value.observedHighOrCritical !== observedHighOrCritical) errors.push("exact-head owner policy observed high or critical count does not match current evidence");
+  if (!Number.isInteger(value.nonfixableHighOrCritical) || value.nonfixableHighOrCritical < 0 || value.nonfixableHighOrCritical !== nonfixableHighOrCritical) errors.push("exact-head owner policy nonfixable count does not match current evidence");
+  if (Number.isInteger(value.observedHighOrCritical) && Number.isInteger(value.actionableHighOrCritical) && Number.isInteger(value.nonfixableHighOrCritical) && value.observedHighOrCritical !== value.actionableHighOrCritical + value.nonfixableHighOrCritical) errors.push("exact-head owner policy counts must satisfy observed = actionable + nonfixable");
+  const policyActionableIds = Array.isArray(value.actionableIds) ? value.actionableIds : [];
+  if (!Array.isArray(value.actionableIds) || policyActionableIds.some((id) => typeof id !== "string" || id.trim().length === 0) || new Set(policyActionableIds).size !== policyActionableIds.length || JSON.stringify(policyActionableIds) !== JSON.stringify(actionableIds)) errors.push("exact-head owner policy actionable IDs do not match current evidence");
+  const policyObservedIds = Array.isArray(value.observedIds) ? value.observedIds : [];
+  if (!Array.isArray(value.observedIds) || policyObservedIds.some((id) => typeof id !== "string" || id.trim().length === 0) || new Set(policyObservedIds).size !== policyObservedIds.length || JSON.stringify(policyObservedIds) !== JSON.stringify(observedIds)) errors.push("exact-head owner policy observed finding IDs do not match current evidence");
+  const policyNonfixableIds = Array.isArray(value.nonfixableIds) ? value.nonfixableIds : [];
+  if (!Array.isArray(value.nonfixableIds) || policyNonfixableIds.some((id) => typeof id !== "string" || id.trim().length === 0) || new Set(policyNonfixableIds).size !== policyNonfixableIds.length || JSON.stringify(policyNonfixableIds) !== JSON.stringify(nonfixableIds)) errors.push("exact-head owner policy nonfixable finding IDs do not match current evidence");
+  if (!Array.isArray(value.waiverEntries) || value.waiverEntries.length !== 0) errors.push("exact-head owner policy must contain no waiver entries");
+  return errors;
+}
+
+function evidenceOwnerSummary(directory) {
+  const read = (path) => JSON.parse(readFileSync(join(directory, path), "utf8"));
+  const audits = ["root-npm-audit.json", "renderer-npm-audit.json", "root-dev-npm-audit.json", "renderer-dev-npm-audit.json"].map(read);
+  const trivy = read("renderer-image-trivy.json");
+  const highOrCritical = audits.flatMap((audit) => audit.findings ?? []).filter((finding) => ["high", "critical"].includes(finding.severity))
+    .concat((trivy.findings ?? []).filter((finding) => ["HIGH", "CRITICAL"].includes(finding.severity)));
+  const actionable = highOrCritical.filter((finding) => finding.actionable === true);
+  const observedIds = highOrCritical.map((finding) => finding.id).sort();
+  const nonfixableIds = highOrCritical.filter((finding) => finding.actionable !== true).map((finding) => finding.id).sort();
+  const imageProvenance = read("renderer-image-provenance.json");
+  return {
+    observedHighOrCritical: highOrCritical.length,
+    actionableHighOrCritical: actionable.length,
+    nonfixableHighOrCritical: highOrCritical.length - actionable.length,
+    actionableIds: actionable.map((finding) => finding.id).sort(),
+    observedIds,
+    nonfixableIds,
+    rendererImageId: imageProvenance.imageId ?? null,
+  };
+}
+
+function acceptedOwnerDisposition(policy, evidence) {
+  return {
+    schema: "xot-hosted-supply-owner-disposition-v1",
+    reviewedSha: policy.reviewedSha,
+    status: "reviewed",
+    decision: "accepted",
+    owner: policy.owner,
+    signedAt: policy.signedAt,
+    expiresAt: policy.expiresAt,
+    highOrCritical: policy.actionableHighOrCritical,
+    observedHighOrCritical: policy.observedHighOrCritical,
+    nonfixableHighOrCritical: policy.nonfixableHighOrCritical,
+    actionableIds: policy.actionableIds,
+    observedIds: policy.observedIds,
+    nonfixableIds: policy.nonfixableIds,
+    rendererImageId: evidence.rendererImageId,
+    requiredOwner: "security/release owner",
+    noWaiverReceipt: {
+      decision: "no_waivers",
+      owner: policy.owner,
+      reviewedSha: policy.reviewedSha,
+      baseImageClassification: policy.baseImageClassification,
+      signedAt: policy.signedAt,
+      expiresAt: policy.expiresAt,
+    },
+    waiverEntries: [],
+  };
+}
+
+function ingestOwnerPolicy(directory, encodedPolicy, { reviewedSha, checkoutSha, now = Date.now() } = {}) {
+  const policy = decodeBase64Json(encodedPolicy);
+  const summary = evidenceOwnerSummary(directory);
+  const errors = validateOwnerPolicy(policy, { reviewedSha, checkoutSha, ...summary, now });
+  if (errors.length > 0) throw new Error(errors.join("; "));
+  writeJson(directory, "owner-disposition.json", acceptedOwnerDisposition(policy, summary));
+  writeArtifactManifest(directory, reviewedSha, checkoutSha);
+  writeJson(directory, "validation.json", {
+    schema: "xot-hosted-supply-validation-v1",
+    reviewedSha,
+    checkoutSha,
+    status: "passed_owner_accepted",
+    errors: [],
+  });
+  return policy;
+}
+
 function normalizeDockerInspect(value, { status = 0, timedOut = false } = {}) {
   if (timedOut) throw new Error("renderer Docker image inspect timed out");
   if (status !== 0) throw new Error(`renderer Docker image inspect command failed with status ${status}`);
@@ -412,13 +543,20 @@ function validateEvidenceDirectory(directory, reviewedSha, checkoutSha, { requir
   ].flatMap((audit) => audit?.findings ?? []).filter((finding) => ["high", "critical"].includes(finding.severity));
   const trivyHighOrCritical = (trivy?.findings ?? []).filter((finding) => ["HIGH", "CRITICAL"].includes(finding.severity));
   const actionableFindings = npmHighOrCritical.concat(trivyHighOrCritical).filter((finding) => finding.actionable === true);
+  const observedFindings = npmHighOrCritical.concat(trivyHighOrCritical);
   const actionableHighOrCritical = actionableFindings.length;
   const actionableIds = actionableFindings.map((finding) => finding.id).sort();
   const nonfixableHighOrCritical = highOrCritical - actionableHighOrCritical;
+  const observedIds = observedFindings.map((finding) => finding.id).sort();
+  const nonfixableIds = observedFindings.filter((finding) => finding.actionable !== true).map((finding) => finding.id).sort();
   if (owner && owner.highOrCritical !== actionableHighOrCritical) errors.push("owner disposition actionable count does not match independently verified evidence");
   if (owner && JSON.stringify(owner.actionableIds ?? []) !== JSON.stringify(actionableIds)) errors.push("owner disposition actionable IDs do not match independently verified evidence");
+  if (owner && JSON.stringify(owner.observedIds ?? []) !== JSON.stringify(observedIds)) errors.push("owner disposition observed finding IDs do not match independently verified evidence");
+  if (owner && JSON.stringify(owner.nonfixableIds ?? []) !== JSON.stringify(nonfixableIds)) errors.push("owner disposition nonfixable finding IDs do not match independently verified evidence");
+  if (owner && owner.rendererImageId !== imageProvenance?.imageId) errors.push("owner disposition renderer image identity does not match independently verified evidence");
   if (requireOwner) {
     if (owner) errors.push(...validateOwnerDisposition(owner, Date.now(), { requireAccepted: true }));
+    if (owner?.status !== "reviewed" || owner?.decision !== "accepted") errors.push("final owner validation requires an accepted owner disposition");
     if (actionableHighOrCritical > 0 && owner?.status !== "reviewed" && owner?.decision !== "accepted") errors.push("actionable high or critical findings require an owner disposition");
   }
 
@@ -442,7 +580,10 @@ function validateEvidenceDirectory(directory, reviewedSha, checkoutSha, { requir
     const validation = JSON.parse(readFileSync(join(directory, "validation.json"), "utf8"));
     const expectedErrors = stableErrors(errors);
     const comparableExpectedErrors = expectedErrors.filter((error) => !isOwnerDispositionError(error));
-    const expectedStatus = comparableExpectedErrors.length === 0 ? "passed_pending_owner_review" : "failed";
+    const ownerAccepted = owner?.status === "reviewed" && owner?.decision === "accepted";
+    const expectedStatus = comparableExpectedErrors.length === 0
+      ? (requireOwner && ownerAccepted ? "passed_owner_accepted" : "passed_pending_owner_review")
+      : "failed";
     if (validation.schema !== "xot-hosted-supply-validation-v1" || validation.reviewedSha !== reviewedSha || validation.checkoutSha !== checkoutSha) errors.push("validation record identity is invalid");
     const statusMatches = validation.status === expectedStatus || (!requireOwner && expectedStatus === "passed_pending_owner_review" && validation.status === "failed");
     if (!statusMatches) errors.push("validation record status does not match independently verified evidence");
@@ -560,12 +701,16 @@ function collect(outputDirectory, reviewedSha) {
   const scannerStatus = trivy.status === "unavailable" || imageSbom.status === "unavailable" ? "failed" : "passed";
   const actionableHighOrCritical = Object.values(auditResults).flatMap((audit) => audit?.findings ?? []).filter((finding) => finding.actionable === true).length
     + (trivy.findings ?? []).filter((finding) => finding.actionable === true).length;
+  const observedFindings = Object.values(auditResults).flatMap((audit) => audit?.findings ?? []).filter((finding) => ["high", "critical"].includes(finding.severity))
+    .concat((trivy.findings ?? []).filter((finding) => ["HIGH", "CRITICAL"].includes(finding.severity)));
+  const observedIds = observedFindings.map((finding) => finding.id).sort();
+  const nonfixableIds = observedFindings.filter((finding) => finding.actionable !== true).map((finding) => finding.id).sort();
   errors.push(...evaluateEvidenceContract({ reviewedSha, checkoutSha, actionRefs, scannerStatus, highOrCritical: actionableHighOrCritical, requireOwner: false }));
   const npmVersionResult = run("npm", ["--version"]);
   recordTimeout(npmVersionResult, "npm version probe", errors);
   const provenance = { schema: "xot-hosted-supply-provenance-v1", reviewedSha, checkoutSha, actionRefs, tools: { node: process.version, npm: npmVersionResult.stdout.trim(), docker: dockerVersion, trivy: TRIVY_IMAGE, syft: SYFT_IMAGE, supabaseCli: { declared: "2.111.0", observed: null } }, artifactPolicy: "redacted reviewable metadata only; no raw logs, secrets, tokens, credentials, or provider data" };
   writeJson(outputDirectory, "provenance.json", provenance);
-  writeJson(outputDirectory, "owner-disposition.json", { schema: "xot-hosted-supply-owner-disposition-v1", reviewedSha, status: "awaiting_owner_review", decision: "not_accepted", highOrCritical: actionableHighOrCritical, observedHighOrCritical: highOrCritical, nonfixableHighOrCritical: highOrCritical - actionableHighOrCritical, actionableIds: Object.values(auditResults).flatMap((audit) => audit?.findings ?? []).concat(trivy.findings ?? []).filter((finding) => finding.actionable === true).map((finding) => finding.id).sort(), requiredOwner: "security/release owner", noWaiverReceipt: null, waiverEntries: [] });
+  writeJson(outputDirectory, "owner-disposition.json", { schema: "xot-hosted-supply-owner-disposition-v1", reviewedSha, status: "awaiting_owner_review", decision: "not_accepted", highOrCritical: actionableHighOrCritical, observedHighOrCritical: highOrCritical, nonfixableHighOrCritical: highOrCritical - actionableHighOrCritical, actionableIds: observedFindings.filter((finding) => finding.actionable === true).map((finding) => finding.id).sort(), observedIds, nonfixableIds, rendererImageId: imageInspect.Id ?? null, requiredOwner: "security/release owner", noWaiverReceipt: null, waiverEntries: [] });
   writeArtifactManifest(outputDirectory, reviewedSha, checkoutSha);
   errors.push(...validateEvidenceArtifacts(outputDirectory, false));
   const validationErrors = stableErrors(errors);
@@ -574,14 +719,51 @@ function collect(outputDirectory, reviewedSha) {
   return validation;
 }
 
+function validateOnlyEvidence(outputDirectory, {
+  reviewedSha,
+  checkoutSha,
+  technicalOnly = false,
+  policyMode = null,
+  encodedPolicy = null,
+  now = Date.now(),
+} = {}) {
+  const technicalErrors = validateEvidenceDirectory(outputDirectory, reviewedSha, checkoutSha, { requireOwner: false });
+  let errors = technicalErrors;
+  let ownerDisposition = "pending";
+  if (!technicalOnly && technicalErrors.length === 0) {
+    if (policyMode !== OWNER_POLICY_MODE) {
+      if (encodedPolicy) errors = ["exact-head owner policy mode is not enabled"];
+      else errors = ["exact-head owner policy is missing"];
+    } else if (!encodedPolicy) {
+      errors = ["exact-head owner policy is missing"];
+    } else {
+      try {
+        ingestOwnerPolicy(outputDirectory, encodedPolicy, { reviewedSha, checkoutSha, now });
+        ownerDisposition = "accepted";
+        errors = validateEvidenceDirectory(outputDirectory, reviewedSha, checkoutSha, { requireOwner: true });
+      } catch (error) {
+        errors = [error instanceof Error ? error.message : "exact-head owner policy is invalid"];
+      }
+    }
+  }
+  return { errors, ownerDisposition };
+}
+
 function validateOnly(outputDirectory) {
   const reviewedSha = process.env.XOT_REVIEWED_SHA ?? null;
   const checkoutSha = run("git", ["rev-parse", "HEAD"]).stdout.trim();
-  const errors = validateEvidenceDirectory(outputDirectory, reviewedSha, checkoutSha, { requireOwner: !process.argv.includes("--technical-only") });
+  const result = validateOnlyEvidence(outputDirectory, {
+    reviewedSha,
+    checkoutSha,
+    technicalOnly: process.argv.includes("--technical-only"),
+    policyMode: process.env[OWNER_POLICY_MODE_ENV] ?? null,
+    encodedPolicy: process.env[OWNER_POLICY_ENV] ?? null,
+  });
+  const { errors, ownerDisposition } = result;
   if (errors.length > 0) {
     console.error(`HOSTED_SUPPLY_EVIDENCE_FAIL\n- ${errors.join("\n- ")}`);
     process.exitCode = 1;
-  } else console.log(`HOSTED_SUPPLY_EVIDENCE_PASS sha=${reviewedSha} ownerDisposition=pending`);
+  } else console.log(`HOSTED_SUPPLY_EVIDENCE_PASS sha=${reviewedSha} ownerDisposition=${ownerDisposition}`);
 }
 
 export {
@@ -595,6 +777,12 @@ export {
   validateEvidenceArtifacts,
   validateEvidenceDirectory,
   validateOwnerDisposition,
+  decodeBase64Json,
+  validateOwnerPolicy,
+  evidenceOwnerSummary,
+  acceptedOwnerDisposition,
+  ingestOwnerPolicy,
+  validateOnlyEvidence,
 };
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -106,6 +106,18 @@ test("Vercel must include the renderer runtime metadata used by the build gate",
   assert.ok(validateRuntimeContract({ root, actualNodeVersion: "20.19.0" }).errors.some((error) => error.includes("Vercel ignore contract hash")));
 }));
 
+test("renderer Docker base must retain the reviewed immutable selector and digest", () => withFixture((root) => {
+  const path = join(root, "services/video-renderer/Dockerfile");
+  const original = readFileSync(path, "utf8");
+  for (const mutant of [
+    original.replace(/FROM node:20-bookworm-slim@sha256:[a-f0-9]+/, "FROM node:20-bookworm-slim"),
+    original.replace(/FROM node:20-bookworm-slim@sha256:[a-f0-9]+/, `FROM node:20-bookworm-slim@sha256:${"0".repeat(64)}`),
+  ]) {
+    writeFileSync(path, mutant);
+    assert.ok(validateRuntimeContract({ root, actualNodeVersion: "20.19.0" }).errors.some((error) => error.includes("renderer Docker selector")));
+  }
+}));
+
 test("the prebuild wrapper cannot silently drop runtime or environment checks", () => withFixture((root) => {
   const path = join(root, "scripts/check-build-contract.mjs");
   writeFileSync(path, `${readFileSync(path, "utf8")}\n// bypass\n`);

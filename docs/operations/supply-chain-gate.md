@@ -61,33 +61,57 @@ The current ledger status is `awaiting_fresh_scan_evidence`. Its empty waiver
 arrays mean no current scan evidence was recorded in this source-only slice;
 they do **not** prove that either dependency tree has zero advisories.
 
+The final owner step accepts a reviewed zero-actionable scan through the
+out-of-band GitHub Actions repository variable
+`XOT_SUPPLY_OWNER_POLICY_B64`. The variable contains base64-encoded JSON with
+schema `xot-hosted-supply-owner-policy-v1`, the exact reviewed and checked-out
+SHA, named owner, dated signature, future expiry, observed/actionable/nonfixable
+high-or-critical counts, all observed high-or-critical IDs, exact nonfixable
+IDs, an allowed base-image classification, the decision
+`accept_zero_actionable_no_waivers`, and an empty waiver list. The
+workflow enables this path only with the fixed
+`XOT_SUPPLY_OWNER_POLICY_MODE=exact-head` setting. The collector validates the
+technical artifact manifest before reading the policy, constructs an accepted
+owner disposition in the runner workspace, refreshes that manifest digest,
+writes `validation.json` as `passed_owner_accepted`, and runs the independent
+final validator. The accepted bundle records the renderer image ID produced by
+that rerun and is uploaded only after the validator passes. Missing, malformed,
+stale, mismatched, actionable, or waived policy data remains blocked. The
+pinned base digest and complete observed-ID list are the owner-policy boundary;
+the run-specific image ID remains evidence rather than a cross-run policy key
+because equivalent Docker builds need not have identical image IDs. Debian
+snapshot pinning is not part of this gate. This avoids
+committing a receipt that changes the exact SHA it is meant to approve; the
+repository variable must be refreshed for each exact-head scan.
+
 The older cleanup baseline recorded three moderate root production advisories
 and a clean renderer audit. That observation is historical context only, not a
 fresh scan receipt and not an implicit waiver.
 
-## Deliberate non-claims and remaining SR-SUPPLY-01 work
+## Deliberate non-claims before a green exact-head run
 
-This change does not provide any of the following:
+The source change alone does not provide any of the following:
 
 - a fresh root or renderer audit result from CI;
 - full dev/build advisory triage;
 - an SBOM or license inventory;
 - a Docker image or installed-APT vulnerability scan;
-- an approved immutable image digest;
+- a hosted result for the reviewed immutable base-image digest;
 - CI action SHA-pin review; or
 - a Deno/import image scan beyond static lock checksum coverage.
 
-Do not mark AIR-052, AIR-053, AIR-075, or AIR-078 closed from this source-only
-gate. The historical Supabase PAT secret-scanning alert remains a separate
+Do not mark AIR-052, AIR-053, AIR-075, or AIR-078 closed from source changes
+alone. The historical Supabase PAT secret-scanning alert remains a separate
 release-security follow-up and must not be entered as a dependency waiver.
 
-## Required next evidence after merge approval
+## Required next evidence before owner acceptance
 
-Run the protected CI job on the reviewed SHA, retain the root and renderer audit
-outputs, then record any findings in the exception ledger with owner and expiry.
-Follow with a separately approved scanner/SBOM/license/image/remote-import run.
-Only that combined evidence can satisfy the full `SR-SUPPLY-01` acceptance
-criteria in the remediation plan.
+Run the protected CI job on the exact reviewed SHA and retain the pending
+bundle. Review its complete finding IDs and counts, then set the exact-head
+repository variable and rerun the same SHA. Retain the accepted bundle from the
+green rerun. Any changed finding set needs a new review. Only that combined
+evidence can satisfy the full `SR-SUPPLY-01` acceptance criteria in the
+remediation plan.
 
 GitHub branch protection must require the blocking `lint-build` check, and
 review/CODEOWNERS policy must protect this workflow, its source checker, and the

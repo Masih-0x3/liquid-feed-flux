@@ -194,4 +194,12 @@ jobs:
       - name: Enforce final hosted supply-chain owner disposition
         env:
           XOT_REVIEWED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          XOT_SUPPLY_OWNER_POLICY_MODE: exact-head
+          XOT_SUPPLY_OWNER_POLICY_B64: ${{ vars.XOT_SUPPLY_OWNER_POLICY_B64 }}
         run: node scripts/collect-supply-chain-evidence.mjs --validate-only --output-dir "$RUNNER_TEMP/xot-supply-chain"
+      - name: Upload accepted hosted supply-chain evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: xot-supply-chain-accepted-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/xot-supply-chain
+          if-no-files-found: error

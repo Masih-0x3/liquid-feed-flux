@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -15,6 +16,11 @@ import {
   validateOwnerDisposition,
   validateEvidenceDirectory,
   validateEvidenceArtifacts,
+  decodeBase64Json,
+  validateOwnerPolicy,
+  acceptedOwnerDisposition,
+  ingestOwnerPolicy,
+  validateOnlyEvidence,
 } from "./collect-supply-chain-evidence.mjs";
 
 test("npm audit normalization keeps only reviewable metadata", () => {
@@ -217,4 +223,217 @@ test("owner acceptance requires dated no-waiver or per-finding dispositions", ()
   };
   assert.deepEqual(validateOwnerDisposition(acceptedClean, Date.parse("2026-09-02T01:00:00Z")), []);
   assert.ok(validateOwnerDisposition({ ...acceptedClean, noWaiverReceipt: { ...acceptedClean.noWaiverReceipt, signedAt: "2026-09-03T00:00:00Z" } }, Date.parse("2026-09-02T01:00:00Z")).some((error) => error.includes("no-waiver")));
+});
+
+function ownerPolicy(overrides = {}) {
+  return {
+    schema: "xot-hosted-supply-owner-policy-v1",
+    reviewedSha: "a".repeat(40),
+    owner: "release-security",
+    signedAt: "2026-09-02T00:00:00Z",
+    expiresAt: "2026-10-02T00:00:00Z",
+    decision: "accept_zero_actionable_no_waivers",
+    actionableHighOrCritical: 0,
+    observedHighOrCritical: 0,
+    nonfixableHighOrCritical: 0,
+    actionableIds: [],
+    observedIds: [],
+    nonfixableIds: [],
+    baseImageClassification: "reviewed-non-actionable",
+    waiverEntries: [],
+    ...overrides,
+  };
+}
+
+const ownerPolicyContext = {
+  reviewedSha: "a".repeat(40),
+  checkoutSha: "a".repeat(40),
+  actionableHighOrCritical: 0,
+  observedHighOrCritical: 0,
+  nonfixableHighOrCritical: 0,
+  actionableIds: [],
+  observedIds: [],
+  nonfixableIds: [],
+  now: Date.parse("2026-09-02T01:00:00Z"),
+};
+
+test("exact-head owner policy accepts the current zero-actionable scan and maps to a disposition", () => {
+  const policy = ownerPolicy();
+  const encoded = Buffer.from(JSON.stringify(policy)).toString("base64");
+  assert.deepEqual(decodeBase64Json(encoded), policy);
+  assert.deepEqual(validateOwnerPolicy(policy, ownerPolicyContext), []);
+  const disposition = acceptedOwnerDisposition(policy, { rendererImageId: "sha256:fixture" });
+  assert.equal(disposition.status, "reviewed");
+  assert.equal(disposition.decision, "accepted");
+  assert.equal(disposition.reviewedSha, ownerPolicyContext.reviewedSha);
+  assert.equal(disposition.noWaiverReceipt.decision, "no_waivers");
+  assert.equal(disposition.noWaiverReceipt.baseImageClassification, policy.baseImageClassification);
+  assert.deepEqual(disposition.waiverEntries, []);
+});
+
+test("exact-head owner policy fails closed for missing or tampered base64", () => {
+  assert.throws(() => decodeBase64Json(""), /missing/);
+  assert.throws(() => decodeBase64Json("not-base64"), /base64 is malformed/);
+  const encoded = Buffer.from(JSON.stringify(ownerPolicy())).toString("base64");
+  assert.throws(() => decodeBase64Json(`${encoded.slice(0, -1)}A`), /JSON is malformed|base64 is malformed/);
+});
+
+test("exact-head owner policy rejects wrong SHA, signature dates, counts, IDs, actionable findings, and waivers", () => {
+  const cases = [
+    ["SHA", { reviewedSha: "b".repeat(40) }, /exact reviewed SHA/],
+    ["future signature", { signedAt: "2026-09-03T00:00:00Z" }, /dated signature/],
+    ["expired policy", { expiresAt: "2026-09-02T00:30:00Z" }, /future expiry/],
+    ["observed count", { observedHighOrCritical: 1 }, /observed high or critical/],
+    ["nonfixable count", { nonfixableHighOrCritical: 1 }, /nonfixable count/],
+    ["actionable IDs", { actionableIds: ["unexpected"] }, /actionable IDs/],
+    ["observed IDs", { observedIds: ["unexpected"] }, /observed finding IDs/],
+    ["nonfixable IDs", { nonfixableIds: ["unexpected"] }, /nonfixable finding IDs/],
+    ["actionable finding", { actionableHighOrCritical: 1 }, /zero current actionable/],
+    ["waiver decision", { decision: "accepted" }, /decision must/],
+    ["base image classification", { baseImageClassification: "unknown" }, /base-image classification/],
+    ["waiver entry", { waiverEntries: [{ id: "W-1" }] }, /no waiver entries/],
+  ];
+  for (const [, overrides, expected] of cases) {
+    assert.ok(validateOwnerPolicy(ownerPolicy(overrides), ownerPolicyContext).some((error) => expected.test(error)));
+  }
+  assert.ok(validateOwnerPolicy(ownerPolicy(), { ...ownerPolicyContext, actionableHighOrCritical: 1 }).some((error) => error.includes("current actionable")));
+});
+
+test("exact-head owner policy rejects unknown fields and technical-only evidence remains independently represented", () => {
+  const errors = validateOwnerPolicy(ownerPolicy({ unexpected: true }), ownerPolicyContext);
+  assert.ok(errors.some((error) => error.includes("unexpected fields")));
+  const pending = { status: "awaiting_owner_review", decision: "not_accepted", highOrCritical: 0 };
+  assert.deepEqual(validateOwnerDisposition(pending), []);
+});
+
+const COMPLETE_EVIDENCE_ARTIFACTS = [
+  "root-npm-audit.json", "renderer-npm-audit.json", "root-dev-npm-audit.json", "renderer-dev-npm-audit.json",
+  "root-sbom.spdx.json", "renderer-sbom.spdx.json", "license-inventory.json", "deno-import-evidence.json",
+  "renderer-image-provenance.json", "renderer-image-trivy.json", "renderer-image-sbom.spdx.json",
+  "provenance.json", "owner-disposition.json",
+];
+
+function fileSha256(path) {
+  return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+function writeCompleteEvidenceFixture(directory, reviewedSha) {
+  const audit = (surface) => ({
+    schema: "xot-hosted-npm-audit-v1", surface, reviewedSha, status: "passed", commandStatus: 0,
+    timedOut: false, reportVersion: 2, vulnerabilities: { info: 0, low: 0, moderate: 0, high: 0, critical: 0 },
+    findings: [], findingSummary: { total: 0, actionable: 0, nonfixable: 0, ids: [] },
+  });
+  for (const surface of ["root", "renderer", "root-dev", "renderer-dev"]) writeJsonFixture(directory, `${surface}-npm-audit.json`, audit(surface));
+  const sbom = (surface) => ({
+    schema: "xot-hosted-spdx-sbom-v1", status: "passed", surface, reviewedSha, commandStatus: 0,
+    timedOut: false, spdxVersion: "SPDX-2.3", name: surface, creationInfo: { created: null, creators: [] },
+    packageCount: 1, packages: [{ name: "fixture", version: "1.0.0", licenseDeclared: "MIT", licenseConcluded: "MIT" }],
+  });
+  for (const surface of ["root", "renderer"]) writeJsonFixture(directory, `${surface}-sbom.spdx.json`, sbom(surface));
+  writeJsonFixture(directory, "renderer-image-sbom.spdx.json", sbom("renderer-image"));
+  writeJsonFixture(directory, "license-inventory.json", {
+    schema: "xot-hosted-license-inventory-v1", reviewedSha,
+    surfaces: { root: { packageCount: 1, licenses: ["MIT"] }, renderer: { packageCount: 1, licenses: ["MIT"] } },
+  });
+  const functionCount = readdirSync(join(process.cwd(), "supabase/functions"), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && statSync(join(process.cwd(), "supabase/functions", entry.name, "index.ts"), { throwIfNoEntry: false })?.isFile()).length;
+  writeJsonFixture(directory, "deno-import-evidence.json", {
+    schema: "xot-hosted-deno-import-v1", reviewedSha, status: "passed", reason: "fixture",
+    scanMode: "non-executing-frozen-lock-resolution", resolutionMethod: "deno-check-frozen",
+    runtimeExecution: "not_run_by_policy", denoVersion: "2.0.0", versionCommandStatus: 0,
+    versionTimedOut: false, commandStatus: 0, timedOut: false, timeoutMs: 5 * 60 * 1000,
+    lockSha256: fileSha256(join(process.cwd(), "deno.lock")), entrypointCount: functionCount,
+  });
+  writeJsonFixture(directory, "renderer-image-provenance.json", {
+    schema: "xot-hosted-renderer-image-v1", reviewedSha, image: "fixture", dockerVersion: "fixture",
+    buildStatus: 0, buildTimedOut: false, inspectStatus: 0, inspectTimedOut: false,
+    imageId: "sha256:fixture", architecture: "amd64", os: "linux", rootfsLayers: 1, dockerfileSha256: "fixture",
+  });
+  writeJsonFixture(directory, "renderer-image-trivy.json", {
+    schema: "xot-hosted-trivy-v1", status: "passed", reviewedSha, commandStatus: 0, timedOut: false,
+    resultCount: 1, findings: [], findingSummary: { total: 0, actionable: 0, nonfixable: 0, ids: [] }, severityCounts: {},
+  });
+  writeJsonFixture(directory, "provenance.json", {
+    schema: "xot-hosted-supply-provenance-v1", reviewedSha, checkoutSha: reviewedSha,
+    actionRefs: [{ action: "actions/checkout", version: "1".repeat(40), shaPinned: true }],
+  });
+  writeJsonFixture(directory, "owner-disposition.json", {
+    schema: "xot-hosted-supply-owner-disposition-v1", reviewedSha, status: "awaiting_owner_review",
+    decision: "not_accepted", highOrCritical: 0, observedHighOrCritical: 0, nonfixableHighOrCritical: 0,
+    actionableIds: [], observedIds: [], nonfixableIds: [], rendererImageId: "sha256:fixture",
+    requiredOwner: "security/release owner", noWaiverReceipt: null, waiverEntries: [],
+  });
+  const manifest = {
+    schema: "xot-hosted-supply-artifact-manifest-v1", reviewedSha, checkoutSha: reviewedSha,
+    artifacts: COMPLETE_EVIDENCE_ARTIFACTS.map((path) => ({ path, sha256: fileSha256(join(directory, path)) })),
+  };
+  writeJsonFixture(directory, "artifact-manifest.json", manifest);
+  writeJsonFixture(directory, "validation.json", {
+    schema: "xot-hosted-supply-validation-v1", reviewedSha, checkoutSha: reviewedSha,
+    status: "passed_pending_owner_review", errors: [],
+  });
+}
+
+function writeJsonFixture(directory, name, value) {
+  writeFileSync(join(directory, name), `${JSON.stringify(value, null, 2)}\n`);
+}
+
+test("ingestOwnerPolicy accepts a complete fixture, rewrites disposition, and refreshes manifest", () => {
+  const directory = mkdtempSync(join(tmpdir(), "xot-supply-ingest-"));
+  try {
+    const reviewedSha = "a".repeat(40);
+    writeCompleteEvidenceFixture(directory, reviewedSha);
+    const before = JSON.parse(readFileSync(join(directory, "artifact-manifest.json"), "utf8"));
+    const policy = ownerPolicy({ reviewedSha });
+    const encoded = Buffer.from(JSON.stringify(policy)).toString("base64");
+    assert.deepEqual(validateOnlyEvidence(directory, { reviewedSha, checkoutSha: reviewedSha, technicalOnly: true, policyMode: "exact-head", encodedPolicy: "tampered" }).errors, []);
+    assert.deepEqual(ingestOwnerPolicy(directory, encoded, { reviewedSha, checkoutSha: reviewedSha, now: ownerPolicyContext.now }), policy);
+    const afterIngest = JSON.parse(readFileSync(join(directory, "artifact-manifest.json"), "utf8"));
+    assert.notDeepEqual(afterIngest, before);
+    const owner = JSON.parse(readFileSync(join(directory, "owner-disposition.json"), "utf8"));
+    const after = JSON.parse(readFileSync(join(directory, "artifact-manifest.json"), "utf8"));
+    assert.equal(owner.status, "reviewed");
+    assert.equal(owner.decision, "accepted");
+    assert.equal(owner.noWaiverReceipt.baseImageClassification, policy.baseImageClassification);
+    assert.equal(JSON.parse(readFileSync(join(directory, "validation.json"), "utf8")).status, "passed_owner_accepted");
+    assert.notDeepEqual(after, before);
+    assert.equal(after.artifacts.find((entry) => entry.path === "owner-disposition.json").sha256, fileSha256(join(directory, "owner-disposition.json")));
+    assert.deepEqual(validateEvidenceDirectory(directory, reviewedSha, reviewedSha, { requireOwner: true }), []);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("validate-only keeps technical mode independent and blocks missing policy mode", () => {
+  const directory = mkdtempSync(join(tmpdir(), "xot-supply-policy-mode-"));
+  try {
+    const reviewedSha = "a".repeat(40);
+    writeCompleteEvidenceFixture(directory, reviewedSha);
+    const pending = validateOnlyEvidence(directory, { reviewedSha, checkoutSha: reviewedSha, technicalOnly: true, policyMode: "exact-head", encodedPolicy: "not-base64" });
+    assert.deepEqual(pending.errors, []);
+    assert.equal(JSON.parse(readFileSync(join(directory, "owner-disposition.json"), "utf8")).status, "awaiting_owner_review");
+    const blocked = validateOnlyEvidence(directory, { reviewedSha, checkoutSha: reviewedSha, policyMode: null, encodedPolicy: null });
+    assert.ok(blocked.errors.some((error) => error.includes("policy is missing")));
+    const policy = Buffer.from(JSON.stringify(ownerPolicy({ reviewedSha }))).toString("base64");
+    const accepted = validateOnlyEvidence(directory, { reviewedSha, checkoutSha: reviewedSha, policyMode: "exact-head", encodedPolicy: policy, now: ownerPolicyContext.now });
+    assert.deepEqual(accepted.errors, []);
+    assert.equal(JSON.parse(readFileSync(join(directory, "validation.json"), "utf8")).status, "passed_owner_accepted");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("validate-only rejects tampered evidence before policy ingestion", () => {
+  const directory = mkdtempSync(join(tmpdir(), "xot-supply-tamper-"));
+  try {
+    const reviewedSha = "a".repeat(40);
+    writeCompleteEvidenceFixture(directory, reviewedSha);
+    writeJsonFixture(directory, "root-npm-audit.json", { schema: "xot-hosted-npm-audit-v1", reviewedSha, status: "passed" });
+    const policy = Buffer.from(JSON.stringify(ownerPolicy({ reviewedSha }))).toString("base64");
+    const result = validateOnlyEvidence(directory, { reviewedSha, checkoutSha: reviewedSha, policyMode: "exact-head", encodedPolicy: policy, now: ownerPolicyContext.now });
+    assert.ok(result.errors.some((error) => error.includes("digest mismatch")));
+    assert.equal(JSON.parse(readFileSync(join(directory, "owner-disposition.json"), "utf8")).status, "awaiting_owner_review");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

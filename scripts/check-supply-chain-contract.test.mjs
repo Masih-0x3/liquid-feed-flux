@@ -213,6 +213,50 @@ test("quoted step properties cannot make hosted evidence non-blocking", () => wi
   assert.ok(validateSupplyChainContract({ root }).errors.some((error) => error.includes("must remain blocking")));
 }));
 
+test("final owner validation must retain the exact-head policy mode and repository variable", () => withFixture((root) => {
+  const path = join(root, ".github/workflows/ci.yml");
+  const original = readFileSync(path, "utf8");
+  for (const mutant of [
+    original.replace("          XOT_SUPPLY_OWNER_POLICY_MODE: exact-head\n", ""),
+    original.replace("          XOT_SUPPLY_OWNER_POLICY_B64: ${{ vars.XOT_SUPPLY_OWNER_POLICY_B64 }}\n", ""),
+    original.replace("          XOT_SUPPLY_OWNER_POLICY_B64: ${{ vars.XOT_SUPPLY_OWNER_POLICY_B64 }}", "          XOT_SUPPLY_OWNER_POLICY_B64: ${{ secrets.XOT_SUPPLY_OWNER_POLICY_B64 }}"),
+  ]) {
+    writeFileSync(path, mutant);
+    const errors = validateSupplyChainContract({ root }).errors;
+    assert.ok(errors.some((error) => error.includes("exact-head owner policy") || error.includes("owner policy only from the reviewed repository variable")));
+  }
+}));
+
+test("accepted hosted evidence must be uploaded only after successful final validation", () => withFixture((root) => {
+  const path = join(root, ".github/workflows/ci.yml");
+  const original = readFileSync(path, "utf8");
+  const acceptedStep = [
+    "      - name: Upload accepted hosted supply-chain evidence",
+    "        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2",
+    "        with:",
+    "          name: xot-supply-chain-accepted-${{ github.event.pull_request.head.sha || github.sha }}",
+    "          path: ${{ runner.temp }}/xot-supply-chain",
+    "          if-no-files-found: error",
+  ].join("\n");
+  const withoutAcceptedUpload = original.replace(`${acceptedStep}\n`, "");
+  writeFileSync(path, withoutAcceptedUpload);
+  assert.ok(validateSupplyChainContract({ root }).errors.some((error) => error.includes("accepted-bundle upload sequence")));
+  writeFileSync(path, original.replace(`${acceptedStep}\n`, `${acceptedStep}\n      - run: echo after-accepted-upload\n`));
+  assert.ok(validateSupplyChainContract({ root }).errors.some((error) => error.includes("immediately before the accepted-bundle upload")));
+}));
+
+test("renderer Docker base must retain the reviewed immutable digest", () => withFixture((root) => {
+  const path = join(root, "services/video-renderer/Dockerfile");
+  const original = readFileSync(path, "utf8");
+  for (const mutant of [
+    original.replace(/FROM node:20-bookworm-slim@sha256:[a-f0-9]+/, "FROM node:20-bookworm-slim"),
+    original.replace(/FROM node:20-bookworm-slim@sha256:[a-f0-9]+/, `FROM node:20-bookworm-slim@sha256:${"0".repeat(64)}`),
+  ]) {
+    writeFileSync(path, mutant);
+    assert.ok(validateSupplyChainContract({ root }).errors.some((error) => error.includes("renderer Docker base selector")));
+  }
+}));
+
 test("unchecksummed Deno remote imports are rejected", () => withFixture((root) => {
   const path = join(root, "deno.lock");
   const lock = JSON.parse(readFileSync(path, "utf8"));
