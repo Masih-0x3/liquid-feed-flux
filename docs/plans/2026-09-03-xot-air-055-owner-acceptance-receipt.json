@@ -1,0 +1,89 @@
+{
+  "schema": "xot-air-055-owner-acceptance-receipt-v1",
+  "artifactKind": "detached-owner-attestation",
+  "gateId": "AIR-055",
+  "airId": "AIR-055",
+  "status": "ACCEPTED_OWNER_WITH_DOCUMENTED_LIMITATION",
+  "release": "OWNER_ACCEPTED_LIMITATION_EVIDENCE_ONLY",
+  "releaseGate": "OWNER_DECISION_ACCEPTED; EXACT_SOURCE_TO_LIVE_EQUIVALENCE_AND_MERGE/DEPLOY/PRODUCTION_MUTATION_NOT_AUTHORIZED",
+  "claimBoundary": "This receipt records the named build-and-release owner's acceptance of the documented provenance limitation. It closes the owner-decision gap only; it does not prove exact source-to-live equivalence or authorize merge, deploy, or Production mutation.",
+  "repository": "Masih-0x3/liquid-feed-flux",
+  "reviewedBranch": "codex/video-render-workspace-redesign",
+  "reviewedSha": "8ac9edbfc7235ab7c0e822c65e15c0bcdc68a5a1",
+  "ownerRole": "build-and-release-owner:Masih-0x3",
+  "reviewerRole": "build-and-release-owner:Masih-0x3",
+  "reviewState": "ACCEPTED_OWNER_WITH_DOCUMENTED_LIMITATION",
+  "observedAt": "2026-09-02T23:42:00Z",
+  "reviewedAt": "2026-09-03T01:18:30Z",
+  "signerRole": "build-and-release-owner:Masih-0x3",
+  "signedAt": "2026-09-03T01:18:30Z",
+  "cryptographicSignatureClaimed": false,
+  "signatureState": "NO_CRYPTOGRAPHIC_SIGNATURE",
+  "receiptSha256": null,
+  "receiptSha256Rule": "Hash the finalized UTF-8 receipt bytes with receiptSha256 remaining null; bind that detached hash from the current successor.",
+  "sourceReceiptPath": "docs/plans/2026-09-02-xot-air-055-production-provenance-evidence-receipt.json",
+  "sourceReceiptSha256": "a7e632460482583eef719c7e7ddbd5c5a7078f3fa69e171c9799488ef89fea84",
+  "sourcePaths": [
+    "docs/plans/2026-09-02-xot-air-055-production-provenance-evidence-receipt.json"
+  ],
+  "sourceRequirementHashes": {
+    "docs/plans/2026-09-02-xot-air-055-production-provenance-evidence-receipt.json": "a7e632460482583eef719c7e7ddbd5c5a7078f3fa69e171c9799488ef89fea84"
+  },
+  "decisionOrEvidence": "Formal owner acceptance: accept the recorded Vercel file-tree 404, source-map 403, and missing exact Edge Function Git association for the observed deployment as a documented limitation; require stronger reproducible artifact provenance on a future deployment.",
+  "ownerDecision": {
+    "state": "ACCEPTED_OWNER_WITH_DOCUMENTED_LIMITATION",
+    "decision": "accept_with_documented_limitation",
+    "owner": "build-and-release-owner:Masih-0x3",
+    "acceptedAt": "2026-09-03T01:18:30Z",
+    "acceptedLimitations": [
+      "Vercel deployment file tree returned 404",
+      "production source maps returned 403",
+      "exact Edge Function Git association remains unproven"
+    ],
+    "recommendationNotApproval": "RECOMMENDATION (NOT APPROVAL): retain the limitation and require a reproducible artifact manifest/source association on the next deployment improvement; this is not exact-equivalence, merge, deploy, or Production approval.",
+    "recheckTriggers": [
+      "deployment or build change",
+      "Edge Function version or bundle-hash change",
+      "migration or public asset change",
+      "source-map or Vercel file-tree access change",
+      "next deployment improvement requiring stronger provenance"
+    ]
+  },
+  "stalenessCheck": {
+    "status": "passed_for_owner_decision_binding",
+    "reviewedBranch": "codex/video-render-workspace-redesign",
+    "reviewedSha": "8ac9edbfc7235ab7c0e822c65e15c0bcdc68a5a1",
+    "sourceReceiptSha256Checked": true,
+    "revalidateBy": null,
+    "revalidateImmediatelyOn": [
+      "any deployment, build, function, migration, or public asset change",
+      "source-map or Vercel deployment file-tree access change",
+      "next deployment improvement or stronger artifact evidence"
+    ]
+  },
+  "redactionCheck": {
+    "status": "passed",
+    "rawLogs": false,
+    "secrets": false,
+    "credentials": false,
+    "privateUrls": false,
+    "functionPayloads": false,
+    "result": "Only receipt paths, hashes, deployment limitation labels, timestamps, role identity, and revalidation triggers are retained."
+  },
+  "noMutation": true,
+  "mutationsPerformed": {
+    "production": false,
+    "supabase": false,
+    "vercel": false,
+    "providers": false,
+    "deployment": false,
+    "merge": false
+  },
+  "predecessor": {
+    "path": "docs/plans/2026-09-02-xot-air-055-production-provenance-evidence-receipt.json",
+    "sha256": "a7e632460482583eef719c7e7ddbd5c5a7078f3fa69e171c9799488ef89fea84",
+    "priorState": "BLOCKED_OWNER_EVIDENCE_REFRESH",
+    "immutableEvidenceReceiptPreserved": true,
+    "supersession": "This append-only owner receipt adds the dated limitation acceptance and does not rewrite the provenance evidence receipt."
+  }
+}
