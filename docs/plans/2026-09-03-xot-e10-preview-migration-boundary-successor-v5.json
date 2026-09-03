@@ -1,0 +1,60 @@
+{
+  "schema": "xot-e10-preview-migration-boundary-successor-v5",
+  "event": "e10_preview_migration_boundary_successor_type_and_node24_candidate_alignment",
+  "phase": "local-type-and-runtime-alignment",
+  "status": "ACCEPTED_LOCAL_TYPE_RUNTIME_ALIGNMENT_T0_T1",
+  "release": "CLOSED",
+  "releaseGate": "CLOSED",
+  "repository": ".",
+  "branch": "codex/video-render-workspace-redesign",
+  "predecessor": {
+    "path": "docs/plans/2026-08-29-xot-e10-preview-migration-boundary-successor-v4.json",
+    "sha256": "ea40cee3be0a9e989895ba135ba121823dfa2495cf956d47ee317df3d6d73486"
+  },
+  "candidateBase": {
+    "path": "docs/plans/2026-08-29-xot-e10-preview-migration-boundary-successor-v3.json",
+    "sha256": "21258fffb9e566ac717169534a1c9d1367850559af9bdac295fd63566fb32840"
+  },
+  "currentCandidateOverrides": {
+    "checkedInTypesSha256": "f1dfd39c5ded189ac5bc39dc5ebd7a1f5986475a4f5cfeb333d650aadfe913dd"
+  },
+  "evidenceOverrides": {
+    "src/integrations/supabase/types.ts": "f1dfd39c5ded189ac5bc39dc5ebd7a1f5986475a4f5cfeb333d650aadfe913dd",
+    "package.json": "550d068af40dc3a35eabfa8dd1c06b63c3e486b0110d698ced1bff47c729d74d",
+    ".github/workflows/ci.yml": "6d128e9853a95d8985827bec4b8ab591685b30682ba3a875dcda34b536a52328"
+  },
+  "supersession": {
+    "reason": "Append-only successor that keeps prior Preview evidence immutable while binding the current production-generated types and Node 24 candidate declarations.",
+    "changedPaths": [
+      "src/integrations/supabase/types.ts",
+      "package.json",
+      ".github/workflows/ci.yml",
+      "docs/plans/2026-09-03-xot-e10-preview-migration-boundary-successor-v5.json"
+    ],
+    "validation": [
+      "production-generated Supabase type comparison",
+      "focused Supabase type contract tests",
+      "runtime and supply-chain contract tests",
+      "strict TypeScript typecheck"
+    ],
+    "evidenceTier": {
+      "achieved": ["T0", "T1"],
+      "carriedForward": ["T2", "T2_LIVE_PREVIEW"],
+      "deferred": ["T2_EXACT_HEAD", "T3", "T4"]
+    },
+    "releaseState": "CLOSED"
+  },
+  "claims": {
+    "productionSchema": "read_only_type_source",
+    "productionDeployment": "not_claimed",
+    "productionChanged": false,
+    "staging": "carried_forward_only",
+    "deployment": "not_claimed",
+    "liveVerification": "not_claimed"
+  },
+  "notClosed": [
+    "Hosted CI must pass on the exact new commit.",
+    "The Node 24 Vercel Preview and renderer image canaries remain pending.",
+    "Production remains unchanged and the release gate remains CLOSED."
+  ]
+}

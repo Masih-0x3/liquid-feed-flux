@@ -295,6 +295,7 @@ export function validateRuntimeContract({
   const rootLock = JSON.parse(readFileSync(join(root, "package-lock.json"), "utf8"));
   const rendererPackage = JSON.parse(readFileSync(join(root, "services/video-renderer/package.json"), "utf8"));
   const rendererLock = JSON.parse(readFileSync(join(root, "services/video-renderer/package-lock.json"), "utf8"));
+  const localNodeVersion = readFileSync(resolve(root, contract.node.local_version_file), "utf8").trim();
   const denoLock = JSON.parse(readFileSync(join(root, "deno.lock"), "utf8"));
   const vercel = JSON.parse(readFileSync(join(root, "vercel.json"), "utf8"));
   const vercelIgnore = readFileSync(join(root, ".vercelignore"), "utf8");
@@ -303,7 +304,7 @@ export function validateRuntimeContract({
   const errors = [];
 
   requireEqual(errors, "contract schema", contract.schema_version, "xot-runtime-contract-v1");
-  requireEqual(errors, "contract status", contract.status, "current_divergence_frozen_upgrade_deferred");
+  requireEqual(errors, "contract status", contract.status, "node24_candidate_aligned_external_canaries_deferred");
   requireEqual(errors, "Supabase CLI repository pin", contract.supabase_cli?.repository_pin, PINNED_SUPABASE_CLI_VERSION);
   requireEqual(errors, "Supabase CLI CI pin command", ci.includes(`npx --yes supabase@${PINNED_SUPABASE_CLI_VERSION} --version`), true);
   requireEqual(errors, "root Node engine", rootPackage.engines?.node, contract.node.root_engine);
@@ -313,6 +314,7 @@ export function validateRuntimeContract({
   requireEqual(errors, "lock root npm engine", rootLock.packages?.[""]?.engines?.npm, contract.node.root_npm_engine);
   requireEqual(errors, "renderer Node engine", rendererPackage.engines?.node, contract.node.renderer_engine);
   requireEqual(errors, "renderer lock Node engine", rendererLock.packages?.[""]?.engines?.node, contract.node.renderer_engine);
+  requireEqual(errors, "local Node version", localNodeVersion, contract.node.local_version);
   requireEqual(errors, "Vite package range", rootPackage.devDependencies?.vite, contract.vite.package_range);
   requireEqual(errors, "Vite lock version", rootLock.packages?.["node_modules/vite"]?.version, contract.vite.lock_version);
   requireEqual(errors, "Vite lock Node engine", rootLock.packages?.["node_modules/vite"]?.engines?.node, contract.vite.lock_node_engine);
@@ -486,5 +488,5 @@ if (isMain) {
     console.error(`Runtime contract FAIL:\n- ${result.errors.join("\n- ")}`);
     process.exit(1);
   }
-  console.log(`Runtime contract PASS: node ${result.actualNodeVersion}; npm ${result.actualNpmVersion ?? "not reported"}; deployment selector ${result.contract.node.deployment_selector}; root/renderer/Deno/Edge Supabase versions frozen with upgrade deferred.`);
+  console.log(`Runtime contract PASS: node ${result.actualNodeVersion}; npm ${result.actualNpmVersion ?? "not reported"}; deployment selector ${result.contract.node.deployment_selector}; Node 24 candidate aligned across local, CI, Vercel, and renderer declarations.`);
 }

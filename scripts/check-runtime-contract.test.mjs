@@ -11,6 +11,7 @@ function withFixture(callback) {
   try {
     for (const path of [
       ".github",
+      ".nvmrc",
       ".vercelignore",
       "docs/operations/runtime-contract.json",
       "package.json",
@@ -33,7 +34,7 @@ function withFixture(callback) {
 }
 
 test("the committed runtime freeze is internally consistent", () => {
-  const result = validateRuntimeContract({ actualNodeVersion: "20.19.0", requireDeploymentMajor: true });
+  const result = validateRuntimeContract({ actualNodeVersion: "24.20.0", actualNpmVersion: "11.19.0", requireDeploymentMajor: true });
   assert.deepEqual(result.errors, []);
 });
 
@@ -43,16 +44,21 @@ test("Vite 8 minimum patch and deployment major fail closed", () => {
   const validDeploymentVersion = expectedDeploymentMajor === 20 ? "19.0" : "12.0";
   assert.ok(validateRuntimeContract({ actualNodeVersion: "20.18.9" }).errors.some((error) => error.includes("Vite 8 supported range")));
   assert.ok(validateRuntimeContract({ actualNodeVersion: `${mismatchedDeploymentMajor}.12.0`, requireDeploymentMajor: true }).errors.some((error) => error.includes("deployment/CI Node major")));
-  assert.ok(validateRuntimeContract({ actualNodeVersion: "20.19.0", actualNpmVersion: "11.0.0" }).errors.some((error) => error.includes("npm major")));
+  assert.ok(validateRuntimeContract({ actualNodeVersion: "24.20.0", actualNpmVersion: "10.0.0" }).errors.some((error) => error.includes("npm major")));
   assert.deepEqual(validateRuntimeContract({ actualNodeVersion: `${expectedDeploymentMajor}.${validDeploymentVersion}` }).errors, []);
 });
 
 test("package engine drift is rejected", () => withFixture((root) => {
   const path = join(root, "package.json");
   const value = JSON.parse(readFileSync(path, "utf8"));
-  value.engines.node = "24.x";
+  value.engines.node = "22.x";
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
   assert.ok(validateRuntimeContract({ root, actualNodeVersion: "20.19.0" }).errors.some((error) => error.includes("root Node engine")));
+}));
+
+test("local Node version file drift is rejected", () => withFixture((root) => {
+  writeFileSync(join(root, ".nvmrc"), "22.23.1\n");
+  assert.ok(validateRuntimeContract({ root, actualNodeVersion: "24.20.0" }).errors.some((error) => error.includes("local Node version")));
 }));
 
 test("an unreviewed Edge Supabase client import is rejected", () => withFixture((root) => {
@@ -110,8 +116,8 @@ test("renderer Docker base must retain the reviewed immutable selector and diges
   const path = join(root, "services/video-renderer/Dockerfile");
   const original = readFileSync(path, "utf8");
   for (const mutant of [
-    original.replace(/FROM node:20-bookworm-slim@sha256:[a-f0-9]+/, "FROM node:20-bookworm-slim"),
-    original.replace(/FROM node:20-bookworm-slim@sha256:[a-f0-9]+/, `FROM node:20-bookworm-slim@sha256:${"0".repeat(64)}`),
+    original.replace(/FROM node:24-bookworm-slim@sha256:[a-f0-9]+/, "FROM node:24-bookworm-slim"),
+    original.replace(/FROM node:24-bookworm-slim@sha256:[a-f0-9]+/, `FROM node:24-bookworm-slim@sha256:${"0".repeat(64)}`),
   ]) {
     writeFileSync(path, mutant);
     assert.ok(validateRuntimeContract({ root, actualNodeVersion: "20.19.0" }).errors.some((error) => error.includes("renderer Docker selector")));
@@ -224,15 +230,15 @@ test("CI must explicitly bootstrap the pinned Deno package after lifecycle suppr
 test("coordinated declaration edits cannot split the Node matrix", () => withFixture((root) => {
   const contractPath = join(root, "docs/operations/runtime-contract.json");
   const contract = JSON.parse(readFileSync(contractPath, "utf8"));
-  contract.node.root_engine = "24.x";
+  contract.node.root_engine = "22.x";
   writeFileSync(contractPath, `${JSON.stringify(contract, null, 2)}\n`);
   const packagePath = join(root, "package.json");
   const packageValue = JSON.parse(readFileSync(packagePath, "utf8"));
-  packageValue.engines.node = "24.x";
+  packageValue.engines.node = "22.x";
   writeFileSync(packagePath, `${JSON.stringify(packageValue, null, 2)}\n`);
   const lockPath = join(root, "package-lock.json");
   const lockValue = JSON.parse(readFileSync(lockPath, "utf8"));
-  lockValue.packages[""].engines.node = "24.x";
+  lockValue.packages[""].engines.node = "22.x";
   writeFileSync(lockPath, `${JSON.stringify(lockValue, null, 2)}\n`);
   assert.ok(validateRuntimeContract({ root, actualNodeVersion: "20.19.0" }).errors.some((error) => error.includes("root/deployment Node invariant")));
 }));
@@ -330,7 +336,7 @@ test("checkout and setup-node cannot be redirected or extended", () => withFixtu
   ));
   assert.ok(validateRuntimeContract({ root, actualNodeVersion: "20.19.0" }).errors.some((error) => error.includes("must begin with checkout")));
 
-  writeFileSync(path, original.replace("        with:\n          node-version: '20'", "        env:\n          node-version: '20'"));
+  writeFileSync(path, original.replace("        with:\n          node-version: '24'", "        env:\n          node-version: '24'"));
   assert.ok(validateRuntimeContract({ root, actualNodeVersion: "20.19.0" }).errors.some((error) => error.includes("must begin with checkout")));
 }));
 

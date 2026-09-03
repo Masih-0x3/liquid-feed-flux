@@ -20,6 +20,8 @@ import {
   CURRENT_ON_DISK_MIGRATION_COUNT,
   CURRENT_CANDIDATE_INVENTORY_SHA256,
   SUCCESSOR_CANDIDATE_RECEIPT_PATH,
+  SUCCESSOR_V5_CANDIDATE_RECEIPT_PATH,
+  SUCCESSOR_V4_CANDIDATE_RECEIPT_PATH,
   SUCCESSOR_V2_CANDIDATE_RECEIPT_PATH,
   SUCCESSOR_V1_CANDIDATE_RECEIPT_PATH,
   GATE_REQUIRED_CHECKS,
@@ -929,9 +931,11 @@ test("successor baseline verifies the exact E7 predecessor hash binding", () =>
     assert.equal(result.activeCount, CURRENT_ON_DISK_MIGRATION_COUNT);
   }));
 
-test("successor-v3 resolves the immutable v3 -> v2 -> v1 -> base chain", () =>
+test("successor-v5 resolves the immutable v5 -> v4 and v3 -> v2 -> v1 -> base chain", () =>
   withCurrentTreeFixture((root) => {
     for (const relativePath of [
+      SUCCESSOR_V5_CANDIDATE_RECEIPT_PATH,
+      SUCCESSOR_V4_CANDIDATE_RECEIPT_PATH,
       SUCCESSOR_CANDIDATE_RECEIPT_PATH,
       SUCCESSOR_V2_CANDIDATE_RECEIPT_PATH,
       SUCCESSOR_V1_CANDIDATE_RECEIPT_PATH,
@@ -951,6 +955,41 @@ test("successor-v3 resolves the immutable v3 -> v2 -> v1 -> base chain", () =>
     assert.equal(result.activeCount, CURRENT_ON_DISK_MIGRATION_COUNT);
   }));
 
+test("successor-v5 rejects a changed successor-v4 binding", () =>
+  withCurrentTreeFixture((root) => {
+    for (const relativePath of [
+      SUCCESSOR_V5_CANDIDATE_RECEIPT_PATH,
+      SUCCESSOR_V4_CANDIDATE_RECEIPT_PATH,
+      SUCCESSOR_CANDIDATE_RECEIPT_PATH,
+      SUCCESSOR_V2_CANDIDATE_RECEIPT_PATH,
+      SUCCESSOR_V1_CANDIDATE_RECEIPT_PATH,
+      "scripts/check-video-render-rls-contract.mjs",
+    ]) {
+      const destination = join(root, relativePath);
+      mkdirSync(dirname(destination), { recursive: true });
+      cpSync(join(REPO_ROOT, relativePath), destination);
+    }
+    const receiptPath = join(root, SUCCESSOR_V5_CANDIDATE_RECEIPT_PATH);
+    const receipt = JSON.parse(readFileSync(receiptPath, "utf8"));
+    receipt.predecessor.sha256 = "0".repeat(64);
+    writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+    const result = validateCurrentCandidateSuccessorBaseline({ root });
+    assert.equal(result.checked, false);
+    assert.ok(result.errors.some((error) => error.includes("successor-v5 predecessor")));
+  }));
+
+function rebindLegacyV3FixtureToCurrentEvidence(root) {
+  const receiptPath = join(root, SUCCESSOR_CANDIDATE_RECEIPT_PATH);
+  const receipt = JSON.parse(readFileSync(receiptPath, "utf8"));
+  for (const evidencePath of ["src/integrations/supabase/types.ts", "package.json", ".github/workflows/ci.yml"]) {
+    receipt.evidenceOverrides[evidencePath] = sha256(readFileSync(join(root, evidencePath)));
+  }
+  receipt.currentCandidateOverrides.checkedInTypesSha256 = sha256(
+    readFileSync(join(root, "src/integrations/supabase/types.ts")),
+  );
+  writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+}
+
 test("successor-v3 rejects a changed successor-v2 predecessor hash", () =>
   withCurrentTreeFixture((root) => {
     for (const relativePath of [
@@ -963,6 +1002,7 @@ test("successor-v3 rejects a changed successor-v2 predecessor hash", () =>
       mkdirSync(dirname(destination), { recursive: true });
       cpSync(join(REPO_ROOT, relativePath), destination);
     }
+    rebindLegacyV3FixtureToCurrentEvidence(root);
     const receiptPath = join(root, SUCCESSOR_CANDIDATE_RECEIPT_PATH);
     const receipt = JSON.parse(readFileSync(receiptPath, "utf8"));
     receipt.predecessor.sha256 = "0".repeat(64);
@@ -984,6 +1024,7 @@ test("successor-v3 rejects a stale types binding and unexpected candidate overri
       mkdirSync(dirname(destination), { recursive: true });
       cpSync(join(REPO_ROOT, relativePath), destination);
     }
+    rebindLegacyV3FixtureToCurrentEvidence(root);
     const receiptPath = join(root, SUCCESSOR_CANDIDATE_RECEIPT_PATH);
     const receipt = JSON.parse(readFileSync(receiptPath, "utf8"));
     receipt.currentCandidateOverrides.checkedInTypesSha256 = "0".repeat(64);

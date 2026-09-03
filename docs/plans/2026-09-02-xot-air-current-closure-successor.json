@@ -1,6 +1,6 @@
 {
   "schema": "xot-air-current-closure-successor-v1",
-  "capturedAt": "2026-09-02T15:36:19Z",
+  "capturedAt": "2026-09-03T13:33:50Z",
   "predecessor": "docs/plans/2026-08-21-xot-air-latest-state-and-estimate.json",
   "sourceSnapshot": {
     "repository": "/Users/stevmq/Finalized XOT",
@@ -306,6 +306,39 @@
       "observedAt": "2026-09-03T01:18:30Z",
       "state": "ACCEPTED_OWNER_WITH_DOCUMENTED_LIMITATION"
     }
+  },
+  "currentDelta": {
+    "capturedAt": "2026-09-03T13:33:50Z",
+    "baseHead": "dbebdc47507aa528434bb088c8378463e175aeab",
+    "candidateHead": "assigned by Git after this closure commit",
+    "scope": [
+      "Align the application, hosted CI, and renderer candidate on Node 24 with npm 11.",
+      "Restore checked-in Supabase RPC type parity without changing the live schema.",
+      "Make renderer cutover and rollback commands explicitly restore restart policy unless-stopped while preserving the disabled-first Compose default.",
+      "Add append-only migration boundary successor v5 for the current seven approved migrations."
+    ],
+    "localValidation": {
+      "runtimeContractTests": "35/35 passed",
+      "supplyContractTests": "62/62 passed",
+      "migrationBaselineTests": "83/83 passed",
+      "rendererTests": "212/212 passed",
+      "appTests": "245/245 passed",
+      "supabaseSchemaTypeTests": "3/3 passed",
+      "strictCheck": "passed",
+      "rendererBoundaryTypecheck": "passed",
+      "lint": "0 errors; 11 existing warnings",
+      "node24PreviewStyleBuild": "passed",
+      "diffCheck": "passed"
+    },
+    "airImpact": {
+      "AIR-010": "The T1/T2 cutoff issue remains semantically resolved. Source-to-live identity is still not proved.",
+      "AIR-017": "Owner acceptance remains ACCEPTED_OWNER_DEFER_NO_CHANGE.",
+      "AIR-052": "The prior exact-head acceptance does not apply to this new candidate. Fresh hosted exact-head CI and scan evidence are required after push.",
+      "AIR-055": "Owner acceptance remains ACCEPTED_OWNER_WITH_DOCUMENTED_LIMITATION. Exact source-to-live equivalence remains unproved.",
+      "AIR-065": "Still owner-blocked. No cleanup, restore, schedule, or backlog action was authorized."
+    },
+    "release": "CLOSED",
+    "mutation": "Local source, test, and documentation changes only. No production, provider, posting, backlog, database, Supabase, Vercel, renderer-host, merge, or deploy mutation."
   },
   "productionAssessment": {
     "verdict": "V2_PRESENT_IN_PRODUCTION_RETROSPECTIVE_READ_ONLY_JOIN; SOURCE_TO_LIVE_EQUIVALENCE_AND_BROWSER_PROOF_UNPROVEN",

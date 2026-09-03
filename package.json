@@ -4,10 +4,10 @@
   "description": "RSS-to-Telegram content pipeline with admin dashboard — ingests tweets via RSS.app, translates (OpenAI), and delivers to Telegram channels.",
   "private": true,
   "type": "module",
-  "packageManager": "npm@10.8.2",
+  "packageManager": "npm@11.19.0",
   "engines": {
-    "node": "20.x",
-    "npm": "10.x"
+    "node": "24.x",
+    "npm": "11.x"
   },
   "scripts": {
     "dev": "vite",

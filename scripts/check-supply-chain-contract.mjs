@@ -63,7 +63,7 @@ const REQUIRED_CI_PREFIX_BLOCKS = [
   [
     "      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0",
     "        with:",
-    "          node-version: '20'",
+    "          node-version: '24'",
     "          cache: 'npm'",
   ],
   ...REQUIRED_CI_PRECOLLECT_RUNS.map((run) => [`      - run: ${run}`]),
@@ -74,7 +74,7 @@ const HOSTED_EVIDENCE_TECHNICAL_VALIDATE_RUN = 'node scripts/collect-supply-chai
 const HOSTED_EVIDENCE_OWNER_VALIDATE_RUN = 'node scripts/collect-supply-chain-evidence.mjs --validate-only --output-dir "$RUNNER_TEMP/xot-supply-chain"';
 const OWNER_POLICY_MODE = "exact-head";
 const OWNER_POLICY_VARIABLE = "XOT_SUPPLY_OWNER_POLICY_B64";
-const REVIEWED_RENDERER_DOCKER_BASE = "node:20-bookworm-slim@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0";
+const REVIEWED_RENDERER_DOCKER_BASE = "node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e";
 const SHA_RE = /^[a-f0-9]{40}$/;
 
 const WAIVER_COLLECTIONS = [

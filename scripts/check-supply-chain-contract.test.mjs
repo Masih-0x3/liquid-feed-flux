@@ -249,8 +249,8 @@ test("renderer Docker base must retain the reviewed immutable digest", () => wit
   const path = join(root, "services/video-renderer/Dockerfile");
   const original = readFileSync(path, "utf8");
   for (const mutant of [
-    original.replace(/FROM node:20-bookworm-slim@sha256:[a-f0-9]+/, "FROM node:20-bookworm-slim"),
-    original.replace(/FROM node:20-bookworm-slim@sha256:[a-f0-9]+/, `FROM node:20-bookworm-slim@sha256:${"0".repeat(64)}`),
+    original.replace(/FROM node:24-bookworm-slim@sha256:[a-f0-9]+/, "FROM node:24-bookworm-slim"),
+    original.replace(/FROM node:24-bookworm-slim@sha256:[a-f0-9]+/, `FROM node:24-bookworm-slim@sha256:${"0".repeat(64)}`),
   ]) {
     writeFileSync(path, mutant);
     assert.ok(validateSupplyChainContract({ root }).errors.some((error) => error.includes("renderer Docker base selector")));

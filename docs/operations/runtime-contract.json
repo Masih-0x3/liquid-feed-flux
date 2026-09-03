@@ -1,21 +1,23 @@
 {
   "schema_version": "xot-runtime-contract-v1",
-  "observed_at": "2026-07-14T12:47:38Z",
-  "status": "current_divergence_frozen_upgrade_deferred",
+  "observed_at": "2026-09-03T12:58:00Z",
+  "status": "node24_candidate_aligned_external_canaries_deferred",
   "node": {
     "vite_supported_range": "^20.19.0 || >=22.12.0",
-    "deployment_major": 20,
-    "deployment_selector": "20.x",
-    "deployment_minimum": "20.19.0",
+    "deployment_major": 24,
+    "deployment_selector": "24.x",
+    "deployment_minimum": "24.0.0",
     "vercel_project_setting": "24.x",
-    "vercel_effective_exact": "20.20.2",
+    "vercel_effective_exact": null,
     "vercel_node20_build_deadline": "2026-10-01",
-    "root_engine": "20.x",
-    "root_npm_engine": "10.x",
-    "root_package_manager": "npm@10.8.2",
-    "npm_major": 10,
-    "npm_effective_exact": "10.8.2",
-    "ci_selector": "20",
+    "root_engine": "24.x",
+    "root_npm_engine": "11.x",
+    "root_package_manager": "npm@11.19.0",
+    "npm_major": 11,
+    "npm_effective_exact": null,
+    "local_version_file": ".nvmrc",
+    "local_version": "24.20.0",
+    "ci_selector": "24",
     "ci_job": "lint-build",
     "ci_runs_on": "ubuntu-latest",
     "ci_setup_node_action": "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
@@ -30,17 +32,17 @@
       "node --test scripts/check-supply-chain-contract.test.mjs"
     ],
     "ci_deno_bootstrap_run": "npm rebuild --ignore-scripts=false deno",
-    "renderer_engine": "20.x",
-    "renderer_docker_selector": "node:20-bookworm-slim@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0",
-    "renderer_live_exact": null,
-    "renderer_live_status": "not_checked_host_not_resolvable_from_current_machine",
-    "local_observed": "22.23.1",
-    "local_npm_observed": "10.9.8",
-    "local_observed_surface": "Codex bundled workspace runtime",
+    "renderer_engine": "24.x",
+    "renderer_docker_selector": "node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e",
+    "renderer_live_exact": "20.20.2",
+    "renderer_live_status": "observed_current_unsupported_node20_candidate_not_deployed",
+    "local_observed": "24.20.0",
+    "local_npm_observed": "11.19.0",
+    "local_observed_surface": "candidate .nvmrc and package contract",
     "planned_cutover": {
       "selector": "24.x",
       "phase": 7,
-      "status": "deferred_until_schema_type_and_behavior_gates"
+      "status": "candidate_implemented_awaiting_exact_node24_ci_preview_and_renderer_canary"
     }
   },
   "vercel_evidence": {
@@ -83,7 +85,7 @@
     "vercel_ignore_path": ".vercelignore",
     "vercel_ignore_sha256": "abc295fdc2acda9d3430d70254bc2c93cf3ae324bad2d9b06141d9cd728405fa",
     "ci_workflow_path": ".github/workflows/ci.yml",
-    "ci_workflow_sha256": "2fa3915bec2f47288b51fd535bf5685a71cc882ff5e00591fc04d7951ea6e1ff",
+    "ci_workflow_sha256": "6d128e9853a95d8985827bec4b8ab591685b30682ba3a875dcda34b536a52328",
     "wrapper_path": "scripts/check-build-contract.mjs",
     "wrapper_sha256": "7959d9345395856258f9b79efe655dc57f5e14f3a67cb7ce3c87bf742313249d",
     "frontend_env_path": "scripts/check-vite-env.mjs",
@@ -135,7 +137,7 @@
     "status": "divergent_frozen_no_upgrade_approved"
   },
   "supabase_cli": {
-    "observed_evidence_version": "2.109.1",
+    "observed_evidence_version": "2.111.0",
     "repository_pin": "2.111.0",
     "status": "pinned_ci_release_blocker"
   },
@@ -147,7 +149,7 @@
   "prohibitions": [
     "runtime_or_client_upgrade_in_correctness_slice",
     "floating_new_edge_import",
-    "claiming_renderer_live_exact_without_host_evidence",
+    "claiming_node24_renderer_live_without_exact_image_canary",
     "claiming_vercel_exact_patch_without_guarded_build_log"
   ]
 }
