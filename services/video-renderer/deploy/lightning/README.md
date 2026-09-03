@@ -22,7 +22,7 @@ acceptance.
 ## Hard constraints enforced by the Compose file
 
 - **Platform:** `linux/amd64` (build + runtime).
-- **Port bind:** `127.0.0.1:8797:8787` — loopback only, never `0.0.0.0`.
+- **Port bind:** `127.0.0.1:${XOT_RENDERER_HOST_PORT:-8797}:8787` — loopback only, never `0.0.0.0`.
 - **CPU:** 2 cores (`cpus: 2.0`, `cpu_count: 2`).
 - **Memory:** 6 GiB (`mem_limit: 6g`, `memswap_limit: 6g`).
 - **Shared memory:** 1 GiB (`shm_size: 1g`).
@@ -78,6 +78,9 @@ directory, and restart profile/policy:
 - `XOT_RENDERER_BUILD_SOURCE`: source tree containing the selected Dockerfile;
 - `XOT_RENDERER_ENV_FILE`: secret renderer runtime env path;
 - `XOT_RENDERER_CONTROL_DIR`: stable directory containing the Compose bundle.
+- `XOT_RENDERER_COMPOSE_PROJECT`, `XOT_RENDERER_HOST_PORT`,
+  `XOT_RENDERER_NETWORK_NAME`, and `XOT_RENDERER_VOLUME_NAME`: four identifiers
+  that keep Production and Preview containers isolated on the same host.
 
 The `XOT_RENDERER_SERVICE_PROFILE` is `candidate` by default and the matching
 `XOT_RENDERER_RESTART_POLICY` is `no`. After full acceptance and the
@@ -96,6 +99,26 @@ XOT_RENDERER_BUILD_SOURCE=/teamspace/studios/this_studio/xot-renderer/releases/p
 XOT_RENDERER_ENV_FILE=/teamspace/studios/this_studio/xot-renderer/runtime/renderer.env
 XOT_RENDERER_CONTROL_DIR=/teamspace/studios/this_studio/xot-renderer/control/deploy/lightning
 ```
+
+To run the disabled Preview renderer beside Production without replacing or
+restarting it, use a separate runtime env and these non-secret selectors:
+
+```dotenv
+XOT_RENDERER_SERVICE_PROFILE=candidate
+XOT_RENDERER_RESTART_POLICY=no
+XOT_RENDERER_COMPOSE_PROJECT=xot-renderer-preview
+XOT_RENDERER_HOST_PORT=8798
+XOT_RENDERER_NETWORK_NAME=xot-renderer-preview-net
+XOT_RENDERER_VOLUME_NAME=xot-renderer-preview-tmp
+XOT_RENDERER_IMAGE_TAG=xot-video-renderer:preview-REPLACE_WITH_COMMIT
+XOT_RENDERER_BUILD_SOURCE=/teamspace/studios/this_studio/xot-renderer/releases/current-candidate
+XOT_RENDERER_ENV_FILE=/teamspace/studios/this_studio/xot-renderer/runtime/preview/renderer.env
+XOT_RENDERER_CONTROL_DIR=/teamspace/studios/this_studio/xot-renderer/control/deploy/lightning
+```
+
+The Preview runtime env must target only the Supabase Preview branch, use
+`RENDERER_ID=xot-staging-1`, and keep `RENDER_POLLING_ENABLED=0` until the
+bounded Preview canary is authorized. Do not reuse the Production runtime env.
 
 The later B4-fenced candidate switch changes only the image tag and build
 source to the accepted current-candidate release. It does not change the
@@ -123,6 +146,10 @@ after the migration and posting hold are live. It is not derived inside the
 renderer and is not moved backward without explicit operator authority.
 
 ## Staged start
+
+The commands below show the Production-default project and port. For the
+parallel Preview stack, load its `service.env` first and use the selected
+`XOT_RENDERER_COMPOSE_PROJECT` and `XOT_RENDERER_HOST_PORT` values.
 
 ### 1. Provision secrets
 
