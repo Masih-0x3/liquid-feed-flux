@@ -1,7 +1,9 @@
 # XOT Video Renderer
 
-Node 20 service for the production Persian video render gate. Supabase stays the
-control plane; this service claims `video_renders`, downloads source media from
+Node 24 service candidate for the production Persian video render gate. The
+currently deployed renderer remains on Node 20 until the exact candidate image
+passes its canary and persistence checks. Supabase stays the control plane; this
+service claims `video_renders`, downloads source media from
 `temp-media`, transcribes audio with Deepgram, translates timed cues, burns the
 subtitles plus the `X @Masihh` watermark with one ffmpeg encode pass,
 uploads the processed MP4, and calls the completion RPC.

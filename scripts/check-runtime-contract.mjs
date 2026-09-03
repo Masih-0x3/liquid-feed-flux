@@ -10,6 +10,8 @@ export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const CONTRACT_PATH = "docs/operations/runtime-contract.json";
 export const PINNED_SUPABASE_CLI_VERSION = "2.111.0";
 export const PINNED_DENO_BOOTSTRAP_RUN = "npm rebuild --ignore-scripts=false deno";
+export const PINNED_CHECKOUT_ACTION = "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683";
+export const PINNED_SETUP_NODE_ACTION = "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020";
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 
@@ -25,17 +27,17 @@ const REQUIRED_CI_SUPPLY_PREFLIGHT_RUNS = [
   "npm ci --ignore-scripts",
   "node scripts/check-supply-chain-contract.mjs",
   "npm --prefix services/video-renderer ci --ignore-scripts",
-  "npm audit --omit=dev --audit-level=high",
-  "npm --prefix services/video-renderer audit --omit=dev --audit-level=high",
 ];
 
 const REQUIRED_CI_GUARD_PREFIX = [
   ...REQUIRED_CI_SUPPLY_PREFLIGHT_RUNS,
+  PINNED_DENO_BOOTSTRAP_RUN,
   ...REQUIRED_CI_RUNTIME_RUNS,
 ];
 
 const REQUIRED_CI_PREFIX_STEPS = [
   ...REQUIRED_CI_SUPPLY_PREFLIGHT_RUNS,
+  PINNED_DENO_BOOTSTRAP_RUN,
   ...REQUIRED_CI_RUNTIME_RUNS.slice(0, 2),
   REQUIRED_CI_BUILD_IDENTITY_TEST_RUN,
   ...REQUIRED_CI_RUNTIME_RUNS.slice(2),
@@ -249,7 +251,7 @@ function workflowRuntimeFacts(value, jobName, setupNodeAction) {
     blocking: !jobHasBypass && steps.every((step) => !step.hasBypass),
     setupBeforeRuns: setupIndex >= 0 && setupIndex < firstRequiredRunIndex,
     requiredPrefixMatches:
-      steps[0]?.uses === "actions/checkout@v4"
+      steps[0]?.uses === PINNED_CHECKOUT_ACTION
       && steps[0]?.meaningful.length === 3
       && steps[0]?.meaningful[1]?.trim() === "with:"
       && steps[0]?.meaningful[2]?.trim() === "ref: ${{ github.event.pull_request.head.sha || github.sha }}"
@@ -257,7 +259,12 @@ function workflowRuntimeFacts(value, jobName, setupNodeAction) {
       && steps[1]?.meaningful.length === 4
       && steps[1]?.meaningful[1]?.trim() === "with:"
       && steps[1]?.cache === "npm"
-      && steps.slice(2, 12).map((step) => step.run).every((run, index) => run === REQUIRED_CI_PREFIX_STEPS[index]),
+      && steps.slice(2, 6).map((step) => step.run).every((run, index) => run === REQUIRED_CI_SUPPLY_PREFLIGHT_RUNS[index])
+      && steps[6]?.run === PINNED_DENO_BOOTSTRAP_RUN
+      && steps[7]?.run === 'node scripts/collect-supply-chain-evidence.mjs --collect-only --output-dir "$RUNNER_TEMP/xot-supply-chain"'
+      && steps[8]?.uses === "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"
+      && steps[9]?.run === 'node scripts/collect-supply-chain-evidence.mjs --validate-only --technical-only --output-dir "$RUNNER_TEMP/xot-supply-chain"'
+      && steps.slice(10, 14).map((step) => step.run).every((run, index) => run === REQUIRED_CI_PREFIX_STEPS[index + 5]),
     unsafeRequiredRun: steps.some((step) => [...REQUIRED_CI_GUARD_PREFIX, REQUIRED_CI_BUILD_IDENTITY_TEST_RUN].includes(step.run) && !step.isBareRun),
     workflowHasOverrides,
     workflowHasQuotedKeys,
@@ -288,6 +295,7 @@ export function validateRuntimeContract({
   const rootLock = JSON.parse(readFileSync(join(root, "package-lock.json"), "utf8"));
   const rendererPackage = JSON.parse(readFileSync(join(root, "services/video-renderer/package.json"), "utf8"));
   const rendererLock = JSON.parse(readFileSync(join(root, "services/video-renderer/package-lock.json"), "utf8"));
+  const localNodeVersion = readFileSync(resolve(root, contract.node.local_version_file), "utf8").trim();
   const denoLock = JSON.parse(readFileSync(join(root, "deno.lock"), "utf8"));
   const vercel = JSON.parse(readFileSync(join(root, "vercel.json"), "utf8"));
   const vercelIgnore = readFileSync(join(root, ".vercelignore"), "utf8");
@@ -296,7 +304,7 @@ export function validateRuntimeContract({
   const errors = [];
 
   requireEqual(errors, "contract schema", contract.schema_version, "xot-runtime-contract-v1");
-  requireEqual(errors, "contract status", contract.status, "current_divergence_frozen_upgrade_deferred");
+  requireEqual(errors, "contract status", contract.status, "node24_candidate_aligned_external_canaries_deferred");
   requireEqual(errors, "Supabase CLI repository pin", contract.supabase_cli?.repository_pin, PINNED_SUPABASE_CLI_VERSION);
   requireEqual(errors, "Supabase CLI CI pin command", ci.includes(`npx --yes supabase@${PINNED_SUPABASE_CLI_VERSION} --version`), true);
   requireEqual(errors, "root Node engine", rootPackage.engines?.node, contract.node.root_engine);
@@ -306,6 +314,7 @@ export function validateRuntimeContract({
   requireEqual(errors, "lock root npm engine", rootLock.packages?.[""]?.engines?.npm, contract.node.root_npm_engine);
   requireEqual(errors, "renderer Node engine", rendererPackage.engines?.node, contract.node.renderer_engine);
   requireEqual(errors, "renderer lock Node engine", rendererLock.packages?.[""]?.engines?.node, contract.node.renderer_engine);
+  requireEqual(errors, "local Node version", localNodeVersion, contract.node.local_version);
   requireEqual(errors, "Vite package range", rootPackage.devDependencies?.vite, contract.vite.package_range);
   requireEqual(errors, "Vite lock version", rootLock.packages?.["node_modules/vite"]?.version, contract.vite.lock_version);
   requireEqual(errors, "Vite lock Node engine", rootLock.packages?.["node_modules/vite"]?.engines?.node, contract.vite.lock_node_engine);
@@ -352,7 +361,7 @@ export function validateRuntimeContract({
   if (workflowFacts.workflowHasYamlIndirection) errors.push("YAML anchors, aliases, and merge keys are prohibited in the runtime workflow");
   requireEqual(errors, "CI runtime job runner", workflowFacts.runsOn, contract.node.ci_runs_on);
   if (!workflowFacts.blocking) errors.push("CI runtime job or one of its steps can be skipped or ignored");
-  if (!workflowFacts.requiredPrefixMatches) errors.push("CI must begin with checkout, setup-node, both direct supply preflight/install/audit phases, then direct runtime and supply test commands in that exact order");
+  if (!workflowFacts.requiredPrefixMatches) errors.push("CI must begin with checkout, setup-node, lifecycle-suppressed installs, hosted supply evidence collection/validation, then direct runtime and supply test commands in that exact order");
   if (workflowFacts.unsafeRequiredRun) errors.push("CI required runtime run steps must be bare commands without shell, directory, env, or other overrides");
   if (!workflowFacts.setupNodeActionFound) errors.push("CI setup-node action is missing or changed");
   if (!workflowFacts.setupBeforeRuns) errors.push("CI setup-node must execute before runtime run steps");
@@ -479,5 +488,5 @@ if (isMain) {
     console.error(`Runtime contract FAIL:\n- ${result.errors.join("\n- ")}`);
     process.exit(1);
   }
-  console.log(`Runtime contract PASS: node ${result.actualNodeVersion}; npm ${result.actualNpmVersion ?? "not reported"}; deployment selector ${result.contract.node.deployment_selector}; root/renderer/Deno/Edge Supabase versions frozen with upgrade deferred.`);
+  console.log(`Runtime contract PASS: node ${result.actualNodeVersion}; npm ${result.actualNpmVersion ?? "not reported"}; deployment selector ${result.contract.node.deployment_selector}; Node 24 candidate aligned across local, CI, Vercel, and renderer declarations.`);
 }

@@ -217,8 +217,8 @@ assert.ok(isIdentifier(saveProperties.get("label"), "feedbackLabel"), "feedback 
 assert.ok(isIdentifier(saveProperties.get("note"), "feedbackNote"), "feedback save must use the current keyed note");
 assert.match(
   panelSource,
-  /disabled=\{(?:readOnly \|\| )?!feedbackDraftCurrent \|\| feedbackPending\}/,
-  "feedback save must remain unavailable until its current selection-keyed draft is ready",
+  /disabled=\{(?:readOnly \|\| )?!feedbackDraftCurrent \|\| !feedbackLabel \|\| feedbackPending\}/,
+  "feedback save must remain unavailable until its current selection-keyed draft has an explicit label",
 );
 
 const hookFile = sourceFile(hookPath, hookSource);

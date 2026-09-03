@@ -10,24 +10,36 @@ jobs:
   lint-build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
       - run: node scripts/check-supply-chain-contract.mjs
       - run: npm ci --ignore-scripts
       - run: node scripts/check-supply-chain-contract.mjs
       - run: npm --prefix services/video-renderer ci --ignore-scripts
-      - run: npm audit --omit=dev --audit-level=high
-      - run: npm --prefix services/video-renderer audit --omit=dev --audit-level=high
+      - run: npm rebuild --ignore-scripts=false deno
+      - name: Collect redacted hosted supply-chain evidence
+        env:
+          XOT_REVIEWED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node scripts/collect-supply-chain-evidence.mjs --collect-only --output-dir "$RUNNER_TEMP/xot-supply-chain"
+      - name: Upload redacted hosted supply-chain evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: xot-supply-chain-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/xot-supply-chain
+          if-no-files-found: error
+      - name: Enforce technical hosted supply-chain evidence contract
+        env:
+          XOT_REVIEWED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node scripts/collect-supply-chain-evidence.mjs --validate-only --technical-only --output-dir "$RUNNER_TEMP/xot-supply-chain"
       - run: node scripts/check-runtime-contract.mjs
       - run: node --test scripts/check-runtime-contract.test.mjs
       - run: node --test scripts/check-build-output-identity.test.mjs scripts/run-vite-build.test.mjs
       - run: node --test scripts/check-supply-chain-contract.test.mjs
-      - run: npm rebuild --ignore-scripts=false deno
       - run: npx --yes supabase@2.111.0 --version
       - run: npm run check:remote-media-policy
       - run: npm run check:remote-media-no-egress
@@ -179,3 +191,15 @@ jobs:
           VITE_SUPABASE_URL: https://abcdefghijklmnopqrst.supabase.co
           VITE_SUPABASE_PUBLISHABLE_KEY: eyJhbGciOiJIUzI1NiJ9.synthetic-public-payload.synthetic-signature
           VITE_SUPABASE_PROJECT_ID: abcdefghijklmnopqrst
+      - name: Enforce final hosted supply-chain owner disposition
+        env:
+          XOT_REVIEWED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          XOT_SUPPLY_OWNER_POLICY_MODE: exact-head
+          XOT_SUPPLY_OWNER_POLICY_B64: ${{ vars.XOT_SUPPLY_OWNER_POLICY_B64 }}
+        run: node scripts/collect-supply-chain-evidence.mjs --validate-only --output-dir "$RUNNER_TEMP/xot-supply-chain"
+      - name: Upload accepted hosted supply-chain evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: xot-supply-chain-accepted-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/xot-supply-chain
+          if-no-files-found: error

@@ -11,6 +11,7 @@ const INVENTORY_SOURCE_PATHS = [
   "services/video-renderer/package-lock.json", "deno.lock", "services/video-renderer/Dockerfile",
   ".github/workflows/ci.yml", "docs/operations/supply-chain-exceptions.json",
   "scripts/check-supply-chain-contract.mjs", "scripts/check-supply-chain-contract.test.mjs",
+  "scripts/collect-supply-chain-evidence.mjs", "scripts/collect-supply-chain-evidence.test.mjs",
   "scripts/build-e8-local-supply-build-inventory.test.mjs",
   "scripts/check-vite-env.mjs", "scripts/check-vite-env.test.mjs",
 ];
@@ -46,28 +47,35 @@ const REQUIRED_CI_RUNS = [
   "npm ci --ignore-scripts",
   "node scripts/check-supply-chain-contract.mjs",
   "npm --prefix services/video-renderer ci --ignore-scripts",
-  "npm audit --omit=dev --audit-level=high",
-  "npm --prefix services/video-renderer audit --omit=dev --audit-level=high",
   "node scripts/check-runtime-contract.mjs",
   "node --test scripts/check-runtime-contract.test.mjs",
   "node --test scripts/check-build-output-identity.test.mjs scripts/run-vite-build.test.mjs",
   "node --test scripts/check-supply-chain-contract.test.mjs",
 ];
+const REQUIRED_CI_PRECOLLECT_RUNS = [...REQUIRED_CI_RUNS.slice(0, 4), "npm rebuild --ignore-scripts=false deno"];
 
 const REQUIRED_CI_PREFIX_BLOCKS = [
   [
-    "      - uses: actions/checkout@v4",
+    "      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2",
     "        with:",
     "          ref: ${{ github.event.pull_request.head.sha || github.sha }}",
   ],
   [
-    "      - uses: actions/setup-node@v4",
+    "      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0",
     "        with:",
-    "          node-version: '20'",
+    "          node-version: '24'",
     "          cache: 'npm'",
   ],
-  ...REQUIRED_CI_RUNS.map((run) => [`      - run: ${run}`]),
+  ...REQUIRED_CI_PRECOLLECT_RUNS.map((run) => [`      - run: ${run}`]),
 ];
+const REQUIRED_CI_POST_EVIDENCE_RUNS = REQUIRED_CI_RUNS.slice(4);
+const HOSTED_EVIDENCE_COLLECT_RUN = 'node scripts/collect-supply-chain-evidence.mjs --collect-only --output-dir "$RUNNER_TEMP/xot-supply-chain"';
+const HOSTED_EVIDENCE_TECHNICAL_VALIDATE_RUN = 'node scripts/collect-supply-chain-evidence.mjs --validate-only --technical-only --output-dir "$RUNNER_TEMP/xot-supply-chain"';
+const HOSTED_EVIDENCE_OWNER_VALIDATE_RUN = 'node scripts/collect-supply-chain-evidence.mjs --validate-only --output-dir "$RUNNER_TEMP/xot-supply-chain"';
+const OWNER_POLICY_MODE = "exact-head";
+const OWNER_POLICY_VARIABLE = "XOT_SUPPLY_OWNER_POLICY_B64";
+const REVIEWED_RENDERER_DOCKER_BASE = "node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e";
+const SHA_RE = /^[a-f0-9]{40}$/;
 
 const WAIVER_COLLECTIONS = [
   "production_waivers",
@@ -75,7 +83,7 @@ const WAIVER_COLLECTIONS = [
   "license_waivers",
 ];
 const REVIEWED_INVENTORY_COUNTS = Object.freeze({
-  rootPackageEntries: 654,
+  rootPackageEntries: 655,
   rendererPackageEntries: 32,
   denoRemoteImports: 41,
 });
@@ -130,8 +138,10 @@ function collectCiRunSteps(source, jobName, errors) {
   const steps = stepStarts.map((stepStart, position) => {
     const stepEnd = stepStarts[position + 1] ?? jobLines.length;
     const block = jobLines.slice(stepStart, stepEnd);
-    const run = block[0].match(/^      - run:\s*(.*?)\s*$/)?.[1] ?? null;
-    return { run, block };
+    const run = block[0].match(/^      - run:\s*(.*?)\s*$/)?.[1]
+      ?? block.find((line) => /^        run:\s*/.test(line))?.match(/^        run:\s*(.*?)\s*$/)?.[1]
+      ?? null;
+    return { run, block, isBareRun: Boolean(run) && block.length === 1 };
   });
   return { jobLines, steps };
 }
@@ -197,12 +207,49 @@ function validateCi(root, errors) {
       assertCondition(errors, step.block.length === 1, `CI ${JSON.stringify(run)} step must be a bare, non-conditional command`);
     }
   }
+  const bootstrapSteps = steps.filter((step) => step.run === "npm rebuild --ignore-scripts=false deno");
+  assertCondition(errors, bootstrapSteps.length === 1 && bootstrapSteps[0].isBareRun, "CI must contain exactly one bare pinned Deno bootstrap before hosted evidence collection");
 
-  assertCondition(
-    errors,
-    REQUIRED_CI_RUNS.every((run, index) => steps[index + 2]?.run === run),
-    "CI must complete direct supply-chain preflights before both lifecycle-suppressed install/audit phases, before any mutable Node contract or test command",
-  );
+  const actionRefs = [...source.matchAll(/^\s+(?:-\s+)?uses:\s*([^\s#]+)\s*(?:#.*)?$/gm)].map((match) => match[1]);
+  assertCondition(errors, actionRefs.length > 0 && actionRefs.every((ref) => {
+    const at = ref.lastIndexOf("@");
+    return at > 0 && ref.slice(0, at).startsWith("actions/") && SHA_RE.test(ref.slice(at + 1));
+  }), "every CI workflow action must use the official actions/* namespace and an immutable SHA");
+  const collectorIndexes = steps.flatMap((step, index) => step.run === HOSTED_EVIDENCE_COLLECT_RUN ? [index] : []);
+  const uploadIndexes = steps.flatMap((step, index) => step.block.some((line) => line.includes("uses: actions/upload-artifact@")) ? [index] : []);
+  const acceptedUploadIndexes = steps.flatMap((step, index) => step.block.some((line) => line.includes("name: xot-supply-chain-accepted-${{ github.event.pull_request.head.sha || github.sha }}")) ? [index] : []);
+  const technicalValidatorIndexes = steps.flatMap((step, index) => step.run === HOSTED_EVIDENCE_TECHNICAL_VALIDATE_RUN ? [index] : []);
+  const ownerValidatorIndexes = steps.flatMap((step, index) => step.run === HOSTED_EVIDENCE_OWNER_VALIDATE_RUN ? [index] : []);
+  assertCondition(errors, collectorIndexes.length === 1 && uploadIndexes.length === 2 && acceptedUploadIndexes.length === 1 && technicalValidatorIndexes.length === 1 && ownerValidatorIndexes.length === 1, "CI must contain hosted supply-chain collection, technical validation, final owner validation, and accepted-bundle upload sequence");
+  if (collectorIndexes.length === 1 && uploadIndexes.length === 2 && acceptedUploadIndexes.length === 1 && technicalValidatorIndexes.length === 1 && ownerValidatorIndexes.length === 1) {
+    const [collectorIndex] = collectorIndexes;
+    let collectorSource = "";
+    try { collectorSource = readFileSync(join(root, "scripts/collect-supply-chain-evidence.mjs"), "utf8"); } catch { /* inventory/source checks report missing paths separately */ }
+    const requiredCollectorAudits = [
+      `["root", REPO_ROOT, ["audit", "--omit=dev", "--json"]]`,
+      `["renderer", join(REPO_ROOT, "services/video-renderer"), ["audit", "--omit=dev", "--json"]]`,
+      `["root-dev", REPO_ROOT, ["audit", "--json"]]`,
+      `["renderer-dev", join(REPO_ROOT, "services/video-renderer"), ["audit", "--json"]]`,
+    ];
+    for (const [index, audit] of requiredCollectorAudits.entries()) assertCondition(errors, collectorSource.includes(audit), `hosted supply-chain collector must retain the ${["root", "renderer", "root-dev", "renderer-dev"][index]} npm audit`);
+    assertCondition(errors, collectorSource.includes('["check", "--frozen", ...entrypoints]'), "hosted supply-chain collector must run the frozen non-executing Deno resolution check");
+    assertCondition(errors, REQUIRED_CI_PRECOLLECT_RUNS.every((run, index) => steps[index + 2]?.run === run), "CI must complete direct supply-chain preflights, lifecycle-suppressed installs, and the pinned Deno bootstrap before hosted evidence collection");
+    assertCondition(errors, steps[collectorIndex].block.some((line) => line.includes("XOT_REVIEWED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}")), "hosted supply-chain collection must bind XOT_REVIEWED_SHA to the reviewed checkout");
+    assertCondition(errors, steps[technicalValidatorIndexes[0]].block.some((line) => line.includes("XOT_REVIEWED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}")), "hosted technical supply-chain validation must bind XOT_REVIEWED_SHA to the reviewed checkout");
+    assertCondition(errors, steps[ownerValidatorIndexes[0]].block.some((line) => line.includes("XOT_REVIEWED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}")), "hosted owner supply-chain validation must bind XOT_REVIEWED_SHA to the reviewed checkout");
+    const hasBypass = (block) => block.some((line) => /(?:^|\s)["']?(?:if|continue-on-error)["']?:/.test(line));
+    assertCondition(errors, !hasBypass(steps[collectorIndex].block) && !hasBypass(steps[technicalValidatorIndexes[0]].block) && !hasBypass(steps[ownerValidatorIndexes[0]].block), "hosted supply-chain collection and validation must remain blocking");
+    assertCondition(errors, REQUIRED_CI_POST_EVIDENCE_RUNS.every((run, index) => steps[technicalValidatorIndexes[0] + 1 + index]?.run === run), "CI must run the mutable Node/runtime commands only after technical hosted evidence validation");
+    assertCondition(errors, ownerValidatorIndexes[0] === acceptedUploadIndexes[0] - 1 && acceptedUploadIndexes[0] === steps.length - 1 && ownerValidatorIndexes[0] > technicalValidatorIndexes[0], "CI must run final owner validation immediately before the accepted-bundle upload");
+    assertCondition(errors, steps[ownerValidatorIndexes[0]].block.some((line) => line.includes(`XOT_SUPPLY_OWNER_POLICY_MODE: ${OWNER_POLICY_MODE}`)), "final hosted supply-chain validation must enable the exact-head owner policy mode");
+    const expectedOwnerPolicyVariable = `${OWNER_POLICY_VARIABLE}: $` + `{{ vars.${OWNER_POLICY_VARIABLE} }}`;
+    assertCondition(errors, steps[ownerValidatorIndexes[0]].block.some((line) => line.includes(expectedOwnerPolicyVariable)), "final hosted supply-chain validation must read the owner policy only from the reviewed repository variable");
+    assertCondition(errors, collectorIndex > 0 && collectorIndex < steps.findIndex((step) => step.run === "node scripts/check-runtime-contract.mjs"), "hosted supply-chain evidence must complete before mutable runtime/test commands");
+    assertCondition(errors, uploadIndexes[0] === collectorIndex + 1 && technicalValidatorIndexes[0] === collectorIndex + 2, "hosted supply-chain collection, upload, and technical validation steps must remain contiguous");
+    assertCondition(errors, steps[uploadIndexes[0]].block.some((line) => /uses: actions\/upload-artifact@[a-f0-9]{40}/.test(line)), "hosted supply-chain artifact upload must use an immutable action SHA");
+    assertCondition(errors, uploadIndexes[1] === acceptedUploadIndexes[0] && !hasBypass(steps[acceptedUploadIndexes[0]].block), "accepted hosted supply-chain upload must follow successful final validation without a bypass");
+    assertCondition(errors, steps[acceptedUploadIndexes[0]].block.some((line) => line.includes("path: ${{ runner.temp }}/xot-supply-chain")) && steps[acceptedUploadIndexes[0]].block.some((line) => line.includes("if-no-files-found: error")), "accepted hosted supply-chain upload must retain the complete evidence directory");
+  }
 }
 
 function validateNpmLock(root, packagePath, lockPath, label, errors) {
@@ -277,7 +324,7 @@ function validateRendererDockerfile(root, errors) {
   }
 
   const baseImage = dockerfile.match(/^FROM\s+(\S+)\s*$/m)?.[1] ?? null;
-  assertCondition(errors, baseImage === "node:20-bookworm-slim", "renderer Docker base selector must stay aligned with the reviewed runtime contract");
+  assertCondition(errors, baseImage === REVIEWED_RENDERER_DOCKER_BASE, "renderer Docker base selector must stay aligned with the reviewed immutable runtime contract");
   assertCondition(errors, dockerfile.includes("apt-get install -y --no-install-recommends"), "renderer Dockerfile must retain its explicit APT package installation boundary");
   assertCondition(errors, dockerfile.includes("rm -rf /var/lib/apt/lists/*"), "renderer Dockerfile must clear transient APT metadata");
   assertCondition(errors, dockerfile.includes("COPY package.json package-lock.json ./"), "renderer Dockerfile must install from its lockfile");
@@ -473,7 +520,7 @@ function inventoryDocker(root) {
 function inventoryCi(root) {
   const path = ".github/workflows/ci.yml";
   const sourceHash = inventoryHashFile(root, path);
-  const actionRefs = [...inventoryText(root, path).matchAll(/^\s*- uses:\s*([^\s#]+)\s*$/gm)].map((match) => {
+  const actionRefs = [...inventoryText(root, path).matchAll(/^\s+(?:-\s+)?uses:\s*([^\s#]+)\s*(?:#.*)?$/gm)].map((match) => {
     const at = match[1].lastIndexOf("@");
     return { name: at > 0 ? match[1].slice(0, at) : match[1], path, version_or_ref: at > 0 ? match[1].slice(at + 1) : null, integrity_or_source_hash: null, source_file_sha256: sourceHash };
   });

@@ -14,6 +14,10 @@ export const CURRENT_CANDIDATE_RECEIPT_PATH =
   "docs/plans/2026-08-12-xot-e10-preview-migration-boundary.json";
 export const SUCCESSOR_CANDIDATE_RECEIPT_PATH =
   "docs/plans/2026-08-29-xot-e10-preview-migration-boundary-successor-v3.json";
+export const SUCCESSOR_V5_CANDIDATE_RECEIPT_PATH =
+  "docs/plans/2026-09-03-xot-e10-preview-migration-boundary-successor-v5.json";
+export const SUCCESSOR_V4_CANDIDATE_RECEIPT_PATH =
+  "docs/plans/2026-08-29-xot-e10-preview-migration-boundary-successor-v4.json";
 export const SUCCESSOR_V2_CANDIDATE_RECEIPT_PATH =
   "docs/plans/2026-08-24-xot-e10-preview-migration-boundary-successor-v2.json";
 export const SUCCESSOR_V1_CANDIDATE_RECEIPT_PATH =
@@ -24,6 +28,10 @@ export const SUCCESSOR_V2_CANDIDATE_RECEIPT_SCHEMA =
   "xot-e10-preview-migration-boundary-successor-v2";
 export const SUCCESSOR_V3_CANDIDATE_RECEIPT_SCHEMA =
   "xot-e10-preview-migration-boundary-successor-v3";
+export const SUCCESSOR_V4_CANDIDATE_RECEIPT_SCHEMA =
+  "xot-e10-preview-migration-boundary-successor-v4";
+export const SUCCESSOR_V5_CANDIDATE_RECEIPT_SCHEMA =
+  "xot-e10-preview-migration-boundary-successor-v5";
 export const CURRENT_CANDIDATE_RECEIPT_CONTRACT = "xot-e10-preview-migration-boundary-v1";
 export const CURRENT_CANDIDATE_MIGRATION_COUNT = 129;
 export const APPROVED_APPEND_ONLY_SUCCESSOR_MIGRATIONS = Object.freeze([
@@ -40,7 +48,7 @@ export const CURRENT_ON_DISK_MIGRATION_COUNT =
 export const CURRENT_CANDIDATE_INVENTORY_SHA256 =
   "cb9945c9a08efef8ef2bbe21c88f59ce8ee30e418055de5a035f37cda330c0ce";
 export const CURRENT_CANDIDATE_TYPES_SHA256 =
-  "1480973b0ff3603d02a66b7f12623502c37b19b6524bb81a485150dbb32a9ddb";
+  "f1dfd39c5ded189ac5bc39dc5ebd7a1f5986475a4f5cfeb333d650aadfe913dd";
 // The immediately-preceding authorized successor receipt. The E10 current
 // candidate must carry this exact predecessor SHA-256 so the append-only chain
 // remains immutable: E7 -> E10 (this candidate).
@@ -1655,11 +1663,14 @@ export function validateCurrentCandidateBaseline({
 export function validateCurrentCandidateSuccessorBaseline({ root = REPO_ROOT } = {}) {
   const resolvedRoot = resolve(root);
   const errors = [];
+  const successorV5Path = resolve(resolvedRoot, SUCCESSOR_V5_CANDIDATE_RECEIPT_PATH);
   const successorV3Path = resolve(resolvedRoot, SUCCESSOR_CANDIDATE_RECEIPT_PATH);
   const successorV2Path = resolve(resolvedRoot, SUCCESSOR_V2_CANDIDATE_RECEIPT_PATH);
   const successorV1Path = resolve(resolvedRoot, SUCCESSOR_V1_CANDIDATE_RECEIPT_PATH);
-  const currentPath = existsSync(successorV3Path)
-    ? successorV3Path
+  const currentPath = existsSync(successorV5Path)
+    ? successorV5Path
+    : existsSync(successorV3Path)
+      ? successorV3Path
     : existsSync(successorV2Path)
       ? successorV2Path
       : existsSync(successorV1Path)
@@ -1818,13 +1829,13 @@ export function validateCurrentCandidateSuccessorBaseline({ root = REPO_ROOT } =
     return effectiveV2;
   };
 
-  let effectiveCurrent = current;
-  if (current?.schema === SUCCESSOR_V3_CANDIDATE_RECEIPT_SCHEMA) {
-    if (JSON.stringify(current.supersession?.evidenceTier) !== JSON.stringify({ achieved: ["T0", "T1", "T2"], deferred: ["T3", "T4"] })) {
+  const resolveSuccessorV3 = (v3) => {
+    let effectiveV3 = null;
+    if (JSON.stringify(v3.supersession?.evidenceTier) !== JSON.stringify({ achieved: ["T0", "T1", "T2"], deferred: ["T3", "T4"] })) {
       errors.push("successor-v3 evidence tier is invalid");
     }
     const v2 = validateEnvelope(
-      current,
+      v3,
       SUCCESSOR_V3_CANDIDATE_RECEIPT_SCHEMA,
       SUCCESSOR_V2_CANDIDATE_RECEIPT_PATH,
       546,
@@ -1835,8 +1846,69 @@ export function validateCurrentCandidateSuccessorBaseline({ root = REPO_ROOT } =
     }
     if (v2) {
       const effectiveV2 = resolveSuccessorV2(v2);
-      if (effectiveV2) effectiveCurrent = applyOverrides(effectiveV2, current, "successor-v3");
+      if (effectiveV2) effectiveV3 = applyOverrides(effectiveV2, v3, "successor-v3");
     }
+    return effectiveV3;
+  };
+
+  let effectiveCurrent = current;
+  if (current?.schema === SUCCESSOR_V5_CANDIDATE_RECEIPT_SCHEMA) {
+    if (current.status !== "ACCEPTED_LOCAL_TYPE_RUNTIME_ALIGNMENT_T0_T1"
+      || current.release !== "CLOSED"
+      || current.releaseGate !== "CLOSED"
+      || current.claims?.productionChanged !== false
+      || current.claims?.productionDeployment !== "not_claimed") {
+      errors.push("successor-v5 acceptance boundary is invalid");
+    }
+    if (JSON.stringify(current.supersession?.evidenceTier) !== JSON.stringify({
+      achieved: ["T0", "T1"],
+      carriedForward: ["T2", "T2_LIVE_PREVIEW"],
+      deferred: ["T2_EXACT_HEAD", "T3", "T4"],
+    })) {
+      errors.push("successor-v5 evidence tier is invalid");
+    }
+    const v4Path = resolve(resolvedRoot, SUCCESSOR_V4_CANDIDATE_RECEIPT_PATH);
+    const v3Path = resolve(resolvedRoot, SUCCESSOR_CANDIDATE_RECEIPT_PATH);
+    if (current.predecessor?.path !== SUCCESSOR_V4_CANDIDATE_RECEIPT_PATH
+      || !existsSync(v4Path)
+      || current.predecessor?.sha256 !== sha256(readFileSync(v4Path))) {
+      errors.push("successor-v5 predecessor must bind the immutable successor-v4 receipt");
+    }
+    if (current.candidateBase?.path !== SUCCESSOR_CANDIDATE_RECEIPT_PATH
+      || !existsSync(v3Path)
+      || current.candidateBase?.sha256 !== sha256(readFileSync(v3Path))) {
+      errors.push("successor-v5 candidate base must bind the immutable successor-v3 receipt");
+    }
+    if (existsSync(v4Path)) {
+      try {
+        const v4 = JSON.parse(readFileSync(v4Path, "utf8"));
+        if (v4.schema !== SUCCESSOR_V4_CANDIDATE_RECEIPT_SCHEMA
+          || v4.predecessor?.path !== SUCCESSOR_CANDIDATE_RECEIPT_PATH
+          || v4.release !== "CLOSED"
+          || v4.releaseGate !== "CLOSED"
+          || v4.claims?.productionChanged !== false) {
+          errors.push("successor-v4 carried-forward Preview boundary is invalid");
+        }
+      } catch {
+        errors.push("successor-v4 carried-forward Preview receipt is not valid JSON");
+      }
+    }
+    if (existsSync(v3Path)) {
+      try {
+        const v3 = JSON.parse(readFileSync(v3Path, "utf8"));
+        if (v3.schema !== SUCCESSOR_V3_CANDIDATE_RECEIPT_SCHEMA) {
+          errors.push("successor-v5 candidate base must be successor-v3");
+        } else {
+          const effectiveV3 = resolveSuccessorV3(v3);
+          if (effectiveV3) effectiveCurrent = applyOverrides(effectiveV3, current, "successor-v5");
+        }
+      } catch {
+        errors.push("successor-v5 candidate base is not valid JSON");
+      }
+    }
+  } else if (current?.schema === SUCCESSOR_V3_CANDIDATE_RECEIPT_SCHEMA) {
+    const effectiveV3 = resolveSuccessorV3(current);
+    if (effectiveV3) effectiveCurrent = effectiveV3;
   } else if (current?.schema === SUCCESSOR_V2_CANDIDATE_RECEIPT_SCHEMA) {
     const effectiveV2 = resolveSuccessorV2(current);
     if (effectiveV2) effectiveCurrent = effectiveV2;

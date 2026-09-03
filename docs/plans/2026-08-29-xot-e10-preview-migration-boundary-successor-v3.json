@@ -21,6 +21,7 @@
     "src/api/runtimeControls.ts": "6268d500d0cda794a0885b543d2ad1981ddf0ffec82476a28b4e119bdf4d29a2",
     "src/test/runtime-controls-api.test.ts": "5fc612d3b72dad51d6fb9d8daacc09ff27e05b069cbd6444bbcd40acd4cfef00",
     "src/test/runtime-controls.test.tsx": "1bacc12bce358c033d2d2cd095dcef2188ecace097c93c2d2379459302e981c4",
+    ".github/workflows/ci.yml": "2fa3915bec2f47288b51fd535bf5685a71cc882ff5e00591fc04d7951ea6e1ff",
     "src/components/settings/RuntimeControlsPanel.tsx": "8d2581d27d77d0e4633c1b47561b55bc7c525b99d34bc550c2d3780e4a4e0dd8"
   },
   "supersession": {
