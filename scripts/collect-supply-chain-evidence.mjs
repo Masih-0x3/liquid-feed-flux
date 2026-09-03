@@ -18,6 +18,8 @@ const OWNER_POLICY_MODE = "exact-head";
 const MAX_OWNER_POLICY_B64_LENGTH = 64 * 1024;
 const OWNER_POLICY_DECISION = "accept_zero_actionable_no_waivers";
 const OWNER_POLICY_BASE_IMAGE_CLASSIFICATIONS = Object.freeze(["reviewed-non-actionable"]);
+const DEFAULT_COMMAND_TIMEOUT_MS = 5 * 60 * 1000;
+const DOCKER_BUILD_TIMEOUT_MS = 15 * 60 * 1000;
 const BASE_EVIDENCE_ARTIFACTS = Object.freeze([
   "root-npm-audit.json",
   "renderer-npm-audit.json",
@@ -392,12 +394,12 @@ function denoEntrypoints(root) {
     .sort((left, right) => left.localeCompare(right));
 }
 
-function run(command, args, cwd = REPO_ROOT) {
+function run(command, args, cwd = REPO_ROOT, timeoutMs = DEFAULT_COMMAND_TIMEOUT_MS) {
   const result = spawnSync(command, args, {
     cwd,
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
-    timeout: 5 * 60 * 1000,
+    timeout: timeoutMs,
   });
   return {
     status: result.status ?? (result.error ? 124 : 1),
@@ -407,8 +409,8 @@ function run(command, args, cwd = REPO_ROOT) {
   };
 }
 
-function recordTimeout(result, label, errors) {
-  if (result.timedOut) errors.push(`${label} timed out after 5 minutes`);
+function recordTimeout(result, label, errors, timeoutMs = DEFAULT_COMMAND_TIMEOUT_MS) {
+  if (result.timedOut) errors.push(`${label} timed out after ${timeoutMs / 60_000} minutes`);
 }
 
 function writeJson(directory, name, value) {
@@ -659,8 +661,8 @@ function collect(outputDirectory, reviewedSha) {
   writeJson(outputDirectory, "deno-import-evidence.json", deno);
 
   const image = `xot-renderer:${reviewedSha}`;
-  const build = run("docker", ["build", "--pull", "--tag", image, "services/video-renderer"]);
-  recordTimeout(build, "renderer Docker build", errors);
+  const build = run("docker", ["build", "--pull", "--tag", image, "services/video-renderer"], REPO_ROOT, DOCKER_BUILD_TIMEOUT_MS);
+  recordTimeout(build, "renderer Docker build", errors, DOCKER_BUILD_TIMEOUT_MS);
   let imageInspect = { status: "unavailable" };
   let inspectStatus = null;
   let inspectTimedOut = false;
@@ -783,6 +785,9 @@ export {
   acceptedOwnerDisposition,
   ingestOwnerPolicy,
   validateOnlyEvidence,
+  DEFAULT_COMMAND_TIMEOUT_MS,
+  DOCKER_BUILD_TIMEOUT_MS,
+  recordTimeout,
 };
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

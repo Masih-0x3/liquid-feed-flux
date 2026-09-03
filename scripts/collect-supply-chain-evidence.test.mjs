@@ -21,7 +21,23 @@ import {
   acceptedOwnerDisposition,
   ingestOwnerPolicy,
   validateOnlyEvidence,
+  DEFAULT_COMMAND_TIMEOUT_MS,
+  DOCKER_BUILD_TIMEOUT_MS,
+  recordTimeout,
 } from "./collect-supply-chain-evidence.mjs";
+
+test("the hosted Docker build has a cold-run timeout without weakening other command timeouts", () => {
+  assert.equal(DEFAULT_COMMAND_TIMEOUT_MS, 5 * 60 * 1000);
+  assert.equal(DOCKER_BUILD_TIMEOUT_MS, 15 * 60 * 1000);
+
+  const defaultErrors = [];
+  recordTimeout({ timedOut: true }, "npm audit", defaultErrors);
+  assert.deepEqual(defaultErrors, ["npm audit timed out after 5 minutes"]);
+
+  const buildErrors = [];
+  recordTimeout({ timedOut: true }, "renderer Docker build", buildErrors, DOCKER_BUILD_TIMEOUT_MS);
+  assert.deepEqual(buildErrors, ["renderer Docker build timed out after 15 minutes"]);
+});
 
 test("npm audit normalization keeps only reviewable metadata", () => {
   const normalized = normalizeNpmAudit({

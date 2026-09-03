@@ -50,11 +50,11 @@
     },
     {
       "path": "scripts/collect-supply-chain-evidence.mjs",
-      "sha256": "ad84b9759292e50b5bd65a0b9185c0e3f74c61536eb606b92247eb654907a96e"
+      "sha256": "fe351904967739c918bfe6e7dd9776522d9557f3a9c77efcd917d5221e261d46"
     },
     {
       "path": "scripts/collect-supply-chain-evidence.test.mjs",
-      "sha256": "c3f4acbba96914d9a325a335db84d8b71b311b2c8ea8ba1a0e83f11cebb0246a"
+      "sha256": "06f00f2cc4e607e5356738d40ab02e93005e7f14e1f68cc5dbd0f143ddc17f38"
     },
     {
       "path": "services/video-renderer/Dockerfile",
