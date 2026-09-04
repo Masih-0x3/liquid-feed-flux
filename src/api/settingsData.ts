@@ -142,21 +142,6 @@ export const DEFAULT_AXIS_WEIGHTS: Record<ScoreAxisKey, number> = {
   noise: 1.0,
 };
 
-export function makeDefaultProfile(name = 'Default'): EditorialProfile {
-  return {
-    id: crypto.randomUUID(),
-    name,
-    weights: { ...DEFAULT_AXIS_WEIGHTS },
-    threshold: 12,
-    must_include_keywords: [],
-    must_exclude_keywords: [],
-    required_tags_any: [],
-    blocked_tags: [],
-    author_overrides: {},
-    editorial_note: '',
-  };
-}
-
 
 export interface ScoringSettings {
   model?: string;
