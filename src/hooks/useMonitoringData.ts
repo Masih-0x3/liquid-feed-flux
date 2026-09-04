@@ -30,26 +30,13 @@ import {
 export type {
   DuplicateCluster,
   DuplicateClusterMember,
-  MonitoringDataSource,
   MonitoringEntry,
   MonitoringFilter,
-  MonitoringOverview,
-  MonitoringPage,
   MonitoringProcessAiCall,
   MonitoringProcessObservability,
-  MonitoringProcessRun,
   PipelineEvent,
   ScoreBucket,
-  XApiSummary,
 } from '@/api/monitoringData';
-
-export function useMonitoringData(filter: MonitoringFilter = 'all') {
-  return useMonitoringDataSearch(filter, '');
-}
-
-export function useMonitoringDataSearch(filter: MonitoringFilter = 'all', search = '') {
-  return useMonitoringDataSearchWithScore(filter, search, 'any');
-}
 
 const REALTIME_PATCH_DEBOUNCE_MS = 400;
 
