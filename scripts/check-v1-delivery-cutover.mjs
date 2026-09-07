@@ -16,6 +16,7 @@ const effectiveRepairMigration = await readFile(
 const zeroWriteMigrationName = "20260830120000_enforce_historical_delivery_zero_write.sql";
 const pendingReceiptAdoptionMigrationName = "20260901150013_adopt_telegram_pending_delivery_receipts.sql";
 const preProviderReleaseMigrationName = "20260901170000_release_pre_provider_x_delivery_claim.sql";
+const preProviderReclaimMigrationName = "20260907120000_reclaim_pre_provider_x_delivery_retry.sql";
 const zeroWriteMigration = await readFile(
   new URL(`../supabase/migrations/${zeroWriteMigrationName}`, import.meta.url),
   "utf8",
@@ -245,10 +246,38 @@ if (!zeroWriteMigration.includes("CREATE TRIGGER trg_00_historical_delivery_job_
   !zeroWriteMigration.includes("delivery_cutover_blocked:historical_deliver_job_zero_write")) {
   throw new Error("historical delivery jobs do not have a first-write trigger fence");
 }
-if (migrationNames.at(-1) !== preProviderReleaseMigrationName ||
-  migrationNames.at(-2) !== pendingReceiptAdoptionMigrationName ||
-  migrationNames.at(-3) !== zeroWriteMigrationName) {
-  throw new Error("historical zero-write, Telegram receipt adoption, and pre-provider release successors are not the final active migrations");
+if (migrationNames.at(-1) !== preProviderReclaimMigrationName ||
+    migrationNames.at(-2) !== preProviderReleaseMigrationName ||
+    migrationNames.at(-3) !== pendingReceiptAdoptionMigrationName ||
+    migrationNames.at(-4) !== zeroWriteMigrationName) {
+  throw new Error("historical zero-write, Telegram receipt adoption, pre-provider release, and pre-provider reclaim successors are not the final active migrations");
+}
+// Gate 2 (reclaim): the LATEST migration that defines get_x_post_candidates
+// must not exclude a pre-provider-released 'pending' x_deliveries row from the
+// candidate set, while still excluding the genuinely-active and terminal
+// states. This is the SQL-side reclaim gate that pairs with the x-poster
+// existing-set (Gate 1) and in-loop deferral (Gate 3).
+const candidateRpcDefinitionNames = migrationNames.filter((name) =>
+  migrationSources.find(([n]) => n === name)?.[1].includes("CREATE OR REPLACE FUNCTION public.get_x_post_candidates("),
+);
+if (candidateRpcDefinitionNames.length === 0) {
+  throw new Error("no migration defines public.get_x_post_candidates");
+}
+const candidateRpcSource = migrationSources.find(([n]) => n === candidateRpcDefinitionNames.at(-1))?.[1] ?? "";
+const candidateNotExistsMatch = candidateRpcSource.match(
+  /NOT EXISTS\s*\(\s*SELECT 1 FROM public\.x_deliveries xd WHERE xd\.post_id\s*=\s*p\.tweet_id\s+AND xd\.status IN\s*\(([^)]+)\)/,
+);
+if (!candidateNotExistsMatch) {
+  throw new Error(`${candidateRpcDefinitionNames.at(-1)} does not define the x_deliveries NOT EXISTS candidate gate`);
+}
+const candidateStatusList = candidateNotExistsMatch[1];
+if (/'pending'/.test(candidateStatusList)) {
+  throw new Error(`${candidateRpcDefinitionNames.at(-1)} still excludes released 'pending' rows from get_x_post_candidates`);
+}
+for (const status of ["'posted'", "'skipped'", "'failed'", "'posting'", "'running'"]) {
+  if (!candidateStatusList.includes(status)) {
+    throw new Error(`${candidateRpcDefinitionNames.at(-1)} dropped the required ${status} exclusion from get_x_post_candidates`);
+  }
 }
 const guardedTelegramStart = effectiveRepairMigration.indexOf(
   "CREATE OR REPLACE FUNCTION public.claim_telegram_delivery(",

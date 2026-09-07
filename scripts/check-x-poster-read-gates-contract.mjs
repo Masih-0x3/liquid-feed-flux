@@ -63,6 +63,29 @@ function assertContract({ source, packageJson, ci }, label = "current source") {
       !source.includes("const cfg = await loadVideoRenderConfig(sb);")) {
     fail(`${label}: render configuration must fail closed before provider admission and isolate post-provider retention reads`);
   }
+  // Reclaim gates: a pre-provider-released 'pending' x_deliveries row
+  // (claim_release_reason='pre_provider_retry') must re-enter the candidate set
+  // on the next cron tick. Gate 1 (the existing-delivery dedupe set) must not
+  // list 'pending', and Gate 3 (the in-loop active-deferral) must delegate to the
+  // reclaim-gate helper so a released row falls through to claimXPostDelivery.
+  if (!source.includes("in('status', ['posting', 'posted'])")) {
+    fail(`${label}: gate 1 existing-delivery query must list only 'posting' and 'posted'`);
+  }
+  if (source.includes("in('status', ['posting', 'posted', 'pending'])")) {
+    fail(`${label}: gate 1 still excludes released 'pending' rows`);
+  }
+  if (!source.includes("import { shouldDeferActiveXDelivery } from '../_shared/xPostReclaimGate.ts';")) {
+    fail(`${label}: gate 3 must import the reclaim-gate helper`);
+  }
+  if (!source.includes("'status, last_error, skip_reason, x_tweet_id, claim_expires_at, claim_release_reason'")) {
+    fail(`${label}: gate 3 latestX select must include claim_release_reason`);
+  }
+  if (!source.includes("if (shouldDeferActiveXDelivery(latestStatus, latestReleaseReason)) {")) {
+    fail(`${label}: gate 3 deferral must delegate to shouldDeferActiveXDelivery`);
+  }
+  if (source.includes("if (latestStatus === 'posting' || latestStatus === 'pending') {")) {
+    fail(`${label}: gate 3 must not keep the un-reclaim-aware 'pending' deferral`);
+  }
   const packageData = JSON.parse(packageJson);
   if (packageData.scripts?.["check:x-poster-read-gates"] !== "node scripts/check-x-poster-read-gates-contract.mjs") {
     fail(`${label}: package script is missing`);
@@ -134,6 +157,30 @@ if (process.env.MUTATION_TEST === "1") {
     packageJson: source.packageJson,
     ci: source.ci,
   }), "render decision malformed result continuation");
+  assertRejects((source) => ({
+    source: source.source.replace(
+      "in('status', ['posting', 'posted'])",
+      "in('status', ['posting', 'posted', 'pending'])",
+    ),
+    packageJson: source.packageJson,
+    ci: source.ci,
+  }), "gate 1 re-adds pending to existing-delivery query");
+  assertRejects((source) => ({
+    source: source.source.replace(
+      "if (shouldDeferActiveXDelivery(latestStatus, latestReleaseReason)) {",
+      "if (latestStatus === 'posting' || latestStatus === 'pending') {",
+    ),
+    packageJson: source.packageJson,
+    ci: source.ci,
+  }), "gate 3 restores un-reclaim-aware deferral");
+  assertRejects((source) => ({
+    source: source.source.replace(
+      "'status, last_error, skip_reason, x_tweet_id, claim_expires_at, claim_release_reason'",
+      "'status, last_error, skip_reason, x_tweet_id, claim_expires_at'",
+    ),
+    packageJson: source.packageJson,
+    ci: source.ci,
+  }), "gate 3 drops claim_release_reason select");
 }
 
 console.log(`X_POSTER_READ_GATES_SOURCE_CONTRACT_PASS candidateAndManualReadsFailClosed=true providerWorkBlockedOnReadErrors=true selfTest=${process.env.MUTATION_TEST === "1" ? "pass" : "skipped"}`);

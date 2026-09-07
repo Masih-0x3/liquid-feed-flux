@@ -3781,6 +3781,12 @@ const reviewedNonRawMigrationDigests = new Map([
   // does not change the protected video raw-table grant surface. Keep the
   // exemption byte-locked so any edit re-enters this RLS review.
   ['20260901170000_release_pre_provider_x_delivery_claim.sql', 'afeb056d73020e084e68afc5fca8aa33346cf56b8afa6f661cf94c57b2f36f68'],
+  // This successor redefines public.get_x_post_candidates (a reviewed
+  // service-only RPC) to stop excluding pre-provider-released 'pending'
+  // x_deliveries rows, opening the auto-cron reclaim path. It grants only
+  // service_role and does not change the protected video raw-table grant
+  // surface. Keep the exemption byte-locked so any edit re-enters this review.
+  ['20260907120000_reclaim_pre_provider_x_delivery_retry.sql', 'cbcf21ac02278b33513c7d7d2b1633968490e4d6ebfd05c46ac53715e1ee23eb'],
 ]);
 const reviewedServiceOnlyXCutoverMigration =
   '20260828120000_repair_effective_x_claim_cutover.sql';
