@@ -128,6 +128,10 @@ function validateStructural(source) {
   assert.ok(candidateIncrement < candidateValidation, "invalid candidates must consume parser budget before validation");
   assert.doesNotMatch(source.itemParser, /<img\[\^>\]\+src/, "RSS parser must not restore greedy HTML tag regexes");
   assert.doesNotMatch(source.itemParser, /\.match\(/, "RSS parser must not allocate unbounded regex match arrays");
+  const directMediaCollector = functionSlice(source.itemParser, "function collectBoundedDirectRssMedia", "\n/**\n * Parses a bounded RSS item");
+  assert.match(source.itemParser, /function indexOfIgnoreCase/, "RSS direct media scanner must use a length-preserving case-insensitive search");
+  assert.match(directMediaCollector, /indexOfIgnoreCase\(input/, "RSS direct media scanner must locate host URLs against the original input");
+  assert.doesNotMatch(directMediaCollector, /\.toLowerCase\(\)/, "RSS direct media scanner must not derive offsets from a length-mutating lowercase copy");
   assert.match(source.webhook, /filterReviewedRemoteMediaItems\(prefilteredMediaItems\)/, "reviewed-host media policy remains the downstream ingress gate");
   assert.match(source.mediaPolicy, /MAX_REMOTE_MEDIA_CANDIDATES_PER_POST = 8/, "media egress candidate cap remains present");
 }
@@ -201,6 +205,25 @@ assert.equal(
   0,
   "invalid candidates must consume all parser budget before a later valid media URL",
 );
+const turkishPrefixMedia = itemParser.parseBoundedRssItemMedia(
+  { description_html: "İstanbul https://pbs.twimg.com/media/abc.jpg" },
+  "İstanbul https://pbs.twimg.com/media/abc.jpg",
+);
+assert.equal(turkishPrefixMedia.length, 1, "bare twimg URL preceded by a length-changing character must still produce a candidate");
+assert.equal(turkishPrefixMedia[0].url, "https://pbs.twimg.com/media/abc.jpg", "bare twimg URL must retain its leading https scheme (no toLowerCase offset drift)");
+const uppercaseHostMedia = itemParser.parseBoundedRssItemMedia(
+  { description_html: "see HTTPS://PBS.TWIMG.COM/media/upper.jpg" },
+  "see HTTPS://PBS.TWIMG.COM/media/upper.jpg",
+);
+assert.equal(uppercaseHostMedia.length, 1, "uppercase twimg host must still match case-insensitively");
+assert.equal(uppercaseHostMedia[0].url, "HTTPS://PBS.TWIMG.COM/media/upper.jpg", "uppercase host URL must be extracted from the original input");
+const multiUrlMedia = itemParser.parseBoundedRssItemMedia(
+  { description_html: "İ https://pbs.twimg.com/media/a.jpg then https://pbs.twimg.com/media/b.jpg" },
+  "İ https://pbs.twimg.com/media/a.jpg then https://pbs.twimg.com/media/b.jpg",
+);
+assert.equal(multiUrlMedia.length, 2, "multiple bare twimg URLs after a length-changing character must both be extracted");
+assert.equal(multiUrlMedia[0].url, "https://pbs.twimg.com/media/a.jpg", "first URL after a length-changing prefix must not be shifted");
+assert.equal(multiUrlMedia[1].url, "https://pbs.twimg.com/media/b.jpg", "second URL must not inherit drift from the earlier prefix");
 assert.equal(
   itemParser.normalizeRssWebhookText("visible <img", true),
   "visible <img",
@@ -363,6 +386,10 @@ if (process.env.MUTATION_TEST === "1") {
       "inspected.count += 1;\n  if (!candidate) return true;",
       "if (!candidate) return true;\n  inspected.count += 1;",
     ),
+  }));
+  assertRejected("direct RSS media scanner index parity", (source) => ({
+    ...source,
+    itemParser: source.itemParser.replaceAll("indexOfIgnoreCase(input, ", "input.toLowerCase().indexOf("),
   }));
   assertRejected("HTML scan attempt cap", (source) => ({
     ...source,
