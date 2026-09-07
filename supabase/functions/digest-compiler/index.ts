@@ -14,6 +14,7 @@ import {
   type WorkflowRunStatus,
 } from "../_shared/observability.ts";
 import { captureEdgeException, initSentryEdge } from "../_shared/sentry.ts";
+import { buildThreadTweets, clampHeaderFormat } from "../_shared/digestThreadTweets.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": Deno.env.get("ALLOWED_CORS_ORIGIN") ?? "https://liquid-feed-flux.lovable.app",
@@ -148,12 +149,13 @@ function readDigestConfigOverride(value: unknown): Partial<DigestConfig> {
   const frequencyMinutes = readNumber(value.frequency_minutes);
   const maxBullets = readNumber(value.max_bullets);
   const minPosts = readNumber(value.min_posts);
+  const headerFormat = clampHeaderFormat(value.header_format);
 
   return {
     ...(frequencyMinutes !== undefined ? { frequency_minutes: Math.max(5, Math.min(1440, Math.round(frequencyMinutes))) } : {}),
     ...(maxBullets !== undefined ? { max_bullets: Math.max(1, Math.min(20, Math.round(maxBullets))) } : {}),
     ...(minPosts !== undefined ? { min_posts: Math.max(1, Math.min(50, Math.round(minPosts))) } : {}),
-    ...(readString(value.header_format) !== undefined ? { header_format: readString(value.header_format)! } : {}),
+    ...(headerFormat !== undefined ? { header_format: headerFormat } : {}),
   };
 }
 
@@ -191,25 +193,6 @@ async function sha256Hex(value: string): Promise<string> {
   return Array.from(new Uint8Array(digest))
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
-}
-
-function buildThreadTweets(summary: string, header: string): string[] {
-  const lines = summary.split("\n").map((line) => line.trim()).filter(Boolean);
-  if (lines.length === 0) return [];
-
-  const tweets: string[] = [];
-  let current = `${header}\n\n`;
-
-  for (const line of lines) {
-    if ((current + line + "\n").length > 270) {
-      tweets.push(current.trim());
-      current = "";
-    }
-    current += `${line}\n`;
-  }
-
-  if (current.trim()) tweets.push(current.trim());
-  return tweets;
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
