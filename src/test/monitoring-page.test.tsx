@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -312,5 +312,176 @@ describe("monitoring page", () => {
     expect(screen.queryByRole("button", { name: /row actions/i })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^refresh$/i })).toBeEnabled();
     expect(screen.getAllByRole("button", { name: /^details$/i })[0]).toBeEnabled();
+  });
+});
+
+function makeManualScoreEntry(overrides: Partial<MonitoringEntry> = {}): MonitoringEntry {
+  return {
+    tweet_id: "post-1",
+    text_original: "Source post text",
+    text_translated: "",
+    url: "https://twitter.com/example/status/1",
+    created_at: new Date(Date.now() - 20_000).toISOString(),
+    has_media: false,
+    account_handle: "FirstSquawk",
+    author_handle: "FirstSquawk",
+    delivery_status: "pending",
+    telegram_message_ids: [],
+    is_translated: false,
+    is_delivered: false,
+    translation_job_status: "pending",
+    delivery_job_status: "pending",
+    translation_error: "",
+    delivery_error: "",
+    importance_score: 16,
+    importance_tags: null,
+    importance_reasoning: null,
+    delivery_decision: "deliver",
+    score_axes: null,
+    final_score: 16,
+    base_score: null,
+    learned_score: null,
+    learned_delta: null,
+    x_gate_score: null,
+    learning_confidence: null,
+    decision_reason: null,
+    scoring_version: "v2",
+    scoring_profile_id: "iran-first",
+    audience_class: "direct_focus",
+    audience_confidence: 0.9,
+    audience_reason: null,
+    global_exception_class: null,
+    score_review_status: null,
+    is_truncated: false,
+    hydrated_at: null,
+    hydration_source: null,
+    x_status: null,
+    x_tweet_id: null,
+    x_posted_at: null,
+    x_error: null,
+    x_skip_reason: null,
+    dup_of_tweet_id: null,
+    duplicate_of: null,
+    story_cluster_id: null,
+    dup_similarity: null,
+    dedupe_status: "unique",
+    dedupe_checked_at: new Date(Date.now() - 18_000).toISOString(),
+    dedupe_method: "local",
+    dedupe_confidence: null,
+    dedupe_reason: null,
+    dedupe_new_facts: null,
+    score_breakdown: null,
+    feedback_locked: false,
+    enrich_status: null,
+    enrichment_version: null,
+    editorial_commentary: null,
+    humanized_commentary: null,
+    commentary_hook: null,
+    commentary_question: null,
+    narrative_callback: null,
+    composed_post_text: null,
+    creator_angle: null,
+    why_it_matters: null,
+    source_context: null,
+    algorithm_signal_scores: null,
+    aggregator_risk_score: null,
+    ai_voice_risk_score: null,
+    monetization_risk_flags: null,
+    enrichment_review_reason: null,
+    final_x_text: null,
+    post_format_hint: null,
+    background_context: null,
+    enrich_tokens: null,
+    enrich_duration_ms: null,
+    process_observability: null,
+    monitoring_state: {
+      code: "translation_queue",
+      stage_label: "Translation queue",
+      tone: "info",
+      decision_label: "Queued",
+      primary_blocker: "Awaiting translation",
+      translation_state: "queued",
+      telegram_state: "none",
+      x_state: "none",
+      needs_attention: false,
+      next_actions: ["translate"],
+    },
+    duplicate_cluster: null,
+    hidden_in_cluster: false,
+    ...overrides,
+  } as unknown as MonitoringEntry;
+}
+
+describe("monitoring page manual score dialog preview", () => {
+  beforeEach(() => {
+    monitoringHooks.useMonitoringDataSearchWithScore.mockReset();
+    monitoringHooks.useMonitoringOverview.mockReset();
+    monitoringHooks.useXApiSummary.mockReset();
+    authMock.useAuth.mockReset();
+    authMock.useAuth.mockReturnValue({ isAdmin: true, role: "admin" });
+    monitoringHooks.useXApiSummary.mockReturnValue({ data: undefined });
+    monitoringHooks.useMonitoringOverview.mockReturnValue({
+      data: { threshold: 14, threshold_source: "default" },
+    });
+  });
+
+  function renderWithEntries(entries: MonitoringEntry[]) {
+    monitoringHooks.useMonitoringDataSearchWithScore.mockReturnValue({
+      entries,
+      isLoading: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      isFetchingNextPage: false,
+      isFetching: false,
+      error: null,
+    });
+    renderMonitoring();
+  }
+
+  function openManualScoreDialog() {
+    fireEvent.click(screen.getByRole("button", { name: /^Score$/ }));
+  }
+
+  function getPreview(): string {
+    return screen.getByText(/This score will/).textContent ?? "";
+  }
+
+  function checkOverrideDuplicate() {
+    fireEvent.click(screen.getByRole("checkbox", { name: /override duplicate block/i }));
+  }
+
+  it("says skip for a passing score on a duplicate-blocked post when override is left unchecked", () => {
+    renderWithEntries([
+      makeManualScoreEntry({
+        tweet_id: "dup-1",
+        dup_of_tweet_id: "canonical-tweet",
+        duplicate_of: null,
+        final_score: 16,
+        importance_score: 16,
+      }),
+    ]);
+    openManualScoreDialog();
+
+    expect(screen.getByText("Override duplicate block")).toBeInTheDocument();
+    // Override is unchecked by default (openManualScore sets it to false).
+    expect(getPreview()).toContain("skip if saved");
+    expect(getPreview()).not.toContain("pass if saved");
+  });
+
+  it("says pass for a passing score on a duplicate-blocked post after override is checked", () => {
+    renderWithEntries([
+      makeManualScoreEntry({
+        tweet_id: "dup-1",
+        dup_of_tweet_id: "canonical-tweet",
+        duplicate_of: null,
+        final_score: 16,
+        importance_score: 16,
+      }),
+    ]);
+    openManualScoreDialog();
+
+    expect(getPreview()).toContain("skip if saved");
+    checkOverrideDuplicate();
+    expect(getPreview()).toContain("pass if saved");
   });
 });
