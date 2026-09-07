@@ -116,6 +116,20 @@ function validateStructural(source) {
   assert.match(main, /requiredPostingQuotaFields\.some\(\(\[field, max\]\) => !isBoundedPositiveSafeInteger\(rawRateLimits\[field\], max\)\)/, 'raw persisted quota settings must honor the same upper bounds');
   assert.doesNotMatch(main, /if \(posts1hCount >= limits\.posts_per_hour\)/, 'direct untyped quota comparisons must not return');
   assert.doesNotMatch(main, /settingsError\.message|result\.error\.message/, 'quota unavailability telemetry must not log database error text');
+  // Media-upload baseline unit: the 24h baseline must sum x_deliveries.media_count
+  // (the same per-media-item unit the in-run counter increments), not count rows
+  // with media_count > 0 (one unit per post regardless of how many images it
+  // carried). The per-post row-count baseline (introduced in c5fd15da) made
+  // media_uploads_per_day 4x too permissive and unusable as a real cap.
+  assert.doesNotMatch(main, /\.gt\('media_count', 0\)/, 'media-upload baseline must use a per-media-item sum, not a per-post row count');
+  assert.match(main, /sb\.from\('x_deliveries'\)\.select\('media_count'\)\.eq\('status', 'posted'\)\.gte\('created_at', since24h\)/, 'media-upload baseline must select media_count for posted deliveries in the last 24h');
+  assert.match(main, /let mediaUp24hDb = 0;[\s\S]*?for \(const row of mediaUp24hRows\)[\s\S]*?mediaUp24hDb \+= \(row as \{ media_count: number \}\)\.media_count;/, 'media-upload baseline must sum media_count rows into mediaUp24hDb');
+  assert.match(main, /!Array\.isArray\(mediaUp24hRows\) \|\|[\s\S]*?mediaUp24hRows\.some\(\(row\) => !isRecord\(row\) \|\| !isNonNegativeSafeInteger\(\(row as \{ media_count\?: unknown \}\)\.media_count\)\)/, 'malformed media_count rows must fail closed before the baseline sum');
+  // Per-upload enforcement: the per-image upload loop must re-check the 24h
+  // media cap immediately before each uploadImage call, so a 4-image post cannot
+  // push mediaUp24hCount past the cap by more than 1 within a single iteration.
+  assert.match(main, /if \(mediaUp24hCount >= limits\.media_uploads_per_day\) \{[\s\S]*?mediaQuotaBlocked = true;[\s\S]*?break;/, 'the per-image upload loop must re-check the media cap before each uploadImage');
+  assert.match(main, /failXPostDelivery\(sb, \{[\s\S]*?status: 'skipped',[\s\S]*?skipReason: mediaQuotaReason,[\s\S]*?mediaKind: 'image',/, 'the per-image media cap trip must release the claim as skipped with rate_limit_media');
 
   const manual = sliceBetween(poster, 'async function handleManualVideoIntakePost', '// ─── Main');
   const manualQuotaIndex = indexOfOrFail(manual, 'const quotaReason = params.quotaBlock();', 'manual posting must consult the shared quota closure');
@@ -230,6 +244,41 @@ if (process.env.MUTATION_TEST === '1') {
   assertRejected('whole-number UI controls', (source) => ({
     ...source,
     rateLimitsUi: source.rateLimitsUi.replace('step={1}', ''),
+  }));
+  assertRejected('per-post media baseline', (source) => ({
+    ...source,
+    poster: source.poster.replace(
+      "sb.from('x_deliveries').select('media_count').eq('status', 'posted').gte('created_at', since24h),",
+      "sb.from('x_deliveries').select('*', { count: 'exact', head: true }).eq('status', 'posted').gt('media_count', 0).gte('created_at', since24h),",
+    ),
+  }));
+  assertRejected('zero-sum media baseline', (source) => ({
+    ...source,
+    poster: source.poster.replace(
+      'mediaUp24hDb += (row as { media_count: number }).media_count;',
+      'mediaUp24hDb += 0;',
+    ),
+  }));
+  assertRejected('media-row shape guard', (source) => ({
+    ...source,
+    poster: source.poster.replace(
+      "!Array.isArray(mediaUp24hRows) ||\n    mediaUp24hRows.some((row) => !isRecord(row) || !isNonNegativeSafeInteger((row as { media_count?: unknown }).media_count))",
+      "false ||\n    false",
+    ),
+  }));
+  assertRejected('per-upload media gate removal', (source) => ({
+    ...source,
+    poster: source.poster.replace(
+      'if (mediaUp24hCount >= limits.media_uploads_per_day) {\n              mediaQuotaBlocked = true;\n              break;\n            }',
+      'if (false) {\n              mediaQuotaBlocked = true;\n              break;\n            }',
+    ),
+  }));
+  assertRejected('per-upload media claim release downgrade', (source) => ({
+    ...source,
+    poster: source.poster.replace(
+      "skipReason: mediaQuotaReason,\n                  mediaCount,",
+      "skipReason: null,\n                  mediaCount,",
+    ),
   }));
   selfTest = 'pass';
 }

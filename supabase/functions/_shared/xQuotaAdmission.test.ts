@@ -101,3 +101,57 @@ Deno.test("X quota admission returns the correct window and same-run boundaries"
     "min_spacing",
   );
 });
+
+Deno.test("X quota admission media cap follows the per-media-item unit", () => {
+  // The in-run counter in x-poster/index.ts increments once per uploadImage
+  // and the 24h DB baseline sums x_deliveries.media_count, so the snapshot
+  // value is the count of individual media items uploaded in the last 24h.
+  // The admission gate must trip exactly when that count reaches
+  // media_uploads_per_day, regardless of whether the count was reached by
+  // many single-image posts or few multi-image posts. This loop models the
+  // counter advancing one media item at a time, asserting that admission
+  // stays open up to (cap - 1) and switches to rate_limit_media at the cap
+  // — the guarantee the per-image upload loop in x-poster depends on.
+  const cap = 5;
+  const atCount = (n: number) =>
+    getXQuotaBlockReason({
+      ...valid,
+      limits: { ...valid.limits, media_uploads_per_day: cap },
+      snapshot: { ...valid.snapshot, mediaUploads24h: n },
+    });
+  assertEquals(atCount(0), null, "an empty 24h media history must admit");
+  assertEquals(atCount(cap - 2), null, "two slots below the cap must admit");
+  assertEquals(atCount(cap - 1), null, "one slot below the cap must admit");
+  assertEquals(atCount(cap), "rate_limit_media", "the cap itself must block");
+  assertEquals(
+    atCount(cap + 1),
+    "rate_limit_media",
+    "any post-cap value (overshoot) must still block",
+  );
+  assertEquals(
+    atCount(cap + 3),
+    "rate_limit_media",
+    "the prior worst-case +3 overshoot (a 4-image iteration that started at cap - 1) must still block",
+  );
+  // The operator-intent check: setting media_uploads_per_day=50 must trip at
+  // 50 media items, not at 50 image-posts (which could carry up to 200 real
+  // media uploads under the old per-post baseline).
+  assertEquals(
+    getXQuotaBlockReason({
+      ...valid,
+      limits: { ...valid.limits, media_uploads_per_day: 50 },
+      snapshot: { ...valid.snapshot, mediaUploads24h: 50 },
+    }),
+    "rate_limit_media",
+    "an operator lowering the cap to 50 must trip at 50 media items, not at 50 image-posts",
+  );
+  assertEquals(
+    getXQuotaBlockReason({
+      ...valid,
+      limits: { ...valid.limits, media_uploads_per_day: 50 },
+      snapshot: { ...valid.snapshot, mediaUploads24h: 49 },
+    }),
+    null,
+    "the 50th media upload in 24h must still be admissible (cap is the cap, not cap-1)",
+  );
+});

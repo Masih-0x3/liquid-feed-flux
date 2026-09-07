@@ -632,22 +632,40 @@ export async function getXPostingDiagnostics(
       count: "exact",
       head: true,
     }).eq("status", "posted").gte("created_at", since30d),
-    table(supabase, "x_deliveries").select("id", {
-      count: "exact",
-      head: true,
-    }).eq("status", "posted").gt("media_count", 0).gte(
-      "created_at",
-      since24h,
-    ),
+    table(supabase, "x_deliveries").select("media_count").eq(
+      "status",
+      "posted",
+    ).gte("created_at", since24h),
   ]);
   if (posts1h.error || posts24h.error || posts30d.error || media24h.error) {
     return { success: false, error: "x_diagnostics_quota_read_failed" };
   }
+  // The 24h media baseline must use the same per-media-item unit as the
+  // x-poster enforcement (sum of media_count), not a per-post row count, so
+  // the operator-facing quota snapshot agrees with the actual admission gate.
+  const media24hRows = media24h.data;
+  if (
+    !Array.isArray(media24hRows) ||
+    media24hRows.some((row) =>
+      !row ||
+      typeof row !== "object" ||
+      Array.isArray(row) ||
+      typeof (row as { media_count?: unknown }).media_count !== "number" ||
+      !Number.isSafeInteger((row as { media_count?: unknown }).media_count) ||
+      ((row as { media_count?: unknown }).media_count as number) < 0
+    )
+  ) {
+    return { success: false, error: "x_diagnostics_quota_read_failed" };
+  }
+  const media24hSum = (media24hRows as Array<{ media_count: number }>).reduce(
+    (sum, row) => sum + row.media_count,
+    0,
+  );
   const quotaSnapshot = {
     posts_1h: posts1h.count ?? 0,
     posts_24h: posts24h.count ?? 0,
     posts_30d: posts30d.count ?? 0,
-    media_24h: media24h.count ?? 0,
+    media_24h: media24hSum,
   };
   const quotaReason = xQuotaBlock(quotaSnapshot, xLimits);
 

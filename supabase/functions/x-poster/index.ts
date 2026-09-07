@@ -1604,7 +1604,7 @@ Deno.serve(async (req) => {
       sb.from('x_deliveries').select('*', { count: 'exact', head: true }).eq('status', 'posted').gte('created_at', since30d),
       sb.from('x_deliveries').select('*', { count: 'exact', head: true }).eq('status', 'posted').gte('created_at', since24h),
       sb.from('x_deliveries').select('*', { count: 'exact', head: true }).eq('status', 'posted').gte('created_at', since1h),
-      sb.from('x_deliveries').select('*', { count: 'exact', head: true }).eq('status', 'posted').gt('media_count', 0).gte('created_at', since24h),
+      sb.from('x_deliveries').select('media_count').eq('status', 'posted').gte('created_at', since24h),
       sb.from('x_deliveries').select('created_at, posted_at').eq('status', 'posted').order('created_at', { ascending: false }).limit(1),
     ]) as unknown as Array<Record<string, unknown>>;
   } catch (_error) {
@@ -1628,7 +1628,7 @@ Deno.serve(async (req) => {
   const monthlyPosts = monthlyQuota.count;
   const posts24hDb = posts24hQuota.count;
   const posts1hDb = posts1hQuota.count;
-  const mediaUp24hDb = mediaUp24hQuota.count;
+  const mediaUp24hRows = mediaUp24hQuota.data;
   const lastPostRows = lastPostQuota.data;
   if (
     !Array.isArray(lastPostRows) ||
@@ -1636,10 +1636,20 @@ Deno.serve(async (req) => {
     !isNonNegativeSafeInteger(monthlyPosts) ||
     !isNonNegativeSafeInteger(posts24hDb) ||
     !isNonNegativeSafeInteger(posts1hDb) ||
-    !isNonNegativeSafeInteger(mediaUp24hDb)
+    !Array.isArray(mediaUp24hRows) ||
+    mediaUp24hRows.some((row) => !isRecord(row) || !isNonNegativeSafeInteger((row as { media_count?: unknown }).media_count))
   ) {
     console.error('[x-poster] quota history malformed', { code: X_QUOTA_UNAVAILABLE });
     return quotaUnavailableResponse();
+  }
+  // The 24h media-upload baseline must use the same per-media-item unit as the
+  // in-run counter (which increments once per successful uploadImage). Summing
+  // x_deliveries.media_count over the last 24h, rather than counting rows with
+  // media_count > 0, keeps the baseline and the counter in the same unit so
+  // media_uploads_per_day actually bounds individual X media/upload calls.
+  let mediaUp24hDb = 0;
+  for (const row of mediaUp24hRows) {
+    mediaUp24hDb += (row as { media_count: number }).media_count;
   }
   let posts24hCount = posts24hDb;
   let posts1hCount = posts1hDb;
@@ -2357,12 +2367,47 @@ Deno.serve(async (req) => {
           mediaKind = 'video';
           mediaUp24hCount += 1;
         } else {
+          let mediaQuotaBlocked = false;
           for (const prepared of preparedMediaUploads) {
+            // Re-check the 24h media-upload cap immediately before each
+            // individual uploadImage call. The per-iteration quotaBlock() at
+            // the top of the candidate loop only sees the count before the
+            // post, so a 4-image iteration could otherwise push
+            // mediaUp24hCount up to (cap + 3). Gating per-upload bounds the
+            // overshoot to at most one wasted uploadImage per run.
+            if (mediaUp24hCount >= limits.media_uploads_per_day) {
+              mediaQuotaBlocked = true;
+              break;
+            }
             const id = await uploadImage(prepared.bytes, prepared.mimeType || 'image/jpeg', ck, cs, at, ats, sb, tweetId);
             mediaIds.push(id);
             mediaBytes += prepared.bytes.length;
             mediaCount += 1;
             mediaUp24hCount += 1;
+          }
+          if (mediaQuotaBlocked) {
+            const mediaQuotaReason = 'rate_limit_media';
+            try {
+              const skipOk = deliveryClaim
+                ? await failXPostDelivery(sb, {
+                  deliveryId: deliveryClaim.deliveryId!,
+                  claimToken: deliveryClaim.claimToken!,
+                  claimGeneration: deliveryClaim.claimGeneration,
+                  status: 'skipped',
+                  error: mediaQuotaReason,
+                  skipReason: mediaQuotaReason,
+                  mediaCount,
+                  mediaBytes,
+                  mediaKind: 'image',
+                })
+                : false;
+              if (!skipOk) console.error('[x-poster] x_deliveries claim release rejected (media quota)', { tweetId });
+            } catch (failErr) {
+              console.error('[x-poster] fail_x_post_delivery failed (media quota)', { tweetId, err: safeXPosterErrorCode(failErr, 'fail_x_post_delivery_failed') });
+            }
+            results.push({ tweet_id: tweetId, status: 'skipped', reason: mediaQuotaReason });
+            console.log(`[x-poster] skipping ${tweetId}: ${mediaQuotaReason} mid-batch`);
+            continue;
           }
           mediaKind = 'image';
         }
