@@ -108,3 +108,38 @@ Deno.test("repairTranslationReadability redacts thrown provider messages", async
   assertEquals(result.repairStatus, "failed");
   assertEquals(result.repairError, "translation_readability_openai_request_failed");
 });
+
+Deno.test("regression: Latin-only junk must not replace flawed Persian draft", async () => {
+  const draft =
+    "J.D. Vance told The Michael Knowles Show that the technical talks between USA and IR continue بدون توافق";
+  const result = await repairTranslationReadability({
+    apiKey: "key",
+    model: "gpt-5.4-mini",
+    originalText:
+      "J.D. Vance told The Michael Knowles Show that the technical talks between USA and IR continue without agreement",
+    translatedText: draft,
+    callOpenAI: async () => openAiResponse("Hi."),
+  });
+  assertEquals(result.repairStatus, "rejected");
+  assertEquals(result.acceptedRepair, false);
+  assertEquals(result.text, draft);
+});
+
+Deno.test("regression: candidate that keeps not_persian where original also had not_persian is accepted on count drop", async () => {
+  const draft =
+    "Hello world this is a broken non-Persian draft lacking punctuation";
+  const result = await repairTranslationReadability({
+    apiKey: "key",
+    model: "gpt-5.4-mini",
+    originalText: "Source",
+    translatedText: draft,
+    callOpenAI: async () =>
+      openAiResponse("Hello world this is a better non-Persian draft."),
+  });
+  assertEquals(result.repairStatus, "accepted");
+  assertEquals(result.acceptedRepair, true);
+  assertEquals(
+    result.text,
+    "Hello world this is a better non-Persian draft.",
+  );
+});

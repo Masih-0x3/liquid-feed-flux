@@ -316,8 +316,12 @@ export async function repairTranslationReadability(
       targetChars,
       maxParagraphs: options.maxParagraphs,
     });
+    const introducesNotPersian = final.issues.some((i) =>
+      i.code === "not_persian"
+    ) && !initial.issues.some((i) => i.code === "not_persian");
     const improves = final.issues.length < initial.issues.length &&
-      final.metrics.chars <= maxChars;
+      final.metrics.chars <= maxChars &&
+      !introducesNotPersian;
     const accepted = final.ok || improves;
     return {
       text: accepted ? candidate : original,
