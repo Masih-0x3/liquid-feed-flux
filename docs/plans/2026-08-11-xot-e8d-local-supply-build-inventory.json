@@ -346,7 +346,7 @@
     },
     {
       "path": "supabase/functions/worker/index.ts",
-      "sha256": "469976d0e03f8ee1d6492f8e9bd38d054875e0409cd17fc2fee212e533a016bb"
+      "sha256": "3a63545b83b4e211da5d14be5f9ffa5bbc2422892bc0ebe218dc874c9ae2d32f"
     },
     {
       "path": "supabase/functions/worker/jobLifecycle.test.ts",
@@ -9846,14 +9846,14 @@
           "path": "supabase/functions/admin-actions/index.ts,supabase/functions/admin-retry/index.ts,supabase/functions/db-cleanup/index.ts,supabase/functions/digest-compiler/index.ts,supabase/functions/media-cleanup/index.ts,supabase/functions/media-processor/index.ts,supabase/functions/webhooks-rssapp/index.ts,supabase/functions/worker/index.ts,supabase/functions/x-followers-snapshot/index.ts",
           "version_or_ref": "https://deno.land/std@0.168.0/http/server.ts",
           "integrity_or_source_hash": "e99c1bee8a3f6571ee4cdeb2966efad465b8f6fe62bec1bdb59c1f007cc4d155",
-          "source_file_sha256": "c4e96b7fc3fa125eb82bf1224a61f73dbd1a910a77109da82128c3d572fa0c6e"
+          "source_file_sha256": "008218273721f9b4ec33aeddca86f787a10bad32543d0e213bae99ee1c0b5154"
         },
         {
           "name": "https://esm.sh/@supabase/supabase-js@2.39.7",
           "path": "supabase/functions/admin-actions/index.ts,supabase/functions/admin-retry/index.ts,supabase/functions/db-cleanup/index.ts,supabase/functions/media-cleanup/index.ts,supabase/functions/media-processor/index.ts,supabase/functions/webhooks-rssapp/index.ts,supabase/functions/worker/index.ts,supabase/functions/x-followers-snapshot/index.ts",
           "version_or_ref": "https://esm.sh/@supabase/supabase-js@2.39.7",
           "integrity_or_source_hash": "5361671c958daa350e504d9975da64b2d6dc9e81390b985ccdafb2e3572e24e7",
-          "source_file_sha256": "19fef1ca04091f5a48c98bb049df787acf0a2203936ccc7e23c49230739f7b73"
+          "source_file_sha256": "8afd202730450dda2f6418614d8dd81f772f34c41659b49c592c255d27b950d5"
         },
         {
           "name": "https://esm.sh/@supabase/supabase-js@2.49.1",
@@ -9874,7 +9874,7 @@
           "path": "supabase/functions/worker/index.ts",
           "version_or_ref": "jsr:@supabase/functions-js/edge-runtime.d.ts",
           "integrity_or_source_hash": "e81b95eac034f9ebb8b62d64e9006958ce762622a882ad6b19ee9eab94da2043",
-          "source_file_sha256": "1416e0c6d15845066c8b245f40d870c24d3f046c7216a7669d1c47a9d04832b8"
+          "source_file_sha256": "79537050e7a3b9af5854dadefef9deca2d11e1113302f71fe794c4ea6eb9a599"
         },
         {
           "name": "npm:@ai-sdk/openai@3.0.79",
