@@ -225,3 +225,102 @@ Deno.test("x posting config does not restamp when user supplies an explicit new 
     false,
   );
 });
+
+const validStoryMemoryBase = {
+  enabled: true,
+  window_hours: 48,
+  similarity_threshold: 0.86,
+  action: "skip",
+};
+
+Deno.test("story_memory.bypass_authors validator rejects non-string and malformed entries", () => {
+  assertEquals(
+    validateSettingsValue("story_memory", {
+      ...validStoryMemoryBase,
+      bypass_authors: "trusted",
+    }),
+    "story_memory.bypass_authors must be array",
+  );
+  assertEquals(
+    validateSettingsValue("story_memory", {
+      ...validStoryMemoryBase,
+      bypass_authors: new Array(101).fill("a"),
+    }),
+    "story_memory.bypass_authors must be ≤100",
+  );
+  for (
+    const bad of [
+      ["nested"],
+      true,
+      false,
+      null,
+      12345,
+      undefined,
+      {},
+      [],
+    ]
+  ) {
+    assertEquals(
+      validateSettingsValue("story_memory", {
+        ...validStoryMemoryBase,
+        bypass_authors: [bad],
+      }),
+      "story_memory.bypass_authors entries must be strings",
+    );
+  }
+  for (const bad of ["", "   ", "@", "@   "]) {
+    assertEquals(
+      validateSettingsValue("story_memory", {
+        ...validStoryMemoryBase,
+        bypass_authors: [bad],
+      }),
+      "story_memory.bypass_authors entries must be handles ≤15 chars",
+    );
+  }
+  assertEquals(
+    validateSettingsValue("story_memory", {
+      ...validStoryMemoryBase,
+      bypass_authors: ["@abcdefghijklmnop"],
+    }),
+    "story_memory.bypass_authors entries must be handles ≤15 chars",
+  );
+  assertEquals(
+    validateSettingsValue("story_memory", {
+      ...validStoryMemoryBase,
+      bypass_authors: ["abcdefghijklmnop"],
+    }),
+    "story_memory.bypass_authors entries must be handles ≤15 chars",
+  );
+  assertEquals(
+    validateSettingsValue("story_memory", {
+      ...validStoryMemoryBase,
+      bypass_authors: ["valid", ["nested"]],
+    }),
+    "story_memory.bypass_authors entries must be strings",
+  );
+});
+
+Deno.test("story_memory.bypass_authors validator accepts valid handles and a full payload", () => {
+  for (const ok of ["@Trusted", "Trusted", "  @Trusted  ", "abc", "abcdefghijklmno"]) {
+    assertEquals(
+      validateSettingsValue("story_memory", {
+        ...validStoryMemoryBase,
+        bypass_authors: [ok],
+      }),
+      null,
+    );
+  }
+  assertEquals(
+    validateSettingsValue("story_memory", {
+      ...validStoryMemoryBase,
+      candidate_min_similarity: 0.78,
+      auto_duplicate_similarity: 0.94,
+      mode: "hybrid_ai",
+      adjudicator_model: "gpt-5.4-mini",
+      adjudicator_reasoning_effort: "medium",
+      adjudicator_confidence_threshold: 0.8,
+      bypass_authors: ["@Trusted", "source", "PressDesk"],
+    }),
+    null,
+  );
+});

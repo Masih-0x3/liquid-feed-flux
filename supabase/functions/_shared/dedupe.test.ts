@@ -29,6 +29,38 @@ Deno.test("normalizeDuplicateGateConfig keeps legacy settings and fills new gate
   assertEquals(cfg.bypass_authors, ["trusted"]);
 });
 
+Deno.test("normalizeDuplicateGateConfig coerces non-string bypass_authors into candidate handles (validateSettingsValue rejects these upstream)", () => {
+  // The write validator (validateSettingsValue) now rejects every non-string
+  // entry before persistence. This test documents the defensive legacy path
+  // that motivated the fix: a malformed persisted value would stringify each
+  // entry, turning scalars/nested-arrays into syntactically valid handles
+  // that the bypass match path in runDuplicateGate trusts without question.
+  const cfg = normalizeDuplicateGateConfig({
+    enabled: true,
+    bypass_authors: [
+      "@Trusted",
+      ["nested"],
+      true,
+      null,
+      12345,
+      {},
+      undefined,
+      false,
+    ],
+  });
+
+  assertEquals(cfg.bypass_authors, [
+    "trusted",
+    "nested",
+    "true",
+    "null",
+    "12345",
+    "[object object]",
+    "undefined",
+    "false",
+  ]);
+});
+
 Deno.test("normalizeDuplicateGateConfig enforces a 48 hour story memory floor", () => {
   const cfg = normalizeDuplicateGateConfig({
     enabled: true,
