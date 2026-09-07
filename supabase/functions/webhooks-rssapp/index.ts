@@ -87,7 +87,7 @@ export async function buildMediaReplacementRows(
     sendableMediaItems.map(async (media, index) => {
       const newHash = await hashUrl(media.url);
       const existing = existingByOrdering.get(index);
-      const srcUrlChanged = existing !== undefined && existing.src_url_hash !== newHash;
+      const srcUrlChanged = existing === undefined || existing.src_url_hash !== newHash;
       if (srcUrlChanged) anySrcUrlChanged = true;
       const preserveDownload = existing !== undefined && !srcUrlChanged;
       return {
