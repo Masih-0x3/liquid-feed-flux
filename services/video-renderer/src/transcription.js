@@ -391,7 +391,7 @@ export async function transcribeAudio(options = {}) {
           !isLikelyRepeatedFillerTranscript(candidate) &&
           !isLikelyNonSpeechDescription(candidate) &&
           !isLikelyContextMismatchedRepetitiveTranscript(candidate, options.contextText) &&
-          !isSparseContextMismatchedTranscript(candidate, { contextText: options.contextText, durationMs: options.durationMs }) &&
+          (!String(options.contextText ?? "").trim() || !isSparseContextMismatchedTranscript(candidate, { contextText: options.contextText, durationMs: options.durationMs })) &&
           !isLikelyRomanizedHebrewTranscript(candidate, {
             deepgramLanguage: options.deepgramLanguage,
             deepgramLanguageFallbacks: options.deepgramLanguageFallbacks,
