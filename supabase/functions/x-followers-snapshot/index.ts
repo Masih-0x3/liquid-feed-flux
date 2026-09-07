@@ -190,6 +190,11 @@ serve(async (req) => {
   const dryRun = body.dry_run === true;
   const includeFollowing = body.include_following !== false;
 
+  let snapshotId: string | null = null;
+  let pages = 0;
+  let apiCalls = 0;
+  let followingPages = 0;
+
   try {
     const { data: controlsRow, error: controlsError } = await supabase.from('settings').select('value').eq('key', 'x_api_controls').maybeSingle();
     if (controlsError) throw new Error('x_api_controls_read_failed');
@@ -203,6 +208,7 @@ serve(async (req) => {
     const { data: latestSnap, error: latestSnapshotError } = await supabase
       .from('x_follower_snapshots')
       .select('id, taken_at, status, follower_count, following_count, api_calls_used')
+      .or('status.eq.complete,and(status.eq.partial,follower_count.gt.0),and(status.eq.partial,error.not.is.null)')
       .order('taken_at', { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -247,6 +253,7 @@ serve(async (req) => {
         .from('x_follower_snapshots')
         .select('id, taken_at, status')
         .gte('taken_at', new Date(Date.now() - 23 * 60 * 60 * 1000).toISOString())
+        .or('status.eq.complete,and(status.eq.partial,follower_count.gt.0),and(status.eq.partial,error.not.is.null)')
         .order('taken_at', { ascending: false })
         .limit(1);
       if (recentSnapshotError) throw new Error('follower_snapshot_daily_cap_read_failed');
@@ -274,13 +281,11 @@ serve(async (req) => {
       .select()
       .single();
     if (snapErr || !snapRow) throw new Error('follower_snapshot_insert_failed');
-    const snapshotId = snapRow.id as string;
+    snapshotId = snapRow.id as string;
 
     const allIds: string[] = [];
     const allUsers: FollowerUser[] = [];
     let pageToken: string | null = null;
-    let pages = 0;
-    let apiCalls = 0;
     let halted: { reason: string; status?: number; error?: string } | null = null;
 
     // Page through followers. Cap at 100 pages (100k followers) as safety.
@@ -305,7 +310,6 @@ serve(async (req) => {
     const followingIds: string[] = [];
     const followingUsers: FollowerUser[] = [];
     let followingToken: string | null = null;
-    let followingPages = 0;
 
     if (!halted && includeFollowing) {
       while (followingPages < 100) {
@@ -467,6 +471,18 @@ serve(async (req) => {
     const errorCode = safeFollowerErrorCode(e);
     const safeError = new Error(errorCode);
     console.error('x-followers-snapshot error', errorCode);
+    if (snapshotId) {
+      try {
+        await supabase.from('x_follower_snapshots').update({
+          status: 'failed',
+          error: errorCode,
+          pages_fetched: pages + followingPages,
+          api_calls_used: apiCalls,
+        }).eq('id', snapshotId);
+      } catch {
+        // best-effort orphan cleanup; do not mask the original error
+      }
+    }
     await captureEdgeException(safeError, {
       functionName: "x-followers-snapshot",
       action: "error",
