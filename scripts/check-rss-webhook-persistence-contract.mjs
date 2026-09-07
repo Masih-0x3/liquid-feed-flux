@@ -129,6 +129,40 @@ function validate(source) {
   assert.match(handler, /status: 500/, 'core persistence failure must return a non-success status');
   assert.match(handler, /error: 'Internal server error', code/, 'core persistence failure response must carry only a stable code');
   assert.doesNotMatch(handler, /console\.error\('Webhook error:'/, 'raw persistence errors must not be logged from the acknowledgement path');
+
+  assert.match(
+    handler,
+    /\.from\('media'\)\s*\.delete\(\)\s*\.eq\('tweet_id', tweetId\)\s*\.gte\('ordering', sendableMediaItems\.length\)/,
+    'webhook must prune orphan/higher-ordering media rows before the upsert on a re-delivery',
+  );
+  assert.match(handler, /rss_webhook_media_prune_failed/, 'media prune failures must fail the request');
+  assert.match(
+    handler,
+    /\.from\('media'\)\s*\.select\('ordering, src_url_hash, storage_path, downloaded_at, mime_type, file_size'\)\s*\.eq\('tweet_id', tweetId\)/,
+    'webhook must read existing media hashes and download columns before the upsert to detect src_url changes and preserve unchanged downloads',
+  );
+  assert.match(handler, /rss_webhook_media_read_failed/, 'media read failures must fail the request');
+  assert.match(
+    webhook,
+    /const preserveDownload = existing !== undefined && !srcUrlChanged/,
+    'webhook must distinguish unchanged rows (preserve download) from changed/new rows (clear)',
+  );
+  assert.match(
+    webhook,
+    /storage_path:\s*preserveDownload\s*\?\s*existing!\.storage_path\s*:\s*null[\s\S]*?downloaded_at:\s*preserveDownload\s*\?\s*existing!\.downloaded_at\s*:\s*null[\s\S]*?mime_type:\s*preserveDownload\s*\?\s*existing!\.mime_type\s*:\s*null[\s\S]*?file_size:\s*preserveDownload\s*\?\s*existing!\.file_size\s*:\s*null/,
+    'webhook must clear download columns for changed/new enclosures and preserve them for unchanged enclosures (uniform batch prevents the supabase-js columns-union from nulling unchanged rows)',
+  );
+  assert.match(
+    handler,
+    /idempotency_key:\s*`download_media:redeliver:\$\{tweetId\}:\$\{new Date\(\)\.getTime\(\)\}`/,
+    'webhook must enqueue a fresh per-re-delivery download job with a unique key when src_url changed',
+  );
+  assert.match(handler, /if \(anySrcUrlChanged\)/, 'the fresh re-delivery download job must be gated on a src_url change');
+  assert.doesNotMatch(
+    handler,
+    /\.upsert\(\{[\s\S]{0,400}?storage_path:\s*null[\s\S]{0,400}?idempotency_key:\s*`download_media:\$\{tweetId\}`/,
+    'the primary download_media job upsert must not clear storage_path',
+  );
 }
 
 for (const [name, path] of Object.entries(paths)) transpile(path, sources[name]);
@@ -197,6 +231,35 @@ if (process.env.MUTATION_TEST === '1') {
   expectRejected('RSS webhook any video item', (source) => ({
     ...source,
     webhook: source.webhook.replace('item: RssWebhookItem,', 'item: any,'),
+  }));
+  expectRejected('removed media prune', (source) => ({
+    ...source,
+    webhook: source.webhook
+      .replace(".from('media')\n          .delete()\n          .eq('tweet_id', tweetId)\n          .gte('ordering', sendableMediaItems.length);", ".from('media')\n          .select('id')\n          .eq('tweet_id', tweetId);"),
+  }));
+  expectRejected('removed media prune error code', (source) => ({
+    ...source,
+    webhook: source.webhook.replace("'rss_webhook_media_prune_failed'", "'rss_webhook_media_upsert_failed'"),
+  }));
+  expectRejected('removed media hash read', (source) => ({
+    ...source,
+    webhook: source.webhook.replace(".select('ordering, src_url_hash, storage_path, downloaded_at, mime_type, file_size')", ".select('id')"),
+  }));
+  expectRejected('changed rows keep stale storage_path', (source) => ({
+    ...source,
+    webhook: source.webhook.replace("preserveDownload ? existing!.storage_path : null", "existing ? existing!.storage_path : null"),
+  }));
+  expectRejected('unchanged rows cleared of download', (source) => ({
+    ...source,
+    webhook: source.webhook.replace("preserveDownload ? existing!.storage_path : null", "null"),
+  }));
+  expectRejected('fresh re-deliver key collapses to primary', (source) => ({
+    ...source,
+    webhook: source.webhook.replace("`download_media:redeliver:${tweetId}:${new Date().getTime()}`", "`download_media:${tweetId}`"),
+  }));
+  expectRejected('fresh re-deliver job ungated', (source) => ({
+    ...source,
+    webhook: source.webhook.replace('if (anySrcUrlChanged) {', 'if (sendableMediaItems.length > 0) {'),
   }));
   selfTest = 'pass';
 }

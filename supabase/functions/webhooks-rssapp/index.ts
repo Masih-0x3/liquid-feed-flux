@@ -5,7 +5,7 @@ import {
   requireRssWebhookAuth,
   serviceRoleBearerHeader,
 } from "../_shared/internalAuth.ts";
-import { filterSendableIngestMedia } from "../_shared/mediaSelection.ts";
+import { filterSendableIngestMedia, type IngestMediaItem } from "../_shared/mediaSelection.ts";
 import { filterReviewedRemoteMediaItems } from "../_shared/remoteMediaPolicy.ts";
 import {
   normalizeRssWebhookText,
@@ -54,6 +54,61 @@ async function hashUrl(url: string): Promise<string> {
   return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+export type MediaReplacementRow = {
+  tweet_id: string;
+  kind: string;
+  src_url: string;
+  src_url_hash: string;
+  width: number | null;
+  height: number | null;
+  duration_ms: number | null;
+  ordering: number;
+  storage_path: string | null;
+  downloaded_at: string | null;
+  mime_type: string | null;
+  file_size: number | null;
+};
+
+export type ExistingMediaRow = {
+  src_url_hash: string;
+  storage_path: string | null;
+  downloaded_at: string | null;
+  mime_type: string | null;
+  file_size: number | null;
+};
+
+export async function buildMediaReplacementRows(
+  tweetId: string,
+  sendableMediaItems: IngestMediaItem[],
+  existingByOrdering: Map<number, ExistingMediaRow>,
+): Promise<{ rows: MediaReplacementRow[]; anySrcUrlChanged: boolean }> {
+  let anySrcUrlChanged = false;
+  const rows = await Promise.all(
+    sendableMediaItems.map(async (media, index) => {
+      const newHash = await hashUrl(media.url);
+      const existing = existingByOrdering.get(index);
+      const srcUrlChanged = existing !== undefined && existing.src_url_hash !== newHash;
+      if (srcUrlChanged) anySrcUrlChanged = true;
+      const preserveDownload = existing !== undefined && !srcUrlChanged;
+      return {
+        tweet_id: tweetId,
+        kind: media.type,
+        src_url: media.url,
+        src_url_hash: newHash,
+        width: media.width ?? null,
+        height: media.height ?? null,
+        duration_ms: media.duration ?? null,
+        ordering: index,
+        storage_path: preserveDownload ? existing!.storage_path : null,
+        downloaded_at: preserveDownload ? existing!.downloaded_at : null,
+        mime_type: preserveDownload ? existing!.mime_type : null,
+        file_size: preserveDownload ? existing!.file_size : null,
+      };
+    })
+  );
+  return { rows, anySrcUrlChanged };
+}
+
 const MAX_RSS_WEBHOOK_ITEM_ID_LENGTH = 1_024;
 
 class RssWebhookPersistenceError extends Error {
@@ -71,12 +126,14 @@ type RssWebhookQueryResult = {
 type RssWebhookQueryBuilder = PromiseLike<RssWebhookQueryResult> & {
   select(columns?: string): RssWebhookQueryBuilder;
   eq(column: string, value: unknown): RssWebhookQueryBuilder;
+  gte(column: string, value: unknown): RssWebhookQueryBuilder;
   limit(count: number): RssWebhookQueryBuilder;
   maybeSingle(): PromiseLike<RssWebhookQueryResult>;
   upsert(values: unknown, options?: Record<string, unknown>): RssWebhookQueryBuilder;
   update(values: Record<string, unknown>): RssWebhookQueryBuilder;
   insert(values: unknown): RssWebhookQueryBuilder;
   single(): PromiseLike<RssWebhookQueryResult>;
+  delete(): RssWebhookQueryBuilder;
 };
 
 type RssWebhookSupabaseClient = {
@@ -806,20 +863,47 @@ serve(async (req) => {
 
         console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'post_upserted', truncated: isTruncated }));
 
-        // Insert media items
+        const { error: pruneError } = await supabase
+          .from('media')
+          .delete()
+          .eq('tweet_id', tweetId)
+          .gte('ordering', sendableMediaItems.length);
+        if (pruneError) {
+          throw new RssWebhookPersistenceError('rss_webhook_media_prune_failed');
+        }
+
+        let anySrcUrlChanged = false;
         if (sendableMediaItems.length > 0) {
-          const mediaRows = await Promise.all(
-            sendableMediaItems.map(async (media, index) => ({
-              tweet_id: tweetId,
-              kind: media.type,
-              src_url: media.url,
-              src_url_hash: await hashUrl(media.url),
-              width: media.width,
-              height: media.height,
-              duration_ms: media.duration,
-              ordering: index
-            }))
+          const { data: existingMediaRows, error: existingMediaError } = await supabase
+            .from('media')
+            .select('ordering, src_url_hash, storage_path, downloaded_at, mime_type, file_size')
+            .eq('tweet_id', tweetId);
+          if (existingMediaError) {
+            throw new RssWebhookPersistenceError('rss_webhook_media_read_failed');
+          }
+          const existingByOrdering = new Map<number, ExistingMediaRow>();
+          if (Array.isArray(existingMediaRows)) {
+            for (const row of existingMediaRows) {
+              if (!isRecord(row)) continue;
+              const existingOrdering = row.ordering;
+              const existingHash = row.src_url_hash;
+              if (typeof existingOrdering !== 'number' || typeof existingHash !== 'string') continue;
+              existingByOrdering.set(existingOrdering, {
+                src_url_hash: existingHash,
+                storage_path: typeof row.storage_path === 'string' ? row.storage_path : null,
+                downloaded_at: typeof row.downloaded_at === 'string' ? row.downloaded_at : null,
+                mime_type: typeof row.mime_type === 'string' ? row.mime_type : null,
+                file_size: typeof row.file_size === 'number' ? row.file_size : null,
+              });
+            }
+          }
+
+          const { rows: mediaRows, anySrcUrlChanged: srcChanged } = await buildMediaReplacementRows(
+            tweetId,
+            sendableMediaItems,
+            existingByOrdering,
           );
+          anySrcUrlChanged = srcChanged;
           const { error: mediaError } = await supabase
             .from('media')
             .upsert(mediaRows, { onConflict: 'tweet_id,ordering' });
@@ -870,6 +954,21 @@ serve(async (req) => {
             mediaEventError,
             'rss_webhook_media_pipeline_event_failed',
           );
+          if (anySrcUrlChanged) {
+            const { error: requeueError } = await supabase
+              .from('jobs')
+              .upsert({
+                type: 'download_media',
+                payload: { tweet_id: tweetId },
+                status: 'pending',
+                priority: 12,
+                idempotency_key: `download_media:redeliver:${tweetId}:${new Date().getTime()}`,
+                next_run_at: new Date().toISOString()
+              }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+            if (requeueError) {
+              throw new RssWebhookPersistenceError('rss_webhook_download_job_upsert_failed');
+            }
+          }
         }
 
         // Enqueue resolve_media when a video is suspected. The job uses the
