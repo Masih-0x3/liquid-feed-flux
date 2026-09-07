@@ -146,7 +146,7 @@
     },
     {
       "path": "supabase/functions/_shared/mediaSelection.test.ts",
-      "sha256": "3ba890a1d7dbfd846db36fed992c8b93e2fcd069e7070f4e39fca000c4a62efa"
+      "sha256": "de33dec7f6e764a261656c4be3e14301d583f86cabe190992d1c2e238db06cf7"
     },
     {
       "path": "supabase/functions/_shared/myXControls.test.ts",
@@ -337,8 +337,12 @@
       "sha256": "c7cc9091b2300678dbe2ef27270e1098539255e5090f3d466cabdc52fa132f6a"
     },
     {
+      "path": "supabase/functions/media-processor/downloadMediaForTweet.test.ts",
+      "sha256": "4a8e25f5a5bc94750b8f2dd41be835ac32900e0acc7ea3de2dde07fa4bfdf757"
+    },
+    {
       "path": "supabase/functions/media-processor/index.ts",
-      "sha256": "df8aa2835962bc3f7917abbbbc59899ae624580a79d1dbb8b6886f0f9cffa921"
+      "sha256": "4ef62afb7a6a07b619fa21df8881f96bfb5c33fd697aa35c39bb877b38903826"
     },
     {
       "path": "supabase/functions/webhooks-rssapp/index.ts",
@@ -9846,14 +9850,14 @@
           "path": "supabase/functions/admin-actions/index.ts,supabase/functions/admin-retry/index.ts,supabase/functions/db-cleanup/index.ts,supabase/functions/digest-compiler/index.ts,supabase/functions/media-cleanup/index.ts,supabase/functions/media-processor/index.ts,supabase/functions/webhooks-rssapp/index.ts,supabase/functions/worker/index.ts,supabase/functions/x-followers-snapshot/index.ts",
           "version_or_ref": "https://deno.land/std@0.168.0/http/server.ts",
           "integrity_or_source_hash": "e99c1bee8a3f6571ee4cdeb2966efad465b8f6fe62bec1bdb59c1f007cc4d155",
-          "source_file_sha256": "c4e96b7fc3fa125eb82bf1224a61f73dbd1a910a77109da82128c3d572fa0c6e"
+          "source_file_sha256": "30581d8ce7ee7f908b0884fdab491c3e75b2e6afdc8dee3699b889ef45b73193"
         },
         {
           "name": "https://esm.sh/@supabase/supabase-js@2.39.7",
           "path": "supabase/functions/admin-actions/index.ts,supabase/functions/admin-retry/index.ts,supabase/functions/db-cleanup/index.ts,supabase/functions/media-cleanup/index.ts,supabase/functions/media-processor/index.ts,supabase/functions/webhooks-rssapp/index.ts,supabase/functions/worker/index.ts,supabase/functions/x-followers-snapshot/index.ts",
           "version_or_ref": "https://esm.sh/@supabase/supabase-js@2.39.7",
           "integrity_or_source_hash": "5361671c958daa350e504d9975da64b2d6dc9e81390b985ccdafb2e3572e24e7",
-          "source_file_sha256": "19fef1ca04091f5a48c98bb049df787acf0a2203936ccc7e23c49230739f7b73"
+          "source_file_sha256": "c2af8be8422c27154f678f64e5ac9638298c61dfbaf2b36f6672b57d38457d55"
         },
         {
           "name": "https://esm.sh/@supabase/supabase-js@2.49.1",
@@ -9864,10 +9868,10 @@
         },
         {
           "name": "jsr:@std/assert",
-          "path": "supabase/functions/_shared/cleanupEntryPoints.test.ts,supabase/functions/_shared/cleanupSafety.test.ts,supabase/functions/_shared/dedupe.test.ts,supabase/functions/_shared/deliveryDedupeGuard.test.ts,supabase/functions/_shared/duplicateGuard.test.ts,supabase/functions/_shared/durableClaimFence.test.ts,supabase/functions/_shared/e10PreviewParityFoundation.test.ts,supabase/functions/_shared/e6DisposableAcceptance.test.ts,supabase/functions/_shared/effectiveThreshold.test.ts,supabase/functions/_shared/enrich.test.ts,supabase/functions/_shared/externalPostingGuard.test.ts,supabase/functions/_shared/feedbackBias.test.ts,supabase/functions/_shared/internalAuth.test.ts,supabase/functions/_shared/legacyMediaCleanup.test.ts,supabase/functions/_shared/mediaSelection.test.ts,supabase/functions/_shared/myXControls.test.ts,supabase/functions/_shared/openaiCostControls.test.ts,supabase/functions/_shared/providerErrors.test.ts,supabase/functions/_shared/scoring.test.ts,supabase/functions/_shared/scoringPolicy.test.ts,supabase/functions/_shared/staleMediaRepair.test.ts,supabase/functions/_shared/telegramVideoLimits.test.ts,supabase/functions/_shared/translationReadability.test.ts,supabase/functions/_shared/videoRenderGate.test.ts,supabase/functions/_shared/xApiLedger.test.ts,supabase/functions/_shared/xCandidateCutover.test.ts,supabase/functions/_shared/xPostDeliveryClaim.test.ts,supabase/functions/_shared/xPostText.test.ts,supabase/functions/_shared/xPosterOutcome.test.ts,supabase/functions/_shared/xQuotaAdmission.test.ts,supabase/functions/admin-actions/activeThreshold.test.ts,supabase/functions/admin-actions/adminAccessPolicy.test.ts,supabase/functions/admin-actions/adminOperation.test.ts,supabase/functions/admin-actions/adminOperationProtocol.test.ts,supabase/functions/admin-actions/basicActions.test.ts,supabase/functions/admin-actions/dashboardSummaries.test.ts,supabase/functions/admin-actions/dedupeActions.test.ts,supabase/functions/admin-actions/enrichmentActions.test.ts,supabase/functions/admin-actions/maintenanceActions.test.ts,supabase/functions/admin-actions/manualAdvanceActions.test.ts,supabase/functions/admin-actions/manualVideoIntakeActions.test.ts,supabase/functions/admin-actions/manualVideoPostingGuard.test.ts,supabase/functions/admin-actions/monitoringMutations.test.ts,supabase/functions/admin-actions/monitoringReads.test.ts,supabase/functions/admin-actions/readHelpers.test.ts,supabase/functions/admin-actions/runtimeControlsRoute.test.ts,supabase/functions/admin-actions/scoringActions.test.ts,supabase/functions/admin-actions/settings.test.ts,supabase/functions/admin-actions/sideEffects.test.ts,supabase/functions/admin-actions/translationRescoreActions.test.ts,supabase/functions/admin-actions/videoRenderActions.test.ts,supabase/functions/admin-actions/xApiActions.test.ts,supabase/functions/admin-actions/xApiSummary.test.ts,supabase/functions/admin-actions/xPostingActions.test.ts,supabase/functions/admin-retry/adminRetryPolicy.test.ts,supabase/functions/admin-retry/adminRetryRoute.test.ts,supabase/functions/worker/jobLifecycle.test.ts,supabase/functions/worker/mediaWorkflow.test.ts,supabase/functions/worker/runtimeControlRace.test.ts,supabase/functions/worker/scoringWorkflow.test.ts,supabase/functions/worker/telegramDelivery.test.ts,supabase/functions/worker/translateWorkflow.test.ts,supabase/functions/worker/tweetNormalizers.test.ts,supabase/functions/worker/videoRenderWorkflow.test.ts,supabase/functions/worker/workerUtils.test.ts,supabase/functions/worker/xApiWorkflow.test.ts,supabase/functions/x-poster/providerGuard.test.ts",
+          "path": "supabase/functions/_shared/cleanupEntryPoints.test.ts,supabase/functions/_shared/cleanupSafety.test.ts,supabase/functions/_shared/dedupe.test.ts,supabase/functions/_shared/deliveryDedupeGuard.test.ts,supabase/functions/_shared/duplicateGuard.test.ts,supabase/functions/_shared/durableClaimFence.test.ts,supabase/functions/_shared/e10PreviewParityFoundation.test.ts,supabase/functions/_shared/e6DisposableAcceptance.test.ts,supabase/functions/_shared/effectiveThreshold.test.ts,supabase/functions/_shared/enrich.test.ts,supabase/functions/_shared/externalPostingGuard.test.ts,supabase/functions/_shared/feedbackBias.test.ts,supabase/functions/_shared/internalAuth.test.ts,supabase/functions/_shared/legacyMediaCleanup.test.ts,supabase/functions/_shared/mediaSelection.test.ts,supabase/functions/_shared/myXControls.test.ts,supabase/functions/_shared/openaiCostControls.test.ts,supabase/functions/_shared/providerErrors.test.ts,supabase/functions/_shared/scoring.test.ts,supabase/functions/_shared/scoringPolicy.test.ts,supabase/functions/_shared/staleMediaRepair.test.ts,supabase/functions/_shared/telegramVideoLimits.test.ts,supabase/functions/_shared/translationReadability.test.ts,supabase/functions/_shared/videoRenderGate.test.ts,supabase/functions/_shared/xApiLedger.test.ts,supabase/functions/_shared/xCandidateCutover.test.ts,supabase/functions/_shared/xPostDeliveryClaim.test.ts,supabase/functions/_shared/xPostText.test.ts,supabase/functions/_shared/xPosterOutcome.test.ts,supabase/functions/_shared/xQuotaAdmission.test.ts,supabase/functions/admin-actions/activeThreshold.test.ts,supabase/functions/admin-actions/adminAccessPolicy.test.ts,supabase/functions/admin-actions/adminOperation.test.ts,supabase/functions/admin-actions/adminOperationProtocol.test.ts,supabase/functions/admin-actions/basicActions.test.ts,supabase/functions/admin-actions/dashboardSummaries.test.ts,supabase/functions/admin-actions/dedupeActions.test.ts,supabase/functions/admin-actions/enrichmentActions.test.ts,supabase/functions/admin-actions/maintenanceActions.test.ts,supabase/functions/admin-actions/manualAdvanceActions.test.ts,supabase/functions/admin-actions/manualVideoIntakeActions.test.ts,supabase/functions/admin-actions/manualVideoPostingGuard.test.ts,supabase/functions/admin-actions/monitoringMutations.test.ts,supabase/functions/admin-actions/monitoringReads.test.ts,supabase/functions/admin-actions/readHelpers.test.ts,supabase/functions/admin-actions/runtimeControlsRoute.test.ts,supabase/functions/admin-actions/scoringActions.test.ts,supabase/functions/admin-actions/settings.test.ts,supabase/functions/admin-actions/sideEffects.test.ts,supabase/functions/admin-actions/translationRescoreActions.test.ts,supabase/functions/admin-actions/videoRenderActions.test.ts,supabase/functions/admin-actions/xApiActions.test.ts,supabase/functions/admin-actions/xApiSummary.test.ts,supabase/functions/admin-actions/xPostingActions.test.ts,supabase/functions/admin-retry/adminRetryPolicy.test.ts,supabase/functions/admin-retry/adminRetryRoute.test.ts,supabase/functions/media-processor/downloadMediaForTweet.test.ts,supabase/functions/worker/jobLifecycle.test.ts,supabase/functions/worker/mediaWorkflow.test.ts,supabase/functions/worker/runtimeControlRace.test.ts,supabase/functions/worker/scoringWorkflow.test.ts,supabase/functions/worker/telegramDelivery.test.ts,supabase/functions/worker/translateWorkflow.test.ts,supabase/functions/worker/tweetNormalizers.test.ts,supabase/functions/worker/videoRenderWorkflow.test.ts,supabase/functions/worker/workerUtils.test.ts,supabase/functions/worker/xApiWorkflow.test.ts,supabase/functions/x-poster/providerGuard.test.ts",
           "version_or_ref": "jsr:@std/assert",
           "integrity_or_source_hash": "eaada96ee120cb980bc47e040f82814d786fe8162ecc53c91d8df60b8755991e",
-          "source_file_sha256": "fb66752db43fd15a726edecc168094bdb457d05dc4a0b82b37c5c4c551f54627"
+          "source_file_sha256": "c304703729cd1a0e632da9618397ffe2249983d0068c1c7570cf79f156aa7427"
         },
         {
           "name": "jsr:@supabase/functions-js/edge-runtime.d.ts",
