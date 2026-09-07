@@ -54,12 +54,10 @@ export function computeFinalScore(
     posSum += (axes[k] ?? 0) * w;
     posMax += 10 * w;
   }
-  const noiseW = Math.max(0, weights.noise ?? 0);
-  const noisePenalty = (axes.noise ?? 0) * noiseW;
-  const noiseMax = 10 * noiseW;
+  const noiseW = Math.max(0, weights.noise ?? 1);
 
   const positiveNorm = posMax > 0 ? (posSum / posMax) * 20 : 0;
-  const noiseNorm = noiseMax > 0 ? (noisePenalty / noiseMax) * 8 : 0;
+  const noiseNorm = noiseW > 0 ? ((axes.noise ?? 0) / 10) * 8 * noiseW : 0;
   return Math.max(0, Math.min(20, Math.round((positiveNorm - noiseNorm) * 10) / 10));
 }
 

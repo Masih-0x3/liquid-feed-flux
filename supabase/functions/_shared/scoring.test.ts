@@ -1,5 +1,11 @@
-import { assertEquals } from "jsr:@std/assert";
-import { applyProfileDecision, type EditorialProfile, type ScoreAxes } from "./scoring.ts";
+import { assert, assertEquals, assertNotEquals } from "jsr:@std/assert";
+import {
+  applyProfileDecision,
+  computeFinalScore,
+  type EditorialProfile,
+  type ScoreAxes,
+  type ScoreAxisKey,
+} from "./scoring.ts";
 
 const iranWarProfile: EditorialProfile = {
   id: "iran-war-default",
@@ -104,6 +110,80 @@ Deno.test("Iran-first profile does not inflate unrelated Taiwan news", () => {
 
   assertEquals(result.decision, "skip");
   assertEquals(result.finalScore, 5);
+});
+
+function weightedAxesProvider() {
+  const a: Required<ScoreAxes> = {
+    iran_relevance: 8,
+    severity: 7,
+    novelty: 5,
+    credibility: 6,
+    actionability: 4,
+    noise: 5,
+  };
+  const w = (noise: number): Record<ScoreAxisKey, number> => ({
+    iran_relevance: 1,
+    severity: 1,
+    novelty: 1,
+    credibility: 0.5,
+    actionability: 1,
+    noise,
+  });
+  return { a, w };
+}
+
+Deno.test("computeFinalScore penalizes noise proportionally to the noise weight", () => {
+  const { a, w } = weightedAxesProvider();
+  assertNotEquals(computeFinalScore(a, w(1)), computeFinalScore(a, w(4)));
+  assertNotEquals(computeFinalScore(a, w(1)), computeFinalScore(a, w(0.5)));
+});
+
+Deno.test("computeFinalScore noise weight 0 disables the penalty entirely", () => {
+  const { w } = weightedAxesProvider();
+  const base = { iran_relevance: 8, severity: 7, novelty: 5, credibility: 6, actionability: 4 };
+  assertEquals(computeFinalScore({ ...base, noise: 0 }, w(0)), computeFinalScore({ ...base, noise: 7 }, w(0)));
+  assertEquals(computeFinalScore({ ...base, noise: 0 }, w(0)), computeFinalScore({ ...base, noise: 10 }, w(0)));
+  assertEquals(computeFinalScore({ ...base, noise: 10 }, w(0)), 12);
+});
+
+Deno.test("computeFinalScore default-weights path is unchanged by the noise fix", () => {
+  const { a } = weightedAxesProvider();
+  const explicitDefault: Record<ScoreAxisKey, number> = {
+    iran_relevance: 1,
+    severity: 1,
+    novelty: 1,
+    credibility: 0.5,
+    actionability: 1,
+    noise: 1,
+  };
+  assertEquals(computeFinalScore(a), computeFinalScore(a, explicitDefault));
+  assertEquals(computeFinalScore(a), 8);
+});
+
+Deno.test("applyProfileDecision skips high-noise items the cancelled weight would have delivered", () => {
+  const profile: EditorialProfile = {
+    ...iranWarProfile,
+    threshold: 2,
+  };
+  const result = applyProfileDecision({
+    profile,
+    axes: axes({
+      iran_relevance: 4,
+      severity: 5,
+      novelty: 4,
+      credibility: 7,
+      actionability: 3,
+      noise: 8,
+    }),
+    legacyScore: 0,
+    tags: [],
+    text: "Spammy crypto giveaway promotion, click the link to claim your prize.",
+    authorHandle: null,
+  });
+
+  assertEquals(result.finalScore, 0);
+  assertEquals(result.decision, "skip");
+  assert(result.reason.startsWith("below_threshold"));
 });
 
 function axes(values: Required<ScoreAxes>): ScoreAxes {
