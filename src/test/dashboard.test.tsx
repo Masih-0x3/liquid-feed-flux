@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import Dashboard from "@/pages/Dashboard";
 import { type SystemPerformanceSummary, useDashboardData } from "@/hooks/useDashboardData";
@@ -45,6 +45,25 @@ function renderDashboard(initialEntries = ["/"]) {
       <TooltipProvider>
         <MemoryRouter initialEntries={initialEntries}>
           <Dashboard />
+        </MemoryRouter>
+      </TooltipProvider>
+    </QueryClientProvider>,
+  );
+}
+
+function LocationProbe() {
+  const location = useLocation();
+  return <div data-testid="location-probe">{`${location.pathname}${location.search}${location.hash}`}</div>;
+}
+
+function renderDashboardWithProbe(initialEntries = ["/"]) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <MemoryRouter initialEntries={initialEntries}>
+          <Dashboard />
+          <LocationProbe />
         </MemoryRouter>
       </TooltipProvider>
     </QueryClientProvider>,
@@ -655,6 +674,72 @@ describe("Dashboard", () => {
     expect(screen.getByText("Media Storage")).toBeTruthy();
     expect(screen.getByText("Allowance")).toBeTruthy();
     expect(screen.getByRole("button", { name: /Dry-run media cleanup/i })).toBeTruthy();
+  });
+
+  it("labels the ingest settings CTA for a /settings ops route and navigates there", () => {
+    mockedUseDashboardData.mockReturnValue({
+      data: {
+        ...dashboardData,
+        opsStatus: {
+          ...dashboardData.opsStatus,
+          severity: "warning" as const,
+          primaryIssue: "Ingest warning",
+          recommendedRoute: "/settings",
+        },
+        pipelineCounts: {
+          ...dashboardData.pipelineCounts,
+          failedStuck: 0,
+          staleJobs: 0,
+        },
+      },
+      isLoading: false,
+      isError: false,
+      error: null,
+      dataUpdatedAt: Date.now(),
+      isFetching: false,
+    } as ReturnType<typeof useDashboardData>);
+
+    renderDashboardWithProbe();
+
+    expect(screen.getByRole("button", { name: /Open settings/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Open monitoring/i })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Open settings/i }));
+
+    expect(screen.getByTestId("location-probe").textContent).toBe("/settings");
+  });
+
+  it("labels the X settings CTA for the x-automation settings route and navigates there", () => {
+    mockedUseDashboardData.mockReturnValue({
+      data: {
+        ...dashboardData,
+        opsStatus: {
+          ...dashboardData.opsStatus,
+          severity: "warning" as const,
+          primaryIssue: "X local budget estimate is at 90%",
+          recommendedRoute: "/settings#x-automation",
+        },
+        pipelineCounts: {
+          ...dashboardData.pipelineCounts,
+          failedStuck: 0,
+          staleJobs: 0,
+        },
+      },
+      isLoading: false,
+      isError: false,
+      error: null,
+      dataUpdatedAt: Date.now(),
+      isFetching: false,
+    } as ReturnType<typeof useDashboardData>);
+
+    renderDashboardWithProbe();
+
+    expect(screen.getByRole("button", { name: /Open X settings/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Open monitoring/i })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Open X settings/i }));
+
+    expect(screen.getByTestId("location-probe").textContent).toBe("/settings#x-automation");
   });
 
   it("defaults secondary dashboard tabs to pipeline", () => {
