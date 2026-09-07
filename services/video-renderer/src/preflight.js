@@ -1668,7 +1668,7 @@ export function visionFromWatermarkOnly(watermarkOnly) {
         action: "keep",
         confidence: 1,
         reason: item.reason,
-        box: { x: 0, y: 0, w: 0, h: 0 },
+        box: item?.box ?? { x: 0, y: 0, w: 0, h: 0 },
       })),
     ],
   };
