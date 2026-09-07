@@ -57,4 +57,57 @@ describe("ScoringStudio", () => {
     expect(screen.getByText(/Score 16/)).toBeTruthy();
     expect(screen.getAllByText(/Bitcoin milestone/).length).toBeGreaterThan(0);
   });
+
+  it("run eval surfaces transport failures when summary.failed_count > 0", async () => {
+    vi.mocked(supabase.functions.invoke).mockResolvedValueOnce({
+      data: {
+        ok: true,
+        summary: {
+          accuracy: 0,
+          correct: 0,
+          profile_id: "iran-first",
+          failed_count: 3,
+        },
+        results: [{}, {}, {}],
+      },
+      error: null,
+    });
+
+    renderStudio();
+    fireEvent.click(screen.getByRole("button", { name: /run 10-case eval/i }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          /Evaluation accuracy: 0% on 0\/3 examples \(3 transport failures excluded from counts\)/,
+        ),
+      ).toBeTruthy(),
+    );
+  });
+
+  it("run eval omits the transport-failure note when failed_count is 0", async () => {
+    vi.mocked(supabase.functions.invoke).mockResolvedValueOnce({
+      data: {
+        ok: true,
+        summary: {
+          accuracy: 50,
+          correct: 1,
+          profile_id: "iran-first",
+          failed_count: 0,
+        },
+        results: [{}, {}],
+      },
+      error: null,
+    });
+
+    renderStudio();
+    fireEvent.click(screen.getByRole("button", { name: /run 10-case eval/i }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Evaluation accuracy: 50% on 1\/2 examples/),
+      ).toBeTruthy(),
+    );
+    expect(screen.queryByText(/transport failure/)).toBeNull();
+  });
 });

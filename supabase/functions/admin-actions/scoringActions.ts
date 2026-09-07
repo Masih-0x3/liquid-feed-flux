@@ -943,6 +943,7 @@ export async function runScoringEval(
   let falsePositive = 0;
   let falseNegative = 0;
   let ambiguous = 0;
+  let failedCount = 0;
   for (const example of examples) {
     const calibrationExamples = examples
       .filter((candidate) => candidate.id !== example.id)
@@ -959,6 +960,22 @@ export async function runScoringEval(
     );
     const expectedDecision = example.expected_decision as string;
     const expectedClass = example.expected_audience_class as string;
+    if (!result.ok) {
+      failedCount += 1;
+      rows.push({
+        example_id: example.id,
+        expected_class: expectedClass,
+        expected_decision: expectedDecision,
+        audience_class: null,
+        decision: null,
+        score: null,
+        threshold: null,
+        ok: false,
+        failure: true,
+        error: result.error ?? "scoring_policy_failed",
+      });
+      continue;
+    }
     const classOk = result.audience_class === expectedClass;
     const decisionOk = expectedDecision === "review"
       ? result.review_status === "needs_review"
@@ -980,6 +997,8 @@ export async function runScoringEval(
       score: result.final_score,
       threshold: result.threshold,
       ok: classOk && decisionOk,
+      failure: false,
+      error: null,
     });
   }
   const count = rows.length;
@@ -990,6 +1009,7 @@ export async function runScoringEval(
     false_positive_count: falsePositive,
     false_negative_count: falseNegative,
     ambiguous_count: ambiguous,
+    failed_count: failedCount,
   };
   const { data: inserted, error: insertError } = await table(
     supabase,

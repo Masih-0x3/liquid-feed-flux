@@ -58,6 +58,31 @@ function scoringResult(
   };
 }
 
+function scoringFallbackResult(
+  overrides: Partial<ScoringPolicyResult> = {},
+): ScoringPolicyResult {
+  return scoringResult({
+    ok: false,
+    audience_class: "off_topic",
+    audience_confidence: 0,
+    audience_reason: "scoring_policy_failed",
+    global_exception_class: null,
+    axes: {},
+    raw_priority_score: 1,
+    uncapped_score: 1,
+    final_score: 1,
+    threshold: 99,
+    cap: 8,
+    delivery_decision: "skip",
+    decision_reason: "scoring_v2_failed",
+    tags: [],
+    review_status: "needs_review",
+    adjudicated: false,
+    error: "scoring_policy_failed",
+    ...overrides,
+  });
+}
+
 function fakeSupabase(config: FakeConfig = {}) {
   const calls: FakeCall[] = [];
   const settings = {
@@ -556,5 +581,228 @@ Deno.test("runScoringEval records summary counts and inserted evaluation id", as
     false_positive_count: 1,
     false_negative_count: 0,
     ambiguous_count: 0,
+    failed_count: 0,
   });
+  assertEquals(result.results?.length, 2);
+  assertEquals(result.results?.[0], {
+    example_id: "a",
+    expected_class: "direct_focus",
+    expected_decision: "deliver",
+    audience_class: "direct_focus",
+    decision: "deliver",
+    score: 16,
+    threshold: 14,
+    ok: true,
+    failure: false,
+    error: null,
+  });
+});
+
+Deno.test("runScoringEval guards failed runScoringPolicy calls: deliver label no longer inflates false_negative_count or ambiguous_count", async () => {
+  const supabase = fakeSupabase({
+    examples: [
+      {
+        id: "a",
+        text_original: "A",
+        expected_audience_class: "direct_focus",
+        expected_decision: "deliver",
+      },
+      {
+        id: "b",
+        text_original: "B",
+        expected_audience_class: "direct_focus",
+        expected_decision: "deliver",
+      },
+    ],
+  });
+  const { deps } = fakeDeps();
+  deps.runScoringPolicy = async (input) =>
+    (input.text as string) === "B"
+      ? scoringFallbackResult()
+      : scoringResult({ delivery_decision: "deliver", review_status: "none" });
+
+  const result = await runScoringEval(supabase, { limit: 2 }, deps);
+
+  assertEquals(result.ok, true);
+  assertEquals(result.summary, {
+    profile_id: "iran-first",
+    accuracy: 50,
+    correct: 1,
+    false_positive_count: 0,
+    false_negative_count: 0,
+    ambiguous_count: 0,
+    failed_count: 1,
+  });
+  assertEquals(result.results?.length, 2);
+  assertEquals(result.results?.[1], {
+    example_id: "b",
+    expected_class: "direct_focus",
+    expected_decision: "deliver",
+    audience_class: null,
+    decision: null,
+    score: null,
+    threshold: null,
+    ok: false,
+    failure: true,
+    error: "scoring_policy_failed",
+  });
+});
+
+Deno.test("runScoringEval guards failed runScoringPolicy calls: skip+off_topic no longer counted as correct", async () => {
+  const supabase = fakeSupabase({
+    examples: [
+      {
+        id: "a",
+        text_original: "A",
+        expected_audience_class: "off_topic",
+        expected_decision: "skip",
+      },
+    ],
+  });
+  const { deps } = fakeDeps(scoringFallbackResult());
+  deps.runScoringPolicy = async () => scoringFallbackResult();
+
+  const result = await runScoringEval(supabase, { limit: 1 }, deps);
+
+  assertEquals(result.ok, true);
+  assertEquals(result.summary, {
+    profile_id: "iran-first",
+    accuracy: 0,
+    correct: 0,
+    false_positive_count: 0,
+    false_negative_count: 0,
+    ambiguous_count: 0,
+    failed_count: 1,
+  });
+  assertEquals(result.results?.length, 1);
+  assertEquals(result.results?.[0], {
+    example_id: "a",
+    expected_class: "off_topic",
+    expected_decision: "skip",
+    audience_class: null,
+    decision: null,
+    score: null,
+    threshold: null,
+    ok: false,
+    failure: true,
+    error: "scoring_policy_failed",
+  });
+});
+
+Deno.test("runScoringEval mixed run keeps counts clean and persists failed_count plus per-row failure markers", async () => {
+  const supabase = fakeSupabase({
+    examples: [
+      {
+        id: "a",
+        text_original: "A",
+        expected_audience_class: "direct_focus",
+        expected_decision: "deliver",
+      },
+      {
+        id: "b",
+        text_original: "B",
+        expected_audience_class: "off_topic",
+        expected_decision: "skip",
+      },
+      {
+        id: "c",
+        text_original: "C",
+        expected_audience_class: "global_exception",
+        expected_decision: "deliver",
+      },
+    ],
+  });
+  const { deps } = fakeDeps();
+  deps.runScoringPolicy = async (input) => {
+    const text = input.text as string;
+    if (text === "B" || text === "C") return scoringFallbackResult();
+    return scoringResult({ delivery_decision: "deliver", review_status: "none" });
+  };
+
+  const result = await runScoringEval(supabase, { limit: 3 }, deps);
+
+  assertEquals(result.ok, true);
+  assertEquals(result.summary, {
+    profile_id: "iran-first",
+    accuracy: 33.3,
+    correct: 1,
+    false_positive_count: 0,
+    false_negative_count: 0,
+    ambiguous_count: 0,
+    failed_count: 2,
+  });
+  assertEquals(result.results?.length, 3);
+  assertEquals(result.results?.[0].failure, false);
+  assertEquals(result.results?.[1].failure, true);
+  assertEquals(result.results?.[2].failure, true);
+  assertEquals(result.results?.[0].error, null);
+  assertEquals(result.results?.[1].error, "scoring_policy_failed");
+  assertEquals(result.results?.[2].error, "scoring_policy_failed");
+  const insert = supabase.calls.find((call) =>
+    call.op === "insert" && call.table === "scoring_evaluations"
+  )?.value as Record<string, unknown>;
+  assertEquals((insert.summary as Record<string, unknown>).failed_count, 2);
+  assertEquals(
+    (insert.results as Array<Record<string, unknown>>).filter((row) =>
+      row.failure
+    ).length,
+    2,
+  );
+});
+
+Deno.test("runScoringEval still counts a genuine needs_review result as ambiguous and correct for a review label", async () => {
+  const supabase = fakeSupabase({
+    examples: [
+      {
+        id: "a",
+        text_original: "A",
+        expected_audience_class: "off_topic",
+        expected_decision: "review",
+      },
+    ],
+  });
+  const { deps } = fakeDeps(
+    scoringResult({
+      audience_class: "off_topic",
+      delivery_decision: "skip",
+      review_status: "needs_review",
+    }),
+  );
+
+  const result = await runScoringEval(supabase, { limit: 1 }, deps);
+
+  assertEquals(result.ok, true);
+  assertEquals(result.summary, {
+    profile_id: "iran-first",
+    accuracy: 100,
+    correct: 1,
+    false_positive_count: 0,
+    false_negative_count: 0,
+    ambiguous_count: 1,
+    failed_count: 0,
+  });
+  assertEquals(result.results?.[0].failure, false);
+});
+
+Deno.test("runScoringEval surfaces the underlying runScoringPolicy error code on failure rows", async () => {
+  const supabase = fakeSupabase({
+    examples: [
+      {
+        id: "a",
+        text_original: "A",
+        expected_audience_class: "direct_focus",
+        expected_decision: "deliver",
+      },
+    ],
+  });
+  const { deps } = fakeDeps();
+  deps.runScoringPolicy = async () =>
+    scoringFallbackResult({ error: "scoring_openai_http_503" });
+
+  const result = await runScoringEval(supabase, { limit: 1 }, deps);
+
+  assertEquals(result.ok, true);
+  assertEquals(result.summary.failed_count, 1);
+  assertEquals(result.results?.[0].failure, true);
+  assertEquals(result.results?.[0].error, "scoring_openai_http_503");
 });

@@ -204,12 +204,14 @@ export default function ScoringStudio({ initial }: Props) {
   const runEval = async () => {
     setDryRunState('evaluating');
     try {
-      const data = await invokeAdminAction<{ ok?: boolean; error?: string; summary?: { accuracy?: number | string; correct?: number; profile_id?: string }; results?: unknown[] }>(
+      const data = await invokeAdminAction<{ ok?: boolean; error?: string; summary?: { accuracy?: number | string; correct?: number; profile_id?: string; failed_count?: number }; results?: unknown[] }>(
         { action: 'run_scoring_eval', profile_id: activeProfile.id, limit: 10 },
         { throwOnFailure: false },
       );
       if (!data?.ok) throw new Error(data?.error ?? 'Evaluation failed');
-      setDryRunState(`Evaluation accuracy: ${data.summary?.accuracy ?? 'n/a'}% on ${data.summary?.correct ?? 0}/${data.summary?.profile_id ? data.results?.length ?? 0 : 0} examples`);
+      const failedCount = typeof data.summary?.failed_count === 'number' ? data.summary.failed_count : 0;
+      const failureNote = failedCount > 0 ? ` (${failedCount} transport failure${failedCount === 1 ? '' : 's'} excluded from counts)` : '';
+      setDryRunState(`Evaluation accuracy: ${data.summary?.accuracy ?? 'n/a'}% on ${data.summary?.correct ?? 0}/${data.summary?.profile_id ? data.results?.length ?? 0 : 0} examples${failureNote}`);
     } catch (e) {
       setDryRunState(null);
       toast({ title: 'Evaluation failed', description: (e as Error).message, variant: 'destructive' });
