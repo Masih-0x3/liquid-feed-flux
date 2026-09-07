@@ -70,7 +70,7 @@ function isDeepgramNoTimedSegmentsReason(reason) {
 function isDeepgramContentQualityReason(reason) {
   const value = String(reason ?? "");
   return isDeepgramNoTimedSegmentsReason(value) ||
-    /weak low-confidence speech detection|repeated filler transcript|non-speech descriptive transcript|repetitive transcript does not match context|only weak deepgram candidates/i.test(value);
+    /weak low-confidence speech detection|repeated filler transcript|non-speech descriptive transcript|repetitive transcript does not match context|sparse transcript does not match context|only weak deepgram candidates/i.test(value);
 }
 
 export function isLikelyNonSpeechDescription(transcription) {
@@ -342,6 +342,7 @@ function weakDeepgramReason(transcription, options = {}) {
   if (isLikelyRepeatedFillerTranscript(transcription)) return "repeated filler transcript";
   if (isLikelyNonSpeechDescription(transcription)) return "non-speech descriptive transcript";
   if (isLikelyContextMismatchedRepetitiveTranscript(transcription, options.contextText)) return "repetitive transcript does not match context";
+  if (isSparseContextMismatchedTranscript(transcription, { contextText: options.contextText, durationMs: options.durationMs })) return "sparse transcript does not match context";
   if (transcription.onlyWeakCandidates === true) return transcription.fallbackReason || "only weak Deepgram candidates";
   return "";
 }
@@ -390,6 +391,7 @@ export async function transcribeAudio(options = {}) {
           !isLikelyRepeatedFillerTranscript(candidate) &&
           !isLikelyNonSpeechDescription(candidate) &&
           !isLikelyContextMismatchedRepetitiveTranscript(candidate, options.contextText) &&
+          !isSparseContextMismatchedTranscript(candidate, { contextText: options.contextText, durationMs: options.durationMs }) &&
           !isLikelyRomanizedHebrewTranscript(candidate, {
             deepgramLanguage: options.deepgramLanguage,
             deepgramLanguageFallbacks: options.deepgramLanguageFallbacks,

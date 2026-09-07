@@ -947,3 +947,151 @@ test("keeps short confident utterances so tiny real speech still gets subtitles"
     segments: [{ id: 1, start: 4.2, end: 5.1, text: "uh huh" }],
   }, { durationMs: 12000 }), false);
 });
+
+test("rejects confident sparse off-context Deepgram Latin cues on the default Deepgram path", async () => {
+  const result = await transcribeAudio({
+    provider: "deepgram",
+    audioPath: "/tmp/audio.mp3",
+    durationMs: 10000,
+    deepgramApiKey: "dg-key",
+    contextText: "Post context:\nPost: Tokyo skyline at sunset with cherry blossoms.",
+    fetchImpl: async () => ({
+      ok: true,
+      text: async () => JSON.stringify({
+        results: {
+          channels: [{
+            detected_language: "en",
+            language_confidence: 0.95,
+            alternatives: [{
+              transcript: "Olive grove.",
+              confidence: 0.95,
+              words: [
+                { word: "Olive", start: 4.7, end: 5.1, confidence: 0.95 },
+                { word: "grove", start: 5.1, end: 5.5, confidence: 0.95 },
+              ],
+            }],
+          }],
+          utterances: [{ start: 4.7, end: 5.5, transcript: "Olive grove." }],
+        },
+      }),
+    }),
+    readFileImpl: async () => Buffer.from("audio"),
+  });
+
+  assert.equal(result.provider, "deepgram");
+  assert.equal(result.noUsableSpeech, true);
+  assert.deepEqual(result.segments, []);
+  assert.match(result.noUsableSpeechReason, /sparse transcript does not match context/);
+  assert.equal(
+    isSparseContextMismatchedTranscript(
+      { segments: [{ id: 1, start: 4.7, end: 5.5, text: "Olive grove." }] },
+      { durationMs: 10000, contextText: "Tokyo skyline at sunset with cherry blossoms." },
+    ),
+    true,
+  );
+  assert.equal(
+    isWeakSpeechDetection(
+      {
+        language: "en",
+        languageConfidence: 0.95,
+        confidence: 0.95,
+        segments: [{ id: 1, start: 4.7, end: 5.5, text: "Olive grove." }],
+      },
+      { durationMs: 10000 },
+    ),
+    false,
+  );
+  assert.equal(
+    isLikelyContextMismatchedRepetitiveTranscript(
+      { segments: [{ id: 1, start: 4.7, end: 5.5, text: "Olive grove." }] },
+      "Tokyo skyline at sunset with cherry blossoms.",
+    ),
+    false,
+  );
+});
+
+test("keeps confident Latin Deepgram cues that match post context on long clips", async () => {
+  const result = await transcribeAudio({
+    provider: "deepgram",
+    audioPath: "/tmp/audio.mp3",
+    durationMs: 12000,
+    deepgramApiKey: "dg-key",
+    contextText: "Post context:\nPost: Protesters chanting Free Palestine in the streets.",
+    fetchImpl: async () => ({
+      ok: true,
+      text: async () => JSON.stringify({
+        results: {
+          channels: [{
+            detected_language: "en",
+            language_confidence: 0.93,
+            alternatives: [{
+              transcript: "Free Palestine",
+              confidence: 0.93,
+              words: [
+                { word: "Free", start: 4.7, end: 4.95, confidence: 0.93 },
+                { word: "Palestine", start: 4.95, end: 5.5, confidence: 0.93 },
+              ],
+            }],
+          }],
+          utterances: [{ start: 4.7, end: 5.5, transcript: "Free Palestine" }],
+        },
+      }),
+    }),
+    readFileImpl: async () => Buffer.from("audio"),
+  });
+
+  assert.equal(result.provider, "deepgram");
+  assert.equal(result.noUsableSpeech, undefined);
+  assert.deepEqual(result.segments, [{ id: 1, start: 4.7, end: 5.5, text: "Free Palestine" }]);
+  assert.equal(
+    isSparseContextMismatchedTranscript(
+      { segments: [{ id: 1, start: 4.7, end: 5.5, text: "Free Palestine" }] },
+      { durationMs: 12000, contextText: "Protesters chanting Free Palestine in the streets." },
+    ),
+    false,
+  );
+});
+
+test("does not fall back to OpenAI after Deepgram rejects a sparse off-context Latin cue", async () => {
+  let openaiCalled = false;
+  const result = await transcribeAudio({
+    provider: "deepgram",
+    fallbackProvider: "openai",
+    audioPath: "/tmp/audio.mp3",
+    durationMs: 10000,
+    deepgramApiKey: "dg-key",
+    openaiApiKey: "openai-key",
+    contextText: "Post context:\nPost: Tokyo skyline at sunset with cherry blossoms.",
+    fetchImpl: async () => ({
+      ok: true,
+      text: async () => JSON.stringify({
+        results: {
+          channels: [{
+            detected_language: "en",
+            language_confidence: 0.95,
+            alternatives: [{
+              transcript: "Olive grove.",
+              confidence: 0.95,
+              words: [
+                { word: "Olive", start: 4.7, end: 5.1, confidence: 0.95 },
+                { word: "grove", start: 5.1, end: 5.5, confidence: 0.95 },
+              ],
+            }],
+          }],
+          utterances: [{ start: 4.7, end: 5.5, transcript: "Olive grove." }],
+        },
+      }),
+    }),
+    readFileImpl: async () => Buffer.from("audio"),
+    openaiTranscribe: async () => {
+      openaiCalled = true;
+      return { model: "whisper-1", language: "en", segments: [{ id: 1, start: 0, end: 1, text: "should not reach" }] };
+    },
+  });
+
+  assert.equal(openaiCalled, false);
+  assert.equal(result.provider, "deepgram");
+  assert.equal(result.noUsableSpeech, true);
+  assert.deepEqual(result.segments, []);
+  assert.match(result.noUsableSpeechReason, /sparse transcript does not match context/);
+});
