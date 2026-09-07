@@ -122,7 +122,7 @@ function validateStructural(source) {
   // carried). The per-post row-count baseline (introduced in c5fd15da) made
   // media_uploads_per_day 4x too permissive and unusable as a real cap.
   assert.doesNotMatch(main, /\.gt\('media_count', 0\)/, 'media-upload baseline must use a per-media-item sum, not a per-post row count');
-  assert.match(main, /sb\.from\('x_deliveries'\)\.select\('media_count'\)\.eq\('status', 'posted'\)\.gte\('created_at', since24h\)/, 'media-upload baseline must select media_count for posted deliveries in the last 24h');
+  assert.match(main, /sb\.from\('x_deliveries'\)\.select\('media_count'\)\.(?:eq\('status', 'posted'\)|or\('[^']*status\.eq\.posted[^']*'\))\.gte\('created_at', since24h\)/, 'media-upload baseline must select media_count for posted deliveries in the last 24h');
   assert.match(main, /let mediaUp24hDb = 0;[\s\S]*?for \(const row of mediaUp24hRows\)[\s\S]*?mediaUp24hDb \+= \(row as \{ media_count: number \}\)\.media_count;/, 'media-upload baseline must sum media_count rows into mediaUp24hDb');
   assert.match(main, /!Array\.isArray\(mediaUp24hRows\) \|\|[\s\S]*?mediaUp24hRows\.some\(\(row\) => !isRecord\(row\) \|\| !isNonNegativeSafeInteger\(\(row as \{ media_count\?: unknown \}\)\.media_count\)\)/, 'malformed media_count rows must fail closed before the baseline sum');
   // Per-upload enforcement: the per-image upload loop must re-check the 24h
@@ -248,7 +248,7 @@ if (process.env.MUTATION_TEST === '1') {
   assertRejected('per-post media baseline', (source) => ({
     ...source,
     poster: source.poster.replace(
-      "sb.from('x_deliveries').select('media_count').eq('status', 'posted').gte('created_at', since24h),",
+      "sb.from('x_deliveries').select('media_count').or('status.eq.posted,and(status.eq.skipped,media_count.gt.0)').gte('created_at', since24h),",
       "sb.from('x_deliveries').select('*', { count: 'exact', head: true }).eq('status', 'posted').gt('media_count', 0).gte('created_at', since24h),",
     ),
   }));
