@@ -33,7 +33,9 @@ export const HEADER_FORMAT_MAX = 280;
  */
 export function clampHeaderFormat(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
-  return value.length > HEADER_FORMAT_MAX ? value.slice(0, HEADER_FORMAT_MAX) : value;
+  if (value.length <= HEADER_FORMAT_MAX) return value;
+  const truncated = value.slice(0, HEADER_FORMAT_MAX);
+  return /[\uD800-\uDBFF]$/.test(truncated) ? truncated.slice(0, -1) : truncated;
 }
 
 /**
