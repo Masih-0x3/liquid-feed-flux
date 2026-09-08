@@ -69,6 +69,10 @@ export function createMediaProcessorHandler(
       "expired_render_query_failed",
       "old_media_result_invalid",
       "expired_render_result_invalid",
+      "media_object_claim_failed",
+      "media_object_claim_invalid",
+      "media_object_preview_failed",
+      "media_object_preview_invalid",
     ]);
     function mediaProcessorErrorCode(error: unknown): string {
       const message = error instanceof Error ? error.message : "";

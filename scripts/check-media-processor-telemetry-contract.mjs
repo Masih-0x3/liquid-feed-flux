@@ -348,6 +348,58 @@ function assertHandlerContract(source, label = "media-processor handler") {
 }
 
 assertHandlerContract(handlerSource);
+
+const legacyMediaCleanupPath = join(repoRoot, "supabase/functions/_shared/legacyMediaCleanup.ts");
+const legacyMediaCleanupSource = readFileSync(legacyMediaCleanupPath, "utf8");
+
+const RUNTIME_CLEANUP_ERROR_CODES = [
+  "media_object_claim_failed",
+  "media_object_claim_invalid",
+  "media_object_preview_failed",
+  "media_object_preview_invalid",
+];
+
+function extractHandlerAllowlist(source) {
+  const sourceFile = typescript.createSourceFile(
+    handlerPath,
+    source,
+    typescript.ScriptTarget.ES2022,
+    true,
+    typescript.ScriptKind.TS,
+  );
+  const allowlist = new Set();
+  for (const node of findNodes(sourceFile, (n) =>
+    typescript.isVariableDeclaration(n) && propertyName(n.name) === "MEDIA_PROCESSOR_ERROR_CODES"
+  )) {
+    if (!node.initializer || !typescript.isNewExpression(node.initializer)) continue;
+    if (!isIdentifier(node.initializer.expression, "Set")) continue;
+    const arrayArg = node.initializer.arguments?.[0];
+    if (!arrayArg || !typescript.isArrayLiteralExpression(arrayArg)) continue;
+    for (const element of arrayArg.elements) {
+      const value = stringValue(element);
+      if (value !== null) allowlist.add(value);
+    }
+  }
+  return allowlist;
+}
+
+function assertHandlerAllowlistCoversRuntime(source, label = "media-processor handler allowlist") {
+  for (const code of RUNTIME_CLEANUP_ERROR_CODES) {
+    assert.match(
+      legacyMediaCleanupSource,
+      new RegExp(`throw new Error\\("${code}"\\)`),
+      `${label}: legacyMediaCleanup runtime must still throw the bounded code ${code}`,
+    );
+  }
+  const allowlist = extractHandlerAllowlist(source);
+  assert.ok(allowlist.size > 0, `${label} must define a non-empty MEDIA_PROCESSOR_ERROR_CODES allowlist`);
+  for (const code of RUNTIME_CLEANUP_ERROR_CODES) {
+    assert.equal(allowlist.has(code), true, `${label} must preserve the cleanup runtime bounded code ${code}`);
+  }
+}
+
+assertHandlerAllowlistCoversRuntime(handlerSource);
+
 if (process.env.MUTATION_TEST === "1") {
   assert.throws(() => assertHandlerContract(
     handlerSource.replace("type SupabaseClient = unknown;", "type SupabaseClient = any;"),
@@ -365,6 +417,11 @@ if (process.env.MUTATION_TEST === "1") {
     handlerSource.replace("const safeError = new Error(mediaProcessorErrorCode(error));", "const safeError = error;"),
     "unsanitized handler error mutation",
   ));
+  for (const code of RUNTIME_CLEANUP_ERROR_CODES) {
+    assert.throws(() => assertHandlerAllowlistCoversRuntime(
+      handlerSource.replace(`"${code}",`, ""),
+    ), `removing ${code} from the handler allowlist must fail the cross-boundary check`);
+  }
 }
 
 console.log(`MEDIA_PROCESSOR_TELEMETRY_SOURCE_CONTRACT_PASS structural=1 handlerBoundary=1 selfTest=${process.env.MUTATION_TEST === "1" ? "pass" : "skipped"}`);
