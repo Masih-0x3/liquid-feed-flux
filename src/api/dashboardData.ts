@@ -373,7 +373,7 @@ function deriveOpsStatus(metrics: DashboardMetrics, health: PipelineHealth, hear
     return {
       severity: 'warning',
       primaryIssue: `X budget estimate is at ${health.xBudgetUsedPct}%`,
-      recommendedRoute: '/settings?section=x-automation',
+      recommendedRoute: '/settings#x-automation',
       lastIngestAgeSeconds: heartbeat.ageSeconds,
       staleJobCount: health.staleRunning30m,
     };
