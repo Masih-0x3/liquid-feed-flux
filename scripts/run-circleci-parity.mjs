@@ -11,6 +11,7 @@ export const CIRCLE_SHA_ENV = "CIRCLE_SHA1";
 export const OWNER_POLICY_ENV = "XOT_SUPPLY_OWNER_POLICY_B64";
 export const RUNNER_TEMP_ENV = "RUNNER_TEMP";
 export const BASH_ENV_ENV = "BASH_ENV";
+export const PARITY_BASH_ARGS = Object.freeze(["--noprofile", "--norc", "-euo", "pipefail", "-c"]);
 
 const SHA_RE = /^[a-f0-9]{40}$/;
 const CHECKOUT_REF = "${{ github.event.pull_request.head.sha || github.sha }}";
@@ -197,7 +198,7 @@ export function runCircleParity({ stage, source = readFileSync(WORKFLOW_PATH, "u
   if (!runnerTemp) fail(`${RUNNER_TEMP_ENV} must be set by CircleCI so evidence cannot be written to an implicit location`);
   for (const step of selected) {
     const env = buildStepEnvironment(step, circleSha);
-    const result = spawnSync("bash", ["-euo", "pipefail", "-c", step.run], {
+    const result = spawnSync("bash", [...PARITY_BASH_ARGS, step.run], {
       cwd: REPO_ROOT,
       env,
       stdio: "inherit",

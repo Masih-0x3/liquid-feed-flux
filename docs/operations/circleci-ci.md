@@ -32,8 +32,10 @@ There are two CircleCI artifact boundaries matching the GitHub workflow:
 
 The runner removes `XOT_SUPPLY_OWNER_POLICY_B64` from every derived command
 until the final owner-validation command. It also removes `BASH_ENV` from each
-derived child while retaining the setup step's resolved Node 24 `PATH`, so
-Circle's bootstrap shell configuration cannot be re-entered under `nounset`.
+derived child and invokes each child as `bash --noprofile --norc -euo
+pipefail -c`, while retaining the setup step's resolved Node 24 `PATH`. This
+prevents Circle's bootstrap or remote-daemon shell startup configuration from
+being re-entered under `nounset`.
 Configure the owner policy as a protected CircleCI project/context environment
 variable; it is never committed or printed by this job. The final command still requires
 `XOT_SUPPLY_OWNER_POLICY_MODE=exact-head`, an exact `CIRCLE_SHA1`, and an

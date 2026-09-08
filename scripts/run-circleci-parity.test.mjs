@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
-import { buildStepEnvironment, REPO_ROOT, parseWorkflow, runCircleParity, validateCircleWorkflow } from "./run-circleci-parity.mjs";
+import { buildStepEnvironment, PARITY_BASH_ARGS, REPO_ROOT, parseWorkflow, runCircleParity, validateCircleWorkflow } from "./run-circleci-parity.mjs";
 
 const workflowSource = readFileSync(`${REPO_ROOT}/.github/workflows/ci.yml`, "utf8");
 const circleConfig = readFileSync(`${REPO_ROOT}/.circleci/config.yml`, "utf8");
@@ -70,4 +73,29 @@ test("CircleCI parity keeps the owner policy out of pre-owner commands", () => {
   assert.equal(owner.XOT_SUPPLY_OWNER_POLICY_B64, sourceEnv.XOT_SUPPLY_OWNER_POLICY_B64);
   assert.equal(owner.BASH_ENV, undefined);
   assert.equal(owner.XOT_REVIEWED_SHA, sourceEnv.CIRCLE_SHA1);
+});
+
+test("CircleCI derived children isolate bash startup under a synthetic SSH environment", () => {
+  const root = mkdtempSync(join(tmpdir(), "xot-circle-bash-"));
+  try {
+    const bashEnv = join(root, "bash-env");
+    writeFileSync(bashEnv, "printf 'BASH_ENV_WAS_SOURCED\\n' >&2\n");
+    const sourceEnv = {
+      ...process.env,
+      BASH_ENV: bashEnv,
+      SSH_CLIENT: "198.51.100.10 4242 22",
+    };
+    const childEnv = buildStepEnvironment({ run: "fixture", env: {} }, "a".repeat(40), sourceEnv);
+    assert.equal(childEnv.BASH_ENV, undefined);
+    const result = spawnSync(
+      "bash",
+      [...PARITY_BASH_ARGS, "test \"$SSH_CLIENT\" = \"198.51.100.10 4242 22\"; printf 'isolated-child\\n'"],
+      { env: childEnv, encoding: "utf8" },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, "isolated-child\n");
+    assert.equal(result.stderr, "");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
