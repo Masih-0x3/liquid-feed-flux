@@ -1,0 +1,73 @@
+{
+  "schema": "xot-current-release-sql-boundary-receipt-v1",
+  "status": "ACCEPTED_LOCAL_SQL_T1",
+  "context": "orbstack",
+  "image": "public.ecr.aws/supabase/postgres@sha256:99b1729aeb0bac314445024fc149fbd39306170b61dd50800ccf180327ab3459",
+  "imageCommand": [
+    "postgres",
+    "-D",
+    "/etc/postgresql"
+  ],
+  "migrationCount": 137,
+  "inventorySha256": "321c48bcc6258dabfae83c088a2d6286be0012de8f69cd275b0cf33f424aeeb5",
+  "migrationSha256": "6a8dcb81934646a23dc7cf0f0e0dc19347594d945f1649eb94b1ffa8158218c8",
+  "container": "removed",
+  "cleanup": "removed",
+  "skillmapUnchanged": true,
+  "xotE10Unchanged": true,
+  "signal": null,
+  "startedAt": "2026-09-07T10:35:48.385Z",
+  "finishedAt": "2026-09-07T10:36:22.296Z",
+  "evidenceDirectory": "/Users/stevmq/Finalized XOT/supabase/.temp/current-release-replay-9ad2tq",
+  "replaySchemaSha256": "390518c200ac9e0b68d00d30ea81c4f04c912aba7469497409bac6c4ebd5aa54",
+  "replayCatalogSha256": "6053c2666c7e37c1b14b4f61824dfa846f1a6f5309d22ce4363e86760e9a8a48",
+  "egressProbe": {
+    "network": "none",
+    "nonLoopbackRoutes": 0,
+    "reservedAddressConnectExit": 7,
+    "publishedPorts": 0,
+    "mounts": 0
+  },
+  "feedbackRegression": {
+    "status": "passed",
+    "feedbackRowsAfterRollback": 0,
+    "fixture": "synthetic-local-only"
+  },
+  "harnessHashes": {
+    "scripts/run-current-release-sql-boundary.mjs": "941a69ceb232b1b848316779792c655c4a8872839d3ce7d63f46e1ef12b67023",
+    "scripts/currentReleaseSqlBoundary.mjs": "60fccbf92198c3c50d9450b3204ad9eca2c6ac5e46513e0571feae3fd52944e8",
+    "scripts/e10SqlBoundary.mjs": "652e14ec3cc3c94c45095767df45a7068f95f1763db4e84578bf328b87aead58",
+    "scripts/e7DisposableBoundary.mjs": "2966bef1de80102fabecf3852437af59d4c7aee74c2f6c0bb48e86701fc68cbe",
+    "scripts/current-release-schema-catalog.sql": "251733d092f8520dafbd236a4ab42adf87a10df30a98cb5b8e84ff6ba986013a",
+    "scripts/test-preview-video-render-feedback.sql": "dbaf595849030f1372efe1467c83deac05c024a6dd7ae28d22c821b668148c36"
+  },
+  "generatedTypesSha256": "1b02e251a9a5578f5bac4b22fb5ecb78f51a830243a9f88b6d58095a836b6cea",
+  "typeGenerator": {
+    "image": "public.ecr.aws/supabase/postgres-meta@sha256:a84cc713585eea7b401e4a2561ec4a1e48c87083d1c7ecb4502f204bb4391300",
+    "tag": "public.ecr.aws/supabase/postgres-meta:v0.96.6",
+    "command": [
+      "node",
+      "dist/server/server.js"
+    ],
+    "invocation": "direct pinned postgres-meta",
+    "schema": "public",
+    "network": "owned database no-egress namespace",
+    "cleanup": "removed"
+  },
+  "assertionRows": {
+    "runtime_controls_rows": "1",
+    "enum_labels": "admin,read_only",
+    "user_roles_pk": "user_id",
+    "user_roles_id_unique": "true",
+    "rls_user_roles": "true",
+    "rls_runtime_controls": "true",
+    "table_grants": "true",
+    "rpc_grants": "true",
+    "role_functions_search_path": "true",
+    "update_rpc_security_definer": "true",
+    "update_rpc_search_path": "true",
+    "runtime_controls_safe_seed": "true",
+    "activation_epochs_empty": "true"
+  },
+  "release": "CLOSED"
+}

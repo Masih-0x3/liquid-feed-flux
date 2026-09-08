@@ -125,6 +125,9 @@ const postLockdownMigrationDigests = new Map([
   ['20260808163000_b3a_claim_x_ambiguous_retry_fix.sql', 'ad4d0e56f652f7df0b5d40b8258643b099e76ea5cb51b8b4d9d42fe380184807'],
   ['20260808173000_b3a_claim_x_ambiguous_history_fix.sql', '74b69c207ef81d76fc6a0e800d9105c05aa61b69d4d8818ec252dc7ba29af555'],
   [e7MigrationName, 'fec67e19b6e47534e6b9c7cd7b6b33735fdf26cce74204c8d1e5862b4f8446e8'],
+  // Existing service-only feedback RPC: qualification-only CREATE OR REPLACE.
+  // Preview SQL regression and authenticated role probes verify retained ACLs.
+  ['20260907001640_video_render_feedback_qualified_columns.sql', '6a8dcb81934646a23dc7cf0f0e0dc19347594d945f1649eb94b1ffa8158218c8'],
 ]);
 
 function read(path) {
@@ -1206,7 +1209,20 @@ function validatePostLockdownMigrations(postLockdownMigrations) {
       validateB2BSuccessor(source, name);
     } else {
       assert.doesNotMatch(normalized, /(?:^|\n)\s*do\s+\$\$|\bexecute\s+(?:format\s*\(|['$])/i, `${name}: dynamic SQL is forbidden`);
-      validateFunctionPrivilegeContract(source, name);
+      if (name === '20260907001640_video_render_feedback_qualified_columns.sql') {
+        // This replaces the same existing signature, so PostgreSQL retains its
+        // owner and ACL. Do not exempt arbitrary new functions or grant edits.
+        const definitions = functionDefinitions(source);
+        assert.equal(definitions.length, 1, `${name}: exactly one existing RPC replacement required`);
+        assert.deepEqual(executableSqlStatements(source.replace(definitions[0].source, '')), [], `${name}: only the RPC replacement is allowed`);
+        assert.equal(compactSql(definitions[0].signature), compactSql(
+          'public.save_video_render_feedback_if_current(p_render_id uuid, p_expected_render_version text, p_expected_render_revision bigint, p_label text, p_note text, p_metadata jsonb, p_created_by uuid)',
+        ), `${name}: the existing signature must be preserved`);
+        assert.match(definitions[0].source, /^CREATE OR REPLACE FUNCTION/);
+        assert.match(definitions[0].source, /SECURITY DEFINER\s+SET search_path TO public, pg_catalog/);
+      } else {
+        validateFunctionPrivilegeContract(source, name);
+      }
       validateRlsTableIntent(source, name);
       if (name === '20260808123000_b4_video_render_claim_fencing.sql') validateB4Migration(source, name);
     }
@@ -3939,6 +3955,16 @@ if (process.env.MUTATION_TEST === '1') {
     '20260730070000_telegram_delivery_claims.sql',
     (migration) => `${migration}\n`,
   ));
+  for (const [label, mutate] of [
+    ['byte drift', (migration) => `${migration}\n`],
+    ['browser grant', (migration) => `${migration}\nGRANT EXECUTE ON FUNCTION public.save_video_render_feedback_if_current(uuid,text,bigint,text,text,jsonb,uuid) TO authenticated;`],
+    ['signature drift', (migration) => migration.replace('p_expected_render_revision bigint', 'p_expected_render_revision integer')],
+    ['revision guard removal', (migration) => migration.replace('AND r.render_revision = p_expected_render_revision', '')],
+  ]) {
+    expectRejected(`feedback qualification repair ${label}`, (source) => mutateSuccessor(
+      source, '20260907001640_video_render_feedback_qualified_columns.sql', mutate,
+    ));
+  }
   expectRejected('post-lockdown weak search_path', (source) => mutateSuccessor(
     source,
     '20260730070000_telegram_delivery_claims.sql',

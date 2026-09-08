@@ -1,0 +1,4871 @@
+{
+  "schema": "xot-current-release-baseline-v1",
+  "created_at": "2026-09-07T10:11:17.446Z",
+  "project_ref": "jzirqfzzvlbxwfzndaer",
+  "historical": {
+    "path": "docs/plans/2026-07-14-xot-migration-equivalence-manifest.json",
+    "sha256": "418fc0a4994565daf929244e47e77feb3b8c08728849057b5dce7888f6e96b78"
+  },
+  "predecessor": {
+    "path": "docs/plans/2026-09-03-xot-e10-preview-migration-boundary-successor-v5.json",
+    "sha256": "bf88befa452ec8f7b34c819543b5546308f91702a7c514e3a24c6878b01b8b9e"
+  },
+  "candidate": {
+    "status": "pending_review",
+    "reviewed_git_sha": null,
+    "inventory_sha256": "321c48bcc6258dabfae83c088a2d6286be0012de8f69cd275b0cf33f424aeeb5",
+    "checked_in_types_sha256": "f1dfd39c5ded189ac5bc39dc5ebd7a1f5986475a4f5cfeb333d650aadfe913dd",
+    "local_inventory": [
+      {
+        "version": "20250902164607",
+        "name": "4824a25b-3b01-4499-8ddd-2dd4e191920b",
+        "sha256": "2eb3b40ebba66f6ca9b00a03c637b8956313d94094b43f2a7a71cb4a5a0b223a",
+        "sha256_without_terminal_lf": "2eb3b40ebba66f6ca9b00a03c637b8956313d94094b43f2a7a71cb4a5a0b223a"
+      },
+      {
+        "version": "20250902172822",
+        "name": "1ca0b343-366e-4f29-8cc6-de909151ff54",
+        "sha256": "6156debd1d4180146636ae904f83b9ef9abb5801506d80bd2c1f1a42e74f2313",
+        "sha256_without_terminal_lf": "83603c041ae76cd6d754701c677206bcbfec4c9241c6f7e3b79ce7e6f232c1cb"
+      },
+      {
+        "version": "20250902173238",
+        "name": "d6440fa1-4471-4f5b-877f-b8be7f0be811",
+        "sha256": "d4250efd2218f0dc59cce64f97b5c6d4d64cf3cad9bba93b92fb4e47d745ea1b",
+        "sha256_without_terminal_lf": "4c091afe7a66b2f27d9f3733211239d7f4d3d4a40cf60c020e7fb1c5c2b88d02"
+      },
+      {
+        "version": "20250902203545",
+        "name": "0ce52d8a-ddca-4bb0-ae47-93e99927604d",
+        "sha256": "b7ca551947c1aca5c1089b205ab0fdbdbcdcc54b1a281a488453750f1184238b",
+        "sha256_without_terminal_lf": "b7ca551947c1aca5c1089b205ab0fdbdbcdcc54b1a281a488453750f1184238b"
+      },
+      {
+        "version": "20250902213839",
+        "name": "91d2a11a-788f-4498-9931-055c6090560b",
+        "sha256": "3da154531a0ea14cf2f89cd63fe11c0466f12217026760d241b6a7c13c6324a8",
+        "sha256_without_terminal_lf": "3da154531a0ea14cf2f89cd63fe11c0466f12217026760d241b6a7c13c6324a8"
+      },
+      {
+        "version": "20250902213857",
+        "name": "db322c6b-76d3-4736-80fc-763a1c063155",
+        "sha256": "699b169bf2d5f3de13d3cbd797e6811a53e557d9350f42b29957086f26bf1d3e",
+        "sha256_without_terminal_lf": "699b169bf2d5f3de13d3cbd797e6811a53e557d9350f42b29957086f26bf1d3e"
+      },
+      {
+        "version": "20250902214327",
+        "name": "81b9307b-715e-41f2-98ff-60d3a2d9d3c9",
+        "sha256": "240c26c3da8e19cce4cce160cb7b8443f57f9717c4abdc58b354b81f28f5a8e2",
+        "sha256_without_terminal_lf": "240c26c3da8e19cce4cce160cb7b8443f57f9717c4abdc58b354b81f28f5a8e2"
+      },
+      {
+        "version": "20250902234705",
+        "name": "93a88859-cee3-429b-bc08-95ba2db4fd95",
+        "sha256": "9fb15a2078c4680d7e755c64160375bc1e3c5b0f33420710aed75d2ddd1845a0",
+        "sha256_without_terminal_lf": "0e2ef23ffe2c9e5de1ddb976b9975ad6afaac25725d6b5969899eaadb955a856"
+      },
+      {
+        "version": "20250902234736",
+        "name": "4a64a00e-9bd2-47bb-bd22-1f66e5440880",
+        "sha256": "89bfcfdf50ee4a9ee4d1418727aabec208c7f1bbcc566fbebefd57c3037df091",
+        "sha256_without_terminal_lf": "75ff0308a3a123f1f3d33579b9c8385b9cdcf7c97dec041c073f9a3f86231588"
+      },
+      {
+        "version": "20250902234908",
+        "name": "f7055d34-ab45-4881-962c-f59e3bf72ff4",
+        "sha256": "71cd599fba617574ab9e13430db6f19414ad9c402b04c5da4fed6fc57bb21034",
+        "sha256_without_terminal_lf": "71cd599fba617574ab9e13430db6f19414ad9c402b04c5da4fed6fc57bb21034"
+      },
+      {
+        "version": "20250903005714",
+        "name": "0d906bd6-aae5-43a6-a60b-cf42ee46db46",
+        "sha256": "2e5a1f31fc9f7a863243d37bbd088115dc7835603d06e7bf647feed34bb46fb0",
+        "sha256_without_terminal_lf": "2e5a1f31fc9f7a863243d37bbd088115dc7835603d06e7bf647feed34bb46fb0"
+      },
+      {
+        "version": "20250903014813",
+        "name": "876af37a-f66a-407e-bc0c-1cee72cb1a91",
+        "sha256": "d1c046cea1b73d5388d438761196212e16e3c14cd4ea2096075cbe8a0272841d",
+        "sha256_without_terminal_lf": "d1c046cea1b73d5388d438761196212e16e3c14cd4ea2096075cbe8a0272841d"
+      },
+      {
+        "version": "20250903015813",
+        "name": "e1a74e3e-25b0-4816-aec6-3c6716d94730",
+        "sha256": "1255871c5332742d48a2ae07a5d0dbce29e8f81f88a86a73ae1601ad18caee42",
+        "sha256_without_terminal_lf": "a128627a69001c0b0cce99cc3ff7a44975c2e6246992c7d2af24d858f978cd7b"
+      },
+      {
+        "version": "20250903020258",
+        "name": "0209d87c-e054-402a-994a-07bc3b2320b9",
+        "sha256": "7938f4cd3dcb143a46b5a561b60aa0a097c9ca6be59daeb89925e81e4b3446df",
+        "sha256_without_terminal_lf": "7938f4cd3dcb143a46b5a561b60aa0a097c9ca6be59daeb89925e81e4b3446df"
+      },
+      {
+        "version": "20250903020456",
+        "name": "05537c22-f444-4df7-8d43-0eb4061818cd",
+        "sha256": "4d9f2af9cb309d8b7fda090ccc87d89c88ca0738253662c6744dbccaa4cd1343",
+        "sha256_without_terminal_lf": "4d9f2af9cb309d8b7fda090ccc87d89c88ca0738253662c6744dbccaa4cd1343"
+      },
+      {
+        "version": "20250903020940",
+        "name": "23c8b8b8-a05e-4c07-a334-316213e15564",
+        "sha256": "38e80e528c67f1271130ba346b4a2a684250e757f130ed88367f65e3be4a358f",
+        "sha256_without_terminal_lf": "38e80e528c67f1271130ba346b4a2a684250e757f130ed88367f65e3be4a358f"
+      },
+      {
+        "version": "20250903022256",
+        "name": "69c172e7-caad-4f8f-b49d-9b132be18364",
+        "sha256": "efa5c1b7bd43236d95580c4f625cde7cbfe56de198b5c31376e23c41bc3c4914",
+        "sha256_without_terminal_lf": "efa5c1b7bd43236d95580c4f625cde7cbfe56de198b5c31376e23c41bc3c4914"
+      },
+      {
+        "version": "20250904033120",
+        "name": "add_core_pipeline_columns",
+        "sha256": "bc7a6b422b54ed05c0df39d3752b8df69c4d9b04385e757a072054857eb71b90",
+        "sha256_without_terminal_lf": "fdb2fdd17d669140e2f60914c9252e8c2798b0bb6aca11665561cd45800ad2ee"
+      },
+      {
+        "version": "20250904033146",
+        "name": "rpc_pipeline_status_and_retry",
+        "sha256": "8cb827cc9933ac27e725b2ab6af5c1ae75fc40be00e12d5449216bb49b9661ab",
+        "sha256_without_terminal_lf": "2d455b55c84dfafef65e963b917e83877e6782fbc5e925e1b1da6b5ef42bed6d"
+      },
+      {
+        "version": "20250905010114",
+        "name": "telegram_analytics",
+        "sha256": "23dc1adc9445f5b5b1551fd6ee326996fd0e8fb9339accf0bb2c62ce4896364e",
+        "sha256_without_terminal_lf": "e1f17b86bb4143db5ba8b9b67f6b9471ec34fb472239736656688a54725b20a1"
+      },
+      {
+        "version": "20260226200038",
+        "name": "fd5e5453-3535-4801-b2da-62c44000384f",
+        "sha256": "dd1ec08af42bef387250567bade66426b205fbf9f217c9a66babdb61eb49d7fb",
+        "sha256_without_terminal_lf": "eb9f4f5a2af19ebe1c53aea225a80bb888ef3ce365227867453e5382be9da91f"
+      },
+      {
+        "version": "20260226200321",
+        "name": "e5151941-e314-4f83-8017-e4bf1e8bdb88",
+        "sha256": "30fb97f121146366b850ca3d4a767e37925aeb90aab90e2c050630fe89179fd7",
+        "sha256_without_terminal_lf": "1b6f947a1a28bf364377278385c14f1bff83bd2e2a2c555bf02fabcba6e59a6a"
+      },
+      {
+        "version": "20260226201153",
+        "name": "e1593ff8-eb1f-46db-a56c-8bc2fce539ed",
+        "sha256": "5bf5b317cea29dbf78907e991e81cdd1177b56c04cfa68fafbf833b91338eaaf",
+        "sha256_without_terminal_lf": "33975479208d11d0062e451741b51bd3a3205b7ca3968204d5c52998603051d1"
+      },
+      {
+        "version": "20260226203309",
+        "name": "cda068bf-51e5-4c6a-9700-705289a536d6",
+        "sha256": "3ca8d30ce380535794437beecfd19cd54ff21163598626693651084ce05bc634",
+        "sha256_without_terminal_lf": "64a35b092610d8b1de3f58a5f7255246b7744ee3b95aeeb269fb62cc9bdcc617"
+      },
+      {
+        "version": "20260319115558",
+        "name": "b6d9099b-38cd-41b7-ad4f-69d24f030981",
+        "sha256": "d9ae673059f41368372d6db733053d1b0e91c40a2daca467f3f71d48624af5ef",
+        "sha256_without_terminal_lf": "d9ae673059f41368372d6db733053d1b0e91c40a2daca467f3f71d48624af5ef"
+      },
+      {
+        "version": "20260320004655",
+        "name": "04a925c9-fd01-4fa6-a88e-c48f93ad480e",
+        "sha256": "1045a86c2a2a30f0a8fe7c85074cff22894f871fdf25acbec6676375f8a38344",
+        "sha256_without_terminal_lf": "1045a86c2a2a30f0a8fe7c85074cff22894f871fdf25acbec6676375f8a38344"
+      },
+      {
+        "version": "20260320055853",
+        "name": "66f0ebc4-0c37-4b83-afda-88e1c10eb8f3",
+        "sha256": "b6993282dceb3ff7534149b2f38e8b53b822106f31ae57e7ee0e9d2be4a6945d",
+        "sha256_without_terminal_lf": "0ad0553d03f2d4fd01c5d175f67e184e805c4b8ae3a558c4319e9398e886a66d"
+      },
+      {
+        "version": "20260320055907",
+        "name": "e0f19c96-1864-434c-9e95-a67b5d01a098",
+        "sha256": "868d60a175fb48ba301c49e86e18f6be5414a4482477bfb674a42f0d24967798",
+        "sha256_without_terminal_lf": "b852f2d4e67597e6b3c99a3e9e75cf3d71701c0a457fadc411727539ee7f8e1b"
+      },
+      {
+        "version": "20260320081419",
+        "name": "ef6527e3-c417-4ecf-9286-0e6fb4b26961",
+        "sha256": "42d020deebdd87b7eb499143245fcd37a33f12f56a555e9f95e7b2b29ff799cc",
+        "sha256_without_terminal_lf": "1204f9747903ff3cfac950d368fc0ef278916e6e7fd9873123a6e1414a733c96"
+      },
+      {
+        "version": "20260320125020",
+        "name": "67c7b741-6094-4804-8b77-5dbc6cfc71b4",
+        "sha256": "72a1e14602c0941432f2d27c5d89bff5290d27db7496276781b92d5a19eff868",
+        "sha256_without_terminal_lf": "86cb2f04a0933e65cafa505ef0cabd49cb986ce7ec503c1a9941e493cca16d8c"
+      },
+      {
+        "version": "20260320140507",
+        "name": "9b7b62ef-d3e5-41d3-b0c4-42a9b29eb74f",
+        "sha256": "8017d4cda4d7e0be5797e88e483d54fdd26f28c57c0f763d03e7e9d755820bef",
+        "sha256_without_terminal_lf": "a5d97650b6f96c75ca427334fc95d1cb01ea3076423cbfd71507787920f5b6f1"
+      },
+      {
+        "version": "20260320160659",
+        "name": "eb23a38a-864a-4208-81bf-0363f0975639",
+        "sha256": "88abdb71ec9d7f08f9abfc7b8f05417c0cfed2a43e8bcc9f8b6f5c6800bfeaca",
+        "sha256_without_terminal_lf": "88abdb71ec9d7f08f9abfc7b8f05417c0cfed2a43e8bcc9f8b6f5c6800bfeaca"
+      },
+      {
+        "version": "20260320162001",
+        "name": "2913777c-0ffd-4959-bc5b-8fa2e3a2300a",
+        "sha256": "dd2dc6b2f965788b76e8064662f1be7808ff8b4cd8beb28d0e8082321da3151e",
+        "sha256_without_terminal_lf": "dd2dc6b2f965788b76e8064662f1be7808ff8b4cd8beb28d0e8082321da3151e"
+      },
+      {
+        "version": "20260320165323",
+        "name": "2115f75a-83e0-493a-82cc-be9eec6de69e",
+        "sha256": "d72f26120375586302378b6d1c4d416087994b6a830228ebdc91ba332abd3cce",
+        "sha256_without_terminal_lf": "d72f26120375586302378b6d1c4d416087994b6a830228ebdc91ba332abd3cce"
+      },
+      {
+        "version": "20260320165620",
+        "name": "a638989e-2da6-4a5c-bd79-d11f061adbaf",
+        "sha256": "bdcd444244f2e43e7753f12c39f3456110dd47aaf9823a8aff9dcc71c56800af",
+        "sha256_without_terminal_lf": "bdcd444244f2e43e7753f12c39f3456110dd47aaf9823a8aff9dcc71c56800af"
+      },
+      {
+        "version": "20260320170033",
+        "name": "0b3cf6e5-97a0-4279-9bdd-d34f923924a0",
+        "sha256": "4154d42de730caeef427572e4410690ec8db3b610e0910f36553d387d7fd52ee",
+        "sha256_without_terminal_lf": "4154d42de730caeef427572e4410690ec8db3b610e0910f36553d387d7fd52ee"
+      },
+      {
+        "version": "20260321063115",
+        "name": "1c4b91ac-bcc5-4509-8952-e6a86d2c1676",
+        "sha256": "64cd5d9f6f60b5f20a0231f9b863de0c60d8aae2a1c37161ce13b96249da0244",
+        "sha256_without_terminal_lf": "2d7907931bef6e49f0cee34e7176fddc6122a21a477a0d80026760cfe479f56a"
+      },
+      {
+        "version": "20260404124348",
+        "name": "d61f8073-1165-4e8d-8c4a-90acb593817e",
+        "sha256": "6ca2e740c5f09162a05d810153373bc270b332757bb65a4dcbfff02feca67d4a",
+        "sha256_without_terminal_lf": "0a0a2d3cc21629ce6f004eaab307695c57c4eefce5166ad3754c6afbe63071d6"
+      },
+      {
+        "version": "20260413125431",
+        "name": "88d84d44-dd4f-4d9b-be22-413a1f0d57ab",
+        "sha256": "bb4b3df3aa5f70f1936da38b0578b617323559455affcf47c3f4dffacc0490b3",
+        "sha256_without_terminal_lf": "8b8a025808b6d6c08ed48a7095f425be5b32bd629b9402f2e1db1676635548b7"
+      },
+      {
+        "version": "20260413125542",
+        "name": "3acf3706-c1ae-47b1-8f2d-b5a72b56400d",
+        "sha256": "6ecf0f8c528896b30c737e2791e3549d090851f8d3d4816d6ce6dd9b1ee65f01",
+        "sha256_without_terminal_lf": "be68677c1ac227f2a81415190d954f331f6a33da85f12a76544cf1538ee44c4d"
+      },
+      {
+        "version": "20260413133631",
+        "name": "0f3c8b2c-81c1-49c0-bc95-1a92771bed40",
+        "sha256": "f1accf44b4af2dd5ba3dcdd0fb0a6a8e93085c0313a8b676d976a104938b432e",
+        "sha256_without_terminal_lf": "b39be998b569006d1eea4c002ec649af217401eb9a8fe40844dd1499af964d86"
+      },
+      {
+        "version": "20260413144422",
+        "name": "926db42c-c447-4d5e-8034-54b5d8470130",
+        "sha256": "384fc7c8d84bf73dbd7deed466538d453f5fb339761b4bd1667b6ef23e10eec2",
+        "sha256_without_terminal_lf": "fa0389dd1265b3594559270993c1f02725d2a2c4107e656c4b1c1970b4a25387"
+      },
+      {
+        "version": "20260413145620",
+        "name": "1efcf10f-eb55-4bec-a555-50270c2a1193",
+        "sha256": "cdbd528ce23fd9ffce5dd6bcb73a4b5e4022159fcc3b9d73cf85810a513a4806",
+        "sha256_without_terminal_lf": "cdbd528ce23fd9ffce5dd6bcb73a4b5e4022159fcc3b9d73cf85810a513a4806"
+      },
+      {
+        "version": "20260415081447",
+        "name": "dcee9a2e-6b6a-44bb-9420-6b4116002713",
+        "sha256": "2344c280db7991c950f7847207ac5b9ad9835578f8e060868e09c531672f5463",
+        "sha256_without_terminal_lf": "2344c280db7991c950f7847207ac5b9ad9835578f8e060868e09c531672f5463"
+      },
+      {
+        "version": "20260415093908",
+        "name": "191cdf79-1aed-4cb0-9df3-2b7a43a29fdb",
+        "sha256": "60ba7b56f9c752dbdeb0b90e9c5867cacc3cddd6b1ea92a1ca35b74b1b45c904",
+        "sha256_without_terminal_lf": "60ba7b56f9c752dbdeb0b90e9c5867cacc3cddd6b1ea92a1ca35b74b1b45c904"
+      },
+      {
+        "version": "20260415103405",
+        "name": "0f4214eb-1d7d-4654-91ba-9930e6267ad1",
+        "sha256": "763ae33b227ff46fd98649d625516558f5d473433f33b6e6044b88e5f7a77904",
+        "sha256_without_terminal_lf": "763ae33b227ff46fd98649d625516558f5d473433f33b6e6044b88e5f7a77904"
+      },
+      {
+        "version": "20260418041632",
+        "name": "bc422cec-a2eb-4d7c-8804-6068af2b2964",
+        "sha256": "bee36363da310fa849e498ac6ca693706d15b233f3e40689d82668a292642f0e",
+        "sha256_without_terminal_lf": "bee36363da310fa849e498ac6ca693706d15b233f3e40689d82668a292642f0e"
+      },
+      {
+        "version": "20260418073136",
+        "name": "e62e51d4-db59-438e-8281-730db687d975",
+        "sha256": "8b961af8b74370de2e6bc5764f0fde472bf86b5ef0d9c058bdc89c168fbb4129",
+        "sha256_without_terminal_lf": "8b961af8b74370de2e6bc5764f0fde472bf86b5ef0d9c058bdc89c168fbb4129"
+      },
+      {
+        "version": "20260418133725",
+        "name": "914c8ba5-305b-45b4-93a5-a5abac4c8a65",
+        "sha256": "5fbb3e1997190d63e7d9152df60befe29d87046a588d1018dab7cd7b3d3a60cc",
+        "sha256_without_terminal_lf": "5fbb3e1997190d63e7d9152df60befe29d87046a588d1018dab7cd7b3d3a60cc"
+      },
+      {
+        "version": "20260418135312",
+        "name": "325e36d6-8861-4d87-a7cb-a35f1d49af10",
+        "sha256": "1ea0b7627fed12bc0afd644d55d6efeb19bd834c31270b62b4c45d3e10843b00",
+        "sha256_without_terminal_lf": "83e4ca634fc6d8c8ee4df76663266d1795cfdb5e82784e7f96a67d220b1a0183"
+      },
+      {
+        "version": "20260418152635",
+        "name": "60eb1029-fdcb-4df7-9bb9-4566cdfe2251",
+        "sha256": "a32618b8bf8b1fd65173a417b58ffd8bdeb1a1385a514cdb49771911c90fe0e8",
+        "sha256_without_terminal_lf": "a1bc7de6cd9f045b06f28e9a30562d2f5bdf1c0101252cde51a2157b32a224c0"
+      },
+      {
+        "version": "20260418160410",
+        "name": "ac5d00a9-b267-47ac-a1c1-f6c87b7971e9",
+        "sha256": "a76382b8c24682a7a7fa5e0d8e8ea4d05453c26fd89c5b6c00f8bb51b231a3f4",
+        "sha256_without_terminal_lf": "a76382b8c24682a7a7fa5e0d8e8ea4d05453c26fd89c5b6c00f8bb51b231a3f4"
+      },
+      {
+        "version": "20260425094604",
+        "name": "543e772b-1f45-4d6f-ac6d-91632a1cfaca",
+        "sha256": "89b54b7b1389b05be048958beb47ac60fea0a54ca8bc5dbf718a4f18075d3979",
+        "sha256_without_terminal_lf": "30bccb673f5aef27908e460c08febaf5e6c5739a5661ce63ae9123dc65c1c0af"
+      },
+      {
+        "version": "20260426023757",
+        "name": "245c5af0-a694-418b-be3f-a46fd83d424b",
+        "sha256": "6bc6a876c81fdda2c8ee0e0cf3464e7b2037e97e2a931fe9cdc96fe0b45a9123",
+        "sha256_without_terminal_lf": "6bc6a876c81fdda2c8ee0e0cf3464e7b2037e97e2a931fe9cdc96fe0b45a9123"
+      },
+      {
+        "version": "20260428072856",
+        "name": "1557adb7-89f6-4579-9464-dc840e47e6e3",
+        "sha256": "e8d3702c9beae96cd16de81721f64926f4f09ae7bdd831ff80d375bb4a4a2a28",
+        "sha256_without_terminal_lf": "6073ab0f091a482291f0590a78c1029124b8e7c8dbd0f574f57243f5f9e21f58"
+      },
+      {
+        "version": "20260428125603",
+        "name": "62d42481-b345-437b-9efa-b6cb7b0920a1",
+        "sha256": "e512affc301bc4cc6c156a119bed978249983b1d1fae60f58b632351d8c6b53e",
+        "sha256_without_terminal_lf": "e512affc301bc4cc6c156a119bed978249983b1d1fae60f58b632351d8c6b53e"
+      },
+      {
+        "version": "20260428125641",
+        "name": "22f27fd1-3ce7-4a17-8e8c-fd7e00fc55cf",
+        "sha256": "5bdff781cc906e010d86a16edbaf61077c0c93c54eb90c217148aaa1e2c8735a",
+        "sha256_without_terminal_lf": "5bdff781cc906e010d86a16edbaf61077c0c93c54eb90c217148aaa1e2c8735a"
+      },
+      {
+        "version": "20260428132610",
+        "name": "42917f01-fca0-4b1c-a7a8-29f3215695f0",
+        "sha256": "31be80e1abc8bca0e5058abdf195f2548e5f4ba51d97c811f5adbfde9c163819",
+        "sha256_without_terminal_lf": "31be80e1abc8bca0e5058abdf195f2548e5f4ba51d97c811f5adbfde9c163819"
+      },
+      {
+        "version": "20260428133038",
+        "name": "2fbb0983-b319-4255-802f-7abf2de61de3",
+        "sha256": "35b737ecbaf77a7f6164a0f425f08ae601d243d41ccc8211ebabd44ce0921688",
+        "sha256_without_terminal_lf": "35b737ecbaf77a7f6164a0f425f08ae601d243d41ccc8211ebabd44ce0921688"
+      },
+      {
+        "version": "20260428133709",
+        "name": "1a75b3ca-6811-44c5-8524-8fe5534a4427",
+        "sha256": "afda00f383627314240903f3d706cd8b0f503322bbef89580da7aa7619046ad6",
+        "sha256_without_terminal_lf": "afda00f383627314240903f3d706cd8b0f503322bbef89580da7aa7619046ad6"
+      },
+      {
+        "version": "20260428134935",
+        "name": "69b54fc3-94a1-42d4-9b5d-76687a75b017",
+        "sha256": "39cacd9d8f779dd56d59aa9839045398aac3a6e05085ca1dcaf3be83fab7e528",
+        "sha256_without_terminal_lf": "39cacd9d8f779dd56d59aa9839045398aac3a6e05085ca1dcaf3be83fab7e528"
+      },
+      {
+        "version": "20260430104113",
+        "name": "f86a10fd-6cb8-44b1-918c-66713cbda6f6",
+        "sha256": "4483747680b588b834603a6e8bc0c1a7f9eda89f4fee73ea1c6d881542635e81",
+        "sha256_without_terminal_lf": "9c02ee70f2caf142cd6b594c023c8f00395cbc02d5122a603895f01da595959e"
+      },
+      {
+        "version": "20260430110154",
+        "name": "12590c3d-e4cd-4941-8fef-272f2f878260",
+        "sha256": "57d0d8ae0a51acdfe5c96fc5fcdbaa78f27d24a7fc7bf8a9691161bf2cfe212b",
+        "sha256_without_terminal_lf": "57d0d8ae0a51acdfe5c96fc5fcdbaa78f27d24a7fc7bf8a9691161bf2cfe212b"
+      },
+      {
+        "version": "20260501011410",
+        "name": "55ef7a51-a388-4837-9db4-5d3bb61160a8",
+        "sha256": "e9ca183e3a34783f66f330b276a107ca74125b525c539047d2925580996ae0f3",
+        "sha256_without_terminal_lf": "e9ca183e3a34783f66f330b276a107ca74125b525c539047d2925580996ae0f3"
+      },
+      {
+        "version": "20260507235716",
+        "name": "30c84cee-4ac9-41c8-9685-3f7ea981711c",
+        "sha256": "31ff9b472edad5749a7bcb73897834455d8ef74f36d2febbb8b5038008d0aac9",
+        "sha256_without_terminal_lf": "31ff9b472edad5749a7bcb73897834455d8ef74f36d2febbb8b5038008d0aac9"
+      },
+      {
+        "version": "20260508000554",
+        "name": "c81fe1b8-c999-4ec1-a227-1033cf458fcd",
+        "sha256": "26a5d1beed5021ecacba424bc9ff873f07971e871dd36c6d18fa433989c9855d",
+        "sha256_without_terminal_lf": "22523e6145fc9b753d533ebcbb04d8cacb07d5b0199895873e1437022e98ee6a"
+      },
+      {
+        "version": "20260508004959",
+        "name": "9354a223-6458-49e6-aa01-472f61b93817",
+        "sha256": "5a7aeeff831fcc673232b2fbb81ca8e817dde178741e39019042399fec62d78a",
+        "sha256_without_terminal_lf": "5a7aeeff831fcc673232b2fbb81ca8e817dde178741e39019042399fec62d78a"
+      },
+      {
+        "version": "20260508005913",
+        "name": "b26bde5e-811b-45cb-b7e1-dc5c40110c83",
+        "sha256": "8debf18268ca8fefcc56d324086c9c10f5cc31feb075e2c555ae9025a18b7b79",
+        "sha256_without_terminal_lf": "8debf18268ca8fefcc56d324086c9c10f5cc31feb075e2c555ae9025a18b7b79"
+      },
+      {
+        "version": "20260512010913",
+        "name": "ab56afe1-8849-4e0e-a0c8-d1960afa744a",
+        "sha256": "dbb6b9101a677efc2c33c3d67cc14bc5ae56c0e925c672a6c3eeba31da3e309e",
+        "sha256_without_terminal_lf": "dbb6b9101a677efc2c33c3d67cc14bc5ae56c0e925c672a6c3eeba31da3e309e"
+      },
+      {
+        "version": "20260512024751",
+        "name": "c8091745-2abb-4ea5-9cf2-a639c8007e1c",
+        "sha256": "a4968f2ad81fd7c98f7f380a4f3ff45a772bc2a7c83926127f8ae2d0b790b606",
+        "sha256_without_terminal_lf": "a4968f2ad81fd7c98f7f380a4f3ff45a772bc2a7c83926127f8ae2d0b790b606"
+      },
+      {
+        "version": "20260513074341",
+        "name": "c50301c1-8090-4190-9c4b-893aef9e38b2",
+        "sha256": "e97f73a9db3b3c5276cb8a19b62b06b94e9ed7a833e803c4cef102d119380830",
+        "sha256_without_terminal_lf": "17fcd36af674ed4d26d9e469edfc4d1105ca655247a1440ace5d30c4ccee2935"
+      },
+      {
+        "version": "20260513092325",
+        "name": "ae316ad7-1615-40c0-9385-896f792edb3e",
+        "sha256": "37d3fc1f914b90c4d166a63f06486d6e116a60cb689337607aa444ea1669c263",
+        "sha256_without_terminal_lf": "ec62c813109e3a60667e50a011a0ee2919d849ec73de09ccb9e8b1d278de3ad3"
+      },
+      {
+        "version": "20260513180000",
+        "name": "verify_webhook_internal_token",
+        "sha256": "4e5e2febdd7e35d4b56af0ee39cc066702447bbd96cabf5114c905b2938484ac",
+        "sha256_without_terminal_lf": "da1f02b4b851190130e6465c7e73b27eaf235531236c9af2ccf33b6c6b4cb4bb"
+      },
+      {
+        "version": "20260514103000",
+        "name": "x_poster_cron_respect_enabled",
+        "sha256": "14868d501468603a3ff72aba715a30a16c9468f3e1369744264d592c677861dc",
+        "sha256_without_terminal_lf": "0f4242c6f71fa4d3360601fc0db857f4fd93c3fd394ad60d12ff0a4cbeb89d25"
+      },
+      {
+        "version": "20260514120000",
+        "name": "feedback_learning_storage",
+        "sha256": "0c886d35c3f35f7e92f937d415215bd5056b27e9a7b16789697c17d72ced90e7",
+        "sha256_without_terminal_lf": "c739a0be05361b66d15dd7093752834b9a2236ea4982348a36567d7ac2b46d25"
+      },
+      {
+        "version": "20260514160000",
+        "name": "enrichment_pipeline",
+        "sha256": "9ceed6937dc3c18c35c9eb81291c1758113dcd6330959fd0a312819ee1971cc9",
+        "sha256_without_terminal_lf": "e61ced25b6de13cd6f985c475efc32f986be52394ec5fe87dd8c8a37cacb2a90"
+      },
+      {
+        "version": "20260514180000",
+        "name": "follower_review_status",
+        "sha256": "37eff8f1a0bfb9b2b2f3fa6272a57249b79746e74edda82853cb037cb66b18f5",
+        "sha256_without_terminal_lf": "ecb675decf52f1c53604844f222e7a6806190f8bb2a6099cf7d140195ad25321"
+      },
+      {
+        "version": "20260514190000",
+        "name": "add_following_ids",
+        "sha256": "d6d45c30244bc41261b4d0754f5514456265cd2f694c9fa65a6c4f0b5ffe30a6",
+        "sha256_without_terminal_lf": "d5546951cde86201ae053b9406fe84c0777cf6891e2a2bc24250e7b3f3bac482"
+      },
+      {
+        "version": "20260515075613",
+        "name": "harden_admin_surface",
+        "sha256": "c09099d90329ccec902cda3e51142245670ee00ca8b96598cbe1b02709ef6304",
+        "sha256_without_terminal_lf": "9180b48f6d9f8bd7a268e8b229ca78bc57f170de8e7bb75f9ab46486ec7a89de"
+      },
+      {
+        "version": "20260515080625",
+        "name": "queue_reliability_and_indexes",
+        "sha256": "947826502428fae21093273bd62e7dc20982530699aa1b0eb35686e33d2b2aef",
+        "sha256_without_terminal_lf": "d3f35fac224329843e9e0752e2f0b1052f096fc69618fabf7518869558b6881c"
+      },
+      {
+        "version": "20260515084409",
+        "name": "x_api_events_and_monitoring_views",
+        "sha256": "21a05c10813da0f0e2769d23323a87e4baff94f92863b4123e16c7f934308e0e",
+        "sha256_without_terminal_lf": "653f908a497e61646d72000dd42f7a0c767c3951d0a5784ca2df730da7230823"
+      },
+      {
+        "version": "20260515104839",
+        "name": "decouple_duplicate_gate",
+        "sha256": "af082a86ceb8565f34b23a8b3c3948996a731b2e22785230fc5a1ea537b4f44d",
+        "sha256_without_terminal_lf": "a1736afddce76b4b336dc516676628dbfc3ebc1cde7cadc754fbf127d80299be"
+      },
+      {
+        "version": "20260516021358",
+        "name": "profile_driven_scoring",
+        "sha256": "4756b72852e8041ec7b52a27296ce51405ad5f8fce0a7cc3774b82e4ce5740c3",
+        "sha256_without_terminal_lf": "db77f4bd99ab43d77f319faee870629a1e606862a5729891a728e91baa28c28b"
+      },
+      {
+        "version": "20260516050042",
+        "name": "tighten_new_object_api_surface",
+        "sha256": "28b44c9e7a6e409f3e85cfb1799a417ab7361dd0722e5df244031eeae609f3ae",
+        "sha256_without_terminal_lf": "cb305491ac5246d2061c50082aaefa795bccb51be09dd024f31b48b1811c44f6"
+      },
+      {
+        "version": "20260516072003",
+        "name": "algorithm_aware_enrichment",
+        "sha256": "78aad259d5926ade38fd69533ffb657d866f354a31aead6c252a6c09fe25aa07",
+        "sha256_without_terminal_lf": "870e319626cd479afccaa78db689371768138ec6c53bd5c5a81752e1fc0167a8"
+      },
+      {
+        "version": "20260516091651",
+        "name": "allow_skipped_deliveries_for_admin_ignore",
+        "sha256": "70749e30f1ec492ed69b896475c5ceffbc51b4a523d631f18ae1b10c38993275",
+        "sha256_without_terminal_lf": "efbad7eba4a0db0a98ca2ace37985f97124a14fc9d212b25568a2e3756d7ad96"
+      },
+      {
+        "version": "20260516092627",
+        "name": "allow_admin_ignore_feedback_events",
+        "sha256": "2f7e2fc8a1373c73633807c1cba82b9740bd557fcf30fc3a10fbb1f288aa2ff9",
+        "sha256_without_terminal_lf": "f7df5835c0829fecf0ee97c2060b001b2275d80b5a1b70dbf215ac25eb08797b"
+      },
+      {
+        "version": "20260517091837",
+        "name": "fix_duplicate_x_guard",
+        "sha256": "abc15b22ce4d199f01612abbb3739bd1ffb2644bd6b614661fe69f347fff1b5a",
+        "sha256_without_terminal_lf": "73d5e19e95f1071c104d740825e331ca3613d785e666735931726fa65e11438a"
+      },
+      {
+        "version": "20260517140817",
+        "name": "media_video_thumbnail_guard",
+        "sha256": "b475a90cc99d37d7a85a6dd9351a022f9fb013803d9320be6bfdf7340e59fc81",
+        "sha256_without_terminal_lf": "39079a152c7f2c28871c8f1d73d85daaac29246a594b503980345c1b8ca6a1cb"
+      },
+      {
+        "version": "20260518143606",
+        "name": "duplicate_coverage_gap_guard",
+        "sha256": "3bd489e81fcfd8f4452c53847c0f2ac9ff1225be956985a6021da1b517654bb2",
+        "sha256_without_terminal_lf": "78dbacbbd45a0e308472c9caa359b0ba890bc152298a35422d785bb25566af7d"
+      },
+      {
+        "version": "20260518201408",
+        "name": "speed_quota_worker_cadence",
+        "sha256": "1665dd2ff1d8919b42907f38a39ae65d458ce93df5e9f10b87e86441deb4f132",
+        "sha256_without_terminal_lf": "628665565c06324e1ce881125351dc608ff060df8a454a7324ae57e430801759"
+      },
+      {
+        "version": "20260522030027",
+        "name": "x_non_followback_reviews",
+        "sha256": "9a1e109f7a2064a1c91a7de780c55a55d86ecea0edb1e32d1276aa9d09b3074d",
+        "sha256_without_terminal_lf": "318e9cdcf156f705ed79a82d5a704df05b54c1b5edd337adb751e042068eecbc"
+      },
+      {
+        "version": "20260523140122",
+        "name": "deactivate_my_x_owned_reads",
+        "sha256": "fc22638b63e1bd73c7d7dfd15fd1f5fbe088e39fa1cf8e93cf9972d56b044224",
+        "sha256_without_terminal_lf": "1ab371b2871d289646327f59fd0cdee6d13499e3f3c8697133a9b1e55eb35cb8"
+      },
+      {
+        "version": "20260602035014",
+        "name": "pipeline_speed_monitoring",
+        "sha256": "a78e6419a7393acdd88656c525956cf114b38949f726fbbcba8af873775f7c65",
+        "sha256_without_terminal_lf": "2196bdae960a76626f3fa5fcfbd9329edf018abeb3a50eb890ecd748d61d32c5"
+      },
+      {
+        "version": "20260602061229",
+        "name": "prevent_skip_reconcile_translate",
+        "sha256": "f49a5a6ccc851ee75cd93ce0d37fbb4d51a6f459617aabd6ecac9814b88283c5",
+        "sha256_without_terminal_lf": "fb1a7a9b0f68fce730e6ab648f6db1eac602d0bc46788a3d5afec2636581116e"
+      },
+      {
+        "version": "20260609201533",
+        "name": "video_render_pipeline",
+        "sha256": "7f5662625d36cb525208bd167e115bba2dcfd37a196a4365e2f3d3563fdcd1a1",
+        "sha256_without_terminal_lf": "e56746aee9a5b028568416918dbaec5a15d0528d2e6cd18186f906623a0f50fb"
+      },
+      {
+        "version": "20260609213357",
+        "name": "v2_scoring_tuning_policy",
+        "sha256": "a84e4ee52e922d50425810ea82cd88df7f866e78dc74ab50a2f2a2f4eb0b9d6c",
+        "sha256_without_terminal_lf": "28200e8f724bb95a06079d13e363fe5fb95975cdf4a68adb69c03be0e96763e4"
+      },
+      {
+        "version": "20260614064657",
+        "name": "update_storage_quota_telemetry",
+        "sha256": "db747267e3ba7983ec6d12ce55c68b0879343acb58f7d7dc8b755e7fa93eb04b",
+        "sha256_without_terminal_lf": "eb54fdb6e1cce97df84af288126cb11b7a4634b87a2eb6179944110cb209fd3d"
+      },
+      {
+        "version": "20260615005500",
+        "name": "include_reprocess_in_worker_cron",
+        "sha256": "ac54f3884316f7d21e59dd597d0c35fbff3040bf7658f6c9f0c4e7b21b3a2b79",
+        "sha256_without_terminal_lf": "5f3de59c99cc479a246ea2f71da5ee664a8678d191f1f88fb20e5d057d9e5c18"
+      },
+      {
+        "version": "20260615043000",
+        "name": "compatibility_usage_events",
+        "sha256": "0da16e1599e34b07679178d07554b359079ae6cbba6423926d6f36fc0bb0de52",
+        "sha256_without_terminal_lf": "43e5de7186e5b8d60859cceab6750f0ec15a1a52b32cd144c6a7a83ddb7a7003"
+      },
+      {
+        "version": "20260617004958",
+        "name": "fix_claim_video_render_by_id_args",
+        "sha256": "de39c74aad3944f54bc53c829ab806bd6f298d300ad67c606e16d7beabbc9c02",
+        "sha256_without_terminal_lf": "a47ae65907edea47199ebdb60695ad670a63aa3a6f02a10d77f835b161bd4b88"
+      },
+      {
+        "version": "20260617224908",
+        "name": "x_post_delivery_claims",
+        "sha256": "31ae918df85bf5aa483b7de72033d0f7416392d3fb84454164aa8424938c57b2",
+        "sha256_without_terminal_lf": "905bfc616a33fd8e4896b2b06eb34706541feb9c9ec98e8fc76e328d2aa5fd55"
+      },
+      {
+        "version": "20260623010000",
+        "name": "learning_x_gate_scores",
+        "sha256": "2f2a06f6dd7f9e5438b1544b146ef51d3d5fa789dc991aa6bc5db0b0dfdecfe7",
+        "sha256_without_terminal_lf": "6ec8dc7d2097c8ad9fc22c2c0ade83aab29ee861e2a7eac5e03ceab055974ca2"
+      },
+      {
+        "version": "20260623023000",
+        "name": "x_post_no_retro_catchup",
+        "sha256": "6844f0c577c1a13ac3cdee0f5d37af001e3ebd325e31028ccb23bf7c6e2e931a",
+        "sha256_without_terminal_lf": "5d6658e9893e61497b44d0ecfcbbee7f95c3af8c944391a1ab408cf50ffcd655"
+      },
+      {
+        "version": "20260629010000",
+        "name": "manual_video_intakes",
+        "sha256": "7c1756ea8e58837c4d3b8b5e63fa372395bc46b5a7a7fc87678b204a7cbe15ce",
+        "sha256_without_terminal_lf": "7d6731b4eedd040d96001db0ae9fce9821748771ec4bbb376c019920c50a6750"
+      },
+      {
+        "version": "20260703010000",
+        "name": "xot_process_observability",
+        "sha256": "12b105160ca2cc98971d076516412ab9428abf6884d5062e50aeda2ecbf5b4a8",
+        "sha256_without_terminal_lf": "f2a755d51095d3395775a77e5481aa5a2e4455674a6b23371e64803202f6c95d"
+      },
+      {
+        "version": "20260703013000",
+        "name": "harden_observability_grants",
+        "sha256": "66e998098f867ed5ef09b88c66ed03850013b3d256f157f50d7499e45d5f249c",
+        "sha256_without_terminal_lf": "2b53dc009f3cda61cec1ef277b5a04c4a042ee597ca01b8682a425e12363d52a"
+      },
+      {
+        "version": "20260715074510",
+        "name": "video_render_review_state",
+        "sha256": "9dda9bca700629c972b8856d6deb082dfb10a6c1d484017c5103c7b067ab0187",
+        "sha256_without_terminal_lf": "007d552b0f538b07e5397400c2f0f3a5765dd3a369d536a60ee9f504e16cd672"
+      },
+      {
+        "version": "20260722162000",
+        "name": "video_render_feedback_revision",
+        "sha256": "af5ee529552719d27225f3b13e406153e34ba129a6236788e87faf89993a4d4c",
+        "sha256_without_terminal_lf": "fb5b58f5d9236e51d886abab19c46774e0b41483ad0b70c34bea13b40152bfb3"
+      },
+      {
+        "version": "20260723173100",
+        "name": "lock_down_video_render_raw_tables",
+        "sha256": "5c2250da37f6b876080c9bf48043ab3969cc7a617dcf66a8d3e54b31a4d571a3",
+        "sha256_without_terminal_lf": "24e93982c5c2ced477dc6eaefaa6040da2576d397bdd5c32e173d485901ee79a"
+      },
+      {
+        "version": "20260724183000",
+        "name": "add_current_user_is_admin_rpc",
+        "sha256": "cedd28e0976f70bdff25ac2e3025c407fb27af4beff1d3ebc14f888be8a08602",
+        "sha256_without_terminal_lf": "bedc962742468778b7340d10e919682b281dea097f0e7b0d6aa2be38562b2623"
+      },
+      {
+        "version": "20260730070000",
+        "name": "telegram_delivery_claims",
+        "sha256": "94531ca09a843f2ea00c05adcd0de0d1787305df431d4c161212c95773a8bcf2",
+        "sha256_without_terminal_lf": "e61304f9449167d9933e6d7935680fcb9483cba6479f58b64a96467bfda873ec"
+      },
+      {
+        "version": "20260806123000",
+        "name": "media_object_cleanup_claims",
+        "sha256": "f830ed38a7b190ef01aa747f5cefbb315963d304fd097154b35c293ad8abf4ef",
+        "sha256_without_terminal_lf": "f830ed38a7b190ef01aa747f5cefbb315963d304fd097154b35c293ad8abf4ef"
+      },
+      {
+        "version": "20260806143000",
+        "name": "b3_job_x_claim_fencing",
+        "sha256": "024dc8569aa490d9050d63b4507e584a9ffba5cb255bc3df9e76e24a64b84ecd",
+        "sha256_without_terminal_lf": "0bd0f76dab345c2093fd7f4241cc3bca5ab9ca20f2357ef301a36d6dbec7e8da"
+      },
+      {
+        "version": "20260806153000",
+        "name": "b3b1_rss_webhook_receipts",
+        "sha256": "c33231946eddcc7b97f8a6edd33f3c8527f6f3fa32008181c882bec042de9b46",
+        "sha256_without_terminal_lf": "56e739415a5bf2100938ae8d41e56ee679822749279bcc7b8398c48a39c57031"
+      },
+      {
+        "version": "20260808110000",
+        "name": "b3b2_digest_checkpoints",
+        "sha256": "83bc88b93f5017c8f664eac2b5abadbba8b0e559b71e8117862fc35ea2089758",
+        "sha256_without_terminal_lf": "e8a0bd6e3a0e43410722436c385644ac3c40677bce7c8e6d229633c9c0202de4"
+      },
+      {
+        "version": "20260808123000",
+        "name": "b4_video_render_claim_fencing",
+        "sha256": "24957228d1facffbcf5e737de0f1c3c349da0a3dc1d4defb8d1915d2ae15bdf4",
+        "sha256_without_terminal_lf": "d3f117363ed3175d3fcce4d33a4287f5c23a96bbe637bfc70f0100482d12ac3e"
+      },
+      {
+        "version": "20260808133000",
+        "name": "b2b_media_object_deletion_token_uuid",
+        "sha256": "b25a0f0367a5fe34783a29b0e2837d56fc89d5f1bff0e423ef0f1f87286eb364",
+        "sha256_without_terminal_lf": "5012b09e917bc863b8b3fb69accfe26ccda2367fb1f245f61bfd1d3875590681"
+      },
+      {
+        "version": "20260808143000",
+        "name": "b3a_reconcile_expired_job_claims_fix",
+        "sha256": "a126f3f1268bd710bc420861974915eb7adbbae03ce94e7329eeb335ab1a3c20",
+        "sha256_without_terminal_lf": "b487db16971559db67f82dda48e7511b39420ea164a592260e1f4e8f9647ba6a"
+      },
+      {
+        "version": "20260808153000",
+        "name": "b3a_fail_x_post_delivery_null_fix",
+        "sha256": "c95c09cbfef0d7bc44a0640383f9ad4a23297701d75126d46155ab928a9b44b5",
+        "sha256_without_terminal_lf": "8919a5005afa735e7bc1177c1dbaf2b93634cb0c93b2442eb093f595f7d19d6d"
+      },
+      {
+        "version": "20260808163000",
+        "name": "b3a_claim_x_ambiguous_retry_fix",
+        "sha256": "ad4d0e56f652f7df0b5d40b8258643b099e76ea5cb51b8b4d9d42fe380184807",
+        "sha256_without_terminal_lf": "6dc7f39cb9373927f6087b5f27ec4a01be50a4edf42faf3e42f2949f335d5978"
+      },
+      {
+        "version": "20260808173000",
+        "name": "b3a_claim_x_ambiguous_history_fix",
+        "sha256": "74b69c207ef81d76fc6a0e800d9105c05aa61b69d4d8818ec252dc7ba29af555",
+        "sha256_without_terminal_lf": "867d5f03a8379b3f6de6dfa6db81ec33ce6999904e3b9c058c7dea25c6b6db0c"
+      },
+      {
+        "version": "20260811090000",
+        "name": "revoke_public_default_privileges",
+        "sha256": "fec67e19b6e47534e6b9c7cd7b6b33735fdf26cce74204c8d1e5862b4f8446e8",
+        "sha256_without_terminal_lf": "308dd11d6a357c3b4419c4529a7caa6e0f08801680a564398d1079c570b19242"
+      },
+      {
+        "version": "20260812100000",
+        "name": "e10_preview_runtime_controls_and_roles",
+        "sha256": "66729659d4573d1245ba3ee7845fb76fa7808ecb5bda74cb616916e0700518d7",
+        "sha256_without_terminal_lf": "6ea979d814badd66ff21ee8bf61b484e4016ad943f2fd8f3849987097515852a"
+      },
+      {
+        "version": "20260825024826",
+        "name": "render_only_automation_cutover",
+        "sha256": "0a0e4e5039488e6f1996ba5bca7f4008d6f6f691863d6c8a4406df1e41e9b49f",
+        "sha256_without_terminal_lf": "02f276f911b9c3b144ea580e1419b8425b544537cf00020df719f1647259cf6b"
+      },
+      {
+        "version": "20260825091418",
+        "name": "v1_delivery_continuity_cutover",
+        "sha256": "378acb7d9079c9b23bd780de8c092db860e89646ffbc06dd55eac2c5cbf8acaa",
+        "sha256_without_terminal_lf": "6dc7317e18792fd92d3adbda21a0c6949b681ee308a63efb1940d11ed9bf4792"
+      },
+      {
+        "version": "20260825104845",
+        "name": "v1_delivery_cutover_settle_reason_prefix",
+        "sha256": "c509cbe64adb317781da026bdaf8c4e73508c8f8cbba24d05f4ff64f6edd5247",
+        "sha256_without_terminal_lf": "73c26ea0dff91ca950c7fabc662b590c31827774f3dff1c9e2f005611e595e79"
+      },
+      {
+        "version": "20260825220124",
+        "name": "xot_v2_runtime_controls_activation_bridge",
+        "sha256": "7d70aee49b5849f8b7df9e20c78a9d5d886a18eb4618a96ff9296afe81920910",
+        "sha256_without_terminal_lf": "8c557db769f87a521493c737af411cd7323fa73d7be3cf1280866cca65553b36"
+      },
+      {
+        "version": "20260827064509",
+        "name": "repair_effective_claim_fence_and_delivery_cutover",
+        "sha256": "754cef7f569a784125327b20eb20ffba6330f3e801fd43a264175c39d5f2d816",
+        "sha256_without_terminal_lf": "da92e6ddca9b95c0c3ca14071d007365ff951497b4c002be2435394ca5e5493e"
+      },
+      {
+        "version": "20260828120000",
+        "name": "repair_effective_x_claim_cutover",
+        "sha256": "44f363203e4fad7b42a6aeab244d05b13c3e03acf7f14bedc08b8f54be66d0e5",
+        "sha256_without_terminal_lf": "651f6d9ee7ef339275b096e7d77e4ffefb901b50bfe5260950bf922a8778546f"
+      },
+      {
+        "version": "20260828130000",
+        "name": "retire_legacy_x_delivery_overloads",
+        "sha256": "084f846331a791dc2b4495ba630fcd2eb1ceedb9cf950f6da0e16475cb44a9e8",
+        "sha256_without_terminal_lf": "87427342b4702185f2703181f00bc045c2b7994b39b65b31ad3eb34954dd0d9a"
+      },
+      {
+        "version": "20260828140000",
+        "name": "runtime_control_claim_release_race_guards",
+        "sha256": "c8d56b34ecab578555aaae7036c6ee8690493faaed259c80de95a5a3ae24de5f",
+        "sha256_without_terminal_lf": "45ff80a4f2b629bdbeb808a0f1f9ee9cd2ea901f2e39698a9d9630265dab8ad5"
+      },
+      {
+        "version": "20260829120000",
+        "name": "reconcile_historical_delivery_jobs",
+        "sha256": "aa20d3e809bc34b10d2b1c9eb96bd9c92c2b4a9c4adf2e20b4740c7d09410b4a",
+        "sha256_without_terminal_lf": "dfdb28729cf9b21ea2865f414588911f7e9a59e0f601430ef2883d59cfdde30c"
+      },
+      {
+        "version": "20260830120000",
+        "name": "enforce_historical_delivery_zero_write",
+        "sha256": "8ca74e40a5b199f5664edf72933559e8af089536e8506cc7415b8a5ded4c3901",
+        "sha256_without_terminal_lf": "5b633b25ca5dbf5d4d17f49bad8af07b26b0ccc3350fdc7561b6b4363b3d196c"
+      },
+      {
+        "version": "20260901150013",
+        "name": "adopt_telegram_pending_delivery_receipts",
+        "sha256": "ba209ccb73f7681f86b76e966500c39fbe75a3aa4f8f7354b2fab0b26b46d526",
+        "sha256_without_terminal_lf": "da50c9f622dd2d057874a742e5837bd1676b2d046641584be8d3ccff86998717"
+      },
+      {
+        "version": "20260901170000",
+        "name": "release_pre_provider_x_delivery_claim",
+        "sha256": "afeb056d73020e084e68afc5fca8aa33346cf56b8afa6f661cf94c57b2f36f68",
+        "sha256_without_terminal_lf": "1a91cd6c31e7929d6944b871b537eb2a4f5aacf125bff39cdfb673b1ba462c1f"
+      },
+      {
+        "version": "20260907001640",
+        "name": "video_render_feedback_qualified_columns",
+        "sha256": "6a8dcb81934646a23dc7cf0f0e0dc19347594d945f1649eb94b1ffa8158218c8",
+        "sha256_without_terminal_lf": "0b29e05f1b5cc23c6dc6c3934679cdde895e890b48eaecb9bee9bd64e13a7992"
+      }
+    ]
+  },
+  "remote": {
+    "captured_at": "2026-09-07T01:40:28.843Z",
+    "raw_sha256": "b9047ddbf06bcc1cf9fed2d037ef25c88188f0aa42c1e45e97e235972442509d",
+    "source": {
+      "service": "postgres",
+      "relation": "supabase_migrations.schema_migrations",
+      "statement_serialization": "statements.join(LF)",
+      "capture_tool": "supabase-cli-go:db-query-linked-2.111.0",
+      "query_sha256": "ebd2e913e33eed927c78b46aa164a8ad6c4447f94ea2d10484ade2a1cb56a891"
+    },
+    "inventory": [
+      {
+        "version": "20250902044607",
+        "name": null,
+        "sha256": "2eb3b40ebba66f6ca9b00a03c637b8956313d94094b43f2a7a71cb4a5a0b223a",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20250902052820",
+        "name": null,
+        "sha256": "b5b56d531acc068ad2220249374e849ae0184dae13cf4e5bf9551868b9a3269e",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20250902053237",
+        "name": null,
+        "sha256": "eab8b502422c02d882f63c7511bfd1a66561a4f21577a3c818a25f490756a220",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20250902083544",
+        "name": null,
+        "sha256": "b7ca551947c1aca5c1089b205ab0fdbdbcdcc54b1a281a488453750f1184238b",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20250902093838",
+        "name": null,
+        "sha256": "3da154531a0ea14cf2f89cd63fe11c0466f12217026760d241b6a7c13c6324a8",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20250902093856",
+        "name": null,
+        "sha256": "699b169bf2d5f3de13d3cbd797e6811a53e557d9350f42b29957086f26bf1d3e",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20250902094325",
+        "name": null,
+        "sha256": "240c26c3da8e19cce4cce160cb7b8443f57f9717c4abdc58b354b81f28f5a8e2",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20250902114704",
+        "name": null,
+        "sha256": "b974aa9957ba6c4f4c00d4ededac18e5743056a097e37b54c18f011a68b955f9",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20250902114735",
+        "name": null,
+        "sha256": "67575ff1724edd1ff2fbd61a2f8faab2318879bf5aa4f23ed4139abb08eafe84",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20250902114907",
+        "name": null,
+        "sha256": "71cd599fba617574ab9e13430db6f19414ad9c402b04c5da4fed6fc57bb21034",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20250903014811",
+        "name": null,
+        "sha256": "d1c046cea1b73d5388d438761196212e16e3c14cd4ea2096075cbe8a0272841d",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20250903015811",
+        "name": null,
+        "sha256": "8609a333be790dbb7fce3c36e5eeb7ee3398edb67b3d65174671702f5a1d48b1",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20250903020257",
+        "name": null,
+        "sha256": "7938f4cd3dcb143a46b5a561b60aa0a097c9ca6be59daeb89925e81e4b3446df",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20250903020454",
+        "name": null,
+        "sha256": "4d9f2af9cb309d8b7fda090ccc87d89c88ca0738253662c6744dbccaa4cd1343",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20250903020939",
+        "name": null,
+        "sha256": "38e80e528c67f1271130ba346b4a2a684250e757f130ed88367f65e3be4a358f",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20250903022255",
+        "name": null,
+        "sha256": "efa5c1b7bd43236d95580c4f625cde7cbfe56de198b5c31376e23c41bc3c4914",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20250903125713",
+        "name": null,
+        "sha256": "2e5a1f31fc9f7a863243d37bbd088115dc7835603d06e7bf647feed34bb46fb0",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20250904033120",
+        "name": "20250903140500_add_core_pipeline_columns",
+        "sha256": "fdb2fdd17d669140e2f60914c9252e8c2798b0bb6aca11665561cd45800ad2ee",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20250904033146",
+        "name": "20250903140000_rpc_pipeline_status_and_retry",
+        "sha256": "2d455b55c84dfafef65e963b917e83877e6782fbc5e925e1b1da6b5ef42bed6d",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20250905010114",
+        "name": "telegram_analytics",
+        "sha256": "e1f17b86bb4143db5ba8b9b67f6b9471ec34fb472239736656688a54725b20a1",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260226200037",
+        "name": null,
+        "sha256": "dd1ec08af42bef387250567bade66426b205fbf9f217c9a66babdb61eb49d7fb",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260226200319",
+        "name": null,
+        "sha256": "30fb97f121146366b850ca3d4a767e37925aeb90aab90e2c050630fe89179fd7",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260226201151",
+        "name": null,
+        "sha256": "5bf5b317cea29dbf78907e991e81cdd1177b56c04cfa68fafbf833b91338eaaf",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260226203308",
+        "name": null,
+        "sha256": "87091c9d706b68790678c9b282485d75906fb383f39781922fbec96fb066f1b3",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260319115556",
+        "name": null,
+        "sha256": "d9ae673059f41368372d6db733053d1b0e91c40a2daca467f3f71d48624af5ef",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260320004647",
+        "name": null,
+        "sha256": "1045a86c2a2a30f0a8fe7c85074cff22894f871fdf25acbec6676375f8a38344",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260320055851",
+        "name": null,
+        "sha256": "b6993282dceb3ff7534149b2f38e8b53b822106f31ae57e7ee0e9d2be4a6945d",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260320055906",
+        "name": null,
+        "sha256": "868d60a175fb48ba301c49e86e18f6be5414a4482477bfb674a42f0d24967798",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260320081417",
+        "name": null,
+        "sha256": "42d020deebdd87b7eb499143245fcd37a33f12f56a555e9f95e7b2b29ff799cc",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260320125018",
+        "name": null,
+        "sha256": "72a1e14602c0941432f2d27c5d89bff5290d27db7496276781b92d5a19eff868",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260320140505",
+        "name": null,
+        "sha256": "8017d4cda4d7e0be5797e88e483d54fdd26f28c57c0f763d03e7e9d755820bef",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260320160657",
+        "name": null,
+        "sha256": "88abdb71ec9d7f08f9abfc7b8f05417c0cfed2a43e8bcc9f8b6f5c6800bfeaca",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260320161959",
+        "name": null,
+        "sha256": "dd2dc6b2f965788b76e8064662f1be7808ff8b4cd8beb28d0e8082321da3151e",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260320165318",
+        "name": null,
+        "sha256": "d72f26120375586302378b6d1c4d416087994b6a830228ebdc91ba332abd3cce",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260320165618",
+        "name": null,
+        "sha256": "bdcd444244f2e43e7753f12c39f3456110dd47aaf9823a8aff9dcc71c56800af",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260320170031",
+        "name": null,
+        "sha256": "4154d42de730caeef427572e4410690ec8db3b610e0910f36553d387d7fd52ee",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260321063031",
+        "name": null,
+        "sha256": "64cd5d9f6f60b5f20a0231f9b863de0c60d8aae2a1c37161ce13b96249da0244",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260404124347",
+        "name": null,
+        "sha256": "6ca2e740c5f09162a05d810153373bc270b332757bb65a4dcbfff02feca67d4a",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260413125429",
+        "name": null,
+        "sha256": "bb4b3df3aa5f70f1936da38b0578b617323559455affcf47c3f4dffacc0490b3",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260413125541",
+        "name": null,
+        "sha256": "6ecf0f8c528896b30c737e2791e3549d090851f8d3d4816d6ce6dd9b1ee65f01",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260413133611",
+        "name": null,
+        "sha256": "f1accf44b4af2dd5ba3dcdd0fb0a6a8e93085c0313a8b676d976a104938b432e",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260413144420",
+        "name": null,
+        "sha256": "88350e8c1104c383a751fff7a405d3f71a107c55e4b23e17e648af31090ce3a4",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260413145554",
+        "name": null,
+        "sha256": "cdbd528ce23fd9ffce5dd6bcb73a4b5e4022159fcc3b9d73cf85810a513a4806",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260415081445",
+        "name": null,
+        "sha256": "2344c280db7991c950f7847207ac5b9ad9835578f8e060868e09c531672f5463",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260415093859",
+        "name": null,
+        "sha256": "60ba7b56f9c752dbdeb0b90e9c5867cacc3cddd6b1ea92a1ca35b74b1b45c904",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260415103403",
+        "name": null,
+        "sha256": "763ae33b227ff46fd98649d625516558f5d473433f33b6e6044b88e5f7a77904",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260418041623",
+        "name": null,
+        "sha256": "bee36363da310fa849e498ac6ca693706d15b233f3e40689d82668a292642f0e",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260418073134",
+        "name": null,
+        "sha256": "8b961af8b74370de2e6bc5764f0fde472bf86b5ef0d9c058bdc89c168fbb4129",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260418133724",
+        "name": null,
+        "sha256": "5fbb3e1997190d63e7d9152df60befe29d87046a588d1018dab7cd7b3d3a60cc",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260418135310",
+        "name": null,
+        "sha256": "b0280cf64cfc775fb9bef83f94418bc3025f2a8f1d83a1623f3e917fea069e7e",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260418152633",
+        "name": null,
+        "sha256": "de6d92c7fb9cb02dd034dd81298eb7d25e94bede8830ccd1da9745642113af24",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260418160408",
+        "name": null,
+        "sha256": "a76382b8c24682a7a7fa5e0d8e8ea4d05453c26fd89c5b6c00f8bb51b231a3f4",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260425094602",
+        "name": null,
+        "sha256": "d5ec512a686b35d0f7cb62ef06d606c6dc4dd1068d21b5d2d47ce561b51b39ec",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260426023755",
+        "name": null,
+        "sha256": "6bc6a876c81fdda2c8ee0e0cf3464e7b2037e97e2a931fe9cdc96fe0b45a9123",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260428072852",
+        "name": null,
+        "sha256": "e8d3702c9beae96cd16de81721f64926f4f09ae7bdd831ff80d375bb4a4a2a28",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260428125559",
+        "name": null,
+        "sha256": "e512affc301bc4cc6c156a119bed978249983b1d1fae60f58b632351d8c6b53e",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260428125639",
+        "name": null,
+        "sha256": "5bdff781cc906e010d86a16edbaf61077c0c93c54eb90c217148aaa1e2c8735a",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260428132607",
+        "name": null,
+        "sha256": "31be80e1abc8bca0e5058abdf195f2548e5f4ba51d97c811f5adbfde9c163819",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260428133005",
+        "name": null,
+        "sha256": "35b737ecbaf77a7f6164a0f425f08ae601d243d41ccc8211ebabd44ce0921688",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260428133707",
+        "name": null,
+        "sha256": "afda00f383627314240903f3d706cd8b0f503322bbef89580da7aa7619046ad6",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260428134932",
+        "name": null,
+        "sha256": "39cacd9d8f779dd56d59aa9839045398aac3a6e05085ca1dcaf3be83fab7e528",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260430104111",
+        "name": null,
+        "sha256": "4483747680b588b834603a6e8bc0c1a7f9eda89f4fee73ea1c6d881542635e81",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260430110152",
+        "name": null,
+        "sha256": "57d0d8ae0a51acdfe5c96fc5fcdbaa78f27d24a7fc7bf8a9691161bf2cfe212b",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260501011408",
+        "name": null,
+        "sha256": "e9ca183e3a34783f66f330b276a107ca74125b525c539047d2925580996ae0f3",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260507235715",
+        "name": null,
+        "sha256": "31ff9b472edad5749a7bcb73897834455d8ef74f36d2febbb8b5038008d0aac9",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260508000552",
+        "name": null,
+        "sha256": "d54d2d7dc4230f34cccf13fa89efda2e40a7fe1d424de02d9f8e4cc9e2bb551a",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260508004957",
+        "name": null,
+        "sha256": "5a7aeeff831fcc673232b2fbb81ca8e817dde178741e39019042399fec62d78a",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260508005911",
+        "name": null,
+        "sha256": "8debf18268ca8fefcc56d324086c9c10f5cc31feb075e2c555ae9025a18b7b79",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260512010911",
+        "name": null,
+        "sha256": "dbb6b9101a677efc2c33c3d67cc14bc5ae56c0e925c672a6c3eeba31da3e309e",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260512024749",
+        "name": null,
+        "sha256": "a4968f2ad81fd7c98f7f380a4f3ff45a772bc2a7c83926127f8ae2d0b790b606",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260513074339",
+        "name": null,
+        "sha256": "e97f73a9db3b3c5276cb8a19b62b06b94e9ed7a833e803c4cef102d119380830",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260513092323",
+        "name": null,
+        "sha256": "37d3fc1f914b90c4d166a63f06486d6e116a60cb689337607aa444ea1669c263",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260513203218",
+        "name": "verify_webhook_internal_token",
+        "sha256": "5a7f7d6bb95b18d91bd4d14e256bc4ae45b765ea0e997ca49ff4f5f8a52d82a7",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260513211212",
+        "name": "x_poster_cron_respect_enabled",
+        "sha256": "0f4242c6f71fa4d3360601fc0db857f4fd93c3fd394ad60d12ff0a4cbeb89d25",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260513223207",
+        "name": "feedback_learning_storage",
+        "sha256": "abf1a64a65ac758346597b356f50f46548a4195357e0c05116df736c06590691",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260514163302",
+        "name": "enrichment_pipeline",
+        "sha256": "3bffe63b566d58dbc2a553a172c4fb4b738f28defd024e0124a60e89fd832dcc",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260514173818",
+        "name": "follower_review_status",
+        "sha256": "4ac8197e8aae3fd49bfb5f0f9f502782c4dcf5c4a16bdc0d3161e5feb2e45b5c",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260514175208",
+        "name": "add_following_ids_to_snapshot",
+        "sha256": "e0c80bf0171c5014e73547e2ff571b9168f457546762a71c4fa780e6bd8e8696",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260515075613",
+        "name": "harden_admin_surface",
+        "sha256": "c09099d90329ccec902cda3e51142245670ee00ca8b96598cbe1b02709ef6304",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260515080625",
+        "name": "queue_reliability_and_indexes",
+        "sha256": "9e298030f914ec0b27ecd332d56c108fffcf1fad174e19b56a93c79d8ec79ecc",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260515084409",
+        "name": "x_api_events_and_monitoring_views",
+        "sha256": "df0ef121186053468d9e55e268c8ee604c91c1a9ab7576876ab98c86ecd9d92c",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260515104839",
+        "name": "decouple_duplicate_gate",
+        "sha256": "e032706e41c0abd847da62d486d4325e437b66b1458962e1eeba3bb04ab7a3d5",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260516021358",
+        "name": "profile_driven_scoring",
+        "sha256": "5ba4f349103b0ef0f4c378ccf56a964855ea584877ca1a28d277d7bdf95e2eff",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260516050042",
+        "name": "tighten_new_object_api_surface",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "statement_count": 0,
+        "body_available": false
+      },
+      {
+        "version": "20260516072003",
+        "name": "algorithm_aware_enrichment",
+        "sha256": "2f9f297d09c87db8566a1dd315e3a24ff5341c031d5634d707fed71a92d43da0",
+        "statement_count": 18,
+        "body_available": true
+      },
+      {
+        "version": "20260516091651",
+        "name": "allow_skipped_deliveries_for_admin_ignore",
+        "sha256": "949ea07cab9ffd9e2b2c041ac62106e8402f7f927a51a7c87cc2d99bfff2be32",
+        "statement_count": 2,
+        "body_available": true
+      },
+      {
+        "version": "20260516092627",
+        "name": "allow_admin_ignore_feedback_events",
+        "sha256": "33e012ca86dd0fc2413d084159ec7c0a1a8ac92098597384a58b13ccb37ff020",
+        "statement_count": 2,
+        "body_available": true
+      },
+      {
+        "version": "20260517091837",
+        "name": "fix_duplicate_x_guard",
+        "sha256": "ae1de74420907cad10fdcd7441c33fc4a610903c8741257982a0ed1731b9ff65",
+        "statement_count": 8,
+        "body_available": true
+      },
+      {
+        "version": "20260517140817",
+        "name": "media_video_thumbnail_guard",
+        "sha256": "9ef6e26db2937585b9e33e7903cf7098efedcd248575e43d7cd865dd928682f9",
+        "statement_count": 3,
+        "body_available": true
+      },
+      {
+        "version": "20260518143606",
+        "name": "duplicate_coverage_gap_guard",
+        "sha256": "e3efe389e9f35065d7f0c1ffde968467881f76d41b4cc3c61e211d401df3de52",
+        "statement_count": 13,
+        "body_available": true
+      },
+      {
+        "version": "20260518201408",
+        "name": "speed_quota_worker_cadence",
+        "sha256": "4ed86ed00204a7eb256fa37bfd550970d3c88b44ef0876e8498f9da36e92b879",
+        "statement_count": 8,
+        "body_available": true
+      },
+      {
+        "version": "20260522030027",
+        "name": "x_non_followback_reviews",
+        "sha256": "6ed954f4f9e361b20db1ea2f1c2030282092031bdaba48860d10dcb66d03368a",
+        "statement_count": 10,
+        "body_available": true
+      },
+      {
+        "version": "20260523140122",
+        "name": "deactivate_my_x_owned_reads",
+        "sha256": "b0e350cc03311164901caf71a325575b62b8ffafcb9a4e918b59cc0615c58d2a",
+        "statement_count": 2,
+        "body_available": true
+      },
+      {
+        "version": "20260602035014",
+        "name": "pipeline_speed_monitoring",
+        "sha256": "3772d28070cc8f35bd2558a435ef8e81d56508e41f3a48f0ea711d16974df991",
+        "statement_count": 12,
+        "body_available": true
+      },
+      {
+        "version": "20260602061229",
+        "name": "prevent_skip_reconcile_translate",
+        "sha256": "b461c5e647446526e3c83c2b285f2d9966f2e1b33ed5dfe78cebba0630446a7f",
+        "statement_count": 7,
+        "body_available": true
+      },
+      {
+        "version": "20260614064657",
+        "name": "update_storage_quota_telemetry",
+        "sha256": "eb54fdb6e1cce97df84af288126cb11b7a4634b87a2eb6179944110cb209fd3d",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260615005500",
+        "name": "include_reprocess_in_worker_cron",
+        "sha256": "8c5167b055d64b3bcee8cbf1fd3bcabe6c3a2efce1cec8594f35b2b51d667bb7",
+        "statement_count": 2,
+        "body_available": true
+      },
+      {
+        "version": "20260615043000",
+        "name": "compatibility_usage_events",
+        "sha256": "35468217c165ba24a3e52f999683e99cc507efb8f5ad77d3e9c119090bc25bbd",
+        "statement_count": 8,
+        "body_available": true
+      },
+      {
+        "version": "20260617004958",
+        "name": "fix_claim_video_render_by_id_args",
+        "sha256": "a47ae65907edea47199ebdb60695ad670a63aa3a6f02a10d77f835b161bd4b88",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260617224908",
+        "name": "x_post_delivery_claims",
+        "sha256": "905bfc616a33fd8e4896b2b06eb34706541feb9c9ec98e8fc76e328d2aa5fd55",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260623014212",
+        "name": "learning_x_gate_scores",
+        "sha256": "6ec8dc7d2097c8ad9fc22c2c0ade83aab29ee861e2a7eac5e03ceab055974ca2",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260623022722",
+        "name": "x_post_no_retro_catchup",
+        "sha256": "5d6658e9893e61497b44d0ecfcbbee7f95c3af8c944391a1ab408cf50ffcd655",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260629010000",
+        "name": "manual_video_intakes",
+        "sha256": "22f267196b1c4227e15508a5a121599ef2907dc265caa581fae45ce5b89f5d65",
+        "statement_count": 20,
+        "body_available": true
+      },
+      {
+        "version": "20260703010000",
+        "name": "xot_process_observability",
+        "sha256": "21806c934fc774d27e27cff469bd3e8dc26ad3188df4f49176cc41796d6685bb",
+        "statement_count": 37,
+        "body_available": true
+      },
+      {
+        "version": "20260703013000",
+        "name": "harden_observability_grants",
+        "sha256": "1366f7c7d2ef322f6696935680e2889bc6c18d00bc0d32451176cee5d9a5cde2",
+        "statement_count": 9,
+        "body_available": true
+      },
+      {
+        "version": "20260715074510",
+        "name": "video_render_review_state",
+        "sha256": "007d552b0f538b07e5397400c2f0f3a5765dd3a369d536a60ee9f504e16cd672",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260825030158",
+        "name": "render_only_automation_cutover",
+        "sha256": "0a0e4e5039488e6f1996ba5bca7f4008d6f6f691863d6c8a4406df1e41e9b49f",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260825103600",
+        "name": "v1_delivery_continuity_cutover",
+        "sha256": "010bde04ffa3338a032e543f873636957536207a33e06ff436480d53f5303d82",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260825110234",
+        "name": "v1_delivery_cutover_settle_reason_prefix",
+        "sha256": "73c26ea0dff91ca950c7fabc662b590c31827774f3dff1c9e2f005611e595e79",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260901135245",
+        "name": "xot_v2_production_convergence_fbbd44a",
+        "sha256": "859a80d7cfc84de3a82f752e3b9580af323e8823e00f5173279f337063174f81",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260901140737",
+        "name": "retire_legacy_x_delivery_overloads_fbbd44a",
+        "sha256": "084f846331a791dc2b4495ba630fcd2eb1ceedb9cf950f6da0e16475cb44a9e8",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260901151416",
+        "name": "adopt_telegram_pending_delivery_receipts",
+        "sha256": "da50c9f622dd2d057874a742e5837bd1676b2d046641584be8d3ccff86998717",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260901151446",
+        "name": "adopt_telegram_pending_delivery_receipts",
+        "sha256": "ba209ccb73f7681f86b76e966500c39fbe75a3aa4f8f7354b2fab0b26b46d526",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260901234638",
+        "name": "release_pre_provider_x_delivery_claim",
+        "sha256": "afeb056d73020e084e68afc5fca8aa33346cf56b8afa6f661cf94c57b2f36f68",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260901235227",
+        "name": "adopt_telegram_pending_delivery_receipts",
+        "sha256": "ba209ccb73f7681f86b76e966500c39fbe75a3aa4f8f7354b2fab0b26b46d526",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260901235444",
+        "name": "adopt_telegram_pending_delivery_receipts",
+        "sha256": "ba209ccb73f7681f86b76e966500c39fbe75a3aa4f8f7354b2fab0b26b46d526",
+        "statement_count": 1,
+        "body_available": true
+      },
+      {
+        "version": "20260901235451",
+        "name": "release_pre_provider_x_delivery_claim",
+        "sha256": "afeb056d73020e084e68afc5fca8aa33346cf56b8afa6f661cf94c57b2f36f68",
+        "statement_count": 1,
+        "body_available": true
+      }
+    ],
+    "sensitive_history_disposition": "protected_local_input_pending_owner_review"
+  },
+  "observed_entries": [
+    {
+      "id": "local:20250902164607",
+      "side": "local",
+      "version": "20250902164607",
+      "sha256": "2eb3b40ebba66f6ca9b00a03c637b8956313d94094b43f2a7a71cb4a5a0b223a",
+      "counterparts": [
+        "remote:20250902044607"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20250902172822",
+      "side": "local",
+      "version": "20250902172822",
+      "sha256": "6156debd1d4180146636ae904f83b9ef9abb5801506d80bd2c1f1a42e74f2313",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "superseded_operational_definition",
+      "review": null
+    },
+    {
+      "id": "local:20250902173238",
+      "side": "local",
+      "version": "20250902173238",
+      "sha256": "d4250efd2218f0dc59cce64f97b5c6d4d64cf3cad9bba93b92fb4e47d745ea1b",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "superseded_operational_definition",
+      "review": null
+    },
+    {
+      "id": "local:20250902203545",
+      "side": "local",
+      "version": "20250902203545",
+      "sha256": "b7ca551947c1aca5c1089b205ab0fdbdbcdcc54b1a281a488453750f1184238b",
+      "counterparts": [
+        "remote:20250902083544"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20250902213839",
+      "side": "local",
+      "version": "20250902213839",
+      "sha256": "3da154531a0ea14cf2f89cd63fe11c0466f12217026760d241b6a7c13c6324a8",
+      "counterparts": [
+        "remote:20250902093838"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20250902213857",
+      "side": "local",
+      "version": "20250902213857",
+      "sha256": "699b169bf2d5f3de13d3cbd797e6811a53e557d9350f42b29957086f26bf1d3e",
+      "counterparts": [
+        "remote:20250902093856"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20250902214327",
+      "side": "local",
+      "version": "20250902214327",
+      "sha256": "240c26c3da8e19cce4cce160cb7b8443f57f9717c4abdc58b354b81f28f5a8e2",
+      "counterparts": [
+        "remote:20250902094325"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20250902234705",
+      "side": "local",
+      "version": "20250902234705",
+      "sha256": "9fb15a2078c4680d7e755c64160375bc1e3c5b0f33420710aed75d2ddd1845a0",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "superseded_operational_definition",
+      "review": null
+    },
+    {
+      "id": "local:20250902234736",
+      "side": "local",
+      "version": "20250902234736",
+      "sha256": "89bfcfdf50ee4a9ee4d1418727aabec208c7f1bbcc566fbebefd57c3037df091",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "superseded_operational_definition",
+      "review": null
+    },
+    {
+      "id": "local:20250902234908",
+      "side": "local",
+      "version": "20250902234908",
+      "sha256": "71cd599fba617574ab9e13430db6f19414ad9c402b04c5da4fed6fc57bb21034",
+      "counterparts": [
+        "remote:20250902114907"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20250903005714",
+      "side": "local",
+      "version": "20250903005714",
+      "sha256": "2e5a1f31fc9f7a863243d37bbd088115dc7835603d06e7bf647feed34bb46fb0",
+      "counterparts": [
+        "remote:20250903125713"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20250903014813",
+      "side": "local",
+      "version": "20250903014813",
+      "sha256": "d1c046cea1b73d5388d438761196212e16e3c14cd4ea2096075cbe8a0272841d",
+      "counterparts": [
+        "remote:20250903014811"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20250903015813",
+      "side": "local",
+      "version": "20250903015813",
+      "sha256": "1255871c5332742d48a2ae07a5d0dbce29e8f81f88a86a73ae1601ad18caee42",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "superseded_operational_definition",
+      "review": null
+    },
+    {
+      "id": "local:20250903020258",
+      "side": "local",
+      "version": "20250903020258",
+      "sha256": "7938f4cd3dcb143a46b5a561b60aa0a097c9ca6be59daeb89925e81e4b3446df",
+      "counterparts": [
+        "remote:20250903020257"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20250903020456",
+      "side": "local",
+      "version": "20250903020456",
+      "sha256": "4d9f2af9cb309d8b7fda090ccc87d89c88ca0738253662c6744dbccaa4cd1343",
+      "counterparts": [
+        "remote:20250903020454"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20250903020940",
+      "side": "local",
+      "version": "20250903020940",
+      "sha256": "38e80e528c67f1271130ba346b4a2a684250e757f130ed88367f65e3be4a358f",
+      "counterparts": [
+        "remote:20250903020939"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20250903022256",
+      "side": "local",
+      "version": "20250903022256",
+      "sha256": "efa5c1b7bd43236d95580c4f625cde7cbfe56de198b5c31376e23c41bc3c4914",
+      "counterparts": [
+        "remote:20250903022255"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20250904033120",
+      "side": "local",
+      "version": "20250904033120",
+      "sha256": "bc7a6b422b54ed05c0df39d3752b8df69c4d9b04385e757a072054857eb71b90",
+      "counterparts": [
+        "remote:20250904033120"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "local:20250904033146",
+      "side": "local",
+      "version": "20250904033146",
+      "sha256": "8cb827cc9933ac27e725b2ab6af5c1ae75fc40be00e12d5449216bb49b9661ab",
+      "counterparts": [
+        "remote:20250904033146"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "local:20250905010114",
+      "side": "local",
+      "version": "20250905010114",
+      "sha256": "23dc1adc9445f5b5b1551fd6ee326996fd0e8fb9339accf0bb2c62ce4896364e",
+      "counterparts": [
+        "remote:20250905010114"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "local:20260226200038",
+      "side": "local",
+      "version": "20260226200038",
+      "sha256": "dd1ec08af42bef387250567bade66426b205fbf9f217c9a66babdb61eb49d7fb",
+      "counterparts": [
+        "remote:20260226200037"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260226200321",
+      "side": "local",
+      "version": "20260226200321",
+      "sha256": "30fb97f121146366b850ca3d4a767e37925aeb90aab90e2c050630fe89179fd7",
+      "counterparts": [
+        "remote:20260226200319"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260226201153",
+      "side": "local",
+      "version": "20260226201153",
+      "sha256": "5bf5b317cea29dbf78907e991e81cdd1177b56c04cfa68fafbf833b91338eaaf",
+      "counterparts": [
+        "remote:20260226201151"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260226203309",
+      "side": "local",
+      "version": "20260226203309",
+      "sha256": "3ca8d30ce380535794437beecfd19cd54ff21163598626693651084ce05bc634",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "superseded_operational_definition",
+      "review": null
+    },
+    {
+      "id": "local:20260319115558",
+      "side": "local",
+      "version": "20260319115558",
+      "sha256": "d9ae673059f41368372d6db733053d1b0e91c40a2daca467f3f71d48624af5ef",
+      "counterparts": [
+        "remote:20260319115556"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260320004655",
+      "side": "local",
+      "version": "20260320004655",
+      "sha256": "1045a86c2a2a30f0a8fe7c85074cff22894f871fdf25acbec6676375f8a38344",
+      "counterparts": [
+        "remote:20260320004647"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260320055853",
+      "side": "local",
+      "version": "20260320055853",
+      "sha256": "b6993282dceb3ff7534149b2f38e8b53b822106f31ae57e7ee0e9d2be4a6945d",
+      "counterparts": [
+        "remote:20260320055851"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260320055907",
+      "side": "local",
+      "version": "20260320055907",
+      "sha256": "868d60a175fb48ba301c49e86e18f6be5414a4482477bfb674a42f0d24967798",
+      "counterparts": [
+        "remote:20260320055906"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260320081419",
+      "side": "local",
+      "version": "20260320081419",
+      "sha256": "42d020deebdd87b7eb499143245fcd37a33f12f56a555e9f95e7b2b29ff799cc",
+      "counterparts": [
+        "remote:20260320081417"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260320125020",
+      "side": "local",
+      "version": "20260320125020",
+      "sha256": "72a1e14602c0941432f2d27c5d89bff5290d27db7496276781b92d5a19eff868",
+      "counterparts": [
+        "remote:20260320125018"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260320140507",
+      "side": "local",
+      "version": "20260320140507",
+      "sha256": "8017d4cda4d7e0be5797e88e483d54fdd26f28c57c0f763d03e7e9d755820bef",
+      "counterparts": [
+        "remote:20260320140505"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260320160659",
+      "side": "local",
+      "version": "20260320160659",
+      "sha256": "88abdb71ec9d7f08f9abfc7b8f05417c0cfed2a43e8bcc9f8b6f5c6800bfeaca",
+      "counterparts": [
+        "remote:20260320160657"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260320162001",
+      "side": "local",
+      "version": "20260320162001",
+      "sha256": "dd2dc6b2f965788b76e8064662f1be7808ff8b4cd8beb28d0e8082321da3151e",
+      "counterparts": [
+        "remote:20260320161959"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260320165323",
+      "side": "local",
+      "version": "20260320165323",
+      "sha256": "d72f26120375586302378b6d1c4d416087994b6a830228ebdc91ba332abd3cce",
+      "counterparts": [
+        "remote:20260320165318"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260320165620",
+      "side": "local",
+      "version": "20260320165620",
+      "sha256": "bdcd444244f2e43e7753f12c39f3456110dd47aaf9823a8aff9dcc71c56800af",
+      "counterparts": [
+        "remote:20260320165618"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260320170033",
+      "side": "local",
+      "version": "20260320170033",
+      "sha256": "4154d42de730caeef427572e4410690ec8db3b610e0910f36553d387d7fd52ee",
+      "counterparts": [
+        "remote:20260320170031"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260321063115",
+      "side": "local",
+      "version": "20260321063115",
+      "sha256": "64cd5d9f6f60b5f20a0231f9b863de0c60d8aae2a1c37161ce13b96249da0244",
+      "counterparts": [
+        "remote:20260321063031"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260404124348",
+      "side": "local",
+      "version": "20260404124348",
+      "sha256": "6ca2e740c5f09162a05d810153373bc270b332757bb65a4dcbfff02feca67d4a",
+      "counterparts": [
+        "remote:20260404124347"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260413125431",
+      "side": "local",
+      "version": "20260413125431",
+      "sha256": "bb4b3df3aa5f70f1936da38b0578b617323559455affcf47c3f4dffacc0490b3",
+      "counterparts": [
+        "remote:20260413125429"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260413125542",
+      "side": "local",
+      "version": "20260413125542",
+      "sha256": "6ecf0f8c528896b30c737e2791e3549d090851f8d3d4816d6ce6dd9b1ee65f01",
+      "counterparts": [
+        "remote:20260413125541"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260413133631",
+      "side": "local",
+      "version": "20260413133631",
+      "sha256": "f1accf44b4af2dd5ba3dcdd0fb0a6a8e93085c0313a8b676d976a104938b432e",
+      "counterparts": [
+        "remote:20260413133611"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260413144422",
+      "side": "local",
+      "version": "20260413144422",
+      "sha256": "384fc7c8d84bf73dbd7deed466538d453f5fb339761b4bd1667b6ef23e10eec2",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "superseded_operational_definition",
+      "review": null
+    },
+    {
+      "id": "local:20260413145620",
+      "side": "local",
+      "version": "20260413145620",
+      "sha256": "cdbd528ce23fd9ffce5dd6bcb73a4b5e4022159fcc3b9d73cf85810a513a4806",
+      "counterparts": [
+        "remote:20260413145554"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260415081447",
+      "side": "local",
+      "version": "20260415081447",
+      "sha256": "2344c280db7991c950f7847207ac5b9ad9835578f8e060868e09c531672f5463",
+      "counterparts": [
+        "remote:20260415081445"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260415093908",
+      "side": "local",
+      "version": "20260415093908",
+      "sha256": "60ba7b56f9c752dbdeb0b90e9c5867cacc3cddd6b1ea92a1ca35b74b1b45c904",
+      "counterparts": [
+        "remote:20260415093859"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260415103405",
+      "side": "local",
+      "version": "20260415103405",
+      "sha256": "763ae33b227ff46fd98649d625516558f5d473433f33b6e6044b88e5f7a77904",
+      "counterparts": [
+        "remote:20260415103403"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260418041632",
+      "side": "local",
+      "version": "20260418041632",
+      "sha256": "bee36363da310fa849e498ac6ca693706d15b233f3e40689d82668a292642f0e",
+      "counterparts": [
+        "remote:20260418041623"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260418073136",
+      "side": "local",
+      "version": "20260418073136",
+      "sha256": "8b961af8b74370de2e6bc5764f0fde472bf86b5ef0d9c058bdc89c168fbb4129",
+      "counterparts": [
+        "remote:20260418073134"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260418133725",
+      "side": "local",
+      "version": "20260418133725",
+      "sha256": "5fbb3e1997190d63e7d9152df60befe29d87046a588d1018dab7cd7b3d3a60cc",
+      "counterparts": [
+        "remote:20260418133724"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260418135312",
+      "side": "local",
+      "version": "20260418135312",
+      "sha256": "1ea0b7627fed12bc0afd644d55d6efeb19bd834c31270b62b4c45d3e10843b00",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "superseded_operational_definition",
+      "review": null
+    },
+    {
+      "id": "local:20260418152635",
+      "side": "local",
+      "version": "20260418152635",
+      "sha256": "a32618b8bf8b1fd65173a417b58ffd8bdeb1a1385a514cdb49771911c90fe0e8",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "superseded_operational_definition",
+      "review": null
+    },
+    {
+      "id": "local:20260418160410",
+      "side": "local",
+      "version": "20260418160410",
+      "sha256": "a76382b8c24682a7a7fa5e0d8e8ea4d05453c26fd89c5b6c00f8bb51b231a3f4",
+      "counterparts": [
+        "remote:20260418160408"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260425094604",
+      "side": "local",
+      "version": "20260425094604",
+      "sha256": "89b54b7b1389b05be048958beb47ac60fea0a54ca8bc5dbf718a4f18075d3979",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "superseded_operational_definition",
+      "review": null
+    },
+    {
+      "id": "local:20260426023757",
+      "side": "local",
+      "version": "20260426023757",
+      "sha256": "6bc6a876c81fdda2c8ee0e0cf3464e7b2037e97e2a931fe9cdc96fe0b45a9123",
+      "counterparts": [
+        "remote:20260426023755"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260428072856",
+      "side": "local",
+      "version": "20260428072856",
+      "sha256": "e8d3702c9beae96cd16de81721f64926f4f09ae7bdd831ff80d375bb4a4a2a28",
+      "counterparts": [
+        "remote:20260428072852"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260428125603",
+      "side": "local",
+      "version": "20260428125603",
+      "sha256": "e512affc301bc4cc6c156a119bed978249983b1d1fae60f58b632351d8c6b53e",
+      "counterparts": [
+        "remote:20260428125559"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260428125641",
+      "side": "local",
+      "version": "20260428125641",
+      "sha256": "5bdff781cc906e010d86a16edbaf61077c0c93c54eb90c217148aaa1e2c8735a",
+      "counterparts": [
+        "remote:20260428125639"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260428132610",
+      "side": "local",
+      "version": "20260428132610",
+      "sha256": "31be80e1abc8bca0e5058abdf195f2548e5f4ba51d97c811f5adbfde9c163819",
+      "counterparts": [
+        "remote:20260428132607"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260428133038",
+      "side": "local",
+      "version": "20260428133038",
+      "sha256": "35b737ecbaf77a7f6164a0f425f08ae601d243d41ccc8211ebabd44ce0921688",
+      "counterparts": [
+        "remote:20260428133005"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260428133709",
+      "side": "local",
+      "version": "20260428133709",
+      "sha256": "afda00f383627314240903f3d706cd8b0f503322bbef89580da7aa7619046ad6",
+      "counterparts": [
+        "remote:20260428133707"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260428134935",
+      "side": "local",
+      "version": "20260428134935",
+      "sha256": "39cacd9d8f779dd56d59aa9839045398aac3a6e05085ca1dcaf3be83fab7e528",
+      "counterparts": [
+        "remote:20260428134932"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260430104113",
+      "side": "local",
+      "version": "20260430104113",
+      "sha256": "4483747680b588b834603a6e8bc0c1a7f9eda89f4fee73ea1c6d881542635e81",
+      "counterparts": [
+        "remote:20260430104111"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260430110154",
+      "side": "local",
+      "version": "20260430110154",
+      "sha256": "57d0d8ae0a51acdfe5c96fc5fcdbaa78f27d24a7fc7bf8a9691161bf2cfe212b",
+      "counterparts": [
+        "remote:20260430110152"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260501011410",
+      "side": "local",
+      "version": "20260501011410",
+      "sha256": "e9ca183e3a34783f66f330b276a107ca74125b525c539047d2925580996ae0f3",
+      "counterparts": [
+        "remote:20260501011408"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260507235716",
+      "side": "local",
+      "version": "20260507235716",
+      "sha256": "31ff9b472edad5749a7bcb73897834455d8ef74f36d2febbb8b5038008d0aac9",
+      "counterparts": [
+        "remote:20260507235715"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260508000554",
+      "side": "local",
+      "version": "20260508000554",
+      "sha256": "26a5d1beed5021ecacba424bc9ff873f07971e871dd36c6d18fa433989c9855d",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "superseded_operational_definition",
+      "review": null
+    },
+    {
+      "id": "local:20260508004959",
+      "side": "local",
+      "version": "20260508004959",
+      "sha256": "5a7aeeff831fcc673232b2fbb81ca8e817dde178741e39019042399fec62d78a",
+      "counterparts": [
+        "remote:20260508004957"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260508005913",
+      "side": "local",
+      "version": "20260508005913",
+      "sha256": "8debf18268ca8fefcc56d324086c9c10f5cc31feb075e2c555ae9025a18b7b79",
+      "counterparts": [
+        "remote:20260508005911"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260512010913",
+      "side": "local",
+      "version": "20260512010913",
+      "sha256": "dbb6b9101a677efc2c33c3d67cc14bc5ae56c0e925c672a6c3eeba31da3e309e",
+      "counterparts": [
+        "remote:20260512010911"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260512024751",
+      "side": "local",
+      "version": "20260512024751",
+      "sha256": "a4968f2ad81fd7c98f7f380a4f3ff45a772bc2a7c83926127f8ae2d0b790b606",
+      "counterparts": [
+        "remote:20260512024749"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260513074341",
+      "side": "local",
+      "version": "20260513074341",
+      "sha256": "e97f73a9db3b3c5276cb8a19b62b06b94e9ed7a833e803c4cef102d119380830",
+      "counterparts": [
+        "remote:20260513074339"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260513092325",
+      "side": "local",
+      "version": "20260513092325",
+      "sha256": "37d3fc1f914b90c4d166a63f06486d6e116a60cb689337607aa444ea1669c263",
+      "counterparts": [
+        "remote:20260513092323"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260513180000",
+      "side": "local",
+      "version": "20260513180000",
+      "sha256": "4e5e2febdd7e35d4b56af0ee39cc066702447bbd96cabf5114c905b2938484ac",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "renamed_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "local:20260514103000",
+      "side": "local",
+      "version": "20260514103000",
+      "sha256": "14868d501468603a3ff72aba715a30a16c9468f3e1369744264d592c677861dc",
+      "counterparts": [
+        "remote:20260513211212"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "local:20260514120000",
+      "side": "local",
+      "version": "20260514120000",
+      "sha256": "0c886d35c3f35f7e92f937d415215bd5056b27e9a7b16789697c17d72ced90e7",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "remote_body_subset_live_effect_reconciled",
+      "review": null
+    },
+    {
+      "id": "local:20260514160000",
+      "side": "local",
+      "version": "20260514160000",
+      "sha256": "9ceed6937dc3c18c35c9eb81291c1758113dcd6330959fd0a312819ee1971cc9",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "schema_equivalent_runtime_seed_superseded",
+      "review": null
+    },
+    {
+      "id": "local:20260514180000",
+      "side": "local",
+      "version": "20260514180000",
+      "sha256": "37eff8f1a0bfb9b2b2f3fa6272a57249b79746e74edda82853cb037cb66b18f5",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "renamed_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "local:20260514190000",
+      "side": "local",
+      "version": "20260514190000",
+      "sha256": "d6d45c30244bc41261b4d0754f5514456265cd2f694c9fa65a6c4f0b5ffe30a6",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "renamed_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "local:20260515075613",
+      "side": "local",
+      "version": "20260515075613",
+      "sha256": "c09099d90329ccec902cda3e51142245670ee00ca8b96598cbe1b02709ef6304",
+      "counterparts": [
+        "remote:20260515075613"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "local:20260515080625",
+      "side": "local",
+      "version": "20260515080625",
+      "sha256": "947826502428fae21093273bd62e7dc20982530699aa1b0eb35686e33d2b2aef",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "security_privilege_divergence",
+      "review": null
+    },
+    {
+      "id": "local:20260515084409",
+      "side": "local",
+      "version": "20260515084409",
+      "sha256": "21a05c10813da0f0e2769d23323a87e4baff94f92863b4123e16c7f934308e0e",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "security_privilege_divergence",
+      "review": null
+    },
+    {
+      "id": "local:20260515104839",
+      "side": "local",
+      "version": "20260515104839",
+      "sha256": "af082a86ceb8565f34b23a8b3c3948996a731b2e22785230fc5a1ea537b4f44d",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "security_privilege_divergence",
+      "review": null
+    },
+    {
+      "id": "local:20260516021358",
+      "side": "local",
+      "version": "20260516021358",
+      "sha256": "4756b72852e8041ec7b52a27296ce51405ad5f8fce0a7cc3774b82e4ce5740c3",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "security_privilege_divergence",
+      "review": null
+    },
+    {
+      "id": "local:20260516050042",
+      "side": "local",
+      "version": "20260516050042",
+      "sha256": "28b44c9e7a6e409f3e85cfb1799a417ab7361dd0722e5df244031eeae609f3ae",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "remote_body_missing_effect_observed_pending_approval",
+      "review": null
+    },
+    {
+      "id": "local:20260516072003",
+      "side": "local",
+      "version": "20260516072003",
+      "sha256": "78aad259d5926ade38fd69533ffb657d866f354a31aead6c252a6c09fe25aa07",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "local:20260516091651",
+      "side": "local",
+      "version": "20260516091651",
+      "sha256": "70749e30f1ec492ed69b896475c5ceffbc51b4a523d631f18ae1b10c38993275",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "local:20260516092627",
+      "side": "local",
+      "version": "20260516092627",
+      "sha256": "2f7e2fc8a1373c73633807c1cba82b9740bd557fcf30fc3a10fbb1f288aa2ff9",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "local:20260517091837",
+      "side": "local",
+      "version": "20260517091837",
+      "sha256": "abc15b22ce4d199f01612abbb3739bd1ffb2644bd6b614661fe69f347fff1b5a",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "local:20260517140817",
+      "side": "local",
+      "version": "20260517140817",
+      "sha256": "b475a90cc99d37d7a85a6dd9351a022f9fb013803d9320be6bfdf7340e59fc81",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "local:20260518143606",
+      "side": "local",
+      "version": "20260518143606",
+      "sha256": "3bd489e81fcfd8f4452c53847c0f2ac9ff1225be956985a6021da1b517654bb2",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "local:20260518201408",
+      "side": "local",
+      "version": "20260518201408",
+      "sha256": "1665dd2ff1d8919b42907f38a39ae65d458ce93df5e9f10b87e86441deb4f132",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "local:20260522030027",
+      "side": "local",
+      "version": "20260522030027",
+      "sha256": "9a1e109f7a2064a1c91a7de780c55a55d86ecea0edb1e32d1276aa9d09b3074d",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "local:20260523140122",
+      "side": "local",
+      "version": "20260523140122",
+      "sha256": "fc22638b63e1bd73c7d7dfd15fd1f5fbe088e39fa1cf8e93cf9972d56b044224",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "local:20260602035014",
+      "side": "local",
+      "version": "20260602035014",
+      "sha256": "a78e6419a7393acdd88656c525956cf114b38949f726fbbcba8af873775f7c65",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "local:20260602061229",
+      "side": "local",
+      "version": "20260602061229",
+      "sha256": "f49a5a6ccc851ee75cd93ce0d37fbb4d51a6f459617aabd6ecac9814b88283c5",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "local:20260609201533",
+      "side": "local",
+      "version": "20260609201533",
+      "sha256": "7f5662625d36cb525208bd167e115bba2dcfd37a196a4365e2f3d3563fdcd1a1",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "live_schema_equivalent_unledgered_local",
+      "review": null
+    },
+    {
+      "id": "local:20260609213357",
+      "side": "local",
+      "version": "20260609213357",
+      "sha256": "a84e4ee52e922d50425810ea82cd88df7f866e78dc74ab50a2f2a2f4eb0b9d6c",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "live_schema_equivalent_unledgered_local",
+      "review": null
+    },
+    {
+      "id": "local:20260614064657",
+      "side": "local",
+      "version": "20260614064657",
+      "sha256": "db747267e3ba7983ec6d12ce55c68b0879343acb58f7d7dc8b755e7fa93eb04b",
+      "counterparts": [
+        "remote:20260614064657"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "local:20260615005500",
+      "side": "local",
+      "version": "20260615005500",
+      "sha256": "ac54f3884316f7d21e59dd597d0c35fbff3040bf7658f6c9f0c4e7b21b3a2b79",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "local:20260615043000",
+      "side": "local",
+      "version": "20260615043000",
+      "sha256": "0da16e1599e34b07679178d07554b359079ae6cbba6423926d6f36fc0bb0de52",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "local:20260617004958",
+      "side": "local",
+      "version": "20260617004958",
+      "sha256": "de39c74aad3944f54bc53c829ab806bd6f298d300ad67c606e16d7beabbc9c02",
+      "counterparts": [
+        "remote:20260617004958"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "local:20260617224908",
+      "side": "local",
+      "version": "20260617224908",
+      "sha256": "31ae918df85bf5aa483b7de72033d0f7416392d3fb84454164aa8424938c57b2",
+      "counterparts": [
+        "remote:20260617224908"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "local:20260623010000",
+      "side": "local",
+      "version": "20260623010000",
+      "sha256": "2f2a06f6dd7f9e5438b1544b146ef51d3d5fa789dc991aa6bc5db0b0dfdecfe7",
+      "counterparts": [
+        "remote:20260623014212"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "local:20260623023000",
+      "side": "local",
+      "version": "20260623023000",
+      "sha256": "6844f0c577c1a13ac3cdee0f5d37af001e3ebd325e31028ccb23bf7c6e2e931a",
+      "counterparts": [
+        "remote:20260623022722"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "local:20260629010000",
+      "side": "local",
+      "version": "20260629010000",
+      "sha256": "7c1756ea8e58837c4d3b8b5e63fa372395bc46b5a7a7fc87678b204a7cbe15ce",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "local:20260703010000",
+      "side": "local",
+      "version": "20260703010000",
+      "sha256": "12b105160ca2cc98971d076516412ab9428abf6884d5062e50aeda2ecbf5b4a8",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "local:20260703013000",
+      "side": "local",
+      "version": "20260703013000",
+      "sha256": "66e998098f867ed5ef09b88c66ed03850013b3d256f157f50d7499e45d5f249c",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "local:20260715074510",
+      "side": "local",
+      "version": "20260715074510",
+      "sha256": "9dda9bca700629c972b8856d6deb082dfb10a6c1d484017c5103c7b067ab0187",
+      "counterparts": [
+        "remote:20260715074510"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "local:20260722162000",
+      "side": "local",
+      "version": "20260722162000",
+      "sha256": "af5ee529552719d27225f3b13e406153e34ba129a6236788e87faf89993a4d4c",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "local:20260723173100",
+      "side": "local",
+      "version": "20260723173100",
+      "sha256": "5c2250da37f6b876080c9bf48043ab3969cc7a617dcf66a8d3e54b31a4d571a3",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "local:20260724183000",
+      "side": "local",
+      "version": "20260724183000",
+      "sha256": "cedd28e0976f70bdff25ac2e3025c407fb27af4beff1d3ebc14f888be8a08602",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "local:20260730070000",
+      "side": "local",
+      "version": "20260730070000",
+      "sha256": "94531ca09a843f2ea00c05adcd0de0d1787305df431d4c161212c95773a8bcf2",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "local:20260806123000",
+      "side": "local",
+      "version": "20260806123000",
+      "sha256": "f830ed38a7b190ef01aa747f5cefbb315963d304fd097154b35c293ad8abf4ef",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "local:20260806143000",
+      "side": "local",
+      "version": "20260806143000",
+      "sha256": "024dc8569aa490d9050d63b4507e584a9ffba5cb255bc3df9e76e24a64b84ecd",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "local:20260806153000",
+      "side": "local",
+      "version": "20260806153000",
+      "sha256": "c33231946eddcc7b97f8a6edd33f3c8527f6f3fa32008181c882bec042de9b46",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "local:20260808110000",
+      "side": "local",
+      "version": "20260808110000",
+      "sha256": "83bc88b93f5017c8f664eac2b5abadbba8b0e559b71e8117862fc35ea2089758",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "local:20260808123000",
+      "side": "local",
+      "version": "20260808123000",
+      "sha256": "24957228d1facffbcf5e737de0f1c3c349da0a3dc1d4defb8d1915d2ae15bdf4",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "local:20260808133000",
+      "side": "local",
+      "version": "20260808133000",
+      "sha256": "b25a0f0367a5fe34783a29b0e2837d56fc89d5f1bff0e423ef0f1f87286eb364",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "local:20260808143000",
+      "side": "local",
+      "version": "20260808143000",
+      "sha256": "a126f3f1268bd710bc420861974915eb7adbbae03ce94e7329eeb335ab1a3c20",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "local:20260808153000",
+      "side": "local",
+      "version": "20260808153000",
+      "sha256": "c95c09cbfef0d7bc44a0640383f9ad4a23297701d75126d46155ab928a9b44b5",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "local:20260808163000",
+      "side": "local",
+      "version": "20260808163000",
+      "sha256": "ad4d0e56f652f7df0b5d40b8258643b099e76ea5cb51b8b4d9d42fe380184807",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "local:20260808173000",
+      "side": "local",
+      "version": "20260808173000",
+      "sha256": "74b69c207ef81d76fc6a0e800d9105c05aa61b69d4d8818ec252dc7ba29af555",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "local:20260811090000",
+      "side": "local",
+      "version": "20260811090000",
+      "sha256": "fec67e19b6e47534e6b9c7cd7b6b33735fdf26cce74204c8d1e5862b4f8446e8",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "local:20260812100000",
+      "side": "local",
+      "version": "20260812100000",
+      "sha256": "66729659d4573d1245ba3ee7845fb76fa7808ecb5bda74cb616916e0700518d7",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "local:20260825024826",
+      "side": "local",
+      "version": "20260825024826",
+      "sha256": "0a0e4e5039488e6f1996ba5bca7f4008d6f6f691863d6c8a4406df1e41e9b49f",
+      "counterparts": [
+        "remote:20260825030158"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "local:20260825091418",
+      "side": "local",
+      "version": "20260825091418",
+      "sha256": "378acb7d9079c9b23bd780de8c092db860e89646ffbc06dd55eac2c5cbf8acaa",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "local:20260825104845",
+      "side": "local",
+      "version": "20260825104845",
+      "sha256": "c509cbe64adb317781da026bdaf8c4e73508c8f8cbba24d05f4ff64f6edd5247",
+      "counterparts": [
+        "remote:20260825110234"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "local:20260825220124",
+      "side": "local",
+      "version": "20260825220124",
+      "sha256": "7d70aee49b5849f8b7df9e20c78a9d5d886a18eb4618a96ff9296afe81920910",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "local:20260827064509",
+      "side": "local",
+      "version": "20260827064509",
+      "sha256": "754cef7f569a784125327b20eb20ffba6330f3e801fd43a264175c39d5f2d816",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "local:20260828120000",
+      "side": "local",
+      "version": "20260828120000",
+      "sha256": "44f363203e4fad7b42a6aeab244d05b13c3e03acf7f14bedc08b8f54be66d0e5",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "local:20260828130000",
+      "side": "local",
+      "version": "20260828130000",
+      "sha256": "084f846331a791dc2b4495ba630fcd2eb1ceedb9cf950f6da0e16475cb44a9e8",
+      "counterparts": [
+        "remote:20260901140737"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "local:20260828140000",
+      "side": "local",
+      "version": "20260828140000",
+      "sha256": "c8d56b34ecab578555aaae7036c6ee8690493faaed259c80de95a5a3ae24de5f",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "local:20260829120000",
+      "side": "local",
+      "version": "20260829120000",
+      "sha256": "aa20d3e809bc34b10d2b1c9eb96bd9c92c2b4a9c4adf2e20b4740c7d09410b4a",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "local:20260830120000",
+      "side": "local",
+      "version": "20260830120000",
+      "sha256": "8ca74e40a5b199f5664edf72933559e8af089536e8506cc7415b8a5ded4c3901",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "local:20260901150013",
+      "side": "local",
+      "version": "20260901150013",
+      "sha256": "ba209ccb73f7681f86b76e966500c39fbe75a3aa4f8f7354b2fab0b26b46d526",
+      "counterparts": [
+        "remote:20260901151416",
+        "remote:20260901151446",
+        "remote:20260901235227",
+        "remote:20260901235444"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "local:20260901170000",
+      "side": "local",
+      "version": "20260901170000",
+      "sha256": "afeb056d73020e084e68afc5fca8aa33346cf56b8afa6f661cf94c57b2f36f68",
+      "counterparts": [
+        "remote:20260901234638",
+        "remote:20260901235451"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "local:20260907001640",
+      "side": "local",
+      "version": "20260907001640",
+      "sha256": "6a8dcb81934646a23dc7cf0f0e0dc19347594d945f1649eb94b1ffa8158218c8",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "remote:20250902044607",
+      "side": "remote",
+      "version": "20250902044607",
+      "sha256": "2eb3b40ebba66f6ca9b00a03c637b8956313d94094b43f2a7a71cb4a5a0b223a",
+      "counterparts": [
+        "local:20250902164607"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20250902052820",
+      "side": "remote",
+      "version": "20250902052820",
+      "sha256": "b5b56d531acc068ad2220249374e849ae0184dae13cf4e5bf9551868b9a3269e",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "superseded_operational_definition",
+      "review": null
+    },
+    {
+      "id": "remote:20250902053237",
+      "side": "remote",
+      "version": "20250902053237",
+      "sha256": "eab8b502422c02d882f63c7511bfd1a66561a4f21577a3c818a25f490756a220",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "superseded_operational_definition",
+      "review": null
+    },
+    {
+      "id": "remote:20250902083544",
+      "side": "remote",
+      "version": "20250902083544",
+      "sha256": "b7ca551947c1aca5c1089b205ab0fdbdbcdcc54b1a281a488453750f1184238b",
+      "counterparts": [
+        "local:20250902203545"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20250902093838",
+      "side": "remote",
+      "version": "20250902093838",
+      "sha256": "3da154531a0ea14cf2f89cd63fe11c0466f12217026760d241b6a7c13c6324a8",
+      "counterparts": [
+        "local:20250902213839"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20250902093856",
+      "side": "remote",
+      "version": "20250902093856",
+      "sha256": "699b169bf2d5f3de13d3cbd797e6811a53e557d9350f42b29957086f26bf1d3e",
+      "counterparts": [
+        "local:20250902213857"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20250902094325",
+      "side": "remote",
+      "version": "20250902094325",
+      "sha256": "240c26c3da8e19cce4cce160cb7b8443f57f9717c4abdc58b354b81f28f5a8e2",
+      "counterparts": [
+        "local:20250902214327"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20250902114704",
+      "side": "remote",
+      "version": "20250902114704",
+      "sha256": "b974aa9957ba6c4f4c00d4ededac18e5743056a097e37b54c18f011a68b955f9",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "superseded_operational_definition",
+      "review": null
+    },
+    {
+      "id": "remote:20250902114735",
+      "side": "remote",
+      "version": "20250902114735",
+      "sha256": "67575ff1724edd1ff2fbd61a2f8faab2318879bf5aa4f23ed4139abb08eafe84",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "superseded_operational_definition",
+      "review": null
+    },
+    {
+      "id": "remote:20250902114907",
+      "side": "remote",
+      "version": "20250902114907",
+      "sha256": "71cd599fba617574ab9e13430db6f19414ad9c402b04c5da4fed6fc57bb21034",
+      "counterparts": [
+        "local:20250902234908"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20250903014811",
+      "side": "remote",
+      "version": "20250903014811",
+      "sha256": "d1c046cea1b73d5388d438761196212e16e3c14cd4ea2096075cbe8a0272841d",
+      "counterparts": [
+        "local:20250903014813"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20250903015811",
+      "side": "remote",
+      "version": "20250903015811",
+      "sha256": "8609a333be790dbb7fce3c36e5eeb7ee3398edb67b3d65174671702f5a1d48b1",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "superseded_operational_definition",
+      "review": null
+    },
+    {
+      "id": "remote:20250903020257",
+      "side": "remote",
+      "version": "20250903020257",
+      "sha256": "7938f4cd3dcb143a46b5a561b60aa0a097c9ca6be59daeb89925e81e4b3446df",
+      "counterparts": [
+        "local:20250903020258"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20250903020454",
+      "side": "remote",
+      "version": "20250903020454",
+      "sha256": "4d9f2af9cb309d8b7fda090ccc87d89c88ca0738253662c6744dbccaa4cd1343",
+      "counterparts": [
+        "local:20250903020456"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20250903020939",
+      "side": "remote",
+      "version": "20250903020939",
+      "sha256": "38e80e528c67f1271130ba346b4a2a684250e757f130ed88367f65e3be4a358f",
+      "counterparts": [
+        "local:20250903020940"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20250903022255",
+      "side": "remote",
+      "version": "20250903022255",
+      "sha256": "efa5c1b7bd43236d95580c4f625cde7cbfe56de198b5c31376e23c41bc3c4914",
+      "counterparts": [
+        "local:20250903022256"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20250903125713",
+      "side": "remote",
+      "version": "20250903125713",
+      "sha256": "2e5a1f31fc9f7a863243d37bbd088115dc7835603d06e7bf647feed34bb46fb0",
+      "counterparts": [
+        "local:20250903005714"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20250904033120",
+      "side": "remote",
+      "version": "20250904033120",
+      "sha256": "fdb2fdd17d669140e2f60914c9252e8c2798b0bb6aca11665561cd45800ad2ee",
+      "counterparts": [
+        "local:20250904033120"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "source_restored_candidate",
+      "review": null
+    },
+    {
+      "id": "remote:20250904033146",
+      "side": "remote",
+      "version": "20250904033146",
+      "sha256": "2d455b55c84dfafef65e963b917e83877e6782fbc5e925e1b1da6b5ef42bed6d",
+      "counterparts": [
+        "local:20250904033146"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_comment_only_equivalent_pending_archive_approval",
+      "review": null
+    },
+    {
+      "id": "remote:20250905010114",
+      "side": "remote",
+      "version": "20250905010114",
+      "sha256": "e1f17b86bb4143db5ba8b9b67f6b9471ec34fb472239736656688a54725b20a1",
+      "counterparts": [
+        "local:20250905010114"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "source_restored_candidate",
+      "review": null
+    },
+    {
+      "id": "remote:20260226200037",
+      "side": "remote",
+      "version": "20260226200037",
+      "sha256": "dd1ec08af42bef387250567bade66426b205fbf9f217c9a66babdb61eb49d7fb",
+      "counterparts": [
+        "local:20260226200038"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260226200319",
+      "side": "remote",
+      "version": "20260226200319",
+      "sha256": "30fb97f121146366b850ca3d4a767e37925aeb90aab90e2c050630fe89179fd7",
+      "counterparts": [
+        "local:20260226200321"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260226201151",
+      "side": "remote",
+      "version": "20260226201151",
+      "sha256": "5bf5b317cea29dbf78907e991e81cdd1177b56c04cfa68fafbf833b91338eaaf",
+      "counterparts": [
+        "local:20260226201153"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260226203308",
+      "side": "remote",
+      "version": "20260226203308",
+      "sha256": "87091c9d706b68790678c9b282485d75906fb383f39781922fbec96fb066f1b3",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "superseded_operational_definition",
+      "review": null
+    },
+    {
+      "id": "remote:20260319115556",
+      "side": "remote",
+      "version": "20260319115556",
+      "sha256": "d9ae673059f41368372d6db733053d1b0e91c40a2daca467f3f71d48624af5ef",
+      "counterparts": [
+        "local:20260319115558"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260320004647",
+      "side": "remote",
+      "version": "20260320004647",
+      "sha256": "1045a86c2a2a30f0a8fe7c85074cff22894f871fdf25acbec6676375f8a38344",
+      "counterparts": [
+        "local:20260320004655"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260320055851",
+      "side": "remote",
+      "version": "20260320055851",
+      "sha256": "b6993282dceb3ff7534149b2f38e8b53b822106f31ae57e7ee0e9d2be4a6945d",
+      "counterparts": [
+        "local:20260320055853"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260320055906",
+      "side": "remote",
+      "version": "20260320055906",
+      "sha256": "868d60a175fb48ba301c49e86e18f6be5414a4482477bfb674a42f0d24967798",
+      "counterparts": [
+        "local:20260320055907"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260320081417",
+      "side": "remote",
+      "version": "20260320081417",
+      "sha256": "42d020deebdd87b7eb499143245fcd37a33f12f56a555e9f95e7b2b29ff799cc",
+      "counterparts": [
+        "local:20260320081419"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260320125018",
+      "side": "remote",
+      "version": "20260320125018",
+      "sha256": "72a1e14602c0941432f2d27c5d89bff5290d27db7496276781b92d5a19eff868",
+      "counterparts": [
+        "local:20260320125020"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260320140505",
+      "side": "remote",
+      "version": "20260320140505",
+      "sha256": "8017d4cda4d7e0be5797e88e483d54fdd26f28c57c0f763d03e7e9d755820bef",
+      "counterparts": [
+        "local:20260320140507"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260320160657",
+      "side": "remote",
+      "version": "20260320160657",
+      "sha256": "88abdb71ec9d7f08f9abfc7b8f05417c0cfed2a43e8bcc9f8b6f5c6800bfeaca",
+      "counterparts": [
+        "local:20260320160659"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260320161959",
+      "side": "remote",
+      "version": "20260320161959",
+      "sha256": "dd2dc6b2f965788b76e8064662f1be7808ff8b4cd8beb28d0e8082321da3151e",
+      "counterparts": [
+        "local:20260320162001"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260320165318",
+      "side": "remote",
+      "version": "20260320165318",
+      "sha256": "d72f26120375586302378b6d1c4d416087994b6a830228ebdc91ba332abd3cce",
+      "counterparts": [
+        "local:20260320165323"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260320165618",
+      "side": "remote",
+      "version": "20260320165618",
+      "sha256": "bdcd444244f2e43e7753f12c39f3456110dd47aaf9823a8aff9dcc71c56800af",
+      "counterparts": [
+        "local:20260320165620"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260320170031",
+      "side": "remote",
+      "version": "20260320170031",
+      "sha256": "4154d42de730caeef427572e4410690ec8db3b610e0910f36553d387d7fd52ee",
+      "counterparts": [
+        "local:20260320170033"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260321063031",
+      "side": "remote",
+      "version": "20260321063031",
+      "sha256": "64cd5d9f6f60b5f20a0231f9b863de0c60d8aae2a1c37161ce13b96249da0244",
+      "counterparts": [
+        "local:20260321063115"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260404124347",
+      "side": "remote",
+      "version": "20260404124347",
+      "sha256": "6ca2e740c5f09162a05d810153373bc270b332757bb65a4dcbfff02feca67d4a",
+      "counterparts": [
+        "local:20260404124348"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260413125429",
+      "side": "remote",
+      "version": "20260413125429",
+      "sha256": "bb4b3df3aa5f70f1936da38b0578b617323559455affcf47c3f4dffacc0490b3",
+      "counterparts": [
+        "local:20260413125431"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260413125541",
+      "side": "remote",
+      "version": "20260413125541",
+      "sha256": "6ecf0f8c528896b30c737e2791e3549d090851f8d3d4816d6ce6dd9b1ee65f01",
+      "counterparts": [
+        "local:20260413125542"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260413133611",
+      "side": "remote",
+      "version": "20260413133611",
+      "sha256": "f1accf44b4af2dd5ba3dcdd0fb0a6a8e93085c0313a8b676d976a104938b432e",
+      "counterparts": [
+        "local:20260413133631"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260413144420",
+      "side": "remote",
+      "version": "20260413144420",
+      "sha256": "88350e8c1104c383a751fff7a405d3f71a107c55e4b23e17e648af31090ce3a4",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "superseded_operational_definition",
+      "review": null
+    },
+    {
+      "id": "remote:20260413145554",
+      "side": "remote",
+      "version": "20260413145554",
+      "sha256": "cdbd528ce23fd9ffce5dd6bcb73a4b5e4022159fcc3b9d73cf85810a513a4806",
+      "counterparts": [
+        "local:20260413145620"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260415081445",
+      "side": "remote",
+      "version": "20260415081445",
+      "sha256": "2344c280db7991c950f7847207ac5b9ad9835578f8e060868e09c531672f5463",
+      "counterparts": [
+        "local:20260415081447"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260415093859",
+      "side": "remote",
+      "version": "20260415093859",
+      "sha256": "60ba7b56f9c752dbdeb0b90e9c5867cacc3cddd6b1ea92a1ca35b74b1b45c904",
+      "counterparts": [
+        "local:20260415093908"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260415103403",
+      "side": "remote",
+      "version": "20260415103403",
+      "sha256": "763ae33b227ff46fd98649d625516558f5d473433f33b6e6044b88e5f7a77904",
+      "counterparts": [
+        "local:20260415103405"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260418041623",
+      "side": "remote",
+      "version": "20260418041623",
+      "sha256": "bee36363da310fa849e498ac6ca693706d15b233f3e40689d82668a292642f0e",
+      "counterparts": [
+        "local:20260418041632"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260418073134",
+      "side": "remote",
+      "version": "20260418073134",
+      "sha256": "8b961af8b74370de2e6bc5764f0fde472bf86b5ef0d9c058bdc89c168fbb4129",
+      "counterparts": [
+        "local:20260418073136"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260418133724",
+      "side": "remote",
+      "version": "20260418133724",
+      "sha256": "5fbb3e1997190d63e7d9152df60befe29d87046a588d1018dab7cd7b3d3a60cc",
+      "counterparts": [
+        "local:20260418133725"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260418135310",
+      "side": "remote",
+      "version": "20260418135310",
+      "sha256": "b0280cf64cfc775fb9bef83f94418bc3025f2a8f1d83a1623f3e917fea069e7e",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "superseded_operational_definition",
+      "review": null
+    },
+    {
+      "id": "remote:20260418152633",
+      "side": "remote",
+      "version": "20260418152633",
+      "sha256": "de6d92c7fb9cb02dd034dd81298eb7d25e94bede8830ccd1da9745642113af24",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "superseded_operational_definition",
+      "review": null
+    },
+    {
+      "id": "remote:20260418160408",
+      "side": "remote",
+      "version": "20260418160408",
+      "sha256": "a76382b8c24682a7a7fa5e0d8e8ea4d05453c26fd89c5b6c00f8bb51b231a3f4",
+      "counterparts": [
+        "local:20260418160410"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260425094602",
+      "side": "remote",
+      "version": "20260425094602",
+      "sha256": "d5ec512a686b35d0f7cb62ef06d606c6dc4dd1068d21b5d2d47ce561b51b39ec",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "superseded_operational_definition",
+      "review": null
+    },
+    {
+      "id": "remote:20260426023755",
+      "side": "remote",
+      "version": "20260426023755",
+      "sha256": "6bc6a876c81fdda2c8ee0e0cf3464e7b2037e97e2a931fe9cdc96fe0b45a9123",
+      "counterparts": [
+        "local:20260426023757"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260428072852",
+      "side": "remote",
+      "version": "20260428072852",
+      "sha256": "e8d3702c9beae96cd16de81721f64926f4f09ae7bdd831ff80d375bb4a4a2a28",
+      "counterparts": [
+        "local:20260428072856"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260428125559",
+      "side": "remote",
+      "version": "20260428125559",
+      "sha256": "e512affc301bc4cc6c156a119bed978249983b1d1fae60f58b632351d8c6b53e",
+      "counterparts": [
+        "local:20260428125603"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260428125639",
+      "side": "remote",
+      "version": "20260428125639",
+      "sha256": "5bdff781cc906e010d86a16edbaf61077c0c93c54eb90c217148aaa1e2c8735a",
+      "counterparts": [
+        "local:20260428125641"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260428132607",
+      "side": "remote",
+      "version": "20260428132607",
+      "sha256": "31be80e1abc8bca0e5058abdf195f2548e5f4ba51d97c811f5adbfde9c163819",
+      "counterparts": [
+        "local:20260428132610"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260428133005",
+      "side": "remote",
+      "version": "20260428133005",
+      "sha256": "35b737ecbaf77a7f6164a0f425f08ae601d243d41ccc8211ebabd44ce0921688",
+      "counterparts": [
+        "local:20260428133038"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260428133707",
+      "side": "remote",
+      "version": "20260428133707",
+      "sha256": "afda00f383627314240903f3d706cd8b0f503322bbef89580da7aa7619046ad6",
+      "counterparts": [
+        "local:20260428133709"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260428134932",
+      "side": "remote",
+      "version": "20260428134932",
+      "sha256": "39cacd9d8f779dd56d59aa9839045398aac3a6e05085ca1dcaf3be83fab7e528",
+      "counterparts": [
+        "local:20260428134935"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260430104111",
+      "side": "remote",
+      "version": "20260430104111",
+      "sha256": "4483747680b588b834603a6e8bc0c1a7f9eda89f4fee73ea1c6d881542635e81",
+      "counterparts": [
+        "local:20260430104113"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260430110152",
+      "side": "remote",
+      "version": "20260430110152",
+      "sha256": "57d0d8ae0a51acdfe5c96fc5fcdbaa78f27d24a7fc7bf8a9691161bf2cfe212b",
+      "counterparts": [
+        "local:20260430110154"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260501011408",
+      "side": "remote",
+      "version": "20260501011408",
+      "sha256": "e9ca183e3a34783f66f330b276a107ca74125b525c539047d2925580996ae0f3",
+      "counterparts": [
+        "local:20260501011410"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260507235715",
+      "side": "remote",
+      "version": "20260507235715",
+      "sha256": "31ff9b472edad5749a7bcb73897834455d8ef74f36d2febbb8b5038008d0aac9",
+      "counterparts": [
+        "local:20260507235716"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260508000552",
+      "side": "remote",
+      "version": "20260508000552",
+      "sha256": "d54d2d7dc4230f34cccf13fa89efda2e40a7fe1d424de02d9f8e4cc9e2bb551a",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "superseded_operational_definition",
+      "review": null
+    },
+    {
+      "id": "remote:20260508004957",
+      "side": "remote",
+      "version": "20260508004957",
+      "sha256": "5a7aeeff831fcc673232b2fbb81ca8e817dde178741e39019042399fec62d78a",
+      "counterparts": [
+        "local:20260508004959"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260508005911",
+      "side": "remote",
+      "version": "20260508005911",
+      "sha256": "8debf18268ca8fefcc56d324086c9c10f5cc31feb075e2c555ae9025a18b7b79",
+      "counterparts": [
+        "local:20260508005913"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260512010911",
+      "side": "remote",
+      "version": "20260512010911",
+      "sha256": "dbb6b9101a677efc2c33c3d67cc14bc5ae56c0e925c672a6c3eeba31da3e309e",
+      "counterparts": [
+        "local:20260512010913"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260512024749",
+      "side": "remote",
+      "version": "20260512024749",
+      "sha256": "a4968f2ad81fd7c98f7f380a4f3ff45a772bc2a7c83926127f8ae2d0b790b606",
+      "counterparts": [
+        "local:20260512024751"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260513074339",
+      "side": "remote",
+      "version": "20260513074339",
+      "sha256": "e97f73a9db3b3c5276cb8a19b62b06b94e9ed7a833e803c4cef102d119380830",
+      "counterparts": [
+        "local:20260513074341"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260513092323",
+      "side": "remote",
+      "version": "20260513092323",
+      "sha256": "37d3fc1f914b90c4d166a63f06486d6e116a60cb689337607aa444ea1669c263",
+      "counterparts": [
+        "local:20260513092325"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260513203218",
+      "side": "remote",
+      "version": "20260513203218",
+      "sha256": "5a7f7d6bb95b18d91bd4d14e256bc4ae45b765ea0e997ca49ff4f5f8a52d82a7",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "renamed_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "remote:20260513211212",
+      "side": "remote",
+      "version": "20260513211212",
+      "sha256": "0f4242c6f71fa4d3360601fc0db857f4fd93c3fd394ad60d12ff0a4cbeb89d25",
+      "counterparts": [
+        "local:20260514103000"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "remote:20260513223207",
+      "side": "remote",
+      "version": "20260513223207",
+      "sha256": "abf1a64a65ac758346597b356f50f46548a4195357e0c05116df736c06590691",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "remote_body_subset_live_effect_reconciled",
+      "review": null
+    },
+    {
+      "id": "remote:20260514163302",
+      "side": "remote",
+      "version": "20260514163302",
+      "sha256": "3bffe63b566d58dbc2a553a172c4fb4b738f28defd024e0124a60e89fd832dcc",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "schema_equivalent_runtime_seed_superseded",
+      "review": null
+    },
+    {
+      "id": "remote:20260514173818",
+      "side": "remote",
+      "version": "20260514173818",
+      "sha256": "4ac8197e8aae3fd49bfb5f0f9f502782c4dcf5c4a16bdc0d3161e5feb2e45b5c",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "renamed_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "remote:20260514175208",
+      "side": "remote",
+      "version": "20260514175208",
+      "sha256": "e0c80bf0171c5014e73547e2ff571b9168f457546762a71c4fa780e6bd8e8696",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "renamed_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "remote:20260515075613",
+      "side": "remote",
+      "version": "20260515075613",
+      "sha256": "c09099d90329ccec902cda3e51142245670ee00ca8b96598cbe1b02709ef6304",
+      "counterparts": [
+        "local:20260515075613"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "exact_equivalent",
+      "review": null
+    },
+    {
+      "id": "remote:20260515080625",
+      "side": "remote",
+      "version": "20260515080625",
+      "sha256": "9e298030f914ec0b27ecd332d56c108fffcf1fad174e19b56a93c79d8ec79ecc",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "security_privilege_divergence",
+      "review": null
+    },
+    {
+      "id": "remote:20260515084409",
+      "side": "remote",
+      "version": "20260515084409",
+      "sha256": "df0ef121186053468d9e55e268c8ee604c91c1a9ab7576876ab98c86ecd9d92c",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "security_privilege_divergence",
+      "review": null
+    },
+    {
+      "id": "remote:20260515104839",
+      "side": "remote",
+      "version": "20260515104839",
+      "sha256": "e032706e41c0abd847da62d486d4325e437b66b1458962e1eeba3bb04ab7a3d5",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "security_privilege_divergence",
+      "review": null
+    },
+    {
+      "id": "remote:20260516021358",
+      "side": "remote",
+      "version": "20260516021358",
+      "sha256": "5ba4f349103b0ef0f4c378ccf56a964855ea584877ca1a28d277d7bdf95e2eff",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "security_privilege_divergence",
+      "review": null
+    },
+    {
+      "id": "remote:20260516050042",
+      "side": "remote",
+      "version": "20260516050042",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "remote_body_missing_effect_observed_pending_approval",
+      "review": null
+    },
+    {
+      "id": "remote:20260516072003",
+      "side": "remote",
+      "version": "20260516072003",
+      "sha256": "2f9f297d09c87db8566a1dd315e3a24ff5341c031d5634d707fed71a92d43da0",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "remote:20260516091651",
+      "side": "remote",
+      "version": "20260516091651",
+      "sha256": "949ea07cab9ffd9e2b2c041ac62106e8402f7f927a51a7c87cc2d99bfff2be32",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "remote:20260516092627",
+      "side": "remote",
+      "version": "20260516092627",
+      "sha256": "33e012ca86dd0fc2413d084159ec7c0a1a8ac92098597384a58b13ccb37ff020",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "remote:20260517091837",
+      "side": "remote",
+      "version": "20260517091837",
+      "sha256": "ae1de74420907cad10fdcd7441c33fc4a610903c8741257982a0ed1731b9ff65",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "remote:20260517140817",
+      "side": "remote",
+      "version": "20260517140817",
+      "sha256": "9ef6e26db2937585b9e33e7903cf7098efedcd248575e43d7cd865dd928682f9",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "remote:20260518143606",
+      "side": "remote",
+      "version": "20260518143606",
+      "sha256": "e3efe389e9f35065d7f0c1ffde968467881f76d41b4cc3c61e211d401df3de52",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "remote:20260518201408",
+      "side": "remote",
+      "version": "20260518201408",
+      "sha256": "4ed86ed00204a7eb256fa37bfd550970d3c88b44ef0876e8498f9da36e92b879",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "remote:20260522030027",
+      "side": "remote",
+      "version": "20260522030027",
+      "sha256": "6ed954f4f9e361b20db1ea2f1c2030282092031bdaba48860d10dcb66d03368a",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "remote:20260523140122",
+      "side": "remote",
+      "version": "20260523140122",
+      "sha256": "b0e350cc03311164901caf71a325575b62b8ffafcb9a4e918b59cc0615c58d2a",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "remote:20260602035014",
+      "side": "remote",
+      "version": "20260602035014",
+      "sha256": "3772d28070cc8f35bd2558a435ef8e81d56508e41f3a48f0ea711d16974df991",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "remote:20260602061229",
+      "side": "remote",
+      "version": "20260602061229",
+      "sha256": "b461c5e647446526e3c83c2b285f2d9966f2e1b33ed5dfe78cebba0630446a7f",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "remote:20260614064657",
+      "side": "remote",
+      "version": "20260614064657",
+      "sha256": "eb54fdb6e1cce97df84af288126cb11b7a4634b87a2eb6179944110cb209fd3d",
+      "counterparts": [
+        "local:20260614064657"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "remote:20260615005500",
+      "side": "remote",
+      "version": "20260615005500",
+      "sha256": "8c5167b055d64b3bcee8cbf1fd3bcabe6c3a2efce1cec8594f35b2b51d667bb7",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "remote:20260615043000",
+      "side": "remote",
+      "version": "20260615043000",
+      "sha256": "35468217c165ba24a3e52f999683e99cc507efb8f5ad77d3e9c119090bc25bbd",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "remote:20260617004958",
+      "side": "remote",
+      "version": "20260617004958",
+      "sha256": "a47ae65907edea47199ebdb60695ad670a63aa3a6f02a10d77f835b161bd4b88",
+      "counterparts": [
+        "local:20260617004958"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "remote:20260617224908",
+      "side": "remote",
+      "version": "20260617224908",
+      "sha256": "905bfc616a33fd8e4896b2b06eb34706541feb9c9ec98e8fc76e328d2aa5fd55",
+      "counterparts": [
+        "local:20260617224908"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "remote:20260623014212",
+      "side": "remote",
+      "version": "20260623014212",
+      "sha256": "6ec8dc7d2097c8ad9fc22c2c0ade83aab29ee861e2a7eac5e03ceab055974ca2",
+      "counterparts": [
+        "local:20260623010000"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "remote:20260623022722",
+      "side": "remote",
+      "version": "20260623022722",
+      "sha256": "5d6658e9893e61497b44d0ecfcbbee7f95c3af8c944391a1ab408cf50ffcd655",
+      "counterparts": [
+        "local:20260623023000"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": "renamed_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "remote:20260629010000",
+      "side": "remote",
+      "version": "20260629010000",
+      "sha256": "22f267196b1c4227e15508a5a121599ef2907dc265caa581fae45ce5b89f5d65",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "remote:20260703010000",
+      "side": "remote",
+      "version": "20260703010000",
+      "sha256": "21806c934fc774d27e27cff469bd3e8dc26ad3188df4f49176cc41796d6685bb",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "remote:20260703013000",
+      "side": "remote",
+      "version": "20260703013000",
+      "sha256": "1366f7c7d2ef322f6696935680e2889bc6c18d00bc0d32451176cee5d9a5cde2",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": "same_version_normalized_match_pending_semantic_review",
+      "review": null
+    },
+    {
+      "id": "remote:20260715074510",
+      "side": "remote",
+      "version": "20260715074510",
+      "sha256": "007d552b0f538b07e5397400c2f0f3a5765dd3a369d536a60ee9f504e16cd672",
+      "counterparts": [
+        "local:20260715074510"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "remote:20260825030158",
+      "side": "remote",
+      "version": "20260825030158",
+      "sha256": "0a0e4e5039488e6f1996ba5bca7f4008d6f6f691863d6c8a4406df1e41e9b49f",
+      "counterparts": [
+        "local:20260825024826"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "remote:20260825103600",
+      "side": "remote",
+      "version": "20260825103600",
+      "sha256": "010bde04ffa3338a032e543f873636957536207a33e06ff436480d53f5303d82",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "remote:20260825110234",
+      "side": "remote",
+      "version": "20260825110234",
+      "sha256": "73c26ea0dff91ca950c7fabc662b590c31827774f3dff1c9e2f005611e595e79",
+      "counterparts": [
+        "local:20260825104845"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "remote:20260901135245",
+      "side": "remote",
+      "version": "20260901135245",
+      "sha256": "859a80d7cfc84de3a82f752e3b9580af323e8823e00f5173279f337063174f81",
+      "counterparts": [],
+      "disposition": "requires_semantic_review",
+      "review_status": "candidate_pending_owner_review",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "remote:20260901140737",
+      "side": "remote",
+      "version": "20260901140737",
+      "sha256": "084f846331a791dc2b4495ba630fcd2eb1ceedb9cf950f6da0e16475cb44a9e8",
+      "counterparts": [
+        "local:20260828130000"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "remote:20260901151416",
+      "side": "remote",
+      "version": "20260901151416",
+      "sha256": "da50c9f622dd2d057874a742e5837bd1676b2d046641584be8d3ccff86998717",
+      "counterparts": [
+        "local:20260901150013"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "remote:20260901151446",
+      "side": "remote",
+      "version": "20260901151446",
+      "sha256": "ba209ccb73f7681f86b76e966500c39fbe75a3aa4f8f7354b2fab0b26b46d526",
+      "counterparts": [
+        "local:20260901150013"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "remote:20260901234638",
+      "side": "remote",
+      "version": "20260901234638",
+      "sha256": "afeb056d73020e084e68afc5fca8aa33346cf56b8afa6f661cf94c57b2f36f68",
+      "counterparts": [
+        "local:20260901170000"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "remote:20260901235227",
+      "side": "remote",
+      "version": "20260901235227",
+      "sha256": "ba209ccb73f7681f86b76e966500c39fbe75a3aa4f8f7354b2fab0b26b46d526",
+      "counterparts": [
+        "local:20260901150013"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "remote:20260901235444",
+      "side": "remote",
+      "version": "20260901235444",
+      "sha256": "ba209ccb73f7681f86b76e966500c39fbe75a3aa4f8f7354b2fab0b26b46d526",
+      "counterparts": [
+        "local:20260901150013"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": null,
+      "review": null
+    },
+    {
+      "id": "remote:20260901235451",
+      "side": "remote",
+      "version": "20260901235451",
+      "sha256": "afeb056d73020e084e68afc5fca8aa33346cf56b8afa6f661cf94c57b2f36f68",
+      "counterparts": [
+        "local:20260901170000"
+      ],
+      "disposition": "raw_body_equal",
+      "review_status": "hash_proven",
+      "historical_disposition": null,
+      "review": null
+    }
+  ],
+  "blockers": [
+    {
+      "id": "replay-egress",
+      "status": "blocked",
+      "required_checks": [
+        "clean-replay",
+        "outbound-isolation",
+        "production-log-zero-traffic"
+      ],
+      "resolved_at": null,
+      "receipt": null
+    },
+    {
+      "id": "restore-readiness",
+      "status": "blocked",
+      "required_checks": [
+        "backup-readiness",
+        "restore-drill",
+        "restore-validation"
+      ],
+      "resolved_at": null,
+      "receipt": null
+    },
+    {
+      "id": "owner-review",
+      "status": "blocked",
+      "required_checks": [
+        "all-entries-reviewed",
+        "review-package-integrity"
+      ],
+      "resolved_at": null,
+      "receipt": null
+    },
+    {
+      "id": "remote-body-missing",
+      "status": "blocked",
+      "required_checks": [
+        "source-recovery-or-forward-fix",
+        "live-effect-review"
+      ],
+      "resolved_at": null,
+      "receipt": null
+    },
+    {
+      "id": "privilege-drift",
+      "status": "blocked",
+      "required_checks": [
+        "role-matrix",
+        "schema-privilege-reproduction",
+        "default-privilege-disposition"
+      ],
+      "resolved_at": null,
+      "receipt": null
+    },
+    {
+      "id": "types-stale",
+      "status": "blocked",
+      "required_checks": [
+        "linked-type-generation",
+        "replay-type-generation",
+        "type-parity"
+      ],
+      "resolved_at": null,
+      "receipt": null
+    },
+    {
+      "id": "hosted-ci",
+      "status": "blocked",
+      "required_checks": [
+        "github-actions-success",
+        "reviewed-sha-match"
+      ],
+      "resolved_at": null,
+      "receipt": null
+    }
+  ],
+  "evidence": {
+    "replay_receipt": {
+      "path": "docs/plans/2026-09-07-xot-current-release-sql-replay.json",
+      "sha256": "29123724f53636cb624b04f6b06ee50afa8875654ddadc9276b460d4e0e39190"
+    },
+    "privilege_diff": {
+      "path": "docs/plans/2026-09-07-xot-current-release-schema-privilege-diff.json",
+      "sha256": "036f3d0b06c62662545fb0f3e2329e547940c3c9bde00fabb6fbeb6edeb6ebb1"
+    },
+    "production_schema_sha256": "8d42bd1648794c0d113ac15942741d60fca13ad69c2929a3ff2248f9aab8738f",
+    "replay_schema_sha256": "390518c200ac9e0b68d00d30ea81c4f04c912aba7469497409bac6c4ebd5aa54",
+    "production_types_sha256": "1527e399c86eeef11ac3342f1196b9083cb8ef6e0577793d211f39d1eb7a4c5d",
+    "replay_types_sha256": "1b02e251a9a5578f5bac4b22fb5ecb78f51a830243a9f88b6d58095a836b6cea"
+  },
+  "release": "CLOSED"
+}

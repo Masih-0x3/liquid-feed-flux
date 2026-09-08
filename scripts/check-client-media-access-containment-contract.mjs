@@ -529,8 +529,10 @@ validateStructural(sources);
 let selfTest = 'skipped';
 if (process.env.MUTATION_TEST === '1') {
   const assertRejected = (label, mutate) => {
+    const mutated = mutate(sources);
+    assert.notDeepEqual(mutated, sources, label + ' mutation must change its source fixture');
     assert.throws(
-      () => validateStructural(mutate(sources)),
+      () => validateStructural(mutated),
       undefined,
       label + ' mutation must fail the source contract',
     );
@@ -699,8 +701,8 @@ if (process.env.MUTATION_TEST === '1') {
   assertRejected('stale compact detail prop', (source) => ({
     ...source,
     videoRenders: source.videoRenders.replace(
-      'isVisible={isVisible}\n              />',
-      'isVisible={isVisible}\n                compact\n              />',
+      '<VideoRenderDetailPanel\n',
+      '<VideoRenderDetailPanel\n      compact\n',
     ),
   }));
   assertRejected('wide metrics fallback', (source) => ({

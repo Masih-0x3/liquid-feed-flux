@@ -2,6 +2,14 @@
 
 Current evidence date: 2026-07-14
 
+Latest inventory refresh: 2026-09-06. WAL-G remains enabled and PITR disabled.
+The provider returned eight completed physical backup records spanning August 30
+through September 6; latest ID `1595267488`, inserted
+`2026-09-06T11:26:15.449Z`. This is an observed inventory, not an eight-day retention
+guarantee. No restore or Storage-object recovery was performed. Recovery remains
+blocked; the July evidence below is historical, not the current backup list.
+See [the execution checkpoint](../plans/2026-09-06-xot-release-execution.md).
+
 Project reference: `jzirqfzzvlbxwfzndaer`
 
 ## Readiness Verdict

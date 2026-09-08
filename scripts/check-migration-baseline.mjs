@@ -5,6 +5,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 import { fileURLToPath } from "node:url";
 
 import { buildSchemaPrivilegeFacts } from "./schema-privilege-evidence.mjs";
+import { CURRENT_RELEASE_BASELINE_PATH, validateCurrentReleaseBaseline } from "./currentReleaseBaseline.mjs";
 
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const MANIFEST_PATH = "docs/plans/2026-07-14-xot-migration-equivalence-manifest.json";
@@ -42,6 +43,7 @@ export const APPROVED_APPEND_ONLY_SUCCESSOR_MIGRATIONS = Object.freeze([
   "20260830120000_enforce_historical_delivery_zero_write.sql",
   "20260901150013_adopt_telegram_pending_delivery_receipts.sql",
   "20260901170000_release_pre_provider_x_delivery_claim.sql",
+  "20260907001640_video_render_feedback_qualified_columns.sql",
 ]);
 export const CURRENT_ON_DISK_MIGRATION_COUNT =
   CURRENT_CANDIDATE_MIGRATION_COUNT + APPROVED_APPEND_ONLY_SUCCESSOR_MIGRATIONS.length;
@@ -525,7 +527,11 @@ function immutableManifestProjection(manifest) {
   };
 }
 
-function validateReviewedGitEvidence(manifest, gitRoot, allowedUntrackedPaths = new Set()) {
+function validateReviewedGitEvidence(manifest, gitRoot, allowedUntrackedPaths = new Set(), {
+  manifestPath = MANIFEST_PATH,
+  privilegeDiffPath = PRIVILEGE_DIFF_PATH,
+  projection = immutableManifestProjection,
+} = {}) {
   const reviewedGitSha = manifest.candidate?.reviewed_git_sha;
   if (!isValidReviewedGitSha(reviewedGitSha)) return ["release candidate reviewed_git_sha is missing or invalid"];
   try {
@@ -548,20 +554,20 @@ function validateReviewedGitEvidence(manifest, gitRoot, allowedUntrackedPaths = 
       ["-C", resolve(gitRoot), "diff", "--name-only", reviewedGitSha, head],
       { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
     ).trim().split("\n").filter(Boolean);
-    const allowedEvidenceCommitPaths = new Set([MANIFEST_PATH, PRIVILEGE_DIFF_PATH]);
+    const allowedEvidenceCommitPaths = new Set([manifestPath, privilegeDiffPath]);
     const unexpectedPaths = changedPaths.filter((path) => !allowedEvidenceCommitPaths.has(path));
-    if (unexpectedPaths.length > 0 || !changedPaths.includes(MANIFEST_PATH)) {
+    if (unexpectedPaths.length > 0 || !changedPaths.includes(manifestPath)) {
       return [`evidence commit changes unauthorized paths: ${unexpectedPaths.join(", ") || "manifest missing"}`];
     }
     const parentManifestRaw = execFileSync(
       "git",
-      ["-C", resolve(gitRoot), "show", `${reviewedGitSha}:${MANIFEST_PATH}`],
+      ["-C", resolve(gitRoot), "show", `${reviewedGitSha}:${manifestPath}`],
       { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
     );
     const parentManifest = JSON.parse(parentManifestRaw);
     if (
-      stableJson(immutableManifestProjection(parentManifest))
-      !== stableJson(immutableManifestProjection(manifest))
+      stableJson(projection(parentManifest))
+      !== stableJson(projection(manifest))
     ) {
       return ["evidence commit changes immutable migration manifest facts from the reviewed parent"];
     }
@@ -1994,10 +2000,28 @@ export function validateMigrationBaseline({
   replaySchemaPath = null,
   productionSchemaPath = null,
   productionTypesPath = null,
+  replayTypesPath = null,
   typesReceiptPath = null,
   releaseGate = false,
 } = {}) {
   const resolvedRoot = resolve(root);
+  const currentReleaseExists = manifestPath === MANIFEST_PATH
+    && existsSync(resolve(resolvedRoot, CURRENT_RELEASE_BASELINE_PATH));
+  const currentLegacy = {
+    historicalPath: MANIFEST_PATH,
+    predecessorPath: SUCCESSOR_V5_CANDIDATE_RECEIPT_PATH,
+    gateChecks: GATE_REQUIRED_CHECKS,
+    noSecrets: validateNoSensitiveMaterial,
+    referencedEvidence: validateReferencedEvidenceFiles,
+    reviewedGit: validateReviewedGitEvidence,
+  };
+  if (releaseGate && currentReleaseExists) {
+    // Keep the immutable historical and successor-chain integrity checks. Only
+    // the release candidate/capture contract moves to the separately bound epoch.
+    validateMigrationBaseline({ root: resolvedRoot });
+    return validateCurrentReleaseBaseline({ root: resolvedRoot, remoteJsonPath, replaySchemaPath,
+      productionSchemaPath, productionTypesPath, replayTypesPath, typesReceiptPath, releaseGate: true, legacy: currentLegacy });
+  }
   const resolvedManifest = resolve(resolvedRoot, manifestPath);
   if (!existsSync(resolvedManifest)) throw new Error(`Migration manifest not found: ${resolvedManifest}`);
   const rawManifest = readFileSync(resolvedManifest, "utf8");
@@ -2178,6 +2202,10 @@ export function validateMigrationBaseline({
   }
   if (errors.length) throw new Error(`Migration baseline validation failed:\n- ${errors.join("\n- ")}`);
 
+  const currentReleaseValidation = currentReleaseExists
+    ? validateCurrentReleaseBaseline({ root: resolvedRoot, releaseGate: false, legacy: currentLegacy })
+    : null;
+
   const releaseErrors = evaluateReleaseReadiness(manifest, remoteValidation, {
     schemaEvidenceChecked,
     typesEvidenceChecked: typesValidation.checked,
@@ -2202,6 +2230,7 @@ export function validateMigrationBaseline({
     releaseErrors,
     currentCandidateChecked: currentCandidateValidation.checked,
     currentCandidateActiveCount: currentCandidateValidation.activeCount,
+    currentRelease: currentReleaseValidation,
   };
 }
 
@@ -2215,6 +2244,8 @@ if (isMain) {
   const productionSchemaPath = productionSchemaFlagIndex >= 0 ? process.argv[productionSchemaFlagIndex + 1] : null;
   const productionTypesFlagIndex = process.argv.indexOf("--production-types");
   const productionTypesPath = productionTypesFlagIndex >= 0 ? process.argv[productionTypesFlagIndex + 1] : null;
+  const replayTypesFlagIndex = process.argv.indexOf("--replay-types");
+  const replayTypesPath = replayTypesFlagIndex >= 0 ? process.argv[replayTypesFlagIndex + 1] : null;
   const typesReceiptFlagIndex = process.argv.indexOf("--types-receipt");
   const typesReceiptPath = typesReceiptFlagIndex >= 0 ? process.argv[typesReceiptFlagIndex + 1] : null;
   const releaseGate = process.argv.includes("--release-gate");
@@ -2223,6 +2254,7 @@ if (isMain) {
     [replaySchemaFlagIndex, "--replay-schema"],
     [productionSchemaFlagIndex, "--production-schema"],
     [productionTypesFlagIndex, "--production-types"],
+    [replayTypesFlagIndex, "--replay-types"],
     [typesReceiptFlagIndex, "--types-receipt"],
   ]) {
     if (index >= 0 && !process.argv[index + 1]) throw new Error(`${name} requires a path`);
@@ -2232,6 +2264,7 @@ if (isMain) {
     replaySchemaPath,
     productionSchemaPath,
     productionTypesPath,
+    replayTypesPath,
     typesReceiptPath,
     releaseGate,
   });
@@ -2241,7 +2274,9 @@ if (isMain) {
       + `${result.pendingOwnerReviewEntries} pending owner review, remote snapshot `
       + `${result.remoteSnapshotChecked ? `checked at ${result.remoteSnapshotCapturedAt}` : "not checked"}.`,
   );
-  console.log(`Migration release gate ${result.releaseReady ? "READY" : "BLOCKED"}: ${result.releaseErrors.join("; ")}`);
+  const effectiveRelease = result.currentRelease ?? result;
+  console.log(`Migration release gate ${effectiveRelease.releaseReady ? "READY" : "BLOCKED"}: ${effectiveRelease.releaseErrors.join("; ")}`);
+  if (result.currentRelease) console.log(`Current release baseline integrity PASS: ${result.currentRelease.observedSideEntries} source records; ${result.currentRelease.pendingOwnerReviewEntries} pending owner review.`);
   console.log(
     `Current candidate contents verified: ${result.currentCandidateChecked ? "PASS" : "FAIL"} `
       + `(${CURRENT_CANDIDATE_MIGRATION_COUNT} frozen receipt migrations + `

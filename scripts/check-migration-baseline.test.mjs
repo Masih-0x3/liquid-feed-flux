@@ -4,6 +4,9 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
+import "./currentReleaseBaseline.test.mjs";
+import "./currentReleaseSqlBoundary.test.mjs";
+import "./currentReleaseSchemaComparison.test.mjs";
 
 import {
   APPROVED_APPEND_ONLY_SUCCESSOR_MIGRATIONS,
@@ -1630,9 +1633,15 @@ test("hash-proven labels require reciprocal raw hash equality", () => {
 test("release mode fails closed while migration gates remain", () => {
   assert.throws(
     () => validateMigrationBaseline({ releaseGate: true }),
-    /Migration baseline validation failed:[\s\S]*requires protected replay and production schema evidence[\s\S]*requires fresh production types evidence/,
+    /Current migration release gate blocked:[\s\S]*protected replay and Production schema inputs are required[\s\S]*fresh protected Production types and capture receipt are required/,
   );
 });
+
+test("historical release fixtures retain the original protected-input requirements", () =>
+  withCurrentTreeFixture((root) => {
+    assert.throws(() => validateMigrationBaseline({ root, releaseGate: true }),
+      /Migration baseline validation failed:[\s\S]*requires protected replay and production schema evidence[\s\S]*requires fresh production types evidence/);
+  }));
 
 test("active source tampering is rejected in normal mode", () =>
   withCurrentTreeFixture((root) => {

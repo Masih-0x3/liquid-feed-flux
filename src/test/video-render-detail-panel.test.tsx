@@ -73,4 +73,27 @@ describe('video render detail review states', () => {
     expect(warning).not.toHaveBeenCalledWith(expect.stringContaining('Select is changing from uncontrolled to controlled'));
     warning.mockRestore();
   });
+
+  it.each([
+    ['translated subtitle', 'Translated cue', 'Legacy cue', 'Translated cue'],
+    ['legacy fallback', '   ', 'Legacy cue', 'Legacy cue'],
+  ])('displays populated %s with Persian direction while media remains contained', (_name, translated, legacy, expected) => {
+    const detail = videoHooks.useVideoRenderDetail.getMockImplementation()?.();
+    videoHooks.useVideoRenderDetail.mockReturnValue({
+      ...detail,
+      data: { ...detail.data, render: {
+        ...detail.data.render,
+        target_language: 'fa',
+        translated_srt: translated,
+        persian_srt: legacy,
+      } },
+    });
+    const { container } = render(<VideoRenderDetailPanel renderId="render-1" status="failed" />);
+    expect(screen.getByText('Final subtitle')).toBeInTheDocument();
+    expect(container.querySelector('pre')).toHaveTextContent(expected);
+    expect(container.querySelector('pre')).toHaveAttribute('lang', 'fa');
+    expect(container.querySelector('pre')).toHaveAttribute('dir', 'rtl');
+    expect(screen.getByText('Media preview unavailable')).toBeInTheDocument();
+    expect(container.querySelector('video, audio, source, iframe')).toBeNull();
+  });
 });
