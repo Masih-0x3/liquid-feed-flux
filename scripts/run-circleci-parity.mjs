@@ -10,6 +10,7 @@ export const WORKFLOW_PATH = join(REPO_ROOT, ".github/workflows/ci.yml");
 export const CIRCLE_SHA_ENV = "CIRCLE_SHA1";
 export const OWNER_POLICY_ENV = "XOT_SUPPLY_OWNER_POLICY_B64";
 export const RUNNER_TEMP_ENV = "RUNNER_TEMP";
+export const BASH_ENV_ENV = "BASH_ENV";
 
 const SHA_RE = /^[a-f0-9]{40}$/;
 const CHECKOUT_REF = "${{ github.event.pull_request.head.sha || github.sha }}";
@@ -153,6 +154,9 @@ function envValue(value, circleSha, allowOwnerPolicy, ownerPolicyValue) {
 export function buildStepEnvironment(step, circleSha, sourceEnv = process.env) {
   const env = { ...sourceEnv };
   delete env[OWNER_POLICY_ENV];
+  // Circle's shell has already loaded the setup step's Node 24 PATH. Do not
+  // let a derived nounset child source Circle's bootstrap bashrc again.
+  delete env[BASH_ENV_ENV];
   const ownerStep = step.run === OWNER_VALIDATE_COMMAND;
   if (ownerStep && sourceEnv[OWNER_POLICY_ENV] !== undefined) env[OWNER_POLICY_ENV] = sourceEnv[OWNER_POLICY_ENV];
   for (const [key, value] of Object.entries(step.env)) {

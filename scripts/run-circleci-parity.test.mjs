@@ -56,10 +56,18 @@ test("CircleCI stages stop at the same artifact boundaries as the reviewed workf
 
 test("CircleCI parity keeps the owner policy out of pre-owner commands", () => {
   const workflow = validateCircleWorkflow();
-  const sourceEnv = { CIRCLE_SHA1: "a".repeat(40), XOT_SUPPLY_OWNER_POLICY_B64: "redacted-test-policy" };
+  const sourceEnv = {
+    CIRCLE_SHA1: "a".repeat(40),
+    XOT_SUPPLY_OWNER_POLICY_B64: "redacted-test-policy",
+    BASH_ENV: "/etc/bash.bashrc",
+    PATH: "/home/circleci/.nvm/versions/node/v24.20.0/bin:/usr/bin",
+  };
   const preOwner = buildStepEnvironment(workflow.steps[workflow.collectorIndex], sourceEnv.CIRCLE_SHA1, sourceEnv);
   const owner = buildStepEnvironment(workflow.steps[workflow.ownerIndex], sourceEnv.CIRCLE_SHA1, sourceEnv);
   assert.equal(preOwner.XOT_SUPPLY_OWNER_POLICY_B64, undefined);
+  assert.equal(preOwner.BASH_ENV, undefined);
+  assert.equal(preOwner.PATH, sourceEnv.PATH);
   assert.equal(owner.XOT_SUPPLY_OWNER_POLICY_B64, sourceEnv.XOT_SUPPLY_OWNER_POLICY_B64);
+  assert.equal(owner.BASH_ENV, undefined);
   assert.equal(owner.XOT_REVIEWED_SHA, sourceEnv.CIRCLE_SHA1);
 });

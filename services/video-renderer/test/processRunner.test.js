@@ -393,7 +393,10 @@ test("real two-process pipeline streams producer stdout into consumer stdin", as
   const consumer = `
     const rl = require("node:readline").createInterface({ input: process.stdin });
     rl.on("line", (l) => process.stdout.write(l.toUpperCase() + "\\n"));
-    rl.on("close", () => process.exit(0));
+    // Let stdout flush before the child exits. Calling process.exit() here can
+    // discard buffered consumer output under CI load and make the fixture
+    // report fewer lines than the producer actually emitted.
+    rl.on("close", () => process.stdout.end());
   `;
   const result = await runManagedPipeline(
     [
