@@ -301,6 +301,111 @@ Secret/config rollback:
 
 Add new entries at the top.
 
+### 2026-09-08 - V2 remediation backend and renderer release
+
+The owner authorized the production update on September 8. This release brings
+the backend and renderer to the application source already deployed by PR #117.
+It retains the September 1 incremental release and recovery approach: no broad
+historical migration replay, no delivery cutoff reset, and no backlog replay.
+
+```text
+Application Git SHA: 407ecce68fc52f17714c3781051073fc1821d329
+GitHub PR: https://github.com/Masih-0x3/liquid-feed-flux/pull/117
+Main CI: https://github.com/Masih-0x3/liquid-feed-flux/actions/runs/34222780629 (success)
+Vercel deployment: dpl_ATx4br1yZDHXTztEspLyrn2h6SYU (READY, production, same SHA)
+Vercel aliases checked: https://xot.iraneyes.com and https://xot.vercel.app
+Supabase project ref: jzirqfzzvlbxwfzndaer
+Migration head before: 20260901235451 release_pre_provider_x_delivery_claim
+Migration head after: 20260908130948 reserve_x_media_upload_quota
+DEPLOY_GIT_SHA: 407ecce68fc52f17714c3781051073fc1821d329
+Mutation window: 2026-09-08 13:09-13:13 UTC
+Controls restored at: 2026-09-08T13:13:31.029014Z
+Smoke observation: 2026-09-08 13:14-13:17 UTC
+Renderer heartbeat: lightning-xot-1 online, polling effective, running 0, no last error
+Renderer image: sha256:0accc863397c1654615b9acc8168fceeeef1d2c2d3bbb6cbb41425891abf583b
+Renderer tag: xot-video-renderer:production-407ecce68fc5-sec1
+Renderer rollback: sha256:6f2cc5371e9fa731e33624534d243b025d07ce6963a398c9b2c0abb2d721c676
+Renderer rollback tag: xot-video-renderer:prep4-fe3e78a2f20f-amd64
+```
+
+Only these four forward migrations were applied through the migration API.
+The recorded API versions below map to the unchanged source files; each ran
+transactionally with bounded statement and lock timeouts.
+
+| Source migration | Recorded production version |
+| --- | --- |
+| `20260908103000_follower_snapshot_claims.sql` | `20260908130927` |
+| `20260908104000_replace_rss_media_atomically.sql` | `20260908130934` |
+| `20260908105000_reclaim_pre_provider_x_deliveries.sql` | `20260908130941` |
+| `20260908110000_reserve_x_media_upload_quota.sql` | `20260908130948` |
+
+| Function | Before | After | Source deployed |
+| --- | ---: | ---: | --- |
+| webhooks-rssapp | 252 | 254 | Yes |
+| media-processor | 217 | 219 | Yes |
+| digest-compiler | 137 | 139 | Yes |
+| x-followers-snapshot | 128 | 130 | Yes |
+| admin-actions | 219 | 221 | Yes |
+| x-poster | 167 | 169 | Yes |
+| worker | 291 | 293 | Yes |
+| admin-retry | 210 | 211 | No |
+| db-cleanup | 178 | 179 | No |
+| media-cleanup | 214 | 215 | No |
+
+The shared SHA stamp increments every function version once. The three functions
+without source changes retain their source timestamps. Downloaded deployed
+bundles match the release source; all ten functions are ACTIVE and retain their
+prior JWT configuration. All seven changed endpoints reject unauthenticated
+requests with HTTP 401. Service-authenticated probes confirmed the follower
+endpoint's existing disabled response and the X poster's blocked response during
+the pause. The admin endpoint rejects a service credential as an invalid user
+token; this is an authorization check, not an authenticated admin workflow test.
+
+The renderer uses the previous immutable image with the release's changed source
+files and unchanged dependency lockfile. Two inherited Debian libraries required
+security patches: `libaom3=3.6.0-1+deb12u3` and
+`libssh2-1=1.10.0-3+deb12u1`. All 228 tests passed inside the final image. The
+offline Trivy scan passed the existing zero-fixable-HIGH/CRITICAL criterion;
+334 HIGH and 19 CRITICAL findings without a reported fix remain in the full
+report. This is not a vulnerability-free image claim. An SPDX SBOM and exact
+image archive were retained. Candidate and rollback boot/auth checks ran without
+network access; final production health and heartbeat checks used the real DB.
+Polling was disabled for the initial replacement, then restored from the saved
+runtime configuration. The existing restart policy remains `no`; no persistence
+or host-restart acceptance is claimed. The stable service controls now select
+the actual release image and source, and the Preview container was unchanged.
+
+The exact four migrations passed against a fresh production-derived public and
+private schema in an isolated PostgreSQL container, including all remaining-PR
+SQL regressions. Live catalog comparison shows exactly seven added functions,
+two replaced functions, no removed functions, and the expected additive columns
+and quota table. Service-only ACLs and RLS were verified. The only new security
+advisor is the informational no-policy notice for the deliberately service-only
+quota table; existing advisories remain unchanged.
+
+Historical fingerprints were identical before preparation, after DDL, and after
+resuming: 11,538 deliveries, 17,395 X deliveries, and 5,956 delivery jobs. Activation
+epochs and the immutable `2026-09-01T14:07:25.617154Z` cutoff were unchanged. Worker
+cron 26 and the prior runtime flags were restored; cron 17, 19, 20, and 22 remain
+disabled, while cron 21 remains active. Normal worker ticks and media processing
+resumed without new pipeline failures in the observation window. An existing
+video delivery still awaited source media, as it did before release; no new
+successful render or provider post is claimed.
+
+Production browser smoke passed at desktop 1440x1000 and mobile 390x844 with HTTP
+200, the expected sign-in screen, and no page errors. It used isolated headless
+Chromium without an authenticated user session. The explicit production
+release-state render plan passed before and after; live API/SQL inventories were
+captured separately because the script's direct DB URL was unavailable.
+
+Recovery evidence includes completed daily physical backup 1615202037 at
+2026-09-08T11:30:46.415Z, all ten previous function bundles, prior definitions of
+the two replaced RPCs, saved runtime configuration, and a checksum-verified
+renderer rollback archive. No restore drill or RPO/RTO is claimed. The historical
+migration reconciliation gate remains unchanged; this release did not execute
+that historical chain. Component rollback restores the captured prior source
+and configuration while preserving additive schema and all existing data.
+
 ### 2026-07-03 - Dashboard process cockpit
 
 ```text
