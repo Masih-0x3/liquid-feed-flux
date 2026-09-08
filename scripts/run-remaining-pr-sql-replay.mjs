@@ -17,6 +17,7 @@ const cidfile = join(temp, 'cid');
 const children = new Set();
 let id;
 let interrupted = false;
+let replayError;
 const env = safeChildEnv(process.env, { POSTGRES_PASSWORD: randomBytes(48).toString('base64url') });
 async function docker(args, input, timeout = 30000) {
   const result = await runBoundedProcess({ file: 'docker', args: ['--context', context, ...args], cwd: root,
@@ -81,7 +82,11 @@ try {
   if (reservations.map(JSON.parse).filter(r => r.reserved).length !== 1) throw new Error('concurrent quota admission exceeded cap');
   if (await sql('SELECT public.get_x_media_upload_usage();') !== '4') throw new Error('concurrent quota usage mismatch');
   console.log('PASS concurrent whole-batch quota admission');
-} finally {
+} catch (error) {
+  replayError = error;
+}
+
+try {
   if (!id) { try { id = (await readFile(cidfile, 'utf8')).trim(); } catch {} }
   if (id) {
     const [owned] = JSON.parse(await docker(['inspect', id]));
@@ -93,3 +98,8 @@ try {
   }
   await rm(temp, { recursive: true, force: true });
 }
+catch (cleanupError) {
+  if (replayError) throw new AggregateError([replayError, cleanupError], 'SQL replay failed and disposable cleanup also failed');
+  throw cleanupError;
+}
+if (replayError) throw replayError;

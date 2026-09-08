@@ -3784,8 +3784,8 @@ const reviewedNonRawMigrationDigests = new Map([
   // Remaining-PR successors: service-only RPCs and quota table; isolated SQL
   // replay verifies role grants, claim fences, atomicity, and concurrent admission.
   // None grants access to protected video raw tables. Keep review byte-bound.
-  ['20260908103000_follower_snapshot_claims.sql', '9b776e645e2fe0c6206d0db05d537b3ed1e4dcc7f55efa000488ce813be9ee68'],
-  ['20260908104000_replace_rss_media_atomically.sql', 'd1ab0d075f7061aac1dca0bb7736baf00a5373214db86ce5044166df208bddd3'],
+  ['20260908103000_follower_snapshot_claims.sql', '6a821023690e60d61b8cea9a24b59ffae7238cd70f01619b625e877931e1ff1d'],
+  ['20260908104000_replace_rss_media_atomically.sql', '0b13bca8229bd416bd1044b1d0fd6aedab84590ac08dfec2ae49a4aa42952ea8'],
   ['20260908105000_reclaim_pre_provider_x_deliveries.sql', 'f49e131553a15da17d5cc4685e3385fd8684f4bd6e70bc9c3b5f175433adc7ee'],
   ['20260908110000_reserve_x_media_upload_quota.sql', 'bc8cf9c61e0eb87a1bf77d839d98573afad32ac7b1c9da2fa9e5e8e4423dd256'],
 ]);

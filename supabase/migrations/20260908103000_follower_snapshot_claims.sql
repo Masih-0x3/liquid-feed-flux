@@ -6,7 +6,7 @@ ALTER TABLE public.x_follower_snapshots
   ADD COLUMN claim_expires_at timestamptz;
 
 CREATE OR REPLACE FUNCTION public.claim_follower_snapshot(
-  p_trigger text, p_force boolean DEFAULT false, p_stale_minutes integer DEFAULT 60
+  p_trigger text, p_force boolean DEFAULT false, p_stale_minutes double precision DEFAULT 60
 ) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path TO public, pg_catalog AS $$
 DECLARE
@@ -43,7 +43,7 @@ BEGIN
     RETURN jsonb_build_object('claimed', false, 'reason', 'daily_cap');
   END IF;
   IF p_trigger = 'manual' AND NOT COALESCE(p_force, false)
-    AND v_latest.taken_at > v_now - make_interval(mins => p_stale_minutes) THEN
+    AND v_latest.taken_at > v_now - make_interval(secs => p_stale_minutes * 60) THEN
     RETURN jsonb_build_object('claimed', false, 'reason', 'snapshot_recent');
   END IF;
   INSERT INTO public.x_follower_snapshots(trigger, status, claim_token, claim_expires_at)
@@ -92,10 +92,10 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.claim_follower_snapshot(text, boolean, integer) FROM public, anon, authenticated;
+REVOKE ALL ON FUNCTION public.claim_follower_snapshot(text, boolean, double precision) FROM public, anon, authenticated;
 REVOKE ALL ON FUNCTION public.renew_follower_snapshot_claim(uuid, uuid) FROM public, anon, authenticated;
 REVOKE ALL ON FUNCTION public.finish_follower_snapshot_claim(uuid, uuid, text, jsonb) FROM public, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.claim_follower_snapshot(text, boolean, integer) TO service_role;
+GRANT EXECUTE ON FUNCTION public.claim_follower_snapshot(text, boolean, double precision) TO service_role;
 GRANT EXECUTE ON FUNCTION public.renew_follower_snapshot_claim(uuid, uuid) TO service_role;
 GRANT EXECUTE ON FUNCTION public.finish_follower_snapshot_claim(uuid, uuid, text, jsonb) TO service_role;
 COMMIT;

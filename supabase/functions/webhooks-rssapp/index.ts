@@ -435,6 +435,20 @@ async function reserveRssWebhookReceipt(
   return (data as { reserved: boolean; reason?: string; claim_token?: string | null; claim_generation?: number | null });
 }
 
+async function renewRssWebhookReceipt(
+  supabase: RssReceiptRpcClient,
+  receiptKey: string,
+  claimToken: string | null | undefined,
+  claimGeneration: number | null | undefined,
+): Promise<void> {
+  const { data, error } = await supabase.rpc('renew_rss_webhook_receipt', {
+    p_receipt_key: receiptKey,
+    p_claim_token: claimToken,
+    p_claim_generation: claimGeneration,
+  });
+  if (error || data !== true) throw new RssWebhookPersistenceError('rss_webhook_receipt_renew_failed');
+}
+
 async function completeRssWebhookReceipt(
   supabase: RssReceiptRpcClient,
   receiptKey: string,
@@ -636,6 +650,7 @@ serve(async (req) => {
 
     for (const item of items) {
       try {
+        await renewRssWebhookReceipt(supabase, receiptKey, receiptClaim.claim_token, receiptClaim.claim_generation);
         console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'processing_item' }));
         
         // A retry must target the same idempotency key. Do not manufacture a
@@ -814,6 +829,7 @@ serve(async (req) => {
           height: media.height ?? null,
           duration_ms: media.duration ?? null,
         })));
+        await renewRssWebhookReceipt(supabase, receiptKey, receiptClaim.claim_token, receiptClaim.claim_generation);
         const { data: mediaReplacement, error: mediaError } = await supabase.rpc('replace_rss_post_media', {
           p_tweet_id: tweetId,
           p_media: mediaRows,
@@ -925,6 +941,7 @@ serve(async (req) => {
     // INV-3: only after every idempotency-keyed materialization/enqueue write is
     // durable do we persist the terminal 'completed' receipt and return 200. The
     // waitUntil worker invoke and pipeline_events telemetry are never the basis.
+    await renewRssWebhookReceipt(supabase, receiptKey, receiptClaim.claim_token, receiptClaim.claim_generation);
     await completeRssWebhookReceipt(supabase, receiptKey, receiptClaim.claim_token ?? null, receiptClaim.claim_generation ?? null, itemOutcomes);
 
     return new Response(JSON.stringify({

@@ -26,8 +26,8 @@ SELECT public.initialize_delivery_cutover('isolated remaining PR replay');
 INSERT INTO public.accounts(id, handle) VALUES ('00000000-0000-0000-0000-000000008001', 'synthetic_replay');
 INSERT INTO public.posts(tweet_id, account_id, text_original, text_translated, created_at, importance_score, delivery_decision)
 VALUES ('replay-media', '00000000-0000-0000-0000-000000008001', 'synthetic', 'synthetic', clock_timestamp(), 20, 'deliver');
-INSERT INTO public.webhook_receipts(receipt_key, auth_mode, feed_id, status, claim_token, claim_generation, claim_expires_at)
-VALUES ('replay-receipt', 'hmac', 'synthetic', 'materializing', '00000000-0000-0000-0000-000000008002', 1, now() + interval '1 hour');
+INSERT INTO public.webhook_receipts(receipt_key, auth_mode, feed_id, status, claim_token, claim_generation, claim_expires_at, claim_state)
+VALUES ('replay-receipt', 'hmac', 'synthetic', 'materializing', '00000000-0000-0000-0000-000000008002', 1, now() + interval '1 hour', 'received');
 DO $$
 DECLARE old_id uuid; new_id uuid; media_set jsonb;
 BEGIN
@@ -77,13 +77,31 @@ SELECT 'PASS quota full-batch admission, exact cap, idempotency, and pre-provide
 DO $$
 DECLARE signature text;
 BEGIN
-  FOREACH signature IN ARRAY ARRAY['claim_follower_snapshot(text,boolean,integer)','renew_follower_snapshot_claim(uuid,uuid)','finish_follower_snapshot_claim(uuid,uuid,text,jsonb)','replace_rss_post_media(text,jsonb,text,uuid,bigint,boolean)','reserve_x_media_uploads(uuid,uuid,bigint,integer)','get_x_media_upload_usage()'] LOOP
+  FOREACH signature IN ARRAY ARRAY['claim_follower_snapshot(text,boolean,double precision)','renew_follower_snapshot_claim(uuid,uuid)','finish_follower_snapshot_claim(uuid,uuid,text,jsonb)','replace_rss_post_media(text,jsonb,text,uuid,bigint,boolean)','reserve_x_media_uploads(uuid,uuid,bigint,integer)','get_x_media_upload_usage()','renew_rss_webhook_receipt(text,uuid,bigint)'] LOOP
     PERFORM pg_temp.assert_true(NOT has_function_privilege('anon','public.'||signature,'EXECUTE'), 'anon denied '||signature);
     PERFORM pg_temp.assert_true(NOT has_function_privilege('authenticated','public.'||signature,'EXECUTE'), 'authenticated denied '||signature);
     PERFORM pg_temp.assert_true(has_function_privilege('service_role','public.'||signature,'EXECUTE'), 'service role allowed '||signature);
   END LOOP;
 END $$;
 SELECT 'PASS RPC role boundaries';
+
+-- Mixed RSS images plus a video placeholder must keep the resolved video,
+-- including when its ordering would collide with the first incoming image.
+DO $$
+DECLARE video_id uuid; image_id uuid; media_set jsonb;
+BEGIN
+  INSERT INTO public.media(tweet_id,kind,src_url,src_url_hash,ordering,storage_path,downloaded_at)
+    VALUES ('replay-media','video','https://example.com/resolved.mp4',repeat('f',64),0,'synthetic/resolved.mp4',now()) RETURNING id INTO video_id;
+  media_set := jsonb_build_array(jsonb_build_object('kind','image','src_url','https://example.com/mixed.jpg','src_url_hash',repeat('e',64)));
+  PERFORM public.replace_rss_post_media('replay-media',media_set,'replay-receipt','00000000-0000-0000-0000-000000008002',1,true);
+  PERFORM pg_temp.assert_true(EXISTS(SELECT 1 FROM public.media WHERE id=video_id AND storage_path='synthetic/resolved.mp4'), 'mixed placeholder retains resolved video identity and download');
+  SELECT id INTO image_id FROM public.media WHERE tweet_id='replay-media' AND kind='image';
+  PERFORM pg_temp.assert_true((SELECT ordering FROM public.media WHERE id=image_id)=1, 'incoming image avoids retained video slot');
+  PERFORM public.replace_rss_post_media('replay-media',media_set,'replay-receipt','00000000-0000-0000-0000-000000008002',1,true);
+  PERFORM pg_temp.assert_true(EXISTS(SELECT 1 FROM public.media WHERE id=image_id), 'mixed replay remains idempotent');
+  PERFORM public.replace_rss_post_media('replay-media','[]','replay-receipt','00000000-0000-0000-0000-000000008002',1,false);
+END $$;
+SELECT 'PASS mixed image and unresolved video preservation without slot collision';
 
 -- A database job failure must roll back the replacement, not strand new media.
 CREATE FUNCTION pg_temp.reject_replay_download() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -134,3 +152,20 @@ SELECT pg_temp.assert_true(NOT public.fail_digest_run('replay-digest',gen_random
 SELECT pg_temp.assert_true(public.fail_digest_run('replay-digest','00000000-0000-0000-0000-000000008051',1,'digest_formatting_failed'), 'formatting failure closes owned claim');
 SELECT pg_temp.assert_true((SELECT state='ambiguous' AND claim_expires_at IS NULL AND last_error='digest_formatting_failed' FROM public.digest_runs WHERE run_key='replay-digest'), 'formatting failure releases lease without reopening provider replay');
 SELECT 'PASS digest formatting failure finalization and no provider replay';
+
+
+-- Preserve the accepted fractional-minute setting rather than rounding its policy.
+UPDATE public.x_follower_snapshots SET taken_at=now()-interval '75 seconds' WHERE status='complete';
+SELECT pg_temp.assert_true(public.claim_follower_snapshot('manual',false,1.5)->>'reason'='snapshot_recent', 'fractional 90-second freshness window');
+UPDATE public.x_follower_snapshots SET taken_at=now()-interval '95 seconds' WHERE status='complete';
+SELECT pg_temp.assert_true((public.claim_follower_snapshot('manual',false,1.5)->>'claimed')::boolean, 'fractional freshness expires after 90 seconds');
+SELECT 'PASS fractional follower snapshot interval compatibility';
+
+UPDATE public.webhook_receipts SET claim_expires_at=now()+interval '1 second' WHERE receipt_key='replay-receipt';
+SELECT pg_temp.assert_true(NOT public.renew_rss_webhook_receipt('replay-receipt',gen_random_uuid(),1), 'wrong receipt token cannot renew');
+SELECT pg_temp.assert_true(NOT public.renew_rss_webhook_receipt('replay-receipt','00000000-0000-0000-0000-000000008002',2), 'wrong receipt generation cannot renew');
+SELECT pg_temp.assert_true(public.renew_rss_webhook_receipt('replay-receipt','00000000-0000-0000-0000-000000008002',1), 'active receipt can renew');
+SELECT pg_temp.assert_true((SELECT claim_expires_at>now()+interval '4 minutes' FROM public.webhook_receipts WHERE receipt_key='replay-receipt'), 'receipt lease extended for next item');
+UPDATE public.webhook_receipts SET claim_expires_at=now()-interval '1 second' WHERE receipt_key='replay-receipt';
+SELECT pg_temp.assert_true(NOT public.renew_rss_webhook_receipt('replay-receipt','00000000-0000-0000-0000-000000008002',1), 'expired receipt cannot be resurrected');
+SELECT 'PASS webhook receipt renewal ownership and expiry';
