@@ -1825,16 +1825,6 @@ export function subtitlePlacementFromVision(vision, dimensions = {}, options = {
   };
 }
 
-export function mergePreflight(existing, patch) {
-  return {
-    ...(existing ?? {}),
-    ...(patch ?? {}),
-    softSubtitles: patch?.softSubtitles ?? existing?.softSubtitles ?? [],
-    hardSubtitles: patch?.hardSubtitles ?? existing?.hardSubtitles ?? null,
-    watermark: patch?.watermark ?? existing?.watermark ?? null,
-  };
-}
-
 export async function runVisualPreflight({ inputPath, probe, vision = null, options = {} }) {
   const [captionDetection, overlayDetection] = await Promise.all([
     detectCaptionBand(inputPath, probe),
