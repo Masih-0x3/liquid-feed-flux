@@ -40,6 +40,12 @@ test("CircleCI config cannot publish the pending bundle as accepted", () => {
   assert.ok(parityIndex >= 0 && parityIndex < snapshotIndex && snapshotIndex < copyIndex);
 });
 
+test("CircleCI Node setup persists the resolved Node 24 bin path for nounset children", () => {
+  assert.match(circleConfig, /node_bin=\"\$\(dirname \"\$\(command -v node\)\"\)\"/);
+  assert.match(circleConfig, /printf 'export PATH=%q:\$PATH\\n' \"\$node_bin\" > \"\$BASH_ENV\"/);
+  assert.match(circleConfig, /BASH_ENV=\"\$BASH_ENV\" bash -euo pipefail -c 'node -p/);
+});
+
 test("CircleCI stages stop at the same artifact boundaries as the reviewed workflow", () => {
   const prepared = runCircleParity({ stage: "pre-technical", source: workflowSource, execute: false });
   const verified = runCircleParity({ stage: "post-technical", source: workflowSource, execute: false });

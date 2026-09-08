@@ -24,6 +24,11 @@ jobs:
             nvm use 24
             test "$(node -p 'process.versions.node.split(".")[0]')" = 24
             test "$(npm --version | cut -d. -f1)" = 11
+            node_bin="$(dirname "$(command -v node)")"
+            test -x "$node_bin/node"
+            printf 'export PATH=%q:$PATH\n' "$node_bin" > "$BASH_ENV"
+            child_node_version="$(BASH_ENV="$BASH_ENV" bash -euo pipefail -c 'node -p "process.versions.node"')"
+            test "${child_node_version%%.*}" = 24
       - run:
           name: Run reviewed checks through technical supply-chain evidence
           command: node scripts/run-circleci-parity.mjs --stage=pre-technical

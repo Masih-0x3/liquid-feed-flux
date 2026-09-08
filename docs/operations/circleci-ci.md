@@ -11,9 +11,12 @@ unchecked second copy of the 157-step GitHub job.
 The machine executor is required because the hosted supply-chain collector
 builds the renderer image locally and scans it through the host Docker socket.
 The job selects Node 24 through the machine image's `nvm` installation and
-requires npm 11 before the derived checks begin. CircleCI's built-in checkout
-must leave `git rev-parse HEAD` equal to `CIRCLE_SHA1`; otherwise the runner
-fails before executing checks.
+requires npm 11 before the derived checks begin. After selection, the setup
+step persists the resolved Node 24 `bin` directory in `BASH_ENV` and verifies a
+nounset child shell, rather than re-sourcing `nvm.sh` in every child command.
+This keeps shell startup configuration from falling back to the machine image's
+Node version. CircleCI's built-in checkout must leave `git rev-parse HEAD`
+equal to `CIRCLE_SHA1`; otherwise the runner fails before executing checks.
 
 There are two CircleCI artifact boundaries matching the GitHub workflow:
 
