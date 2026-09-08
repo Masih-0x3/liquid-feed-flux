@@ -39,6 +39,10 @@ function assertContract({ source, packageJson, ci }, label = "current source") {
   if (source.includes("console.warn('[x-poster] active manual intake filter failed'")) {
     fail(`${label}: active manual-intake read failure still permits auto delivery`);
   }
+  if (!source.includes("claim_expires_at, claim_release_reason, next_retry_at, claim_token, provider_started_at')") ||
+      !source.includes('shouldDeferActiveXDelivery(latestXRecord)')) {
+    fail(`${label}: fallback and forced candidates must retain the due-time gate`);
+  }
   const requiredShapeGuards = [
     "if (!Array.isArray(existingRows))",
     "if (!Array.isArray(rpcRes.data))",
@@ -93,6 +97,8 @@ function assertRejects(mutator, label) {
 assertContract(sources());
 
 if (process.env.MUTATION_TEST === "1") {
+  assertRejects(input => ({ ...input, source: input.source.replace('shouldDeferActiveXDelivery(latestXRecord)', 'false') }), 'due-time gate removal');
+
   for (const [needle, replacement, label] of [
     ["throw new Error('x_poster_existing_delivery_read_failed');", "console.warn(\"existing read failed\");", "existing-delivery read continuation"],
     ["throw new Error('x_poster_manual_intake_read_failed');", "console.warn(\"manual read failed\");", "manual-intake read continuation"],

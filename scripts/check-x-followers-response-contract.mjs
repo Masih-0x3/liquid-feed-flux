@@ -11,7 +11,7 @@ function fail(message) {
   throw new Error(`X_FOLLOWERS_RESPONSE_SOURCE_CONTRACT_FAIL ${message}`);
 }
 
-function assertContract({ source, packageJson, ci }, label = "current source") {
+function assertContract({ source, claimHelper, packageJson, ci }, label = "current source") {
   const parsed = ts.createSourceFile(sourcePath, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   if (parsed.parseDiagnostics.length > 0) fail(`${label}: TypeScript parse diagnostics`);
   const transpiled = ts.transpileModule(source, {
@@ -69,10 +69,7 @@ function assertContract({ source, packageJson, ci }, label = "current source") {
     "const { error: selfIdCacheError }",
     "const { data: controlsRow, error: controlsError }",
     "const { data: latestSnap, error: latestSnapshotError }",
-    "const { data: recent, error: recentSnapshotError }",
     "const { error: cacheUpsertError }",
-    "const { error: partialSnapshotError }",
-    "const { error: completeSnapshotError }",
     "const { data: prevSnap, error: prevSnapshotError }",
     "const { error: changesInsertError }",
   ];
@@ -84,15 +81,28 @@ function assertContract({ source, packageJson, ci }, label = "current source") {
     "x_self_id_cache_write_failed'",
     "x_api_controls_read_failed'",
     "follower_snapshot_latest_read_failed'",
-    "follower_snapshot_daily_cap_read_failed'",
-    "follower_snapshot_daily_cap_result_invalid",
     "followers_cache_upsert_failed'",
-    "follower_snapshot_partial_update_failed'",
-    "follower_snapshot_complete_update_failed'",
     "follower_snapshot_baseline_read_failed'",
     "follower_changes_insert_failed'",
   ]) {
     if (!source.includes(marker)) fail(`${label}: missing persistence failure marker ${marker}`);
+  }
+  for (const marker of [
+    "await claimFollowerSnapshot(supabase, trigger, force, staleMinutes)",
+    "await renewFollowerSnapshot(supabase, claim)",
+    "await finishFollowerSnapshot(supabase, claim, 'partial',",
+    "await finishFollowerSnapshot(supabase, claim, 'complete',",
+    "await finishFollowerSnapshot(supabase, claim, 'failed',",
+  ]) {
+    if (!source.includes(marker)) fail(`${label}: missing fenced persistence call ${marker}`);
+  }
+  for (const marker of [
+    "if (error) throw new Error('follower_snapshot_claim_failed');",
+    "throw new Error('follower_snapshot_claim_invalid');",
+    "if (error || data !== true) throw new Error('follower_snapshot_claim_lost');",
+    "if (error || data !== true) throw new Error('follower_snapshot_finish_failed');",
+  ]) {
+    if (!claimHelper.includes(marker)) fail(`${label}: missing RPC result guard ${marker}`);
   }
   const helperEnd = source.indexOf("function followerHttpErrorCode(");
   const nonHelperSource = helperEnd > 0
@@ -116,6 +126,7 @@ function assertContract({ source, packageJson, ci }, label = "current source") {
 function sources() {
   return {
     source: fs.readFileSync(sourcePath, "utf8"),
+    claimHelper: fs.readFileSync(path.join(repoRoot, "supabase/functions/_shared/followerSnapshotClaim.ts"), "utf8"),
     packageJson: fs.readFileSync(packagePath, "utf8"),
     ci: fs.readFileSync(ciPath, "utf8"),
   };
@@ -134,6 +145,13 @@ function assertRejects(mutator, label) {
 assertContract(sources());
 
 if (process.env.MUTATION_TEST === "1") {
+  for (const status of ['partial', 'complete', 'failed']) {
+    assertRejects(input => ({ ...input, source: input.source.replace(`await finishFollowerSnapshot(supabase, claim, '${status}',`, `await ignoredFinish(supabase, claim, '${status}',`) }), `${status} fenced finish removal`);
+  }
+  for (const marker of ["if (error) throw new Error('follower_snapshot_claim_failed');", "throw new Error('follower_snapshot_claim_invalid');", "if (error || data !== true) throw new Error('follower_snapshot_claim_lost');", "if (error || data !== true) throw new Error('follower_snapshot_finish_failed');"]) {
+    assertRejects(input => ({ ...input, claimHelper: input.claimHelper.replace(marker, '') }), 'RPC result guard removal');
+  }
+
   assertRejects((input) => ({
     ...input,
     source: input.source.replace("supabase: FollowerSupabaseClient,", "supabase: any,"),
@@ -165,11 +183,7 @@ if (process.env.MUTATION_TEST === "1") {
     ["if (selfIdCacheError) throw new Error('x_self_id_cache_write_failed');", "self-id cache failure guard"],
     ["if (controlsError) throw new Error('x_api_controls_read_failed');", "controls read failure guard"],
     ["if (latestSnapshotError) throw new Error('follower_snapshot_latest_read_failed');", "latest snapshot read failure guard"],
-    ["if (recentSnapshotError) throw new Error('follower_snapshot_daily_cap_read_failed');", "daily cap read failure guard"],
-    ["if (!Array.isArray(recent)) throw new Error('follower_snapshot_daily_cap_result_invalid');", "daily cap result-shape guard"],
     ["if (cacheUpsertError) throw new Error('followers_cache_upsert_failed');", "cache persistence failure guard"],
-    ["if (partialSnapshotError) throw new Error('follower_snapshot_partial_update_failed');", "partial snapshot persistence failure guard"],
-    ["if (completeSnapshotError) throw new Error('follower_snapshot_complete_update_failed');", "complete snapshot persistence failure guard"],
     ["if (prevSnapshotError) throw new Error('follower_snapshot_baseline_read_failed');", "baseline read failure guard"],
     ["if (changesInsertError) throw new Error('follower_changes_insert_failed');", "change persistence failure guard"],
   ]) {

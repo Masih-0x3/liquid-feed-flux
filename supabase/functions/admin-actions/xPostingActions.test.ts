@@ -260,7 +260,7 @@ function fakeSupabase(config: FakeConfig = {}) {
     rpc(name: string, args?: Record<string, unknown>) {
       calls.push({ op: "rpc", name, args });
       return Promise.resolve({
-        data: config.rpcData ?? [],
+        data: name === "get_x_media_upload_usage" ? config.xDeliveryCounts?.media24h ?? 0 : config.rpcData ?? [],
         error: config.rpcError ?? null,
       });
     },
@@ -743,4 +743,12 @@ Deno.test("posting diagnostics gates on x gate score rather than learned final s
   assertEquals(item.score, 18.9);
   assertEquals(item.x_gate_score, 18.9);
   assertEquals(item.final_score, 16.9);
+});
+
+Deno.test("posting diagnostics reports reserved media items from the authoritative usage RPC", async () => {
+  const supabase = fakeSupabase({ xDeliveryCounts: { media24h: 7 } });
+  const result = await getXPostingDiagnostics(supabase, {}, { now: () => new Date("2026-01-01T00:00:00.000Z") });
+  assertEquals((result as { diagnostics: { quota: { media_24h: number } } }).diagnostics.quota.media_24h, 7);
+  assertEquals(supabase.calls.filter(call => call.op === "rpc" && call.name === "get_x_media_upload_usage").length, 1);
+  assertEquals(supabase.calls.some(call => call.op === "gt" && call.column === "media_count"), false);
 });
