@@ -390,7 +390,7 @@
     },
     {
       "path": "supabase/functions/x-followers-snapshot/index.ts",
-      "sha256": "8367d38caa644699d7e2f3e9abdaaf373539c2538e437f93a5a405d127607278"
+      "sha256": "6e50532475fe41c32610cb8e3eae8ee4e68dc270dd1e62312f9437d2b70a633e"
     },
     {
       "path": "supabase/functions/x-poster/index.ts",
@@ -9846,14 +9846,14 @@
           "path": "supabase/functions/admin-actions/index.ts,supabase/functions/admin-retry/index.ts,supabase/functions/db-cleanup/index.ts,supabase/functions/digest-compiler/index.ts,supabase/functions/media-cleanup/index.ts,supabase/functions/media-processor/index.ts,supabase/functions/webhooks-rssapp/index.ts,supabase/functions/worker/index.ts,supabase/functions/x-followers-snapshot/index.ts",
           "version_or_ref": "https://deno.land/std@0.168.0/http/server.ts",
           "integrity_or_source_hash": "e99c1bee8a3f6571ee4cdeb2966efad465b8f6fe62bec1bdb59c1f007cc4d155",
-          "source_file_sha256": "c4e96b7fc3fa125eb82bf1224a61f73dbd1a910a77109da82128c3d572fa0c6e"
+          "source_file_sha256": "a45977f2da03c28dd8f8080d3c73fffbd1c61c14d6371995b50d7a76f3a80b5a"
         },
         {
           "name": "https://esm.sh/@supabase/supabase-js@2.39.7",
           "path": "supabase/functions/admin-actions/index.ts,supabase/functions/admin-retry/index.ts,supabase/functions/db-cleanup/index.ts,supabase/functions/media-cleanup/index.ts,supabase/functions/media-processor/index.ts,supabase/functions/webhooks-rssapp/index.ts,supabase/functions/worker/index.ts,supabase/functions/x-followers-snapshot/index.ts",
           "version_or_ref": "https://esm.sh/@supabase/supabase-js@2.39.7",
           "integrity_or_source_hash": "5361671c958daa350e504d9975da64b2d6dc9e81390b985ccdafb2e3572e24e7",
-          "source_file_sha256": "19fef1ca04091f5a48c98bb049df787acf0a2203936ccc7e23c49230739f7b73"
+          "source_file_sha256": "593774562e2dcd16d795a65b4ce95afc2481dd1441863f0da622c5051532c8a5"
         },
         {
           "name": "https://esm.sh/@supabase/supabase-js@2.49.1",
