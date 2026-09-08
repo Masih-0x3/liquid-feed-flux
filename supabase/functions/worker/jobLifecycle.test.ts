@@ -326,7 +326,7 @@ Deno.test("handleJobFailure persists reconciliation-required metadata after comp
       attempts: 0,
       payload: { tweet_id: "tweet-completion-unknown" },
     }), new NonRetryableJobError(
-      "completion_persistence_unknown:job_state_write_failed:complete:jobs_update_failed",
+      "completion_persistence_unknown",
     ));
   });
 
@@ -338,6 +338,32 @@ Deno.test("handleJobFailure persists reconciliation-required metadata after comp
   assertEquals(update.status, "failed");
   assertEquals(resultMeta.reconciliation_required, true);
   assertEquals(resultMeta.non_retryable, true);
+  assertEquals(resultMeta.non_retryable_reason, "explicit_non_retryable");
+  assertEquals(resultMeta.error, "completion_persistence_unknown");
+});
+
+Deno.test("handleJobFailure leaves reconciliation_required false for unrelated non-retryable failures", async () => {
+  const supabase = createFakeSupabase();
+
+  await withMutedConsole(async () => {
+    await handleJobFailure(supabase, claimedJob({
+      id: "job-non-reconciliation",
+      locked_by: "worker-test",
+      type: "deliver",
+      attempts: 0,
+      payload: { tweet_id: "tweet-non-reconciliation" },
+    }), new NonRetryableJobError("video too large"));
+  });
+
+  const update = findCall(supabase.calls, "jobs", "update").payload as Record<
+    string,
+    unknown
+  >;
+  const resultMeta = update.result_meta as Record<string, unknown>;
+  assertEquals(update.status, "failed");
+  assertEquals(resultMeta.reconciliation_required, false);
+  assertEquals(resultMeta.non_retryable, true);
+  assertEquals(resultMeta.non_retryable_reason, "explicit_non_retryable");
 });
 
 Deno.test("handleJobFailure leaves the job state untouched when terminal dead-letter persistence fails", async () => {

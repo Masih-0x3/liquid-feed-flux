@@ -208,6 +208,143 @@ Deno.test("queue manual advance queues blocking enrichment before delivery", asy
   }]);
 });
 
+Deno.test("queue manual advance proceeds to delivery when enrichment auto-completed under auto-approval", async () => {
+  const supabase = fakeSupabase({
+    post: {
+      tweet_id: "t1",
+      text_translated: "translated",
+      is_truncated: false,
+      enrich_status: "completed",
+    },
+    enrichmentConfig: {
+      enabled: true,
+      pipeline_mode: "required_for_x",
+      require_approval: false,
+      review_mode: "auto_high_confidence",
+    },
+    pendingDeliveries: [],
+  });
+  const events: Array<Record<string, unknown>> = [];
+
+  const result = await queueManualAdvance(supabase, "t1", {
+    now: () => new Date("2026-01-06T00:00:00.000Z"),
+    insertAdminPipelineEvent: async (
+      _supabase,
+      tweetId,
+      step,
+      status,
+      meta,
+    ) => {
+      events.push({ tweetId, step, status, meta });
+    },
+  });
+
+  assertEquals(result, { queued: "deliver" });
+  assertEquals(
+    supabase.calls.some((call) =>
+      call.op === "upsert" && call.table === "jobs" &&
+      (call.value as Record<string, unknown>).type === "enrich"
+    ),
+    false,
+    "auto-completed enrichment must not be re-queued",
+  );
+  assertEquals(
+    (supabase.calls.find((call) =>
+      call.op === "upsert" && call.table === "jobs"
+    )?.value as Record<string, unknown>)?.type,
+    "deliver",
+  );
+  assertEquals(events, [{
+    tweetId: "t1",
+    step: "deliver",
+    status: "queued",
+    meta: { source: "manual_score" },
+  }]);
+});
+
+Deno.test("queue manual advance re-queues enrichment when completed but approval still required", async () => {
+  const supabase = fakeSupabase({
+    post: {
+      tweet_id: "t1",
+      text_translated: "translated",
+      is_truncated: false,
+      enrich_status: "completed",
+    },
+    enrichmentConfig: {
+      enabled: true,
+      pipeline_mode: "required_for_x",
+      require_approval: true,
+      review_mode: "manual_only",
+    },
+    pendingDeliveries: [],
+  });
+  const events: Array<Record<string, unknown>> = [];
+
+  const result = await queueManualAdvance(supabase, "t1", {
+    now: () => new Date("2026-01-06T00:00:00.000Z"),
+    insertAdminPipelineEvent: async (
+      _supabase,
+      tweetId,
+      step,
+      status,
+      meta,
+    ) => {
+      events.push({ tweetId, step, status, meta });
+    },
+  });
+
+  assertEquals(result, { queued: "enrich" });
+  assertEquals(
+    (supabase.calls.find((call) => call.op === "upsert" && call.table === "jobs")
+      ?.value as Record<string, unknown>)?.type,
+    "enrich",
+  );
+  assertEquals(
+    supabase.calls.some((call) =>
+      call.op === "upsert" && call.table === "jobs" &&
+      (call.value as Record<string, unknown>).type === "deliver"
+    ),
+    false,
+    "delivery must not be queued while enrichment is unsatisfied",
+  );
+  assertEquals(events, [{
+    tweetId: "t1",
+    step: "enrich",
+    status: "queued",
+    meta: { source: "manual_score" },
+  }]);
+});
+
+Deno.test("queue manual advance re-queues enrichment when completed but review_mode is not auto_high_confidence", async () => {
+  const supabase = fakeSupabase({
+    post: {
+      tweet_id: "t1",
+      text_translated: "translated",
+      is_truncated: false,
+      enrich_status: "completed",
+    },
+    enrichmentConfig: {
+      enabled: true,
+      pipeline_mode: "required_for_x",
+      require_approval: false,
+      review_mode: "shadow_review",
+    },
+    pendingDeliveries: [],
+  });
+
+  const result = await queueManualAdvance(supabase, "t1", {
+    now: () => new Date("2026-01-06T00:00:00.000Z"),
+    insertAdminPipelineEvent: async () => {},
+  });
+
+  assertEquals(result, { queued: "enrich" });
+  assertEquals(
+    (supabase.calls.find((call) => call.op === "upsert" && call.table === "jobs")
+      ?.value as Record<string, unknown>)?.type,
+    "enrich",
+  );
+});
+
 Deno.test("queue manual advance queues delivery and creates missing pending delivery", async () => {
   const supabase = fakeSupabase({
     post: {

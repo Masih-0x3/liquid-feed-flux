@@ -1,4 +1,5 @@
 import {
+  allowCompletedEnrichmentForPosting,
   doesEnrichmentBlockX,
   type EnrichmentConfig,
   normalizeEnrichmentConfig,
@@ -93,8 +94,12 @@ export async function queueManualAdvance(
   );
   if (
     doesEnrichmentBlockX(enrichCfg) &&
-    postRecord.enrich_status !== "approved" &&
-    postRecord.enrich_status !== "skipped"
+    !(
+      postRecord.enrich_status === "approved" ||
+      postRecord.enrich_status === "skipped" ||
+      (postRecord.enrich_status === "completed" &&
+        allowCompletedEnrichmentForPosting(enrichCfg))
+    )
   ) {
     const { error: enrichJobError } = await table(supabase, "jobs").upsert({
       type: "enrich",

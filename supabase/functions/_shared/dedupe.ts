@@ -512,6 +512,13 @@ export async function fetchObservedStoryEmbedding(params: {
   }
 }
 
+function duplicateGateOwnedReason(post: DuplicateGatePost): boolean {
+  const previousReason = typeof post.decision_reason === "string"
+    ? post.decision_reason
+    : "";
+  return previousReason.startsWith("duplicate_gate:");
+}
+
 export async function runDuplicateGate(
   // deno-lint-ignore no-explicit-any
   supabase: any,
@@ -563,6 +570,10 @@ export async function runDuplicateGate(
         dedupe_confidence: null,
         dedupe_reason: "too_little_text",
         dedupe_checked_at: nowIso,
+        dup_of_tweet_id: null,
+        ...(duplicateGateOwnedReason(post)
+          ? { decision_reason: null, delivery_decision: "deliver" }
+          : {}),
       });
       await insertDedupeEvent(supabase, post.tweet_id, "completed", {
         status: "unique",
@@ -588,6 +599,9 @@ export async function runDuplicateGate(
         dedupe_reason: result.reason,
         dedupe_checked_at: nowIso,
         dup_of_tweet_id: null,
+        ...(duplicateGateOwnedReason(post)
+          ? { decision_reason: null, delivery_decision: "deliver" }
+          : {}),
       });
       await insertDedupeEvent(supabase, post.tweet_id, "completed", {
         status: "unique",
@@ -1781,11 +1795,9 @@ async function persistDedupeResult(
     }
   } else {
     update.dup_of_tweet_id = null;
-    const previousReason = typeof post.decision_reason === "string"
-      ? post.decision_reason
-      : "";
-    if (previousReason.startsWith("duplicate_gate:")) {
+    if (duplicateGateOwnedReason(post)) {
       update.decision_reason = null;
+      update.delivery_decision = "deliver";
     }
   }
 

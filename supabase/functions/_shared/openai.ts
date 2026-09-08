@@ -209,10 +209,19 @@ async function callResponsesApi(p: OpenAICallParams): Promise<NormalizedOpenAIRe
         if (r.url) webSearchResults.push({ url: r.url, title: r.title ?? '', snippet: r.snippet ?? '' });
       }
     } else if (item.type === 'message') {
-      const msg = item as { content?: Array<{ type: string; text?: string }> };
+      const msg = item as { content?: Array<{ type: string; text?: string; annotations?: Array<{ type?: string; url?: string; title?: string }> }> };
       for (const c of msg.content ?? []) {
         if ((c.type === 'output_text' || c.type === 'text') && typeof c.text === 'string') {
           content += c.text;
+        }
+        // The Responses API emits cited URLs as `url_citation` annotations on
+        // `message.content[].annotations[]` (default behavior). The
+        // `web_search_call` output item only carries `id`/`action`/`status`
+        // unless `include` requests other sources, which we never set.
+        for (const a of c.annotations ?? []) {
+          if (a.type === 'url_citation' && a.url) {
+            webSearchResults.push({ url: a.url, title: a.title ?? '', snippet: '' });
+          }
         }
       }
     }

@@ -3633,6 +3633,7 @@ async function handleDeliverJob(
       );
     }
     if (error instanceof JobDeferred) throw error;
+    if (error instanceof DeliveryCutoverBlockedNoWrite) throw error;
     const e = workerBoundaryError(error, "deliver_failed");
     console.error(
       JSON.stringify({

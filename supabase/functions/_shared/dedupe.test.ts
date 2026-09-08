@@ -29,6 +29,38 @@ Deno.test("normalizeDuplicateGateConfig keeps legacy settings and fills new gate
   assertEquals(cfg.bypass_authors, ["trusted"]);
 });
 
+Deno.test("normalizeDuplicateGateConfig coerces non-string bypass_authors into candidate handles (validateSettingsValue rejects these upstream)", () => {
+  // The write validator (validateSettingsValue) now rejects every non-string
+  // entry before persistence. This test documents the defensive legacy path
+  // that motivated the fix: a malformed persisted value would stringify each
+  // entry, turning scalars/nested-arrays into syntactically valid handles
+  // that the bypass match path in runDuplicateGate trusts without question.
+  const cfg = normalizeDuplicateGateConfig({
+    enabled: true,
+    bypass_authors: [
+      "@Trusted",
+      ["nested"],
+      true,
+      null,
+      12345,
+      {},
+      undefined,
+      false,
+    ],
+  });
+
+  assertEquals(cfg.bypass_authors, [
+    "trusted",
+    "nested",
+    "true",
+    "null",
+    "12345",
+    "[object object]",
+    "undefined",
+    "false",
+  ]);
+});
+
 Deno.test("normalizeDuplicateGateConfig enforces a 48 hour story memory floor", () => {
   const cfg = normalizeDuplicateGateConfig({
     enabled: true,
@@ -644,6 +676,89 @@ Deno.test("runDuplicateGate treats OpenAI quota exhaustion as non-retryable", as
   const meta = failedEvent?.row.meta as Record<string, unknown>;
   assertEquals(meta.failure_phase, "embedding");
   assertEquals(meta.retryable, false);
+});
+
+Deno.test("runDuplicateGate restores delivery_decision on duplicate to unique re-evaluation (persistDedupeResult else-branch)", async () => {
+  const supabase = makeFakeSupabase({ candidates: [] });
+  const result = await runDuplicateGate(
+    supabase,
+    { ...basePost(), decision_reason: "duplicate_gate:semantic_ai:older" },
+    { enabled: true, action: "skip" },
+    { fetchEmbedding: async () => [0.1, 0.2, 0.3] },
+  );
+
+  assertEquals(result.status, "unique");
+  assertEquals(result.should_enqueue_translate, true);
+  const update = supabase.updates[0].update;
+  assertEquals(update.dedupe_status, "unique");
+  assertEquals(update.dup_of_tweet_id, null);
+  assertEquals(update.decision_reason, null);
+  assertEquals(update.delivery_decision, "deliver");
+});
+
+Deno.test("runDuplicateGate too_little_text resets stale dup_of_tweet_id, decision_reason, and delivery_decision", async () => {
+  const supabase = makeFakeSupabase();
+  const result = await runDuplicateGate(
+    supabase,
+    {
+      tweet_id: "newer",
+      text_original: "Hi",
+      decision_reason: "duplicate_gate:semantic_ai:older",
+    },
+    { enabled: true, action: "skip" },
+    { fetchEmbedding: async () => [0.1, 0.2, 0.3] },
+  );
+
+  assertEquals(result.status, "unique");
+  assertEquals(result.reason, "too_little_text");
+  assertEquals(result.should_enqueue_translate, true);
+  const update = supabase.updates[0].update;
+  assertEquals(update.dedupe_status, "unique");
+  assertEquals(update.dedupe_reason, "too_little_text");
+  assertEquals(update.dup_of_tweet_id, null);
+  assertEquals(update.decision_reason, null);
+  assertEquals(update.delivery_decision, "deliver");
+});
+
+Deno.test("runDuplicateGate bypass_authors resets stale delivery_decision and decision_reason", async () => {
+  const supabase = makeFakeSupabase();
+  const result = await runDuplicateGate(
+    supabase,
+    {
+      ...basePost(),
+      author_handle: "Trusted",
+      decision_reason: "duplicate_gate:semantic_ai:older",
+    },
+    { enabled: true, action: "skip", bypass_authors: ["Trusted"] },
+    { fetchEmbedding: async () => [0.1, 0.2, 0.3] },
+  );
+
+  assertEquals(result.status, "unique");
+  assertEquals(result.reason, "bypass_author:trusted");
+  assertEquals(result.should_enqueue_translate, true);
+  const update = supabase.updates[0].update;
+  assertEquals(update.dedupe_status, "unique");
+  assertEquals(update.dedupe_reason, "bypass_author:trusted");
+  assertEquals(update.dup_of_tweet_id, null);
+  assertEquals(update.decision_reason, null);
+  assertEquals(update.delivery_decision, "deliver");
+});
+
+Deno.test("runDuplicateGate does not clobber non-dedupe delivery_decision on unique re-evaluation (gated reset)", async () => {
+  const supabase = makeFakeSupabase({ candidates: [] });
+  const result = await runDuplicateGate(
+    supabase,
+    { ...basePost(), decision_reason: "below_threshold:4<14" },
+    { enabled: true, action: "skip" },
+    { fetchEmbedding: async () => [0.1, 0.2, 0.3] },
+  );
+
+  assertEquals(result.status, "unique");
+  const update = supabase.updates[0].update;
+  assertEquals(update.dedupe_status, "unique");
+  assertEquals(update.dup_of_tweet_id, null);
+  assertEquals(update.decision_reason, undefined);
+  assertEquals(update.delivery_decision, undefined);
 });
 
 function makeFakeSupabase(options: {

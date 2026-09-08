@@ -75,7 +75,9 @@ function createStorageSupabase(options: {
   };
 }
 
-function createSpacingSupabase(options: { count?: number; throws?: boolean }) {
+function createSpacingSupabase(
+  options: { count?: number; throws?: boolean; error?: boolean },
+) {
   const calls: Array<{ action: string; value?: unknown }> = [];
   return {
     calls,
@@ -97,6 +99,12 @@ function createSpacingSupabase(options: { count?: number; throws?: boolean }) {
         ilike(column: string, value: unknown) {
           calls.push({ action: `ilike:${column}`, value });
           if (options.throws) throw new Error("query_failed");
+          if (options.error) {
+            return Promise.resolve({
+              count: null,
+              error: { code: "PGRST_ERROR", message: "probe failed" },
+            });
+          }
           return Promise.resolve({ count: options.count ?? 0, error: null });
         },
       };
@@ -498,6 +506,10 @@ Deno.test("computeAdaptiveSpacing preserves current zero-or-fallback behavior", 
   );
   assertEquals(
     await computeAdaptiveSpacing(createSpacingSupabase({ throws: true })),
+    1500,
+  );
+  assertEquals(
+    await computeAdaptiveSpacing(createSpacingSupabase({ error: true })),
     1500,
   );
 });

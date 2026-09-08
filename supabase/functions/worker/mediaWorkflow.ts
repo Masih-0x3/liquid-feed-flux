@@ -148,14 +148,21 @@ export async function rmFetchFromVx(
       const type = String(m.type || "");
       const url = m.url as string | undefined;
       if (!url) continue;
+      const size = m.size && typeof m.size === "object" && !Array.isArray(m.size)
+        ? m.size as Record<string, unknown>
+        : {};
+      const width = typeof size.width === "number" ? size.width : undefined;
+      const height = typeof size.height === "number" ? size.height : undefined;
       if (type === "video" || type === "gif") {
         out.push({
           kind: type === "gif" ? "gif" : "video",
           url,
           duration_ms: m.duration_millis as number | undefined,
+          width,
+          height,
         });
       } else if (type === "image") {
-        out.push({ kind: "image", url: rmUpgradeImageUrl(url) });
+        out.push({ kind: "image", url: rmUpgradeImageUrl(url), width, height });
       }
     }
     const { accepted } = filterReviewedRemoteMediaItems(out);
