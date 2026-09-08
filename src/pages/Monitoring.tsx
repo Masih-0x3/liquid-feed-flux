@@ -1078,7 +1078,7 @@ export default function Monitoring() {
                   onChange={(e) => setManualScore(e.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Threshold is {deliverThreshold}. This score will {Number(manualScore) >= deliverThreshold ? 'pass' : 'skip'} if saved.
+                  Threshold is {deliverThreshold}. This score will {Number(manualScore) >= deliverThreshold && (!manualEntry.dup_of_tweet_id || manualOverrideDuplicate) ? 'pass' : 'skip'} if saved.
                 </p>
               </div>
               <div className="grid gap-2">
