@@ -65,13 +65,14 @@ export async function computeAdaptiveSpacing(
 ): Promise<number> {
   try {
     const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
-    const { count } = await supabase
+    const { count, error } = await supabase
       .from("pipeline_events")
       .select("id", { count: "exact", head: true })
       .eq("step", "deliver")
       .eq("status", "failed")
       .gte("started_at", twoMinutesAgo)
       .ilike("error", "%Too Many Requests%");
+    if (error) return 1500;
     if ((count ?? 0) === 0) return 800;
   } catch (_e) {
     // fallback
