@@ -505,3 +505,133 @@ Deno.test("clear duplicate clears post state, blocklists ordered pair, and recor
     relatedTweetId: "t1",
   });
 });
+
+Deno.test(
+  "run dedupe with translation disabled and enqueue_next runs the gate and skips the translate enqueue when the gate declines",
+  async () => {
+    const supabase = fakeSupabase({
+      runtimeControls: {
+        singleton_id: true,
+        environment: "production",
+        dedupe_enabled: true,
+        translation_enabled: false,
+        posting_mode: "enabled",
+        updated_at: "2026-06-29T00:00:00.000Z",
+        updated_by: null,
+      },
+      settings: { enabled: true },
+      post: {
+        tweet_id: "t1",
+        text_original: "A substantial post about the same story.",
+      },
+    });
+    let gateRan = false;
+
+    const result = await runDedupeAdminAction(
+      supabase,
+      { tweet_id: "t1", enqueue_next: true, force: true },
+      {
+        now: () => new Date("2026-01-01T00:00:00.000Z"),
+        runDuplicateGate: async () => {
+          gateRan = true;
+          return {
+            ok: true,
+            status: "duplicate",
+            method: "semantic_ai",
+            confidence: 0.95,
+            dup_of_tweet_id: "t0",
+            story_cluster_id: "c1",
+            similarity: 0.95,
+            reason: "matched",
+            new_facts: [],
+            should_enqueue_translate: false,
+            candidates: [],
+          };
+        },
+      },
+    );
+
+    assertEquals(gateRan, true);
+    assertEquals(result.ok, true);
+    if (!("tweet_id" in result) || !("config_enabled" in result)) {
+      throw new Error("expected dedupe result");
+    }
+    assertEquals(result.tweet_id, "t1");
+    assertEquals(result.config_enabled, true);
+    assertEquals(
+      supabase.calls.filter((call) =>
+        call.op === "update" && call.table === "posts"
+      ).length,
+      1,
+    );
+    assertEquals(
+      supabase.calls.some((call) =>
+        call.op === "upsert" && call.table === "jobs"
+      ),
+      false,
+    );
+  },
+);
+
+Deno.test(
+  "run dedupe with translation disabled and enqueue_next still enqueues a translate job when the gate requests one",
+  async () => {
+    const supabase = fakeSupabase({
+      runtimeControls: {
+        singleton_id: true,
+        environment: "production",
+        dedupe_enabled: true,
+        translation_enabled: false,
+        posting_mode: "enabled",
+        updated_at: "2026-06-29T00:00:00.000Z",
+        updated_by: null,
+      },
+      settings: { enabled: true },
+      post: {
+        tweet_id: "t1",
+        text_original: "A substantial post about the same story.",
+      },
+    });
+    let gateRan = false;
+
+    const result = await runDedupeAdminAction(
+      supabase,
+      { tweet_id: "t1", enqueue_next: true, force: true },
+      {
+        now: () => new Date("2026-01-01T00:00:00.000Z"),
+        runDuplicateGate: async () => {
+          gateRan = true;
+          return {
+            ok: true,
+            status: "unique",
+            method: "none",
+            confidence: null,
+            dup_of_tweet_id: null,
+            story_cluster_id: null,
+            similarity: null,
+            reason: "unique",
+            new_facts: [],
+            should_enqueue_translate: true,
+            candidates: [],
+          };
+        },
+      },
+    );
+
+    assertEquals(gateRan, true);
+    assertEquals(result.ok, true);
+    assertEquals(
+      supabase.calls.find((call) =>
+        call.op === "upsert" && call.table === "jobs"
+      )?.value,
+      {
+        type: "translate",
+        payload: { tweet_id: "t1" },
+        status: "pending",
+        priority: 10,
+        idempotency_key: "translate:dedupe-admin:t1",
+        next_run_at: "2026-01-01T00:00:00.000Z",
+      },
+    );
+  },
+);
