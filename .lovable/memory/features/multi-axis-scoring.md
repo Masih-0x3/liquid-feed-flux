@@ -15,6 +15,6 @@ type: feature
 - An `EditorialProfile` bundles `weights` (per-axis 0–5), `threshold` (0–20), `must_include_keywords` (+2 boost each, capped at 20), `must_exclude_keywords` (auto-skip), `required_tags_any` (auto-skip if no match), `blocked_tags` (auto-skip), `author_overrides` (`always_deliver`/`always_skip`).
 - Decision precedence (in `applyProfileDecision`, exported from worker): author_override → blocked_tags → required_tags_any → must_exclude_keywords → final_score = `computeFinalScore(axes, profile.weights)` + must_include boost → threshold gate.
 - Worker uses active profile when set; falls back to legacy `content_filter` (default_threshold + author_rules) otherwise. Both pre-translation gate (split_calls=true) and post-translation gate use the same helper.
-- UI: `EditorialProfilesCard` mounted above legacy `ContentFilterSettings` in the Filter tab. Profile CRUD (new/duplicate/delete/set-active) + name/threshold/axis sliders + 4 chip lists + editorial note.
-- Save flow: single button writes `editorial_profiles` then `active_profile_id` via `useSaveSettings`.
+- UI: in the Filter tab, `ScoringStudio` is the only writable scoring policy; `EditorialProfilesCard` and `ContentFilterSettings` are mounted below it as **read-only legacy snapshots** (profile name/axes/threshold/chip lists/editorial note still render, but all edits are disabled).
+- Save flow: `ScoringStudio` writes the canonical `scoring_policy` row via `useSaveSettings`. `editorial_profiles`, `active_profile_id`, and `content_filter` are read from the DB for backwards compatibility but are no longer written from the UI.
 - Types live in `src/hooks/useSettingsData.ts` (`EditorialProfile`, `ScoreAxisKey`, `SCORE_AXIS_KEYS`, `DEFAULT_AXIS_WEIGHTS`, `makeDefaultProfile`).
