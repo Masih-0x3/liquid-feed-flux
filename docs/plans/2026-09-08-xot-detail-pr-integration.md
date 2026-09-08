@@ -4,7 +4,7 @@
 
 Base: `7797b11c11b9805f701c9f77b5a752c5eece71d9`. Validated source candidate: `673582f272ad5842917a135ead490fe38dfe2209`.
 
-28 existing Detail PRs are integrated locally: 18 bug fixes, eight cleanups, and two documentation changes. Original PR head ancestry is preserved. No remote push, merge, or deployment has occurred. The aggregate must use a merge commit to preserve that ancestry.
+28 existing Detail PRs are integrated locally: 18 bug fixes, eight cleanups, and two documentation changes. Original PR head ancestry is preserved. At initial local validation, no remote push, merge, or deployment had occurred. The aggregate must use a merge commit to preserve that ancestry.
 
 ## Accepted PRs
 
@@ -75,3 +75,9 @@ Read-only Vercel project inspection confirmed that `main` is the production bran
 The user authorized merging suitable Detail fixes. On 2026-09-08, the user explicitly approved the accompanying production frontend deployment and any charges from existing hosted CI/review/Preview automation. Incremental hosted costs are not exposed by available evidence. No account configuration or safeguards were changed.
 
 Under that approval, publish the candidate for exact-head hosted checks, investigate failures without weakening gates, and merge only when applicable checks permit it. Revalidate remote heads and base before publishing.
+
+## Hosted integration outcome
+
+PR #115 merged as `aaad5aac9cfca33cad9fcfb04f06ff6353c3809e` on 2026-09-08. GitHub marked all 28 accepted Detail PRs merged; their heads are ancestors of main. The final PR head passed required Node 20 CI (run 34213597854). Production frontend deployment `dpl_9EvQVtacp158bjEYzbYYRN6G5CLv` reached READY at that merge SHA; the homepage and entry asset returned HTTP 200. Backend functions and migrations were not deployed.
+
+Late automated review identified overly broad runbook wording about the worker guard preceding all writes; the follow-up corrects that documentation. The manual-score fractional-input preview mismatch and permissive bypass-handle character validation also existed on the original base; those are separate follow-up issues, not regressions introduced by this integration. The bot ancestry concern was disproven by checking all 28 accepted heads against main.

@@ -133,9 +133,13 @@ are allowed and must be recorded separately from the immutable delivery cohort.
 Historical `deliver` jobs are immutable under the zero-write invariant: a
 `BEFORE UPDATE OR DELETE` trigger on `public.jobs` blocks any mutation of a
 historical deliver row, and `settle_delivery_cutover_blocked` is now a
-zero-DML no-op that returns `false`. The worker rejects historical lineage
-before any first write and stops without writing. `video_renders` are not
-blocked by that trigger and continue as above.
+zero-DML no-op that returns `false`. The SQL claim predicate excludes these
+rows, including historical deliver jobs with a missing `tweet_id`; the trigger
+prevents updates and deletes on `public.jobs`. The worker cutover guard protects
+the delivery path after claim, but does not precede every worker write: pipeline
+event recording and provider-start marking occur before `handleDeliverJob`
+checks the cutover. `video_renders` are not blocked by that trigger and continue
+as above.
 
 ## Rollback
 
