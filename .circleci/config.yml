@@ -1,0 +1,55 @@
+version: 2.1
+
+jobs:
+  lint-build:
+    machine:
+      image: ubuntu-2204:current
+    resource_class: medium
+    environment:
+      BASH_ENV: /tmp/xot-circleci-bash-env
+      RUNNER_TEMP: /tmp/xot-circleci-runner
+    steps:
+      - checkout
+      - run:
+          name: Select Node.js 24
+          command: |
+            set -euo pipefail
+            : > "$BASH_ENV"
+            printf '%s\n' 'export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"' >> "$BASH_ENV"
+            printf '%s\n' '[ -s "$NVM_DIR/nvm.sh" ] || { echo "CircleCI machine image must provide nvm" >&2; exit 1; }' >> "$BASH_ENV"
+            printf '%s\n' '. "$NVM_DIR/nvm.sh"' >> "$BASH_ENV"
+            . "$BASH_ENV"
+            nvm install --no-progress 24
+            nvm alias default 24
+            nvm use 24
+            test "$(node -p 'process.versions.node.split(".")[0]')" = 24
+            test "$(npm --version | cut -d. -f1)" = 11
+      - run:
+          name: Run reviewed checks through technical supply-chain evidence
+          command: node scripts/run-circleci-parity.mjs --stage=pre-technical
+      - store_artifacts:
+          path: /tmp/xot-circleci-runner/xot-supply-chain
+          destination: xot-supply-chain-pending
+      - run:
+          name: Run technical validation, tests, build, and owner disposition
+          command: node scripts/run-circleci-parity.mjs --stage=post-technical
+      - run:
+          name: Verify CircleCI parity contract
+          command: env -u XOT_SUPPLY_OWNER_POLICY_B64 node --test scripts/run-circleci-parity.test.mjs
+      - run:
+          name: Snapshot accepted supply-chain evidence
+          command: |
+            set -euo pipefail
+            accepted_dir="$RUNNER_TEMP/xot-supply-chain-accepted"
+            test ! -e "$accepted_dir"
+            test -f "$RUNNER_TEMP/xot-supply-chain/validation.json"
+            test "$(node -e 'const fs = require("fs"); const p = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write(p.status);' "$RUNNER_TEMP/xot-supply-chain/validation.json")" = passed_owner_accepted
+            cp -a "$RUNNER_TEMP/xot-supply-chain" "$accepted_dir"
+      - store_artifacts:
+          path: /tmp/xot-circleci-runner/xot-supply-chain-accepted
+          destination: xot-supply-chain-accepted
+
+workflows:
+  circleci-parity:
+    jobs:
+      - lint-build
