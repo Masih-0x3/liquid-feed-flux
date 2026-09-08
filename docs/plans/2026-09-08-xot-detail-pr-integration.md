@@ -72,6 +72,6 @@ Existing Detail PRs have failed Vercel statuses. The inspected #114 build failed
 
 Read-only Vercel project inspection confirmed that `main` is the production branch with automatic domain assignment. Merging the candidate therefore triggers a production frontend deployment. Backend Edge Functions and migrations are not deployed by this merge workflow.
 
-The user authorized merging suitable Detail fixes. Explicit approval is still required for the accompanying production frontend deployment and any paid execution from existing hosted CI/review/Preview automation, under the supplied AGENTS.md approval rules. Incremental hosted costs are not exposed by available evidence. No account configuration or safeguards were changed.
+The user authorized merging suitable Detail fixes. On 2026-09-08, the user explicitly approved the accompanying production frontend deployment and any charges from existing hosted CI/review/Preview automation. Incremental hosted costs are not exposed by available evidence. No account configuration or safeguards were changed.
 
-After approval, publish the candidate for exact-head hosted checks, investigate failures without weakening gates, and merge only when applicable checks permit it. Revalidate remote heads and base before publishing.
+Under that approval, publish the candidate for exact-head hosted checks, investigate failures without weakening gates, and merge only when applicable checks permit it. Revalidate remote heads and base before publishing.
