@@ -1,4 +1,5 @@
 import { readdir, readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 
 const migrationPath = new URL(
   "../supabase/migrations/20260825091418_v1_delivery_continuity_cutover.sql",
@@ -16,6 +17,7 @@ const effectiveRepairMigration = await readFile(
 const zeroWriteMigrationName = "20260830120000_enforce_historical_delivery_zero_write.sql";
 const pendingReceiptAdoptionMigrationName = "20260901150013_adopt_telegram_pending_delivery_receipts.sql";
 const preProviderReleaseMigrationName = "20260901170000_release_pre_provider_x_delivery_claim.sql";
+const feedbackRepairMigrationName = "20260907001640_video_render_feedback_qualified_columns.sql";
 const zeroWriteMigration = await readFile(
   new URL(`../supabase/migrations/${zeroWriteMigrationName}`, import.meta.url),
   "utf8",
@@ -245,10 +247,18 @@ if (!zeroWriteMigration.includes("CREATE TRIGGER trg_00_historical_delivery_job_
   !zeroWriteMigration.includes("delivery_cutover_blocked:historical_deliver_job_zero_write")) {
   throw new Error("historical delivery jobs do not have a first-write trigger fence");
 }
-if (migrationNames.at(-1) !== preProviderReleaseMigrationName ||
-  migrationNames.at(-2) !== pendingReceiptAdoptionMigrationName ||
-  migrationNames.at(-3) !== zeroWriteMigrationName) {
-  throw new Error("historical zero-write, Telegram receipt adoption, and pre-provider release successors are not the final active migrations");
+if (migrationNames.at(-1) !== feedbackRepairMigrationName ||
+  migrationNames.at(-2) !== preProviderReleaseMigrationName ||
+  migrationNames.at(-3) !== pendingReceiptAdoptionMigrationName ||
+  migrationNames.at(-4) !== zeroWriteMigrationName) {
+  throw new Error("historical zero-write, Telegram receipt adoption, pre-provider release, and feedback repair are not the exact final active migrations");
+}
+// Permit only the reviewed qualification-only RPC replacement after the delivery
+// successors. Any changed body or later migration still requires explicit review.
+const feedbackRepairSource = migrationSources.find(([name]) => name === feedbackRepairMigrationName)?.[1] ?? "";
+if (createHash("sha256").update(feedbackRepairSource).digest("hex") !==
+  "6a8dcb81934646a23dc7cf0f0e0dc19347594d945f1649eb94b1ffa8158218c8") {
+  throw new Error("feedback repair successor differs from the reviewed qualification-only body");
 }
 const guardedTelegramStart = effectiveRepairMigration.indexOf(
   "CREATE OR REPLACE FUNCTION public.claim_telegram_delivery(",

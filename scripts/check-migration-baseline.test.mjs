@@ -7,6 +7,7 @@ import test from "node:test";
 import "./currentReleaseBaseline.test.mjs";
 import "./currentReleaseSqlBoundary.test.mjs";
 import "./currentReleaseSchemaComparison.test.mjs";
+import "./check-v1-delivery-cutover.test.mjs";
 
 import {
   APPROVED_APPEND_ONLY_SUCCESSOR_MIGRATIONS,

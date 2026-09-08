@@ -173,3 +173,27 @@ to PR #77 for exact-commit CI. That requires explicit publishing approval and
 does not authorize merging or deploying. A real recovery drill separately needs
 an approved source/target and an established pre-start no-egress boundary; this
 schema-only replay cannot be presented as that drill.
+
+### September 8 publication and CI follow-up
+
+Published `47af33d1726fe4692ef14553e4f75a424f8a398b` to draft PR #77 with the
+branch-specific Vercel exclusion. Two subsequent Vercel deployment-list reads
+returned zero deployments since the push. GitHub CI run `34179154611` passed
+the hosted supply-chain technical stage but failed `check:v1-delivery-cutover`:
+its three-file migration-tail assumption rejected the new feedback successor.
+
+The follow-up checker retains the ordered delivery successors, requires the
+exact feedback successor and its reviewed SHA-256, and preserves every existing
+cutover assertion. Six subprocess fixture regressions cover the valid candidate,
+missing repair, unexpected later migration, missing historical fence, changed
+repair bytes and a trigger-drop addition. Red-first reproduction demonstrated
+the old checker rejected the valid candidate and accepted a missing repair.
+After the fix, all six pass, the real cutover check passes, and the combined
+migration/E10 suite passes 129 tests. Hosted acceptance of the follow-up commit
+still requires a new run.
+
+Semaphore reported a generic pipeline failure; its cause was not available from
+GitHub and the background browser was unavailable. CodeRabbit skipped the draft
+review. Macroscope skipped because its estimated review exceeded the existing
+per-review cost limit; no override, paid review, account setting change, merge,
+or deployment was requested.
