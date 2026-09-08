@@ -146,6 +146,17 @@ function assertContract({ worker, packageJson, ci }, label = "current source") {
   ) {
     fail(`${label}: JobDeferred must be preserved before generic error wrapping`);
   }
+  if (
+    !handlerCatch.includes("if (error instanceof DeliveryCutoverBlockedNoWrite) throw error;")
+  ) {
+    fail(`${label}: handler catch must preserve DeliveryCutoverBlockedNoWrite identity for the serve-level no-write branch`);
+  }
+  if (
+    handlerCatch.indexOf("if (error instanceof DeliveryCutoverBlockedNoWrite) throw error;") >
+      handlerCatch.indexOf('const e = workerBoundaryError(error, "deliver_failed");')
+  ) {
+    fail(`${label}: DeliveryCutoverBlockedNoWrite must be preserved before the class-destroying wrap`);
+  }
 
   const packageData = JSON.parse(packageJson);
   if (packageData.scripts?.["check:telegram-delivery-fail-closed"] !==
@@ -275,6 +286,19 @@ if (process.env.MUTATION_TEST === "1") {
       return `${source.worker.slice(0, start)}${handler}${source.worker.slice(end)}`;
     })(),
   }), "lost JobDeferred semantics mutant");
+  assertRejects((source) => ({
+    ...source,
+    worker: (() => {
+      const start = source.worker.indexOf("async function handleDeliverJob(");
+      const end = source.worker.indexOf("\n// ─── handleEnrichJob", start);
+      if (start < 0 || end < 0) return source.worker;
+      const handler = source.worker.slice(start, end).replace(
+        "if (error instanceof DeliveryCutoverBlockedNoWrite) throw error;",
+        "if (false) { throw error; }",
+      );
+      return `${source.worker.slice(0, start)}${handler}${source.worker.slice(end)}`;
+    })(),
+  }), "lost DeliveryCutoverBlockedNoWrite semantics mutant");
   assertRejects((source) => ({
     ...source,
     worker: source.worker.replaceAll(
