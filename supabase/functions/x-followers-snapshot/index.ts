@@ -281,15 +281,15 @@ serve(async (req) => {
     let pageToken: string | null = null;
     let pages = 0;
     let apiCalls = 0;
-    let halted: { reason: string; status?: number; error?: string } | null = null;
+    let halted: { reason: string } | null = null;
 
     // Page through followers. Cap at 100 pages (100k followers) as safety.
     while (pages < 100) {
-      const { users, nextToken, status, errorText } = await fetchUserPage(supabase, selfId, 'followers', pageToken, creds);
+      const { users, nextToken, status } = await fetchUserPage(supabase, selfId, 'followers', pageToken, creds);
       apiCalls += 1;
 
-      if (status === 429) { halted = { reason: 'rate_limited', status, error: errorText }; break; }
-      if (status !== 200) { halted = { reason: 'api_error', status, error: errorText }; break; }
+      if (status === 429) { halted = { reason: 'rate_limited' }; break; }
+      if (status !== 200) { halted = { reason: 'api_error' }; break; }
 
       pages += 1;
       for (const u of users) {
@@ -309,11 +309,11 @@ serve(async (req) => {
 
     if (!halted && includeFollowing) {
       while (followingPages < 100) {
-        const { users, nextToken, status, errorText } = await fetchUserPage(supabase, selfId, 'following', followingToken, creds);
+        const { users, nextToken, status } = await fetchUserPage(supabase, selfId, 'following', followingToken, creds);
         apiCalls += 1;
 
-        if (status === 429) { halted = { reason: 'rate_limited_following', status, error: errorText }; break; }
-        if (status !== 200) { halted = { reason: 'following_api_error', status, error: errorText }; break; }
+        if (status === 429) { halted = { reason: 'rate_limited_following' }; break; }
+        if (status !== 200) { halted = { reason: 'following_api_error' }; break; }
 
         followingPages += 1;
         for (const u of users) {
