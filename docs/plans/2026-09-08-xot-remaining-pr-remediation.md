@@ -44,7 +44,7 @@ The four migrations are append-only successors dated `20260908103000` through `2
 
 The 147 non-install CI commands were run against this candidate. Four first-pass failures identified outdated source-contract expectations or inventory hashes and the scoring exception-expression guard. The RPC contracts now check the new ownership/result boundaries; scoring exceptions use explicit failure handling. All eight affected rechecks passed after correction; the final rollup is 147/147 commands passing. Dependency audits, root/Edge lint, Edge type checks, strict TypeScript, build, migration-baseline tests, and the UI/renderer suites passed.
 
-Passing suites include **568 Edge tests**, **245 UI tests**, and **228 renderer tests**.
+Passing suites include **569 Edge tests**, **245 UI tests**, and **228 renderer tests**.
 
 Additional regression coverage:
 
@@ -55,7 +55,7 @@ Additional regression coverage:
 
 ## Release boundary
 
-The approved successor PR may merge and trigger the existing frontend deployment. Backend RPC behavior remains unverified live until the four migrations and corresponding Edge functions are deployed under separate production authorization. The changed UI remains compatible with the prior evaluation response. Original PR branches and comments are retained; superseded patches are closed with a link after the successor merges.
+The approved successor PR may merge and trigger the existing frontend deployment. Backend RPC behavior remains unverified live until the four migrations, corresponding Edge functions, and renderer are deployed under separate production authorization. The changed UI remains compatible with the prior evaluation response. Original PR branches and comments are retained; superseded patches are closed with a link after the successor merges.
 
 
 ## Hosted review follow-up
@@ -68,3 +68,8 @@ The suggestion to exempt retries from `max_candidate_age_minutes` was not adopte
 Further review verified that snapshot settings already accept fractional minutes; the new RPC now preserves that contract using seconds-based interval construction. Webhook receipts renew their still-owned live lease before each item, media replacement, and completion; expired/reclaimed leases remain rejected. Mixed image/video-placeholder replays preserve resolved video identities and put incoming images after retained video slots. Real SQL regressions cover these cases. The disposable runner also preserves the original replay error if cleanup fails, reporting both errors rather than masking the first.
 
 The request to prioritize all due retries ahead of newer eligible posts was not adopted. The existing newest-first editorial policy remains unchanged. The starvation regression concerns *ineligible* pending rows consuming `LIMIT`; eligible new posts and eligible retries intentionally compete under the same existing ordering.
+
+The fallback retry gate also checks the remaining claim token, provider-start marker, and X tweet ID before permitting a released pending row to proceed, matching the RPC candidate fences. Tests cover each remaining-evidence rejection.
+
+
+Download jobs are versioned by receipt claim generation and actual media row identities. Replacement rows can therefore enqueue after an earlier job completed, including when another receipt intervened. A terminal job with still-missing media cannot produce a false `download_queued` acknowledgement; the attempt fails and a new fenced receipt generation can schedule the work. SQL regressions verify completed-job replacement and terminal-job retry behavior.

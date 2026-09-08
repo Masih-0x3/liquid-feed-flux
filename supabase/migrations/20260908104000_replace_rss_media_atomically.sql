@@ -29,6 +29,8 @@ DECLARE
   v_item jsonb;
   v_index integer;
   v_needs_download boolean;
+  v_download_queued boolean := false;
+  v_download_key text;
   v_preserve_video boolean := false;
   v_media_offset integer := 0;
   v_video_count integer;
@@ -91,12 +93,24 @@ BEGIN
   SELECT EXISTS (SELECT 1 FROM public.media
     WHERE tweet_id = p_tweet_id AND (storage_path IS NULL OR downloaded_at IS NULL)) INTO v_needs_download;
   IF v_needs_download THEN
+    -- The same receipt may resume after another receipt replaced these rows.
+    -- Bind work to this claim generation and actual row identities, not just
+    -- the input URL set. MD5 is a compact version label, not an auth boundary.
+    SELECT 'download_media:rss:' || p_tweet_id || ':' || p_receipt_key || ':' || p_claim_generation::text || ':' ||
+      md5(string_agg(id::text || ':' || COALESCE(src_url_hash, ''), ',' ORDER BY ordering, id))
+      INTO v_download_key FROM public.media WHERE tweet_id = p_tweet_id;
     INSERT INTO public.jobs(type, payload, status, priority, idempotency_key, next_run_at)
     VALUES ('download_media', jsonb_build_object('tweet_id', p_tweet_id), 'pending', 12,
-      'download_media:rss:' || p_tweet_id || ':' || p_receipt_key, now())
+      v_download_key, now())
     ON CONFLICT (idempotency_key) DO NOTHING;
+    SELECT EXISTS (SELECT 1 FROM public.jobs WHERE idempotency_key = v_download_key
+      AND status IN ('pending', 'running')) INTO v_download_queued;
+    IF NOT v_download_queued AND EXISTS (SELECT 1 FROM public.media
+      WHERE tweet_id = p_tweet_id AND (storage_path IS NULL OR downloaded_at IS NULL)) THEN
+      RAISE EXCEPTION 'rss_webhook_media_download_job_terminal';
+    END IF;
   END IF;
-  RETURN jsonb_build_object('replaced', true, 'download_queued', v_needs_download);
+  RETURN jsonb_build_object('replaced', true, 'download_queued', v_download_queued);
 END;
 $$;
 REVOKE ALL ON FUNCTION public.replace_rss_post_media(text, jsonb, text, uuid, bigint, boolean) FROM public, anon, authenticated;

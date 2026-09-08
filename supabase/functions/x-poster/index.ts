@@ -1855,7 +1855,7 @@ Deno.serve(async (req) => {
 
     const { data: latestX, error: latestXError } = await sb
       .from('x_deliveries')
-      .select('status, last_error, skip_reason, x_tweet_id, claim_expires_at, claim_release_reason, next_retry_at')
+      .select('status, last_error, skip_reason, x_tweet_id, claim_expires_at, claim_release_reason, next_retry_at, claim_token, provider_started_at')
       .eq('post_id', tweetId)
       .order('created_at', { ascending: false })
       .limit(1)
@@ -1863,9 +1863,8 @@ Deno.serve(async (req) => {
     if (latestXError) {
       throw new Error('x_poster_latest_delivery_read_failed');
     }
-    const latestXRecord = latestX as { status?: string; x_tweet_id?: string | null; claim_expires_at?: string | null; claim_release_reason?: string | null; next_retry_at?: string | null } | null;
+    const latestXRecord = latestX as { status?: string; x_tweet_id?: string | null; claim_expires_at?: string | null; claim_release_reason?: string | null; next_retry_at?: string | null; claim_token?: string | null; provider_started_at?: string | null } | null;
     const latestStatus = latestXRecord?.status;
-    const latestReleaseReason = latestXRecord?.claim_release_reason ?? null;
 
     if (latestStatus === 'posted') {
       results.push({
@@ -1878,7 +1877,7 @@ Deno.serve(async (req) => {
       continue;
     }
 
-    if (shouldDeferActiveXDelivery(latestStatus, latestReleaseReason, latestXRecord?.next_retry_at)) {
+    if (shouldDeferActiveXDelivery(latestXRecord)) {
       const stale = latestStatus === 'posting' && latestXRecord?.claim_expires_at &&
         new Date(latestXRecord.claim_expires_at).getTime() < Date.now();
       results.push({

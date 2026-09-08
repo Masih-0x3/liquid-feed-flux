@@ -10,16 +10,24 @@
  * re-attempted without `force_retry = true` (see migration
  * `20260908105000_reclaim_pre_provider_x_deliveries.sql`).
  */
+export type XDeliveryReclaimState = {
+  status?: string | null;
+  claim_release_reason?: string | null;
+  next_retry_at?: string | null;
+  claim_token?: string | null;
+  provider_started_at?: string | null;
+  x_tweet_id?: string | null;
+};
+
 export function shouldDeferActiveXDelivery(
-  latestStatus: string | null | undefined,
-  claimReleaseReason: string | null | undefined,
-  nextRetryAt?: string | null,
+  latest: XDeliveryReclaimState | null | undefined,
   nowMs = Date.now(),
 ): boolean {
-  if (latestStatus !== "posting" && latestStatus !== "pending") return false;
-  if (latestStatus === "pending" && claimReleaseReason === "pre_provider_retry") {
-    if (nextRetryAt == null) return false;
-    const retryMs = Date.parse(nextRetryAt);
+  if (latest?.status !== "posting" && latest?.status !== "pending") return false;
+  if (latest.status === "pending" && latest.claim_release_reason === "pre_provider_retry") {
+    if (latest.claim_token != null || latest.provider_started_at != null || latest.x_tweet_id != null) return true;
+    if (latest.next_retry_at == null) return false;
+    const retryMs = Date.parse(latest.next_retry_at);
     return !Number.isFinite(retryMs) || retryMs > nowMs;
   }
   return true;

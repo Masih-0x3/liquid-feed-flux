@@ -44,10 +44,12 @@ BEGIN
     IF SQLERRM <> 'rss_webhook_media_invalid_item' THEN RAISE; END IF;
   END;
   PERFORM pg_temp.assert_true(EXISTS(SELECT 1 FROM public.media WHERE id=old_id), 'invalid replacement leaves old media');
+  UPDATE public.jobs SET status='completed' WHERE type='download_media' AND payload->>'tweet_id'='replay-media';
   media_set := jsonb_build_array(jsonb_build_object('kind','image','src_url','https://example.com/two.jpg','src_url_hash',repeat('b',64)));
   PERFORM public.replace_rss_post_media('replay-media', media_set, 'replay-receipt', '00000000-0000-0000-0000-000000008002', 1);
   SELECT id INTO new_id FROM public.media WHERE tweet_id='replay-media';
   PERFORM pg_temp.assert_true(new_id <> old_id, 'changed source rotates row identity');
+  PERFORM pg_temp.assert_true(EXISTS(SELECT 1 FROM public.jobs WHERE type='download_media' AND payload->>'tweet_id'='replay-media' AND status='pending'), 'changed media schedules work after the earlier job completed');
   PERFORM pg_temp.assert_true(NOT EXISTS(SELECT 1 FROM public.media WHERE id=old_id), 'old download cannot match new source');
   PERFORM public.replace_rss_post_media('replay-media', '[]', 'replay-receipt', '00000000-0000-0000-0000-000000008002', 1, true);
   PERFORM pg_temp.assert_true(EXISTS(SELECT 1 FROM public.media WHERE id=new_id), 'unresolved video preserves resolved media');
@@ -169,3 +171,26 @@ SELECT pg_temp.assert_true((SELECT claim_expires_at>now()+interval '4 minutes' F
 UPDATE public.webhook_receipts SET claim_expires_at=now()-interval '1 second' WHERE receipt_key='replay-receipt';
 SELECT pg_temp.assert_true(NOT public.renew_rss_webhook_receipt('replay-receipt','00000000-0000-0000-0000-000000008002',1), 'expired receipt cannot be resurrected');
 SELECT 'PASS webhook receipt renewal ownership and expiry';
+
+-- A terminal job is not a truthful queue receipt. Fail the attempt, then let
+-- the next fenced receipt generation enqueue the still-missing media once.
+DO $$
+DECLARE claim jsonb; media_set jsonb; replacement jsonb;
+BEGIN
+  media_set := jsonb_build_array(jsonb_build_object('kind','image','src_url','https://example.com/retry.jpg','src_url_hash',repeat('a',64)));
+  claim := public.reserve_webhook_receipt('replay-terminal-job','token','synthetic');
+  PERFORM public.replace_rss_post_media('replay-media',media_set,'replay-terminal-job',(claim->>'claim_token')::uuid,(claim->>'claim_generation')::bigint);
+  UPDATE public.jobs SET status='completed' WHERE idempotency_key LIKE 'download_media:rss:replay-media:replay-terminal-job:%';
+  BEGIN
+    PERFORM public.replace_rss_post_media('replay-media',media_set,'replay-terminal-job',(claim->>'claim_token')::uuid,(claim->>'claim_generation')::bigint);
+    RAISE EXCEPTION 'expected terminal job rejection';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM <> 'rss_webhook_media_download_job_terminal' THEN RAISE; END IF;
+  END;
+  PERFORM pg_temp.assert_true(public.fail_webhook_receipt('replay-terminal-job',(claim->>'claim_token')::uuid,(claim->>'claim_generation')::bigint,'synthetic_terminal_job'), 'failed materialization releases its receipt');
+  claim := public.reserve_webhook_receipt('replay-terminal-job','token','synthetic');
+  PERFORM pg_temp.assert_true((claim->>'reserved')::boolean AND (claim->>'claim_generation')::integer=2, 'next attempt has a new receipt generation');
+  replacement := public.replace_rss_post_media('replay-media',media_set,'replay-terminal-job',(claim->>'claim_token')::uuid,(claim->>'claim_generation')::bigint);
+  PERFORM pg_temp.assert_true((replacement->>'download_queued')::boolean, 'next receipt generation queues missing media after terminal work');
+END $$;
+SELECT 'PASS terminal download-job rejection and fenced retry scheduling';
