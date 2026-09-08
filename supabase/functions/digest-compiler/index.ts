@@ -81,7 +81,7 @@ function sanitizeDigestOpenAiResponse(
 
 function digestErrorCode(reason: unknown): string {
   const message = reason instanceof Error ? reason.message : String(reason ?? "");
-  if (message === "digest_openai_request_failed") return message;
+  if (message === "digest_openai_request_failed" || message === "digest_formatting_failed") return message;
   if (/^digest_openai_http_\d{3}$/.test(message)) return message;
   if (message.startsWith("digest_persistence_failed:skipped")) {
     return "digest_persistence_failed:skipped";
@@ -595,7 +595,23 @@ Guidelines:
       timeZone: "UTC",
     });
     const header = digestConfig.header_format.replace("{time}", timeStr);
-    const tweets = await buildThreadTweets(summary, header);
+    let tweets: string[];
+    try {
+      tweets = await buildThreadTweets(summary, header);
+    } catch {
+      if (!dryRun && checkpointRunStarted) {
+        const { data: failedRun, error: failError } = await sb.rpc("fail_digest_run", {
+          p_run_key: runKey,
+          p_claim_token: claimToken,
+          p_claim_generation: claimGeneration,
+          p_reason: "digest_formatting_failed",
+        });
+        if (failError || failedRun !== true) {
+          throw new Error("digest_checkpoint_failed:fail");
+        }
+      }
+      throw new Error("digest_formatting_failed");
+    }
 
     if (dryRun) {
       await finishDigestWorkflow("completed", {

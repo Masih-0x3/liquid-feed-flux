@@ -44,15 +44,22 @@ The four migrations are append-only successors dated `20260908103000` through `2
 
 The 147 non-install CI commands were run against this candidate. Four first-pass failures identified outdated source-contract expectations or inventory hashes and the scoring exception-expression guard. The RPC contracts now check the new ownership/result boundaries; scoring exceptions use explicit failure handling. All eight affected rechecks passed after correction; the final rollup is 147/147 commands passing. Dependency audits, root/Edge lint, Edge type checks, strict TypeScript, build, migration-baseline tests, and the UI/renderer suites passed.
 
-Passing suites include **567 Edge tests**, **245 UI tests**, and **228 renderer tests**.
+Passing suites include **568 Edge tests**, **245 UI tests**, and **228 renderer tests**.
 
 Additional regression coverage:
 
 - Isolated PostgreSQL replay applied all **140 migrations** and checked snapshot orphan/retry/finalization, simultaneous snapshot admission, RSS source identity and unchanged-download preservation, authoritative empty media, rollback on job insertion failure, due-only X retry selection before `LIMIT`, complete-batch quota rejection/exact cap/idempotency/refund, failed provider accounting, concurrent quota admission, and RPC role privileges.
-- The replay uses an already-cached pinned Supabase PostgreSQL image, a local Unix Docker endpoint, networking disabled, one CPU/768 MiB, no published ports or host mounts, and removes only its labeled disposable container and volumes. Both completed runs confirmed cleanup. No production database was contacted.
+- The replay uses an already-cached pinned Supabase PostgreSQL image, a local Unix Docker endpoint, networking disabled, one CPU/768 MiB, no published ports or host mounts, and removes only its labeled disposable container and volumes. All completed runs confirmed cleanup. No production database was contacted.
 - Reproduce the SQL checks with `node scripts/run-remaining-pr-sql-replay.mjs`; set `XOT_REPLAY_DOCKER_CONTEXT` to an existing local context if needed. The runner never pulls an image or modifies Docker configuration. This is local SQL evidence, separate from hosted CI or production migration acceptance.
 - Desktop (1440×1000) and mobile (390×844) headless browser checks used synthetic, intercepted API responses. Keyboard activation, mixed/all-failed summaries, visible request errors, wrapping, and focus were checked with no page exceptions. No scoring provider request was made. The task-created browser and local server were stopped.
 
 ## Release boundary
 
 The approved successor PR may merge and trigger the existing frontend deployment. Backend RPC behavior remains unverified live until the four migrations and corresponding Edge functions are deployed under separate production authorization. The changed UI remains compatible with the prior evaluation response. Original PR branches and comments are retained; superseded patches are closed with a link after the successor merges.
+
+
+## Hosted review follow-up
+
+PR #117's first revision passed required hosted CI. Review then identified two gaps repaired before merge: formatting rejections now call the fenced `fail_digest_run` RPC with a stable reason, and the latest-delivery gate loads/checks `next_retry_at` for fallback and forced candidate paths. Invalid retry timestamps fail closed. Additional tests cover future/exactly-due/past retry times and digest failure finalization; the latter retains the existing `ambiguous` no-provider-replay state after provider start while clearing the active lease.
+
+The suggestion to exempt retries from `max_candidate_age_minutes` was not adopted: freshness is an existing posting-policy gate, not a duplicate-prevention artifact. A released claim permits another attempt only while the post remains otherwise eligible. Relaxing that policy would broaden auto-posting behavior beyond this remediation.

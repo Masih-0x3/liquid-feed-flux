@@ -125,3 +125,12 @@ UPDATE public.x_deliveries SET provider_started_at=now(),status='failed',claim_s
 SELECT pg_temp.assert_true(NOT public.release_x_post_delivery_for_retry('00000000-0000-0000-0000-000000008020','00000000-0000-0000-0000-000000008021',1), 'post-provider refund denied');
 SELECT pg_temp.assert_true(public.get_x_media_upload_usage()=2, 'failed partially uploaded batch remains conservatively counted once');
 SELECT 'PASS ambiguous and failed provider attempts consume quota';
+
+-- A formatting failure after a provider call must close the owned lease while
+-- preserving the existing no-automatic-provider-replay policy.
+INSERT INTO public.digest_runs(run_key,input_fingerprint,period_start,period_end,delivery_key,state,claim_token,claim_generation,claim_expires_at,provider_started_at)
+VALUES ('replay-digest',repeat('d',64),now()-interval '1 hour',now(),'replay-digest-delivery','provider_started','00000000-0000-0000-0000-000000008051',1,now()+interval '1 hour',now());
+SELECT pg_temp.assert_true(NOT public.fail_digest_run('replay-digest',gen_random_uuid(),1,'digest_formatting_failed'), 'formatting failure cannot close another claim');
+SELECT pg_temp.assert_true(public.fail_digest_run('replay-digest','00000000-0000-0000-0000-000000008051',1,'digest_formatting_failed'), 'formatting failure closes owned claim');
+SELECT pg_temp.assert_true((SELECT state='ambiguous' AND claim_expires_at IS NULL AND last_error='digest_formatting_failed' FROM public.digest_runs WHERE run_key='replay-digest'), 'formatting failure releases lease without reopening provider replay');
+SELECT 'PASS digest formatting failure finalization and no provider replay';
