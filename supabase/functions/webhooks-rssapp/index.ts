@@ -806,29 +806,27 @@ serve(async (req) => {
 
         console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'post_upserted', truncated: isTruncated }));
 
-        // Insert media items
-        if (sendableMediaItems.length > 0) {
-          const mediaRows = await Promise.all(
-            sendableMediaItems.map(async (media, index) => ({
-              tweet_id: tweetId,
-              kind: media.type,
-              src_url: media.url,
-              src_url_hash: await hashUrl(media.url),
-              width: media.width,
-              height: media.height,
-              duration_ms: media.duration,
-              ordering: index
-            }))
-          );
-          const { error: mediaError } = await supabase
-            .from('media')
-            .upsert(mediaRows, { onConflict: 'tweet_id,ordering' });
-
-          if (mediaError) {
-            throw new RssWebhookPersistenceError('rss_webhook_media_upsert_failed');
-          }
-          console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'media_inserted', count: sendableMediaItems.length }));
+        const mediaRows = await Promise.all(sendableMediaItems.map(async (media) => ({
+          kind: media.type,
+          src_url: media.url,
+          src_url_hash: await hashUrl(media.url),
+          width: media.width ?? null,
+          height: media.height ?? null,
+          duration_ms: media.duration ?? null,
+        })));
+        const { data: mediaReplacement, error: mediaError } = await supabase.rpc('replace_rss_post_media', {
+          p_tweet_id: tweetId,
+          p_media: mediaRows,
+          p_receipt_key: receiptKey,
+          p_claim_token: receiptClaim.claim_token,
+          p_claim_generation: receiptClaim.claim_generation,
+          p_has_video_signal: hasVideoSignal,
+        });
+        if (mediaError || !isRecord(mediaReplacement) || mediaReplacement.replaced !== true ||
+          typeof mediaReplacement.download_queued !== 'boolean') {
+          throw new RssWebhookPersistenceError('rss_webhook_media_replace_failed');
         }
+        const mediaDownloadQueued = mediaReplacement.download_queued;
 
         // Enqueue duplicate detection first when enabled. The worker only
         // advances unique/related items to translation and filtering.
@@ -837,23 +835,8 @@ serve(async (req) => {
         dispatchTweetIds.add(tweetId);
         dispatchableCount++;
 
-        // Create media download job for tweets with media
-        if (sendableMediaItems.length > 0) {
-          const { error: downloadJobError } = await supabase
-            .from('jobs')
-            .upsert({
-              type: 'download_media',
-              payload: { tweet_id: tweetId },
-              status: 'pending',
-              priority: 12,
-              idempotency_key: `download_media:${tweetId}`,
-              next_run_at: new Date().toISOString()
-            }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
-
-          if (downloadJobError) {
-            throw new RssWebhookPersistenceError('rss_webhook_download_job_upsert_failed');
-          }
-          console.log(JSON.stringify({ function: 'webhooks-rssapp', action: 'media_download_job_created' }));
+        // The replacement RPC atomically enqueues missing media downloads.
+        if (mediaDownloadQueued) {
           dispatchJobTypes.add('download_media');
           dispatchTweetIds.add(tweetId);
           const { error: mediaEventError } = await supabase
@@ -883,7 +866,7 @@ serve(async (req) => {
               payload: { tweet_id: tweetId },
               status: 'pending',
               priority: 12,
-              idempotency_key: `resolve_media:${tweetId}`,
+              idempotency_key: `resolve_media:rss:${tweetId}:${receiptKey}`,
               next_run_at: new Date().toISOString()
             }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
 
@@ -911,7 +894,7 @@ serve(async (req) => {
         // auth_mode/timestamps never enter this outcome, only per-item job identity.
         const itemJobs: string[] = [];
         itemJobs.push(entryJobType);
-        if (sendableMediaItems.length > 0) itemJobs.push('download_media');
+        if (mediaDownloadQueued) itemJobs.push('download_media');
         if (hasVideoSignal) itemJobs.push('resolve_media');
         itemOutcomes[String(tweetId)] = { status: 'queued', jobs: [...new Set(itemJobs)].sort() };
 

@@ -67,6 +67,8 @@ import {
   X_POSTING_QUOTA_MAX,
   X_QUOTA_UNAVAILABLE,
 } from '../_shared/xQuotaAdmission.ts';
+import { shouldDeferActiveXDelivery } from '../_shared/xPostReclaimGate.ts';
+import { reserveXMediaUploads } from '../_shared/xMediaUploadQuota.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': Deno.env.get('ALLOWED_CORS_ORIGIN') ?? 'https://liquid-feed-flux.lovable.app',
@@ -1269,6 +1271,15 @@ async function handleManualVideoIntakePost(params: {
     throw error;
   }
 
+  const mediaReservation = await reserveXMediaUploads(params.sb, deliveryClaim, 1);
+  if (mediaReservation.reserved === false) {
+    await releaseManualPreProviderClaim(mediaReservation.reason);
+    return completeManualFailure(params.sb, {
+      intakeId: manualIntakeId, tweetId, status: 'blocked',
+      reason: mediaReservation.reason, startedAt, meta: { render_id: selectedRenderId },
+    });
+  }
+
   // Durable provider-start boundary: recorded BEFORE the first irreversible X
   // provider call. If the durable marker cannot be written, the provider is never
   // invoked (fail-closed). Once the provider may accept, a DB completion failure
@@ -1588,8 +1599,7 @@ Deno.serve(async (req) => {
     });
   }
 
-  // Quota check: derive posting/media windows from x_deliveries, not the legacy
-  // settings.x_api_usage arrays, which can drift from actual posted rows.
+  // Post history and durable media reservations provide the quota snapshot.
   const since1h = new Date(Date.now() - 60 * 60 * 1000).toISOString();
   const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const since30d = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
@@ -1604,7 +1614,7 @@ Deno.serve(async (req) => {
       sb.from('x_deliveries').select('*', { count: 'exact', head: true }).eq('status', 'posted').gte('created_at', since30d),
       sb.from('x_deliveries').select('*', { count: 'exact', head: true }).eq('status', 'posted').gte('created_at', since24h),
       sb.from('x_deliveries').select('*', { count: 'exact', head: true }).eq('status', 'posted').gte('created_at', since1h),
-      sb.from('x_deliveries').select('*', { count: 'exact', head: true }).eq('status', 'posted').gt('media_count', 0).gte('created_at', since24h),
+      sb.rpc('get_x_media_upload_usage'),
       sb.from('x_deliveries').select('created_at, posted_at').eq('status', 'posted').order('created_at', { ascending: false }).limit(1),
     ]) as unknown as Array<Record<string, unknown>>;
   } catch (_error) {
@@ -1628,7 +1638,7 @@ Deno.serve(async (req) => {
   const monthlyPosts = monthlyQuota.count;
   const posts24hDb = posts24hQuota.count;
   const posts1hDb = posts1hQuota.count;
-  const mediaUp24hDb = mediaUp24hQuota.count;
+  const mediaUp24hDb = mediaUp24hQuota.data;
   const lastPostRows = lastPostQuota.data;
   if (
     !Array.isArray(lastPostRows) ||
@@ -1698,7 +1708,7 @@ Deno.serve(async (req) => {
   const effectiveCutoff = [dedupeCutoff, freshnessCutoff, startFrom].filter((v): v is string => !!v).sort().at(-1) ?? freshnessCutoff;
   const maxPostsPerRun = Math.max(1, Math.min(20, Number(cfg.max_posts_per_run ?? 1) || 1));
 
-  const { data: existingRows, error: existingRowsError } = await sb.from('x_deliveries').select('post_id').in('status', ['posting', 'posted', 'pending']).gte('created_at', dedupeCutoff);
+  const { data: existingRows, error: existingRowsError } = await sb.from('x_deliveries').select('post_id').in('status', ['posting', 'posted']).gte('created_at', dedupeCutoff);
   if (existingRowsError) {
     throw new Error('x_poster_existing_delivery_read_failed');
   }
@@ -1845,7 +1855,7 @@ Deno.serve(async (req) => {
 
     const { data: latestX, error: latestXError } = await sb
       .from('x_deliveries')
-      .select('status, last_error, skip_reason, x_tweet_id, claim_expires_at')
+      .select('status, last_error, skip_reason, x_tweet_id, claim_expires_at, claim_release_reason')
       .eq('post_id', tweetId)
       .order('created_at', { ascending: false })
       .limit(1)
@@ -1853,8 +1863,9 @@ Deno.serve(async (req) => {
     if (latestXError) {
       throw new Error('x_poster_latest_delivery_read_failed');
     }
-    const latestXRecord = latestX as { status?: string; x_tweet_id?: string | null; claim_expires_at?: string | null } | null;
+    const latestXRecord = latestX as { status?: string; x_tweet_id?: string | null; claim_expires_at?: string | null; claim_release_reason?: string | null } | null;
     const latestStatus = latestXRecord?.status;
+    const latestReleaseReason = latestXRecord?.claim_release_reason ?? null;
 
     if (latestStatus === 'posted') {
       results.push({
@@ -1867,7 +1878,7 @@ Deno.serve(async (req) => {
       continue;
     }
 
-    if (latestStatus === 'posting' || latestStatus === 'pending') {
+    if (shouldDeferActiveXDelivery(latestStatus, latestReleaseReason)) {
       const stale = latestStatus === 'posting' && latestXRecord?.claim_expires_at &&
         new Date(latestXRecord.claim_expires_at).getTime() < Date.now();
       results.push({
@@ -2293,6 +2304,21 @@ Deno.serve(async (req) => {
       }
     }
 
+    if (!dryRun && sel.tier !== 'text' && deliveryClaim) {
+      const reservation = await reserveXMediaUploads(sb, deliveryClaim, preparedMediaUploads.length);
+      if (reservation.reserved === false) {
+        const released = await releaseXPostDeliveryForRetry(sb, {
+          deliveryId: deliveryClaim.deliveryId!, claimToken: deliveryClaim.claimToken!,
+          claimGeneration: deliveryClaim.claimGeneration, error: reservation.reason,
+          nextRetryAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(), mediaKind: sel.tier,
+        });
+        if (!released) throw new Error('x_media_quota_claim_release_failed');
+        results.push({ tweet_id: tweetId, status: 'deferred', reason: reservation.reason });
+        continue;
+      }
+      mediaUp24hCount = reservation.usage;
+    }
+
     // Durable provider-start boundary (batch, ALL tiers incl. text — SF2):
     // recorded immediately before the first irreversible X provider call (media
     // upload or tweet POST) for every non-dryRun delivery, text included. If the
@@ -2355,14 +2381,12 @@ Deno.serve(async (req) => {
           mediaBytes += prepared.bytes.length;
           mediaCount = 1;
           mediaKind = 'video';
-          mediaUp24hCount += 1;
         } else {
           for (const prepared of preparedMediaUploads) {
             const id = await uploadImage(prepared.bytes, prepared.mimeType || 'image/jpeg', ck, cs, at, ats, sb, tweetId);
             mediaIds.push(id);
             mediaBytes += prepared.bytes.length;
             mediaCount += 1;
-            mediaUp24hCount += 1;
           }
           mediaKind = 'image';
         }

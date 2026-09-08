@@ -115,13 +115,20 @@ function validate(source) {
     'rss_webhook_account_lookup_failed',
     'rss_webhook_account_create_failed',
     'rss_webhook_post_upsert_failed',
-    'rss_webhook_media_upsert_failed',
-    'rss_webhook_download_job_upsert_failed',
+    'rss_webhook_media_replace_failed',
     'rss_webhook_media_pipeline_event_failed',
     'rss_webhook_resolve_job_upsert_failed',
     'rss_webhook_resolve_pipeline_event_failed',
   ]) {
     assert.match(handler, new RegExp(`['\"]${code}['\"]`), `webhook must keep the ${code} failure receipt`);
+  }
+  assert.match(handler, /supabase\.rpc\('replace_rss_post_media'/, 'media and job must use atomic replacement RPC');
+  for (const guard of ['mediaError || !isRecord(mediaReplacement)', 'mediaReplacement.replaced !== true', "typeof mediaReplacement.download_queued !== 'boolean'"]) {
+    assert.ok(handler.includes(guard), `replacement result must be checked: ${guard}`);
+  }
+  const replacement = sliceFrom(handler, "supabase.rpc('replace_rss_post_media'", 'const mediaDownloadQueued');
+  for (const binding of ['p_receipt_key: receiptKey', 'p_claim_token: receiptClaim.claim_token', 'p_claim_generation: receiptClaim.claim_generation']) {
+    assert.ok(replacement.includes(binding), `replacement must retain receipt ownership: ${binding}`);
   }
   assert.match(handler, /catch \(itemError\) \{[\s\S]{0,900}throw persistenceError;/, 'an item persistence failure must escape the loop and prevent a success acknowledgement');
   assert.doesNotMatch(handler, /catch \(itemError\) \{[\s\S]{0,900}continue;/, 'an item persistence failure must not be converted into a partial success');
@@ -157,11 +164,14 @@ if (process.env.MUTATION_TEST === '1') {
   expectRejected('media persistence result', (source) => ({
     ...source,
     webhook: source.webhook.replace(
-      "throw new RssWebhookPersistenceError('rss_webhook_media_upsert_failed');",
+      "throw new RssWebhookPersistenceError('rss_webhook_media_replace_failed');",
       "console.warn('media write failed');",
     ),
   }));
-  expectRejected('truthful persistence status', (source) => ({
+  for (const binding of ['p_receipt_key: receiptKey', 'p_claim_token: receiptClaim.claim_token', 'p_claim_generation: receiptClaim.claim_generation']) {
+    expectRejected('replacement receipt binding', source => ({ ...source, webhook: source.webhook.replaceAll(binding, 'missing_binding: null') }));
+  }
+  expectRejected('truthful persistence status' , (source) => ({
     ...source,
     webhook: source.webhook.replace('status: 500,', 'status: 200,'),
   }));

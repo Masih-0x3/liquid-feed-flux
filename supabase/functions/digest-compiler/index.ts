@@ -14,6 +14,7 @@ import {
   type WorkflowRunStatus,
 } from "../_shared/observability.ts";
 import { captureEdgeException, initSentryEdge } from "../_shared/sentry.ts";
+import { buildThreadTweets } from "../_shared/digestThreadTweets.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": Deno.env.get("ALLOWED_CORS_ORIGIN") ?? "https://liquid-feed-flux.lovable.app",
@@ -191,25 +192,6 @@ async function sha256Hex(value: string): Promise<string> {
   return Array.from(new Uint8Array(digest))
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
-}
-
-function buildThreadTweets(summary: string, header: string): string[] {
-  const lines = summary.split("\n").map((line) => line.trim()).filter(Boolean);
-  if (lines.length === 0) return [];
-
-  const tweets: string[] = [];
-  let current = `${header}\n\n`;
-
-  for (const line of lines) {
-    if ((current + line + "\n").length > 270) {
-      tweets.push(current.trim());
-      current = "";
-    }
-    current += `${line}\n`;
-  }
-
-  if (current.trim()) tweets.push(current.trim());
-  return tweets;
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -613,7 +595,7 @@ Guidelines:
       timeZone: "UTC",
     });
     const header = digestConfig.header_format.replace("{time}", timeStr);
-    const tweets = buildThreadTweets(summary, header);
+    const tweets = await buildThreadTweets(summary, header);
 
     if (dryRun) {
       await finishDigestWorkflow("completed", {

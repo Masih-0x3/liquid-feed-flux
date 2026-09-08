@@ -156,8 +156,8 @@ function validateStructural(source) {
   assert.match(source.processor, /media_item_limit_exceeded/, 'over-limit candidates must be explicitly accounted for');
 
   const webhookGateIndex = indexOfOrFail(source.webhook, 'filterReviewedRemoteMediaItems(prefilteredMediaItems)', 'RSS media must pass reviewed-host validation');
-  const webhookUpsertIndex = indexOfOrFail(source.webhook, ".from('media')\n            .upsert(mediaRows", 'RSS media persistence must remain present');
-  assert.ok(webhookGateIndex < webhookUpsertIndex, 'RSS validation must happen before media persistence');
+  const webhookReplaceIndex = indexOfOrFail(source.webhook, "supabase.rpc('replace_rss_post_media'", 'RSS media persistence must remain present');
+  assert.ok(webhookGateIndex < webhookReplaceIndex, 'RSS validation must happen before media persistence');
   assert.match(source.webhook, /media_url_rejected_by_policy/, 'RSS rejection telemetry must be aggregate-only');
 
   assert.match(source.workflow, /fetchReviewedRemoteJson\(\s*"fxtwitter"/, 'fxtwitter must use the reviewed JSON boundary');
