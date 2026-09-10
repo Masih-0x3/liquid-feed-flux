@@ -30,7 +30,7 @@ test("cutover contract accepts the exact qualification-only feedback successor",
 
 for (const [name, mutate] of [
   ["missing repair", (dir) => rmSync(join(dir, repair))],
-  ["extra later migration", (dir) => writeFileSync(join(dir, "20260908000000_unreviewed.sql"), "SELECT 1;")],
+  ["extra later migration", (dir) => writeFileSync(join(dir, "20260912000000_unreviewed.sql"), "SELECT 1;")],
   ["missing zero-write fence", (dir) => rmSync(join(dir, "20260830120000_enforce_historical_delivery_zero_write.sql"))],
   ["changed repair body", (dir) => writeFileSync(join(dir, repair), readFileSync(join(dir, repair), "utf8") + "\nSELECT 1;\n")],
   ["cutover override in repair", (dir) => writeFileSync(join(dir, repair), readFileSync(join(dir, repair), "utf8") + "\nDROP TRIGGER trg_00_historical_delivery_job_zero_write ON public.jobs;\n")],

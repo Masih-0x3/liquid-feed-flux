@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, relative, resolve, dirname } from "node:path";
-import { assertCurrentReleaseMigrationInventory, CURRENT_RELEASE_INVENTORY_SHA256, CURRENT_RELEASE_HARNESS_PATHS } from "./currentReleaseSqlBoundary.mjs";
+import { assertCurrentReleaseMigrationInventory, CURRENT_RELEASE_INVENTORY_SHA256, CURRENT_RELEASE_MIGRATION_VERSION, CURRENT_RELEASE_HARNESS_PATHS } from "./currentReleaseSqlBoundary.mjs";
 import { buildSchemaPrivilegeFacts } from "./schema-privilege-evidence.mjs";
 import { E10_EXPECTED_IMAGE, E10_CONTEXT } from "./e10SqlBoundary.mjs";
 import { E7_EXPECTED_PG_META_IMAGE, E7_PG_META_COMMAND } from "./e7DisposableBoundary.mjs";
@@ -33,6 +33,13 @@ export function localInventory(root) {
       return { version: file.slice(0, 14), name: file.slice(15, -4), sha256: hash(body),
         sha256_without_terminal_lf: hash(body.at(-1) === 10 ? body.subarray(0, -1) : body) };
     });
+}
+
+// The current-release epoch ends at CURRENT_RELEASE_MIGRATION_VERSION. Later
+// append-only successors (e.g. the September 8 remaining-PR batch) belong to a
+// newer epoch and must not weaken drift detection inside this one.
+export function epochInventory(root) {
+  return localInventory(root).filter((entry) => entry.version <= CURRENT_RELEASE_MIGRATION_VERSION);
 }
 
 export function remoteInventory(payload) {
@@ -76,7 +83,7 @@ export function protectedInput(root, path) {
 export function buildCurrentReleaseBaseline({ root, remotePath, historicalPath, predecessorPath, gateChecks }) {
   const raw = protectedInput(root, remotePath);
   const payload = parseEvidenceJson(raw);
-  const local = localInventory(root);
+  const local = epochInventory(root);
   assertCurrentReleaseMigrationInventory(local);
   const remote = remoteInventory(payload);
   if (payload.project_ref !== CURRENT_PROJECT || payload.export_contract !== "xot-remote-migration-snapshot-v1"
@@ -205,7 +212,7 @@ export function validateCurrentReleaseBaseline({ root, baselinePath = CURRENT_RE
     if (reference?.path !== expected || !sha(reference?.sha256)
       || hash(readFileSync(insidePath(root, expected))) !== reference.sha256) errors.push(`current ${label} binding differs`);
   }
-  if (JSON.stringify(localInventory(root)) !== JSON.stringify(manifest.candidate.local_inventory)) errors.push("current on-disk migration inventory differs");
+  if (JSON.stringify(epochInventory(root)) !== JSON.stringify(manifest.candidate.local_inventory)) errors.push("current on-disk migration inventory differs");
   if (hash(readFileSync(resolve(root, "src/integrations/supabase/types.ts"))) !== manifest.candidate.checked_in_types_sha256) errors.push("current checked-in types differ");
   errors.push(...legacy.referencedEvidence(manifest, root));
   if (errors.length) throw new Error(`Current migration baseline validation failed:\n- ${errors.join("\n- ")}`);

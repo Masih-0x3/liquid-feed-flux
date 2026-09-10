@@ -7,6 +7,7 @@ import { E7_EXPECTED_PG_META_IMAGE, E7_PG_META_COMMAND } from "./e7DisposableBou
 import {
   assertCurrentReleaseMigrationInventory,
   CURRENT_RELEASE_INVENTORY_SHA256,
+  CURRENT_RELEASE_MIGRATION_VERSION,
   CURRENT_RELEASE_ASSERTION_ROWS,
   assertCurrentReleaseAssertionRows,
   buildCurrentReleaseSqlAssertions,
@@ -14,7 +15,8 @@ import {
   assertCurrentTypeHelperOwnership,
 } from "./currentReleaseSqlBoundary.mjs";
 
-const entries = await readMigrationInventory(fileURLToPath(new URL("../supabase/migrations", import.meta.url)));
+const entries = (await readMigrationInventory(fileURLToPath(new URL("../supabase/migrations", import.meta.url))))
+  .filter((entry) => entry.version <= CURRENT_RELEASE_MIGRATION_VERSION);
 
 test("current candidate pins all 137 source bodies without rewriting historical E10", () => {
   const actual = assertCurrentReleaseMigrationInventory(entries);
