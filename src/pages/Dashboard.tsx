@@ -136,6 +136,8 @@ function getOpsCtaLabel(opsStatus: { recommendedRoute: string }, pipelineCounts:
     return `Review ${plural(count || 1, 'failed job')}`;
   }
   if (opsStatus.recommendedRoute.includes('needs_attention')) return 'Review needs attention';
+  if (opsStatus.recommendedRoute.includes('x-automation')) return 'Open X settings';
+  if (opsStatus.recommendedRoute.startsWith('/settings')) return 'Open settings';
   return 'Open monitoring';
 }
 

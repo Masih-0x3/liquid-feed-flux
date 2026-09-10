@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { resolveWatermarkLayout } from "../src/ffmpeg.js";
 import {
   broadLowerMiddleWatermarkFallbackRegions,
   cornerPositionFallbackRegion,
@@ -26,6 +27,10 @@ import {
   tesseractArgs,
   visionFromWatermarkOnly,
 } from "../src/preflight.js";
+
+function overlaps(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
 
 test("parses soft subtitle streams from ffprobe output", () => {
   const streams = parseSubtitleStreams({
@@ -391,6 +396,47 @@ test("watermark-only protected source logos like AP are kept", () => {
   assert.equal(vision.renderDecision.action, "render");
   assert.equal(vision.overlays[0].action, "keep");
   assert.deepEqual(decideWatermarkOnlyBlock(watermarkOnly, plan), { blocked: false, reason: null });
+});
+
+test("watermark-only protected source logo box is preserved into vision overlays and keeps the badge off the protected region", () => {
+  const apBox = { x: 0.86, y: 0.03, w: 0.12, h: 0.05, valid: true };
+  const watermarkOnly = {
+    decision: "render_with_delogo",
+    confidence: 0.98,
+    reason: "A small AP logo watermark appears in the top-right corner",
+    removableWatermarks: [{
+      text: "AP",
+      type: "third_party_watermark",
+      confidence: 0.99,
+      safeToDelogo: true,
+      seenInFrames: [1, 2, 3],
+      reason: "Small news agency logo near original event/date background text",
+      box: apBox,
+    }],
+    mustKeep: [],
+  };
+
+  const normalized = normalizeWatermarkOnlyDecision(watermarkOnly);
+  const apMustKeep = normalized.mustKeep.find((item) => item.text === "AP" && item.type === "source_logo");
+  assert.equal(apMustKeep !== undefined, true);
+  assert.deepEqual(apMustKeep.box, apBox);
+
+  const vision = visionFromWatermarkOnly(watermarkOnly);
+  const apOverlay = vision.overlays.find((overlay) => overlay.action === "keep" && overlay.text === "AP");
+  assert.equal(apOverlay !== undefined, true);
+  assert.deepEqual(apOverlay.box, apBox);
+
+  const width = 1920;
+  const height = 1080;
+  const layout = resolveWatermarkLayout({
+    width,
+    height,
+    protectedRegions: [apOverlay.box],
+    hasSubtitleTrack: true,
+  });
+  assert.ok(layout.badge);
+  const apRegionPx = { x: apBox.x * width, y: apBox.y * height, w: apBox.w * width, h: apBox.h * height };
+  assert.equal(overlaps(layout.badge.region, apRegionPx), false);
 });
 
 test("watermark-only stock/repost marks misprotected as source context are promoted to delogo", () => {

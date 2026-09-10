@@ -287,7 +287,7 @@ export async function handleJobFailure(
     nonRetryableReason ?? "job_failed",
   );
   const reconciliationRequired = rawErrorMsg.startsWith(
-    "completion_persistence_unknown:",
+    "completion_persistence_unknown",
   );
 
   if (nonRetryable || attempts >= maxAttempts) {

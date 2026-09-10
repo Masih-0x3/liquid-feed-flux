@@ -1,4 +1,4 @@
-import type { MonitoringEntry, MonitoringFilter, PipelineEvent } from "@/api/monitoringData";
+import type { MonitoringEntry, PipelineEvent } from "@/api/monitoringData";
 
 export type ScoringV2Mode = "shadow" | "active";
 export type ScoringV2Decision = "deliver" | "skip";
@@ -31,12 +31,6 @@ export interface ScoringV2Snapshot {
   } | null;
   tags?: string[] | null;
 }
-
-export type ScoringV2MonitoringFilter = Extract<
-  MonitoringFilter,
-  "v2_would_post" | "v2_would_skip" | "v1_post_v2_skip" | "v1_skip_v2_post" | "v2_off_topic" | "v2_needs_review"
-  | "v2_regional_auto" | "global_pilot_review"
->;
 
 function stringValue(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
@@ -138,35 +132,6 @@ export function getScoringV2Snapshot(entry: MonitoringEntry, events: PipelineEve
     decision: decisionValue(entry.delivery_decision),
     review_status: entry.score_review_status,
   };
-}
-
-function policyRuleKind(snapshot: ScoringV2Snapshot): string | null {
-  return snapshot.policy_rule_applied ?? snapshot.policy_rule?.kind ?? null;
-}
-
-export function matchesScoringV2Filter(entry: MonitoringEntry, filter: ScoringV2MonitoringFilter): boolean {
-  const snapshot = getScoringV2Snapshot(entry);
-  if (!snapshot) return false;
-  const v1Decision = entry.delivery_decision;
-  const rule = policyRuleKind(snapshot);
-  switch (filter) {
-    case "v2_would_post":
-      return snapshot.decision === "deliver";
-    case "v2_would_skip":
-      return snapshot.decision === "skip";
-    case "v1_post_v2_skip":
-      return v1Decision === "deliver" && snapshot.decision === "skip";
-    case "v1_skip_v2_post":
-      return v1Decision === "skip" && snapshot.decision === "deliver";
-    case "v2_off_topic":
-      return snapshot.audience_class === "off_topic";
-    case "v2_needs_review":
-      return snapshot.review_status === "needs_review";
-    case "v2_regional_auto":
-      return rule === "regional_escalation_auto";
-    case "global_pilot_review":
-      return rule === "global_mega_event_review" || (snapshot.global_exception_class === "global_mega_event" && snapshot.review_status === "needs_review");
-  }
 }
 
 export function scoringV2DecisionLabel(decision?: string | null): string {

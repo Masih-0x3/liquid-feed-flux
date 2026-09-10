@@ -4,6 +4,7 @@ import { requireInternalAuth } from "../_shared/internalAuth.ts";
 import { recordXApiEvent } from "../_shared/xApiLedger.ts";
 import { isMyXEnabled, MY_X_DISABLED_RESPONSE } from "../_shared/myXControls.ts";
 import { captureEdgeException, initSentryEdge } from "../_shared/sentry.ts";
+import { claimFollowerSnapshot, renewFollowerSnapshot, finishFollowerSnapshot, type FollowerSnapshotClaim } from "../_shared/followerSnapshotClaim.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': Deno.env.get('ALLOWED_CORS_ORIGIN') ?? 'https://liquid-feed-flux.lovable.app',
@@ -100,7 +101,7 @@ async function getSelfId(supabase: FollowerSupabaseClient, creds: { ck: string; 
 
   const url = 'https://api.x.com/2/users/me';
   const auth = await oauthHeader('GET', url, {}, creds.ck, creds.cs, creds.at, creds.ats);
-  const resp = await fetch(url, { headers: { Authorization: auth } });
+  const resp = await fetch(url, { headers: { Authorization: auth }, signal: AbortSignal.timeout(30_000) });
   const text = await resp.text();
   await recordXApiEvent(supabase, {
     source: 'x-followers-snapshot',
@@ -149,7 +150,7 @@ async function fetchUserPage(supabase: unknown, userId: string, endpoint: 'follo
 
   const auth = await oauthHeader('GET', baseUrl, qp, creds.ck, creds.cs, creds.at, creds.ats);
   const url = `${baseUrl}?${Object.entries(qp).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&')}`;
-  const resp = await fetch(url, { headers: { Authorization: auth } });
+  const resp = await fetch(url, { headers: { Authorization: auth }, signal: AbortSignal.timeout(30_000) });
   const text = await resp.text();
   await recordXApiEvent(supabase, {
     source: 'x-followers-snapshot',
@@ -190,6 +191,13 @@ serve(async (req) => {
   const dryRun = body.dry_run === true;
   const includeFollowing = body.include_following !== false;
 
+  let claim: FollowerSnapshotClaim | null = null;
+  let snapshotFinished = false;
+  let pages = 0;
+  let followingPages = 0;
+  let apiCalls = 0;
+  const allIds: string[] = [];
+  const followingIds: string[] = [];
   try {
     const { data: controlsRow, error: controlsError } = await supabase.from('settings').select('value').eq('key', 'x_api_controls').maybeSingle();
     if (controlsError) throw new Error('x_api_controls_read_failed');
@@ -203,6 +211,7 @@ serve(async (req) => {
     const { data: latestSnap, error: latestSnapshotError } = await supabase
       .from('x_follower_snapshots')
       .select('id, taken_at, status, follower_count, following_count, api_calls_used')
+      .neq('status', 'failed')
       .order('taken_at', { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -229,35 +238,6 @@ serve(async (req) => {
       }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    if (trigger === 'manual' && latestIsFresh && !force) {
-      return new Response(JSON.stringify({
-        ok: true,
-        skipped: true,
-        reason: 'snapshot_recent',
-        latest_snapshot: latestSnap,
-        latest_age_minutes: Math.round((latestAgeMs ?? 0) / 60000),
-        stale_minutes: staleMinutes,
-        estimated_api_calls: estimatedCalls,
-      }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-    }
-
-    // Daily-cap guard for cron only
-    if (trigger === 'cron') {
-      const { data: recent, error: recentSnapshotError } = await supabase
-        .from('x_follower_snapshots')
-        .select('id, taken_at, status')
-        .gte('taken_at', new Date(Date.now() - 23 * 60 * 60 * 1000).toISOString())
-        .order('taken_at', { ascending: false })
-        .limit(1);
-      if (recentSnapshotError) throw new Error('follower_snapshot_daily_cap_read_failed');
-      if (!Array.isArray(recent)) throw new Error('follower_snapshot_daily_cap_result_invalid');
-      if (recent && recent.length > 0) {
-        return new Response(JSON.stringify({ skipped: true, reason: 'daily_cap', last_snapshot: recent[0] }), {
-          status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
-    }
-
     const creds = getCreds();
     if (!creds) {
       return new Response(JSON.stringify({ error: 'twitter_credentials_missing' }), {
@@ -265,31 +245,28 @@ serve(async (req) => {
       });
     }
 
+    const admission = await claimFollowerSnapshot(supabase, trigger, force, staleMinutes);
+    if (!admission.claim) {
+      return new Response(JSON.stringify({ ok: true, skipped: true, reason: admission.reason }), {
+        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    claim = admission.claim;
+    const snapshotId = claim.snapshotId;
     const selfId = await getSelfId(supabase, creds);
 
-    // Create snapshot row
-    const { data: snapRow, error: snapErr } = await supabase
-      .from('x_follower_snapshots')
-      .insert({ trigger, status: 'partial', follower_count: 0, follower_ids: [], following_ids: [], following_count: 0, pages_fetched: 0, api_calls_used: 0 })
-      .select()
-      .single();
-    if (snapErr || !snapRow) throw new Error('follower_snapshot_insert_failed');
-    const snapshotId = snapRow.id as string;
-
-    const allIds: string[] = [];
     const allUsers: FollowerUser[] = [];
     let pageToken: string | null = null;
-    let pages = 0;
-    let apiCalls = 0;
-    let halted: { reason: string; status?: number; error?: string } | null = null;
+    let halted: { reason: string } | null = null;
 
     // Page through followers. Cap at 100 pages (100k followers) as safety.
     while (pages < 100) {
-      const { users, nextToken, status, errorText } = await fetchUserPage(supabase, selfId, 'followers', pageToken, creds);
+      await renewFollowerSnapshot(supabase, claim);
       apiCalls += 1;
+      const { users, nextToken, status } = await fetchUserPage(supabase, selfId, 'followers', pageToken, creds);
 
-      if (status === 429) { halted = { reason: 'rate_limited', status, error: errorText }; break; }
-      if (status !== 200) { halted = { reason: 'api_error', status, error: errorText }; break; }
+      if (status === 429) { halted = { reason: 'rate_limited' }; break; }
+      if (status !== 200) { halted = { reason: 'api_error' }; break; }
 
       pages += 1;
       for (const u of users) {
@@ -302,18 +279,17 @@ serve(async (req) => {
     }
 
     // Fetch following list (people I follow)
-    const followingIds: string[] = [];
     const followingUsers: FollowerUser[] = [];
     let followingToken: string | null = null;
-    let followingPages = 0;
 
     if (!halted && includeFollowing) {
       while (followingPages < 100) {
-        const { users, nextToken, status, errorText } = await fetchUserPage(supabase, selfId, 'following', followingToken, creds);
+        await renewFollowerSnapshot(supabase, claim);
         apiCalls += 1;
+        const { users, nextToken, status } = await fetchUserPage(supabase, selfId, 'following', followingToken, creds);
 
-        if (status === 429) { halted = { reason: 'rate_limited_following', status, error: errorText }; break; }
-        if (status !== 200) { halted = { reason: 'following_api_error', status, error: errorText }; break; }
+        if (status === 429) { halted = { reason: 'rate_limited_following' }; break; }
+        if (status !== 200) { halted = { reason: 'following_api_error' }; break; }
 
         followingPages += 1;
         for (const u of users) {
@@ -339,6 +315,7 @@ serve(async (req) => {
         last_seen_at: nowIso,
       }));
       for (let i = 0; i < rows.length; i += 500) {
+        await renewFollowerSnapshot(supabase, claim);
         const chunk = rows.slice(i, i + 500);
         const { error: cacheUpsertError } = await supabase
           .from('x_followers_cache')
@@ -348,8 +325,7 @@ serve(async (req) => {
     }
 
     if (halted) {
-      const { error: partialSnapshotError } = await supabase.from('x_follower_snapshots').update({
-        status: 'partial',
+      await finishFollowerSnapshot(supabase, claim, 'partial', {
         follower_count: allIds.length,
         follower_ids: allIds,
         following_ids: followingIds,
@@ -358,8 +334,8 @@ serve(async (req) => {
         api_calls_used: apiCalls,
         next_token: pageToken ?? followingToken,
         error: safeFollowerErrorCode(halted.reason, 'follower_snapshot_partial'),
-      }).eq('id', snapshotId);
-      if (partialSnapshotError) throw new Error('follower_snapshot_partial_update_failed');
+      });
+      snapshotFinished = true;
 
       return new Response(JSON.stringify({
         snapshot_id: snapshotId, status: 'partial', halted: halted.reason, follower_count: allIds.length,
@@ -368,8 +344,7 @@ serve(async (req) => {
     }
 
     // Mark complete
-    const { error: completeSnapshotError } = await supabase.from('x_follower_snapshots').update({
-      status: 'complete',
+    await finishFollowerSnapshot(supabase, claim, 'complete', {
       follower_count: allIds.length,
       follower_ids: allIds,
       following_ids: followingIds,
@@ -377,8 +352,8 @@ serve(async (req) => {
       pages_fetched: pages + followingPages,
       api_calls_used: apiCalls,
       next_token: null,
-    }).eq('id', snapshotId);
-    if (completeSnapshotError) throw new Error('follower_snapshot_complete_update_failed');
+    });
+    snapshotFinished = true;
 
     // Diff against previous COMPLETE snapshot (excluding this one)
     const { data: prevSnap, error: prevSnapshotError } = await supabase
@@ -467,6 +442,17 @@ serve(async (req) => {
     const errorCode = safeFollowerErrorCode(e);
     const safeError = new Error(errorCode);
     console.error('x-followers-snapshot error', errorCode);
+    if (claim && !snapshotFinished) {
+      try {
+        await finishFollowerSnapshot(supabase, claim, 'failed', {
+          error: errorCode, pages_fetched: pages + followingPages, api_calls_used: apiCalls,
+          follower_ids: allIds, follower_count: allIds.length,
+          following_ids: followingIds, following_count: followingIds.length,
+        });
+      } catch {
+        console.error('x-followers-snapshot cleanup', 'follower_snapshot_finish_failed');
+      }
+    }
     await captureEdgeException(safeError, {
       functionName: "x-followers-snapshot",
       action: "error",

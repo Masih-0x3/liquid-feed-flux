@@ -632,22 +632,17 @@ export async function getXPostingDiagnostics(
       count: "exact",
       head: true,
     }).eq("status", "posted").gte("created_at", since30d),
-    table(supabase, "x_deliveries").select("id", {
-      count: "exact",
-      head: true,
-    }).eq("status", "posted").gt("media_count", 0).gte(
-      "created_at",
-      since24h,
-    ),
+    supabase.rpc("get_x_media_upload_usage"),
   ]);
-  if (posts1h.error || posts24h.error || posts30d.error || media24h.error) {
+  if (posts1h.error || posts24h.error || posts30d.error || media24h.error ||
+    typeof media24h.data !== "number" || !Number.isSafeInteger(media24h.data) || media24h.data < 0) {
     return { success: false, error: "x_diagnostics_quota_read_failed" };
   }
   const quotaSnapshot = {
     posts_1h: posts1h.count ?? 0,
     posts_24h: posts24h.count ?? 0,
     posts_30d: posts30d.count ?? 0,
-    media_24h: media24h.count ?? 0,
+    media_24h: media24h.data,
   };
   const quotaReason = xQuotaBlock(quotaSnapshot, xLimits);
 

@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { normalizeTesseractLang } from "./config.js";
 import { buildAudioExtractCommand, buildContactSheetCommand, buildFrameSampleCommand, buildOpenCvInpaintPreviewCommand, buildPreviewClipCommand, buildWatermarkInspectionSheetCommand, probeVideo, runCommand } from "./ffmpeg.js";
 import { analyzeRemovableWatermarks, cleanupTranscriptSegments, detectLanguageFromTranscription, translateSegments } from "./openai.js";
 import { decidePreflightBlock, decideWatermarkOnlyBlock, delogoRegionsFromWatermarkOnly, evaluateDelogoPlan, normalizeLanguage, normalizeWatermarkOnlyDecision, recoverDelogoRegions, runOptionalOcr, runVisualPreflight, scoreWatermarkSignals, selectDelogoRegions, selectTargetLanguage, subtitlePlacementFromVision, visionFromWatermarkOnly } from "./preflight.js";
@@ -244,6 +245,126 @@ async function renderPreviewWithoutSubtitles({ result, outDir, inputPath, probe,
   }, null, 2));
 }
 
+/**
+ * Runs the OCR + watermark/block preflight stage shared by `main()` and tests.
+ *
+ * Mirrors `renderer.js`'s `maybeRunVisionPreflight`: `runOptionalOcr` and the
+ * initial `scoreWatermarkSignals` recomputation run *outside* the vision gate so
+ * OCR-derived platform handles / corner text always feed the watermark score
+ * and the block decision, regardless of whether OpenAI vision preflight is on.
+ * OCR is a local tesseract operation (no API cost) and is fail-safe, so it is
+ * never gated by the vision flag. `runOcr` and `analyzeWatermarks` are
+ * dependency-injected so tests can exercise both branches deterministically.
+ */
+export async function runPreviewPreflightStage({
+  preflight,
+  probe,
+  contactSheetPath,
+  frameSpecs,
+  apiKey,
+  enableVisionPreflight,
+  tesseractLang,
+  options,
+  runOcr = runOptionalOcr,
+  analyzeWatermarks = analyzeRemovableWatermarks,
+}) {
+  const ocr = await runOcr(contactSheetPath, { tesseractLang });
+  const baseStableOverlayScore = preflight.overlayDetection?.stableOverlayScore ?? preflight.watermark?.score ?? 0;
+  const baseRepeatedCornerText = ocr.text ? [ocr.text] : preflight.watermark?.repeatedText ?? [];
+  const basePlatformMatches = ocr.matches ?? preflight.watermark?.platformMatches ?? [];
+  const watermark = scoreWatermarkSignals({
+    stableOverlayScore: baseStableOverlayScore,
+    repeatedCornerText: baseRepeatedCornerText,
+    platformMatches: basePlatformMatches,
+    vision: null,
+  });
+  const basePreflight = { ...preflight, ocr, watermark };
+
+  if (apiKey && enableVisionPreflight) {
+    let watermarkOnly = await analyzeWatermarks({
+      apiKey,
+      model: process.env.WATERMARK_VISION_MODEL || process.env.SUBTITLE_TRANSLATE_MODEL || "gpt-5.4-mini",
+      framePaths: frameSpecs.map((frame) => frame.path),
+      inspectionPaths: frameSpecs.map((frame) => frame.inspectionPath),
+      imageDetail: process.env.WATERMARK_VISION_IMAGE_DETAIL || "high",
+      temperature: Number(process.env.WATERMARK_VISION_TEMPERATURE ?? 0),
+      topP: process.env.WATERMARK_VISION_TOP_P ? Number(process.env.WATERMARK_VISION_TOP_P) : null,
+      maxOutputTokens: Number(process.env.WATERMARK_VISION_MAX_OUTPUT_TOKENS || 1200),
+    });
+    watermarkOnly = normalizeWatermarkOnlyDecision(watermarkOnly);
+    const vision = visionFromWatermarkOnly(watermarkOnly);
+    const watermarkWithVision = scoreWatermarkSignals({
+      stableOverlayScore: preflight.overlayDetection?.stableOverlayScore ?? preflight.watermark?.score ?? 0,
+      repeatedCornerText: ocr.text ? [ocr.text] : preflight.watermark?.repeatedText ?? [],
+      platformMatches: ocr.matches ?? preflight.watermark?.platformMatches ?? [],
+      vision,
+    });
+    const modelDelogoRegions = delogoRegionsFromWatermarkOnly(watermarkOnly, { width: probe.width, height: probe.height }, options);
+    const delogoRecovery = await recoverDelogoRegions({
+      framePaths: frameSpecs.map((frame) => frame.path),
+      vision,
+      dimensions: { width: probe.width, height: probe.height },
+      existingRegions: [],
+      allowVisualRecovery: process.env.ENABLE_WATERMARK_VISUAL_RECOVERY !== "0",
+    });
+    const requireLocalDelogoCoordinates = shouldRequireLocalDelogoCoordinates(watermarkOnly, vision);
+    const delogoRegions = selectDelogoRegions({
+      recoveredRegions: delogoRecovery.regions,
+      modelRegions: modelDelogoRegions,
+      requireLocalDelogoCoordinates,
+      options,
+    });
+    const delogoPlan = evaluateDelogoPlan(delogoRegions, { width: probe.width, height: probe.height }, {
+      ...options,
+      requireDelogoCoordinates: requireLocalDelogoCoordinates,
+    });
+    const subtitlePlacement = subtitlePlacementFromVision(vision, { width: probe.width, height: probe.height }, {
+      overlayDetection: preflight.overlayDetection,
+    });
+    const watermarkOnlyBlock = decideWatermarkOnlyBlock(watermarkOnly, delogoPlan);
+    return {
+      ...basePreflight,
+      watermarkOnly,
+      vision,
+      watermark: watermarkWithVision,
+      visionFrames: frameSpecs.map((frame) => ({ path: frame.path, seekSeconds: frame.seekSeconds })),
+      visionInspectionSheets: frameSpecs.map((frame) => ({ path: frame.inspectionPath, seekSeconds: frame.seekSeconds })),
+      modelDelogoRegions,
+      delogoRecovery,
+      delogoCoordinatePolicy: requireLocalDelogoCoordinates
+        ? delogoRecovery.regions.length > 0 ? "local_recovery" : delogoRegions.length > 0 ? "model_fallback" : "local_recovery_required"
+        : "none",
+      delogoRegions,
+      delogoPlan,
+      subtitlePlacement,
+      contactSheetGenerated: true,
+      block: watermarkOnlyBlock.blocked
+        ? watermarkOnlyBlock
+        : decidePreflightBlock({
+          watermark: watermarkWithVision,
+          vision,
+          delogoRegions,
+          delogoPlan,
+          hardSubtitles: preflight.hardSubtitles,
+          hasUsableSpeech: true,
+        }, options),
+    };
+  }
+
+  return {
+    ...basePreflight,
+    contactSheetGenerated: true,
+    block: decidePreflightBlock({
+      watermark,
+      vision: null,
+      delogoRegions: [],
+      delogoPlan: null,
+      hardSubtitles: preflight.hardSubtitles,
+      hasUsableSpeech: true,
+    }, options),
+  };
+}
+
 async function main() {
   const inputPath = process.argv[2];
   const outDir = process.argv[3] || join(process.cwd(), `video-preview-${Date.now()}`);
@@ -271,81 +392,16 @@ async function main() {
     tileHeight: Number(process.env.WATERMARK_INSPECTION_TILE_HEIGHT || 360),
   }), { label: `vision_inspection_${frame.seekSeconds}`, stage: "analysis" })));
   const apiKey = process.env.OPENAI_API_KEY || "";
-  let vision = null;
-  let watermarkOnly = null;
-  let ocr = null;
-  if (apiKey && process.env.ENABLE_OPENAI_VISION_PREFLIGHT !== "0") {
-    ocr = await runOptionalOcr(contactSheetPath);
-    watermarkOnly = await analyzeRemovableWatermarks({
-      apiKey,
-      model: process.env.WATERMARK_VISION_MODEL || process.env.SUBTITLE_TRANSLATE_MODEL || "gpt-5.4-mini",
-      framePaths: frameSpecs.map((frame) => frame.path),
-      inspectionPaths: frameSpecs.map((frame) => frame.inspectionPath),
-      imageDetail: process.env.WATERMARK_VISION_IMAGE_DETAIL || "high",
-      temperature: Number(process.env.WATERMARK_VISION_TEMPERATURE ?? 0),
-      topP: process.env.WATERMARK_VISION_TOP_P ? Number(process.env.WATERMARK_VISION_TOP_P) : null,
-      maxOutputTokens: Number(process.env.WATERMARK_VISION_MAX_OUTPUT_TOKENS || 1200),
-    });
-    watermarkOnly = normalizeWatermarkOnlyDecision(watermarkOnly);
-    vision = visionFromWatermarkOnly(watermarkOnly);
-    const watermark = scoreWatermarkSignals({
-      stableOverlayScore: preflight.overlayDetection?.stableOverlayScore ?? preflight.watermark?.score ?? 0,
-      repeatedCornerText: ocr.text ? [ocr.text] : preflight.watermark?.repeatedText ?? [],
-      platformMatches: ocr.matches ?? preflight.watermark?.platformMatches ?? [],
-      vision,
-    });
-    const modelDelogoRegions = delogoRegionsFromWatermarkOnly(watermarkOnly, { width: probe.width, height: probe.height }, previewPreflightOptions());
-    const delogoRecovery = await recoverDelogoRegions({
-      framePaths: frameSpecs.map((frame) => frame.path),
-      vision,
-      dimensions: { width: probe.width, height: probe.height },
-      existingRegions: [],
-      allowVisualRecovery: process.env.ENABLE_WATERMARK_VISUAL_RECOVERY !== "0",
-    });
-    const requireLocalDelogoCoordinates = shouldRequireLocalDelogoCoordinates(watermarkOnly, vision);
-    const delogoRegions = selectDelogoRegions({
-      recoveredRegions: delogoRecovery.regions,
-      modelRegions: modelDelogoRegions,
-      requireLocalDelogoCoordinates,
-      options: previewPreflightOptions(),
-    });
-    const delogoPlan = evaluateDelogoPlan(delogoRegions, { width: probe.width, height: probe.height }, {
-      ...previewPreflightOptions(),
-      requireDelogoCoordinates: requireLocalDelogoCoordinates,
-    });
-    const subtitlePlacement = subtitlePlacementFromVision(vision, { width: probe.width, height: probe.height }, {
-      overlayDetection: preflight.overlayDetection,
-    });
-    const watermarkOnlyBlock = decideWatermarkOnlyBlock(watermarkOnly, delogoPlan);
-    preflight = {
-      ...preflight,
-      ocr,
-      watermarkOnly,
-      vision,
-      watermark,
-      visionFrames: frameSpecs.map((frame) => ({ path: frame.path, seekSeconds: frame.seekSeconds })),
-      visionInspectionSheets: frameSpecs.map((frame) => ({ path: frame.inspectionPath, seekSeconds: frame.seekSeconds })),
-      modelDelogoRegions,
-      delogoRecovery,
-      delogoCoordinatePolicy: requireLocalDelogoCoordinates
-        ? delogoRecovery.regions.length > 0 ? "local_recovery" : delogoRegions.length > 0 ? "model_fallback" : "local_recovery_required"
-        : "none",
-      delogoRegions,
-      delogoPlan,
-      subtitlePlacement,
-      contactSheetGenerated: true,
-      block: watermarkOnlyBlock.blocked ? watermarkOnlyBlock : decidePreflightBlock({
-        watermark,
-        vision,
-        delogoRegions,
-        delogoPlan,
-        hardSubtitles: preflight.hardSubtitles,
-        hasUsableSpeech: true,
-      }, previewPreflightOptions()),
-    };
-  } else {
-    preflight = { ...preflight, contactSheetGenerated: true };
-  }
+  preflight = await runPreviewPreflightStage({
+    preflight,
+    probe,
+    contactSheetPath,
+    frameSpecs,
+    apiKey,
+    enableVisionPreflight: process.env.ENABLE_OPENAI_VISION_PREFLIGHT !== "0",
+    tesseractLang: normalizeTesseractLang(process.env.TESSERACT_LANG),
+    options: previewPreflightOptions(),
+  });
 
   const result = {
     input: inputPath,
@@ -561,7 +617,9 @@ async function main() {
   }, null, 2));
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.stack || error.message : String(error));
-  process.exit(1);
-});
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.stack || error.message : String(error));
+    process.exit(1);
+  });
+}

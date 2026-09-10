@@ -106,10 +106,12 @@ Deno.test("rmFetchFromVx parses extended media and upgrades image URLs", async (
           type: "gif",
           url: "https://video.twimg.com/ext_tw_video/abc/vid/720x1280/loop.mp4",
           duration_millis: 4200,
+          size: { width: 720, height: 1280 },
         },
         {
           type: "image",
           url: "https://pbs.twimg.com/media/vx.jpg?format=jpg&name=small",
+          size: { width: 1320, height: 981 },
         },
         { type: "unknown", url: "https://example.com/ignored" },
       ],
@@ -123,12 +125,108 @@ Deno.test("rmFetchFromVx parses extended media and upgrades image URLs", async (
       kind: "gif",
       url: "https://video.twimg.com/ext_tw_video/abc/vid/720x1280/loop.mp4",
       duration_ms: 4200,
+      width: 720,
+      height: 1280,
     },
     {
       kind: "image",
       url: "https://pbs.twimg.com/media/vx.jpg?format=jpg&name=orig",
+      width: 1320,
+      height: 981,
     },
   ]);
+});
+
+Deno.test("rmFetchFromVx tolerates missing or malformed size metadata", async () => {
+  const { fetchImpl } = fetchSequence([
+    response({
+      media_extended: [
+        {
+          type: "video",
+          url: "https://video.twimg.com/ext_tw_video/abc/vid/1280x720/clip.mp4",
+          duration_millis: 26200,
+        },
+        {
+          type: "image",
+          url: "https://pbs.twimg.com/media/no-size.jpg?format=jpg&name=small",
+          size: null,
+        },
+        {
+          type: "image",
+          url: "https://pbs.twimg.com/media/bad-size.jpg?format=jpg&name=small",
+          size: "1320x981",
+        },
+        {
+          type: "image",
+          url: "https://pbs.twimg.com/media/non-numeric.jpg?format=jpg&name=small",
+          size: { width: "1320", height: "981" },
+        },
+        { type: "unknown", url: "https://example.com/ignored" },
+      ],
+    }),
+  ]);
+
+  const rows = await rmFetchFromVx("source", "123", fetchImpl, publicDnsResolver);
+
+  assertEquals(rows, [
+    {
+      kind: "video",
+      url: "https://video.twimg.com/ext_tw_video/abc/vid/1280x720/clip.mp4",
+      duration_ms: 26200,
+      width: undefined,
+      height: undefined,
+    },
+    {
+      kind: "image",
+      url: "https://pbs.twimg.com/media/no-size.jpg?format=jpg&name=orig",
+      width: undefined,
+      height: undefined,
+    },
+    {
+      kind: "image",
+      url: "https://pbs.twimg.com/media/bad-size.jpg?format=jpg&name=orig",
+      width: undefined,
+      height: undefined,
+    },
+    {
+      kind: "image",
+      url: "https://pbs.twimg.com/media/non-numeric.jpg?format=jpg&name=orig",
+      width: undefined,
+      height: undefined,
+    },
+  ]);
+});
+
+Deno.test("rmFetchFromVx + buildResolvedMediaRows persists vx dimensions end-to-end", async () => {
+  const { fetchImpl } = fetchSequence([
+    response({
+      media_extended: [
+        {
+          type: "video",
+          url: "https://video.twimg.com/amplify_video/2052547918842728454/vid/avc1/1280x720/a.mp4",
+          duration_millis: 26200,
+          size: { width: 1280, height: 720 },
+        },
+        {
+          type: "image",
+          url: "https://pbs.twimg.com/media/HJ2FRflX0AAdufV.jpg",
+          size: { width: 1320, height: 981 },
+        },
+      ],
+    }),
+  ]);
+
+  const resolved = await rmFetchFromVx("source", "123", fetchImpl, publicDnsResolver);
+  assertEquals(resolved !== null, true);
+  const rows = await buildResolvedMediaRows("tweet-vx", resolved!);
+
+  assertEquals(rows.length, 2);
+  assertEquals(rows[0].width, 1280);
+  assertEquals(rows[0].height, 720);
+  assertEquals(rows[0].duration_ms, 26200);
+  assertEquals(rows[1].width, 1320);
+  assertEquals(rows[1].height, 981);
+  assertEquals(rows[1].duration_ms, null);
 });
 
 Deno.test("buildResolvedMediaRows clears stale storage metadata for resolved rows", async () => {

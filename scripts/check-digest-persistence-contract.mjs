@@ -69,6 +69,19 @@ function assertContract({ source, packageJson, ci }, label = "current source") {
     fail(`${label}: digest outer error boundary must be sanitized`);
   }
 
+  const formattingStart = source.indexOf('    let tweets: string[];');
+  const formattingEnd = source.indexOf('\n    if (dryRun)', formattingStart);
+  const formatting = source.slice(formattingStart, formattingEnd);
+  for (const marker of [
+    'try {', 'tweets = await buildThreadTweets(summary, header);', '} catch {',
+    'if (!dryRun && checkpointRunStarted)', 'await sb.rpc("fail_digest_run", {',
+    'p_run_key: runKey', 'p_claim_token: claimToken', 'p_claim_generation: claimGeneration',
+    'p_reason: "digest_formatting_failed"', 'if (failError || failedRun !== true)',
+    'throw new Error("digest_checkpoint_failed:fail")', 'throw new Error("digest_formatting_failed")',
+  ]) {
+    if (!formatting.includes(marker)) fail(`${label}: formatting failure must finalize its owned checkpoint: ${marker}`);
+  }
+
   const packageData = JSON.parse(packageJson);
   if (packageData.scripts?.["check:digest-persistence"] !==
     "node scripts/check-digest-persistence-contract.mjs") {
@@ -100,6 +113,8 @@ function assertRejects(mutator, label) {
 assertContract(sources());
 
 if (process.env.MUTATION_TEST === "1") {
+  assertRejects(input => ({ ...input, source: input.source.replace('p_reason: "digest_formatting_failed"', 'p_reason: "ignored"') }), 'formatting failure checkpoint removal');
+
   assertRejects((input) => ({
     ...input,
     source: input.source.replace(

@@ -943,22 +943,45 @@ export async function runScoringEval(
   let falsePositive = 0;
   let falseNegative = 0;
   let ambiguous = 0;
+  let failedCount = 0;
   for (const example of examples) {
     const calibrationExamples = examples
       .filter((candidate) => candidate.id !== example.id)
       .slice(0, 8) as unknown as ScoringPolicyCalibrationExample[];
-    const result = await runPolicy(
-      {
-        text: example.text_original as string,
-        author_handle: example.author_handle as string | null,
-        published_at: nowIso(deps),
-      },
-      policy,
-      { apiKey, ...model },
-      { profileId, calibrationExamples },
-    );
+    let result: Awaited<ReturnType<typeof runPolicy>> | null;
+    try {
+      result = await runPolicy(
+        {
+          text: example.text_original as string,
+          author_handle: example.author_handle as string | null,
+          published_at: nowIso(deps),
+        },
+        policy,
+        { apiKey, ...model },
+        { profileId, calibrationExamples },
+      );
+    } catch {
+      // Record the failed attempt below; never treat a provider exception as a prediction.
+      result = null;
+    }
     const expectedDecision = example.expected_decision as string;
     const expectedClass = example.expected_audience_class as string;
+    if (!result?.ok) {
+      failedCount += 1;
+      rows.push({
+        example_id: example.id,
+        expected_class: expectedClass,
+        expected_decision: expectedDecision,
+        audience_class: null,
+        decision: null,
+        score: null,
+        threshold: null,
+        ok: false,
+        failure: true,
+        error: "scoring_policy_failed",
+      });
+      continue;
+    }
     const classOk = result.audience_class === expectedClass;
     const decisionOk = expectedDecision === "review"
       ? result.review_status === "needs_review"
@@ -980,13 +1003,21 @@ export async function runScoringEval(
       score: result.final_score,
       threshold: result.threshold,
       ok: classOk && decisionOk,
+      failure: false,
+      error: null,
     });
   }
   const count = rows.length;
+  const evaluatedCount = count - failedCount;
   const summary = {
     profile_id: profileId,
-    accuracy: count > 0 ? Math.round((correct / count) * 1000) / 10 : null,
+    accuracy: evaluatedCount > 0
+      ? Math.round((correct / evaluatedCount) * 1000) / 10
+      : null,
     correct,
+    total_count: count,
+    evaluated_count: evaluatedCount,
+    failed_count: failedCount,
     false_positive_count: falsePositive,
     false_negative_count: falseNegative,
     ambiguous_count: ambiguous,

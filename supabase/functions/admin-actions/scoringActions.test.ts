@@ -553,8 +553,51 @@ Deno.test("runScoringEval records summary counts and inserted evaluation id", as
     profile_id: "iran-first",
     accuracy: 50,
     correct: 1,
+    total_count: 2,
+    evaluated_count: 2,
+    failed_count: 0,
     false_positive_count: 1,
     false_negative_count: 0,
     ambiguous_count: 0,
   });
+});
+
+Deno.test("scoring evaluation excludes failed predictions and thrown provider errors", async () => {
+  const supabase = fakeSupabase({ examples: [
+    { id: "valid", text_original: "Valid", expected_audience_class: "direct_focus", expected_decision: "deliver" },
+    { id: "failed", text_original: "Failed", expected_audience_class: "off_topic", expected_decision: "skip" },
+    { id: "thrown", text_original: "Thrown", expected_audience_class: "direct_focus", expected_decision: "deliver" },
+  ] });
+  const { deps } = fakeDeps();
+  deps.runScoringPolicy = async (input) => {
+    if (input.text === "Thrown") throw new Error("private provider response");
+    return input.text === "Failed"
+      ? scoringResult({ ok: false, audience_class: "off_topic", delivery_decision: "skip", review_status: "needs_review" })
+      : scoringResult();
+  };
+  const result = await runScoringEval(supabase, {}, deps);
+  assertEquals(result.summary, {
+    profile_id: "iran-first", accuracy: 100, correct: 1,
+    total_count: 3, evaluated_count: 1, failed_count: 2,
+    false_positive_count: 0, false_negative_count: 0, ambiguous_count: 0,
+  });
+  assertEquals(result.results?.slice(1).map((row) => [row.decision, row.score, row.failure, row.error]), [
+    [null, null, true, "scoring_policy_failed"], [null, null, true, "scoring_policy_failed"],
+  ]);
+  const saved = supabase.calls.find((call) => call.table === "scoring_evaluations" && call.op === "insert")?.value as Record<string, unknown>;
+  assertEquals(saved.example_count, 3);
+  assertEquals(saved.summary, result.summary);
+  assertEquals(saved.accuracy, 100);
+});
+
+Deno.test("scoring evaluation reports no accuracy when every call fails", async () => {
+  const supabase = fakeSupabase({ examples: [
+    { id: "a", text_original: "A", expected_audience_class: "off_topic", expected_decision: "skip" },
+  ] });
+  const { deps } = fakeDeps(scoringResult({ ok: false, audience_class: "off_topic", delivery_decision: "skip" }));
+  const result = await runScoringEval(supabase, {}, deps);
+  assertEquals(result.summary?.accuracy, null);
+  assertEquals(result.summary?.correct, 0);
+  assertEquals(result.summary?.evaluated_count, 0);
+  assertEquals(result.summary?.failed_count, 1);
 });

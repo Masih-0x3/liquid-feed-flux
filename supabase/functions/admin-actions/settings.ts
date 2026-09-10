@@ -558,6 +558,15 @@ export function validateSettingsValue(
       if ((v.bypass_authors as unknown[]).length > 100) {
         return "story_memory.bypass_authors must be ≤100";
       }
+      for (const a of v.bypass_authors as unknown[]) {
+        if (typeof a !== "string") {
+          return "story_memory.bypass_authors entries must be strings";
+        }
+        const norm = a.trim().replace(/^@/, "");
+        if (norm.length === 0 || norm.length > 15) {
+          return "story_memory.bypass_authors entries must be handles ≤15 chars";
+        }
+      }
       break;
     }
     case "scoring_policy": {

@@ -143,6 +143,8 @@ const internalEntrypoints = Object.freeze({
       '../_shared/xPostDeliveryClaim.ts',
       '../_shared/staleMediaRepair.ts',
       '../_shared/xQuotaAdmission.ts',
+      '../_shared/xPostReclaimGate.ts',
+      '../_shared/xMediaUploadQuota.ts',
       '../_shared/runtimeControls.ts',
       '../_shared/externalPostingGuard.ts',
       '../_shared/deliveryCutover.ts',
@@ -162,6 +164,7 @@ const internalEntrypoints = Object.freeze({
       '../_shared/xApiLedger.ts',
       '../_shared/myXControls.ts',
       '../_shared/sentry.ts',
+      '../_shared/followerSnapshotClaim.ts',
     ],
   },
   'digest-compiler': {
@@ -178,6 +181,7 @@ const internalEntrypoints = Object.freeze({
       '../_shared/openai.ts',
       '../_shared/observability.ts',
       '../_shared/sentry.ts',
+      '../_shared/digestThreadTweets.ts',
     ],
   },
 });

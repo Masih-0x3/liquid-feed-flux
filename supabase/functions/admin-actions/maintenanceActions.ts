@@ -327,10 +327,12 @@ export async function runFollowersSnapshotAdminAction(
     );
     const text = await resp.text();
     let parsed: unknown;
+    let parseFailed = false;
     try {
       parsed = JSON.parse(text);
     } catch {
       parsed = {};
+      parseFailed = true;
     }
     if (!resp.ok) {
       return {
@@ -341,7 +343,10 @@ export async function runFollowersSnapshotAdminAction(
         status: 502,
       };
     }
-    return { body: { ok: true, ...(parsed as Record<string, unknown>) } };
+    const isObjectBody = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed);
+    const upstreamBody = isObjectBody ? (parsed as Record<string, unknown>) : {};
+    const halted = typeof upstreamBody.halted === "string" || upstreamBody.status === "partial";
+    return { body: { ...upstreamBody, ok: !parseFailed && isObjectBody && !halted } };
   } catch {
     return { body: { ok: false, error: "followers_snapshot_request_failed" }, status: 502 };
   }

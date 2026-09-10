@@ -277,6 +277,231 @@ Deno.test("followers snapshot respects My X disable gate and posts enabled reque
   }]);
 });
 
+function enabledFollowersDeps(
+  responseBody: unknown,
+  status = 200,
+): {
+  deps: {
+    readEnv: (key: string) => string;
+    fetchImpl: typeof fetch;
+  };
+  requests: Array<Record<string, unknown>>;
+} {
+  const requests: Array<Record<string, unknown>> = [];
+  const fetchImpl =
+    (async (url: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: String(url), body: init?.body });
+      const text = typeof responseBody === "string"
+        ? responseBody
+        : JSON.stringify(responseBody);
+      return new Response(text, { status });
+    }) as typeof fetch;
+  return {
+    deps: {
+      readEnv: (key) =>
+        key === "SUPABASE_URL"
+          ? "https://example.supabase.co"
+          : key === "SUPABASE_SERVICE_ROLE_KEY"
+          ? "service"
+          : "",
+      fetchImpl,
+    },
+    requests,
+  };
+}
+
+Deno.test("followers snapshot relays upstream partial rate-limited 2xx as ok:false", async () => {
+  const supabase = fakeSupabase({ xApiControls: { my_x_enabled: true } });
+  const { deps, requests } = enabledFollowersDeps({
+    snapshot_id: "snap-1",
+    status: "partial",
+    halted: "rate_limited",
+    follower_count: 4200,
+    following_count: 0,
+    pages_fetched: 5,
+    api_calls_used: 6,
+  });
+
+  const result = await runFollowersSnapshotAdminAction(
+    supabase,
+    { force: true },
+    deps,
+  );
+
+  assertEquals(result.body, {
+    snapshot_id: "snap-1",
+    status: "partial",
+    halted: "rate_limited",
+    follower_count: 4200,
+    following_count: 0,
+    pages_fetched: 5,
+    api_calls_used: 6,
+    ok: false,
+  });
+  assertEquals(result.status, undefined);
+  assertEquals(requests, [{
+    url: "https://example.supabase.co/functions/v1/x-followers-snapshot",
+    body: JSON.stringify({
+      trigger: "manual",
+      force: true,
+      dry_run: false,
+      include_following: true,
+    }),
+  }]);
+});
+
+Deno.test("followers snapshot relays upstream following_api_error halt as ok:false", async () => {
+  const supabase = fakeSupabase({ xApiControls: { my_x_enabled: true } });
+  const { deps } = enabledFollowersDeps({
+    snapshot_id: "snap-2",
+    status: "partial",
+    halted: "following_api_error",
+    follower_count: 1000,
+    following_count: 200,
+    pages_fetched: 2,
+    api_calls_used: 3,
+  });
+
+  const result = await runFollowersSnapshotAdminAction(supabase, {}, deps);
+
+  assertEquals(result.body, {
+    snapshot_id: "snap-2",
+    status: "partial",
+    halted: "following_api_error",
+    follower_count: 1000,
+    following_count: 200,
+    pages_fetched: 2,
+    api_calls_used: 3,
+    ok: false,
+  });
+});
+
+Deno.test("followers snapshot relays complete success 2xx as ok:true", async () => {
+  const supabase = fakeSupabase({ xApiControls: { my_x_enabled: true } });
+  const { deps } = enabledFollowersDeps({
+    snapshot_id: "snap-3",
+    status: "complete",
+    trigger: "manual",
+    include_following: true,
+    follower_count: 5000,
+    following_count: 300,
+    pages_fetched: 6,
+    api_calls_used: 7,
+    unfollowed: 2,
+    followed: 5,
+    baseline: false,
+  });
+
+  const result = await runFollowersSnapshotAdminAction(supabase, {}, deps);
+
+  assertEquals(result.body, {
+    snapshot_id: "snap-3",
+    status: "complete",
+    trigger: "manual",
+    include_following: true,
+    follower_count: 5000,
+    following_count: 300,
+    pages_fetched: 6,
+    api_calls_used: 7,
+    unfollowed: 2,
+    followed: 5,
+    baseline: false,
+    ok: true,
+  });
+  assertEquals(result.status, undefined);
+});
+
+Deno.test("followers snapshot relays dry-run 2xx as ok:true", async () => {
+  const supabase = fakeSupabase({ xApiControls: { my_x_enabled: true } });
+  const { deps } = enabledFollowersDeps({
+    ok: true,
+    dry_run: true,
+    trigger: "manual",
+    include_following: true,
+    estimated_api_calls: 2,
+    latest_snapshot: null,
+    latest_age_minutes: null,
+    stale_minutes: 60,
+    would_skip_without_force: false,
+  });
+
+  const result = await runFollowersSnapshotAdminAction(
+    supabase,
+    { dry_run: true },
+    deps,
+  );
+
+  assertEquals(result.body, {
+    ok: true,
+    dry_run: true,
+    trigger: "manual",
+    include_following: true,
+    estimated_api_calls: 2,
+    latest_snapshot: null,
+    latest_age_minutes: null,
+    stale_minutes: 60,
+    would_skip_without_force: false,
+  });
+});
+
+Deno.test("followers snapshot relays snapshot_recent skip 2xx as ok:true", async () => {
+  const supabase = fakeSupabase({ xApiControls: { my_x_enabled: true } });
+  const { deps } = enabledFollowersDeps({
+    ok: true,
+    skipped: true,
+    reason: "snapshot_recent",
+    latest_snapshot: { id: "snap-prev", status: "complete" },
+    latest_age_minutes: 3,
+    stale_minutes: 60,
+    estimated_api_calls: 2,
+  });
+
+  const result = await runFollowersSnapshotAdminAction(supabase, {}, deps);
+
+  assertEquals(result.body, {
+    ok: true,
+    skipped: true,
+    reason: "snapshot_recent",
+    latest_snapshot: { id: "snap-prev", status: "complete" },
+    latest_age_minutes: 3,
+    stale_minutes: 60,
+    estimated_api_calls: 2,
+  });
+});
+
+Deno.test("followers snapshot fails closed ok:false on non-object 2xx body", async () => {
+  const supabase = fakeSupabase({ xApiControls: { my_x_enabled: true } });
+  const { deps } = enabledFollowersDeps(["not", "an", "object"]);
+
+  const result = await runFollowersSnapshotAdminAction(supabase, {}, deps);
+
+  assertEquals(result.body, { ok: false });
+});
+
+Deno.test("followers snapshot fails closed ok:false on unparseable 2xx body", async () => {
+  const supabase = fakeSupabase({ xApiControls: { my_x_enabled: true } });
+  const { deps } = enabledFollowersDeps("<<<not-json>>>");
+
+  const result = await runFollowersSnapshotAdminAction(supabase, {}, deps);
+
+  assertEquals(result.body, { ok: false });
+});
+
+Deno.test("followers snapshot relays upstream non-2xx as ok:false with bounded code", async () => {
+  const supabase = fakeSupabase({ xApiControls: { my_x_enabled: true } });
+  const { deps } = enabledFollowersDeps({
+    error: "x_followers_followers_http_429",
+  }, 429);
+
+  const result = await runFollowersSnapshotAdminAction(supabase, {}, deps);
+
+  assertEquals(result.body, {
+    ok: false,
+    error: "followers_snapshot_http_429",
+  });
+  assertEquals(result.status, 502);
+});
+
 Deno.test("reset learned biases persists empty bias maps", async () => {
   const supabase = fakeSupabase();
 

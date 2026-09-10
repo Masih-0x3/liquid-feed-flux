@@ -115,14 +115,27 @@ function validate(source) {
     'rss_webhook_account_lookup_failed',
     'rss_webhook_account_create_failed',
     'rss_webhook_post_upsert_failed',
-    'rss_webhook_media_upsert_failed',
-    'rss_webhook_download_job_upsert_failed',
+    'rss_webhook_media_replace_failed',
     'rss_webhook_media_pipeline_event_failed',
     'rss_webhook_resolve_job_upsert_failed',
     'rss_webhook_resolve_pipeline_event_failed',
   ]) {
     assert.match(handler, new RegExp(`['\"]${code}['\"]`), `webhook must keep the ${code} failure receipt`);
   }
+  assert.match(handler, /supabase\.rpc\('replace_rss_post_media'/, 'media and job must use atomic replacement RPC');
+  for (const guard of ['mediaError || !isRecord(mediaReplacement)', 'mediaReplacement.replaced !== true', "typeof mediaReplacement.download_queued !== 'boolean'"]) {
+    assert.ok(handler.includes(guard), `replacement result must be checked: ${guard}`);
+  }
+  const replacement = sliceFrom(handler, "supabase.rpc('replace_rss_post_media'", 'const mediaDownloadQueued');
+  for (const binding of ['p_receipt_key: receiptKey', 'p_claim_token: receiptClaim.claim_token', 'p_claim_generation: receiptClaim.claim_generation']) {
+    assert.ok(replacement.includes(binding), `replacement must retain receipt ownership: ${binding}`);
+  }
+  const renewal = sliceFrom(webhook, 'async function renewRssWebhookReceipt(', 'async function completeRssWebhookReceipt(');
+  assert.match(renewal, /supabase\.rpc\('renew_rss_webhook_receipt'/, 'receipt renewal must use the fenced RPC');
+  assert.ok(renewal.includes("if (error || data !== true) throw new RssWebhookPersistenceError('rss_webhook_receipt_renew_failed');"), 'lost receipt renewal must fail closed');
+  assert.match(handler, /for \(const item of items\) \{\s*try \{\s*await renewRssWebhookReceipt\(/, 'renew the owned receipt before each item');
+  assert.match(handler, /await renewRssWebhookReceipt\([^;]+;\s*const \{ data: mediaReplacement/, 'renew before the atomic media replacement');
+  assert.match(handler, /await renewRssWebhookReceipt\([^;]+;\s*await completeRssWebhookReceipt\(/, 'renew before final receipt completion');
   assert.match(handler, /catch \(itemError\) \{[\s\S]{0,900}throw persistenceError;/, 'an item persistence failure must escape the loop and prevent a success acknowledgement');
   assert.doesNotMatch(handler, /catch \(itemError\) \{[\s\S]{0,900}continue;/, 'an item persistence failure must not be converted into a partial success');
   assert.match(handler, /if \(isRssWebhookPayloadError\(error\)\) return webhookPayloadErrorResponse\(error\);/, 'malformed stable IDs must remain client errors rather than retryable persistence failures');
@@ -157,11 +170,16 @@ if (process.env.MUTATION_TEST === '1') {
   expectRejected('media persistence result', (source) => ({
     ...source,
     webhook: source.webhook.replace(
-      "throw new RssWebhookPersistenceError('rss_webhook_media_upsert_failed');",
+      "throw new RssWebhookPersistenceError('rss_webhook_media_replace_failed');",
       "console.warn('media write failed');",
     ),
   }));
-  expectRejected('truthful persistence status', (source) => ({
+  for (const binding of ['p_receipt_key: receiptKey', 'p_claim_token: receiptClaim.claim_token', 'p_claim_generation: receiptClaim.claim_generation']) {
+    expectRejected('replacement receipt binding', source => ({ ...source, webhook: source.webhook.replaceAll(binding, 'missing_binding: null') }));
+  }
+  expectRejected('receipt renewal removed', source => ({ ...source, webhook: source.webhook.replaceAll('await renewRssWebhookReceipt(', 'await ignoredRenewal(') }));
+  expectRejected('receipt renewal result ignored', source => ({ ...source, webhook: source.webhook.replace("if (error || data !== true) throw new RssWebhookPersistenceError('rss_webhook_receipt_renew_failed');", "// ignored") }));
+  expectRejected('truthful persistence status'  , (source) => ({
     ...source,
     webhook: source.webhook.replace('status: 500,', 'status: 200,'),
   }));

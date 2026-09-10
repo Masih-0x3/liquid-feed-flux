@@ -58,3 +58,18 @@ describe("ScoringStudio", () => {
     expect(screen.getAllByText(/Bitcoin milestone/).length).toBeGreaterThan(0);
   });
 });
+
+for (const { accuracy, correct, evaluated, failed, expected } of [
+  { accuracy: 100, correct: 1, evaluated: 1, failed: 2, expected: "Evaluation accuracy: 100% on 1/1 evaluated examples; 2 scoring failures excluded" },
+  { accuracy: null, correct: 0, evaluated: 0, failed: 3, expected: "Evaluation accuracy: n/a on 0/0 evaluated examples; 3 scoring failures excluded" },
+]) {
+  it(`shows the evaluated denominator for ${failed} failed scoring calls`, async () => {
+    vi.mocked(supabase.functions.invoke).mockResolvedValueOnce({
+      data: { ok: true, summary: { accuracy, correct, evaluated_count: evaluated, failed_count: failed }, results: [{}, {}, {}] },
+      error: null,
+    });
+    renderStudio();
+    fireEvent.click(screen.getByRole("button", { name: /run 10-case eval/i }));
+    await waitFor(() => expect(screen.getByText(expected)).toBeTruthy());
+  });
+}

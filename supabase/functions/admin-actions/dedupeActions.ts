@@ -135,8 +135,7 @@ export async function runDedupeAdminAction(
   } catch {
     return { ok: false, error: "runtime_controls_unavailable" };
   }
-  if (!runtimeControls.dedupe_enabled ||
-    (body.enqueue_next === true && !runtimeControls.translation_enabled)) {
+  if (!runtimeControls.dedupe_enabled) {
     return dedupePausedResponse(runtimeControls, {
       tweet_id: tweetId,
       count: 0,

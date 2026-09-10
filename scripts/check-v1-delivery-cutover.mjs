@@ -247,19 +247,24 @@ if (!zeroWriteMigration.includes("CREATE TRIGGER trg_00_historical_delivery_job_
   !zeroWriteMigration.includes("delivery_cutover_blocked:historical_deliver_job_zero_write")) {
   throw new Error("historical delivery jobs do not have a first-write trigger fence");
 }
-if (migrationNames.at(-1) !== feedbackRepairMigrationName ||
-  migrationNames.at(-2) !== preProviderReleaseMigrationName ||
-  migrationNames.at(-3) !== pendingReceiptAdoptionMigrationName ||
-  migrationNames.at(-4) !== zeroWriteMigrationName) {
-  throw new Error("historical zero-write, Telegram receipt adoption, pre-provider release, and feedback repair are not the exact final active migrations");
+const expectedTail = [zeroWriteMigrationName, pendingReceiptAdoptionMigrationName, preProviderReleaseMigrationName,
+  "20260907001640_video_render_feedback_qualified_columns.sql",
+  "20260908103000_follower_snapshot_claims.sql",
+  "20260908104000_replace_rss_media_atomically.sql",
+  "20260908105000_reclaim_pre_provider_x_deliveries.sql",
+  "20260908110000_reserve_x_media_upload_quota.sql",
+];
+if (JSON.stringify(migrationNames.slice(-expectedTail.length)) !== JSON.stringify(expectedTail)) {
+  throw new Error("reviewed delivery, feedback repair, and remaining-PR successors are not the final active migrations");
 }
-// Permit only the reviewed qualification-only RPC replacement after the delivery
-// successors. Any changed body or later migration still requires explicit review.
+// Permit only the reviewed qualification-only RPC replacement for the feedback
+// repair. Any changed body still requires explicit review.
 const feedbackRepairSource = migrationSources.find(([name]) => name === feedbackRepairMigrationName)?.[1] ?? "";
 if (createHash("sha256").update(feedbackRepairSource).digest("hex") !==
   "6a8dcb81934646a23dc7cf0f0e0dc19347594d945f1649eb94b1ffa8158218c8") {
   throw new Error("feedback repair successor differs from the reviewed qualification-only body");
 }
+
 const guardedTelegramStart = effectiveRepairMigration.indexOf(
   "CREATE OR REPLACE FUNCTION public.claim_telegram_delivery(",
 );

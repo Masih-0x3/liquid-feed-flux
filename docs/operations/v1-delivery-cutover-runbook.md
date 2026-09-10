@@ -130,18 +130,24 @@ Historical `video_renders` are different: queued or expired-running renders
 may move through running, completed, failed, or blocked and may update
 attempts, error/output, and lease fields as normal processing. Those transitions
 are allowed and must be recorded separately from the immutable delivery cohort.
-
 The append-only migration
 `20260830120000_enforce_historical_delivery_zero_write.sql` supersedes the
-older settlement behavior. `reconcile_stuck_jobs()` excludes historical
-`deliver` rows before any update, and `settle_delivery_cutover_blocked` is now a
-service-role-only compatibility no-op that returns `false`. The
-`trg_00_historical_delivery_job_zero_write` trigger rejects an update or delete
-of a historical `jobs` row when `OLD.type = 'deliver'` and
+older settlement behavior. Historical `deliver` jobs are immutable under the
+zero-write invariant: the `trg_00_historical_delivery_job_zero_write`
+`BEFORE UPDATE OR DELETE` trigger on `public.jobs` rejects any mutation of a
+historical deliver row when `OLD.type = 'deliver'` and
 `delivery_cutover_allows_job(...)` is false, with
-`delivery_cutover_blocked:historical_deliver_job_zero_write`. Do not settle,
-requeue, delete, or otherwise mutate historical delivery rows; record them as
-unchanged evidence with zero provider writes.
+`delivery_cutover_blocked:historical_deliver_job_zero_write`, and
+`settle_delivery_cutover_blocked` is now a zero-DML no-op that returns
+`false`. `reconcile_stuck_jobs()` excludes historical `deliver` rows before any
+update, and the SQL claim predicate excludes these rows, including historical
+deliver jobs with a missing `tweet_id`. The worker cutover guard protects the
+delivery path after claim, but does not precede every worker write: pipeline
+event recording and provider-start marking occur before `handleDeliverJob`
+checks the cutover. `video_renders` are not blocked by that trigger and
+continue as above. Do not settle, requeue, delete, or otherwise mutate
+historical delivery rows; record them as unchanged evidence with zero provider
+writes.
 
 ## Rollback
 

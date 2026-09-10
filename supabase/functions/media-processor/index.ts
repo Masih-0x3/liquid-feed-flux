@@ -124,7 +124,7 @@ const handler = createMediaProcessorHandler({
 
 serve(handler);
 
-async function downloadMediaForTweet(supabase: MediaProcessorSupabaseClient, tweetId: string, dryRun: boolean) {
+export async function downloadMediaForTweet(supabase: MediaProcessorSupabaseClient, tweetId: string, dryRun: boolean) {
   console.log(JSON.stringify({ function: 'media-processor', action: 'download_start', tweet_id: tweetId, dry_run: dryRun }));
   
   const { data: mediaItems, error: mediaError } = await supabase
@@ -167,11 +167,11 @@ async function downloadMediaForTweet(supabase: MediaProcessorSupabaseClient, twe
   const hashes = [...new Set(boundedMediaItems
     .map((media) => typeof media.src_url_hash === 'string' ? media.src_url_hash : null)
     .filter(Boolean) as string[])];
-  const existingByHash = new Map<string, string>();
+  const existingByHash = new Map<string, { storagePath: string; fileSize: number | null; mimeType: string | null }>();
   if (hashes.length > 0) {
     const { data: existingRows, error: existingRowsError } = await supabase
       .from('media')
-      .select('src_url_hash, storage_path')
+      .select('src_url_hash, storage_path, file_size, mime_type')
       .in('src_url_hash', hashes)
       .not('storage_path', 'is', null);
     if (existingRowsError) throw new Error('media_reuse_lookup_failed');
@@ -179,7 +179,23 @@ async function downloadMediaForTweet(supabase: MediaProcessorSupabaseClient, twe
     for (const row of existingRows as Array<Record<string, unknown>>) {
       const hash = typeof row.src_url_hash === 'string' ? row.src_url_hash : null;
       const storagePath = typeof row.storage_path === 'string' ? row.storage_path : null;
-      if (hash && storagePath && !existingByHash.has(hash)) existingByHash.set(hash, storagePath);
+      if (!hash || !storagePath) continue;
+      const fileSize = typeof row.file_size === 'number' && Number.isFinite(row.file_size) ? row.file_size : null;
+      const mimeType = typeof row.mime_type === 'string' && row.mime_type.length > 0 ? row.mime_type : null;
+      const existing = existingByHash.get(hash);
+      if (!existing) {
+        existingByHash.set(hash, { storagePath, fileSize, mimeType });
+        continue;
+      }
+      // Prefer a donor that carries real file_size/mime_type so the reused
+      // row is sendable downstream (selectMediaTier requires both). A
+      // metadata-null donor — e.g. a previously reused row that itself
+      // survived as a donor for the same src_url_hash — would otherwise
+      // leave the new row metadata-null and reproduce the omission this
+      // fix corrects, one reuse hop away.
+      if ((existing.fileSize == null || !existing.mimeType) && fileSize != null && mimeType) {
+        existingByHash.set(hash, { storagePath, fileSize, mimeType });
+      }
     }
   }
 
@@ -202,22 +218,32 @@ async function downloadMediaForTweet(supabase: MediaProcessorSupabaseClient, twe
       }
 
       const sourceUrl = validateReviewedRemoteMediaUrl(media.src_url);
-      const reusableStoragePath = typeof media.src_url_hash === 'string' ? existingByHash.get(media.src_url_hash) : null;
-      if (reusableStoragePath) {
+      const reusable = typeof media.src_url_hash === 'string' ? existingByHash.get(media.src_url_hash) : null;
+      if (reusable && reusable.fileSize != null && reusable.mimeType) {
+        const reusableStoragePath = reusable.storagePath;
         const updated = await guardedMediaUpdate(supabase, media, {
           storage_path: reusableStoragePath,
           downloaded_at: new Date().toISOString(),
+          file_size: reusable.fileSize,
+          mime_type: reusable.mimeType,
         });
         if (updated) {
           reusedCount++;
           await insertMediaDownloadEvent(supabase, media, 'completed', null, {
             reused: true,
             storage_path: reusableStoragePath,
+            file_size: reusable.fileSize,
+            mime_type: reusable.mimeType,
             media_download_ms: Date.now() - itemStartedAt,
           });
         }
         return;
       }
+      // No matching donor, or the donor lacks the file_size/mime_type
+      // needed to make the reused row sendable downstream (e.g. a reused
+      // row whose own donor was metadata-null). Fall through to a fresh
+      // download so this media row is stamped with storage_path and the
+      // metadata together, instead of producing a metadata-null reuse.
 
       const remoteMedia = await fetchReviewedRemoteMedia(sourceUrl);
       const contentType = remoteMedia.contentType;

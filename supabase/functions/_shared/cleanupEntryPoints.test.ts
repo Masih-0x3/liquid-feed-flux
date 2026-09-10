@@ -403,3 +403,187 @@ Deno.test("db-cleanup rejects a malformed primary cleanup RPC response", async (
   const response = await handler(jsonRequest({}));
   assertEquals(response.status, 500);
 });
+
+type CleanupSupabaseClientType = Parameters<typeof cleanupOldMedia>[0];
+type CleanupRpcResult = { data: unknown; error: unknown };
+
+function failingCleanupClient(
+  rpcHandler: (name: string, args?: Record<string, unknown>) => Promise<CleanupRpcResult>,
+): CleanupSupabaseClientType {
+  return {
+    rpc: rpcHandler,
+    storage: {
+      from: () => ({
+        remove: async () => {
+          throw new Error("unexpected storage mutation in failing-cleanup stub");
+        },
+      }),
+    },
+    from: () => ({
+      update: () => ({
+        in: async () => {
+          throw new Error("unexpected database mutation in failing-cleanup stub");
+        },
+      }),
+    }),
+  };
+}
+
+type CleanupBoundaryResult = {
+  response: Response;
+  captured: Error[];
+  errorLogs: string[];
+};
+
+async function driveCleanupBoundary(
+  client: CleanupSupabaseClientType,
+  options: { dryRun: boolean; mutationsEnabled: string },
+): Promise<CleanupBoundaryResult> {
+  const captured: Error[] = [];
+  const errorLogs: string[] = [];
+  const originalError = console.error;
+  console.error = ((...args: unknown[]) => {
+    errorLogs.push(args.map((arg) => typeof arg === "string" ? arg : String(arg)).join(" "));
+  }) as typeof console.error;
+  try {
+    const handler = createMediaProcessorHandler({
+      corsHeaders: headers,
+      createSupabase: () => client,
+      requireInternalAuth: noAuthError,
+      getEnv: () => options.mutationsEnabled,
+      downloadMediaForTweet: okResponse,
+      cleanupOldMedia: (supabase, dryRun, daysOld) =>
+        cleanupOldMedia(supabase as CleanupSupabaseClientType, dryRun, daysOld, headers),
+      getMediaInfo: okResponse,
+      captureException: async (error) => { captured.push(error as Error); },
+    });
+    const response = await handler(jsonRequest({
+      action: "cleanup_old_media",
+      dry_run: options.dryRun,
+      days_old: 1,
+    }));
+    return { response, captured, errorLogs };
+  } finally {
+    console.error = originalError;
+  }
+}
+
+Deno.test("media-processor handler preserves media_object_preview_failed at the log/Sentry boundary", async () => {
+  const client = failingCleanupClient(async (name) => {
+    if (name === "get_old_media") return { data: [], error: null };
+    if (name === "media_objects_preview_old") {
+      return { data: null, error: new Error("preview rpc unavailable") };
+    }
+    return { data: null, error: new Error(`unexpected rpc ${name}`) };
+  });
+  const { response, captured, errorLogs } = await driveCleanupBoundary(client, {
+    dryRun: true,
+    mutationsEnabled: "",
+  });
+  assertEquals(response.status, 500);
+  assertEquals(await response.json(), { error: "Internal server error" });
+  assertEquals(captured.length, 1);
+  assertEquals(captured[0].message, "media_object_preview_failed");
+  assertEquals(errorLogs.length, 1);
+  assertEquals(JSON.parse(errorLogs[0]).error, "media_object_preview_failed");
+});
+
+Deno.test("media-processor handler preserves media_object_preview_invalid at the log/Sentry boundary", async () => {
+  const client = failingCleanupClient(async (name) => {
+    if (name === "get_old_media") return { data: [], error: null };
+    if (name === "media_objects_preview_old") {
+      return { data: { not: "an array" }, error: null };
+    }
+    return { data: null, error: new Error(`unexpected rpc ${name}`) };
+  });
+  const { response, captured, errorLogs } = await driveCleanupBoundary(client, {
+    dryRun: true,
+    mutationsEnabled: "",
+  });
+  assertEquals(response.status, 500);
+  assertEquals(await response.json(), { error: "Internal server error" });
+  assertEquals(captured.length, 1);
+  assertEquals(captured[0].message, "media_object_preview_invalid");
+  assertEquals(errorLogs.length, 1);
+  assertEquals(JSON.parse(errorLogs[0]).error, "media_object_preview_invalid");
+});
+
+Deno.test("media-processor handler preserves media_object_claim_failed at the log/Sentry boundary", async () => {
+  const client = failingCleanupClient(async (name) => {
+    if (name === "get_old_media") return { data: [], error: null };
+    if (name === "media_objects_preview_old") {
+      return { data: [{ object_id: "obj-1", storage_path: "2026/7/a.jpg" }], error: null };
+    }
+    if (name === "get_expired_video_render_paths") return { data: [], error: null };
+    if (name === "media_objects_claim_old") {
+      return { data: null, error: new Error("claim rpc unavailable") };
+    }
+    return { data: null, error: new Error(`unexpected rpc ${name}`) };
+  });
+  const { response, captured, errorLogs } = await driveCleanupBoundary(client, {
+    dryRun: false,
+    mutationsEnabled: "true",
+  });
+  assertEquals(response.status, 500);
+  assertEquals(await response.json(), { error: "Internal server error" });
+  assertEquals(captured.length, 1);
+  assertEquals(captured[0].message, "media_object_claim_failed");
+  assertEquals(errorLogs.length, 1);
+  assertEquals(JSON.parse(errorLogs[0]).error, "media_object_claim_failed");
+});
+
+Deno.test("media-processor handler preserves media_object_claim_invalid at the log/Sentry boundary", async () => {
+  const client = failingCleanupClient(async (name) => {
+    if (name === "get_old_media") return { data: [], error: null };
+    if (name === "media_objects_preview_old") {
+      return { data: [{ object_id: "obj-1", storage_path: "2026/7/a.jpg" }], error: null };
+    }
+    if (name === "get_expired_video_render_paths") return { data: [], error: null };
+    if (name === "media_objects_claim_old") {
+      return { data: { not: "an array" }, error: null };
+    }
+    return { data: null, error: new Error(`unexpected rpc ${name}`) };
+  });
+  const { response, captured, errorLogs } = await driveCleanupBoundary(client, {
+    dryRun: false,
+    mutationsEnabled: "true",
+  });
+  assertEquals(response.status, 500);
+  assertEquals(await response.json(), { error: "Internal server error" });
+  assertEquals(captured.length, 1);
+  assertEquals(captured[0].message, "media_object_claim_invalid");
+  assertEquals(errorLogs.length, 1);
+  assertEquals(JSON.parse(errorLogs[0]).error, "media_object_claim_invalid");
+});
+
+Deno.test("media-processor handler collapses an unrecognized cleanup runtime code to media_processor_failed", async () => {
+  const captured: Error[] = [];
+  const errorLogs: string[] = [];
+  const originalError = console.error;
+  console.error = ((...args: unknown[]) => {
+    errorLogs.push(args.map((arg) => typeof arg === "string" ? arg : String(arg)).join(" "));
+  }) as typeof console.error;
+  try {
+    const handler = createMediaProcessorHandler({
+      corsHeaders: headers,
+      createSupabase: () => ({}),
+      requireInternalAuth: noAuthError,
+      getEnv: () => "true",
+      downloadMediaForTweet: okResponse,
+      cleanupOldMedia: async () => {
+        throw new Error("media_object_cleanup_client_invalid");
+      },
+      getMediaInfo: okResponse,
+      captureException: async (error) => { captured.push(error as Error); },
+    });
+    const response = await handler(jsonRequest({ action: "cleanup_old_media" }));
+    assertEquals(response.status, 500);
+    assertEquals(await response.json(), { error: "Internal server error" });
+    assertEquals(captured.length, 1);
+    assertEquals(captured[0].message, "media_processor_failed");
+    assertEquals(errorLogs.length, 1);
+    assertEquals(JSON.parse(errorLogs[0]).error, "media_processor_failed");
+  } finally {
+    console.error = originalError;
+  }
+});

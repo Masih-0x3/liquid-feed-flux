@@ -1668,7 +1668,7 @@ export function visionFromWatermarkOnly(watermarkOnly) {
         action: "keep",
         confidence: 1,
         reason: item.reason,
-        box: { x: 0, y: 0, w: 0, h: 0 },
+        box: item?.box ?? { x: 0, y: 0, w: 0, h: 0 },
       })),
     ],
   };
@@ -1822,16 +1822,6 @@ export function subtitlePlacementFromVision(vision, dimensions = {}, options = {
     confidence: Math.max(Number(recommended?.confidence ?? 0), Number(lowerText?.confidence ?? 0), bottomOverlayScore, source === "default" ? 0 : 0.55),
     source,
     reason: recommended?.reason ?? lowerText?.reason ?? "",
-  };
-}
-
-export function mergePreflight(existing, patch) {
-  return {
-    ...(existing ?? {}),
-    ...(patch ?? {}),
-    softSubtitles: patch?.softSubtitles ?? existing?.softSubtitles ?? [],
-    hardSubtitles: patch?.hardSubtitles ?? existing?.hardSubtitles ?? null,
-    watermark: patch?.watermark ?? existing?.watermark ?? null,
   };
 }
 

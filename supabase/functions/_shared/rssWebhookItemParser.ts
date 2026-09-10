@@ -317,17 +317,32 @@ function firstRssText(item: Record<string, unknown>): string | null {
   return null;
 }
 
+function indexOfIgnoreCase(haystack: string, needle: string, from: number): number {
+  for (let i = from; i + needle.length <= haystack.length; i += 1) {
+    let match = true;
+    for (let j = 0; j < needle.length; j += 1) {
+      const h = haystack.charCodeAt(i + j);
+      const n = needle.charCodeAt(j);
+      if (h === n) continue;
+      const hFolded = h >= 65 && h <= 90 ? h + 32 : h;
+      const nFolded = n >= 65 && n <= 90 ? n + 32 : n;
+      if (hFolded !== nFolded) { match = false; break; }
+    }
+    if (match) return i;
+  }
+  return -1;
+}
+
 function collectBoundedDirectRssMedia(
   input: string,
   mediaItems: RssParsedMedia[],
   inspected: { count: number },
   unique = false,
 ): void {
-  const lower = input.toLowerCase();
   let searchAt = 0;
-  while (searchAt < lower.length) {
-    const httpsIndex = lower.indexOf("https://pbs.twimg.com/", searchAt);
-    const httpIndex = lower.indexOf("http://pbs.twimg.com/", searchAt);
+  while (searchAt < input.length) {
+    const httpsIndex = indexOfIgnoreCase(input, "https://pbs.twimg.com/", searchAt);
+    const httpIndex = indexOfIgnoreCase(input, "http://pbs.twimg.com/", searchAt);
     const start = httpsIndex < 0 ? httpIndex : httpIndex < 0 ? httpsIndex : Math.min(httpsIndex, httpIndex);
     if (start < 0) return;
 
