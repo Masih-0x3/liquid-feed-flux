@@ -30,7 +30,10 @@ CONTROL_DIR="${XOT_RENDERER_CONTROL_DIR:-${PERSIST_ROOT}/control/deploy/lightnin
 ENV_FILE="${XOT_RENDERER_ENV_FILE:-${PERSIST_ROOT}/runtime/renderer.env}"
 SERVICE_ENV_FILE="${XOT_RENDERER_SERVICE_ENV_FILE:-${PERSIST_ROOT}/runtime/service.env}"
 COMPOSE_FILE="${CONTROL_DIR}/docker-compose.lightning.yml"
-PROJECT_NAME="xot-renderer"
+PROJECT_NAME="${XOT_RENDERER_COMPOSE_PROJECT:-xot-renderer}"
+HOST_PORT="${XOT_RENDERER_HOST_PORT:-8797}"
+NETWORK_NAME="${XOT_RENDERER_NETWORK_NAME:-xot-renderer-net}"
+VOLUME_NAME="${XOT_RENDERER_VOLUME_NAME:-xot-renderer-tmp}"
 
 # Defaults; overridable via arguments.
 IMAGE_TAG="${XOT_RENDERER_IMAGE_TAG:-}"
@@ -85,6 +88,38 @@ case "${SERVICE_PROFILE}" in
     ;;
 esac
 
+if [[ ! "${PROJECT_NAME}" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+  echo "[bootstrap] ERROR: invalid Compose project name: ${PROJECT_NAME}" >&2
+  exit 1
+fi
+
+if [[ ! "${HOST_PORT}" =~ ^[0-9]+$ ]]; then
+  echo "[bootstrap] ERROR: host port must be between 1024 and 65535: ${HOST_PORT}" >&2
+  exit 1
+fi
+HOST_PORT_NUMBER=$((10#${HOST_PORT}))
+if (( HOST_PORT_NUMBER < 1024 || HOST_PORT_NUMBER > 65535 )); then
+  echo "[bootstrap] ERROR: host port must be between 1024 and 65535: ${HOST_PORT}" >&2
+  exit 1
+fi
+HOST_PORT="${HOST_PORT_NUMBER}"
+
+for resource_name in "${NETWORK_NAME}" "${VOLUME_NAME}"; do
+  if [[ ! "${resource_name}" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]; then
+    echo "[bootstrap] ERROR: invalid Docker resource name: ${resource_name}" >&2
+    exit 1
+  fi
+done
+
+if [[ "${PROJECT_NAME}" != "xot-renderer" ]] && {
+  [[ "${HOST_PORT_NUMBER}" -eq 8797 ]] ||
+  [[ "${NETWORK_NAME}" == "xot-renderer-net" ]] ||
+  [[ "${VOLUME_NAME}" == "xot-renderer-tmp" ]];
+}; then
+  echo "[bootstrap] ERROR: a non-production project must use its own host port, network, and volume" >&2
+  exit 1
+fi
+
 if [[ -n "${CONFIGURED_RESTART_POLICY}" && "${CONFIGURED_RESTART_POLICY}" != "${RESTART_POLICY}" ]]; then
   echo "[bootstrap] ERROR: service profile ${SERVICE_PROFILE} requires restart policy ${RESTART_POLICY}" >&2
   exit 1
@@ -94,6 +129,10 @@ export XOT_RENDERER_IMAGE_TAG="${IMAGE_TAG}"
 export XOT_RENDERER_BUILD_SOURCE="${SOURCE_DIR}"
 export XOT_RENDERER_ENV_FILE="${ENV_FILE}"
 export XOT_RENDERER_RESTART_POLICY="${RESTART_POLICY}"
+export XOT_RENDERER_COMPOSE_PROJECT="${PROJECT_NAME}"
+export XOT_RENDERER_HOST_PORT="${HOST_PORT}"
+export XOT_RENDERER_NETWORK_NAME="${NETWORK_NAME}"
+export XOT_RENDERER_VOLUME_NAME="${VOLUME_NAME}"
 
 echo "[bootstrap] project:      ${PROJECT_NAME}"
 echo "[bootstrap] compose file: ${COMPOSE_FILE}"
@@ -101,6 +140,9 @@ echo "[bootstrap] image tag:    ${IMAGE_TAG}"
 echo "[bootstrap] build source: ${SOURCE_DIR}"
 echo "[bootstrap] env file:     ${ENV_FILE}"
 echo "[bootstrap] profile:       ${SERVICE_PROFILE} (${RESTART_POLICY})"
+echo "[bootstrap] loopback port: 127.0.0.1:${HOST_PORT}"
+echo "[bootstrap] network:       ${NETWORK_NAME}"
+echo "[bootstrap] temp volume:   ${VOLUME_NAME}"
 
 if [[ ! -f "${COMPOSE_FILE}" ]]; then
   echo "[bootstrap] ERROR: compose file not found at ${COMPOSE_FILE}" >&2
@@ -160,7 +202,7 @@ if [[ "${DO_START}" -eq 1 ]]; then
   docker compose -p "${PROJECT_NAME}" -f "${COMPOSE_FILE}" up -d --no-build
   echo "[bootstrap] container started. Verify with:"
   echo "  docker compose -p ${PROJECT_NAME} -f ${COMPOSE_FILE} ps"
-  echo "  curl -fsS http://127.0.0.1:8797/health"
+  echo "  curl -fsS http://127.0.0.1:${HOST_PORT}/health"
 else
   echo "[bootstrap] build complete. Start with: $0 --image-tag ${IMAGE_TAG} --start"
 fi

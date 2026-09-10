@@ -102,9 +102,9 @@
       "The protected runtime env sets RENDER_POLLING_ENABLED=0 before either image is started.",
       "The selected local image ID exactly matches the recorded immutable image ID."
     ],
-    "candidateCommand": "cd /teamspace/studios/this_studio/xot-renderer/source/deploy/lightning && XOT_RENDERER_IMAGE_TAG=xot-video-renderer:prep4-fe3e78a2f20f-amd64 XOT_RENDERER_ENV_FILE=/teamspace/studios/this_studio/xot-renderer/runtime/renderer.env docker compose -f docker-compose.lightning.yml up -d --no-build --no-deps xot-video-renderer",
+    "candidateCommand": "cd /teamspace/studios/this_studio/xot-renderer/source/deploy/lightning && XOT_RENDERER_RESTART_POLICY=unless-stopped XOT_RENDERER_IMAGE_TAG=xot-video-renderer:prep4-fe3e78a2f20f-amd64 XOT_RENDERER_ENV_FILE=/teamspace/studios/this_studio/xot-renderer/runtime/renderer.env docker compose -f docker-compose.lightning.yml up -d --no-build --no-deps xot-video-renderer",
     "candidateProbe": "docker inspect xot-renderer-xot-video-renderer-1 --format 'image={{.Image}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' && docker exec xot-renderer-xot-video-renderer-1 curl -fsS http://127.0.0.1:8787/health",
-    "rollbackCommand": "cd /teamspace/studios/this_studio/xot-renderer/source/deploy/lightning && XOT_RENDERER_IMAGE_TAG=xot-video-renderer:render-only-20260825t030216z XOT_RENDERER_ENV_FILE=/teamspace/studios/this_studio/xot-renderer/runtime/renderer.env docker compose -f docker-compose.lightning.yml up -d --no-build --no-deps xot-video-renderer",
+    "rollbackCommand": "cd /teamspace/studios/this_studio/xot-renderer/source/deploy/lightning && XOT_RENDERER_RESTART_POLICY=unless-stopped XOT_RENDERER_IMAGE_TAG=xot-video-renderer:render-only-20260825t030216z XOT_RENDERER_ENV_FILE=/teamspace/studios/this_studio/xot-renderer/runtime/renderer.env docker compose -f docker-compose.lightning.yml up -d --no-build --no-deps xot-video-renderer",
     "rollbackProbe": "docker inspect xot-renderer-xot-video-renderer-1 --format 'image={{.Image}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' && docker exec xot-renderer-xot-video-renderer-1 curl -fsS http://127.0.0.1:8787/health"
   },
   "rehearsal": {

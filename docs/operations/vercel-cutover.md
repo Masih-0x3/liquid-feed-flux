@@ -108,7 +108,8 @@ production backend unchanged until its own release gate passes.
 4. Use `npm run build` as the build command.
 5. Use `dist` as the output directory.
 6. Keep the committed `vercel.json`; it rewrites SPA routes to `index.html`.
-7. Set Node.js to 20.x.
+7. Set Node.js to 24.x. The root `engines.node` contract also requires 24.x and
+   overrides the project setting if they differ.
 
 ## Production Vercel Environment (separate release path)
 

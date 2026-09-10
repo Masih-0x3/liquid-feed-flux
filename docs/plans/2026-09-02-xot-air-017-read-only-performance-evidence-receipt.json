@@ -1,0 +1,150 @@
+{
+  "schema": "xot-air-017-read-only-performance-evidence-receipt-v2",
+  "artifactKind": "detached-read-only-evidence",
+  "gateId": "AIR-017",
+  "airId": "AIR-017",
+  "status": "BLOCKED_OWNER_EVIDENCE_REFRESH",
+  "release": "RELEASE_CLOSED",
+  "claimBoundary": "This receipt records fresh diagnostic database evidence only. It does not approve an index, RLS, migration, performance change, or AIR closure.",
+  "decisionOrEvidence": "Fresh supplemental read-only EXPLAIN ANALYZE evidence is recorded; no owner decision was made.",
+  "reviewedBranch": "codex/video-render-workspace-redesign",
+  "reviewedSha": "f9788488cf9801578dd3541730492ecdcb887baf",
+  "repository": "Masih-0x3/liquid-feed-flux",
+  "ownerRole": "database-performance-owner",
+  "reviewerRole": "Luna High implementation/integration owner",
+  "reviewState": "PENDING_INDEPENDENT_DATABASE_OWNER_REVIEW",
+  "reviewedAt": null,
+  "signerRole": null,
+  "signedAt": null,
+  "cryptographicSignatureClaimed": false,
+  "signatureState": "NO_CRYPTOGRAPHIC_SIGNATURE",
+  "receiptSha256": null,
+  "receiptSha256Rule": "Computed externally after finalization and stored only by the successor reference; omitted here to avoid a self-reference.",
+  "sourceReceiptPath": "docs/plans/2026-08-21-xot-air-latest-state-and-estimate.json",
+  "sourceReceiptSha256": "7e60ea89f607d9291f677cc74ff31edf22b938acd6171f6ed1716f5a7e421ed5",
+  "observedAt": "2026-09-02T23:38:00Z",
+  "observedAtWindow": {
+    "from": "2026-09-02T23:35:00Z",
+    "to": "2026-09-02T23:38:00Z",
+    "workload": "bounded six-probe read-only sample; no p95 or before/after claim"
+  },
+  "sourcePaths": [
+    "docs/plans/2026-08-21-xot-air-latest-state-and-estimate.json",
+    "src/api/dashboardData.ts",
+    "supabase/functions/admin-actions/dashboardSummaries.ts",
+    "src/api/monitoringData.ts",
+    "supabase/functions/admin-actions/monitoringReads.ts",
+    "supabase/functions/worker/index.ts",
+    "supabase/migrations/20260320004655_04a925c9-fd01-4fa6-a88e-c48f93ad480e.sql",
+    "services/video-renderer/src/renderer.js",
+    "supabase/migrations/20260825024826_render_only_automation_cutover.sql",
+    "supabase/functions/db-cleanup/handler.ts",
+    "supabase/migrations/20260413125431_88d84d44-dd4f-4d9b-be22-413a1f0d57ab.sql"
+  ],
+  "sourceRequirements": [
+    {"path":"docs/plans/2026-08-21-xot-air-latest-state-and-estimate.json","sha256":"7e60ea89f607d9291f677cc74ff31edf22b938acd6171f6ed1716f5a7e421ed5","immutableRequired":true,"role":"exact predecessor packet and prior AIR statement"},
+    {"path":"src/api/dashboardData.ts","sha256":"927aa8309ea2079042b1f025e8f88166409e9aa6b3c4d6b45ab2a81d5ea66dd6","immutableRequired":true,"role":"dashboard summary client query shape"},
+    {"path":"supabase/functions/admin-actions/dashboardSummaries.ts","sha256":"6a2763f1d2279d5177798f8d89693c4b0f544d420126685ede94ad0fd828f730","immutableRequired":true,"role":"dashboard summary server query shape"},
+    {"path":"src/api/monitoringData.ts","sha256":"dda95fac55564c2a110d138d7fed32522faceb5bf2652327656f2a47f6ac6e97","immutableRequired":true,"role":"monitoring entries client query shape"},
+    {"path":"supabase/functions/admin-actions/monitoringReads.ts","sha256":"60695cbffbd6047d4de34f5064faecf71ae0438594346147d5e1b400ad4d1070","immutableRequired":true,"role":"monitoring delivery server query shape"},
+    {"path":"supabase/functions/worker/index.ts","sha256":"469976d0e03f8ee1d6492f8e9bd38d054875e0409cd17fc2fee212e533a016bb","immutableRequired":true,"role":"job claim caller"},
+    {"path":"supabase/migrations/20260320004655_04a925c9-fd01-4fa6-a88e-c48f93ad480e.sql","sha256":"1045a86c2a2a30f0a8fe7c85074cff22894f871fdf25acbec6676375f8a38344","immutableRequired":true,"role":"claim_jobs definition"},
+    {"path":"services/video-renderer/src/renderer.js","sha256":"987359e63aa9b4f02b6a9a24666f48381c05e4157ace742f3dda11539ba3b4ba","immutableRequired":true,"role":"renderer claim caller"},
+    {"path":"supabase/migrations/20260825024826_render_only_automation_cutover.sql","sha256":"0a0e4e5039488e6f1996ba5bca7f4008d6f6f691863d6c8a4406df1e41e9b49f","immutableRequired":true,"role":"renderer claim-after definition"},
+    {"path":"supabase/functions/db-cleanup/handler.ts","sha256":"e74c47241989f85e0feff6fada39aeb2484ebb26d1570ed2d7fe7edd7b180a4f","immutableRequired":true,"role":"retention read and guarded cleanup caller"},
+    {"path":"supabase/migrations/20260413125431_88d84d44-dd4f-4d9b-be22-413a1f0d57ab.sql","sha256":"bb4b3df3aa5f70f1936da38b0578b617323559455affcf47c3f4dffacc0490b3","immutableRequired":true,"role":"cleanup_old_data definition"}
+  ],
+  "sourceRequirementHashes": {
+    "docs/plans/2026-08-21-xot-air-latest-state-and-estimate.json": "7e60ea89f607d9291f677cc74ff31edf22b938acd6171f6ed1716f5a7e421ed5",
+    "src/api/dashboardData.ts": "927aa8309ea2079042b1f025e8f88166409e9aa6b3c4d6b45ab2a81d5ea66dd6",
+    "supabase/functions/admin-actions/dashboardSummaries.ts": "6a2763f1d2279d5177798f8d89693c4b0f544d420126685ede94ad0fd828f730",
+    "src/api/monitoringData.ts": "dda95fac55564c2a110d138d7fed32522faceb5bf2652327656f2a47f6ac6e97",
+    "supabase/functions/admin-actions/monitoringReads.ts": "60695cbffbd6047d4de34f5064faecf71ae0438594346147d5e1b400ad4d1070",
+    "supabase/functions/worker/index.ts": "469976d0e03f8ee1d6492f8e9bd38d054875e0409cd17fc2fee212e533a016bb",
+    "supabase/migrations/20260320004655_04a925c9-fd01-4fa6-a88e-c48f93ad480e.sql": "1045a86c2a2a30f0a8fe7c85074cff22894f871fdf25acbec6676375f8a38344",
+    "services/video-renderer/src/renderer.js": "987359e63aa9b4f02b6a9a24666f48381c05e4157ace742f3dda11539ba3b4ba",
+    "supabase/migrations/20260825024826_render_only_automation_cutover.sql": "0a0e4e5039488e6f1996ba5bca7f4008d6f6f691863d6c8a4406df1e41e9b49f",
+    "supabase/functions/db-cleanup/handler.ts": "e74c47241989f85e0feff6fada39aeb2484ebb26d1570ed2d7fe7edd7b180a4f",
+    "supabase/migrations/20260413125431_88d84d44-dd4f-4d9b-be22-413a1f0d57ab.sql": "bb4b3df3aa5f70f1936da38b0578b617323559455affcf47c3f4dffacc0490b3"
+  },
+  "freshSupplementalEvidence": {
+    "supersedesAsOf": "2026-09-02T23:35:00Z",
+    "supersedes": "The older successor statement that representative EXPLAIN evidence lacked ANALYZE timing/buffers.",
+    "supersededBy": "This six-probe EXPLAIN ANALYZE sample; immutable predecessor history remains unchanged.",
+    "statePromotion": false
+  },
+  "advisorNotices": {
+    "total": 74,
+    "unindexedForeignKeys": 4,
+    "authRlsInitPlanWarnings": 4,
+    "unusedIndexInfos": 55,
+    "multiplePermissiveWarnings": 5,
+    "duplicateIndexWarnings": 5,
+    "dbConnectionInfo": 1
+  },
+  "explainProbes": {
+    "count": 6,
+    "completed": 6,
+    "timedOut": 0,
+    "statementTimeoutMs": 5000,
+    "lockWaitObserved": false,
+    "explainOptions": ["ANALYZE", "BUFFERS", "SETTINGS", "FORMAT JSON"],
+    "maintenanceAnalyzeOrVacuum": false,
+    "writes": false,
+    "functionsExecuted": false,
+    "timingUnit": "milliseconds",
+    "planAndBufferDisclosure": "Actual timing, buffer instrumentation, and plan completion were observed; detailed plan nodes, buffer counts, query text, literals, and raw output are not retained.",
+    "shapes": [
+      {"name":"main timings dashboard posts","sourcePaths":["src/api/dashboardData.ts","supabase/functions/admin-actions/dashboardSummaries.ts"],"observedExecutionMs":3.358,"planSummary":"representative dashboard read plan completed; no remediation conclusion"},
+      {"name":"monitoring deliveries","sourcePaths":["src/api/monitoringData.ts","supabase/functions/admin-actions/monitoringReads.ts"],"observedExecutionMs":2.575,"planSummary":"representative monitoring delivery read plan completed; no remediation conclusion"},
+      {"name":"job claim read","sourcePaths":["supabase/functions/worker/index.ts","supabase/migrations/20260320004655_04a925c9-fd01-4fa6-a88e-c48f93ad480e.sql"],"observedExecutionMs":0.363,"planSummary":"claim_jobs representative read/claim shape probed read-only; no claim was executed"},
+      {"name":"renderer claim read","sourcePaths":["services/video-renderer/src/renderer.js","supabase/migrations/20260825024826_render_only_automation_cutover.sql"],"observedExecutionMs":0.821,"planSummary":"claim_video_render_after representative read shape completed; no render was claimed"},
+      {"name":"pipeline retention read","sourcePaths":["supabase/functions/db-cleanup/handler.ts","supabase/migrations/20260413125431_88d84d44-dd4f-4d9b-be22-413a1f0d57ab.sql"],"observedExecutionMs":53.271,"planSummary":"pipeline_events retention read shape completed; cleanup mutation was not invoked"},
+      {"name":"job retention read","sourcePaths":["supabase/functions/db-cleanup/handler.ts","supabase/migrations/20260413125431_88d84d44-dd4f-4d9b-be22-413a1f0d57ab.sql"],"observedExecutionMs":56.065,"planSummary":"completed/failed jobs retention read shape completed; cleanup mutation was not invoked"}
+    ]
+  },
+  "limitations": [
+    "No comparable before/after candidate exists.",
+    "No authenticated role-specific admin/application plan set is established.",
+    "The bounded sample is not a comparable workload p95 or production workload baseline.",
+    "High-latency pg_stat_statements query-text mapping is not established.",
+    "Lock, write-amplification, and storage impact bounds are not established.",
+    "No reviewed forward migration, index change, or RLS rewrite exists.",
+    "No dated database-owner decision exists."
+  ],
+  "ownerDecision": {
+    "state": "BLOCKED_OWNER_RETAINED",
+    "decision": null,
+    "recommendationNotApproval": "RECOMMENDATION (NOT APPROVAL): retain AIR-017 blocked until the database performance owner supplies a bounded before/after comparison, role-specific plans, mapped high-latency shapes, impact bounds, and a dated accept-or-forward-fix decision.",
+    "requiredOwner": "database-performance-owner"
+  },
+  "stalenessCheck": {
+    "status": "passed_for_diagnostic_refresh",
+    "reviewedBranch": "codex/video-render-workspace-redesign",
+    "reviewedSha": "f9788488cf9801578dd3541730492ecdcb887baf",
+    "sourceHashesChecked": true,
+    "priorReceiptHashBound": true,
+    "revalidateBy": null,
+    "revalidateImmediatelyOn": ["any migration, index, RLS, grant, or query-shape change", "pg_stat_statements reset or workload/window change", "any probe timeout, lock wait, write, or function execution", "owner requests a closure decision"]
+  },
+  "redactionCheck": {
+    "status": "passed",
+    "rawLogs": false,
+    "secrets": false,
+    "credentials": false,
+    "privateHosts": false,
+    "sensitiveQueryLiterals": false,
+    "privateRows": false,
+    "result": "Only aggregate counts, normalized query-shape labels, timings, source hashes, tool classes, and bounded decision metadata are retained."
+  },
+  "noMutation": true,
+  "mutationsPerformed": {"production":false,"supabase":false,"functions":false,"providers":false,"deployment":false,"migration":false,"ledgerAppend":false},
+  "predecessor": {
+    "path": "docs/plans/2026-08-21-xot-air-latest-state-and-estimate.json",
+    "sha256": "7e60ea89f607d9291f677cc74ff31edf22b938acd6171f6ed1716f5a7e421ed5",
+    "rowPointer": "#rows[AIR-017]",
+    "priorState": "owner_blocked",
+    "immutablePriorEvidencePreserved": true,
+    "supersession": "This append-only receipt adds current diagnostic evidence and does not rewrite the predecessor packet or promote the state."
+  }
+}

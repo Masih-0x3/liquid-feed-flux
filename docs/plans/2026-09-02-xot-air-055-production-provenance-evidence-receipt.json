@@ -1,0 +1,146 @@
+{
+  "schema": "xot-air-055-production-provenance-evidence-receipt-v2",
+  "artifactKind": "detached-read-only-evidence",
+  "gateId": "AIR-055",
+  "airId": "AIR-055",
+  "status": "BLOCKED_OWNER_EVIDENCE_REFRESH",
+  "release": "RELEASE_CLOSED",
+  "claimBoundary": "This receipt records current read-only Production provenance observations. It does not accept the deployment, prove exact source-to-live equivalence, approve a release, or authorize a deploy or merge.",
+  "decisionOrEvidence": "Current Production deployment, public asset, migration, and Edge Function inventory evidence is recorded; no owner decision was made.",
+  "reviewedBranch": "codex/video-render-workspace-redesign",
+  "reviewedSha": "f9788488cf9801578dd3541730492ecdcb887baf",
+  "repository": "Masih-0x3/liquid-feed-flux",
+  "ownerRole": "build-and-release-owner",
+  "reviewerRole": "Luna High implementation/integration owner",
+  "reviewState": "PENDING_INDEPENDENT_RELEASE_OWNER_REVIEW",
+  "reviewedAt": null,
+  "signerRole": null,
+  "signedAt": null,
+  "cryptographicSignatureClaimed": false,
+  "signatureState": "NO_CRYPTOGRAPHIC_SIGNATURE",
+  "receiptSha256": null,
+  "receiptSha256Rule": "Computed externally after finalization and stored only by the successor reference; omitted here to avoid a self-reference.",
+  "sourceReceiptPath": "docs/plans/2026-08-21-xot-air-latest-state-and-estimate.json",
+  "sourceReceiptSha256": "7e60ea89f607d9291f677cc74ff31edf22b938acd6171f6ed1716f5a7e421ed5",
+  "observedAt": "2026-09-02T23:42:00Z",
+  "observedAtWindow": {
+    "from": "2026-09-02T23:35:00Z",
+    "to": "2026-09-02T23:42:00Z"
+  },
+  "sourcePaths": [
+    "docs/plans/2026-08-21-xot-air-latest-state-and-estimate.json",
+    "docs/plans/2026-08-31-xot-production-function-inventory.json",
+    "docs/operations/runtime-contract.json"
+  ],
+  "sourceRequirements": [
+    {"path":"docs/plans/2026-08-21-xot-air-latest-state-and-estimate.json","sha256":"7e60ea89f607d9291f677cc74ff31edf22b938acd6171f6ed1716f5a7e421ed5","immutableRequired":true,"role":"exact predecessor packet and prior AIR statement"},
+    {"path":"docs/plans/2026-08-31-xot-production-function-inventory.json","sha256":"2bf0db143d39b31fc2635f01915fae792cf438ea963ffe59290004dbba458a1d","immutableRequired":true,"role":"compact 10-function Production version and bundle-hash inventory"},
+    {"path":"docs/operations/runtime-contract.json","sha256":"f70f4028c37fb1f2c15b6ecffca9933f25a080c6d4ecd721685a5da1257e5b9d","immutableRequired":true,"role":"release/provenance contract context"}
+  ],
+  "sourceRequirementHashes": {
+    "docs/plans/2026-08-21-xot-air-latest-state-and-estimate.json": "7e60ea89f607d9291f677cc74ff31edf22b938acd6171f6ed1716f5a7e421ed5",
+    "docs/plans/2026-08-31-xot-production-function-inventory.json": "2bf0db143d39b31fc2635f01915fae792cf438ea963ffe59290004dbba458a1d",
+    "docs/operations/runtime-contract.json": "f70f4028c37fb1f2c15b6ecffca9933f25a080c6d4ecd721685a5da1257e5b9d"
+  },
+  "productionDeployment": {
+    "deploymentId": "dpl_7BDVu5uqg2g88KtjRYVboLfvtNjz",
+    "buildId": "bld_8ndoeo74p",
+    "state": "READY",
+    "target": "production",
+    "aliases": ["https://xot.vercel.app", "https://xot.iraneyes.com"],
+    "sourceSha": "7797b11c11b9805f701c9f77b5a752c5eece71d9",
+    "sourceTree": "56664e9dcce25ae0ca7a3569026d79a707a6b40a",
+    "publicAssetHashAgreement": {
+      "html": true,
+      "javascript": true,
+      "css": true,
+      "scope": "exact response hashes agree across both listed Production aliases",
+      "hashValuesRetained": false
+    },
+    "sentryReleaseEmbedded": "7797b11c11b9805f701c9f77b5a752c5eece71d9"
+  },
+  "supportingHostedState": {
+    "supabase": {
+      "status": "ACTIVE",
+      "migrationRows": 117,
+      "latestVersionObserved": "20260901170000",
+      "latestVersionSource": "read-only migration listing",
+      "edgeFunctionCount": 10,
+      "edgeFunctionInventorySource": "docs/plans/2026-08-31-xot-production-function-inventory.json",
+      "edgeFunctionVersionsAndBundleHashesCaptured": true
+    },
+    "candidate": {
+      "head": "f9788488cf9801578dd3541730492ecdcb887baf",
+      "productionBinding": false,
+      "classification": "Preview, not Production"
+    }
+  },
+  "edgeFunctions": [
+    {"name":"webhooks-rssapp","version":248,"bundleHash":"fd5bbde2af0df70dd02fb7080c7c4def3ed777ece3e700a2fa5667e47ef2b3eb"},
+    {"name":"media-processor","version":213,"bundleHash":"1becc70c7b8704da03b655c42cdc6fc517c16fac7a71e225b597f9ed96aa06e1"},
+    {"name":"digest-compiler","version":133,"bundleHash":"44dfe946ea25e4ac0ee5b7028925bd0a05bb4cc098d38e6c05d173cf5f06e5dd"},
+    {"name":"db-cleanup","version":174,"bundleHash":"50e9afed1bb1ffbdd6ab3fe9a9f9a9eda21d3e5c58dae99d4a00812fb4f23a31"},
+    {"name":"media-cleanup","version":210,"bundleHash":"87f95aec75740eec4e7eaac10e1bd0ee524a169ed74dc4334a78c4ee95bec4df"},
+    {"name":"x-followers-snapshot","version":124,"bundleHash":"816c5783e45a9d690733940c2a29ca42caecf699975c9a083418cccd2a7d257a"},
+    {"name":"admin-retry","version":205,"bundleHash":"6060da252c661cc99068fb50e89dd6b31178bcde45cb1bdbcf518720bf14bb33"},
+    {"name":"admin-actions","version":214,"bundleHash":"efaa0826d672d150ae3f89517d2b9e9446f8339e026c88976fef53be4cbaa7c8"},
+    {"name":"x-poster","version":161,"bundleHash":"49c7eedb227889ff9efd6d0192603738228f52d9a0a019476457b6fd166430d1"},
+    {"name":"worker","version":286,"bundleHash":"993ab8806421aa8bd5f8601a2e7d850c4cd26038ff6e9691d85af660c575c5d8"}
+  ],
+  "provenanceGaps": [
+    {"probe":"Production source-map request","observedStatus":403,"meaning":"source-map content was not available for exact source-to-live verification"},
+    {"probe":"Vercel Git deployment file tree","observedStatus":404,"meaning":"deployment file-tree association was not available for exact source-to-build verification"},
+    {"probe":"Edge Function Git association","observedStatus":"unproven","meaning":"function versions and bundle hashes are captured, but exact Git source association is not established by this evidence"}
+  ],
+  "interpretation": {
+    "established": [
+      "Production is READY and serves both listed aliases.",
+      "The Production deployment and build IDs are recorded and the bundle embeds the main SHA as its Sentry release.",
+      "The candidate SHA is a Preview identity and is not the Production binding.",
+      "Public HTML, JavaScript, and CSS response hashes agree across both aliases.",
+      "Production has 117 observed migration rows and 10 active Edge Functions with compact version and bundle-hash inventory."
+    ],
+    "notEstablished": [
+      "exact source-to-live build equivalence",
+      "source-map identity equivalence",
+      "Vercel deployment file-tree equivalence",
+      "exact Git associations for the captured Edge Function versions and bundle hashes",
+      "named release-owner acceptance"
+    ]
+  },
+  "ownerDecision": {
+    "state": "BLOCKED_OWNER_RETAINED",
+    "decision": null,
+    "recommendationNotApproval": "RECOMMENDATION (NOT APPROVAL): retain AIR-055 blocked unless the named deployment owner accepts the stated 403/404 provenance limitation in a dated owner receipt or supplies stronger reproducible artifact evidence tying the reviewed source to the Production build and functions.",
+    "requiredOwner": "build-and-release-owner"
+  },
+  "stalenessCheck": {
+    "status": "passed_for_current_read_only_observation",
+    "reviewedBranch": "codex/video-render-workspace-redesign",
+    "reviewedSha": "f9788488cf9801578dd3541730492ecdcb887baf",
+    "sourceHashesChecked": true,
+    "priorReceiptHashBound": true,
+    "revalidateBy": null,
+    "revalidateImmediatelyOn": ["any Production deployment, build, alias, source SHA, or public asset change", "any function version/hash or migration change", "source-map or Vercel deployment file-tree access changes", "new candidate/evidence SHA or Preview identity", "named release-owner review or provenance waiver request"]
+  },
+  "redactionCheck": {
+    "status": "passed",
+    "rawLogs": false,
+    "secrets": false,
+    "credentials": false,
+    "privateUrls": false,
+    "providerData": false,
+    "functionPayloads": false,
+    "result": "Only public aliases, deployment identifiers, full reviewed/source identities, source hashes, aggregate counts, compact function inventory, response statuses, and provenance limitations are retained."
+  },
+  "noMutation": true,
+  "mutationsPerformed": {"production":false,"supabase":false,"vercel":false,"github":false,"providers":false,"deployment":false,"merge":false,"ledgerAppend":false},
+  "predecessor": {
+    "path": "docs/plans/2026-08-21-xot-air-latest-state-and-estimate.json",
+    "sha256": "7e60ea89f607d9291f677cc74ff31edf22b938acd6171f6ed1716f5a7e421ed5",
+    "rowPointer": "#rows[AIR-055]",
+    "priorState": "owner_blocked",
+    "immutablePriorEvidencePreserved": true,
+    "supersession": "This append-only receipt adds current read-only provenance evidence and does not rewrite the predecessor packet or promote the state."
+  }
+}

@@ -1,4 +1,5 @@
 import { readdir, readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 
 const migrationPath = new URL(
   "../supabase/migrations/20260825091418_v1_delivery_continuity_cutover.sql",
@@ -16,6 +17,7 @@ const effectiveRepairMigration = await readFile(
 const zeroWriteMigrationName = "20260830120000_enforce_historical_delivery_zero_write.sql";
 const pendingReceiptAdoptionMigrationName = "20260901150013_adopt_telegram_pending_delivery_receipts.sql";
 const preProviderReleaseMigrationName = "20260901170000_release_pre_provider_x_delivery_claim.sql";
+const feedbackRepairMigrationName = "20260907001640_video_render_feedback_qualified_columns.sql";
 const zeroWriteMigration = await readFile(
   new URL(`../supabase/migrations/${zeroWriteMigrationName}`, import.meta.url),
   "utf8",
@@ -246,13 +248,21 @@ if (!zeroWriteMigration.includes("CREATE TRIGGER trg_00_historical_delivery_job_
   throw new Error("historical delivery jobs do not have a first-write trigger fence");
 }
 const expectedTail = [zeroWriteMigrationName, pendingReceiptAdoptionMigrationName, preProviderReleaseMigrationName,
+  "20260907001640_video_render_feedback_qualified_columns.sql",
   "20260908103000_follower_snapshot_claims.sql",
   "20260908104000_replace_rss_media_atomically.sql",
   "20260908105000_reclaim_pre_provider_x_deliveries.sql",
   "20260908110000_reserve_x_media_upload_quota.sql",
 ];
 if (JSON.stringify(migrationNames.slice(-expectedTail.length)) !== JSON.stringify(expectedTail)) {
-  throw new Error("reviewed delivery and remaining-PR successors are not the final active migrations");
+  throw new Error("reviewed delivery, feedback repair, and remaining-PR successors are not the final active migrations");
+}
+// Permit only the reviewed qualification-only RPC replacement for the feedback
+// repair. Any changed body still requires explicit review.
+const feedbackRepairSource = migrationSources.find(([name]) => name === feedbackRepairMigrationName)?.[1] ?? "";
+if (createHash("sha256").update(feedbackRepairSource).digest("hex") !==
+  "6a8dcb81934646a23dc7cf0f0e0dc19347594d945f1649eb94b1ffa8158218c8") {
+  throw new Error("feedback repair successor differs from the reviewed qualification-only body");
 }
 
 const guardedTelegramStart = effectiveRepairMigration.indexOf(

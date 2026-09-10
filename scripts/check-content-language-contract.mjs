@@ -211,8 +211,13 @@ for (const [text, argument, label] of [
     assert.ok(hasSpreadCall(element.openingElement, "contentLanguageAttributes", argument, monitoringFile), `${label} must use its explicit language metadata`);
   }
 }
-const videoSubtitles = jsxElementsWithDirectExpression(videoFile, "render.translated_srt");
-assert.equal(videoSubtitles.length, 1, "video subtitle must remain singular and explicit");
+const videoSubtitles = jsxElementsWithDirectExpression(videoFile, "finalSubtitle", true);
+assert.equal(videoSubtitles.length, 1, "video subtitle must retain one explicit finalSubtitle output");
+assert.match(
+  videoSource,
+  /const finalSubtitle = \[render\?\.translated_srt,\s*render\?\.persian_srt\]/,
+  "video subtitle must derive finalSubtitle from translated_srt and persian_srt",
+);
 for (const element of videoSubtitles) {
   assert.ok(hasSpreadCall(element.openingElement, "contentLanguageAttributes", "render.target_language", videoFile), "video subtitle must use its explicit target language");
 }

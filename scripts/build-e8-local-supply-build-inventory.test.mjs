@@ -35,6 +35,7 @@ function withRepositoryFixture(callback) {
       "services/video-renderer/package-lock.json", "services/video-renderer/Dockerfile", ".github/workflows/ci.yml",
       "docs/operations/supply-chain-exceptions.json", "scripts/check-supply-chain-contract.mjs",
       "scripts/check-supply-chain-contract.test.mjs", "scripts/build-e8-local-supply-build-inventory.mjs",
+      "scripts/collect-supply-chain-evidence.mjs", "scripts/collect-supply-chain-evidence.test.mjs",
       "scripts/build-e8-local-supply-build-inventory.test.mjs", "scripts/check-vite-env.mjs", "scripts/check-vite-env.test.mjs",
     ]) cpSync(join(ROOT, path), join(root, path), { recursive: true });
     cpSync(join(ROOT, "src"), join(root, "src"), { recursive: true });

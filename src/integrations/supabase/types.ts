@@ -2693,6 +2693,16 @@ export type Database = {
         }
         Returns: Json
       }
+      claim_telegram_delivery_unchecked: {
+        Args: {
+          p_chat_id: string
+          p_claim_ttl_seconds?: number
+          p_delivery_key: string
+          p_source?: string
+          p_subject_id: string
+        }
+        Returns: Json
+      }
       claim_telegram_delivery_v2: {
         Args: {
           p_chat_id: string
@@ -3153,6 +3163,8 @@ export type Database = {
           recent_negative_count: number
         }[]
       }
+      lock_runtime_controls: { Args: never; Returns: undefined }
+      lock_runtime_v2_activation: { Args: never; Returns: undefined }
       mark_digest_provider_started: {
         Args: {
           p_claim_generation: number
@@ -3253,6 +3265,19 @@ export type Database = {
         Returns: Json
       }
       reconcile_stuck_jobs: { Args: never; Returns: Json }
+      release_x_post_delivery_for_retry: {
+        Args: {
+          p_claim_generation: number
+          p_claim_token: string
+          p_delivery_id: string
+          p_error?: string
+          p_media_bytes?: number
+          p_media_count?: number
+          p_media_kind?: string
+          p_next_retry_at?: string
+        }
+        Returns: boolean
+      }
       renew_video_render_lease: {
         Args: {
           p_claim_generation: number
@@ -3319,6 +3344,7 @@ export type Database = {
           environment: string
           posting_mode: string
           singleton_id: boolean
+          singleton_key: boolean
           translation_enabled: boolean
           updated_at: string
           updated_by: string | null

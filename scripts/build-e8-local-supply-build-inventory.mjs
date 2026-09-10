@@ -19,6 +19,8 @@ const SOURCE_CONTRACT_PATHS = [
   "docs/operations/supply-chain-exceptions.json",
   "scripts/check-supply-chain-contract.mjs",
   "scripts/check-supply-chain-contract.test.mjs",
+  "scripts/collect-supply-chain-evidence.mjs",
+  "scripts/collect-supply-chain-evidence.test.mjs",
   "scripts/build-e8-local-supply-build-inventory.test.mjs",
   "scripts/check-vite-env.mjs",
   "scripts/check-vite-env.test.mjs",
@@ -303,7 +305,7 @@ function dockerSurface(root) {
 function ciSurface(root) {
   const path = ".github/workflows/ci.yml";
   const source = readText(root, path);
-  const actionRefs = [...source.matchAll(/^\s*- uses:\s*([^\s#]+)\s*$/gm)].map((match) => {
+  const actionRefs = [...source.matchAll(/^\s+(?:-\s+)?uses:\s*([^\s#]+)\s*(?:#.*)?$/gm)].map((match) => {
     const at = match[1].lastIndexOf("@");
     return {
       name: at > 0 ? match[1].slice(0, at) : match[1],

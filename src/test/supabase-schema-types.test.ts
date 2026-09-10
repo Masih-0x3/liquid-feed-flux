@@ -79,6 +79,17 @@ describe('migration-defined Supabase type contracts', () => {
       p_source?: string;
       p_claim_ttl_seconds?: number;
     }>();
+    expectTypeOf<Functions['claim_telegram_delivery_unchecked']['Args']>().toEqualTypeOf<{
+      p_delivery_key: string;
+      p_subject_id: string;
+      p_chat_id: string;
+      p_source?: string;
+      p_claim_ttl_seconds?: number;
+    }>();
+    expectTypeOf<Functions['lock_runtime_controls']['Args']>().toEqualTypeOf<never>();
+    expectTypeOf<Functions['lock_runtime_controls']['Returns']>().toEqualTypeOf<undefined>();
+    expectTypeOf<Functions['lock_runtime_v2_activation']['Args']>().toEqualTypeOf<never>();
+    expectTypeOf<Functions['lock_runtime_v2_activation']['Returns']>().toEqualTypeOf<undefined>();
     expectTypeOf<Functions['claim_x_post_delivery_v2']['Args']>().toEqualTypeOf<{
       p_post_id: string;
       p_lineage_time: string;
@@ -87,6 +98,17 @@ describe('migration-defined Supabase type contracts', () => {
       p_force_retry?: boolean;
       p_claim_ttl_seconds?: number;
     }>();
+    expectTypeOf<Functions['release_x_post_delivery_for_retry']['Args']>().toEqualTypeOf<{
+      p_claim_generation: number;
+      p_claim_token: string;
+      p_delivery_id: string;
+      p_error?: string;
+      p_media_bytes?: number;
+      p_media_count?: number;
+      p_media_kind?: string;
+      p_next_retry_at?: string;
+    }>();
+    expectTypeOf<Functions['release_x_post_delivery_for_retry']['Returns']>().toEqualTypeOf<boolean>();
     expectTypeOf<Functions['claim_video_render_after']['Args']>().toEqualTypeOf<{
       p_queued_after: string;
       worker_id?: string;
@@ -108,6 +130,9 @@ describe('migration-defined Supabase type contracts', () => {
     }>();
     expectTypeOf<Functions['assert_delivery_cutover_post']['Args']>().toEqualTypeOf<{
       p_tweet_id: string;
+    }>();
+    expectTypeOf<Functions['update_runtime_control']['Returns']>().toMatchTypeOf<{
+      singleton_key: boolean;
     }>();
     expectTypeOf<Functions['settle_delivery_cutover_blocked']['Args']>().toEqualTypeOf<{
       p_job_id: string;

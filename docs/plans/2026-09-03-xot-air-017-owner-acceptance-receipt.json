@@ -1,0 +1,82 @@
+{
+  "schema": "xot-air-017-owner-acceptance-receipt-v1",
+  "artifactKind": "detached-owner-attestation",
+  "gateId": "AIR-017",
+  "airId": "AIR-017",
+  "status": "ACCEPTED_OWNER_DEFER_NO_CHANGE",
+  "release": "OWNER_ACCEPTED_DEFERRED_EVIDENCE_ONLY",
+  "releaseGate": "OWNER_DECISION_ACCEPTED; NO_DATABASE_MIGRATION_OR_INDEX/RLS_CHANGE_AUTHORIZED",
+  "claimBoundary": "This receipt records the named database-performance owner's decision to defer change and monitor. It closes the owner-decision gap only; it does not claim a comparable performance baseline, approve a migration/index/RLS change, or authorize database or Production mutation.",
+  "repository": "Masih-0x3/liquid-feed-flux",
+  "reviewedBranch": "codex/video-render-workspace-redesign",
+  "reviewedSha": "8ac9edbfc7235ab7c0e822c65e15c0bcdc68a5a1",
+  "ownerRole": "database-performance-owner:Masih-0x3",
+  "reviewerRole": "database-performance-owner:Masih-0x3",
+  "reviewState": "ACCEPTED_OWNER_DEFER_NO_CHANGE",
+  "observedAt": "2026-09-02T23:38:00Z",
+  "reviewedAt": "2026-09-03T01:18:30Z",
+  "signerRole": "database-performance-owner:Masih-0x3",
+  "signedAt": "2026-09-03T01:18:30Z",
+  "cryptographicSignatureClaimed": false,
+  "signatureState": "NO_CRYPTOGRAPHIC_SIGNATURE",
+  "receiptSha256": null,
+  "receiptSha256Rule": "Hash the finalized UTF-8 receipt bytes with receiptSha256 remaining null; bind that detached hash from the current successor.",
+  "sourceReceiptPath": "docs/plans/2026-09-02-xot-air-017-read-only-performance-evidence-receipt.json",
+  "sourceReceiptSha256": "a4e1e438a5fee5685e68db31d83801a661a0acde1101df3e6c276ca0e33319e8",
+  "sourcePaths": [
+    "docs/plans/2026-09-02-xot-air-017-read-only-performance-evidence-receipt.json"
+  ],
+  "sourceRequirementHashes": {
+    "docs/plans/2026-09-02-xot-air-017-read-only-performance-evidence-receipt.json": "a4e1e438a5fee5685e68db31d83801a661a0acde1101df3e6c276ca0e33319e8"
+  },
+  "decisionOrEvidence": "Formal owner acceptance: defer/no database change now, monitor the recorded diagnostic evidence, and recheck when a material trigger occurs.",
+  "ownerDecision": {
+    "state": "ACCEPTED_OWNER_DEFER_NO_CHANGE",
+    "decision": "defer_no_change",
+    "owner": "database-performance-owner:Masih-0x3",
+    "acceptedAt": "2026-09-03T01:18:30Z",
+    "recommendationNotApproval": "RECOMMENDATION (NOT APPROVAL): monitor current timings and recheck before any database change; this is not migration, index, RLS, or Production approval.",
+    "recheckTriggers": [
+      "material workload or query-shape change",
+      "schema, index, RLS, or grant change",
+      "user-visible latency regression",
+      "owner requests a new performance decision"
+    ]
+  },
+  "stalenessCheck": {
+    "status": "passed_for_owner_decision_binding",
+    "reviewedBranch": "codex/video-render-workspace-redesign",
+    "reviewedSha": "8ac9edbfc7235ab7c0e822c65e15c0bcdc68a5a1",
+    "sourceReceiptSha256Checked": true,
+    "revalidateBy": null,
+    "revalidateImmediatelyOn": [
+      "any material workload, query, schema, index, RLS, or grant change",
+      "user-visible latency regression",
+      "new actual-timing evidence or owner decision request"
+    ]
+  },
+  "redactionCheck": {
+    "status": "passed",
+    "rawLogs": false,
+    "secrets": false,
+    "credentials": false,
+    "queryLiterals": false,
+    "result": "Only receipt paths, hashes, normalized decision metadata, timestamps, role identity, and revalidation triggers are retained."
+  },
+  "noMutation": true,
+  "mutationsPerformed": {
+    "database": false,
+    "supabase": false,
+    "production": false,
+    "providers": false,
+    "deployment": false,
+    "merge": false
+  },
+  "predecessor": {
+    "path": "docs/plans/2026-09-02-xot-air-017-read-only-performance-evidence-receipt.json",
+    "sha256": "a4e1e438a5fee5685e68db31d83801a661a0acde1101df3e6c276ca0e33319e8",
+    "priorState": "BLOCKED_OWNER_EVIDENCE_REFRESH",
+    "immutableEvidenceReceiptPreserved": true,
+    "supersession": "This append-only owner receipt adds the dated defer/no-change decision and does not rewrite the diagnostic evidence receipt."
+  }
+}

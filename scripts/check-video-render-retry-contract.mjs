@@ -114,8 +114,13 @@ function retryPendingCalls(path, source) {
   );
 }
 
+assert.equal(
+  retryPendingCalls(pagePath, pageSource).length,
+  0,
+  "page must not own target-specific retry pending checks",
+);
+
 for (const [path, source, expectedMinimum] of [
-  [pagePath, pageSource, 2],
   [panelPath, panelSource, 2],
 ]) {
   const file = sourceFile(path, source);

@@ -11,7 +11,7 @@
 # unless-stopped (see deploy/lightning/README.md "After acceptance").
 #
 # Hard constraints enforced here:
-#   - loopback-only bind 127.0.0.1:8797 -> container 8787
+#   - loopback-only bind 127.0.0.1:${XOT_RENDERER_HOST_PORT:-8797} -> container 8787
 #   - platform linux/amd64
 #   - cpus 2, memory 6 GiB, shm 1 GiB, pids 512, init true
 #   - concurrency 1
@@ -25,11 +25,15 @@
 #   XOT_RENDERER_BUILD_SOURCE  selected source tree containing Dockerfile
 #   XOT_RENDERER_ENV_FILE      absolute path to 0600 secret runtime env
 #   XOT_RENDERER_RESTART_POLICY no (default) or unless-stopped after acceptance
+#   XOT_RENDERER_COMPOSE_PROJECT isolated Compose project name
+#   XOT_RENDERER_HOST_PORT      isolated loopback host port
+#   XOT_RENDERER_NETWORK_NAME   isolated Docker network name
+#   XOT_RENDERER_VOLUME_NAME    isolated temporary-work volume name
 #
 # The env file at XOT_RENDERER_ENV_FILE must be provisioned mode 0600 from
 # XOT-owned sources only. Never commit secret values. Hermes is never a source.
 
-name: xot-renderer
+name: ${XOT_RENDERER_COMPOSE_PROJECT:-xot-renderer}
 
 services:
   xot-video-renderer:
@@ -53,7 +57,7 @@ services:
       # override it from the host shell: an unset value fails closed in the
       # renderer, while an explicit 1/true in the env file must remain usable.
     ports:
-      - "127.0.0.1:8797:8787"
+      - "127.0.0.1:${XOT_RENDERER_HOST_PORT:-8797}:8787"
     volumes:
       - xot-renderer-tmp:/tmp/xot-video-renderer
     networks:
@@ -78,11 +82,11 @@ services:
 
 networks:
   xot-renderer-net:
-    name: xot-renderer-net
+    name: ${XOT_RENDERER_NETWORK_NAME:-xot-renderer-net}
     driver: bridge
     internal: false
 
 volumes:
   xot-renderer-tmp:
-    name: xot-renderer-tmp
+    name: ${XOT_RENDERER_VOLUME_NAME:-xot-renderer-tmp}
     driver: local
