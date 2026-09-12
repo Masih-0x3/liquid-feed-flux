@@ -13,12 +13,12 @@ export function ArchivedMediaAssets({ tweetId, assets, readOnly = false }: { twe
 }
 
 export function ArchivedMediaList({ tweetId, readOnly = false }: { tweetId: string; readOnly?: boolean }) {
-  const [assets, setAssets] = useState<ArchivedAsset[] | null>(null);
+  const [catalog, setCatalog] = useState<{ tweetId: string; assets: ArchivedAsset[] } | null>(null);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const generation = useRef(0);
   useEffect(() => {
-    generation.current += 1; setAssets(null); setMessage(null); setPending(false);
+    generation.current += 1; setCatalog(null); setMessage(null); setPending(false);
     return () => { generation.current += 1; };
   }, [tweetId, readOnly]);
   async function load() {
@@ -28,15 +28,15 @@ export function ArchivedMediaList({ tweetId, readOnly = false }: { tweetId: stri
     try {
       const response = await getMediaCatalog(tweetId);
       if (current !== generation.current) return;
-      if (response.ok) setAssets(response.assets);
+      if (response.ok) setCatalog({ tweetId: response.tweet_id, assets: response.assets });
       else setMessage(mediaAccessMessage(response.code));
     } catch (error) { if (current === generation.current) setMessage(mediaAccessErrorMessage(error)); }
     finally { if (current === generation.current) setPending(false); }
   }
   return <div className="space-y-3">
     <p className="text-sm text-muted-foreground">{readOnly ? mediaAccessMessage('media_access_denied') : 'Review supported media from the private archive. Checking availability does not start processing or posting.'}</p>
-    <Button variant="outline" size="sm" disabled={readOnly || pending} onClick={() => void load()}>{pending ? 'Checking archive…' : assets ? 'Refresh archive' : 'Find archived media'}</Button>
+    <Button variant="outline" size="sm" disabled={readOnly || pending} onClick={() => void load()}>{pending ? 'Checking archive…' : catalog ? 'Refresh archive' : 'Find archived media'}</Button>
     {message && <p role="status" className="text-sm text-muted-foreground">{message}</p>}
-    {assets && <ArchivedMediaAssets tweetId={tweetId} assets={assets} readOnly={readOnly} />}
+    {catalog && <ArchivedMediaAssets tweetId={catalog.tweetId} assets={catalog.assets} readOnly={readOnly} />}
   </div>;
 }

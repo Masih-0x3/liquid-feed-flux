@@ -7,10 +7,8 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useAuth } from '@/contexts/AuthContext';
-import { getMediaCatalog, mediaAccessErrorMessage, mediaAccessMessage, type ArchivedAsset } from '@/api/mediaAccess';
+import { getMediaCatalog, mediaAccessErrorMessage, mediaAccessMessage, parseArchivePostReference, type ArchivedAsset } from '@/api/mediaAccess';
 import { ArchivedMediaAssets } from '@/components/media/ArchivedMediaList';
-
-const TWEET_REGEX = /^https?:\/\/(?:www\.)?(?:twitter\.com|x\.com|fxtwitter\.com|vxtwitter\.com)\/[a-zA-Z0-9_]+\/status\/([0-9]{1,30})(?:[/?#].*)?$/i;
 
 export default function Downloader() {
   const { role } = useAuth();
@@ -29,14 +27,14 @@ export default function Downloader() {
   async function handleFetch(event: FormEvent) {
     event.preventDefault(); setError(null); setInvalid(false); setResult(null);
     if (readOnly) { setError(mediaAccessMessage('media_access_denied')); return; }
-    const match = url.trim().match(TWEET_REGEX);
-    if (!match) { setInvalid(true); setError('Enter a valid X or Twitter status URL, including its post ID.'); return; }
+    const reference = url.trim();
+    if (parseArchivePostReference(reference)?.kind !== 'url') { setInvalid(true); setError('Enter a valid X or Twitter status URL, including its post ID.'); return; }
     const current = ++generation.current;
     setLoading(true);
     try {
-      const response = await getMediaCatalog(match[1]);
+      const response = await getMediaCatalog(reference);
       if (current !== generation.current) return;
-      if (response.ok) setResult({ tweetId: match[1], assets: response.assets, author: response.author_handle });
+      if (response.ok) setResult({ tweetId: response.tweet_id, assets: response.assets, author: response.author_handle });
       else setError(mediaAccessMessage(response.code));
     } catch (error) { if (current === generation.current) setError(mediaAccessErrorMessage(error)); }
     finally { if (current === generation.current) setLoading(false); }
@@ -75,7 +73,7 @@ export default function Downloader() {
         </CardContent>
       </Card>
       {result && <Card>
-        <CardHeader><CardTitle className="break-words text-lg">{result.author ? `@${result.author}` : 'Archived post'}</CardTitle><CardDescription>Post {result.tweetId}</CardDescription></CardHeader>
+        <CardHeader><CardTitle className="break-words text-lg">{result.author ? `@${result.author}` : 'Archived post'}</CardTitle><CardDescription>Post {parseArchivePostReference(result.tweetId)?.statusId}</CardDescription></CardHeader>
         <CardContent><ArchivedMediaAssets tweetId={result.tweetId} assets={result.assets} readOnly={readOnly} /></CardContent>
       </Card>}
     </div>

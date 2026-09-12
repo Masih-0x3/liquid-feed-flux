@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({ invokeAdminRead: vi.fn() }));
 vi.mock('@/api/adminActions', () => mocks);
 import { AuthorizedMedia } from '@/components/media/AuthorizedMedia';
 import { getMediaCatalog, validateMediaGrant } from '@/api/mediaAccess';
+import { ArchivedMediaList } from '@/components/media/ArchivedMediaList';
 
 const origin = 'https://abcdefghijklmnopqrst.supabase.co';
 const target = { tweetId: '123', mediaId: '11111111-1111-4111-8111-111111111111' };
@@ -89,5 +90,42 @@ describe('authorized browser media boundary', () => {
       mocks.invokeAdminRead.mockResolvedValueOnce(reply);
       expect(await getMediaCatalog('123')).toEqual({ ok: false, code: 'media_access_unavailable', assets: [] });
     }
+  });
+
+  it('validates URL-backed grants against the exact stored identity', () => {
+    const storedId = 'https://twitter.com/Archive_News/status/2092144212879765707';
+    const storedTarget = { ...target, tweetId: storedId };
+    expect(validateMediaGrant(grant({ tweet_id: storedId }), storedTarget, 'preview', origin)).not.toBeNull();
+    for (const alias of ['2092144212879765707', storedId.toLowerCase(), storedId.replace('twitter.com', 'x.com')]) {
+      expect(validateMediaGrant(grant({ tweet_id: alias }), storedTarget, 'preview', origin)).toBeNull();
+    }
+    const unrelated = 'https://evil.invalid/Archive_News/status/2092144212879765707';
+    expect(validateMediaGrant(grant({ tweet_id: unrelated }), { ...target, tweetId: unrelated }, 'preview', origin)).toBeNull();
+  });
+
+  it('accepts resolved stored catalog keys only within the requested complete reference variants', async () => {
+    const reference = 'https://x.com/archive_news/status/2092144212879765707?s=20';
+    const storedId = 'https://twitter.com/Archive_News/status/2092144212879765707';
+    for (const tweet_id of [storedId, '2092144212879765707']) {
+      mocks.invokeAdminRead.mockResolvedValueOnce({ ok: true, tweet_id, assets: [] });
+      expect(await getMediaCatalog(reference)).toMatchObject({ ok: true, tweet_id, assets: [] });
+    }
+    for (const tweet_id of [storedId.replace('Archive_News', 'ArchiveXNews'), storedId.replace('Archive_News', 'Other'), `${storedId}0`, storedId.replace('twitter.com', 'evil.invalid'), `${storedId}?s=20`]) {
+      mocks.invokeAdminRead.mockResolvedValueOnce({ ok: true, tweet_id, assets: [] });
+      expect(await getMediaCatalog(reference)).toEqual({ ok: false, code: 'media_access_unavailable', assets: [] });
+    }
+  });
+
+  it('archive lists bind subsequent grants to the resolved identity', async () => {
+    const reference = 'https://x.com/archive_news/status/2092144212879765707';
+    const storedId = 'https://twitter.com/Archive_News/status/2092144212879765707';
+    mocks.invokeAdminRead.mockResolvedValueOnce({ ok: true, tweet_id: storedId, assets: [{ id: target.mediaId, source: 'source', kind: 'video', mime_type: 'video/mp4', available: true }] });
+    const view = render(<ArchivedMediaList tweetId={reference} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Find archived media' }));
+    const preview = await screen.findByRole('button', { name: 'Preview source video 1' });
+    mocks.invokeAdminRead.mockResolvedValueOnce({ ok: true, asset: grant({ tweet_id: storedId }) });
+    fireEvent.click(preview);
+    await waitFor(() => expect(view.container.querySelector('video')).not.toBeNull());
+    expect(mocks.invokeAdminRead).toHaveBeenLastCalledWith({ action: 'get_media_access', tweet_id: storedId, media_id: target.mediaId, purpose: 'preview' }, { throwOnFailure: false });
   });
 });

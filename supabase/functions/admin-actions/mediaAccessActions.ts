@@ -1,4 +1,5 @@
 import type { AppRole } from "../_shared/appRole.ts";
+import { archivePostIdentityVariants, isArchivePostIdentity, MAX_ARCHIVE_POST_VARIANTS, parseArchivePostReference } from "../_shared/archivePostIdentity.ts";
 import type { AdminActionResponse, SupabaseAdminClient } from "./types.ts";
 
 const MEDIA_BUCKET = "temp-media";
@@ -13,6 +14,7 @@ type Result = { data?: unknown; error?: unknown };
 type Query = PromiseLike<Result> & {
   select(columns: string): Query;
   eq(column: string, value: unknown): Query;
+  or(filters: string): Query;
   order(column: string, options?: Row): Query;
   limit(value: number): Query;
   maybeSingle(): PromiseLike<Result>;
@@ -40,7 +42,6 @@ function failure(code: string, status = 200): AdminActionResponse {
   // Stable codes deliberately omit storage paths, provider URLs and SDK errors.
   return { status, body: { ok: false, code } };
 }
-function validTweetId(value: unknown): value is string { return typeof value === "string" && /^[0-9]{1,30}$/.test(value); }
 function validId(value: unknown): value is string {
   return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 }
@@ -84,25 +85,35 @@ export async function getMediaCatalog(
   client: SupabaseAdminClient, body: Row, context: MediaAccessContext,
 ): Promise<AdminActionResponse> {
   if (context.role !== "admin") return failure("media_access_denied", 403);
-  if (!validTweetId(body.tweet_id) || Object.keys(body).some((key) => !["action", "tweet_id"].includes(key))) {
+  const variants = archivePostIdentityVariants(body.tweet_id);
+  if (!variants.length || variants.length > MAX_ARCHIVE_POST_VARIANTS
+    || Object.keys(body).some((key) => !["action", "tweet_id"].includes(key))) {
     return failure("media_request_invalid", 400);
   }
   try {
-    const post = await readOne(table(client, "posts").select("tweet_id,author_handle").eq("tweet_id", body.tweet_id).maybeSingle());
-    if (!post || post.tweet_id !== body.tweet_id) return failure("media_post_not_archived");
+    // Complete, generated literals only. PostgREST's unquoted OR values retain
+    // the LIKE escape; underscores in handles must never become wildcards.
+    const filters = variants.map((identity) => `tweet_id.ilike.${identity.replace(/[\\%_]/g, "\\$&")}`).join(",");
+    const posts = await readRows(table(client, "posts").select("tweet_id,author_handle").or(filters).limit(2));
+    if (!posts.length) return failure("media_post_not_archived");
+    if (posts.some((post) => !isArchivePostIdentity(post.tweet_id)
+      || !variants.some((identity) => identity.toLowerCase() === text(post.tweet_id).toLowerCase()))) return failure("media_access_unavailable");
+    if (posts.length !== 1) return failure("media_post_ambiguous");
+    const post = posts[0];
+    const storedTweetId = text(post.tweet_id);
     if (!await privateStorage(client)) return failure("media_access_unavailable");
     const sources = await readRows(table(client, "media")
       .select("id,tweet_id,object_id,kind,mime_type,file_size,width,height,duration_ms,downloaded_at,storage_path")
-      .eq("tweet_id", body.tweet_id).order("ordering", { ascending: true }).limit(16));
+      .eq("tweet_id", storedTweetId).order("ordering", { ascending: true }).limit(16));
     const outputs = await readRows(table(client, "video_renders")
       .select("id,tweet_id,status,output_mime_type,output_file_size,width,height,duration_ms,output_storage_path,expires_at")
-      .eq("tweet_id", body.tweet_id).order("created_at", { ascending: false }).limit(8));
+      .eq("tweet_id", storedTweetId).order("created_at", { ascending: false }).limit(8));
     const now = (context.now ?? Date.now)();
     return { body: {
-      ok: true, tweet_id: body.tweet_id, author_handle: text(post.author_handle),
+      ok: true, tweet_id: storedTweetId, author_handle: text(post.author_handle),
       assets: [
-        ...sources.filter((row) => row.tweet_id === body.tweet_id).map((row) => assetMetadata(row, "source")),
-        ...outputs.filter((row) => row.tweet_id === body.tweet_id).map((row) => ({
+        ...sources.filter((row) => row.tweet_id === storedTweetId).map((row) => assetMetadata(row, "source")),
+        ...outputs.filter((row) => row.tweet_id === storedTweetId).map((row) => ({
           ...assetMetadata(row, "output"),
           available: assetMetadata(row, "output").available && (!row.expires_at || Date.parse(text(row.expires_at)) > now),
         })),
@@ -118,7 +129,7 @@ export async function getMediaAccess(
   if (context.role !== "admin") return failure("media_access_denied", 403);
   const output = body.render_id !== undefined;
   const idKey = output ? "render_id" : "media_id";
-  if (!validTweetId(body.tweet_id) || !validId(body[idKey])
+  if (!isArchivePostIdentity(body.tweet_id) || !validId(body[idKey])
     || !["preview", "download"].includes(text(body.purpose))
     || Object.keys(body).some((key) => !["action", "tweet_id", idKey, "purpose"].includes(key))) {
     return failure("media_request_invalid", 400);
@@ -170,7 +181,8 @@ export async function getMediaAccess(
       ? Math.floor((Date.parse(text(row.expires_at)) - now) / 1000) : MEDIA_ACCESS_SECONDS;
     const seconds = Math.min(MEDIA_ACCESS_SECONDS, remainingSeconds);
     if (seconds < 1) return failure("media_expired");
-    const downloadName = `xot-${body.tweet_id}-${output ? "output" : "source"}-${text(row.id).slice(0, 8)}.${extension}`;
+    const statusId = parseArchivePostReference(body.tweet_id)!.statusId;
+    const downloadName = `xot-${statusId}-${output ? "output" : "source"}-${text(row.id).slice(0, 8)}.${extension}`;
     const { data, error } = await storage.from(MEDIA_BUCKET).createSignedUrl(
       path, seconds, body.purpose === "download" ? { download: downloadName } : undefined,
     );

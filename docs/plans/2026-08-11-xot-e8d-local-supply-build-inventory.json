@@ -70,7 +70,7 @@
     },
     {
       "path": "src/api/mediaAccess.ts",
-      "sha256": "5dfc008fd84dcae4234b4028e3f6840fb8f457033ca1b385816fddcf662fcbdc"
+      "sha256": "3ebe0467e78ce2ea2506b3a891c76a7014816231defd6527db1477f6153960e2"
     },
     {
       "path": "src/App.tsx",
@@ -303,6 +303,10 @@
     {
       "path": "supabase/functions/admin-actions/manualVideoPostingGuard.test.ts",
       "sha256": "06a9ab6671399324bfa30e802954f55edb3683108484881b29b442c9a29c54fe"
+    },
+    {
+      "path": "supabase/functions/admin-actions/mediaAccessActions.test.ts",
+      "sha256": "d306abf7731dc407b7be9af10d9892a2b5a1e8d59b17f06c2f5b71701182a335"
     },
     {
       "path": "supabase/functions/admin-actions/monitoringMutations.test.ts",
@@ -9929,10 +9933,10 @@
         },
         {
           "name": "https://esm.sh/@supabase/supabase-js@2.39.7",
-          "path": "supabase/functions/admin-actions/index.ts,supabase/functions/admin-retry/index.ts,supabase/functions/db-cleanup/index.ts,supabase/functions/media-cleanup/index.ts,supabase/functions/media-processor/index.ts,supabase/functions/webhooks-rssapp/index.ts,supabase/functions/worker/index.ts,supabase/functions/x-followers-snapshot/index.ts",
+          "path": "supabase/functions/admin-actions/index.ts,supabase/functions/admin-actions/mediaAccessActions.test.ts,supabase/functions/admin-retry/index.ts,supabase/functions/db-cleanup/index.ts,supabase/functions/media-cleanup/index.ts,supabase/functions/media-processor/index.ts,supabase/functions/webhooks-rssapp/index.ts,supabase/functions/worker/index.ts,supabase/functions/x-followers-snapshot/index.ts",
           "version_or_ref": "https://esm.sh/@supabase/supabase-js@2.39.7",
           "integrity_or_source_hash": "5361671c958daa350e504d9975da64b2d6dc9e81390b985ccdafb2e3572e24e7",
-          "source_file_sha256": "a7506ae2e836e0db81d04790cb9eade819b9c93f8787dbc8a500bddef0f4f70b"
+          "source_file_sha256": "fe00b6b3ae7e17fb5ad6d86b031ca47a93c604f9592065dd0044b2db3f4a2645"
         },
         {
           "name": "https://esm.sh/@supabase/supabase-js@2.49.1",
@@ -10160,7 +10164,7 @@
         },
         {
           "path": "src/api/mediaAccess.ts",
-          "sha256": "5dfc008fd84dcae4234b4028e3f6840fb8f457033ca1b385816fddcf662fcbdc"
+          "sha256": "3ebe0467e78ce2ea2506b3a891c76a7014816231defd6527db1477f6153960e2"
         },
         {
           "path": "src/components/settings/ObservabilitySettings.tsx",
@@ -10256,7 +10260,7 @@
           "path": "scripts/check-vite-env.mjs,src/api/mediaAccess.ts,src/components/settings/XAutomationSettings.tsx,src/integrations/supabase/client.ts",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "f0e3da28b6ecd1d6649ebe818023cfbb1b7e915eb544e94cebdd33fc668d6f75"
+          "source_file_sha256": "2c0f41e15cf01c6bcef2527a0b6b5cff1118da4eb024a775d00cdcaefdb10ce4"
         }
       ]
     }
