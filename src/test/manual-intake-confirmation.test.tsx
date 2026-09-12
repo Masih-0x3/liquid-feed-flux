@@ -28,19 +28,31 @@ describe('manual intake consequential actions', () => {
     fireEvent.submit(input.closest('form')!);
     expect(input).toHaveAttribute('aria-invalid', 'true');
     expect(state.create).not.toHaveBeenCalled();
-    fireEvent.change(input, { target: { value: 'https://x.com/example/status/123' } });
+    fireEvent.change(input, { target: { value: 'https://x.com/example/status/12345' } });
     fireEvent.submit(input.closest('form')!);
     const dialog = screen.getByRole('alertdialog');
     expect(dialog).toHaveTextContent('paid provider resources');
-    expect(dialog).toHaveTextContent('https://x.com/example/status/123');
+    expect(dialog).toHaveTextContent('https://x.com/example/status/12345');
     expect(state.create).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Prepare video' }));
-    await waitFor(() => expect(state.create).toHaveBeenCalledExactlyOnceWith({ url: 'https://x.com/example/status/123' }));
+    await waitFor(() => expect(state.create).toHaveBeenCalledExactlyOnceWith({ url: 'https://x.com/example/status/12345' }));
+  });
+  it.each([
+    'https://mobile.twitter.com/example/status/12345',
+    'https://twitter.com/example/statuses/12345',
+    'https://x.com/i/web/status/12345',
+  ])('accepts server-supported URL %s without starting preparation', (url) => {
+    render(<ManualVideoIntakePanel />);
+    const input = screen.getByLabelText('Tweet URL');
+    fireEvent.change(input, { target: { value: url } });
+    fireEvent.submit(input.closest('form')!);
+    expect(screen.getByRole('alertdialog')).toHaveTextContent(url);
+    expect(state.create).not.toHaveBeenCalled();
   });
   it('canceling preparation never invokes processing, and read-only controls stay disabled', () => {
     const view = render(<ManualVideoIntakePanel />);
     const input = screen.getByLabelText('Tweet URL');
-    fireEvent.change(input, { target: { value: 'https://x.com/example/status/123' } });
+    fireEvent.change(input, { target: { value: 'https://x.com/example/status/12345' } });
     fireEvent.submit(input.closest('form')!);
     fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Cancel' }));
     expect(state.create).not.toHaveBeenCalled();

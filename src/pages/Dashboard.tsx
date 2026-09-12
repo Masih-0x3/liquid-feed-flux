@@ -348,7 +348,11 @@ function DashboardContent() {
     route: opsStatus.recommendedRoute,
     ctaLabel: getOpsCtaLabel(opsStatus, pipelineCounts),
   };
-  const primaryAlert = data.dataQuality?.unavailableSections.length ? { severity: 'warning' as const, title: 'Telemetry is incomplete', detail: 'Some reads failed. Unavailable values are not evidence of an empty or healthy pipeline.', route: '/monitoring', ctaLabel: 'Inspect queue' } : getPrimaryAlert(opsAlert, storageAlert);
+  const operationalAlert = getPrimaryAlert(opsAlert, storageAlert);
+  const telemetryIncomplete = Boolean(data.dataQuality?.unavailableSections.length);
+  const primaryAlert = telemetryIncomplete && operationalAlert.severity === 'ok'
+    ? { severity: 'warning' as const, title: 'Telemetry is incomplete', detail: 'Some reads failed. Unavailable values are not evidence of an empty or healthy pipeline.', route: '/monitoring', ctaLabel: 'Inspect queue' }
+    : operationalAlert;
   const oldestPendingSeconds = systemPerformance.queue.oldestPendingAgeSeconds ?? queueBreakdown.oldestPendingAgeSeconds;
   const storagePct = systemPerformance.resources.storageUsedPct;
 
@@ -626,6 +630,9 @@ function DashboardContent() {
               <div>
                 <p className="text-sm font-semibold text-glass-foreground">{primaryAlert.title}</p>
                 <p className="text-xs text-muted-foreground">{primaryAlert.detail}</p>
+                {telemetryIncomplete && operationalAlert.severity !== 'ok' && (
+                  <p className="mt-2 text-xs text-amber-200">Telemetry is incomplete. Some supplemental reads failed; the operational alert above still applies.</p>
+                )}
               </div>
             </div>
             <Button variant="outline" size="sm" onClick={() => navigate(primaryAlert.route)}>

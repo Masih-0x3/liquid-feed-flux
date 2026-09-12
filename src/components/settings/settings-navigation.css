@@ -1,4 +1,0 @@
-/* The enclosing scroller receives the measured sticky navigation height. */
-.settings-page :is([id], [data-settings-save], button, input, textarea, select, [role="combobox"], [role="switch"], [role="slider"]) {
-  scroll-margin-block-start: 1rem;
-}

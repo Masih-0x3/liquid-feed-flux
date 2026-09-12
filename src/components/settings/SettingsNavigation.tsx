@@ -1,5 +1,4 @@
 import { useEffect, useRef, type ReactNode } from 'react';
-import './settings-navigation.css';
 
 export function SettingsNavigation({ children }: { children: ReactNode }) {
   const navigationRef = useRef<HTMLDivElement>(null);

@@ -533,6 +533,21 @@ describe("Dashboard", () => {
     expect(processHudRefetch).not.toHaveBeenCalled();
   });
 
+  it.each(['operations', 'storage'])('preserves a critical %s alert when supplemental telemetry fails', (source) => {
+    mockedUseDashboardData.mockReturnValue({
+      data: {
+        ...dashboardData,
+        dataQuality: { unavailableSections: ['openai_usage'], observedAt: new Date().toISOString() },
+        opsStatus: { ...dashboardData.opsStatus, severity: source === 'operations' ? 'critical' : 'ok', primaryIssue: source === 'operations' ? 'Critical queue backlog' : 'Pipeline is operating normally' },
+        systemPerformance: { ...dashboardData.systemPerformance, resources: { ...dashboardData.systemPerformance.resources, storageUsedPct: source === 'storage' ? 98 : 20 } },
+      },
+      isLoading: false, isError: false, error: null, dataUpdatedAt: Date.now(), isFetching: false,
+    } as ReturnType<typeof useDashboardData>);
+    renderDashboard();
+    expect(screen.getByText(source === 'operations' ? 'Critical queue backlog' : 'Temp media storage critical')).toBeInTheDocument();
+    expect(screen.getByText(/Telemetry is incomplete.*operational alert above/)).toBeInTheDocument();
+  });
+
   it("surfaces storage warning when no higher-priority issue is active", () => {
     mockedUseDashboardData.mockReturnValue({
       data: {

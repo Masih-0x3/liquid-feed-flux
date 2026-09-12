@@ -1,3 +1,4 @@
+import { isSupportedXPostUrl } from '@/lib/xPostUrl';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import {
@@ -195,7 +196,7 @@ export function ManualVideoIntakePanel() {
   function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!isAdmin) return;
-    if (!/^https?:\/\/(?:www\.)?(?:x\.com|twitter\.com)\/[A-Za-z0-9_]+\/status\/[0-9]+(?:[/?#].*)?$/.test(tweetUrl.trim())) {
+    if (!isSupportedXPostUrl(tweetUrl)) {
       setUrlError('Enter an X or Twitter status URL with its post ID.');
       return;
     }
@@ -266,7 +267,7 @@ export function ManualVideoIntakePanel() {
     <div className="grid gap-4 xl:grid-cols-[minmax(300px,0.8fr)_minmax(0,1.2fr)]">
       {readOnly && (
         <div role="note" className="xl:col-span-2 rounded-md border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-          Read-only access. Manual intake, caption, override, and posting changes are disabled. Existing status and previews remain available.
+          Read-only access. Manual intake, caption, override, and posting changes are disabled. Existing status remains available. Media previews and downloads require administrator access.
         </div>
       )}
       <Card className="glass-card">
