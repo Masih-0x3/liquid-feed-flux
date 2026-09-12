@@ -23,7 +23,7 @@ There are two CircleCI artifact boundaries matching the GitHub workflow:
 1. The first run stage collects the redacted pending evidence bundle, then
    `store_artifacts` retains it before technical validation and mutable tests.
 2. The second run stage performs technical validation, all remaining checks and
-   the exact-head owner disposition. Only after that command succeeds and
+   the exact-evidence owner disposition. Only after that command succeeds and
    the CircleCI parity tests pass with the owner-policy variable removed does
    `validation.json` get checked for `passed_owner_accepted` and a separate
    accepted bundle get copied for `store_artifacts`; a failed post-collection
@@ -38,8 +38,11 @@ prevents Circle's bootstrap or remote-daemon shell startup configuration from
 being re-entered under `nounset`.
 Configure the owner policy as a protected CircleCI project/context environment
 variable; it is never committed or printed by this job. The final command still requires
-`XOT_SUPPLY_OWNER_POLICY_MODE=exact-head`, an exact `CIRCLE_SHA1`, and an
-owner-policy payload matching the current technical evidence.
+`XOT_SUPPLY_OWNER_POLICY_MODE=exact-evidence` (supplied by the workflow steps),
+an exact `CIRCLE_SHA1`, and an owner-policy payload whose `evidenceSha256`
+matches the current technical evidence fingerprint. The policy is issued with
+`node scripts/issue-supply-owner-policy.mjs --evidence <bundle> --owner <name>`
+and stays valid across SHAs while the finding set is unchanged.
 
 The workflow intentionally has no branch filter so pull-request branches and
 main pushes both receive the checks. This is broader than the GitHub workflow's

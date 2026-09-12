@@ -17,6 +17,7 @@ import {
   validateEvidenceDirectory,
   validateEvidenceArtifacts,
   decodeBase64Json,
+  supplyEvidenceSha256,
   validateOwnerPolicy,
   acceptedOwnerDisposition,
   ingestOwnerPolicy,
@@ -243,7 +244,8 @@ test("owner acceptance requires dated no-waiver or per-finding dispositions", ()
 
 function ownerPolicy(overrides = {}) {
   return {
-    schema: "xot-hosted-supply-owner-policy-v1",
+    schema: "xot-hosted-supply-owner-policy-v2",
+    evidenceSha256: supplyEvidenceSha256(ownerPolicyContext),
     reviewedSha: "a".repeat(40),
     owner: "release-security",
     signedAt: "2026-09-02T00:00:00Z",
@@ -252,9 +254,6 @@ function ownerPolicy(overrides = {}) {
     actionableHighOrCritical: 0,
     observedHighOrCritical: 0,
     nonfixableHighOrCritical: 0,
-    actionableIds: [],
-    observedIds: [],
-    nonfixableIds: [],
     baseImageClassification: "reviewed-non-actionable",
     waiverEntries: [],
     ...overrides,
@@ -262,8 +261,6 @@ function ownerPolicy(overrides = {}) {
 }
 
 const ownerPolicyContext = {
-  reviewedSha: "a".repeat(40),
-  checkoutSha: "a".repeat(40),
   actionableHighOrCritical: 0,
   observedHighOrCritical: 0,
   nonfixableHighOrCritical: 0,
@@ -273,37 +270,45 @@ const ownerPolicyContext = {
   now: Date.parse("2026-09-02T01:00:00Z"),
 };
 
-test("exact-head owner policy accepts the current zero-actionable scan and maps to a disposition", () => {
+test("exact-evidence owner policy accepts the current zero-actionable scan and maps to a disposition", () => {
   const policy = ownerPolicy();
   const encoded = Buffer.from(JSON.stringify(policy)).toString("base64");
   assert.deepEqual(decodeBase64Json(encoded), policy);
   assert.deepEqual(validateOwnerPolicy(policy, ownerPolicyContext), []);
-  const disposition = acceptedOwnerDisposition(policy, { rendererImageId: "sha256:fixture" });
+  const evidence = { rendererImageId: "sha256:fixture", actionableIds: [], observedIds: [], nonfixableIds: [] };
+  const disposition = acceptedOwnerDisposition(policy, evidence, "c".repeat(40));
   assert.equal(disposition.status, "reviewed");
   assert.equal(disposition.decision, "accepted");
-  assert.equal(disposition.reviewedSha, ownerPolicyContext.reviewedSha);
+  assert.equal(disposition.reviewedSha, "c".repeat(40));
+  assert.equal(disposition.evidenceSha256, policy.evidenceSha256);
+  assert.equal(disposition.policyReviewedSha, policy.reviewedSha);
   assert.equal(disposition.noWaiverReceipt.decision, "no_waivers");
   assert.equal(disposition.noWaiverReceipt.baseImageClassification, policy.baseImageClassification);
   assert.deepEqual(disposition.waiverEntries, []);
 });
 
-test("exact-head owner policy fails closed for missing or tampered base64", () => {
+test("exact-evidence owner policy stays valid when the head SHA changes but evidence is identical", () => {
+  const policy = ownerPolicy({ reviewedSha: "d".repeat(40) });
+  assert.deepEqual(validateOwnerPolicy(policy, ownerPolicyContext), []);
+});
+
+test("exact-evidence owner policy fails closed for missing or tampered base64", () => {
   assert.throws(() => decodeBase64Json(""), /missing/);
   assert.throws(() => decodeBase64Json("not-base64"), /base64 is malformed/);
   const encoded = Buffer.from(JSON.stringify(ownerPolicy())).toString("base64");
   assert.throws(() => decodeBase64Json(`${encoded.slice(0, -1)}A`), /JSON is malformed|base64 is malformed/);
 });
 
-test("exact-head owner policy rejects wrong SHA, signature dates, counts, IDs, actionable findings, and waivers", () => {
+test("exact-evidence owner policy rejects wrong fingerprint, malformed reviewed SHA, signature dates, counts, actionable findings, and waivers", () => {
   const cases = [
-    ["SHA", { reviewedSha: "b".repeat(40) }, /exact reviewed SHA/],
+    ["fingerprint", { evidenceSha256: "b".repeat(64) }, /evidence fingerprint/],
+    ["malformed reviewed SHA", { reviewedSha: "not-a-sha" }, /reviewed SHA/],
+    ["legacy v1 schema", { schema: "xot-hosted-supply-owner-policy-v1" }, /schema is invalid/],
     ["future signature", { signedAt: "2026-09-03T00:00:00Z" }, /dated signature/],
     ["expired policy", { expiresAt: "2026-09-02T00:30:00Z" }, /future expiry/],
     ["observed count", { observedHighOrCritical: 1 }, /observed high or critical/],
     ["nonfixable count", { nonfixableHighOrCritical: 1 }, /nonfixable count/],
-    ["actionable IDs", { actionableIds: ["unexpected"] }, /actionable IDs/],
-    ["observed IDs", { observedIds: ["unexpected"] }, /observed finding IDs/],
-    ["nonfixable IDs", { nonfixableIds: ["unexpected"] }, /nonfixable finding IDs/],
+    ["dropped finding lists", { observedIds: ["legacy"] }, /unexpected fields/],
     ["actionable finding", { actionableHighOrCritical: 1 }, /zero current actionable/],
     ["waiver decision", { decision: "accepted" }, /decision must/],
     ["base image classification", { baseImageClassification: "unknown" }, /base-image classification/],
@@ -312,10 +317,12 @@ test("exact-head owner policy rejects wrong SHA, signature dates, counts, IDs, a
   for (const [, overrides, expected] of cases) {
     assert.ok(validateOwnerPolicy(ownerPolicy(overrides), ownerPolicyContext).some((error) => expected.test(error)));
   }
+  const changedEvidence = { ...ownerPolicyContext, observedIds: ["npm:root:fixture:cve"] };
+  assert.ok(validateOwnerPolicy(ownerPolicy(), changedEvidence).some((error) => error.includes("evidence fingerprint")));
   assert.ok(validateOwnerPolicy(ownerPolicy(), { ...ownerPolicyContext, actionableHighOrCritical: 1 }).some((error) => error.includes("current actionable")));
 });
 
-test("exact-head owner policy rejects unknown fields and technical-only evidence remains independently represented", () => {
+test("exact-evidence owner policy rejects unknown fields and technical-only evidence remains independently represented", () => {
   const errors = validateOwnerPolicy(ownerPolicy({ unexpected: true }), ownerPolicyContext);
   assert.ok(errors.some((error) => error.includes("unexpected fields")));
   const pending = { status: "awaiting_owner_review", decision: "not_accepted", highOrCritical: 0 };
@@ -402,7 +409,7 @@ test("ingestOwnerPolicy accepts a complete fixture, rewrites disposition, and re
     const before = JSON.parse(readFileSync(join(directory, "artifact-manifest.json"), "utf8"));
     const policy = ownerPolicy({ reviewedSha });
     const encoded = Buffer.from(JSON.stringify(policy)).toString("base64");
-    assert.deepEqual(validateOnlyEvidence(directory, { reviewedSha, checkoutSha: reviewedSha, technicalOnly: true, policyMode: "exact-head", encodedPolicy: "tampered" }).errors, []);
+    assert.deepEqual(validateOnlyEvidence(directory, { reviewedSha, checkoutSha: reviewedSha, technicalOnly: true, policyMode: "exact-evidence", encodedPolicy: "tampered" }).errors, []);
     assert.deepEqual(ingestOwnerPolicy(directory, encoded, { reviewedSha, checkoutSha: reviewedSha, now: ownerPolicyContext.now }), policy);
     const afterIngest = JSON.parse(readFileSync(join(directory, "artifact-manifest.json"), "utf8"));
     assert.notDeepEqual(afterIngest, before);
@@ -425,13 +432,13 @@ test("validate-only keeps technical mode independent and blocks missing policy m
   try {
     const reviewedSha = "a".repeat(40);
     writeCompleteEvidenceFixture(directory, reviewedSha);
-    const pending = validateOnlyEvidence(directory, { reviewedSha, checkoutSha: reviewedSha, technicalOnly: true, policyMode: "exact-head", encodedPolicy: "not-base64" });
+    const pending = validateOnlyEvidence(directory, { reviewedSha, checkoutSha: reviewedSha, technicalOnly: true, policyMode: "exact-evidence", encodedPolicy: "not-base64" });
     assert.deepEqual(pending.errors, []);
     assert.equal(JSON.parse(readFileSync(join(directory, "owner-disposition.json"), "utf8")).status, "awaiting_owner_review");
     const blocked = validateOnlyEvidence(directory, { reviewedSha, checkoutSha: reviewedSha, policyMode: null, encodedPolicy: null });
     assert.ok(blocked.errors.some((error) => error.includes("policy is missing")));
     const policy = Buffer.from(JSON.stringify(ownerPolicy({ reviewedSha }))).toString("base64");
-    const accepted = validateOnlyEvidence(directory, { reviewedSha, checkoutSha: reviewedSha, policyMode: "exact-head", encodedPolicy: policy, now: ownerPolicyContext.now });
+    const accepted = validateOnlyEvidence(directory, { reviewedSha, checkoutSha: reviewedSha, policyMode: "exact-evidence", encodedPolicy: policy, now: ownerPolicyContext.now });
     assert.deepEqual(accepted.errors, []);
     assert.equal(JSON.parse(readFileSync(join(directory, "validation.json"), "utf8")).status, "passed_owner_accepted");
   } finally {
@@ -446,7 +453,7 @@ test("validate-only rejects tampered evidence before policy ingestion", () => {
     writeCompleteEvidenceFixture(directory, reviewedSha);
     writeJsonFixture(directory, "root-npm-audit.json", { schema: "xot-hosted-npm-audit-v1", reviewedSha, status: "passed" });
     const policy = Buffer.from(JSON.stringify(ownerPolicy({ reviewedSha }))).toString("base64");
-    const result = validateOnlyEvidence(directory, { reviewedSha, checkoutSha: reviewedSha, policyMode: "exact-head", encodedPolicy: policy, now: ownerPolicyContext.now });
+    const result = validateOnlyEvidence(directory, { reviewedSha, checkoutSha: reviewedSha, policyMode: "exact-evidence", encodedPolicy: policy, now: ownerPolicyContext.now });
     assert.ok(result.errors.some((error) => error.includes("digest mismatch")));
     assert.equal(JSON.parse(readFileSync(join(directory, "owner-disposition.json"), "utf8")).status, "awaiting_owner_review");
   } finally {

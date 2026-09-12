@@ -136,8 +136,8 @@ export function parseWorkflow(source) {
   if (!(collectorIndex < uploadIndexes[0] && uploadIndexes[0] < technicalIndex && technicalIndex < ownerIndex && ownerIndex < uploadIndexes[1])) {
     fail("supply-chain evidence sequence is not blocking and ordered");
   }
-  if (steps[ownerIndex].env.XOT_SUPPLY_OWNER_POLICY_MODE !== "exact-head" || steps[ownerIndex].env[OWNER_POLICY_ENV] !== OWNER_POLICY_REF) {
-    fail("final owner validation must use exact-head and the repository owner-policy variable");
+  if (steps[ownerIndex].env.XOT_SUPPLY_OWNER_POLICY_MODE !== "exact-evidence" || steps[ownerIndex].env[OWNER_POLICY_ENV] !== OWNER_POLICY_REF) {
+    fail("final owner validation must use exact-evidence and the repository owner-policy variable");
   }
   return { steps, collectorIndex, technicalIndex, ownerIndex, uploadIndexes };
 }

@@ -10,7 +10,7 @@
   "source_files": [
     {
       "path": ".github/workflows/ci.yml",
-      "sha256": "6d128e9853a95d8985827bec4b8ab591685b30682ba3a875dcda34b536a52328"
+      "sha256": "c88eeb47e814f2cc276230e31cbb5ba52e875e85038d926c4eb0d132e73db69b"
     },
     {
       "path": "deno.lock",
@@ -34,11 +34,11 @@
     },
     {
       "path": "scripts/check-supply-chain-contract.mjs",
-      "sha256": "99635f90226350daae983b74aee4da0803d4dea6e06b655837937edc781c6842"
+      "sha256": "5fb1528a864b328c9f7368bb637799352bc0497a9ce4dd4ef5841535bd18ad7e"
     },
     {
       "path": "scripts/check-supply-chain-contract.test.mjs",
-      "sha256": "3a5780b12619b45f391bf9d5b53dee99fc5e75bb55bcd533e83d1d21edd575ca"
+      "sha256": "a05a0e3f72682a693bf4fc992c299aa8b017fe534696e5f806401bb6e76cdc36"
     },
     {
       "path": "scripts/check-vite-env.mjs",
@@ -50,11 +50,11 @@
     },
     {
       "path": "scripts/collect-supply-chain-evidence.mjs",
-      "sha256": "fe351904967739c918bfe6e7dd9776522d9557f3a9c77efcd917d5221e261d46"
+      "sha256": "9569efec8a717ef5d296124000e45008f6cd1fe7994d6d608134cc7889637f16"
     },
     {
       "path": "scripts/collect-supply-chain-evidence.test.mjs",
-      "sha256": "06f00f2cc4e607e5356738d40ab02e93005e7f14e1f68cc5dbd0f143ddc17f38"
+      "sha256": "fe6291919b6d3d5f3b98bda2f6956d8a9ffc89ae74a331b99ea6b96cee04ff66"
     },
     {
       "path": "services/video-renderer/Dockerfile",
@@ -10099,7 +10099,7 @@
     "ci": {
       "source_file": {
         "path": ".github/workflows/ci.yml",
-        "sha256": "6d128e9853a95d8985827bec4b8ab591685b30682ba3a875dcda34b536a52328"
+        "sha256": "c88eeb47e814f2cc276230e31cbb5ba52e875e85038d926c4eb0d132e73db69b"
       },
       "action_refs": [
         {
@@ -10107,28 +10107,28 @@
           "path": ".github/workflows/ci.yml",
           "version_or_ref": "11bd71901bbe5b1630ceea73d27597364c9af683",
           "integrity_or_source_hash": null,
-          "source_file_sha256": "6d128e9853a95d8985827bec4b8ab591685b30682ba3a875dcda34b536a52328"
+          "source_file_sha256": "c88eeb47e814f2cc276230e31cbb5ba52e875e85038d926c4eb0d132e73db69b"
         },
         {
           "name": "actions/setup-node",
           "path": ".github/workflows/ci.yml",
           "version_or_ref": "49933ea5288caeca8642d1e84afbd3f7d6820020",
           "integrity_or_source_hash": null,
-          "source_file_sha256": "6d128e9853a95d8985827bec4b8ab591685b30682ba3a875dcda34b536a52328"
+          "source_file_sha256": "c88eeb47e814f2cc276230e31cbb5ba52e875e85038d926c4eb0d132e73db69b"
         },
         {
           "name": "actions/upload-artifact",
           "path": ".github/workflows/ci.yml",
           "version_or_ref": "ea165f8d65b6e75b540449e92b4886f43607fa02",
           "integrity_or_source_hash": null,
-          "source_file_sha256": "6d128e9853a95d8985827bec4b8ab591685b30682ba3a875dcda34b536a52328"
+          "source_file_sha256": "c88eeb47e814f2cc276230e31cbb5ba52e875e85038d926c4eb0d132e73db69b"
         },
         {
           "name": "actions/upload-artifact",
           "path": ".github/workflows/ci.yml",
           "version_or_ref": "ea165f8d65b6e75b540449e92b4886f43607fa02",
           "integrity_or_source_hash": null,
-          "source_file_sha256": "6d128e9853a95d8985827bec4b8ab591685b30682ba3a875dcda34b536a52328"
+          "source_file_sha256": "c88eeb47e814f2cc276230e31cbb5ba52e875e85038d926c4eb0d132e73db69b"
         }
       ]
     },
