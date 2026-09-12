@@ -230,7 +230,7 @@ Deno.test("catalog resolves complete URL variants and case while preserving lite
   }
 });
 
-Deno.test("deployed SDK version transports unquoted literal ILIKE escapes without network access", async () => {
+Deno.test("deployed SDK version transports numeric equality and escaped URL ILIKE without network access", async () => {
   const requests: URL[] = [];
   const client = createClient(ORIGIN, "synthetic-test-key", {
     auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
@@ -239,17 +239,23 @@ Deno.test("deployed SDK version transports unquoted literal ILIKE escapes withou
       return Promise.resolve(new Response("[]", { status: 200, headers: { "Content-Type": "application/json" } }));
     } },
   });
-  const response = await getMediaCatalog(client, { tweet_id: URL_TWEET_ID }, context);
-  assert.equal((response.body as Row).code, "media_post_not_archived");
-  assert.equal(requests.length, 1);
-  assert.equal(requests[0].pathname, "/rest/v1/posts");
-  assert.equal(requests[0].searchParams.get("limit"), "2");
+  for (const tweet_id of [URL_TWEET_ID, URL_STATUS_ID]) {
+    const response = await getMediaCatalog(client, { tweet_id }, context);
+    assert.equal((response.body as Row).code, "media_post_not_archived");
+  }
+  assert.equal(requests.length, 2);
+  for (const request of requests) {
+    assert.equal(request.pathname, "/rest/v1/posts");
+    assert.equal(request.searchParams.get("limit"), "2");
+  }
   const transported = requests[0].searchParams.get("or")!;
   assert.equal(transported.split(",").length, MAX_ARCHIVE_POST_VARIANTS);
   assert.equal(transported.startsWith(`(tweet_id.ilike.${URL_STATUS_ID},tweet_id.ilike.https://twitter.com/Archive\\_News/status/${URL_STATUS_ID},`), true);
   assert.equal(transported.includes('"'), false);
   assert.equal(transported.includes("%"), false);
   assert.equal(transported.includes("*"), false);
+  assert.equal(requests[1].searchParams.get("tweet_id"), `eq.${URL_STATUS_ID}`);
+  assert.equal(requests[1].searchParams.has("or"), false);
 });
 
 Deno.test("numeric catalogs stay exact and URL references can resolve numeric archive keys", async () => {
@@ -258,11 +264,16 @@ Deno.test("numeric catalogs stay exact and URL references can resolve numeric ar
     const body = (await getMediaCatalog(f.client, { tweet_id: reference }, context)).body as Row;
     assert.equal(body.ok, true);
     assert.equal(body.tweet_id, TWEET_ID);
+    if (reference === TWEET_ID) {
+      assert.deepEqual(f.reads[0].equals, [["tweet_id", TWEET_ID]]);
+      assert.equal(f.reads[0].or, undefined);
+    }
   }
   assert.deepEqual(archivePostIdentityVariants(TWEET_ID), [TWEET_ID]);
   const f = fixture({ tweetId: URL_TWEET_ID });
   assert.equal(((await getMediaCatalog(f.client, { tweet_id: URL_STATUS_ID }, context)).body as Row).code, "media_post_not_archived");
-  assert.equal(f.reads[0].or, `tweet_id.ilike.${URL_STATUS_ID}`);
+  assert.deepEqual(f.reads[0].equals, [["tweet_id", URL_STATUS_ID]]);
+  assert.equal(f.reads[0].or, undefined);
 });
 
 Deno.test("ambiguous catalog identities fail closed before reading or signing media", async () => {

@@ -94,7 +94,10 @@ export async function getMediaCatalog(
     // Complete, generated literals only. PostgREST's unquoted OR values retain
     // the LIKE escape; underscores in handles must never become wildcards.
     const filters = variants.map((identity) => `tweet_id.ilike.${identity.replace(/[\\%_]/g, "\\$&")}`).join(",");
-    const posts = await readRows(table(client, "posts").select("tweet_id,author_handle").or(filters).limit(2));
+    const postQuery = table(client, "posts").select("tweet_id,author_handle");
+    // Numeric references have one exact key; equality can use posts_pkey.
+    const matchingPosts = variants.length === 1 ? postQuery.eq("tweet_id", variants[0]) : postQuery.or(filters);
+    const posts = await readRows(matchingPosts.limit(2));
     if (!posts.length) return failure("media_post_not_archived");
     if (posts.some((post) => !isArchivePostIdentity(post.tweet_id)
       || !variants.some((identity) => identity.toLowerCase() === text(post.tweet_id).toLowerCase()))) return failure("media_access_unavailable");

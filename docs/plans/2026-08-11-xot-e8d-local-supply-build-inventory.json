@@ -306,7 +306,7 @@
     },
     {
       "path": "supabase/functions/admin-actions/mediaAccessActions.test.ts",
-      "sha256": "d306abf7731dc407b7be9af10d9892a2b5a1e8d59b17f06c2f5b71701182a335"
+      "sha256": "941f90e7d169e64011cdbef443bdc4d24936bbbc4d10310c95743448a0ee89bb"
     },
     {
       "path": "supabase/functions/admin-actions/monitoringMutations.test.ts",
@@ -9936,7 +9936,7 @@
           "path": "supabase/functions/admin-actions/index.ts,supabase/functions/admin-actions/mediaAccessActions.test.ts,supabase/functions/admin-retry/index.ts,supabase/functions/db-cleanup/index.ts,supabase/functions/media-cleanup/index.ts,supabase/functions/media-processor/index.ts,supabase/functions/webhooks-rssapp/index.ts,supabase/functions/worker/index.ts,supabase/functions/x-followers-snapshot/index.ts",
           "version_or_ref": "https://esm.sh/@supabase/supabase-js@2.39.7",
           "integrity_or_source_hash": "5361671c958daa350e504d9975da64b2d6dc9e81390b985ccdafb2e3572e24e7",
-          "source_file_sha256": "fe00b6b3ae7e17fb5ad6d86b031ca47a93c604f9592065dd0044b2db3f4a2645"
+          "source_file_sha256": "a0d62cc242499c9f2bc326eb2ae66d07cd46659a071621cb5286728a61792afe"
         },
         {
           "name": "https://esm.sh/@supabase/supabase-js@2.49.1",
