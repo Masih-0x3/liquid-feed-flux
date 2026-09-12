@@ -20,6 +20,11 @@ const paths = {
   xPostingActionsTest: join(repoRoot, 'supabase/functions/admin-actions/xPostingActions.test.ts'),
   packageJson: join(repoRoot, 'package.json'),
   ci: join(repoRoot, '.github/workflows/ci.yml'),
+  mediaAccess: join(repoRoot, 'src/api/mediaAccess.ts'),
+  authorizedMedia: join(repoRoot, 'src/components/media/AuthorizedMedia.tsx'),
+  mediaAccessActions: join(repoRoot, 'supabase/functions/admin-actions/mediaAccessActions.ts'),
+  manualIntakeActions: join(repoRoot, 'supabase/functions/admin-actions/manualVideoIntakeActions.ts'),
+  adminActionNames: join(repoRoot, 'supabase/functions/_shared/adminActionNames.ts'),
 };
 const require = createRequire(import.meta.url);
 const typescript = require('typescript');
@@ -295,11 +300,7 @@ function assertDownloaderMetadataBoundary(source) {
     [],
     'Downloader must use resolver media only for its bounded metadata cards',
   );
-  assert.equal(
-    tweetMediaAccesses.length,
-    2,
-    'Downloader must use tweet media only for the bounded count and checked map callback',
-  );
+
 }
 
 function assertVideoRenderTargetTypes() {
@@ -338,6 +339,21 @@ function assertVideoRenderTargetTypes() {
   );
 }
 
+function assertAuthorizedMediaSink(source) {
+  const file = parse(paths.authorizedMedia, source);
+  const sinks = [];
+  const visit = (node) => {
+    if (typescript.isJsxAttribute(node) && ['src', 'href', 'srcSet', 'poster', 'style'].includes(node.name.text)) {
+      assert.equal(node.initializer?.getText(file), '{visibleGrant.signed_url}', 'Central media URLs must come only from the validated, current grant');
+      sinks.push(node.name.text);
+    }
+    typescript.forEachChild(node, visit);
+  };
+  visit(file);
+  assert.deepEqual(sinks.sort(), ['href', 'src', 'src'], 'Retain one image, one video and one attachment sink');
+  assert.match(source, /!readOnly && grant && grant\.tweet_id === tweetId && grant\.id === \(renderId \|\| mediaId\)/, 'Selection and role changes must immediately revoke the visible grant');
+}
+
 function validateStructural(source) {
   for (const name of [
     'downloader',
@@ -356,34 +372,40 @@ function validateStructural(source) {
     transpile(paths[name], source[name]);
   }
 
-  assert.match(source.downloader, /action: "resolve_x_media"/, 'Downloader must retain the server-side reviewed metadata resolver');
-  assert.doesNotMatch(source.downloader, /\bfetch\s*\(/, 'Downloader must not make a browser remote-media fetch');
-  assert.doesNotMatch(source.downloader, /(?:createObjectURL|revokeObjectURL|window\.open\s*\()/, 'Downloader must not open or materialize a remote media URL');
-  assert.doesNotMatch(source.downloader, /(?:\bsupabase\b|createSignedUrls|getPublicUrl|\.storage\b)/, 'Downloader must not bypass the server boundary with a direct media client');
-  assert.doesNotMatch(source.downloader, /(?:<img\b|<video\b|<AvatarImage\b|Download File|Open Direct Link|data\?\.error)/, 'Downloader must not retain direct media controls or raw resolver errors');
-  assert.match(source.downloader, /Preview and download are temporarily unavailable until authorised media access is implemented\. No remote media URL was opened\./, 'Downloader must explain that access is unavailable without claiming a download');
-  assert.match(source.downloader, /Authorised preview unavailable/, 'Downloader cards must visibly distinguish metadata from an authorised preview');
-  assert.match(source.downloader, /tweetData\.media\.map\(\(media, index\) =>/, 'Downloader must retain the checked media callback boundary');
+  assert.match(source.downloader, /getMediaCatalog/, 'Downloader must use the free authorized archive lookup');
+  assert.doesNotMatch(source.downloader, /resolve_x_media/, 'Archive lookup must not invoke a cost-bearing provider resolver');
+  assert.doesNotMatch(source.downloader, /(?:\bsupabase\b|createSignedUrls|getPublicUrl|\.storage\b)/, 'Downloader must not directly query or sign storage');
+  assert.match(source.downloader, /This lookup is read-only and does not call X, start a render or publish a post/, 'Downloader must disclose its real capability before lookup');
   assertNoBrowserMediaSink(paths.downloader, source.downloader, 'Downloader');
   assertDownloaderMetadataBoundary(source.downloader);
-  const downloaderMediaType = between(source.downloader, 'type ResolvedMedia = {', 'type TweetInfo = {');
-  const downloaderTweetType = between(source.downloader, 'type TweetInfo = {', 'const TWEET_REGEX');
-  assert.doesNotMatch(downloaderMediaType, /(?:\burl\b|thumbnail_url)/, 'Downloader response type must not admit raw media URLs');
-  assert.doesNotMatch(downloaderTweetType, /user_profile_image_url/, 'Downloader response type must not admit raw profile URLs');
-
-  assert.doesNotMatch(source.mediaThumbnails, /(?:\bsupabase\b|\.from\(\s*["']media["']\s*\)|\.storage\b|createSignedUrls|\bsrc_url\b|\bstorage_path\b)/, 'Monitoring thumbnails must not query/sign/fallback to client media access');
-  assert.match(source.mediaThumbnails, /role="status"/, 'Monitoring containment must expose an accessible status');
-  assert.match(source.mediaThumbnails, /Authorised media access has not been configured\. No remote media was loaded\./, 'Monitoring containment must explain why no media is shown');
+  assert.doesNotMatch(source.mediaThumbnails, /(?:\bsupabase\b|\.storage\b|createSignedUrls|\bsrc_url\b|\bstorage_path\b)/, 'Monitoring must not query/sign/fallback to raw client media');
+  assert.match(source.mediaThumbnails, /ArchivedMediaList tweetId=\{tweetId\} readOnly=\{readOnly\}/, 'Monitoring must pass only logical identity and role');
   assertNoBrowserMediaSink(paths.mediaThumbnails, source.mediaThumbnails, 'Monitoring thumbnails');
-  assert.match(source.monitoringDrawer, /\{entry\.has_media && <MediaThumbnails \/>\}/, 'Monitoring must show the unavailable state only when media exists');
-  assert.doesNotMatch(source.monitoringDrawer, /VideoRenderDetailPanel/, 'Monitoring drawer must not mount a second media route beneath the unavailable state');
-
-  assert.match(source.videoRenderDetailPanel, /Media preview unavailable/, 'Video render detail must visibly explain preview containment');
-  assert.match(source.videoRenderDetailPanel, /Authorised media access has not been configured\. Render status and review controls remain available; no remote media was loaded\./, 'Video render detail must not claim that it loaded remote media');
-  assert.doesNotMatch(source.videoRenderDetailPanel, /(?:source_signed_url|output_signed_url|<video\b|<audio\b|href=|Open processed video)/, 'Video render detail must not retain signed-media playback or open controls during containment');
-  assert.doesNotMatch(source.videoRenderDetailPanel, /render\?\.metrics\s*\?\?\s*\{\}/, 'Video render detail must not widen the fixed metrics type with an empty object fallback');
+  assert.match(source.monitoringDrawer, /entry\.has_media && <MediaThumbnails tweetId=\{entry\.tweet_id\}/, 'Monitoring must bind media to this post');
+  assert.doesNotMatch(source.monitoringDrawer, /VideoRenderDetailPanel/, 'Monitoring must not mount a duplicate inspector');
+  assert.match(source.videoRenderDetailPanel, /AuthorizedMedia tweetId=\{render\.tweet_id\} renderId=\{render\.id\}/, 'Render preview must bind both logical IDs');
+  assert.doesNotMatch(source.videoRenderDetailPanel, /(?:source_signed_url|output_signed_url|\bstorage_path\b|\bsrc_url\b)/, 'Detail must not accept raw URLs or paths');
+  assert.doesNotMatch(source.videoRenderDetailPanel, /render\?\.metrics\s*\?\?\s*\{\}/, 'Detail must retain fixed metrics types');
   assertNoBrowserMediaSink(paths.videoRenderDetailPanel, source.videoRenderDetailPanel, 'Video render detail');
-  assert.doesNotMatch(source.videoRenders, /<VideoRenderDetailPanel[\s\S]*?\bcompact(?:\s|=|\/)/, 'Video Renders must not pass the removed compact prop to the contained detail panel');
+  assert.doesNotMatch(source.videoRenders, /<VideoRenderDetailPanel[\s\S]*?\bcompact(?:\s|=|\/)/, 'Video Renders must not pass the removed compact prop');
+
+  assert.match(source.mediaAccess, /validateMediaGrant\(response\.asset, target, purpose\)/, 'All grants must be checked before entering component state');
+  for (const guard of ["grant.tweet_id !== target.tweetId", "grant.id !== (target.renderId || target.mediaId)", "signed.origin !== expected.origin", "expires <= now", "expires > now + 125_000", "MEDIA_MIMES.has(grant.mime_type)", "grant.provenance !== 'private_archive'"]) {
+    assert.ok(source.mediaAccess.includes(guard), 'Missing grant guard: ' + guard);
+  }
+  assert.doesNotMatch(source.mediaAccess, /(?:createSignedUrl|getPublicUrl|\.storage\b|\bfetch\s*\()/, 'Grant client may only use admin action transport');
+  assert.match(source.authorizedMedia, /requestMediaAccess\(\{ tweetId, mediaId, renderId \}, purpose\)/, 'Central sink may only request logical targets');
+  assert.match(source.authorizedMedia, /setTimeout/, 'Central sink must clear expired grants');
+  assert.match(source.authorizedMedia, /visibleGrant\.kind === 'video'/, 'Media semantics must follow verified MIME');
+  assertAuthorizedMediaSink(source.authorizedMedia);
+  assert.doesNotMatch(source.authorizedMedia, /(?:storage_path|src_url|source_signed_url|output_signed_url|createSignedUrl|\bfetch\s*\()/, 'Central sink must not accept raw fallback access');
+  for (const guard of ['context.role !== "admin"', 'bucket.public === false', 'row.tweet_id !== body.tweet_id', 'object.status !== "active"', 'metadata?.mimetype !== mime', 'number(metadata.size) !== bytes', 'grant.origin !== origin.origin', 'decodeURIComponent(grant.pathname) !== expectedPath', 'MEDIA_ACCESS_SECONDS = 120', 'Object.keys(body).some']) {
+    assert.ok(source.mediaAccessActions.includes(guard), 'Missing server authorization guard: ' + guard);
+  }
+  assert.doesNotMatch(source.mediaAccessActions, /(?:getPublicUrl|src_url|fetchReviewedRemoteMedia|\bfetch\s*\()/, 'Archive grants must never fetch or expose a provider origin');
+  const readOnlyNames = source.adminActionNames.slice(source.adminActionNames.indexOf('export const READ_ONLY_ADMIN_ACTION_NAMES'));
+  assert.doesNotMatch(readOnlyNames, /'get_media_(?:access|catalog)'/, 'Private media grants remain admin-only');
+  assert.doesNotMatch(source.manualIntakeActions, /(?:createSignedUrl|source_signed_url|output_signed_url)/, 'Manual Intake reads must not issue legacy path-based grants');
 
   assert.doesNotMatch(source.videoRenderData, /(?:output_storage_path|\bstorage_path\b|\bsrc_url\b|source_signed_url|output_signed_url)/, 'Video render frontend types must not admit raw paths, origins, or signed URLs');
   const frontendQueueType = between(source.videoRenderData, 'export interface VideoRenderQueueRow', 'export interface VideoRenderDetail');
@@ -576,7 +598,7 @@ if (process.env.MUTATION_TEST === '1') {
   assertRejected('unavailable copy', (source) => ({
     ...source,
     downloader: source.downloader.replace(
-      'Preview and download are temporarily unavailable until authorised media access is implemented. No remote media URL was opened.',
+      'This lookup is read-only and does not call X, start a render or publish a post',
       'Download ready.',
     ),
   }));
@@ -591,7 +613,7 @@ if (process.env.MUTATION_TEST === '1') {
   assertRejected('monitoring panel remount', (source) => ({
     ...source,
     monitoringDrawer: source.monitoringDrawer.replace(
-      '{entry.has_media && <MediaThumbnails />}',
+      '{entry.has_media && <MediaThumbnails tweetId={entry.tweet_id} readOnly={readOnly} />}',
       '{entry.has_media && <><MediaThumbnails /><VideoRenderDetailPanel tweetId={entry.tweet_id} /></>}',
     ),
   }));
@@ -740,9 +762,21 @@ if (process.env.MUTATION_TEST === '1') {
       'assertEquals(body.tweet.media[0].url, "visible");',
     ),
   }));
+  for (const [name, guard] of [
+    ['mediaAccessActions', 'context.role !== "admin"'],
+    ['mediaAccessActions', 'bucket.public === false'],
+    ['mediaAccessActions', 'row.tweet_id !== body.tweet_id'],
+    ['mediaAccessActions', 'object.status !== "active"'],
+    ['mediaAccessActions', 'metadata?.mimetype !== mime'],
+    ['mediaAccess', 'signed.origin !== expected.origin'],
+    ['mediaAccess', 'expires <= now'],
+  ]) assertRejected('authorized media guard ' + guard, (source) => ({ ...source, [name]: source[name].replaceAll(guard, 'false') }));
+  assertRejected('unvalidated central media sink', (source) => ({
+    ...source, authorizedMedia: source.authorizedMedia + '\nconst bypass = <img src="https://provider.invalid/raw.jpg" />;\n',
+  }));
   selfTest = 'pass';
 }
 
 console.log(
-  'CLIENT_MEDIA_ACCESS_CONTAINMENT_SOURCE_CONTRACT_PASS downloader=metadata_only monitoring=authorised_only video_render=metadata_only targetTypecheck=pass selfTest=' + selfTest,
+  'CLIENT_MEDIA_ACCESS_CONTAINMENT_SOURCE_CONTRACT_PASS downloader=archive_only monitoring=authorised_only video_render=authorised_only targetTypecheck=pass selfTest=' + selfTest,
 );

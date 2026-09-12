@@ -287,17 +287,17 @@ export function actionDescription(action: PendingAction | null) {
   const entry = action.entry;
   switch (action.type) {
     case 'force_telegram':
-      return 'Queues Telegram delivery and records the override as feedback.';
+      return 'Queues delivery to the configured Telegram destination and records the override as feedback. This can publish externally when the posting gate permits it.';
     case 'force_x': {
       const reasons = entry?.x_cost_flags?.reasons ?? ['tweet write expected'];
-      return `Runs X preflight, queues hydration first if needed, then posts the plain translation unless an approved enrichment exists. Expected X work: ${reasons.join(', ')}.`;
+      return `Runs X preflight, queues hydration first if needed, then posts the plain translation unless an approved enrichment exists. Expected X work: ${reasons.join(', ')}. This can publish to the connected X account and incur provider charges.`;
     }
     case 'rescore':
-      return 'Runs the current scoring prompt again and may update the deliver/skip decision.';
+      return 'Runs the current scoring prompt with the configured AI provider and may update the deliver/skip decision. Provider charges may apply; cost is unavailable here.';
     case 'reprocess':
       return 'Queues a pipeline re-evaluation. Existing media is preserved and is not refreshed until the staged media path is available.';
     case 'hydrate':
-      return 'Queues one X read for full tweet text unless an equivalent hydrate job is already pending.';
+      return 'Queues one X read for full tweet text unless an equivalent hydrate job is already pending. X API charges may apply.';
     case 'clear_dup':
       return 'Marks this pair as not duplicate and reopens the post for delivery evaluation.';
     case 'ignore':
@@ -305,7 +305,7 @@ export function actionDescription(action: PendingAction | null) {
     case 'close_stale_x':
       return 'Marks pending X delivery rows older than 24 hours as skipped. This does not retry, post, or call X.';
     case 'translate':
-      return 'Runs Persian translation only. This does not change the score, decision, Telegram state, or X eligibility.';
+      return 'Runs Persian translation with the configured AI provider; provider charges may apply and cost is unavailable here. This does not change the score, decision, Telegram state, or X eligibility.';
     case 'run_dedupe':
       return 'Runs the duplicate gate now. Unique or meaningfully updated posts can continue to translation; duplicates remain blocked.';
     case 'cancel_jobs':
@@ -319,7 +319,7 @@ export function actionDescription(action: PendingAction | null) {
 
 export function bulkActionDescription(action: BulkAction, count: number) {
   if (action === 'bulk_reprocess') {
-    return 'Queues pipeline re-evaluation for the selected posts. Existing media is preserved and is not refreshed until the staged media path is available.';
+    return 'Queues pipeline re-evaluation for the selected posts. Existing media is preserved and is not refreshed until the staged media path is available. Paid AI/X calls and external delivery can follow according to the saved pipeline and posting gates.';
   }
   return 'Marks each selected post as reviewed/ignored, closes failed or pending X rows, closes failed/pending Telegram rows, and cancels pending/running/failed jobs without calling Telegram or X.';
 }

@@ -78,13 +78,13 @@ function sliceBetween(input, start, end, label) {
 }
 
 function assertDraftHook(hook, label) {
-  assertIncludes(hook, "export function useIncomingSettingsDraft<T>(incoming: T)", label + " exported hook");
-  assertIncludes(hook, "const [draft, setDraft] = useState<T>(() => incoming);", label + " local draft state");
-  assertIncludes(hook, "const [baseline, setBaseline] = useState<T>(() => incoming);", label + " baseline state");
-  assertIncludes(hook, "const [pendingIncoming, setPendingIncoming] = useState<PendingIncoming<T> | null>(null);", label + " pending incoming state");
+  assertIncludes(hook, "export function useIncomingSettingsDraft<T>(incoming: T, restored?:", label + " exported hook");
+  assertIncludes(hook, "const [draft, setDraft] = useState<T>(() => restored ? restored.draft : incoming);", label + " local draft state");
+  assertIncludes(hook, "const [baseline, setBaseline] = useState<T>(() => restored ? restored.baseline : incoming);", label + " baseline state");
+  assertIncludes(hook, "const [pendingIncoming, setPendingIncoming] = useState<PendingIncoming<T> | null>(() => {", label + " pending incoming state");
   assertIncludes(hook, "const dirtyFields = useMemo(", label + " dirty field derivation");
   assertIncludes(hook, "const pendingFields = useMemo(", label + " pending comparison derivation");
-  assertIncludes(hook, "const seenIncomingFingerprintsRef = useRef(new Set<string>([incomingFingerprint]));", label + " replay protection state");
+  assertIncludes(hook, "const seenIncomingFingerprintsRef = useRef(new Set<string>([incomingFingerprint, settingsSnapshotFingerprint(baseline)]));", label + " replay protection state");
   assertIncludes(hook, "const pendingIncomingRef = useRef(pendingIncoming);", label + " pending snapshot ref");
   assertIncludes(hook, "pendingIncomingRef.current = pendingIncoming;", label + " pending snapshot ref update");
 
@@ -181,8 +181,13 @@ function assertCard({
   recommendedSavedConfig,
   readOnly,
 }) {
-  assertIncludes(input, "import { useIncomingSettingsDraft } from '@/hooks/useIncomingSettingsDraft';", label + " shared draft hook import");
-  assertIncludes(input, "useIncomingSettingsDraft(incomingConfig)", label + " hook use");
+  if (readOnly) {
+    assertIncludes(input, "import { useIncomingSettingsDraft } from '@/hooks/useIncomingSettingsDraft';", label + " shared draft hook import");
+    assertIncludes(input, "useIncomingSettingsDraft(incomingConfig)", label + " hook use");
+  } else {
+    assertIncludes(input, "useSettingsDraft('duplicate-gate', 'Duplicate Gate', incomingConfig)", label + " retained shared draft hook");
+    assertIncludes(input, "} = editor;", label + " editor state binding");
+  }
   assertNotIncludes(input, "useEffect(", label + " unconditional prop reset");
   assertNotIncludes(input, stateSetter + "(", label + " direct local state reset");
   assertIncludes(input, "dirtyFields,", label + " dirty field UI state");

@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Maximize2, Minimize2, Copy, Check, RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -38,15 +38,22 @@ export function PromptEditor({
 }: PromptEditorProps) {
   const [fullscreen, setFullscreen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState(false);
+  const copyTimer = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(() => () => clearTimeout(copyTimer.current), []);
 
   const len = value?.length ?? 0;
   const overLimit = maxLength != null && len > maxLength;
   const nearLimit = maxLength != null && !overLimit && len > maxLength * 0.85;
 
-  const copy = () => {
-    navigator.clipboard.writeText(value ?? '');
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1200);
+  const copy = async () => {
+    setCopyError(false);
+    try {
+      await navigator.clipboard.writeText(value ?? '');
+      setCopied(true);
+      clearTimeout(copyTimer.current);
+      copyTimer.current = setTimeout(() => setCopied(false), 1200);
+    } catch { setCopyError(true); }
   };
 
   const textareaClass = cn(
@@ -64,6 +71,7 @@ export function PromptEditor({
       <div className="relative overflow-hidden rounded-md border border-border bg-background/40 transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 focus-within:ring-offset-background">
         <Textarea
           id={id}
+          aria-label={title}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
@@ -73,16 +81,17 @@ export function PromptEditor({
           style={{ height: `${minHeight}px`, maxHeight: '70vh', overflow: 'auto' }}
         />
         <div className="absolute top-2 right-2 flex items-center gap-1 opacity-70 hover:opacity-100 transition-opacity">
-          <Button type="button" size="icon" variant="ghost" className="h-7 w-7 bg-background/80 backdrop-blur" onClick={copy} title="Copy" aria-label="Copy prompt">
+          <Button type="button" size="icon" variant="ghost" className="h-9 w-9 bg-background/80" onClick={copy} title="Copy" aria-label="Copy prompt">
             {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
           </Button>
-          <Button type="button" size="icon" variant="ghost" className="h-7 w-7 bg-background/80 backdrop-blur" onClick={() => setFullscreen(true)} title="Expand" aria-label="Expand prompt editor">
+          <Button type="button" size="icon" variant="ghost" className="h-9 w-9 bg-background/80" onClick={() => setFullscreen(true)} title="Expand" aria-label="Expand prompt editor">
             <Maximize2 className="w-3.5 h-3.5" />
           </Button>
         </div>
       </div>
 
-      <div className="flex items-center justify-between gap-2 text-xs">
+      {copyError && <p role="alert" className="text-sm text-destructive">Could not copy. Select the editor text and copy it manually.</p>}
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
         <div className="flex items-center gap-2">
           {onReset && !readOnly && (
             <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={onReset}>
@@ -99,7 +108,7 @@ export function PromptEditor({
       <Dialog open={fullscreen} onOpenChange={setFullscreen}>
         <DialogContent className="max-w-[95vw] w-[95vw] h-[92vh] flex flex-col p-0 gap-0">
           <DialogHeader className="px-6 py-4 border-b border-border">
-            <DialogTitle className="flex items-center justify-between gap-4">
+            <DialogTitle className="flex flex-wrap items-center justify-between gap-3 pr-6">
               <span>{title}</span>
               <div className="flex items-center gap-2">
                 <span className={cn('text-xs font-normal', counterClass)}>
@@ -114,9 +123,11 @@ export function PromptEditor({
                 </Button>
               </div>
             </DialogTitle>
+            <DialogDescription>{readOnly ? 'Read-only preview. You can select and copy the text.' : 'Expanded editor. Changes update the same local draft; save the settings group to apply them.'}</DialogDescription>
           </DialogHeader>
           <div className="flex-1 p-6 overflow-hidden">
             <Textarea
+              aria-label={`${title} expanded`}
               value={value}
               onChange={(e) => onChange(e.target.value)}
               placeholder={placeholder}

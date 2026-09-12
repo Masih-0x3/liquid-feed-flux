@@ -112,7 +112,7 @@ function assertContract(source) {
   assertIncludes(source.panel, '}, [savedCaption, savedDuplicateOverride, savedDuplicateOverrideReason, snapshotIntakeId]);', 'manual draft reset only follows saved fields');
   assertIncludes(source.panel, 'const hasUnsavedCaption = Boolean(', 'unsaved caption guard');
   assertIncludes(source.panel, 'setPostSnapshot({', 'freeze post confirmation');
-  assertIncludes(source.panel, 'This creates one public X post from the frozen render and saved caption below.', 'explicit confirmation copy');
+  assertIncludes(source.panel, 'This creates one public post on the configured X account from the frozen render and saved caption below.', 'explicit confirmation copy');
   assertIncludes(source.panel, 'Save caption before posting', 'visible unsaved caption state');
 
   const packageJson = JSON.parse(source.packageJson);

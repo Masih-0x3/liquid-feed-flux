@@ -1,4 +1,5 @@
-import { ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { clearSettingsDraftSession } from '@/components/settings/SettingsDraftSession';
+import { ReactNode, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { Navigate, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { navigationItems } from './navigation';
 import { VersionBanner } from './VersionBanner';
@@ -7,7 +8,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { useRuntimeControls } from '@/hooks/useRuntimeControls';
-import { Loader2, LockKeyhole, LogOut, RefreshCw, ShieldAlert } from 'lucide-react';
+import { Loader2, LockKeyhole, LogOut, RefreshCw, ShieldAlert, ShieldCheck } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface AppLayoutProps {
@@ -16,7 +17,7 @@ interface AppLayoutProps {
 
 export function AppLayout({ children }: AppLayoutProps) {
   const { user, status, authError, role, isAdmin, signOut, refreshSession } = useAuth();
-  const { controls: runtimeControls } = useRuntimeControls(status === 'authorised');
+  const { controls: runtimeControls, loading: runtimeLoading, error: runtimeError } = useRuntimeControls(status === 'authorised');
   const { toast } = useToast();
   const location = useLocation();
   const [headerState, setHeaderState] = useState({ docked: false, hidden: false });
@@ -34,7 +35,7 @@ export function AppLayout({ children }: AppLayoutProps) {
     : runtimeControls?.environment === 'production'
       ? 'Production'
       : 'Runtime unknown';
-  const postingStatusLabel = runtimeControls?.posting_mode === 'blocked'
+  const postingStatusLabel = runtimeError ? 'Posting status unavailable' : runtimeLoading && !runtimeControls ? 'Checking posting status' : runtimeControls?.posting_mode === 'blocked'
     ? `Posting locked in ${environmentLabel}`
     : runtimeControls?.posting_mode === 'enabled'
       ? `Posting enabled in ${environmentLabel}`
@@ -149,6 +150,7 @@ export function AppLayout({ children }: AppLayoutProps) {
     try {
       const { error } = await signOut();
       if (error) throw error;
+      clearSettingsDraftSession();
 
       toast({
         title: 'Signed out successfully',
@@ -251,7 +253,7 @@ export function AppLayout({ children }: AppLayoutProps) {
         >
           <div
             className={cn(
-              'grid min-h-12 w-full max-w-[96rem] grid-cols-[auto_1fr_auto] items-center gap-2 border transition-all duration-300 ease-out motion-reduce:transition-none sm:gap-3',
+              'grid min-h-12 w-full max-w-[96rem] grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border transition-colors duration-150 ease-out motion-reduce:transition-none sm:gap-3',
               headerState.docked
                 ? 'rounded-lg border-glass-border/70 bg-background/80 px-2 py-2 shadow-[0_18px_55px_rgba(0,0,0,0.28)] backdrop-blur-glass-lg sm:px-3'
                 : 'rounded-lg border-glass-border/30 bg-background/50 px-2 py-2 shadow-none backdrop-blur-glass sm:px-3'
@@ -259,25 +261,25 @@ export function AppLayout({ children }: AppLayoutProps) {
           >
             <div className="flex min-w-0 items-center gap-2">
               <BrandLogo compact className="h-8 w-8 shrink-0 rounded-lg ring-1 ring-glass-border/70" />
-              <div className="min-w-0">
+              <div className="hidden min-w-0 min-[360px]:block">
                 <div className="flex items-center gap-1.5 text-sm font-display font-semibold leading-tight text-glass-foreground">
                   <span>XOT</span>
                   <span
                     aria-label="XOT version 2"
                     title="XOT version 2"
-                    className="inline-flex items-center rounded border border-primary/35 bg-primary/10 px-1.5 py-0.5 font-mono text-[9px] font-semibold leading-none tracking-[0.08em] text-primary"
+                    className="hidden min-[360px]:inline-flex items-center rounded border border-primary/35 bg-primary/10 px-1.5 py-0.5 font-mono text-[9px] font-semibold leading-none tracking-[0.08em] text-primary"
                   >
                     V2
                   </span>
                 </div>
                 <div className="truncate text-[11px] uppercase leading-tight tracking-[0.14em] text-muted-foreground">
-                  {activeItem.title}
+                  {location.pathname === '/x-account' ? 'My X' : activeItem.title}
                 </div>
               </div>
             </div>
 
-            <nav aria-label="Primary navigation" className="hidden min-w-0 justify-center md:flex">
-              <div className="flex min-w-0 items-center gap-1 rounded-md border border-glass-border/40 bg-background/32 px-1 py-1 backdrop-blur-glass">
+            <nav aria-label="Primary navigation" className="col-span-2 row-start-2 hidden min-w-0 justify-center md:flex">
+              <div className="flex w-full min-w-0 items-center gap-1 rounded-md border border-glass-border/40 bg-background/32 px-1 py-1 backdrop-blur-glass">
                 {navigationItems.map((item) => (
                   <NavLink
                     key={item.title}
@@ -287,13 +289,13 @@ export function AppLayout({ children }: AppLayoutProps) {
                     title={item.title}
                     className={({ isActive }) =>
                       cn(
-                        'inline-flex h-8 min-w-8 items-center justify-center gap-2 rounded px-2 text-xs font-mono font-medium text-muted-foreground transition-colors hover:bg-glass-border/20 hover:text-glass-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70 lg:px-3',
+                        'inline-flex min-h-10 min-w-0 flex-1 shrink-0 items-center justify-center gap-2 rounded px-2 text-xs font-mono font-medium text-muted-foreground transition-colors hover:bg-glass-border/20 hover:text-glass-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70 lg:px-3',
                         isActive && 'bg-primary/15 text-primary'
                       )
                     }
                   >
-                    <item.icon className="h-3.5 w-3.5 shrink-0" />
-                    <span className="hidden lg:inline">{item.title}</span>
+                    <item.icon className="hidden h-3.5 w-3.5 shrink-0 lg:block" />
+                    <span className="whitespace-nowrap">{item.title}</span>
                   </NavLink>
                 ))}
               </div>
@@ -303,12 +305,13 @@ export function AppLayout({ children }: AppLayoutProps) {
               <div
                 role="status"
                 aria-label="Posting status"
-                className="hidden items-center gap-1.5 rounded border border-amber-400/30 bg-amber-500/10 px-2 py-1 text-[11px] font-medium text-amber-100 sm:flex"
+                title={postingStatusLabel}
+                className={cn("flex min-w-0 items-center gap-1.5 rounded border px-1 py-1 text-xs font-medium min-[360px]:px-2", runtimeControls?.posting_mode === 'enabled' && !runtimeError ? "border-success/30 bg-success/10 text-success" : "border-amber-400/30 bg-amber-500/10 text-amber-100")}
               >
-                <LockKeyhole className="h-3 w-3 text-amber-300" aria-hidden="true" />
-                {postingStatusLabel}
+                {runtimeControls?.posting_mode === "enabled" && !runtimeError ? <ShieldCheck className="hidden h-3.5 w-3.5 shrink-0 min-[360px]:block" aria-hidden="true" /> : <LockKeyhole className="hidden h-3.5 w-3.5 shrink-0 min-[360px]:block" aria-hidden="true" />}
+                <span className="min-w-0 leading-snug"><span className="block sm:hidden">{environmentLabel}</span><span className="sm:hidden">{runtimeError ? 'Status unavailable' : runtimeLoading && !runtimeControls ? 'Checking status' : runtimeControls?.posting_mode === 'enabled' ? 'Enabled' : runtimeControls?.posting_mode === 'blocked' ? 'Posting locked' : 'Status unavailable'}</span><span className="hidden sm:inline">{postingStatusLabel}</span></span>
               </div>
-              <div className="hidden min-w-0 xl:flex">
+              <div className="hidden min-w-0 2xl:flex">
                 <VersionBanner />
               </div>
               <Button
@@ -330,13 +333,13 @@ export function AppLayout({ children }: AppLayoutProps) {
         <main
           ref={mainRef}
           className={cn(
-            'flex-1 overflow-auto overflow-x-hidden px-2 pb-24 sm:px-5 sm:pb-6',
-            isReadOnly ? 'pt-28 sm:pt-[7.5rem]' : 'pt-20 sm:pt-[5.5rem]',
+            'flex-1 overflow-auto overflow-x-hidden px-2 pb-40 min-[360px]:pb-24 sm:px-5 sm:pb-6',
+            isReadOnly ? 'pt-32 md:pt-44' : 'pt-24 md:pt-36',
           )}
           onScroll={handleMainScroll}
         >
           <div className={`mx-auto w-full ${isWideOpsRoute ? 'max-w-none' : 'max-w-7xl'}`}>
-            {children ?? <Outlet />}
+            <Suspense key={user?.id ?? 'anonymous'} fallback={<div role="status" className="min-h-60 space-y-4 py-4 text-sm text-muted-foreground"><p>Loading page…</p><div className="h-12 rounded-md bg-muted/40" /><div className="h-40 rounded-md bg-muted/40" /></div>}>{children ?? <Outlet />}</Suspense>
           </div>
         </main>
       </div>
@@ -348,14 +351,14 @@ export function AppLayout({ children }: AppLayoutProps) {
 function MobileBottomNav() {
   return (
     <nav aria-label="Mobile navigation" className="fixed inset-x-0 bottom-0 z-40 border-t border-glass-border bg-background/95 px-1.5 pb-[max(env(safe-area-inset-bottom),0.35rem)] pt-1.5 backdrop-blur-glass md:hidden">
-      <div className="grid gap-0.5" style={{ gridTemplateColumns: `repeat(${navigationItems.length}, minmax(0, 1fr))` }}>
+      <div className="grid grid-cols-3 gap-0.5 min-[360px]:grid-cols-6">
         {navigationItems.map((item) => (
           <NavLink
             key={item.title}
             to={item.url}
             end
             className={({ isActive }) =>
-              `flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg px-0 py-1.5 text-[9px] leading-none transition-colors ${
+              `flex min-h-12 min-w-0 flex-col items-center justify-center gap-1 rounded-lg px-0 py-1.5 text-[10px] leading-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
                 isActive
                   ? 'bg-primary/20 text-primary'
                   : 'text-muted-foreground hover:bg-glass-border/20 hover:text-glass-foreground'

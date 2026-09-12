@@ -28,7 +28,13 @@ import {
 import type { ContentFilterConfig } from '@/components/settings/ContentFilterSettings';
 import type { EditorialProfile } from '@/hooks/useSettingsData';
 import PromptEditor from '@/components/settings/PromptEditor';
-import RuntimeControlsPanel from '@/components/settings/RuntimeControlsPanel';
+import { SettingsRuntimeControls } from '@/components/settings/SettingsRuntimeControls';
+import { useSettingsDraft, useSettingsSave, SettingsDraftGuard, SettingsSaveStatus, SettingsIncomingNotice } from '@/components/settings/SettingsDrafts';
+import { PlaceholderPicker } from '@/components/settings/PlaceholderPicker';
+import { MessagePreview } from '@/components/settings/MessagePreview';
+import { Checkbox } from '@/components/ui/checkbox';
+import { SettingsSectionNav } from '@/components/settings/SettingsSectionNav';
+import { SettingsNavigation } from '@/components/settings/SettingsNavigation';
 
 const ContentFilterSettings = lazy(() => import('@/components/settings/ContentFilterSettings'));
 const EditorialProfilesCard = lazy(() => import('@/components/settings/EditorialProfilesCard'));
@@ -169,9 +175,24 @@ export default function Settings() {
   const sampleTweets = samplesQuery.data || [];
   const hasAuthoritativeSettingsBaseline = hasSettingsBaseline(settings);
 
-  const [translationSettings, setTranslationSettings] = useState<TranslationSettings | null>(null);
-  const [telegramSettings, setTelegramSettings] = useState<TelegramSettings | null>(null);
-  const [messageTemplate, setMessageTemplate] = useState<MessageTemplateSettings | null>(null);
+  const translationDraft = useSettingsDraft<TranslationSettings | null>('translation', 'Translation settings', settings?.translation_prompt ?? null);
+  const telegramDraft = useSettingsDraft<TelegramSettings | null>('telegram', 'Telegram configuration', settings?.telegram_config ?? null);
+  const messageDraft = useSettingsDraft<MessageTemplateSettings | null>('messages', 'Message template', settings?.message_template ?? null);
+  const { draft: translationSettings, updateDraft: setTranslationSettings } = translationDraft;
+  const { draft: telegramSettings, updateDraft: setTelegramSettings } = telegramDraft;
+  const { draft: messageTemplate, updateDraft: setMessageTemplate } = messageDraft;
+  const translationSave = useSettingsSave(translationDraft, async (value) => {
+    if (!canMutate || !value) throw new Error('Settings unavailable');
+    await saveMutation.mutateAsync({ key: 'translation_prompt', value: prepareTranslationSettingsForSave(value) });
+  });
+  const telegramSave = useSettingsSave(telegramDraft, async (value) => {
+    if (!canMutate || !value) throw new Error('Settings unavailable');
+    await saveMutation.mutateAsync({ key: 'telegram_config', value });
+  });
+  const messageSave = useSettingsSave(messageDraft, async (value) => {
+    if (!canMutate || !value) throw new Error('Settings unavailable');
+    await saveMutation.mutateAsync({ key: 'message_template', value });
+  });
 
   // Sync from server on first load
   const ts = translationSettings ?? settings?.translation_prompt;
@@ -213,11 +234,7 @@ export default function Settings() {
 
   const selectedModel = openaiModels.find(m => m.id === ts.model);
   const cappedTranslationMaxTokens = clampOpenAiCompletionTokens(ts.max_completion_tokens, 1000);
-  const saveSetting = (input: Parameters<typeof saveMutation.mutate>[0]) => {
-    if (!canMutate) return;
-    saveMutation.mutate(input);
-  };
-  const saveTranslationPrompt = () => saveSetting({ key: 'translation_prompt', value: prepareTranslationSettingsForSave(ts) });
+  const saveTranslationPrompt = () => { void translationSave.save(); };
 
   const getPlaceholderValue = (key: string, tweet: Record<string, unknown>) => {
     const accounts = tweet?.accounts as Record<string, unknown> | undefined;
@@ -257,7 +274,7 @@ export default function Settings() {
   };
 
   return (
-    <div className="space-y-6 animate-fade-in-up">
+    <div className="settings-page space-y-6 animate-fade-in-up [&_:is([id],[data-settings-save],button,input,textarea,select,[role=combobox],[role=switch],[role=slider])]:scroll-mt-4">
       <div>
         <h1 className="text-3xl font-display font-bold text-glass-foreground">Settings</h1>
         <p className="text-muted-foreground mt-1">Configure your pipeline integrations and translation prompts</p>
@@ -271,25 +288,47 @@ export default function Settings() {
         </Alert>
       )}
 
-      <RuntimeControlsPanel />
+      <SettingsRuntimeControls />
 
       <Tabs value={settingsTab} onValueChange={(v) => goToSettingsTab(v as SettingsTabId)} className="w-full">
-        <TabsList className="flex h-auto w-full justify-start gap-1 overflow-x-auto p-1">
-          <TabsTrigger value="translation" className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><Brain className="w-4 h-4" />Translation</TabsTrigger>
-          <TabsTrigger value="filter" className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><Filter className="w-4 h-4" />Scoring</TabsTrigger>
-          <TabsTrigger value="messages" className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><MessageSquare className="w-4 h-4" />Messages</TabsTrigger>
-          <TabsTrigger value="telegram" className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><Send className="w-4 h-4" />Telegram</TabsTrigger>
-          <TabsTrigger value="x-automation" className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><AtSign className="w-4 h-4" />X Automation</TabsTrigger>
-          <TabsTrigger value="video-rendering" className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><Film className="w-4 h-4" />Video</TabsTrigger>
-          <TabsTrigger value="enrichment" className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><Sparkles className="w-4 h-4" />Enrichment</TabsTrigger>
-          <TabsTrigger value="observability" className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs sm:text-sm"><Activity className="w-4 h-4" />Observability</TabsTrigger>
+        <SettingsNavigation>
+        <div className="sm:hidden">
+          <Label htmlFor="settings-section" className="sr-only">Settings section</Label>
+          <Select value={settingsTab} onValueChange={(value) => goToSettingsTab(value as SettingsTabId)}>
+            <SelectTrigger id="settings-section" aria-label="Settings section"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="translation">Translation</SelectItem>
+              <SelectItem value="filter">Scoring</SelectItem>
+              <SelectItem value="messages">Messages</SelectItem>
+              <SelectItem value="telegram">Telegram</SelectItem>
+              <SelectItem value="x-automation">X Automation</SelectItem>
+              <SelectItem value="video-rendering">Video</SelectItem>
+              <SelectItem value="enrichment">Enrichment</SelectItem>
+              <SelectItem value="observability">Observability</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <TabsList aria-label="Settings sections" className="hidden h-auto w-full grid-cols-4 gap-1 sm:grid xl:grid-cols-8">
+          <TabsTrigger value="translation" className="min-w-0 whitespace-normal flex items-center justify-start gap-2 text-xs sm:text-sm"><Brain className="w-4 h-4" />Translation</TabsTrigger>
+          <TabsTrigger value="filter" className="min-w-0 whitespace-normal flex items-center justify-start gap-2 text-xs sm:text-sm"><Filter className="w-4 h-4" />Scoring</TabsTrigger>
+          <TabsTrigger value="messages" className="min-w-0 whitespace-normal flex items-center justify-start gap-2 text-xs sm:text-sm"><MessageSquare className="w-4 h-4" />Messages</TabsTrigger>
+          <TabsTrigger value="telegram" className="min-w-0 whitespace-normal flex items-center justify-start gap-2 text-xs sm:text-sm"><Send className="w-4 h-4" />Telegram</TabsTrigger>
+          <TabsTrigger value="x-automation" className="min-w-0 whitespace-normal flex items-center justify-start gap-2 text-xs sm:text-sm"><AtSign className="w-4 h-4" />X Automation</TabsTrigger>
+          <TabsTrigger value="video-rendering" className="min-w-0 whitespace-normal flex items-center justify-start gap-2 text-xs sm:text-sm"><Film className="w-4 h-4" />Video</TabsTrigger>
+          <TabsTrigger value="enrichment" className="min-w-0 whitespace-normal flex items-center justify-start gap-2 text-xs sm:text-sm"><Sparkles className="w-4 h-4" />Enrichment</TabsTrigger>
+          <TabsTrigger value="observability" className="min-w-0 whitespace-normal flex items-center justify-start gap-2 text-xs sm:text-sm"><Activity className="w-4 h-4" />Observability</TabsTrigger>
         </TabsList>
+        <SettingsSectionNav tab={settingsTab} />
+        </SettingsNavigation>
+        <div className="my-3"><SettingsDraftGuard /></div>
 
         <fieldset disabled={!canMutate} className="min-w-0 space-y-6 disabled:cursor-not-allowed">
 
         {/* Translation Tab */}
-        <TabsContent value="translation" className="space-y-6">
-          <Card className="glass-card">
+        <TabsContent value="translation" className="min-w-0 space-y-6">
+          <SettingsSaveStatus label="Translation settings" dirty={translationDraft.isDirty} {...translationSave} onSave={saveTranslationPrompt} disabled={!canMutate || translationDraft.hasPendingIncoming} />
+          <SettingsIncomingNotice editor={translationDraft} />
+          <Card id="translation-model" className="glass-card scroll-mt-48">
             <CardHeader>
               <CardTitle className="flex items-center text-glass-foreground"><Sparkles className="w-5 h-5 mr-2" />AI Model Selection</CardTitle>
               <CardDescription>Choose the OpenAI model and configure its parameters</CardDescription>
@@ -298,14 +337,13 @@ export default function Settings() {
               <div className="space-y-2">
                 <Label htmlFor="model_select">Model</Label>
                 <Select value={ts.model} onValueChange={(v) => setTranslationSettings({ ...ts, model: v })}>
-                  <SelectTrigger className="glass-input"><SelectValue placeholder="Select a model" /></SelectTrigger>
+                  <SelectTrigger aria-label="Model" id="model_select" className="glass-input"><SelectValue placeholder="Select a model" /></SelectTrigger>
                   <SelectContent>
                     {openaiModels.map(model => (
                       <SelectItem key={model.id} value={model.id}>
-                        <div className="flex items-center gap-2">
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
                           <span className="font-medium">{model.name}</span>
                           <Badge variant={model.tier === 'latest' ? 'default' : model.tier === 'legacy' ? 'outline' : 'secondary'} className="text-[10px] uppercase">{model.tier}</Badge>
-                          <div className="flex gap-1">{model.supports.map(s => <Badge key={s} variant="secondary" className="text-xs">{s}</Badge>)}</div>
                         </div>
                       </SelectItem>
                     ))}
@@ -314,22 +352,22 @@ export default function Settings() {
                 {selectedModel && (
                   <div className="mt-2 p-3 bg-muted/50 rounded-lg">
                     <p className="text-sm text-muted-foreground">{selectedModel.description}</p>
-                    <div className="flex gap-4 mt-2 text-xs text-muted-foreground">
+                    <div className="flex flex-wrap gap-4 mt-2 text-xs text-muted-foreground">
                       <span>Max Tokens: {selectedModel.maxTokens.toLocaleString()}</span>
                       <span>Supports: {selectedModel.supports.join(', ')}</span>
                     </div>
                   </div>
                 )}
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>{selectedModel?.useMaxCompletionTokens ? 'Max Completion Tokens' : 'Max Tokens'}</Label>
-                  <Input type="number" min="1" max={completionTokenMax(selectedModel?.maxTokens, 4096)} value={cappedTranslationMaxTokens} onChange={(e) => setTranslationSettings({ ...ts, max_completion_tokens: parseOpenAiCompletionTokens(e.target.value, 1000) })} className="glass-input" />
+                  <Input aria-label={selectedModel?.useMaxCompletionTokens ? 'Max Completion Tokens' : 'Max Tokens'} type="number" min="1" max={completionTokenMax(selectedModel?.maxTokens, 4096)} value={cappedTranslationMaxTokens} onChange={(e) => setTranslationSettings({ ...ts, max_completion_tokens: parseOpenAiCompletionTokens(e.target.value, 1000) })} className="glass-input" />
                 </div>
                 {selectedModel?.supportsTemperature && (
                   <div className="space-y-2">
                     <Label>Temperature</Label>
-                    <Input type="number" step="0.1" min="0" max="2" value={ts.temperature} onChange={(e) => setTranslationSettings({ ...ts, temperature: parseFloat(e.target.value) || 0 })} className="glass-input" />
+                    <Input aria-label="Temperature" type="number" step="0.1" min="0" max="2" value={ts.temperature} onChange={(e) => setTranslationSettings({ ...ts, temperature: parseFloat(e.target.value) || 0 })} className="glass-input" />
                     <p className="text-xs text-muted-foreground">0 = deterministic, 2 = very random.</p>
                   </div>
                 )}
@@ -337,7 +375,7 @@ export default function Settings() {
                   <div className="space-y-2">
                     <Label>Reasoning effort</Label>
                     <Select value={ts.reasoning_effort ?? 'medium'} onValueChange={(v) => setTranslationSettings({ ...ts, reasoning_effort: v as 'minimal' | 'low' | 'medium' | 'high' })}>
-                      <SelectTrigger className="glass-input"><SelectValue /></SelectTrigger>
+                      <SelectTrigger aria-label="Reasoning effort" className="glass-input"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="minimal">Minimal — fastest, cheapest</SelectItem>
                         <SelectItem value="low">Low</SelectItem>
@@ -352,7 +390,7 @@ export default function Settings() {
                   <div className="space-y-2">
                     <Label>Verbosity</Label>
                     <Select value={ts.verbosity ?? 'medium'} onValueChange={(v) => setTranslationSettings({ ...ts, verbosity: v as 'low' | 'medium' | 'high' })}>
-                      <SelectTrigger className="glass-input"><SelectValue /></SelectTrigger>
+                      <SelectTrigger aria-label="Verbosity" className="glass-input"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="low">Low — terse output</SelectItem>
                         <SelectItem value="medium">Medium</SelectItem>
@@ -371,25 +409,25 @@ export default function Settings() {
                   </Button>
                 </CollapsibleTrigger>
                 <CollapsibleContent className="space-y-4 pt-4">
-                  <div className="grid grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     {selectedModel?.supportsTopP && (
                       <div className="space-y-2">
                         <Label>Top P</Label>
-                        <Input type="number" step="0.05" min="0" max="1" value={ts.top_p} onChange={(e) => setTranslationSettings({ ...ts, top_p: parseFloat(e.target.value) || 1 })} className="glass-input" />
+                        <Input aria-label="Top P" type="number" step="0.05" min="0" max="1" value={ts.top_p} onChange={(e) => setTranslationSettings({ ...ts, top_p: parseFloat(e.target.value) || 1 })} className="glass-input" />
                       </div>
                     )}
                     {selectedModel?.supportsPenalties && (
                       <>
-                        <div className="space-y-2"><Label>Frequency Penalty</Label><Input type="number" step="0.1" min="-2" max="2" value={ts.frequency_penalty} onChange={(e) => setTranslationSettings({ ...ts, frequency_penalty: parseFloat(e.target.value) || 0 })} className="glass-input" /></div>
-                        <div className="space-y-2"><Label>Presence Penalty</Label><Input type="number" step="0.1" min="-2" max="2" value={ts.presence_penalty} onChange={(e) => setTranslationSettings({ ...ts, presence_penalty: parseFloat(e.target.value) || 0 })} className="glass-input" /></div>
+                        <div className="space-y-2"><Label>Frequency Penalty</Label><Input aria-label="Frequency Penalty" type="number" step="0.1" min="-2" max="2" value={ts.frequency_penalty} onChange={(e) => setTranslationSettings({ ...ts, frequency_penalty: parseFloat(e.target.value) || 0 })} className="glass-input" /></div>
+                        <div className="space-y-2"><Label>Presence Penalty</Label><Input aria-label="Presence Penalty" type="number" step="0.1" min="-2" max="2" value={ts.presence_penalty} onChange={(e) => setTranslationSettings({ ...ts, presence_penalty: parseFloat(e.target.value) || 0 })} className="glass-input" /></div>
                       </>
                     )}
                   </div>
-                  <div className="grid grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     {selectedModel?.supportsSeed && (
                       <div className="space-y-2">
                         <Label>Seed (optional)</Label>
-                        <Input
+                        <Input aria-label="Seed (optional)"
                           type="number"
                           placeholder="leave blank for random"
                           value={ts.seed ?? ''}
@@ -406,7 +444,7 @@ export default function Settings() {
                       <div className="space-y-2">
                         <Label>Service tier</Label>
                         <Select value={ts.service_tier ?? 'auto'} onValueChange={(v) => setTranslationSettings({ ...ts, service_tier: v as 'auto' | 'default' | 'flex' | 'priority' })}>
-                          <SelectTrigger className="glass-input"><SelectValue /></SelectTrigger>
+                          <SelectTrigger aria-label="Service tier" className="glass-input"><SelectValue /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="auto">Auto</SelectItem>
                             <SelectItem value="default">Default</SelectItem>
@@ -420,7 +458,7 @@ export default function Settings() {
                       <div className="space-y-2">
                         <Label>Parallel tool calls</Label>
                         <Select value={String(ts.parallel_tool_calls ?? true)} onValueChange={(v) => setTranslationSettings({ ...ts, parallel_tool_calls: v === 'true' })}>
-                          <SelectTrigger className="glass-input"><SelectValue /></SelectTrigger>
+                          <SelectTrigger aria-label="Parallel tool calls" className="glass-input"><SelectValue /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="true">Enabled</SelectItem>
                             <SelectItem value="false">Disabled (force single call)</SelectItem>
@@ -431,7 +469,7 @@ export default function Settings() {
                   </div>
                   <div className="flex justify-end">
                     <Button size="sm" variant="outline" onClick={saveTranslationPrompt} disabled={saveMutation.isPending}>
-                      Save model parameters
+                      Save Translation Settings
                     </Button>
                   </div>
                 </CollapsibleContent>
@@ -449,7 +487,7 @@ export default function Settings() {
               setTranslationSettings({ ...ts, scoring: { ...scoring, ...patch } });
             };
             return (
-              <Card className="glass-card">
+              <Card id="translation-scoring-model" className="glass-card scroll-mt-48">
                 <CardHeader>
                   <CardTitle className="flex items-center text-glass-foreground"><Brain className="w-5 h-5 mr-2" />Scoring Model Settings</CardTitle>
                   <CardDescription>
@@ -457,13 +495,13 @@ export default function Settings() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
+                  <div className="flex flex-col items-start gap-3 p-3 bg-muted/30 rounded-lg sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <Label className="text-sm">Score-first pipeline (split calls)</Label>
                       <p className="text-xs text-muted-foreground mt-1">When enabled, score first and translate only on pass.</p>
                     </div>
                     <Select value={String(ts.split_calls ?? true)} onValueChange={(v) => setTranslationSettings({ ...ts, split_calls: v === 'true' })}>
-                      <SelectTrigger className="glass-input w-32"><SelectValue /></SelectTrigger>
+                      <SelectTrigger aria-label="Score-first pipeline" className="glass-input w-full sm:w-32"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="true">Enabled</SelectItem>
                         <SelectItem value="false">Disabled</SelectItem>
@@ -474,7 +512,7 @@ export default function Settings() {
                   <div className="space-y-2">
                     <Label>Scoring model</Label>
                     <Select value={scoringModelId} onValueChange={(v) => updateScoring({ model: v })}>
-                      <SelectTrigger className="glass-input"><SelectValue /></SelectTrigger>
+                      <SelectTrigger aria-label="Scoring model" className="glass-input"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         {openaiModels.map(model => (
                           <SelectItem key={model.id} value={model.id}>
@@ -488,22 +526,22 @@ export default function Settings() {
                     </Select>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label>Max Completion Tokens</Label>
-                      <Input type="number" min={1} max={completionTokenMax(scoringModel?.maxTokens, 16000)} value={cappedScoringMaxTokens} onChange={(e) => updateScoring({ max_completion_tokens: parseOpenAiCompletionTokens(e.target.value, 2000) })} className="glass-input" />
+                      <Input aria-label="Max Completion Tokens" type="number" min={1} max={completionTokenMax(scoringModel?.maxTokens, 16000)} value={cappedScoringMaxTokens} onChange={(e) => updateScoring({ max_completion_tokens: parseOpenAiCompletionTokens(e.target.value, 2000) })} className="glass-input" />
                     </div>
                     {scoringModel?.supportsTemperature && (
                       <div className="space-y-2">
                         <Label>Temperature</Label>
-                        <Input type="number" step="0.1" min={0} max={2} value={scoring.temperature ?? 0.2} onChange={(e) => updateScoring({ temperature: parseFloat(e.target.value) })} className="glass-input" />
+                        <Input aria-label="Temperature" type="number" step="0.1" min={0} max={2} value={scoring.temperature ?? 0.2} onChange={(e) => updateScoring({ temperature: parseFloat(e.target.value) })} className="glass-input" />
                       </div>
                     )}
                     {scoringModel?.supportsReasoningEffort && (
                       <div className="space-y-2">
                         <Label>Reasoning effort</Label>
                         <Select value={scoring.reasoning_effort ?? 'low'} onValueChange={(v) => updateScoring({ reasoning_effort: v as 'minimal' | 'low' | 'medium' | 'high' })}>
-                          <SelectTrigger className="glass-input"><SelectValue /></SelectTrigger>
+                          <SelectTrigger aria-label="Reasoning effort" className="glass-input"><SelectValue /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="minimal">Minimal</SelectItem>
                             <SelectItem value="low">Low</SelectItem>
@@ -517,7 +555,7 @@ export default function Settings() {
                       <div className="space-y-2">
                         <Label>Verbosity</Label>
                         <Select value={scoring.verbosity ?? 'low'} onValueChange={(v) => updateScoring({ verbosity: v as 'low' | 'medium' | 'high' })}>
-                          <SelectTrigger className="glass-input"><SelectValue /></SelectTrigger>
+                          <SelectTrigger aria-label="Verbosity" className="glass-input"><SelectValue /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="low">Low</SelectItem>
                             <SelectItem value="medium">Medium</SelectItem>
@@ -529,20 +567,20 @@ export default function Settings() {
                     {scoringModel?.supportsTopP && (
                       <div className="space-y-2">
                         <Label>Top P</Label>
-                        <Input type="number" step="0.05" min={0} max={1} value={scoring.top_p ?? 1} onChange={(e) => updateScoring({ top_p: parseFloat(e.target.value) })} className="glass-input" />
+                        <Input aria-label="Top P" type="number" step="0.05" min={0} max={1} value={scoring.top_p ?? 1} onChange={(e) => updateScoring({ top_p: parseFloat(e.target.value) })} className="glass-input" />
                       </div>
                     )}
                     {scoringModel?.supportsSeed && (
                       <div className="space-y-2">
                         <Label>Seed (optional)</Label>
-                        <Input type="number" placeholder="random" value={scoring.seed ?? ''} onChange={(e) => updateScoring({ seed: e.target.value === '' ? null : parseInt(e.target.value) })} className="glass-input" />
+                        <Input aria-label="Seed (optional)" type="number" placeholder="random" value={scoring.seed ?? ''} onChange={(e) => updateScoring({ seed: e.target.value === '' ? null : parseInt(e.target.value) })} className="glass-input" />
                       </div>
                     )}
                     {scoringModel?.supportsServiceTier && (
                       <div className="space-y-2">
                         <Label>Service tier</Label>
                         <Select value={scoring.service_tier ?? 'auto'} onValueChange={(v) => updateScoring({ service_tier: v as 'auto' | 'default' | 'flex' | 'priority' })}>
-                          <SelectTrigger className="glass-input"><SelectValue /></SelectTrigger>
+                          <SelectTrigger aria-label="Service tier" className="glass-input"><SelectValue /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="auto">Auto</SelectItem>
                             <SelectItem value="default">Default</SelectItem>
@@ -571,7 +609,7 @@ export default function Settings() {
             );
           })()}
 
-          <Card className="glass-card">
+          <Card id="translation-prompts" className="glass-card scroll-mt-48">
             <CardHeader>
               <CardTitle className="flex items-center text-glass-foreground"><MessageSquare className="w-5 h-5 mr-2" />Translation Prompt Configuration</CardTitle>
               <CardDescription>Configure the AI translation prompts with dynamic placeholders</CardDescription>
@@ -591,17 +629,7 @@ export default function Settings() {
               </div>
               <Separator />
               <div className="space-y-4">
-                <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-0">
-                  <Label htmlFor="user_prompt_template">User Prompt Template</Label>
-                  <div className="flex items-center gap-2"><Eye className="w-4 h-4" /><span className="text-sm text-muted-foreground">Available Placeholders</span></div>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {promptPlaceholders.map(p => (
-                    <Button key={p.key} variant="outline" size="sm" onClick={() => insertPlaceholder(p.key, 'user_prompt_template', ts.user_prompt_template, (v) => setTranslationSettings({ ...ts, user_prompt_template: v }))} className="justify-start h-auto p-3 w-full whitespace-normal min-w-0 break-words">
-                      <div className="text-left min-w-0 w-full break-words"><div className="font-mono text-xs text-primary">{p.key}</div><div className="text-xs text-muted-foreground whitespace-normal break-words">{p.description}</div></div>
-                    </Button>
-                  ))}
-                </div>
+                <Label htmlFor="user_prompt_template">User Prompt Template</Label>
                 <PromptEditor
                   id="user_prompt_template"
                   value={ts.user_prompt_template}
@@ -611,27 +639,32 @@ export default function Settings() {
                   maxLength={10000}
                   title="User Prompt Template"
                 />
+                <PlaceholderPicker items={promptPlaceholders} onInsert={(key) => insertPlaceholder(key, 'user_prompt_template', ts.user_prompt_template, (value) => setTranslationSettings({ ...ts, user_prompt_template: value }))} />
               </div>
               <Separator />
               {sampleTweets.length > 0 && (
                 <div className="space-y-3">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <Label className="flex items-center gap-2"><Code className="w-4 h-4" />Prompt Preview with Real Data</Label>
                     <Select value={selectedSample.toString()} onValueChange={(v) => setSelectedSample(parseInt(v))}>
-                      <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
+                      <SelectTrigger aria-label="Preview sample" className="w-full sm:w-48"><SelectValue /></SelectTrigger>
                       <SelectContent>{sampleTweets.map((_, i) => <SelectItem key={i} value={i.toString()}>Sample Tweet {i + 1}</SelectItem>)}</SelectContent>
                     </Select>
                   </div>
                   <div className="p-4 bg-muted/50 rounded-lg">
                     <div className="text-sm font-medium mb-2">Preview of User Prompt:</div>
-                    <div className="text-sm font-mono bg-background p-3 rounded border whitespace-pre-wrap">
-                      {promptPlaceholders.reduce((tpl, p) => tpl.replace(new RegExp(p.key.replace(/[{}]/g, '\\$&'), 'g'), getPlaceholderValue(p.key, sampleTweets[selectedSample])), ts.user_prompt_template)}
-                    </div>
+                    <PromptEditor
+                      title="User prompt preview"
+                      value={promptPlaceholders.reduce((tpl, p) => tpl.replace(new RegExp(p.key.replace(/[{}]/g, '\\$&'), 'g'), getPlaceholderValue(p.key, sampleTweets[selectedSample])), ts.user_prompt_template)}
+                      onChange={() => undefined}
+                      minHeight={240}
+                      readOnly
+                    />
                   </div>
                 </div>
               )}
               <div className="flex flex-col gap-3 sm:flex-row">
-                <Button onClick={saveTranslationPrompt} disabled={saveMutation.isPending} className="bg-gradient-primary hover:opacity-90 text-white w-full sm:flex-1">
+                <Button onClick={saveTranslationPrompt} disabled={saveMutation.isPending} className="w-full sm:w-auto">
                   Save Translation Settings
                 </Button>
                 <AlertDialog>
@@ -719,73 +752,71 @@ export default function Settings() {
           </Alert>
           <Suspense fallback={<SettingsPanelFallback />}>
             <ScoringStudio initial={settings?.scoring_policy as ScoringPolicy | undefined} />
+            <StoryMemoryCard
+              initial={settings?.story_memory as Partial<import('@/components/settings/StoryMemoryCard').StoryMemoryConfig> | undefined}
+            />
+            <details id="scoring-legacy" className="scroll-mt-48 rounded-lg border p-4">
+              <summary className="cursor-pointer text-sm font-medium">Legacy scoring reference · read only</summary>
+              <p className="my-3 text-sm text-muted-foreground">These saved values remain relevant while v2 is disabled or in shadow mode. Scoring Studio owns the editable v2 policy. Expanding this reference does not activate another policy.</p>
+              <div className="space-y-4">
             <EditorialProfilesCard
               profiles={(settings?.editorial_profiles as { profiles?: EditorialProfile[] } | undefined)?.profiles ?? []}
               activeProfileId={(settings?.active_profile_id as { id?: string | null } | undefined)?.id ?? null}
-            />
-            <StoryMemoryCard
-              initial={settings?.story_memory as Partial<import('@/components/settings/StoryMemoryCard').StoryMemoryConfig> | undefined}
             />
             <ContentFilterSettings
               initialConfig={settings?.content_filter as ContentFilterConfig | undefined}
               translationSettings={ts}
               onTranslationSettingsChange={setTranslationSettings}
             />
+              </div>
+            </details>
             <LearnedSignalsCard />
           </Suspense>
         </TabsContent>
 
-        <TabsContent value="messages" className="space-y-6">
-          <Card className="glass-card">
+        <TabsContent value="messages" className="min-w-0 space-y-6">
+          <SettingsSaveStatus label="Message template" dirty={messageDraft.isDirty} {...messageSave} onSave={() => { void messageSave.save(); }} disabled={!canMutate || messageDraft.hasPendingIncoming} />
+          <SettingsIncomingNotice editor={messageDraft} />
+          <Card id="message-template" className="glass-card scroll-mt-48">
             <CardHeader>
               <CardTitle className="flex items-center text-glass-foreground"><MessageSquare className="w-5 h-5 mr-2" />Telegram Message Template</CardTitle>
               <CardDescription>Configure how your translated messages appear in Telegram</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="space-y-4">
-                <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-0">
-                  <Label htmlFor="message_template">Message Template</Label>
-                  <div className="flex items-center gap-2"><Eye className="w-4 h-4" /><span className="text-sm text-muted-foreground">Available Placeholders</span></div>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {messagePlaceholders.map(p => (
-                    <Button key={p.key} variant="outline" size="sm" onClick={() => insertPlaceholder(p.key, 'message_template', mt.template, (v) => setMessageTemplate({ ...mt, template: v }))} className="justify-start h-auto p-3 w-full whitespace-normal min-w-0 break-words">
-                      <div className="text-left min-w-0 w-full break-words"><div className="font-mono text-xs text-primary">{p.key}</div><div className="text-xs text-muted-foreground whitespace-normal break-words">{p.description}</div></div>
-                    </Button>
-                  ))}
-                </div>
-                <Textarea id="message_template" value={mt.template} onChange={(e) => setMessageTemplate({ ...mt, template: e.target.value })} className="glass-input min-h-[150px] font-mono text-sm" placeholder="Enter your message template..." />
+                <Label htmlFor="message_template">Message Template</Label>
+                <Textarea aria-label="Message Template" id="message_template" value={mt.template} onChange={(e) => setMessageTemplate({ ...mt, template: e.target.value })} className="glass-input min-h-[150px] font-mono text-sm" placeholder="Enter your message template..." />
+                <PlaceholderPicker items={messagePlaceholders} onInsert={(key) => insertPlaceholder(key, 'message_template', mt.template, (value) => setMessageTemplate({ ...mt, template: value }))} />
               </div>
               <Separator />
               <div className="space-y-4">
                 <Label className="text-base font-medium">Message Options</Label>
-                <div className="grid grid-cols-2 gap-4">
-                  <Label className="flex items-center gap-2"><input type="checkbox" checked={mt.include_source_link} onChange={(e) => setMessageTemplate({ ...mt, include_source_link: e.target.checked })} className="rounded" />Include Source Link</Label>
-                  <Label className="flex items-center gap-2"><input type="checkbox" checked={mt.include_media_caption} onChange={(e) => setMessageTemplate({ ...mt, include_media_caption: e.target.checked })} className="rounded" />Include Media Caption</Label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <Label className="flex items-center gap-2"><Checkbox aria-label="Include Source Link" checked={mt.include_source_link} onCheckedChange={(checked) => setMessageTemplate({ ...mt, include_source_link: checked === true })} />Include Source Link</Label>
+                  <Label className="flex items-center gap-2"><Checkbox aria-label="Include Media Caption" checked={mt.include_media_caption} onCheckedChange={(checked) => setMessageTemplate({ ...mt, include_media_caption: checked === true })} />Include Media Caption</Label>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2"><Label>Source Link Text</Label><Input value={mt.source_link_text} onChange={(e) => setMessageTemplate({ ...mt, source_link_text: e.target.value })} className="glass-input" /></div>
-                  <div className="space-y-2"><Label>Custom Hashtags</Label><Input value={mt.custom_hashtags} onChange={(e) => setMessageTemplate({ ...mt, custom_hashtags: e.target.value })} className="glass-input" /></div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-2"><Label>Source Link Text</Label><Input aria-label="Source Link Text" value={mt.source_link_text} onChange={(e) => setMessageTemplate({ ...mt, source_link_text: e.target.value })} className="glass-input" /></div>
+                  <div className="space-y-2"><Label>Custom Hashtags</Label><Input aria-label="Custom Hashtags" value={mt.custom_hashtags} onChange={(e) => setMessageTemplate({ ...mt, custom_hashtags: e.target.value })} className="glass-input" /></div>
                 </div>
               </div>
               <Separator />
               {sampleTweets.length > 0 && (
                 <div className="space-y-3">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <Label className="flex items-center gap-2"><Eye className="w-4 h-4" />Telegram Message Preview</Label>
                     <Select value={selectedSample.toString()} onValueChange={(v) => setSelectedSample(parseInt(v))}>
-                      <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
+                      <SelectTrigger aria-label="Preview sample" className="w-full sm:w-48"><SelectValue /></SelectTrigger>
                       <SelectContent>{sampleTweets.map((_, i) => <SelectItem key={i} value={i.toString()}>Sample Tweet {i + 1}</SelectItem>)}</SelectContent>
                     </Select>
                   </div>
                   <div className="p-4 bg-muted/50 rounded-lg border-2 border-dashed border-muted-foreground/20">
-                    <div className="text-sm font-medium mb-2 flex items-center gap-2"><Send className="w-4 h-4" />How it will appear in Telegram:</div>
-                    <div className="text-sm bg-background p-4 rounded border whitespace-pre-wrap font-sans">{renderMessagePreview()}</div>
+                    <MessagePreview destination="Telegram" text={renderMessagePreview()} mode={tgs.parse_mode} />
                   </div>
                 </div>
               )}
               <div className="flex flex-col gap-3 sm:flex-row">
-                <Button onClick={() => saveSetting({ key: 'message_template', value: mt })} disabled={saveMutation.isPending} className="bg-gradient-primary hover:opacity-90 text-white w-full sm:flex-1">Save Message Template</Button>
+                <Button onClick={() => { void messageSave.save(); }} disabled={saveMutation.isPending} className="w-full sm:w-auto">Save Message Template</Button>
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
                     <Button variant="outline" disabled={saveMutation.isPending || sampleTweets.length === 0} className="border-primary/50 hover:bg-primary/10 w-full sm:w-auto">
@@ -797,7 +828,7 @@ export default function Settings() {
                       <AlertDialogTitle>Send a live Telegram test?</AlertDialogTitle>
                       <AlertDialogDescription asChild>
                         <div>
-                          <p>This sends the selected sample through the production Telegram template test action.</p>
+                          <p>This sends one real message to the production Telegram channel configured on the server. Its channel identity is not exposed here; confirm the destination in your deployment configuration before sending.</p>
                           <div className="mt-2 max-h-48 overflow-auto rounded border bg-muted p-3 text-sm text-foreground whitespace-pre-wrap">
                             {renderMessagePreview()}
                           </div>
@@ -822,8 +853,10 @@ export default function Settings() {
         </TabsContent>
 
         {/* Telegram Tab */}
-        <TabsContent value="telegram" className="space-y-6">
-          <Card className="glass-card">
+        <TabsContent value="telegram" className="min-w-0 space-y-6">
+          <SettingsSaveStatus label="Telegram configuration" dirty={telegramDraft.isDirty} {...telegramSave} onSave={() => { void telegramSave.save(); }} disabled={!canMutate || telegramDraft.hasPendingIncoming} />
+          <SettingsIncomingNotice editor={telegramDraft} />
+          <Card id="telegram-config" className="glass-card scroll-mt-48">
             <CardHeader>
               <CardTitle className="flex items-center text-glass-foreground"><Send className="w-5 h-5 mr-2" />Telegram Configuration</CardTitle>
               <CardDescription>Configure Telegram delivery settings</CardDescription>
@@ -839,7 +872,7 @@ export default function Settings() {
               <div className="space-y-2">
                 <Label>Parse Mode</Label>
                 <Select value={tgs.parse_mode} onValueChange={(v) => setTelegramSettings({ ...tgs, parse_mode: v })}>
-                  <SelectTrigger className="glass-input"><SelectValue /></SelectTrigger>
+                  <SelectTrigger aria-label="Parse Mode" className="glass-input"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="Markdown">Markdown</SelectItem>
                     <SelectItem value="MarkdownV2">MarkdownV2</SelectItem>
@@ -847,7 +880,7 @@ export default function Settings() {
                   </SelectContent>
                 </Select>
               </div>
-              <Button onClick={() => saveSetting({ key: 'telegram_config', value: tgs })} disabled={saveMutation.isPending} className="bg-gradient-primary hover:opacity-90 text-white w-full">Save Telegram Config</Button>
+              <Button onClick={() => { void telegramSave.save(); }} disabled={saveMutation.isPending} className="w-full sm:w-auto">Save Telegram Config</Button>
             </CardContent>
           </Card>
         </TabsContent>
@@ -877,6 +910,7 @@ export default function Settings() {
             <EnrichmentSettings />
           </Suspense>
         </TabsContent>
+        </fieldset>
 
         {/* Observability Tab */}
         <TabsContent value="observability" className="space-y-6">
@@ -884,7 +918,6 @@ export default function Settings() {
             <ObservabilitySettings />
           </Suspense>
         </TabsContent>
-        </fieldset>
       </Tabs>
     </div>
   );

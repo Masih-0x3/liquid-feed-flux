@@ -82,7 +82,7 @@ function assertContract(source) {
   assertIncludes(source.dashboard, "const [processHudOpen, setProcessHudOpen] = useState(false);", 'dashboard initially closes HUD');
   assertIncludes(source.dashboard, 'useDashboardProcessHudData({ enabled: processHudOpen })', 'dashboard visibility-scoped HUD hook');
   assertNotIncludes(source.dashboard, 'useDashboardProcessHudData()', 'dashboard unscoped HUD hook');
-  const refresh = sliceBetween(source.dashboard, 'const refresh = () => {', '\n\n  if (isLoading)', 'dashboard refresh');
+  const refresh = sliceBetween(source.dashboard, 'const refresh = () => {', '\n\n  if (isLoading && !data)', 'dashboard refresh');
   assertIncludes(refresh, 'if (processHudOpen) processHudQuery.refetch();', 'dashboard refresh visibility gate');
   const collapsible = sliceBetween(source.dashboard, '<Collapsible open={processHudOpen}', '\n\n        <Card className="glass-card">', 'dashboard HUD panel');
   assertIncludes(collapsible, 'onOpenChange={setProcessHudOpen}', 'dashboard HUD open state');

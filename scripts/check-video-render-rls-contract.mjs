@@ -1448,7 +1448,67 @@ function sourceFileIssues(frontendFiles) {
     );
   };
   const reviewedEventTargetProperties = new Set(['value', 'checked', 'name']);
-  const isReviewedEventTargetUse = (node) => {
+  const isReviewedSettingsAnchorTargetUse = (node, file) => {
+    if (file.path !== 'src/components/settings/SettingsDrafts.tsx') return false;
+    let conditional = node.parent;
+    while (conditional && !typescript.isConditionalExpression(conditional) && !typescript.isArrowFunction(conditional)) conditional = conditional.parent;
+    if (!conditional || !typescript.isConditionalExpression(conditional)) return false;
+    const { condition, whenTrue, whenFalse } = conditional;
+    const isClickTarget = (value) => typescript.isPropertyAccessExpression(value)
+      && typescript.isIdentifier(value.expression) && value.expression.text === 'event' && value.name.text === 'target';
+    if (!typescript.isBinaryExpression(condition) || condition.operatorToken.kind !== typescript.SyntaxKind.InstanceOfKeyword
+      || !isClickTarget(condition.left) || !typescript.isIdentifier(condition.right) || condition.right.text !== 'Element'
+      || !typescript.isCallExpression(whenTrue) || !typescript.isPropertyAccessExpression(whenTrue.expression)
+      || !isClickTarget(whenTrue.expression.expression) || whenTrue.expression.name.text !== 'closest'
+      || whenTrue.arguments.length !== 1 || stringValue(whenTrue.arguments[0]) !== 'a[href]'
+      || whenFalse.kind !== typescript.SyntaxKind.NullKeyword
+      || (node !== condition.left && node !== whenTrue.expression.expression)) return false;
+
+    let callback = conditional.parent;
+    while (callback && !typescript.isArrowFunction(callback)) callback = callback.parent;
+    if (!callback || !typescript.isBlock(callback.body) || callback.parameters.length !== 1
+      || callback.parameters[0].name.getText() !== 'event' || callback.parameters[0].type?.getText() !== 'MouseEvent'
+      || !typescript.isVariableDeclaration(callback.parent) || callback.parent.name.getText() !== 'interceptNavigation') return false;
+    const compact = (value) => value.getText().replace(/\s+/g, '');
+    const routeGate = callback.body.statements.find((statement) => typescript.isIfStatement(statement)
+      && compact(statement.expression) === 'target.origin!==window.location.origin||!dashboardRoutes.has(target.pathname)'
+      && typescript.isReturnStatement(statement.thenStatement) && !statement.elseStatement);
+    const capture = callback.body.statements.find((statement) => typescript.isExpressionStatement(statement)
+      && compact(statement.expression) === 'setDestination(`${target.pathname}${target.search}${target.hash}`)');
+    if (!routeGate || !capture || routeGate.end >= capture.pos) return false;
+
+    // Only this narrowed Element lookup is approved. The route set must remain
+    // closed and the retained destination must come only from the checked URL.
+    // Other event.target uses and every native transport escape are still scanned.
+    const routeNames = ['/', '/monitoring', '/video-renders', '/threads', '/x-account', '/downloader'];
+    let validRoutes = false;
+    let routeReferences = 0;
+    let safeDestinationUses = true;
+    const checkBindings = (candidate) => {
+      if (typescript.isIdentifier(candidate) && candidate.text === 'dashboardRoutes') {
+        routeReferences += 1;
+        const declaration = candidate.parent;
+        if (typescript.isVariableDeclaration(declaration) && declaration.name === candidate) {
+          const value = declaration.initializer;
+          validRoutes = Boolean(value && typescript.isNewExpression(value)
+            && typescript.isIdentifier(value.expression) && value.expression.text === 'Set'
+            && value.arguments?.length === 1 && typescript.isArrayLiteralExpression(value.arguments[0])
+            && JSON.stringify(value.arguments[0].elements.map(stringValue)) === JSON.stringify(routeNames));
+        }
+      }
+      if (typescript.isIdentifier(candidate) && candidate.text === 'setDestination') {
+        const parent = candidate.parent;
+        const binding = typescript.isBindingElement(parent) && parent.name === candidate;
+        const call = typescript.isCallExpression(parent) && parent.expression === candidate && parent.arguments.length === 1
+          && (parent.arguments[0].kind === typescript.SyntaxKind.NullKeyword || parent === capture.expression);
+        if (!binding && !call) safeDestinationUses = false;
+      }
+      typescript.forEachChild(candidate, checkBindings);
+    };
+    checkBindings(node.getSourceFile());
+    return validRoutes && routeReferences === 2 && safeDestinationUses;
+  };
+  const isReviewedEventTargetUse = (node, file) => {
     const outer = unwrapParentExpression(node);
     const parent = outer.parent;
     return (
@@ -1459,7 +1519,7 @@ function sourceFileIssues(frontendFiles) {
       typescript.isElementAccessExpression(parent)
       && parent.expression === outer
       && reviewedEventTargetProperties.has(stringValue(parent.argumentExpression) ?? '')
-    );
+    ) || isReviewedSettingsAnchorTargetUse(node, file);
   };
   const propertyName = (node) => {
     if (typescript.isIdentifier(node.name) || typescript.isStringLiteral(node.name)) return node.name.text;
@@ -2439,6 +2499,108 @@ function sourceFileIssues(frontendFiles) {
     return null;
   };
   const encodedStringDecoderNames = new Set(['atob', 'decodeURI', 'decodeURIComponent', 'fromCharCode', 'fromCodePoint', 'unescape']);
+  const isReviewedMessageEntityDecoder = (node) => {
+    if (file.path !== 'src/components/settings/MessagePreview.tsx'
+      || !typescript.isPropertyAccessExpression(node)
+      || !typescript.isIdentifier(node.expression) || node.expression.text !== 'String'
+      || node.name.text !== 'fromCodePoint') return false;
+    const call = node.parent;
+    if (!typescript.isCallExpression(call) || call.expression !== node
+      || call.arguments.length !== 1 || call.arguments[0].getText() !== 'code') return false;
+    let enclosingFunction = call.parent;
+    while (enclosingFunction && !typescript.isFunctionDeclaration(enclosingFunction)) enclosingFunction = enclosingFunction.parent;
+    if (!enclosingFunction || enclosingFunction.name?.text !== 'decodeEntities' || enclosingFunction.parent !== sourceFile) return false;
+
+    // Numeric HTML entities are decoded only for inert React text. Review the
+    // small decoder and its immediate text renderer as syntax, not a file-wide
+    // decoder exemption. Whitespace/comments do not affect this comparison.
+    const printer = typescript.createPrinter({ removeComments: true });
+    const syntax = (value) => printer.printNode(typescript.EmitHint.Unspecified, value, value.getSourceFile());
+    const matchesFunction = (name, reviewedSource) => {
+      const actual = sourceFile.statements.filter((statement) => typescript.isFunctionDeclaration(statement) && statement.name?.text === name);
+      const reviewed = typescript.createSourceFile('reviewed.tsx', reviewedSource, typescript.ScriptTarget.Latest, true, typescript.ScriptKind.TSX);
+      return actual.length === 1 && syntax(actual[0]) === syntax(reviewed.statements[0]);
+    };
+    if (!matchesFunction('decodeEntities', String.raw`function decodeEntities(text: string) {
+      const named: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: '\u00a0' };
+      return text.replace(/&(#x[\da-f]+|#\d+|amp|lt|gt|quot|apos|nbsp);/gi, (entity, name: string) => {
+        if (!name.startsWith('#')) return named[name.toLowerCase()] ?? entity;
+        const code = /^#x/i.test(name) ? parseInt(name.slice(2), 16) : parseInt(name.slice(1), 10);
+        return code > 0 && code <= 0x10ffff && (code < 0xd800 || code > 0xdfff) ? String.fromCodePoint(code) : '\ufffd';
+      });
+    }`)) return false;
+    if (!matchesFunction('textNodes', String.raw`function textNodes(text: string, prefix: string): ReactNode[] {
+      return text.split(/((?:https?:\/\/|@)[A-Za-z0-9_./?&=%#:+~-]+)/g).map((part, index) =>
+        /^(https?:\/\/|@)/.test(part) ? <bdi key={${'`${prefix}-${index}`'}} dir="ltr">{part}</bdi> : part,
+      );
+    }`)) return false;
+
+    const compact = (value) => value.getText().replace(/\s+/g, '');
+    const inertTags = new Set(['bdi', 'br', 'span', 'strong', 'u', 'em', 'code', 'figure', 'figcaption', 'div']);
+    const inertAttributes = new Set(['key', 'dir', 'className', 'lang']);
+    const formattingTags = ['b', 'strong', 'i', 'em', 'u', 'ins', 's', 'strike', 'del', 'code', 'pre', 'blockquote', 'a', 'tg-spoiler'];
+    let decoderReferences = 0;
+    let formattingReferences = 0;
+    let elementFactoryReferences = 0;
+    let validTagConversion = false;
+    let valid = true;
+    const inspect = (candidate) => {
+      const parent = candidate.parent;
+      // This text preview has no DOM/network capability. Keep that boundary
+      // explicit so decoded text cannot acquire a transport outside JSX.
+      if (typescript.isImportDeclaration(candidate) && stringValue(candidate.moduleSpecifier) !== 'react') valid = false;
+      if (typescript.isIdentifier(candidate) && (browserGlobalRoots.has(candidate.text) || ['history', 'location'].includes(candidate.text))) valid = false;
+      if (typescript.isNewExpression(candidate)
+        && !(typescript.isVariableDeclaration(parent) && parent.name.getText() === 'textFormattingTags')) valid = false;
+      if (typescript.isIdentifier(candidate) && candidate.text === 'decodeEntities') {
+        decoderReferences += 1;
+        const declaration = typescript.isFunctionDeclaration(parent) && parent.name === candidate;
+        const textCall = typescript.isCallExpression(parent) && parent.expression === candidate
+          && compact(parent) === 'decodeEntities(token)' && typescript.isCallExpression(parent.parent)
+          && compact(parent.parent) === 'textNodes(decodeEntities(token),String(index))'
+          && typescript.isSpreadElement(parent.parent.parent)
+          && typescript.isCallExpression(parent.parent.parent.parent)
+          && compact(parent.parent.parent.parent) === 'stack[stack.length-1].children.push(...textNodes(decodeEntities(token),String(index)))';
+        if (!declaration && !textCall) valid = false;
+      }
+      if (typescript.isIdentifier(candidate) && candidate.text === 'textFormattingTags') {
+        formattingReferences += 1;
+        const value = typescript.isVariableDeclaration(parent) && parent.name === candidate ? parent.initializer : null;
+        const declaration = value && typescript.isNewExpression(value) && value.expression.getText() === 'Set'
+          && value.arguments?.length === 1 && typescript.isArrayLiteralExpression(value.arguments[0])
+          && JSON.stringify(value.arguments[0].elements.map(stringValue)) === JSON.stringify(formattingTags);
+        const lookup = typescript.isPropertyAccessExpression(parent) && parent.expression === candidate
+          && parent.name.text === 'has' && typescript.isCallExpression(parent.parent)
+          && compact(parent.parent) === 'textFormattingTags.has(tag)'
+          && typescript.isIfStatement(parent.parent.parent) && parent.parent.parent.expression === parent.parent;
+        if (!declaration && !lookup) valid = false;
+      }
+      if (typescript.isIdentifier(candidate) && candidate.text === 'createElement') {
+        elementFactoryReferences += 1;
+        const imported = typescript.isImportSpecifier(parent) && parent.name === candidate && !parent.propertyName
+          && parent.parent.parent.parent.moduleSpecifier.text === 'react';
+        const factoryCall = typescript.isCallExpression(parent) && parent.expression === candidate
+          && compact(parent) === 'createElement(tag,{key:frame.key,className},frame.children)';
+        if (!imported && !factoryCall) valid = false;
+      }
+      if (typescript.isJsxOpeningElement(candidate) || typescript.isJsxSelfClosingElement(candidate)) {
+        if (!inertTags.has(candidate.tagName.getText()) || candidate.attributes.properties.some((attribute) =>
+          !typescript.isJsxAttribute(attribute) || !inertAttributes.has(attribute.name.getText()))) valid = false;
+      }
+      // The factory's tag conversion keeps preview anchors and spoilers inert.
+      if (typescript.isVariableDeclaration(candidate) && candidate.name.getText() === 'tag'
+        && candidate.initializer?.getText().includes('frame.tag')) {
+        validTagConversion = compact(candidate.initializer) === "frame.tag==='a'||frame.tag==='tg-spoiler'?'span':frame.tag";
+        if (!validTagConversion) valid = false;
+      }
+      if (typescript.isBinaryExpression(candidate) && candidate.operatorToken.kind === typescript.SyntaxKind.EqualsToken
+        && ((typescript.isPropertyAccessExpression(candidate.left) && candidate.left.name.text === 'tag')
+          || (typescript.isIdentifier(candidate.left) && candidate.left.text === 'tag'))) valid = false;
+      typescript.forEachChild(candidate, inspect);
+    };
+    inspect(sourceFile);
+    return valid && validTagConversion && decoderReferences === 2 && formattingReferences === 2 && elementFactoryReferences === 2;
+  };
   const isUnsupportedEncodedStringDecoderReference = (node) => {
     const current = unwrapExpression(node);
     const isStringDecoder = (
@@ -2460,6 +2622,7 @@ function sourceFileIssues(frontendFiles) {
       )
     );
     if (!isStringDecoder && !isGlobalDecoder) return false;
+    if (isReviewedMessageEntityDecoder(current)) return false;
     const call = current.parent;
     return !(
       typescript.isCallExpression(call)
@@ -3206,7 +3369,7 @@ function sourceFileIssues(frontendFiles) {
       if (isCurrentTargetExpression(node) && !isReviewedCurrentTargetUse(node, file)) {
         issues.push(`${file.path}: browser source may not retain an event currentTarget transport host`);
       }
-      if (isEventTargetExpression(node) && !isReviewedEventTargetUse(node)) {
+      if (isEventTargetExpression(node) && !isReviewedEventTargetUse(node, file)) {
         issues.push(`${file.path}: browser source may not retain an event target transport host`);
       }
       if (
@@ -3946,6 +4109,58 @@ if (process.env.MUTATION_TEST === '1') {
       `${label} mutation must fail the source contract`,
     );
   };
+  for (const [label, before, after] of [
+    ['exported decoder', 'function decodeEntities(', 'export function decodeEntities('],
+    ['decoder alias', 'const textFormattingTags =', 'const leakedDecoder = decodeEntities; const textFormattingTags ='],
+    ['decoder reuse', 'const textFormattingTags =', "const leakedText = decodeEntities('&#47;'); const textFormattingTags ="],
+    ['decoder outside text renderer', 'textNodes(decodeEntities(token), String(index))', 'textNodes(token, decodeEntities(token))'],
+    ['invalid scalar guard', 'code <= 0x10ffff', 'true'],
+    ['alternate dynamic decoder', 'String.fromCodePoint(code)', 'String.fromCharCode(code)'],
+    ['computed decoder', 'String.fromCodePoint(code)', "String['fromCodePoint'](code)"],
+    ['unrelated code point call', 'const textFormattingTags =', 'function unsafeDecode(code: number) { return String.fromCodePoint(code); } const textFormattingTags ='],
+    ['text-node resource prop', 'dir="ltr">{part}</bdi>', 'dir="ltr" href={part}>{part}</bdi>'],
+    ['raw JSX markup', '<figure className=', '<figure dangerouslySetInnerHTML={{ __html: text }} className='],
+    ['custom JSX carrier', '<figure className=', '<UnreviewedCarrier className='],
+    ['resource factory prop', '{ key: frame.key, className }', '{ key: frame.key, className, href: frame.children }'],
+    ['factory alias', 'const textFormattingTags =', 'const escapedFactory = createElement; const textFormattingTags ='],
+    ['expanded formatting tags', "'a', 'tg-spoiler']);", "'a', 'tg-spoiler', 'img']);"],
+    ['mutable formatting tags', 'const tokens = text.match', "textFormattingTags.add('img'); const tokens = text.match"],
+    ['navigable anchor conversion', "? 'span' : frame.tag;", "? 'a' : frame.tag;"],
+    ['frame tag mutation', 'const tag = frame.tag', "frame.tag = 'img'; const tag = frame.tag"],
+    ['native image resource', 'const tag = frame.tag', "const image = new Image(); image.src = frame.children[0]; const tag = frame.tag"],
+    ['existing DOM resource', 'const tag = frame.tag', "const image = document.getElementById('preview'); image.src = frame.children[0]; const tag = frame.tag"],
+    ['cross-module transport', "from 'react';", "from 'react'; import { sendPreview } from './unreviewedTransport';"],
+  ]) {
+    expectRejected(`Message preview ${label}`, (source) => ({
+      ...source,
+      frontendFiles: source.frontendFiles.map((file) => {
+        if (file.path !== 'src/components/settings/MessagePreview.tsx') return file;
+        const changed = file.source.replace(before, after);
+        assert.notEqual(changed, file.source, `Message preview ${label} must change source`);
+        return { ...file, source: changed };
+      }),
+    }));
+  }
+  for (const [label, before, after] of [
+    ['removed Element narrowing', 'event.target instanceof Element', 'true'],
+    ['unreviewed closest selector', "event.target.closest('a[href]')", "event.target.closest('iframe')"],
+    ['removed same-origin route gate', 'target.origin !== window.location.origin || !dashboardRoutes.has(target.pathname)', 'false'],
+    ['expanded route set', "'/x-account', '/downloader'", "'/x-account', '/downloader', '/unreviewed'"],
+    ['mutable route set', "const target = new URL(anchor.href);", "dashboardRoutes.add('/unreviewed'); const target = new URL(anchor.href);"],
+    ['raw target retention', "const target = new URL(anchor.href);", "const rawTarget = event.target; const target = new URL(anchor.href);"],
+    ['destination bypass', 'setDestination(`${target.pathname}${target.search}${target.hash}`);', 'setDestination(anchor.href);'],
+    ['destination setter alias', 'navigate(destination);', 'const escapedSetter = setDestination; navigate(destination);'],
+  ]) {
+    expectRejected(`Settings navigation ${label}`, (source) => ({
+      ...source,
+      frontendFiles: source.frontendFiles.map((file) => {
+        if (file.path !== 'src/components/settings/SettingsDrafts.tsx') return file;
+        const changed = file.source.replace(before, after);
+        assert.notEqual(changed, file.source, `Settings navigation ${label} must change source`);
+        return { ...file, source: changed };
+      }),
+    }));
+  }
   const mutateSuccessor = (source, name, mutate) => {
     const migrations = new Map(source.postLockdownMigrations);
     migrations.set(name, mutate(migrations.get(name)));

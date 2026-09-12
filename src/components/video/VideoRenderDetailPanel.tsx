@@ -22,6 +22,8 @@ import {
   videoRenderFeedbackKey,
 } from '@/lib/videoRenderFeedbackState';
 import { contentLanguageAttributes } from '@/lib/contentLanguage';
+import { AuthorizedMedia } from '@/components/media/AuthorizedMedia';
+import { ConfirmMediaAction } from '@/components/media/ConfirmMediaAction';
 
 function statusClass(status?: string | null): string {
   if (status === 'completed') return 'border-emerald-500/30 bg-emerald-500/15 text-emerald-500';
@@ -123,7 +125,7 @@ export function VideoRenderDetailPanel({
   if (detail.isLoading) {
     return (
       <Card className="glass-card">
-        <CardContent className="flex min-h-32 items-center justify-center">
+        <CardContent role="status" aria-label="Loading render details" className="flex min-h-32 items-center justify-center">
           <Loader2 className="h-5 w-5 animate-spin text-primary" />
         </CardContent>
       </Card>
@@ -136,20 +138,22 @@ export function VideoRenderDetailPanel({
         <CardContent className="flex flex-col gap-3 p-4 text-sm text-muted-foreground">
           <div className="flex items-center gap-2">
             <ShieldAlert className="h-4 w-4 text-amber-500" />
-            <span>No video render row is available for this post yet.</span>
+            <span>{detail.error || detail.data?.ok === false ? 'Render details could not be loaded. Retry the read to check the current state.' : 'No video render row is available for this post yet.'}</span>
           </div>
-          {tweetId && (
+          {(detail.error || detail.data?.ok === false) && <Button size="sm" variant="outline" onClick={() => void detail.refetch()}>Reload details</Button>}
+          {tweetId && !detail.error && detail.data?.ok !== false && (
+            <ConfirmMediaAction key={tweetId} title="Queue this video render?" description={`Queue processing for post ${tweetId}. Transcription, translation and rendering may use paid providers. Automatic posting remains subject to current runtime and delivery gates.`} actionLabel="Queue render" disabled={readOnly || tweetRetryPending} onConfirm={() => { if (!readOnly) retry.mutate({ tweet_id: tweetId }); }}>
             <Button
               size="sm"
               variant="outline"
               className="w-fit"
-              onClick={() => { if (!readOnly) retry.mutate({ tweet_id: tweetId }); }}
               disabled={readOnly || tweetRetryPending}
               title={disabledMutationTitle}
             >
               {tweetRetryPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
               Queue render
             </Button>
+            </ConfirmMediaAction>
           )}
         </CardContent>
       </Card>
@@ -178,16 +182,17 @@ export function VideoRenderDetailPanel({
                   {render.source_language} → {render.target_language}
                 </Badge>
               )}
+              <ConfirmMediaAction key={render.id} title="Retry this video render?" description={`Requeue render ${render.id}. This may consume paid transcription, translation and rendering resources. Automatic posting remains subject to current runtime and delivery gates.`} actionLabel="Retry render" disabled={readOnly || renderRetryPending} onConfirm={() => { if (!readOnly) retry.mutate({ render_id: render.id }); }}>
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => { if (!readOnly) retry.mutate({ render_id: render.id }); }}
                 disabled={readOnly || renderRetryPending}
                 title={disabledMutationTitle}
               >
                 {renderRetryPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
                 Retry
               </Button>
+              </ConfirmMediaAction>
               {(render.status === 'failed' || render.status === 'blocked') && (
                 <Button
                   size="sm"
@@ -217,18 +222,9 @@ export function VideoRenderDetailPanel({
             </div>
           )}
 
-          <div
-            role="status"
-            aria-live="polite"
-            className="flex items-start gap-3 rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground"
-          >
-            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-            <div className="space-y-1">
-              <p className="font-medium text-foreground">Media preview unavailable</p>
-              <p>
-                Authorised media access has not been configured. Render status and review controls remain available; no remote media was loaded.
-              </p>
-            </div>
+          <div className="space-y-3">
+            {render.source_media_id && <AuthorizedMedia tweetId={render.tweet_id} mediaId={render.source_media_id} title="Source video" readOnly={readOnly} />}
+            <AuthorizedMedia tweetId={render.tweet_id} renderId={render.id} title="Rendered output" readOnly={readOnly} />
           </div>
 
           <dl className="grid gap-x-4 gap-y-3 border-y py-3 text-sm sm:grid-cols-2 lg:grid-cols-4">

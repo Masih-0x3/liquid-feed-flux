@@ -20,6 +20,8 @@ import {
   useSaveSettings,
 } from '@/hooks/useSettingsData';
 import { invokeAdminAction } from '@/api/adminActions';
+import { ConfirmSettingsAction } from '@/components/settings/ConfirmSettingsAction';
+import { useSettingsDraft, useSettingsSave, SettingsSaveStatus, SettingsIncomingNotice } from '@/components/settings/SettingsDrafts';
 
 interface Props {
   initial?: ScoringPolicy;
@@ -93,7 +95,9 @@ function textToList(value: string) {
 }
 
 export default function ScoringStudio({ initial }: Props) {
-  const [policy, setPolicy] = useState<ScoringPolicy>(() => normalizeInitial(initial));
+  const incoming = useMemo(() => normalizeInitial(initial), [initial]);
+  const editor = useSettingsDraft('scoring-policy', 'Scoring policy', incoming);
+  const { draft: policy, updateDraft: setPolicy } = editor;
   const [previewText, setPreviewText] = useState(EXAMPLE_TEXT);
   const [previewAuthor, setPreviewAuthor] = useState('');
   const [previewResult, setPreviewResult] = useState<Record<string, unknown> | null>(null);
@@ -102,9 +106,7 @@ export default function ScoringStudio({ initial }: Props) {
   const saveMutation = useSaveSettings();
   const { toast } = useToast();
 
-  useEffect(() => {
-    setPolicy(normalizeInitial(initial));
-  }, [initial]);
+
 
   const activeProfile = useMemo(() => {
     return policy.profiles.find((profile) => profile.id === policy.active_profile_id) ?? policy.profiles[0] ?? DEFAULT_SCORING_POLICY.profiles[0];
@@ -160,9 +162,8 @@ export default function ScoringStudio({ initial }: Props) {
     }));
   };
 
-  const save = async () => {
-    await saveMutation.mutateAsync({ key: 'scoring_policy', value: policy });
-  };
+  const saving = useSettingsSave(editor, (value) => saveMutation.mutateAsync({ key: 'scoring_policy', value }));
+  const save = () => { void saving.save(); };
 
   const preview = async () => {
     setPreviewing(true);
@@ -221,7 +222,7 @@ export default function ScoringStudio({ initial }: Props) {
   };
 
   return (
-    <Card className="glass-card">
+    <Card id="scoring-policy" className="glass-card scroll-mt-48">
       <CardHeader>
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div>
@@ -240,13 +241,20 @@ export default function ScoringStudio({ initial }: Props) {
         </div>
       </CardHeader>
       <CardContent className="space-y-6">
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
+        <SettingsSaveStatus label="Scoring policy" dirty={editor.isDirty} {...saving} onSave={save} disabled={editor.hasPendingIncoming} />
+        <SettingsIncomingNotice editor={editor} />
+        <div role="status" className="rounded-md border border-primary/30 p-3 text-sm">
+          <p className="font-medium">Saved delivery gate: {editor.baseline.enabled && editor.baseline.mode === 'active' ? 'Scoring v2' : 'Legacy content filter and editorial profile'}</p>
+          <p className="mt-1 text-muted-foreground">{!editor.baseline.enabled ? 'The v2 scorer is disabled.' : editor.baseline.mode === 'shadow' ? 'V2 evaluates in shadow; its thresholds do not decide delivery. The legacy reference below shows the effective saved gates.' : 'V2 uses the saved active profile’s audience thresholds and caps before translation.'} Duplicate Gate runs first. X has separate posting rules.</p>
+          {editor.isDirty && <p className="mt-1 text-amber-200">The controls below contain an unsaved draft. The saved gate above remains effective.</p>}
+        </div>
+        <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
           <section className="space-y-4 rounded-lg border bg-muted/15 p-4">
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="space-y-2 sm:col-span-2">
                 <Label>Active profile</Label>
                 <Select value={policy.active_profile_id} onValueChange={(value) => updatePolicy({ active_profile_id: value })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger aria-label="Active profile"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {policy.profiles.map((profile) => (
                       <SelectItem key={profile.id} value={profile.id}>{profile.name}</SelectItem>
@@ -266,12 +274,12 @@ export default function ScoringStudio({ initial }: Props) {
                   <Label>Run v2 scorer</Label>
                   <p className="text-xs text-muted-foreground">Disabled means legacy scoring remains untouched.</p>
                 </div>
-                <Switch checked={policy.enabled} onCheckedChange={(enabled) => updatePolicy({ enabled })} />
+                <Switch aria-label="Run v2 scorer" checked={policy.enabled} onCheckedChange={(enabled) => updatePolicy({ enabled })} />
               </div>
               <div className="space-y-2">
                 <Label>Mode</Label>
                 <Select value={policy.mode} onValueChange={(mode) => updatePolicy({ mode: mode as ScoringPolicy['mode'] })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger aria-label="Mode"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="shadow">Shadow: record v2, keep legacy gates</SelectItem>
                     <SelectItem value="active">Active: v2 controls deliver/skip</SelectItem>
@@ -283,8 +291,8 @@ export default function ScoringStudio({ initial }: Props) {
             <div className="rounded-md border border-primary/25 bg-primary/5 p-3">
               <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <h3 className="text-sm font-semibold">Active tuning state</h3>
-                  <p className="text-xs text-muted-foreground">Production V2 editorial tuning currently applied by this profile.</p>
+                  <h3 className="text-sm font-semibold">Profile tuning reference</h3>
+                  <p className="text-xs text-muted-foreground">{policy.enabled && policy.mode === 'active' ? 'This profile’s v2 rules apply after saving active mode.' : 'These v2 rules are evaluated in shadow only; legacy gates remain effective.'}</p>
                 </div>
                 <Badge variant="outline">{policy.mode === 'active' ? 'active' : 'shadow'}</Badge>
               </div>
@@ -311,17 +319,17 @@ export default function ScoringStudio({ initial }: Props) {
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label>Profile name</Label>
-                <Input value={activeProfile.name} onChange={(e) => updateProfile({ name: e.target.value })} />
+                <Input aria-label="Profile name" value={activeProfile.name} onChange={(e) => updateProfile({ name: e.target.value })} />
               </div>
               <div className="space-y-2">
                 <Label>Profile ID</Label>
-                <Input value={activeProfile.id} disabled className="font-mono text-xs" />
+                <Input aria-label="Profile ID" value={activeProfile.id} disabled className="font-mono text-xs" />
               </div>
             </div>
 
             <div className="space-y-2">
               <Label>Audience description</Label>
-              <Textarea value={activeProfile.audience_description} onChange={(e) => updateProfile({ audience_description: e.target.value })} className="min-h-24" />
+              <Textarea aria-label="Audience description" value={activeProfile.audience_description} onChange={(e) => updateProfile({ audience_description: e.target.value })} className="min-h-24" />
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
@@ -333,7 +341,7 @@ export default function ScoringStudio({ initial }: Props) {
 
             <div className="space-y-2">
               <Label>Profile notes</Label>
-              <Textarea value={activeProfile.prompt_notes} onChange={(e) => updateProfile({ prompt_notes: e.target.value })} className="min-h-24" />
+              <Textarea aria-label="Profile notes" value={activeProfile.prompt_notes} onChange={(e) => updateProfile({ prompt_notes: e.target.value })} className="min-h-24" />
             </div>
           </section>
 
@@ -347,11 +355,12 @@ export default function ScoringStudio({ initial }: Props) {
                 <div key={klass} className="rounded-md border bg-background/50 p-3">
                   <div className="mb-3 flex items-center justify-between gap-2">
                     <Label>{CLASS_LABELS[klass]}</Label>
-                    <Badge variant="outline">&gt;={activeProfile.thresholds[klass].threshold} / cap {activeProfile.thresholds[klass].cap}</Badge>
+                    <Badge variant="outline">{activeProfile.thresholds[klass].threshold > 20 ? 'Never eligible' : `≥${activeProfile.thresholds[klass].threshold}`} / cap {activeProfile.thresholds[klass].cap}</Badge>
                   </div>
                   <div className="grid gap-3 sm:grid-cols-2">
-                    <SliderBlock label="Threshold" value={activeProfile.thresholds[klass].threshold} min={1} max={klass === 'off_topic' ? 99 : 20} onChange={(v) => updateThreshold(klass, 'threshold', v)} />
-                    <SliderBlock label="Cap" value={activeProfile.thresholds[klass].cap} min={1} max={20} onChange={(v) => updateThreshold(klass, 'cap', v)} />
+                    {activeProfile.thresholds[klass].threshold > 20 ? <p className="text-sm text-muted-foreground">No score on the 1–20 scale can pass this saved rule.</p> : <SliderBlock label={`${CLASS_LABELS[klass]} threshold`} value={activeProfile.thresholds[klass].threshold} min={1} max={20} onChange={(v) => updateThreshold(klass, 'threshold', v)} />}
+                    {klass === 'off_topic' && <div className="space-y-2"><Label>Off-topic eligibility</Label><Select value={activeProfile.thresholds[klass].threshold > 20 ? 'never' : 'threshold'} onValueChange={(value) => updateThreshold(klass, 'threshold', value === 'never' ? 99 : 20)}><SelectTrigger aria-label="Off-topic eligibility"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="never">Never eligible</SelectItem><SelectItem value="threshold">Use a score threshold</SelectItem></SelectContent></Select></div>}
+                    <SliderBlock label={`${CLASS_LABELS[klass]} cap`} value={activeProfile.thresholds[klass].cap} min={1} max={20} onChange={(v) => updateThreshold(klass, 'cap', v)} />
                   </div>
                 </div>
               ))}
@@ -359,7 +368,7 @@ export default function ScoringStudio({ initial }: Props) {
           </section>
         </div>
 
-        <section className="grid gap-4 lg:grid-cols-2">
+        <section className="grid items-start gap-4 lg:grid-cols-2">
           <div className="space-y-4 rounded-lg border bg-muted/15 p-4">
             <h3 className="flex items-center text-sm font-semibold"><SlidersHorizontal className="mr-2 h-4 w-4" />Neutral axis weights</h3>
             <div className="grid gap-3 sm:grid-cols-2">
@@ -386,15 +395,17 @@ export default function ScoringStudio({ initial }: Props) {
           </div>
         </section>
 
-        <section className="grid gap-4 lg:grid-cols-2">
+        <section className="grid items-start gap-4 lg:grid-cols-2">
           <div className="space-y-3 rounded-lg border bg-muted/15 p-4">
             <h3 className="flex items-center text-sm font-semibold"><FlaskConical className="mr-2 h-4 w-4" />Preview scoring</h3>
-            <Input value={previewAuthor} onChange={(e) => setPreviewAuthor(e.target.value)} placeholder="Optional author handle" />
-            <Textarea value={previewText} onChange={(e) => setPreviewText(e.target.value)} className="min-h-28" />
-            <Button type="button" variant="outline" onClick={preview} disabled={previewing}>
+            <Input aria-label="Scoring preview author handle" value={previewAuthor} onChange={(e) => setPreviewAuthor(e.target.value)} placeholder="Optional author handle" />
+            <Textarea aria-label="Scoring preview text" value={previewText} onChange={(e) => setPreviewText(e.target.value)} className="min-h-28" />
+            <ConfirmSettingsAction title="Run a paid scoring preview?" description="This sends the entered text to OpenAI using the saved selected profile. It may incur provider charges. No delivery is created. Save policy edits first if you want to evaluate changed rules." confirmLabel="Run scoring preview" onConfirm={preview}>
+            <Button type="button" variant="outline" disabled={editor.isDirty || previewing}>
               {previewing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Preview with GPT-5.4 Mini
             </Button>
+            </ConfirmSettingsAction>
             {previewResult && (
               <div className="rounded-md border bg-background/60 p-3 text-sm">
                 <div className="flex flex-wrap gap-2">
@@ -412,14 +423,16 @@ export default function ScoringStudio({ initial }: Props) {
             <p className="text-sm text-muted-foreground">Use dry-runs before switching v2 to active gating. These do not call X.</p>
             <div className="grid gap-2 sm:grid-cols-2">
               <Button type="button" variant="outline" onClick={dryRunBackfill}>Dry-run 48h backfill</Button>
-              <Button type="button" variant="outline" onClick={runEval}>Run 10-case eval</Button>
+              <ConfirmSettingsAction title="Run the 10-case scoring evaluation?" description="This evaluates up to 10 stored examples through OpenAI using the saved selected profile. It may incur provider charges and records evaluation results; it does not post to Telegram or X." confirmLabel="Run evaluation" onConfirm={runEval}>
+            <Button type="button" variant="outline">Run 10-case eval</Button>
+            </ConfirmSettingsAction>
             </div>
             {dryRunState && <p className="rounded-md border bg-background/60 p-3 text-sm">{dryRunState}</p>}
           </div>
         </section>
 
         <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
-          <Button type="button" onClick={save} disabled={saveMutation.isPending} className="bg-gradient-primary text-white hover:opacity-90">
+          <Button type="button" onClick={save} disabled={saveMutation.isPending} >
             {saveMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
             Save Scoring Policy
           </Button>
@@ -440,6 +453,7 @@ function ListEditor({ label, value, onChange }: { label: string; value: string[]
     <div className="space-y-2">
       <Label>{label}</Label>
       <Textarea
+        aria-label={label}
         value={text}
         onChange={(e) => {
           setText(e.target.value);
@@ -459,7 +473,8 @@ function SliderBlock({ label, value, min, max, step = 1, onChange }: { label: st
         <Label className="text-xs">{label}</Label>
         <Badge variant="outline" className="font-mono">{Number.isInteger(value) ? value : value.toFixed(1)}</Badge>
       </div>
-      <Slider value={[value]} min={min} max={max} step={step} onValueChange={([next]) => onChange(next)} />
+      <Slider aria-label={label} value={[value]} min={min} max={max} step={step} onValueChange={([next]) => onChange(next)} />
+      <Input aria-label={`${label} exact value`} type="number" min={min} max={max} step={step} value={value} onChange={(event) => { const next = Number(event.target.value); if (event.target.value !== '' && Number.isFinite(next) && next >= min && next <= max) onChange(next); }} />
     </div>
   );
 }

@@ -25,8 +25,8 @@ function assertContract({ css, sources }, label = "current source") {
   if (/\bp-6\b/.test(glassCard) || /\bp-8\b/.test(glassCard)) {
     fail(`${label}: glass-card must not add outer padding to CardHeader/CardContent-owned spacing`);
   }
-  if (!glassCard.includes("background: var(--gradient-glass);")) {
-    fail(`${label}: glass-card must retain the semantic gradient surface`);
+  if (!/\.glass-panel\s*\{[^}]*background: hsl\(var\(--card\)\)/.test(css)) {
+    fail(`${label}: glass-card must retain the semantic card surface`);
   }
 
   let callerCount = 0;

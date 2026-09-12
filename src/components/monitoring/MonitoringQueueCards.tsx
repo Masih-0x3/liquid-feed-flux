@@ -1,4 +1,4 @@
-import { Card, CardContent } from "@/components/ui/card";
+
 import { compactNumber } from "@/lib/monitoringViewModel";
 
 interface MonitoringQueueCounts {
@@ -34,73 +34,55 @@ interface MonitoringXSummary {
 interface MonitoringQueueCardsProps {
   counts: MonitoringQueueCounts;
   xSummary?: MonitoringXSummary | null;
+  loading?: boolean;
+  scope?: string;
+  updatedAt?: number;
+  stale?: boolean;
 }
 
-export function MonitoringQueueCards({ counts, xSummary }: MonitoringQueueCardsProps) {
+export function MonitoringQueueCards({ counts, xSummary, loading = false, scope = 'Latest 10,000 posts; current pipeline state', updatedAt, stale }: MonitoringQueueCardsProps) {
+  const metrics: Array<[string, number | undefined, string]> = [
+    ['Needs attention', counts.needs_attention, 'text-warning'],
+    ['Failed/stuck', counts.failed_stuck, 'text-destructive'],
+    ['Ready to deliver', counts.ready_to_deliver, 'text-primary'],
+    ['Translation queue', counts.translation_queue, 'text-primary'],
+    ['Needs score', counts.needs_score, 'text-warning'],
+    ['Manual review', counts.manual_review, 'text-warning'],
+    ['Duplicates', counts.duplicates, 'text-muted-foreground'],
+    ['Coverage gaps', counts.coverage_gap, 'text-warning'],
+    ['Possible dupes', counts.possible_duplicate, 'text-warning'],
+    ['Dup anomalies', counts.duplicate_anomalies, 'text-destructive'],
+    ['Hydration', counts.hydration, 'text-primary'],
+    ['X pending', counts.x_pending, 'text-warning'],
+    ['X failed', counts.x_failed, 'text-destructive'],
+    ['Telegram delivered · 24h', counts.delivered_24h, 'text-success'],
+    ['Telegram pending', counts.telegram_pending, 'text-muted-foreground'],
+    ['Below threshold', counts.below_threshold, 'text-muted-foreground'],
+    ['Stale jobs · >30m', counts.stale_jobs, 'text-warning'],
+    ['Stale X pending · >24h', counts.stale_x_pending_24h, 'text-warning'],
+    ['Regional auto', counts.v2_regional_auto, 'text-muted-foreground'],
+    ['Global pilot', counts.global_pilot_review, 'text-muted-foreground'],
+    ['Manual scoring', counts.manual_scoring_feedback, 'text-muted-foreground'],
+  ];
+  const renderMetrics = (items: typeof metrics) => items.map(([label, value, tone]) => (
+    <div key={label} className="min-w-0 px-3 py-2">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className={`mt-1 text-lg font-semibold tabular-nums ${tone}`}>{loading ? '—' : compactNumber(value)}</dd>
+    </div>
+  ));
   return (
-    <>
-      <div className="grid grid-cols-2 gap-2 min-[480px]:grid-cols-3 md:grid-cols-4 xl:grid-cols-7">
-        {[
-          ['Needs attention', counts.needs_attention, 'text-amber-500'],
-          ['Failed/stuck', counts.failed_stuck, 'text-destructive'],
-          ['Translation queue', counts.translation_queue, 'text-blue-500'],
-          ['Needs score', counts.needs_score, 'text-amber-500'],
-          ['Ready to deliver', counts.ready_to_deliver, 'text-primary'],
-          ['Manual review', counts.manual_review, 'text-purple-500'],
-          ['Duplicates', counts.duplicates, 'text-muted-foreground'],
-          ['Coverage gaps', counts.coverage_gap ?? 0, 'text-amber-500'],
-          ['Possible dupes', counts.possible_duplicate ?? 0, 'text-amber-500'],
-          ['Dup anomalies', counts.duplicate_anomalies ?? 0, 'text-destructive'],
-          ['Hydration', counts.hydration, 'text-blue-500'],
-          ['X pending', counts.x_pending, 'text-amber-500'],
-          ['X failed', counts.x_failed, 'text-destructive'],
-          ['Delivered 24h', counts.delivered_24h, 'text-emerald-500'],
-        ].map(([label, value, cls]) => (
-          <Card key={label as string}>
-            <CardContent className="p-2.5 sm:p-3">
-              <p className="text-xs text-muted-foreground">{label}</p>
-              <p className={`text-xl font-semibold tabular-nums sm:text-2xl ${cls}`}>{compactNumber(value as number)}</p>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      <div className="grid gap-3 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <CardContent className="grid grid-cols-2 gap-3 p-3 sm:grid-cols-4">
-            {[
-              ['Telegram pending', counts.telegram_pending],
-              ['Below threshold', counts.below_threshold],
-              ['Stale jobs', counts.stale_jobs],
-              ['Stale X pending', counts.stale_x_pending_24h],
-              ['Regional auto', counts.v2_regional_auto],
-              ['Global pilot', counts.global_pilot_review],
-              ['Manual scoring', counts.manual_scoring_feedback],
-            ].map(([label, value]) => (
-              <div key={label as string}>
-                <p className="text-xs text-muted-foreground">{label}</p>
-                <p className="text-lg font-semibold tabular-nums">{compactNumber(value as number)}</p>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="grid grid-cols-3 gap-3 p-3">
-            <div>
-              <p className="text-xs text-muted-foreground">X attempts</p>
-              <p className="text-lg font-semibold tabular-nums">{compactNumber(xSummary?.counted_attempts)}</p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Local posts</p>
-              <p className="text-lg font-semibold tabular-nums">{compactNumber(xSummary?.posts_local ?? counts.delivered_24h)}</p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Success</p>
-              <p className="text-lg font-semibold tabular-nums">{xSummary ? `${xSummary.success_rate}%` : '—'}</p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    </>
+    <section aria-label="Monitoring summary" className="rounded-lg border bg-card">
+      <dl className="grid grid-cols-2 gap-px sm:grid-cols-4">{renderMetrics(metrics.slice(0, 4))}</dl>
+      <details className="border-t px-3 py-2">
+        <summary className="cursor-pointer text-sm text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">More queue metrics and scope</summary>
+        <p className="mt-2 text-xs text-muted-foreground">{loading ? 'Loading overview…' : scope}. {stale ? 'Refresh failed; last successful data shown. ' : ''}{updatedAt ? `Refreshed ${new Date(updatedAt).toLocaleTimeString()}.` : 'Refresh time unavailable.'} Needs attention includes stale running jobs; categories can overlap.</p>
+        <dl className="mt-2 grid grid-cols-2 gap-px sm:grid-cols-4">{renderMetrics(metrics.slice(4))}</dl>
+        <dl className="mt-2 grid grid-cols-3 border-t pt-2 text-xs">
+          <div><dt>X counted attempts · 24h</dt><dd className="mt-1 font-semibold">{compactNumber(xSummary?.counted_attempts)}</dd></div>
+          <div><dt>X local posts · 24h</dt><dd className="mt-1 font-semibold">{compactNumber(xSummary?.posts_local)}</dd></div>
+          <div><dt>X success · 24h</dt><dd className="mt-1 font-semibold">{typeof xSummary?.success_rate === 'number' ? `${xSummary.success_rate}%` : 'Unavailable'}</dd></div>
+        </dl>
+      </details>
+    </section>
   );
 }

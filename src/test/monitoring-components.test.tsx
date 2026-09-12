@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+vi.mock('@/hooks/useRuntimeControls', () => ({ useRuntimeControls: () => ({ controls: { environment: 'production', posting_mode: 'enabled' }, error: null, loading: false }) }));
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -353,7 +354,7 @@ describe("monitoring row renderers", () => {
     expect(screen.getByText("Direct focus")).toBeInTheDocument();
     expect(screen.getByText("More actions")).toBeInTheDocument();
     expect(onSelectChange).toHaveBeenCalledWith("tweet-1", true);
-    expect(onOpenDetails).toHaveBeenCalledWith("tweet-1");
+    expect(onOpenDetails).toHaveBeenCalledWith("tweet-1", screen.getByRole("button", { name: "Details" }));
     expect(onOpenManualScore).toHaveBeenCalledWith(expect.objectContaining({ tweet_id: "tweet-1" }));
     expect(renderRowActions).toHaveBeenCalledWith(expect.objectContaining({ tweet_id: "tweet-1" }), true);
     expect(onRunDedupe).not.toHaveBeenCalled();
@@ -394,13 +395,13 @@ describe("monitoring row renderers", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Details" }));
 
-    expect(onOpenDetails).toHaveBeenCalledWith("tweet-1");
+    expect(onOpenDetails).toHaveBeenCalledWith("tweet-1", screen.getByRole("button", { name: "Details" }));
     expect(renderRowActions).toHaveBeenCalledWith(expect.objectContaining({ tweet_id: "tweet-1" }));
   });
 });
 
 describe("monitoring detail drawer", () => {
-  it("renders drawer sections and routes primary actions through page callbacks", () => {
+  it("renders drawer sections and routes primary actions through page callbacks", async () => {
     const onRequestAction = vi.fn();
     const onGenerateEnrichment = vi.fn();
     const onScoreFeedback = vi.fn();
@@ -524,6 +525,10 @@ describe("monitoring detail drawer", () => {
     expect(screen.getByText("Enrichment Studio")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Generate enrichment draft" }));
+    expect(onGenerateEnrichment).not.toHaveBeenCalled();
+    expect(screen.getByRole('alertdialog')).toHaveTextContent('Provider charges may apply');
+    fireEvent.click(screen.getByRole('button', { name: 'Generate paid draft' }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "Post plain to X" }));
     fireEvent.click(screen.getByRole("button", { name: "Should skip" }));
     fireEvent.click(screen.getByRole("button", { name: "Approve for X" }));

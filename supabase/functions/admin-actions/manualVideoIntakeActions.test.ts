@@ -3,6 +3,7 @@ import { ExternalPostingBlockedError } from "../_shared/externalPostingGuard.ts"
 import {
   manualVideoIntakeCancelAdminAction,
   manualVideoIntakeCreateAdminAction,
+  manualVideoIntakeGetAdminAction,
   manualVideoIntakePostAdminAction,
   manualVideoIntakeSaveCaptionAdminAction,
   manualVideoIntakeSetDuplicateOverrideAdminAction,
@@ -412,4 +413,28 @@ Deno.test("cancel marks the intake canceled and records a pipeline event", async
     status: "completed",
     meta: { action: "canceled", intake_id: "intake-1" },
   });
+});
+
+
+Deno.test("manual intake reads return logical media identities without signing or raw media paths", async () => {
+  const supabase = fakeSupabase({
+    intake: intakeRow,
+    post: { tweet_id: intakeRow.tweet_id, text_original: "Source caption", author_handle: "example" },
+    media: [{ id: "media-1", tweet_id: intakeRow.tweet_id, storage_path: "private/source.mp4", src_url: "https://provider.invalid/source.mp4", mime_type: "video/mp4", downloaded_at: "2026-09-11" }],
+    renders: [{ id: "render-1", tweet_id: intakeRow.tweet_id, source_media_id: "media-1", status: "completed", output_storage_path: "private/output.mp4", output_mime_type: "video/mp4", metrics: { private_path: "secret" } }],
+    settings: { x_posting_config: { value: { enabled: true, allow_video: true } } },
+  });
+  const result = await manualVideoIntakeGetAdminAction(supabase, { intake_id: intakeRow.id, render_id: "render-1", refresh_dedupe: false, queue_render: false }, {} as ManualVideoIntakeDeps);
+  const body = result.body as { media: Record<string, unknown>[]; renders: Record<string, unknown>[]; preview: Record<string, unknown> };
+  assertEquals(body.preview.source_media_id, "media-1");
+  assertEquals(body.preview.render_id, "render-1");
+  assertEquals(body.preview.output_available, true);
+  assertEquals("source_signed_url" in body.preview, false);
+  assertEquals("output_signed_url" in body.preview, false);
+  assertEquals("src_url" in body.media[0], false);
+  assertEquals("storage_path" in body.media[0], false);
+  assertEquals("output_storage_path" in body.renders[0], false);
+  assertEquals("metrics" in body.renders[0], false);
+  assertEquals(body.renders[0].has_output, true);
+  assertEquals(supabase.calls.some((call) => call.op === "signed_url"), false);
 });

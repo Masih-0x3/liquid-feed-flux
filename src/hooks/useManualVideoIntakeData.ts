@@ -42,8 +42,6 @@ export interface ManualVideoMediaRow {
   id: string;
   tweet_id: string;
   kind: string | null;
-  src_url: string | null;
-  storage_path: string | null;
   ordering: number | null;
   downloaded_at: string | null;
   mime_type: string | null;
@@ -58,7 +56,7 @@ export interface ManualVideoRenderRow {
   tweet_id: string;
   source_media_id: string | null;
   status: string;
-  output_storage_path: string | null;
+  has_output: boolean;
   output_mime_type: string | null;
   output_file_size: number | null;
   duration_ms: number | null;
@@ -93,10 +91,11 @@ export interface ManualVideoSnapshot {
   media: ManualVideoMediaRow[];
   renders: ManualVideoRenderRow[];
   latest_render: ManualVideoRenderRow | null;
+  destination?: { platform: 'X'; handle: string | null; cached_at: string | null; identity_status: 'cached' | 'unavailable' };
   preview: {
     render_id: string | null;
-    source_signed_url: string | null;
-    output_signed_url: string | null;
+    source_media_id: string | null;
+    output_available: boolean;
     subtitle_text: string | null;
   };
   caption: {

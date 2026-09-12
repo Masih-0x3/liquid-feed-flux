@@ -120,6 +120,7 @@
     "deno_lock_integrity": "sha512-cEnx+k49knU+qdIP7rXwR6fqEXPHZs+74xFK1R0S8MgQ7v9tbePVdGxvO03n3bPympMdJWVLadARBfU4TgNHCQ==",
     "edge_imports": {
       "supabase/functions/admin-actions/index.ts": "https://esm.sh/@supabase/supabase-js@2.39.7",
+      "supabase/functions/admin-actions/mediaAccessActions.test.ts": "https://esm.sh/@supabase/supabase-js@2.39.7",
       "supabase/functions/admin-retry/index.ts": "https://esm.sh/@supabase/supabase-js@2.39.7",
       "supabase/functions/db-cleanup/index.ts": "https://esm.sh/@supabase/supabase-js@2.39.7",
       "supabase/functions/digest-compiler/index.ts": "https://esm.sh/@supabase/supabase-js@2.49.1",

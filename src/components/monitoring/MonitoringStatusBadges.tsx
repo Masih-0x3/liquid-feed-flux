@@ -1,3 +1,4 @@
+import { buildDeliverySummary } from '@/lib/timelineDisplay';
 import { Badge } from "@/components/ui/badge";
 import type { MonitoringEntry } from "@/hooks/useMonitoringData";
 import { decisionScore, formatXBadge } from "@/lib/pipelineMessages";
@@ -24,11 +25,8 @@ export function MonitoringXBadge({ entry }: MonitoringEntryBadgeProps) {
 }
 
 export function MonitoringTelegramBadge({ entry }: MonitoringEntryBadgeProps) {
-  return (
-    <Badge variant={entry.is_delivered ? 'default' : entry.monitoring_state?.code === 'telegram_pending' ? 'secondary' : 'outline'}>
-      {entry.is_delivered ? 'Delivered' : entry.monitoring_state?.telegram_state === 'none' ? 'No row' : entry.monitoring_state?.telegram_state || entry.delivery_status || 'No row'}
-    </Badge>
-  );
+  const summary = buildDeliverySummary(entry)[0];
+  return <Badge variant="outline" className={toneClass(summary.tone)} title={summary.detail}>{summary.label}</Badge>;
 }
 
 export function MonitoringDedupeBadge({ entry }: MonitoringEntryBadgeProps) {
