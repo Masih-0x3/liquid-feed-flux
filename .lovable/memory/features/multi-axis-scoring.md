@@ -17,4 +17,4 @@ type: feature
 - Worker uses active profile when set; falls back to legacy `content_filter` (default_threshold + author_rules) otherwise. Both pre-translation gate (split_calls=true) and post-translation gate use the same helper.
 - UI: in the Filter tab, `ScoringStudio` is the only writable scoring policy; `EditorialProfilesCard` and `ContentFilterSettings` are mounted below it as **read-only legacy snapshots** (all edits are disabled). Profile details render only when a profile is selected; after asynchronous settings loading, the existing card can retain an empty selection until the user selects a profile.
 - Save flow: `ScoringStudio` writes the canonical `scoring_policy` row via `useSaveSettings`. `editorial_profiles`, `active_profile_id`, and `content_filter` are read from the DB for backwards compatibility but are no longer written from the UI.
-- Types live in `src/hooks/useSettingsData.ts` (`EditorialProfile`, `ScoreAxisKey`, `SCORE_AXIS_KEYS`, `DEFAULT_AXIS_WEIGHTS`, `makeDefaultProfile`).
+- Types live in `src/hooks/useSettingsData.ts` (`EditorialProfile`, `ScoreAxisKey`, ...).
