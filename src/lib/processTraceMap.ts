@@ -1,3 +1,4 @@
+import { hasTelegramDeliveryReceipt, hasXDeliveryReceipt, pipelineOutcomeStatus } from '@/lib/timelineDisplay';
 import type {
   MonitoringEntry,
   MonitoringProcessAiCall,
@@ -160,13 +161,17 @@ function setNodeStatus(node: ProcessTraceNode, status: ProcessTraceStatus, tone?
   node.statusLabel = processTraceStatusLabel(status);
 }
 
+function hasTimelineDeliveryReceipt(node: Pick<ProcessTraceNode, "id" | "evidence">): boolean {
+  return (node.id === "telegram" || node.id === "x-post") && node.evidence.includes(`receipt:${node.id}`);
+}
+
 function updateNode(node: ProcessTraceNode, patch: NodePatch) {
   const preserveCompletedTerminalEvidence = Boolean(
     patch.preserveCompleted &&
       patch.status &&
       node.status === "completed" &&
       patch.status !== "completed" &&
-      patch.status !== "failed",
+      (patch.status !== "failed" || hasTimelineDeliveryReceipt(node)),
   );
 
   if (patch.status) {
@@ -193,6 +198,10 @@ function updateNode(node: ProcessTraceNode, patch: NodePatch) {
     if (patch.agentName) node.agentName = patch.agentName;
     if (patch.error) node.error = patch.error;
     if (patch.skipReason) node.skipReason = patch.skipReason;
+  }
+  // Failed attempts remain diagnostic evidence after a platform receipt confirms delivery.
+  if (preserveCompletedTerminalEvidence && hasTimelineDeliveryReceipt(node) && patch.error) {
+    node.error = patch.error;
   }
   if (patch.evidence) node.evidence.push(patch.evidence);
   if (patch.evidenceItems) node.evidence.push(...patch.evidenceItems);
@@ -317,16 +326,8 @@ function shouldShowMedia(entry: MonitoringEntry, node: ProcessTraceNode): boolea
 }
 
 function isTerminalDelivery(entry: MonitoringEntry): boolean {
-  const telegramMessageIds = Array.isArray(entry.telegram_message_ids)
-    ? entry.telegram_message_ids
-    : [];
   return Boolean(
-    entry.x_status === "posted" ||
-      entry.monitoring_state?.x_state === "posted" ||
-      entry.monitoring_state?.code === "delivered" ||
-      entry.is_delivered ||
-      telegramMessageIds.length > 0 ||
-      entry.monitoring_state?.telegram_state === "delivered",
+    hasTelegramDeliveryReceipt(entry) || hasXDeliveryReceipt(entry) || entry.monitoring_state?.code === "delivered",
   );
 }
 
@@ -341,9 +342,11 @@ function hasCompletedDeliveryNode(nodes: readonly Pick<ProcessTraceNode, "id" | 
 export function processTraceTerminalStatus(
   entry: MonitoringEntry,
   summary: Pick<ProcessTraceSummary, "status" | "failed">,
-  nodes?: readonly Pick<ProcessTraceNode, "id" | "status">[],
+  nodes?: readonly Pick<ProcessTraceNode, "id" | "status" | "evidence">[],
 ): ProcessTraceStatus {
-  if (summary.failed > 0 || entry.x_status === "failed" || entry.x_error || entry.delivery_error || entry.translation_error) {
+  const telegramReceipt = hasTelegramDeliveryReceipt(entry) || nodes?.some((node) => node.id === "telegram" && hasTimelineDeliveryReceipt(node));
+  const xReceipt = hasXDeliveryReceipt(entry) || nodes?.some((node) => node.id === "x-post" && hasTimelineDeliveryReceipt(node));
+  if (summary.failed > 0 || (!xReceipt && (entry.x_status === "failed" || entry.x_error)) || (!telegramReceipt && entry.delivery_error) || entry.translation_error) {
     return "failed";
   }
   if (isTerminalDelivery(entry) || hasCompletedDeliveryNode(nodes)) return "completed";
@@ -352,21 +355,35 @@ export function processTraceTerminalStatus(
   return summary.status;
 }
 
-function applyTimelineEvents(nodes: Map<ProcessTraceNodeId, ProcessTraceNode>, events: PipelineEvent[]) {
+function applyTimelineEvents(nodes: Map<ProcessTraceNodeId, ProcessTraceNode>, events: PipelineEvent[], entry: MonitoringEntry) {
   for (const event of events) {
     const nodeId = eventNodeId(event);
     if (!nodeId) continue;
     const node = nodes.get(nodeId);
     if (!node) continue;
-    const status = normalizeProcessTraceStatus(event.status);
+    const outcome = pipelineOutcomeStatus(event, entry);
+    const status = normalizeProcessTraceStatus(outcome);
+    const withoutReceipt = outcome === "completed_without_receipt";
+    const receipt = (nodeId === "telegram" || nodeId === "x-post") && (outcome === "posted" || outcome === "delivered");
+    if (hasTimelineDeliveryReceipt(node) && !receipt) {
+      updateNode(node, {
+        error: event.error ?? undefined,
+        evidence: `timeline:${event.step}:${event.status}`,
+        evidenceItems: withoutReceipt ? ["outcome:completed_without_receipt"] : undefined,
+      });
+      continue;
+    }
     updateNode(node, {
       status,
-      detail: event.error || `${event.step.replace(/_/g, " ")} ${event.status.replace(/_/g, " ")}`,
+      preserveCompleted: withoutReceipt || outcome === "skipped" || hasTimelineDeliveryReceipt(node),
+      statusLabel: withoutReceipt ? "No delivery receipt" : undefined,
+      detail: withoutReceipt ? "Queue work finished; no platform delivery receipt is recorded." : outcome === "skipped" ? "Stage skipped; no work or delivery is confirmed by this event." : event.error || `${event.step.replace(/_/g, " ")} ${event.status.replace(/_/g, " ")}`,
       startedAt: event.started_at,
       endedAt: event.ended_at,
       durationMs: durationMs(event.started_at, event.ended_at),
       error: event.error ?? undefined,
       evidence: `timeline:${event.step}:${event.status}`,
+      evidenceItems: receipt ? [`receipt:${nodeId}`] : withoutReceipt ? ["outcome:completed_without_receipt"] : undefined,
     });
   }
 }
@@ -475,11 +492,11 @@ function applyEntryState(nodes: Map<ProcessTraceNodeId, ProcessTraceNode>, entry
       evidence: "entry:translated",
     });
   } else {
-    const translationStatus = normalizeProcessTraceStatus(entry.translation_job_status);
+    const translationStatus = normalizeProcessTraceStatus(pipelineOutcomeStatus({ step: "translate", status: entry.translation_job_status }, entry));
     if (translationStatus !== "unknown") {
       updateNode(translate, {
         status: translationStatus,
-        detail: `Translation job ${entry.translation_job_status.replace(/_/g, " ")}.`,
+        detail: translationStatus === "skipped" ? "Translation skipped; no translated output is recorded." : `Translation job ${entry.translation_job_status.replace(/_/g, " ")}.`,
         evidence: "entry:translation_job_status",
       });
     } else if (isDuplicateBlocked(entry) || isBelowThresholdSkip(entry)) {
@@ -531,27 +548,39 @@ function applyEntryState(nodes: Map<ProcessTraceNodeId, ProcessTraceNode>, entry
   }
 
   const telegram = nodes.get("telegram")!;
-  if (entry.delivery_error) {
-    updateNode(telegram, {
-      status: "failed",
-      detail: "Telegram delivery failed.",
-      error: entry.delivery_error,
-      evidence: "entry:delivery_error",
-    });
-  } else if (entry.is_delivered || telegramMessageIds.length > 0 || entry.monitoring_state?.telegram_state === "delivered") {
+  if (hasTelegramDeliveryReceipt(entry)) {
     updateNode(telegram, {
       status: "completed",
       detail: telegramMessageIds.length > 0 ? `${telegramMessageIds.length} Telegram message ID(s).` : "Telegram delivery is marked delivered.",
+      error: entry.delivery_error || undefined,
       evidence: "entry:telegram_delivered",
+      evidenceItems: entry.delivery_error ? ["entry:delivery_error_diagnostic"] : undefined,
+    });
+  } else if (entry.delivery_error) {
+    updateNode(telegram, {
+      status: "failed",
+      preserveCompleted: true,
+      detail: "Telegram delivery failed.",
+      error: entry.delivery_error,
+      evidence: hasTimelineDeliveryReceipt(telegram) ? "entry:delivery_error_diagnostic" : "entry:delivery_error",
     });
   } else {
-    const status = normalizeProcessTraceStatus(entry.delivery_status || entry.delivery_job_status || entry.monitoring_state?.telegram_state);
+    const outcome = pipelineOutcomeStatus({ step: "deliver", status: entry.delivery_status || entry.delivery_job_status || entry.monitoring_state?.telegram_state || "" }, entry);
+    const status = normalizeProcessTraceStatus(outcome);
     if (status !== "unknown") {
       updateNode(telegram, {
         status,
         preserveCompleted: true,
         detail: `Telegram state ${entry.delivery_status || entry.delivery_job_status || entry.monitoring_state?.telegram_state}.`,
         evidence: "entry:telegram_status",
+      });
+    } else if (outcome === "completed_without_receipt" && telegram.status !== "completed" && telegram.status !== "failed") {
+      setNodeStatus(telegram, "unknown");
+      updateNode(telegram, {
+        statusLabel: "No delivery receipt",
+        detail: "Queue work finished; no Telegram delivery receipt is recorded.",
+        evidence: "entry:telegram_job_completed_without_receipt",
+        evidenceItems: ["outcome:completed_without_receipt"],
       });
     } else if (isDuplicateBlocked(entry) || isBelowThresholdSkip(entry)) {
       updateNode(telegram, {
@@ -566,7 +595,7 @@ function applyEntryState(nodes: Map<ProcessTraceNodeId, ProcessTraceNode>, entry
 
   const xDispatch = nodes.get("x-dispatch")!;
   const xPost = nodes.get("x-post")!;
-  if (entry.x_status === "posted") {
+  if (hasXDeliveryReceipt(entry)) {
     updateNode(xDispatch, {
       status: "completed",
       detail: "X gate passed and dispatch completed.",
@@ -576,7 +605,9 @@ function applyEntryState(nodes: Map<ProcessTraceNodeId, ProcessTraceNode>, entry
       status: "completed",
       detail: entry.x_tweet_id ? `Posted as ${entry.x_tweet_id}.` : "X post completed.",
       endedAt: entry.x_posted_at,
+      error: entry.x_error ?? undefined,
       evidence: "entry:x_posted",
+      evidenceItems: entry.x_error ? ["entry:x_error_diagnostic"] : undefined,
     });
   } else if (entry.x_status === "failed" || entry.x_error) {
     updateNode(xDispatch, {
@@ -586,9 +617,10 @@ function applyEntryState(nodes: Map<ProcessTraceNodeId, ProcessTraceNode>, entry
     });
     updateNode(xPost, {
       status: "failed",
+      preserveCompleted: true,
       detail: "X post failed.",
       error: entry.x_error ?? undefined,
-      evidence: "entry:x_failed",
+      evidence: hasTimelineDeliveryReceipt(xPost) ? "entry:x_error_diagnostic" : "entry:x_failed",
     });
   } else {
     const xStatus = normalizeProcessTraceStatus(entry.x_status ?? entry.monitoring_state?.x_state);
@@ -759,7 +791,7 @@ export function buildProcessTraceMap(
     CANONICAL_NODES.map((definition) => [definition.id, createNode(definition)]),
   );
 
-  applyTimelineEvents(nodes, timeline);
+  applyTimelineEvents(nodes, timeline, entry);
   applyAiCalls(nodes, observability);
   applyEntryState(nodes, entry, observability);
 
@@ -783,6 +815,9 @@ export function buildProcessTraceMap(
     ...visibleNodes.flatMap((node) => [node.error ?? "", node.skipReason ? node.skipReason.replace(/_/g, " ") : ""]),
   ]);
   const summary = buildSummary(visibleNodes, observability);
+  if (summary.status === "completed" && visibleNodes.some((node) => node.status === "unknown" && node.evidence.includes("outcome:completed_without_receipt"))) {
+    summary.status = "unknown";
+  }
   const terminalStatus = processTraceTerminalStatus(entry, summary, visibleNodes);
   summary.status = terminalStatus;
   summary.statusLabel = processTraceStatusLabel(terminalStatus);

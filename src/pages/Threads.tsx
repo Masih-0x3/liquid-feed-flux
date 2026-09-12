@@ -1,3 +1,5 @@
+import { Link } from 'react-router-dom';
+import { persianContentAttributes } from '@/lib/contentLanguage';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -42,10 +44,14 @@ export default function Threads() {
     error: false,
   });
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [refreshedAt, setRefreshedAt] = useState<Date | null>(null);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const previewRequestRef = useRef(0);
 
   const fetchThreads = useCallback(async () => {
+    setLoading(true);
+    setLoadError(false);
     try {
       const { data, error } = await supabase
         .from('threads')
@@ -53,8 +59,9 @@ export default function Threads() {
         .order('created_at', { ascending: false });
       if (error) throw error;
       setThreads((data as Thread[]) || []);
+      setRefreshedAt(new Date());
     } catch (error) {
-      console.error('Error fetching threads:', error);
+      setLoadError(true);
       toast({ title: 'Error loading threads', variant: 'destructive' });
     } finally {
       setLoading(false);
@@ -119,14 +126,17 @@ export default function Threads() {
   const previewLoading = Boolean(selectedThread) && (!hasMatchingThreadPosts || threadPostsState.loading);
   const previewError = hasMatchingThreadPosts && threadPostsState.error;
   return (
-    <div className="space-y-6 animate-fade-in-up">
+    <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-display font-bold text-glass-foreground">Threads</h1>
           <p className="text-muted-foreground mt-1">View grouped tweet conversations</p>
+          <p role="status" className="mt-1 text-xs text-muted-foreground">{loading ? "Refreshing conversations…" : refreshedAt ? `Last successful read: ${refreshedAt.toLocaleTimeString()}` : "No successful read yet"}</p>
         </div>
+        <Button variant="outline" disabled={loading} onClick={() => void fetchThreads()}>Refresh threads</Button>
       </div>
 
+      {loadError && <div role="alert" className="space-y-2 rounded-md border border-destructive/40 p-4 text-sm"><p>Threads could not load. Check your connection or access and retry.{threads.length ? ' Last successful records remain below.' : ''}</p><Button variant="outline" onClick={() => void fetchThreads()}>Retry threads</Button></div>}
       <Card className="glass-card">
         <CardHeader>
           <CardTitle className="text-xl font-display text-glass-foreground flex items-center">
@@ -136,9 +146,9 @@ export default function Threads() {
           <CardDescription>Automatically detected conversation threads</CardDescription>
         </CardHeader>
         <CardContent>
-          {loading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="w-6 h-6 animate-spin text-primary" />
+          {loading && !refreshedAt ? (
+            <div role="status" className="flex min-h-48 items-center justify-center gap-2 py-8">
+              <Loader2 className="w-5 h-5 animate-spin text-primary" />Loading threads…
             </div>
           ) : threads.length > 0 ? (
             <Table>
@@ -169,7 +179,7 @@ export default function Threads() {
                     <TableCell className="text-muted-foreground">{new Date(thread.created_at).toLocaleDateString()}</TableCell>
                     <TableCell>
                       <div className="flex items-center space-x-2">
-                        <Button size="sm" variant="ghost" onClick={() => handlePreview(thread)} className="glass-button h-8 w-8 p-0">
+                        <Button aria-label={`Preview thread from @${thread.accounts?.handle || "unknown"}`} size="sm" variant="ghost" onClick={() => handlePreview(thread)} className="glass-button h-8 w-8 p-0">
                           <Eye className="w-3 h-3" />
                         </Button>
                         <Badge variant="outline" className="text-muted-foreground">Delivery unavailable</Badge>
@@ -179,13 +189,14 @@ export default function Threads() {
                 ))}
               </TableBody>
             </Table>
-          ) : (
+          ) : !loadError ? (
             <div className="text-center py-8 text-muted-foreground">
               <Link2 className="w-12 h-12 mx-auto mb-4 opacity-50" />
               <h3 className="text-lg font-medium text-glass-foreground mb-2">No threads detected</h3>
-              <p>Thread grouping will appear here when conversations are identified</p>
+              <p className="mx-auto max-w-md">Groups appear after incoming posts are linked into conversations. This view lists stored groups; refreshing does not fetch X or create a group.</p>
+              <Button asChild variant="outline" className="mt-4"><Link to="/monitoring">Inspect incoming posts</Link></Button>
             </div>
-          )}
+          ) : null}
         </CardContent>
       </Card>
 
@@ -225,14 +236,14 @@ export default function Threads() {
                         <span className="text-xs text-muted-foreground">{new Date(post.created_at).toLocaleString()}</span>
                       </div>
                       <p className="text-sm text-glass-foreground mb-2"><strong>Original:</strong> {post.text_original}</p>
-                      {post.text_translated && <p className="text-sm text-muted-foreground"><strong>Translated:</strong> {post.text_translated}</p>}
+                      {post.text_translated && <p {...persianContentAttributes} className="text-sm text-muted-foreground"><strong>Translated:</strong> {post.text_translated}</p>}
                     </div>
                   ))}
                 </div>
                 <div className="border-t border-glass-border pt-4">
                   <h4 className="font-medium text-glass-foreground mb-3">Assembled Thread:</h4>
                   <div className="glass-panel p-4 rounded-lg">
-                    <pre className="whitespace-pre-wrap text-sm text-glass-foreground">{assembleThreadBody(threadPosts)}</pre>
+                    <pre dir="auto" className="whitespace-pre-wrap text-sm text-glass-foreground">{assembleThreadBody(threadPosts)}</pre>
                   </div>
                 </div>
                 <div className="rounded-md border border-border/60 bg-muted/30 p-3 text-sm text-muted-foreground" role="status">

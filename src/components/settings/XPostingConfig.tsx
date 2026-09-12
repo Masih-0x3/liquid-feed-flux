@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,6 +15,9 @@ import { invokeAdminAction } from '@/api/adminActions';
 import { useSaveSettings } from '@/hooks/useSettingsData';
 import { useRuntimeControls } from '@/hooks/useRuntimeControls';
 import { PromptEditor } from '@/components/settings/PromptEditor';
+import { useSettingsDraft, useSettingsSave, SettingsSaveStatus, SettingsIncomingNotice } from '@/components/settings/SettingsDrafts';
+import { MessagePreview } from '@/components/settings/MessagePreview';
+import { PlaceholderPicker } from '@/components/settings/PlaceholderPicker';
 import { Newspaper, Save, Sparkles, Loader2, ImageIcon, Eye, RefreshCw, Hash } from 'lucide-react';
 
 export interface XPostingConfigValue {
@@ -98,29 +101,32 @@ export default function XPostingConfig({ initial, isAdmin = false }: Props) {
   const { toast } = useToast();
   const save = useSaveSettings();
   const { controls: runtimeControls, loading: runtimeLoading, error: runtimeError } = useRuntimeControls();
-  const [cfg, setCfg] = useState<XPostingConfigValue>({ ...DEFAULTS, ...(initial ?? {}) });
+  const incoming = useMemo(() => ({ ...DEFAULTS, ...(initial ?? {}) }), [initial]);
+  const editor = useSettingsDraft('x-posting', 'X posting configuration', incoming);
+  const { draft: cfg, updateDraft: setCfg } = editor;
   const [dryRunLoading, setDryRunLoading] = useState(false);
   const [dryRunResult, setDryRunResult] = useState<{ results?: Array<Record<string, unknown>> } | null>(null);
-  const [hashtagPoolText, setHashtagPoolText] = useState<string>(((initial?.hashtag_pool ?? DEFAULTS.hashtag_pool) || []).join('\n'));
   const [previewSeed, setPreviewSeed] = useState(0);
   const runtimePostingBlocked = runtimeLoading
+    || Boolean(runtimeError)
     || runtimeControls === null
     || runtimeControls.environment === 'preview'
     || runtimeControls.posting_mode === 'blocked';
   const canMutate = isAdmin === true && !runtimePostingBlocked;
   const runtimeStatusLabel = runtimeLoading
     ? 'Checking runtime posting controls…'
-    : runtimeControls?.environment === 'preview'
+    : runtimeError || !runtimeControls
+      ? 'Runtime posting state is unavailable; controls are disabled.'
+      : runtimeControls.environment === 'preview'
       ? 'Posting controls are disabled in Preview.'
-      : runtimeControls?.posting_mode === 'blocked'
+      : runtimeControls.posting_mode === 'blocked'
         ? `Posting is blocked in ${runtimeControls.environment === 'production' ? 'Production' : 'the current runtime'}.`
-        : runtimeError ?? 'Runtime posting state is unavailable; controls are disabled.';
-
-  useEffect(() => {
-    const next = { ...DEFAULTS, ...(initial ?? {}) };
-    setCfg(next);
-    setHashtagPoolText((next.hashtag_pool || []).join('\n'));
-  }, [initial]);
+        : 'Posting is enabled in Production. Saved rules control which posts are eligible.';
+  const saving = useSettingsSave(editor, async (value) => {
+    if (!canMutate) throw new Error('Posting controls unavailable');
+    await save.mutateAsync({ key: 'x_posting_config', value: { ...value, hashtag_pool: parsePool(value.hashtag_pool.join('\n')) } });
+  });
+  const hashtagPoolText = (cfg.hashtag_pool || []).join('\n');
 
   const update = (patch: Partial<XPostingConfigValue>) => setCfg((c) => ({ ...c, ...patch }));
 
@@ -130,8 +136,8 @@ export default function XPostingConfig({ initial, isAdmin = false }: Props) {
   };
 
   const handlePoolChange = (raw: string) => {
-    setHashtagPoolText(raw);
-    update({ hashtag_pool: parsePool(raw) });
+    // Keep unfinished lines and commas editable; normalize only the submitted snapshot.
+    update({ hashtag_pool: raw.split('\n') });
   };
 
   const handleEnabledChange = (enabled: boolean) => {
@@ -147,18 +153,28 @@ export default function XPostingConfig({ initial, isAdmin = false }: Props) {
 
   const handleSave = () => {
     if (!canMutate) return;
-    save.mutate({ key: 'x_posting_config', value: { ...cfg, hashtag_pool: parsePool(hashtagPoolText) } });
+    void saving.save();
   };
 
-  const insertPlaceholder = (ph: string) => update({ post_template: cfg.post_template + ' ' + ph });
+  const insertPlaceholder = (placeholder: string) => {
+    const textarea = document.getElementById('x-post-template');
+    if (!(textarea instanceof HTMLTextAreaElement)) return;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    update({ post_template: cfg.post_template.slice(0, start) + placeholder + cfg.post_template.slice(end) });
+    setTimeout(() => {
+      textarea.setSelectionRange(start + placeholder.length, start + placeholder.length);
+      textarea.focus();
+    }, 0);
+  };
 
   const RLM = '\u200F';
   // previewSeed forces re-pick of random hashtags
-  const sampledHashtags = (() => {
+  const sampledHashtags = useMemo(() => {
     void previewSeed;
-    const picked = pickHashtags(cfg.hashtag_pool || [], cfg.hashtags_per_post ?? 0);
+    const picked = pickHashtags(parsePool((cfg.hashtag_pool || []).join('\n')), cfg.hashtags_per_post ?? 0);
     return picked || cfg.hashtags || '';
-  })();
+  }, [cfg.hashtag_pool, cfg.hashtags_per_post, cfg.hashtags, previewSeed]);
   const previewText = RLM + cfg.post_template
     .split('{leading_emoji}').join(cfg.leading_emoji)
     .split('{translated_text}').join('این یک نمونه‌ی پیش‌نمایش از پست خبری ترجمه‌شده است.')
@@ -184,7 +200,7 @@ export default function XPostingConfig({ initial, isAdmin = false }: Props) {
   };
 
   return (
-    <Card className="glass-card">
+    <Card id="x-posting-config" className="glass-card scroll-mt-48">
       <CardHeader>
         <CardTitle className="flex items-center text-glass-foreground">
           <Newspaper className="w-5 h-5 mr-2" />X Posting Configuration
@@ -195,13 +211,16 @@ export default function XPostingConfig({ initial, isAdmin = false }: Props) {
       </CardHeader>
 
       <CardContent className="space-y-6">
+        <SettingsSaveStatus label="X posting configuration" dirty={editor.isDirty} {...saving} onSave={handleSave} disabled={!canMutate || editor.hasPendingIncoming} />
+        <SettingsIncomingNotice editor={editor} />
         <div
           role="status"
           data-testid="x-posting-runtime-status"
-          className="rounded-lg border border-amber-400/30 bg-amber-500/10 p-3 text-sm text-amber-100"
+          className={`rounded-lg border p-3 text-sm ${runtimePostingBlocked ? 'border-amber-400/30 bg-amber-500/10 text-amber-100' : 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200'}`}
         >
           {runtimeStatusLabel}
         </div>
+        <fieldset disabled={!canMutate} className="min-w-0 space-y-6">
         {/* Enable */}
         <div className="flex items-center justify-between p-3 bg-muted/40 rounded-lg">
           <div>
@@ -211,7 +230,7 @@ export default function XPostingConfig({ initial, isAdmin = false }: Props) {
               Telegram delivery and the translate/score pipeline are unchanged.
             </p>
           </div>
-          <Switch id="x_enabled" checked={cfg.enabled} onCheckedChange={handleEnabledChange} disabled={!canMutate} />
+          <Switch aria-label="Enable X posting" id="x_enabled" checked={cfg.enabled} onCheckedChange={handleEnabledChange} disabled={!canMutate} />
         </div>
 
         {/* Score gate */}
@@ -220,21 +239,21 @@ export default function XPostingConfig({ initial, isAdmin = false }: Props) {
             <Label>Minimum importance score</Label>
             <Badge variant="secondary">{cfg.min_score}/20</Badge>
           </div>
-          <Slider value={[cfg.min_score]} min={1} max={20} step={1} onValueChange={([v]) => update({ min_score: v })} />
+          <Slider aria-label="Minimum importance score" value={[cfg.min_score]} min={1} max={20} step={1} onValueChange={([v]) => update({ min_score: v })} />
           <p className="text-xs text-muted-foreground">Only posts scored ≥ this threshold are eligible.</p>
         </div>
 
         {/* Media rules */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <label className="flex items-start gap-3 p-3 bg-muted/30 rounded-lg cursor-pointer opacity-70">
-            <Checkbox checked disabled />
+            <Checkbox aria-label="Require source media on X" checked disabled />
             <div>
               <p className="text-sm font-medium flex items-center gap-1.5"><ImageIcon className="w-3.5 h-3.5" />Require source media on X</p>
               <p className="text-xs text-muted-foreground mt-0.5">Posts with source images or videos wait for uploaded media before publishing. Genuine text-only posts can still publish.</p>
             </div>
           </label>
           <label className="flex items-start gap-3 p-3 bg-muted/30 rounded-lg cursor-pointer">
-            <Checkbox checked={cfg.post_only_decision_deliver} onCheckedChange={(v) => update({ post_only_decision_deliver: !!v })} />
+            <Checkbox aria-label="Only post items approved for Telegram delivery" checked={cfg.post_only_decision_deliver} onCheckedChange={(v) => update({ post_only_decision_deliver: !!v })} />
             <div>
               <p className="text-sm font-medium">Only post items already approved for Telegram delivery</p>
               <p className="text-xs text-muted-foreground mt-0.5">Recommended — keeps X in sync with the content filter decision.</p>
@@ -247,18 +266,11 @@ export default function XPostingConfig({ initial, isAdmin = false }: Props) {
         {/* Template */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <Label>Post template</Label>
+            <Label htmlFor="x-post-template">Post template</Label>
             <span className="text-xs text-muted-foreground">{cfg.post_template.length} chars</span>
           </div>
-          <div className="flex flex-wrap gap-1.5">
-            {PLACEHOLDERS.map((p) => (
-              <Button key={p.key} type="button" variant="outline" size="sm"
-                className="h-7 text-xs" onClick={() => insertPlaceholder(p.key)} title={p.desc}>
-                {p.key}
-              </Button>
-            ))}
-          </div>
           <PromptEditor
+            id="x-post-template"
             value={cfg.post_template}
             onChange={(v) => update({ post_template: v })}
             placeholder="{leading_emoji} {translated_text}"
@@ -268,16 +280,17 @@ export default function XPostingConfig({ initial, isAdmin = false }: Props) {
             onReset={() => update({ post_template: DEFAULTS.post_template })}
             mono
           />
+          <PlaceholderPicker items={PLACEHOLDERS} onInsert={insertPlaceholder} />
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <Label htmlFor="leading_emoji">Leading emoji</Label>
-            <Input id="leading_emoji" value={cfg.leading_emoji} onChange={(e) => update({ leading_emoji: e.target.value })} className="glass-input" />
+            <Input aria-label="Leading emoji" id="leading_emoji" value={cfg.leading_emoji} onChange={(e) => update({ leading_emoji: e.target.value })} className="glass-input" />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="max_chars">Max characters</Label>
-            <Input id="max_chars" type="number" min={50} max={4000} value={cfg.max_chars}
+            <Input aria-label="Max characters" id="max_chars" type="number" min={50} max={4000} value={cfg.max_chars}
               onChange={(e) => update({ max_chars: Math.max(50, Math.min(4000, Number(e.target.value) || 280)) })} className="glass-input" />
           </div>
         </div>
@@ -294,7 +307,7 @@ export default function XPostingConfig({ initial, isAdmin = false }: Props) {
           <p className="text-xs text-muted-foreground -mt-1">
             One hashtag per line (or comma-separated). The poster picks at random per post and substitutes <code>{'{hashtags}'}</code> in the template. Leading <code>#</code> is added automatically.
           </p>
-          <Textarea
+          <Textarea aria-label="Hashtag pool"
             value={hashtagPoolText}
             onChange={(e) => handlePoolChange(e.target.value)}
             placeholder={'#اخبار\n#ایران\n#خاورمیانه\n#اقتصاد'}
@@ -308,7 +321,7 @@ export default function XPostingConfig({ initial, isAdmin = false }: Props) {
                 value={String(cfg.hashtags_per_post ?? 1)}
                 onValueChange={(v) => update({ hashtags_per_post: Number(v) as 0 | 1 | 2 })}
               >
-                <SelectTrigger className="glass-input"><SelectValue /></SelectTrigger>
+                <SelectTrigger aria-label="Hashtags per post" className="glass-input"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="0">None — leave {'{hashtags}'} empty</SelectItem>
                   <SelectItem value="1">1 random hashtag</SelectItem>
@@ -318,7 +331,7 @@ export default function XPostingConfig({ initial, isAdmin = false }: Props) {
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="hashtags_fallback">Fallback hashtags (used if pool is empty)</Label>
-              <Input id="hashtags_fallback" value={cfg.hashtags} onChange={(e) => update({ hashtags: e.target.value })} placeholder="#اخبار" className="glass-input" />
+              <Input aria-label="Fallback hashtags (used if pool is empty)" id="hashtags_fallback" value={cfg.hashtags} onChange={(e) => update({ hashtags: e.target.value })} placeholder="#اخبار" className="glass-input" />
             </div>
           </div>
         </div>
@@ -326,19 +339,19 @@ export default function XPostingConfig({ initial, isAdmin = false }: Props) {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div className="space-y-1.5">
             <Label htmlFor="freshness_minutes">Auto-post freshness</Label>
-            <Input id="freshness_minutes" type="number" min={1} max={1440} value={cfg.max_candidate_age_minutes}
+            <Input aria-label="Auto-post freshness" id="freshness_minutes" type="number" min={1} max={1440} value={cfg.max_candidate_age_minutes}
               onChange={(e) => update({ max_candidate_age_minutes: Math.max(1, Math.min(1440, Number(e.target.value) || 30)) })} className="glass-input" />
             <p className="text-xs text-muted-foreground">Minutes after ingest that cron may publish automatically.</p>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="max_posts_per_run">Posts per cron run</Label>
-            <Input id="max_posts_per_run" type="number" min={1} max={20} value={cfg.max_posts_per_run}
+            <Input aria-label="Posts per cron run" id="max_posts_per_run" type="number" min={1} max={20} value={cfg.max_posts_per_run}
               onChange={(e) => update({ max_posts_per_run: Math.max(1, Math.min(20, Number(e.target.value) || 1)) })} className="glass-input" />
             <p className="text-xs text-muted-foreground">Caps each automatic run even when more posts are eligible.</p>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="dedupe_hours">Dedupe window</Label>
-            <Input id="dedupe_hours" type="number" min={1} max={720} value={cfg.dedupe_window_hours}
+            <Input aria-label="Dedupe window" id="dedupe_hours" type="number" min={1} max={720} value={cfg.dedupe_window_hours}
               onChange={(e) => update({ dedupe_window_hours: Math.max(1, Math.min(720, Number(e.target.value) || 48)) })} className="glass-input" />
             <p className="text-xs text-muted-foreground">Hours used to prevent reposting the same item.</p>
           </div>
@@ -357,12 +370,12 @@ export default function XPostingConfig({ initial, isAdmin = false }: Props) {
             </Button>
             <Badge variant="outline" className="ml-auto text-xs">{previewText.length}/{cfg.max_chars}</Badge>
           </div>
-          <div dir="rtl" lang="fa" className="whitespace-pre-wrap text-sm text-glass-foreground bg-background/50 p-3 rounded text-right">{previewText || '(empty)'}</div>
+          <MessagePreview destination="X" text={previewText} />
         </div>
 
         {/* Actions */}
         <div className="flex flex-wrap gap-2">
-          <Button onClick={handleSave} disabled={!canMutate || save.isPending} className="bg-gradient-primary hover:opacity-90 text-white">
+          <Button onClick={handleSave} disabled={!canMutate || save.isPending} >
             {save.isPending ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Saving...</> : <><Save className="w-4 h-4 mr-2" />Save configuration</>}
           </Button>
           <Button onClick={runDryRun} disabled={!canMutate || dryRunLoading} variant="outline">
@@ -388,6 +401,7 @@ export default function XPostingConfig({ initial, isAdmin = false }: Props) {
             ))}
           </div>
         )}
+        </fieldset>
       </CardContent>
     </Card>
   );

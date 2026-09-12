@@ -271,7 +271,7 @@ describe("process trace map view-model", () => {
     expect(node(map, "x-post")).toMatchObject({ status: "completed" });
   });
 
-  it("keeps timeline-backed delivery evidence dominant over a stale terminal skip", () => {
+  it("keeps explicit platform-posted evidence dominant over a stale terminal skip", () => {
     const map = buildProcessTraceMap(
       entry({
         delivery_decision: "skip",
@@ -292,7 +292,7 @@ describe("process trace map view-model", () => {
       [
         event({
           step: "telegram_delivery",
-          status: "completed",
+          status: "posted",
           started_at: "2026-05-23T14:04:00.000Z",
           ended_at: "2026-05-23T14:05:00.000Z",
           error: null,
@@ -303,6 +303,92 @@ describe("process trace map view-model", () => {
 
     expect(node(map, "telegram")).toMatchObject({ status: "completed" });
     expect(map.summary.status).toBe("completed");
+  });
+
+  it.each(['completed', 'complete', 'done', 'success', 'succeeded'])('does not promote a %s delivery job without a receipt to a completed delivery', (status) => {
+    const map = buildProcessTraceMap(entry({ delivery_job_status: status }));
+    expect(node(map, 'telegram')).toMatchObject({ status: 'unknown', statusLabel: 'No delivery receipt', tone: 'muted' });
+    expect(map.summary.status).toBe('unknown');
+  });
+
+  it('keeps completed-but-skipped translation and delivery snapshots skipped', () => {
+    const post = entry({ delivery_decision: 'skip', delivery_job_status: 'completed', translation_job_status: 'completed' });
+    const map = buildProcessTraceMap(post, [event({ step: 'deliver', status: 'completed' }), event({ step: 'translate', status: 'completed' })]);
+    expect(node(map, 'telegram')).toMatchObject({ status: 'skipped', skipReason: 'below_threshold' });
+    expect(node(map, 'translate')).toMatchObject({ status: 'skipped' });
+    expect(node(map, 'translate').detail).not.toContain('job completed');
+    expect(map.summary.status).toBe('skipped');
+  });
+
+  it.each(['pending', 'blocked', 'failed', 'skipped'])('keeps a current %s delivery state instead of a completed job snapshot', (status) => {
+    const map = buildProcessTraceMap(entry({ delivery_status: status, delivery_job_status: 'completed', x_status: status }));
+    expect(node(map, 'telegram').status).toBe(status);
+    expect(node(map, 'x-post').status).toBe(status);
+  });
+
+  it('recognizes a posted delivery row as receipt evidence without a denormalized flag', () => {
+    const map = buildProcessTraceMap(entry({ delivery_status: 'posted', delivery_job_status: 'completed', delivery_decision: 'skip' }));
+    expect(node(map, 'telegram').status).toBe('completed');
+    expect(map.summary.status).toBe('completed');
+  });
+
+  it('retains a real historical delivery receipt through later no-send queue events', () => {
+    const postedAt = '2026-05-23T14:05:00.000Z';
+    const map = buildProcessTraceMap(entry({ delivery_decision: 'skip', delivery_job_status: 'completed' }), [
+      event({ step: 'telegram_delivery', status: 'posted', ended_at: postedAt }),
+      event({ step: 'deliver', status: 'completed', ended_at: '2026-05-23T15:00:00.000Z', meta: { skipped: true } }),
+    ]);
+    expect(node(map, 'telegram')).toMatchObject({ status: 'completed', endedAt: postedAt });
+    expect(map.summary.status).toBe('completed');
+  });
+
+  it.each([
+    { platform: 'Telegram', id: 'telegram' as const, receipt: { delivery_status: 'posted' }, error: { delivery_error: 'Earlier Telegram timeout' }, expectedError: 'Earlier Telegram timeout', diagnostic: 'entry:delivery_error_diagnostic' },
+    { platform: 'X', id: 'x-post' as const, receipt: { x_status: 'posted' }, error: { x_error: 'Earlier X timeout' }, expectedError: 'Earlier X timeout', diagnostic: 'entry:x_error_diagnostic' },
+  ])('keeps a $platform receipt completed and retains an older error as a diagnostic', ({ id, receipt, error, expectedError, diagnostic }) => {
+    const map = buildProcessTraceMap(entry({ ...receipt, ...error }));
+    expect(node(map, id)).toMatchObject({ status: 'completed', error: expectedError });
+    expect(node(map, id).evidence).toContain(diagnostic);
+    expect(map.summary).toMatchObject({ status: 'completed', failed: 0 });
+  });
+
+  it.each([
+    { platform: 'Telegram', id: 'telegram' as const, step: 'telegram_delivery', snapshot: { delivery_status: 'failed', delivery_error: 'Stale Telegram failure' }, expectedError: 'Stale Telegram failure' },
+    { platform: 'X', id: 'x-post' as const, step: 'x_post', snapshot: { x_status: 'failed', x_error: 'Stale X failure' }, expectedError: 'Stale X failure' },
+  ])('preserves a historical $platform receipt through failed attempts and a stale snapshot', ({ id, step, snapshot, expectedError }) => {
+    const postedAt = '2026-05-23T14:05:00.000Z';
+    const map = buildProcessTraceMap(entry(snapshot), [
+      event({ step, status: 'posted', ended_at: postedAt }),
+      event({ step, status: 'failed', ended_at: '2026-05-23T15:00:00.000Z', error: 'Later attempt failed' }),
+    ]);
+    expect(node(map, id)).toMatchObject({ status: 'completed', endedAt: postedAt, error: expectedError });
+    expect(node(map, id).evidence).toEqual(expect.arrayContaining([`receipt:${id}`, `timeline:${step}:failed`]));
+    expect(map.summary).toMatchObject({ status: 'completed', failed: 0 });
+  });
+
+  it.each([
+    { platform: 'Telegram', id: 'telegram' as const, failure: { delivery_error: 'Telegram timeout' } },
+    { platform: 'X', id: 'x-post' as const, failure: { x_status: 'failed', x_error: 'X timeout' } },
+  ])('keeps a $platform failure failed without a platform receipt', ({ id, failure }) => {
+    const map = buildProcessTraceMap(entry(failure));
+    expect(node(map, id).status).toBe('failed');
+    expect(map.summary.status).toBe('failed');
+  });
+
+  it('does not let a Telegram receipt hide an independent X failure', () => {
+    const map = buildProcessTraceMap(entry({ delivery_status: 'posted', x_status: 'failed', x_error: 'X timeout' }));
+    expect(node(map, 'telegram').status).toBe('completed');
+    expect(node(map, 'x-post').status).toBe('failed');
+    expect(map.summary.status).toBe('failed');
+  });
+
+  it('does not treat a skipped posted event as a receipt that overrides a failure', () => {
+    const map = buildProcessTraceMap(entry({ delivery_error: 'Telegram timeout' }), [
+      event({ step: 'telegram_delivery', status: 'posted', meta: { skipped: true } }),
+    ]);
+    expect(node(map, 'telegram').evidence).not.toContain('receipt:telegram');
+    expect(node(map, 'telegram').status).toBe('failed');
+    expect(map.summary.status).toBe('failed');
   });
 
   it("keeps pending separate from active running work", () => {

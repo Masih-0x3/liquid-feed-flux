@@ -129,7 +129,7 @@ export default function LearnedSignalsCard() {
   );
 
   return (
-    <Card className="glass-card">
+    <Card id="learned-signals" className="glass-card scroll-mt-48">
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>

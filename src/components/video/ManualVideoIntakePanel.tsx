@@ -45,6 +45,8 @@ import {
   type ManualVideoSnapshot,
 } from '@/hooks/useManualVideoIntakeData';
 import { useAuth } from '@/contexts/AuthContext';
+import { AuthorizedMedia } from '@/components/media/AuthorizedMedia';
+import { ConfirmMediaAction } from '@/components/media/ConfirmMediaAction';
 
 function statusClass(status?: string | null): string {
   if (status === 'posted' || status === 'ready') return 'border-emerald-500/30 bg-emerald-500/15 text-emerald-500';
@@ -89,6 +91,7 @@ type PendingManualPostSnapshot = {
   intakeId: string;
   renderId: string;
   caption: string;
+  destination: string;
 };
 
 export function ManualVideoIntakePanel() {
@@ -102,6 +105,8 @@ export function ManualVideoIntakePanel() {
   const [overrideChecked, setOverrideChecked] = useState(false);
   const [overrideReason, setOverrideReason] = useState('');
   const [postSnapshot, setPostSnapshot] = useState<PendingManualPostSnapshot | null>(null);
+  const [intakeRequest, setIntakeRequest] = useState<string | null>(null);
+  const [urlError, setUrlError] = useState<string | null>(null);
 
   const list = useManualVideoIntakeList();
   const createIntake = useCreateManualVideoIntake();
@@ -130,13 +135,11 @@ export function ManualVideoIntakePanel() {
   const savedDuplicateOverrideReason = snapshot?.intake.duplicate_override_reason;
 
   const completedRenders = useMemo(
-    () => (snapshot?.renders ?? []).filter((row) => row.status === 'completed' && row.output_storage_path),
+    () => (snapshot?.renders ?? []).filter((row) => row.status === 'completed' && row.has_output),
     [snapshot?.renders],
   );
   const defaultRender = completedRenders[0] ?? null;
   const selectedRender = (snapshot?.renders ?? []).find((row) => row.id === selectedRenderId) ?? null;
-  const previewUrl = snapshot?.preview.output_signed_url || snapshot?.preview.source_signed_url || null;
-  const isOutputPreview = Boolean(snapshot?.preview.output_signed_url);
   const safety = snapshot?.safety ?? {};
   const duplicateBlocked = safeBoolean(safety.duplicate_blocked);
   const xPostingEnabled = safeBoolean(safety.x_posting_enabled);
@@ -145,7 +148,7 @@ export function ManualVideoIntakePanel() {
   const hasOutputVideo = Boolean(
     selectedRender?.id &&
       snapshot?.preview.render_id === selectedRender.id &&
-      snapshot.preview.output_signed_url,
+      snapshot.preview.output_available,
   );
   const hasUnsavedCaption = Boolean(
     snapshot && captionDraft.trim() !== snapshot.caption.effective.trim(),
@@ -189,12 +192,25 @@ export function ManualVideoIntakePanel() {
     setPostSnapshot(null);
   }, [snapshot?.intake.id]);
 
-  async function handleCreate(event: FormEvent<HTMLFormElement>) {
-    if (!isAdmin) return;
+  function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const result = await createIntake.mutateAsync({ url: tweetUrl });
-    setSelectedIntakeId(result.intake.id);
-    setTweetUrl('');
+    if (!isAdmin) return;
+    if (!/^https?:\/\/(?:www\.)?(?:x\.com|twitter\.com)\/[A-Za-z0-9_]+\/status\/[0-9]+(?:[/?#].*)?$/.test(tweetUrl.trim())) {
+      setUrlError('Enter an X or Twitter status URL with its post ID.');
+      return;
+    }
+    setUrlError(null);
+    setIntakeRequest(tweetUrl.trim());
+  }
+
+  async function confirmCreate() {
+    if (!isAdmin || !intakeRequest) return;
+    try {
+      const result = await createIntake.mutateAsync({ url: intakeRequest });
+      setSelectedIntakeId(result.intake.id);
+      setTweetUrl('');
+      setIntakeRequest(null);
+    } catch { /* The mutation hook displays the failure; retain the requested URL. */ }
   }
 
   async function handleSaveCaption() {
@@ -223,6 +239,9 @@ export function ManualVideoIntakePanel() {
       intakeId: intake.id,
       renderId: selectedRender.id,
       caption: snapshot.caption.effective.trim(),
+      destination: snapshot.destination?.handle
+        ? `X · @${snapshot.destination.handle} (cached account identity)`
+        : 'X · configured account (account identity is unavailable)',
     });
   }
 
@@ -259,7 +278,7 @@ export function ManualVideoIntakePanel() {
           <CardDescription>Tweet URL to reviewed video post</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <form onSubmit={handleCreate} className="space-y-2">
+          <form onSubmit={handleCreate} noValidate className="space-y-2">
             <Label htmlFor="manual-tweet-url">Tweet URL</Label>
             <div className="flex flex-col gap-2 sm:flex-row">
               <Input
@@ -268,25 +287,44 @@ export function ManualVideoIntakePanel() {
                 onChange={(event) => setTweetUrl(event.target.value)}
                 placeholder="https://x.com/account/status/123"
                 className="min-w-0"
+                type="url" aria-invalid={Boolean(urlError)} aria-describedby="manual-intake-help manual-intake-error"
+                disabled={readOnly || createIntake.isPending}
               />
-              <Button type="submit" disabled={readOnly || createIntake.isPending || !tweetUrl.trim()} title={mutationDisabledTitle} className="sm:w-28">
-                {createIntake.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Run'}
+              <Button type="submit" disabled={readOnly || createIntake.isPending || !tweetUrl.trim()} title={mutationDisabledTitle} className="shrink-0">
+                {createIntake.isPending ? <Loader2 className="h-4 w-4 animate-spin" aria-label="Preparing video" /> : 'Prepare video'}
               </Button>
             </div>
+            <p id="manual-intake-help" className="text-xs text-muted-foreground">Preparation may call X and paid translation or video providers. Posting requires a separate review and confirmation.</p>
+            <p id="manual-intake-error" role={urlError ? 'alert' : undefined} className="text-sm text-destructive">{urlError}</p>
           </form>
+          <AlertDialog open={Boolean(intakeRequest)} onOpenChange={(open) => { if (!open && !createIntake.isPending) setIntakeRequest(null); }}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Prepare this video?</AlertDialogTitle>
+                <AlertDialogDescription>Fetch the source post, translate its caption and queue video processing. These steps may consume paid provider resources. This action does not publish the manual post.</AlertDialogDescription>
+              </AlertDialogHeader>
+              <p className="break-all text-sm">{intakeRequest}</p>
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={createIntake.isPending}>Cancel</AlertDialogCancel>
+                <AlertDialogAction disabled={readOnly || createIntake.isPending} onClick={(event) => { event.preventDefault(); void confirmCreate(); }}>Prepare video</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
 
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">
               <Label>Recent</Label>
-              <Button variant="ghost" size="sm" onClick={() => list.refetch()} disabled={list.isFetching}>
+              <Button aria-label="Refresh recent intakes" variant="ghost" size="sm" onClick={() => list.refetch()} disabled={list.isFetching}>
                 {list.isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
               </Button>
             </div>
             <div className="max-h-[520px] overflow-y-auto rounded-md border">
               {list.isLoading ? (
-                <div className="flex min-h-28 items-center justify-center">
+                <div role="status" aria-label="Loading recent intakes" className="flex min-h-28 items-center justify-center">
                   <Loader2 className="h-5 w-5 animate-spin text-primary" />
                 </div>
+              ) : list.error || list.data?.ok === false ? (
+                <p role="alert" className="p-4 text-sm text-destructive">Recent intakes could not be loaded. Use Refresh recent intakes to retry.</p>
               ) : rows.length === 0 ? (
                 <div className="p-5 text-sm text-muted-foreground">No manual intakes yet.</div>
               ) : (
@@ -341,25 +379,28 @@ export function ManualVideoIntakePanel() {
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-2">
+                    <ConfirmMediaAction key={`refresh:${intake.id}`} title="Process this intake again?" description="Refresh this post and its processing state. This can re-run deduplication, translation and rendering through paid providers; it does not publish the manual post." actionLabel="Process again" disabled={readOnly || refreshIntake.isPending} onConfirm={() => { if (isAdmin) refreshIntake.mutate({ intake_id: intake.id }); }}>
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => { if (isAdmin) refreshIntake.mutate({ intake_id: intake.id }); }}
                       disabled={readOnly || refreshIntake.isPending}
                       title={mutationDisabledTitle}
                     >
                       {refreshIntake.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-                      Refresh
+                      Process again
                     </Button>
+                    </ConfirmMediaAction>
+                    <ConfirmMediaAction key={`cancel:${intake.id}`} title="Cancel this manual intake?" description="Cancel this intake before posting. Processing that has already started may still complete, but this manual intake will no longer be available to post." actionLabel="Cancel intake" disabled={readOnly || cancelIntake.isPending || intake.status === 'posted' || intake.status === 'canceled'} onConfirm={() => { if (isAdmin) cancelIntake.mutate({ intake_id: intake.id }); }}>
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => { if (isAdmin) cancelIntake.mutate({ intake_id: intake.id }); }}
+                      aria-label="Cancel manual intake"
                       disabled={readOnly || cancelIntake.isPending || intake.status === 'posted' || intake.status === 'canceled'}
                       title={mutationDisabledTitle}
                     >
                       {cancelIntake.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
                     </Button>
+                    </ConfirmMediaAction>
                   </div>
                 </div>
               </CardHeader>
@@ -370,6 +411,7 @@ export function ManualVideoIntakePanel() {
                   </div>
                 ) : (
                   <>
+                    {(detail.error || detail.data?.ok === false) && <p role="alert" className="text-sm text-destructive">Intake details could not be loaded. Select the intake again or refresh the recent list to retry.</p>}
                     {(intake.last_error || safeString(safety.lookup_warning)) && (
                       <Alert variant="destructive">
                         <AlertTriangle className="h-4 w-4" />
@@ -398,23 +440,19 @@ export function ManualVideoIntakePanel() {
                       </Alert>
                     )}
 
-                    <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
+                    <div className="grid min-w-0 gap-4 2xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
                       <div className="space-y-2">
                         <div className="flex items-center justify-between gap-2">
-                          <Label>{isOutputPreview ? 'Processed Output' : 'Source Video'}</Label>
+                          <p className="text-sm font-medium">Media review</p>
                           {selectedRender && (
                             <Badge variant="outline">
                               {selectedRender.status} · {formatBytes(selectedRender.output_file_size)}
                             </Badge>
                           )}
                         </div>
-                        {previewUrl ? (
-                          <video src={previewUrl} controls className="aspect-video w-full rounded-md border bg-black object-contain" />
-                        ) : (
-                          <div className="flex aspect-video items-center justify-center rounded-md border bg-muted text-sm text-muted-foreground">
-                            Video preview unavailable.
-                          </div>
-                        )}
+                        {snapshot?.preview.source_media_id && <AuthorizedMedia tweetId={intake.tweet_id} mediaId={snapshot.preview.source_media_id} title="Intake source video" readOnly={readOnly} />}
+                        {selectedRender && <AuthorizedMedia tweetId={intake.tweet_id} renderId={selectedRender.id} title="Intake rendered output" readOnly={readOnly} />}
+                        {!snapshot?.preview.source_media_id && !selectedRender && <p role="status" className="text-sm text-muted-foreground">Media is not archived yet. Check processing status before requesting a preview.</p>}
                         <div className="grid gap-2 text-sm sm:grid-cols-3">
                           <div className="rounded-md border bg-muted/20 p-2">
                             <p className="text-xs text-muted-foreground">Render</p>
@@ -431,9 +469,9 @@ export function ManualVideoIntakePanel() {
                         </div>
                         {completedRenders.length > 1 && (
                           <div className="grid gap-1">
-                            <Label>Render Selection</Label>
+                            <Label htmlFor="manual-render-selection">Render selection</Label>
                             <Select value={selectedRenderId} onValueChange={setSelectedRenderId}>
-                              <SelectTrigger><SelectValue /></SelectTrigger>
+                              <SelectTrigger id="manual-render-selection"><SelectValue /></SelectTrigger>
                               <SelectContent>
                                 {completedRenders.map((row) => (
                                   <SelectItem key={row.id} value={row.id}>{renderLabel(row)}</SelectItem>
@@ -448,12 +486,14 @@ export function ManualVideoIntakePanel() {
                         <div className="grid gap-2">
                           <div className="flex items-center justify-between gap-2">
                             <Label htmlFor="manual-caption">Caption</Label>
-                            <span className={captionTooLong ? 'text-xs text-red-500' : 'text-xs text-muted-foreground'}>
+                            <span id="manual-caption-count" className={captionTooLong ? 'text-xs text-red-500' : 'text-xs text-muted-foreground'}>
                               {captionDraft.length}/{snapshot?.caption.max_chars ?? 280}
                             </span>
                           </div>
                           <Textarea
                             id="manual-caption"
+                            aria-invalid={captionTooLong}
+                            aria-describedby="manual-caption-count"
                             value={captionDraft}
                             onChange={(event) => setCaptionDraft(event.target.value)}
                             disabled={readOnly}
@@ -491,6 +531,7 @@ export function ManualVideoIntakePanel() {
                           </div>
                           {overrideChecked && (
                             <Textarea
+                              aria-label="Reason for duplicate override"
                               value={overrideReason}
                               onChange={(event) => setOverrideReason(event.target.value)}
                               disabled={readOnly}
@@ -527,11 +568,15 @@ export function ManualVideoIntakePanel() {
                               <AlertDialogHeader>
                                 <AlertDialogTitle>Post this video to X?</AlertDialogTitle>
                                 <AlertDialogDescription>
-                                  This creates one public X post from the frozen render and saved caption below.
+                                  This creates one public post on the configured X account from the frozen render and saved caption below. It uses the X posting API and may incur provider charges.
                                 </AlertDialogDescription>
                               </AlertDialogHeader>
                               {postSnapshot && (
                                 <div className="space-y-3 rounded-md border bg-muted/30 p-3 text-sm">
+                                  <div>
+                                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Destination</p>
+                                    <p className="mt-1 break-words">{postSnapshot.destination}</p>
+                                  </div>
                                   <div>
                                     <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Render</p>
                                     <p className="mt-1 break-all font-mono text-xs">{postSnapshot.renderId}</p>

@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import XPostingConfig from '@/components/settings/XPostingConfig';
 import { useRuntimeControls } from '@/hooks/useRuntimeControls';
+import { clearSettingsDrafts } from '@/components/settings/SettingsDrafts';
 
 const postingMocks = vi.hoisted(() => ({
   saveMutate: vi.fn(),
@@ -28,6 +29,7 @@ const mockedUseRuntimeControls = vi.mocked(useRuntimeControls);
 
 describe('XPostingConfig runtime gate', () => {
   beforeEach(() => {
+    clearSettingsDrafts();
     vi.clearAllMocks();
     mockedUseRuntimeControls.mockReturnValue({
       controls: {
@@ -42,6 +44,30 @@ describe('XPostingConfig runtime gate', () => {
       error: null,
       refresh: vi.fn(),
     });
+  });
+
+  it('shows a truthful enabled production state and fails closed if a refresh becomes unavailable', () => {
+    const production = {
+      environment: 'production' as const,
+      dedupe_enabled: true,
+      translation_enabled: true,
+      posting_mode: 'enabled' as const,
+      updated_at: '2026-09-11T00:00:00.000Z',
+      updated_by: null,
+    };
+    mockedUseRuntimeControls.mockReturnValue({ controls: production, loading: false, error: null, refresh: vi.fn() });
+    const view = render(<XPostingConfig isAdmin />);
+    expect(screen.getByTestId('x-posting-runtime-status')).toHaveTextContent('Posting is enabled in Production.');
+    expect(screen.getByRole('switch', { name: 'Enable X posting' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /^Save configuration$/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /dry-run on latest eligible/i })).toBeEnabled();
+
+    mockedUseRuntimeControls.mockReturnValue({ controls: production, loading: false, error: 'refresh failed', refresh: vi.fn() });
+    view.rerender(<XPostingConfig isAdmin />);
+    expect(screen.getByTestId('x-posting-runtime-status')).toHaveTextContent('Runtime posting state is unavailable; controls are disabled.');
+    expect(screen.getByRole('switch', { name: 'Enable X posting' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /^Save configuration$/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /dry-run on latest eligible/i })).toBeDisabled();
   });
 
   it('disables enable, save, and dry-run controls in Preview', () => {

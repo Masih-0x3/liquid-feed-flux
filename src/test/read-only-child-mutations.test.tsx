@@ -1,3 +1,4 @@
+vi.mock('@/hooks/useRuntimeControls', () => ({ useRuntimeControls: () => ({ controls: { environment: 'production', posting_mode: 'enabled' }, error: null, loading: false }) }));
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 

@@ -1,3 +1,4 @@
+import { reconcileSettingsDraftIdentity } from '@/components/settings/SettingsDraftSession';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { type AuthError, type Session, type User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
@@ -90,6 +91,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const commit = useCallback((generation: number, next: AuthSnapshot) => {
     if (!isCurrent(generation)) return;
+    reconcileSettingsDraftIdentity(next.user?.id ?? null, next.status);
     authRef.current = next;
     setAuth(next);
   }, [isCurrent]);

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,6 +21,8 @@ import XPostingConfig, { type XPostingConfigValue } from '@/components/settings/
 import XRateLimits, { type XRateLimitsValue } from '@/components/settings/XRateLimits';
 import { useXMonthlyPostsCount } from '@/hooks/useXDeliveries';
 import { useXApiSummary } from '@/hooks/useMonitoringData';
+import { ConfirmSettingsAction } from '@/components/settings/ConfirmSettingsAction';
+import { useSettingsDraft, useSettingsSave, SettingsSaveStatus, SettingsIncomingNotice } from '@/components/settings/SettingsDrafts';
 
 interface Props {
   twitterHydration?: { enabled?: boolean; max_attempts?: number };
@@ -83,7 +85,7 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
   const runtimeAllowsXActions = runtimeControls?.environment === 'production' && runtimeControls.posting_mode === 'enabled';
   const canMutate = isAdmin === true && !runtimeLoading && !runtimeError && runtimeAllowsXActions;
   const { data: monthlyCount } = useXMonthlyPostsCount(canMutate);
-  const { data: xApiSummary, refetch: refetchXApiSummary, isFetching: xApiSummaryFetching } = useXApiSummary(24, false, canMutate);
+  const { data: xApiSummary, refetch: refetchXApiSummary, isFetching: xApiSummaryFetching, error: xApiError, dataUpdatedAt: xApiUpdatedAt } = useXApiSummary(24, false, canMutate);
   const { toast } = useToast();
   const saveMutation = useSaveSettings();
 
@@ -105,21 +107,30 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
   const [backfillLoading, setBackfillLoading] = useState(false);
   const [backfillResult, setBackfillResult] = useState<{ ok: boolean; dry_run?: boolean; scanned?: number; matched?: number; queued?: number; skipped_existing?: number; excluded_by_gate?: number; max?: number; hours?: number; error?: string } | null>(null);
 
-  const calls24h = xApiSummary?.counted_attempts ?? 0;
-  const projectedMonthly = calls24h * 30;
+  const calls24h = xApiSummary?.counted_attempts;
+  const projectedMonthly = xApiSummary?.posts_local == null ? null : xApiSummary.posts_local * 30;
   const configuredMonthlyBudget = xRateLimits?.monthly_post_budget ?? xApiSummary?.configured_budget?.monthly_post_budget ?? 0;
-  const overBudget = configuredMonthlyBudget > 0 && projectedMonthly > configuredMonthlyBudget;
+  const overBudget = configuredMonthlyBudget > 0 && projectedMonthly != null && projectedMonthly > configuredMonthlyBudget;
   const tweetCharCount = tweetText.length;
   const tweetTooLong = tweetCharCount > 280;
   const ownedReadsEnabled = xApiControls?.my_x_enabled === true;
+
+  const hydrationBaseline = useMemo(() => ({ enabled: true, max_attempts: 3, ...twitterHydration }), [twitterHydration]);
+  const hydrationDraft = useSettingsDraft('x-hydration', 'Tweet hydration', hydrationBaseline);
+  const hydrationSave = useSettingsSave(hydrationDraft, async (value) => {
+    if (!canMutate) throw new Error('Runtime unavailable');
+    await saveMutation.mutateAsync({ key: 'twitter_hydration', value });
+  });
 
   const refreshStatus = useCallback(async () => {
     if (!canMutate) return;
     setStatusLoading(true);
     try {
       const data = await invokeAdminAction<{ status?: Record<string, boolean> }>({ action: 'get_x_status' });
-      setStatusMap(data?.status ?? {});
+      if (!data?.status || !SECRET_KEYS.every(({ key }) => typeof data.status?.[key] === 'boolean')) throw new Error('Credential status unavailable');
+      setStatusMap(data.status);
     } catch (e) {
+      setStatusMap(null);
       toast({ title: 'Could not load credential status', description: (e as Error).message, variant: 'destructive' });
     } finally {
       setStatusLoading(false);
@@ -238,7 +249,7 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
   return (
     <div className="space-y-6">
       {/* 1. Credentials */}
-      <Card className="glass-card">
+      <Card id="x-credentials" className="glass-card scroll-mt-48">
         <CardHeader>
           <CardTitle className="flex items-center text-glass-foreground"><Key className="w-5 h-5 mr-2" />Credentials &amp; Connection</CardTitle>
           <CardDescription>X API credentials are stored as Supabase Edge Function secrets. Manage them in your Supabase dashboard.</CardDescription>
@@ -248,15 +259,15 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
             {SECRET_KEYS.map(({ key, label }) => {
               const present = statusMap?.[key];
               return (
-                <div key={key} className="flex items-center justify-between p-3 bg-muted/40 rounded-lg">
+                <div key={key} className="flex min-w-0 flex-wrap items-center justify-between gap-2 p-3 bg-muted/40 rounded-lg">
                   <div>
                     <p className="text-sm font-medium text-glass-foreground">{label}</p>
-                    <code className="text-xs text-muted-foreground">{key}</code>
+                    <code className="break-all text-xs text-muted-foreground">{key}</code>
                   </div>
-                  {statusLoading || statusMap === null ? (
-                    <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
-                  ) : present ? (
-                    <Badge className="bg-emerald-500/15 text-emerald-600 border-emerald-500/30 hover:bg-emerald-500/20"><CheckCircle2 className="w-3 h-3 mr-1" />Configured</Badge>
+                  {statusLoading ? (
+                    <span role="status"><Loader2 className="w-4 h-4 animate-spin text-muted-foreground" /><span className="sr-only">Loading credential status</span></span>
+                  ) : statusMap === null ? <Badge variant="outline">Unavailable</Badge> : present ? (
+                    <Badge className="bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/20"><CheckCircle2 className="w-3 h-3 mr-1" />Configured</Badge>
                   ) : (
                     <Badge variant="destructive"><XCircle className="w-3 h-3 mr-1" />Missing</Badge>
                   )}
@@ -266,9 +277,11 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <Button onClick={verifyConnection} disabled={!canMutate || verifyLoading || !ownedReadsEnabled} variant="outline" className="border-primary/50 hover:bg-primary/10">
+            <ConfirmSettingsAction title="Verify the configured X account?" description="This calls an X user-read endpoint for the account configured on the server and may incur provider charges. The runtime and owned-read gates still apply." confirmLabel="Verify account" onConfirm={verifyConnection} disabled={!canMutate}>
+            <Button disabled={!canMutate || verifyLoading || !ownedReadsEnabled} variant="outline" className="border-primary/50 hover:bg-primary/10">
               {verifyLoading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Verifying...</> : <><Shield className="w-4 h-4 mr-2" />Verify connection</>}
             </Button>
+            </ConfirmSettingsAction>
             <Button onClick={() => { if (canMutate) void refetchXApiSummary(); }} disabled={!canMutate || xApiSummaryFetching} variant="outline" size="sm">
               {xApiSummaryFetching ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : null}
               Refresh usage
@@ -287,7 +300,7 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
           {verifyResult && (
             <div className={`rounded-lg border p-3 text-sm ${verifyResult.ok ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-destructive/30 bg-destructive/5'}`}>
               {verifyResult.ok ? (
-                <div className="flex items-center gap-2"><AtSign className="w-4 h-4 text-emerald-600" /><span className="font-medium">Authenticated as @{verifyResult.handle}</span><span className="text-muted-foreground">(id: {verifyResult.id})</span></div>
+                <div className="flex items-center gap-2"><AtSign className="w-4 h-4 text-emerald-300" /><span className="font-medium">Authenticated as @{verifyResult.handle}</span><span className="text-muted-foreground">(id: {verifyResult.id})</span></div>
               ) : (
                 <div className="flex items-start gap-2"><XCircle className="w-4 h-4 text-destructive mt-0.5" /><span>{verifyResult.error || 'Unknown error'}</span></div>
               )}
@@ -297,7 +310,7 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
       </Card>
 
       {/* 2. Tweet Hydration */}
-      <Card className="glass-card">
+      <Card id="x-hydration" className="glass-card scroll-mt-48">
         <CardHeader>
           <CardTitle className="flex items-center text-glass-foreground"><Sparkles className="w-5 h-5 mr-2" />Tweet Hydration &amp; API Usage</CardTitle>
           <CardDescription>When RSS delivers a truncated tweet, fetch the full text from the X API v2 before translation.</CardDescription>
@@ -308,33 +321,36 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
               <Label htmlFor="hydration_enabled" className="font-medium">Hydrate truncated tweets</Label>
               <p className="text-xs text-muted-foreground mt-1">When off, truncated tweets will be translated as-is.</p>
             </div>
-            <Checkbox
+            <Checkbox aria-label="Hydrate truncated tweets"
               id="hydration_enabled"
-              checked={twitterHydration?.enabled !== false}
+              checked={hydrationDraft.draft.enabled}
               disabled={!canMutate || saveMutation.isPending}
               onCheckedChange={(checked) => {
                 if (!canMutate) return;
-                const next = { ...(twitterHydration ?? { enabled: true, max_attempts: 3 }), enabled: !!checked };
-                saveMutation.mutate({ key: 'twitter_hydration', value: next });
+                hydrationDraft.updateDraft({ ...hydrationDraft.draft, enabled: checked === true });
               }}
             />
           </div>
 
+          <SettingsSaveStatus label="Tweet hydration" dirty={hydrationDraft.isDirty} {...hydrationSave} onSave={() => { void hydrationSave.save(); }} disabled={!canMutate || hydrationDraft.hasPendingIncoming} />
+          <SettingsIncomingNotice editor={hydrationDraft} />
+          <p className="text-xs text-muted-foreground">Local ledger only. Last successful refresh: {xApiUpdatedAt ? new Date(xApiUpdatedAt).toLocaleString() : 'unavailable'}.</p>
+          {xApiError && <p role="status" className="text-sm text-amber-200">Usage refresh failed. Any displayed values are from the last successful snapshot.</p>}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
             <div className="p-3 bg-muted/30 rounded-lg">
               <p className="text-xs text-muted-foreground">Local attempts (24h)</p>
-              <p className="text-2xl font-bold text-glass-foreground">{calls24h}</p>
+              <p className="text-2xl font-bold text-glass-foreground">{calls24h ?? 'Unavailable'}</p>
             </div>
             <div className="p-3 bg-muted/30 rounded-lg">
               <p className="text-xs text-muted-foreground">Local posts (24h)</p>
-              <p className="text-2xl font-bold text-glass-foreground">{xApiSummary?.posts_local ?? 0}</p>
+              <p className="text-2xl font-bold text-glass-foreground">{xApiSummary?.posts_local ?? 'Unavailable'}</p>
               {xApiSummary?.latest_event_at && <p className="text-xs text-muted-foreground mt-1">Last: {new Date(xApiSummary.latest_event_at).toLocaleString()}</p>}
             </div>
             <div className={`p-3 rounded-lg ${overBudget ? 'bg-destructive/10 border border-destructive/30' : 'bg-muted/30'}`}>
-              <p className="text-xs text-muted-foreground">Latest local estimate</p>
-              <p className={`text-2xl font-bold ${overBudget ? 'text-destructive' : 'text-glass-foreground'}`}>{projectedMonthly.toLocaleString()}</p>
+              <p className="text-xs text-muted-foreground">Estimated posts / next 30 days</p>
+              <p className={`text-2xl font-bold ${overBudget ? 'text-destructive' : 'text-glass-foreground'}`}>{projectedMonthly?.toLocaleString() ?? 'Unavailable'}</p>
               <p className="text-xs text-muted-foreground mt-1">
-                Configured budget: {configuredMonthlyBudget ? configuredMonthlyBudget.toLocaleString() : 'not set'}
+                Projection: last 24h local posts × 30. Post budget: {configuredMonthlyBudget ? configuredMonthlyBudget.toLocaleString() : 'not set'}
               </p>
             </div>
           </div>
@@ -346,7 +362,7 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
             </div>
           )}
 
-          {xApiSummary?.latest_error && <p className="text-xs text-destructive">Last error: {String(xApiSummary.latest_error)}</p>}
+          {xApiSummary?.latest_error && <div role="status" className="rounded-md border border-destructive/40 p-3 text-sm"><p className="font-medium">{xErrorExplanation(String(xApiSummary.latest_error))}</p><p className="mt-1 text-muted-foreground">Review the request in Monitoring and check the configured app permissions. Refresh the local status after resolving the cause.</p><details className="mt-2 text-xs"><summary className="cursor-pointer">Diagnostic code</summary><code className="break-all">{String(xApiSummary.latest_error)}</code></details></div>}
 
           <Separator />
 
@@ -361,9 +377,11 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
                   {backfillLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
                   Estimate
                 </Button>
-                <Button onClick={() => runBackfill(false)} disabled={!canMutate || backfillLoading} variant="outline">
+                <ConfirmSettingsAction title="Queue recent hydration jobs?" description="This queues eligible truncated posts from the last 24 hours for X API hydration. Jobs may consume paid X reads. Run Estimate first to inspect the affected count; existing jobs and score gates are preserved." confirmLabel="Queue hydration jobs" onConfirm={() => runBackfill(false)} disabled={!canMutate}>
+            <Button disabled={!canMutate || backfillLoading} variant="outline">
                   Queue backfill
                 </Button>
+            </ConfirmSettingsAction>
               </div>
             </div>
             {backfillResult && (
@@ -384,7 +402,7 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
       </Card>
 
       {/* 3. Test Tweet */}
-      <Card className="glass-card">
+      <Card id="x-tests" className="glass-card scroll-mt-48">
         <CardHeader>
           <CardTitle className="flex items-center text-glass-foreground"><Send className="w-5 h-5 mr-2" />Test Tweet Console</CardTitle>
           <CardDescription>Send a real tweet to your authenticated X account to verify posting works end-to-end.</CardDescription>
@@ -399,14 +417,14 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
           </div>
           <div className="space-y-2">
             <Label htmlFor="reply_to">Reply to tweet ID (optional)</Label>
-            <Input id="reply_to" value={replyTo} onChange={(e) => setReplyTo(e.target.value)} placeholder="e.g. 1234567890" className="glass-input" />
-            <p className="text-xs text-muted-foreground">Posting as a reply keeps the test out of your main timeline.</p>
+            <Input aria-label="Reply to tweet ID (optional)" id="reply_to" value={replyTo} onChange={(e) => setReplyTo(e.target.value)} placeholder="e.g. 1234567890" className="glass-input" />
+            <p className="text-xs text-muted-foreground">A reply is still public and uses the configured X account. Enter an existing numeric tweet ID.</p>
           </div>
 
           <div className="flex flex-wrap gap-3">
             <AlertDialog>
               <AlertDialogTrigger asChild>
-                <Button disabled={!canMutate || sendLoading || tweetTooLong || tweetText.trim().length === 0} className="bg-gradient-primary hover:opacity-90 text-white">
+                <Button disabled={!canMutate || sendLoading || tweetTooLong || tweetText.trim().length === 0} >
                   {sendLoading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Posting...</> : <><Send className="w-4 h-4 mr-2" />Send test tweet</>}
                 </Button>
               </AlertDialogTrigger>
@@ -417,7 +435,7 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
                     <div>
                       <span>This will post the following to your authenticated X account:</span>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        Posting as: {verifyResult?.handle ? `@${verifyResult.handle}` : 'configured X account'}
+                        Posting as: {verifyResult?.handle ? `@${verifyResult.handle}` : 'configured X account (identity has not been verified in this session)'}. This creates a public post and consumes the account’s X write quota.
                       </p>
                       <div className="mt-2 p-3 bg-muted rounded text-sm whitespace-pre-wrap text-foreground">{tweetText}</div>
                       {replyTo && <p className="mt-2 text-xs">As a reply to tweet ID: <code>{replyTo}</code></p>}
@@ -436,7 +454,7 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
             <div className={`rounded-lg border p-3 text-sm space-y-2 ${tweetResult.ok ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-destructive/30 bg-destructive/5'}`}>
               {tweetResult.ok ? (
                 <>
-                  <div className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-600" /><span className="font-medium">Tweet posted</span></div>
+                  <div className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-300" /><span className="font-medium">Tweet posted</span></div>
                   {tweetResult.tweet_id && (
                     <a href={`https://x.com/i/status/${tweetResult.tweet_id}`} target="_blank" rel="noreferrer" className="text-primary text-xs inline-flex items-center hover:underline">
                       View on X <ExternalLink className="w-3 h-3 ml-1" />
@@ -460,11 +478,13 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="hydrate_id">Tweet ID</Label>
-            <div className="flex gap-2">
-              <Input id="hydrate_id" value={hydrateId} onChange={(e) => setHydrateId(e.target.value)} placeholder="e.g. 1234567890123456789" className="glass-input" />
-              <Button onClick={testHydrate} disabled={!canMutate || hydrateLoading} variant="outline" className="border-primary/50 hover:bg-primary/10 shrink-0">
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Input aria-label="Tweet ID" id="hydrate_id" value={hydrateId} onChange={(e) => setHydrateId(e.target.value)} placeholder="e.g. 1234567890123456789" className="glass-input" />
+              <ConfirmSettingsAction title="Fetch this tweet from X?" description="This makes an X API read for the entered tweet ID. It can incur provider charges and uses API quota; it does not publish a tweet or update the post database." confirmLabel="Fetch tweet" onConfirm={testHydrate} disabled={!canMutate}>
+            <Button disabled={!canMutate || hydrateLoading} variant="outline" className="border-primary/50 hover:bg-primary/10 shrink-0">
                 {hydrateLoading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Testing...</> : 'Test hydrate'}
               </Button>
+            </ConfirmSettingsAction>
             </div>
           </div>
 
@@ -472,7 +492,7 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
             <div className={`rounded-lg border p-3 text-sm space-y-2 ${hydrateResult.ok ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-destructive/30 bg-destructive/5'}`}>
               {hydrateResult.ok ? (
                 <>
-                  <div className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-600" /><span className="font-medium">Fetched successfully</span>{hydrateResult.lang && <Badge variant="outline" className="text-xs">{hydrateResult.lang}</Badge>}</div>
+                  <div className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-300" /><span className="font-medium">Fetched successfully</span>{hydrateResult.lang && <Badge variant="outline" className="text-xs">{hydrateResult.lang}</Badge>}</div>
                   {hydrateResult.note_tweet && (
                     <div>
                       <Label className="text-xs">note_tweet (full text)</Label>
@@ -502,9 +522,17 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
       {/* 6. Rate Limits & Quotas */}
       <XRateLimits
         initial={xRateLimits}
-        monthlyPostsCount={monthlyCount ?? 0}
+        monthlyPostsCount={monthlyCount}
         enabled={canMutate}
       />
     </div>
   );
+}
+
+function xErrorExplanation(code: string): string {
+  if (/403|forbidden/i.test(code)) return 'X denied a request. The app or account may lack permission for this operation.';
+  if (/401|unauthorized/i.test(code)) return 'X could not authenticate the request. Review the configured credentials.';
+  if (/429|rate.limit|quota/i.test(code)) return 'X rejected a request because a rate or usage limit was reached.';
+  if (/timeout|network/i.test(code)) return 'The X request did not complete. Inspect its recorded outcome before retrying a post.';
+  return 'A recent X request failed. Its diagnostic code is available below.';
 }

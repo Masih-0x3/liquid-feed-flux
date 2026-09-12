@@ -14,6 +14,7 @@ export interface IncomingSettingsDraft<T> {
   pendingFields: string[];
   isDirty: boolean;
   hasPendingIncoming: boolean;
+  pendingIncoming: PendingIncoming<T> | null;
   updateDraft: (next: DraftUpdate<T>) => void;
   reloadIncoming: () => void;
   keepEditing: () => void;
@@ -63,10 +64,16 @@ function changedTopLevelFields<T>(baseline: T, draft: T): string[] {
  * local draft. Snapshot fingerprints deliberately provide client-side replay
  * protection only; they are not database versions and do not replace CAS.
  */
-export function useIncomingSettingsDraft<T>(incoming: T): IncomingSettingsDraft<T> {
-  const [draft, setDraft] = useState<T>(() => incoming);
-  const [baseline, setBaseline] = useState<T>(() => incoming);
-  const [pendingIncoming, setPendingIncoming] = useState<PendingIncoming<T> | null>(null);
+export function useIncomingSettingsDraft<T>(incoming: T, restored?: { draft: T; baseline: T; incomingFingerprint?: string; pendingIncoming?: PendingIncoming<T> | null }): IncomingSettingsDraft<T> {
+  const [draft, setDraft] = useState<T>(() => restored ? restored.draft : incoming);
+  const [baseline, setBaseline] = useState<T>(() => restored ? restored.baseline : incoming);
+  const [pendingIncoming, setPendingIncoming] = useState<PendingIncoming<T> | null>(() => {
+    const fingerprint = settingsSnapshotFingerprint(incoming);
+    const restoredIsDirty = restored && settingsSnapshotFingerprint(restored.draft) !== settingsSnapshotFingerprint(restored.baseline);
+    return restored && (restoredIsDirty || restored.pendingIncoming) && fingerprint !== restored.incomingFingerprint && fingerprint !== settingsSnapshotFingerprint(restored.baseline)
+      ? { snapshot: incoming, fingerprint }
+      : restored?.pendingIncoming ?? null;
+  });
 
   const incomingFingerprint = useMemo(
     () => settingsSnapshotFingerprint(incoming),
@@ -84,7 +91,7 @@ export function useIncomingSettingsDraft<T>(incoming: T): IncomingSettingsDraft<
 
   const isDirtyRef = useRef(isDirty);
   const pendingIncomingRef = useRef(pendingIncoming);
-  const seenIncomingFingerprintsRef = useRef(new Set<string>([incomingFingerprint]));
+  const seenIncomingFingerprintsRef = useRef(new Set<string>([incomingFingerprint, settingsSnapshotFingerprint(baseline)]));
   isDirtyRef.current = isDirty;
   pendingIncomingRef.current = pendingIncoming;
 
@@ -150,6 +157,7 @@ export function useIncomingSettingsDraft<T>(incoming: T): IncomingSettingsDraft<
     pendingFields,
     isDirty,
     hasPendingIncoming: pendingIncoming !== null,
+    pendingIncoming,
     updateDraft,
     reloadIncoming,
     keepEditing,

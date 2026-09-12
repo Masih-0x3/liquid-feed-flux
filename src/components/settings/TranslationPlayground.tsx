@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Loader2, Play, FlaskConical, Copy, Check } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslationPreview, type TranslationSettings, type PreviewTranslationResult } from '@/hooks/useSettingsData';
+import { ConfirmSettingsAction } from '@/components/settings/ConfirmSettingsAction';
 import { persianContentAttributes } from '@/lib/contentLanguage';
 
 interface Props {
@@ -119,7 +120,7 @@ export default function TranslationPlayground({ translationSettings, contentFilt
   );
 
   return (
-    <Card className="glass-card">
+    <Card id="translation-playground" className="glass-card scroll-mt-48">
       <CardHeader>
         <CardTitle className="flex items-center text-glass-foreground">
           <FlaskConical className="w-5 h-5 mr-2" />Translation Playground
@@ -130,7 +131,7 @@ export default function TranslationPlayground({ translationSettings, contentFilt
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-2">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <Label htmlFor="playground_text">Test text (English)</Label>
             {sampleTweets.length > 0 && (
               <Select onValueChange={loadSample}>
@@ -154,7 +155,7 @@ export default function TranslationPlayground({ translationSettings, contentFilt
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="space-y-2">
             <Label htmlFor="author_handle" className="text-xs">Author handle (optional)</Label>
-            <Input id="author_handle" value={authorHandle} onChange={(e) => setAuthorHandle(e.target.value)} placeholder="@example" className="glass-input h-9" />
+            <Input aria-label="Author handle (optional)" id="author_handle" value={authorHandle} onChange={(e) => setAuthorHandle(e.target.value)} placeholder="@example" className="glass-input h-9" />
           </div>
           <div className="space-y-2">
             <Label id="translation-playground-filter-mode-label" className="text-xs">Filter mode</Label>
@@ -181,14 +182,15 @@ export default function TranslationPlayground({ translationSettings, contentFilt
           </div>
         </div>
 
+        <ConfirmSettingsAction title="Run a paid translation preview?" description={`This sends the test text to OpenAI using ${translationSettings.model} and the current unsaved translation settings. It may incur provider charges. It does not publish or save the result.`} confirmLabel="Run preview" onConfirm={run}>
         <Button
-          onClick={run}
           disabled={previewMutation.isPending || !text.trim()}
-          className="w-full bg-gradient-primary hover:opacity-90 text-white"
+          className="w-full "
         >
           {previewMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Play className="w-4 h-4 mr-2" />}
           Run translation preview
         </Button>
+        </ConfirmSettingsAction>
 
         {(currentResult || previousResult) && (
           <>

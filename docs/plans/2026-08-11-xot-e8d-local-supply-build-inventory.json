@@ -69,16 +69,20 @@
       "sha256": "bcab2b7f5c2cdcef51bada1f7ee33e1fa38289590bbcdb6735ccaf1e49711bda"
     },
     {
+      "path": "src/api/mediaAccess.ts",
+      "sha256": "5dfc008fd84dcae4234b4028e3f6840fb8f457033ca1b385816fddcf662fcbdc"
+    },
+    {
       "path": "src/App.tsx",
       "sha256": "e76aad7bf48522944f3c8c3305848f9ec9eab7a4635c0ab367095ec131206e09"
     },
     {
       "path": "src/components/settings/ObservabilitySettings.tsx",
-      "sha256": "135cd8389e78cf8760bc960bad9e8d523360a50029b1ca72385edaa4b7385c26"
+      "sha256": "97a493b853869541f0354f3b7e17f0344b63e17de105dce55733f59d94cf9046"
     },
     {
       "path": "src/components/settings/XAutomationSettings.tsx",
-      "sha256": "3650ec0353cb94bcdb4f1aaef6cb58eb69629bda0286d445a23d1a6a4bedb99e"
+      "sha256": "1dde7a30e8d6a0aabf192c0bc0d444188d85e4766ab92dda112153da3cd914c2"
     },
     {
       "path": "src/instrument.ts",
@@ -270,7 +274,7 @@
     },
     {
       "path": "supabase/functions/admin-actions/dashboardSummaries.test.ts",
-      "sha256": "5c0627a594533b0cd0ec41e36da1d676e9db2caf337c8bb30f38945646941964"
+      "sha256": "76b5bc4c50995bf0372dcc2b9fdf082bb12993c5a654551efe132c14b2662d0e"
     },
     {
       "path": "supabase/functions/admin-actions/dedupeActions.test.ts",
@@ -282,7 +286,7 @@
     },
     {
       "path": "supabase/functions/admin-actions/index.ts",
-      "sha256": "b3b1fdc29ad09d943e190008b724ab441ea64b99e9c60070413ba72982026fca"
+      "sha256": "9f57e4915e9973fee2a03aef93121ffb686f4a839f38e4107ebefee6b631ffc5"
     },
     {
       "path": "supabase/functions/admin-actions/maintenanceActions.test.ts",
@@ -294,11 +298,11 @@
     },
     {
       "path": "supabase/functions/admin-actions/manualVideoIntakeActions.test.ts",
-      "sha256": "f3e844dcf24cae8cdae8fa29b60befd2c0e95bb9386ff952a4d68f0fe6eec642"
+      "sha256": "66d19972224acf03caff67b77b187f4e0b45f68e76014a71762483e159bc0e06"
     },
     {
       "path": "supabase/functions/admin-actions/manualVideoPostingGuard.test.ts",
-      "sha256": "a976375a8dac15fa7a716b1f99128cea491fffc2454264c3371012206d489e11"
+      "sha256": "06a9ab6671399324bfa30e802954f55edb3683108484881b29b442c9a29c54fe"
     },
     {
       "path": "supabase/functions/admin-actions/monitoringMutations.test.ts",
@@ -9921,14 +9925,14 @@
           "path": "supabase/functions/admin-actions/index.ts,supabase/functions/admin-retry/index.ts,supabase/functions/db-cleanup/index.ts,supabase/functions/digest-compiler/index.ts,supabase/functions/media-cleanup/index.ts,supabase/functions/media-processor/index.ts,supabase/functions/webhooks-rssapp/index.ts,supabase/functions/worker/index.ts,supabase/functions/x-followers-snapshot/index.ts",
           "version_or_ref": "https://deno.land/std@0.168.0/http/server.ts",
           "integrity_or_source_hash": "e99c1bee8a3f6571ee4cdeb2966efad465b8f6fe62bec1bdb59c1f007cc4d155",
-          "source_file_sha256": "d7ca83ec52d5fa3eb59eb6ce2a51c63509f07112b13e9401970699f5fc0f3b8c"
+          "source_file_sha256": "98683d50470e8c46fdbd88e6dcd67ebe48a3aeef0f8b726de85241184eb878d1"
         },
         {
           "name": "https://esm.sh/@supabase/supabase-js@2.39.7",
           "path": "supabase/functions/admin-actions/index.ts,supabase/functions/admin-retry/index.ts,supabase/functions/db-cleanup/index.ts,supabase/functions/media-cleanup/index.ts,supabase/functions/media-processor/index.ts,supabase/functions/webhooks-rssapp/index.ts,supabase/functions/worker/index.ts,supabase/functions/x-followers-snapshot/index.ts",
           "version_or_ref": "https://esm.sh/@supabase/supabase-js@2.39.7",
           "integrity_or_source_hash": "5361671c958daa350e504d9975da64b2d6dc9e81390b985ccdafb2e3572e24e7",
-          "source_file_sha256": "aa6e4d477e9f5b0f3984b07bd40749eb417ffc5e88be59895d8eea2e84fbff40"
+          "source_file_sha256": "a7506ae2e836e0db81d04790cb9eade819b9c93f8787dbc8a500bddef0f4f70b"
         },
         {
           "name": "https://esm.sh/@supabase/supabase-js@2.49.1",
@@ -9942,7 +9946,7 @@
           "path": "supabase/functions/_shared/cleanupEntryPoints.test.ts,supabase/functions/_shared/cleanupSafety.test.ts,supabase/functions/_shared/dedupe.test.ts,supabase/functions/_shared/deliveryDedupeGuard.test.ts,supabase/functions/_shared/digestThreadTweets.test.ts,supabase/functions/_shared/duplicateGuard.test.ts,supabase/functions/_shared/durableClaimFence.test.ts,supabase/functions/_shared/e10PreviewParityFoundation.test.ts,supabase/functions/_shared/e6DisposableAcceptance.test.ts,supabase/functions/_shared/effectiveThreshold.test.ts,supabase/functions/_shared/enrich.test.ts,supabase/functions/_shared/enrichResearcherFallback.test.ts,supabase/functions/_shared/externalPostingGuard.test.ts,supabase/functions/_shared/feedbackBias.test.ts,supabase/functions/_shared/followerSnapshotClaim.test.ts,supabase/functions/_shared/internalAuth.test.ts,supabase/functions/_shared/legacyMediaCleanup.test.ts,supabase/functions/_shared/mediaSelection.test.ts,supabase/functions/_shared/myXControls.test.ts,supabase/functions/_shared/openai.test.ts,supabase/functions/_shared/openaiCostControls.test.ts,supabase/functions/_shared/providerErrors.test.ts,supabase/functions/_shared/scoring.test.ts,supabase/functions/_shared/scoringPolicy.test.ts,supabase/functions/_shared/staleMediaRepair.test.ts,supabase/functions/_shared/telegramVideoLimits.test.ts,supabase/functions/_shared/translationReadability.test.ts,supabase/functions/_shared/videoRenderGate.test.ts,supabase/functions/_shared/xApiLedger.test.ts,supabase/functions/_shared/xCandidateCutover.test.ts,supabase/functions/_shared/xMediaUploadQuota.test.ts,supabase/functions/_shared/xPostDeliveryClaim.test.ts,supabase/functions/_shared/xPostReclaimGate.test.ts,supabase/functions/_shared/xPostText.test.ts,supabase/functions/_shared/xPosterOutcome.test.ts,supabase/functions/_shared/xQuotaAdmission.test.ts,supabase/functions/admin-actions/activeThreshold.test.ts,supabase/functions/admin-actions/adminAccessPolicy.test.ts,supabase/functions/admin-actions/adminOperation.test.ts,supabase/functions/admin-actions/adminOperationProtocol.test.ts,supabase/functions/admin-actions/basicActions.test.ts,supabase/functions/admin-actions/dashboardSummaries.test.ts,supabase/functions/admin-actions/dedupeActions.test.ts,supabase/functions/admin-actions/enrichmentActions.test.ts,supabase/functions/admin-actions/maintenanceActions.test.ts,supabase/functions/admin-actions/manualAdvanceActions.test.ts,supabase/functions/admin-actions/manualVideoIntakeActions.test.ts,supabase/functions/admin-actions/manualVideoPostingGuard.test.ts,supabase/functions/admin-actions/monitoringMutations.test.ts,supabase/functions/admin-actions/monitoringReads.test.ts,supabase/functions/admin-actions/readHelpers.test.ts,supabase/functions/admin-actions/runtimeControlsRoute.test.ts,supabase/functions/admin-actions/scoringActions.test.ts,supabase/functions/admin-actions/settings.test.ts,supabase/functions/admin-actions/sideEffects.test.ts,supabase/functions/admin-actions/translationRescoreActions.test.ts,supabase/functions/admin-actions/videoRenderActions.test.ts,supabase/functions/admin-actions/xApiActions.test.ts,supabase/functions/admin-actions/xApiSummary.test.ts,supabase/functions/admin-actions/xPostingActions.test.ts,supabase/functions/admin-retry/adminRetryPolicy.test.ts,supabase/functions/admin-retry/adminRetryRoute.test.ts,supabase/functions/media-processor/downloadMediaForTweet.test.ts,supabase/functions/worker/jobLifecycle.test.ts,supabase/functions/worker/mediaWorkflow.test.ts,supabase/functions/worker/runtimeControlRace.test.ts,supabase/functions/worker/scoringWorkflow.test.ts,supabase/functions/worker/telegramDelivery.test.ts,supabase/functions/worker/translateWorkflow.test.ts,supabase/functions/worker/tweetNormalizers.test.ts,supabase/functions/worker/videoRenderWorkflow.test.ts,supabase/functions/worker/workerUtils.test.ts,supabase/functions/worker/xApiWorkflow.test.ts,supabase/functions/x-poster/providerGuard.test.ts",
           "version_or_ref": "jsr:@std/assert",
           "integrity_or_source_hash": "eaada96ee120cb980bc47e040f82814d786fe8162ecc53c91d8df60b8755991e",
-          "source_file_sha256": "864c4b318a7b53a6ee4330d1d0d4b0597e1419f3e7f25b195029e9940af9c697"
+          "source_file_sha256": "2a95b9713ffc8e7521df6065467a9f5c86f0830ed1094776fa9a6875b371f968"
         },
         {
           "name": "jsr:@supabase/functions-js/edge-runtime.d.ts",
@@ -10155,12 +10159,16 @@
           "sha256": "e76aad7bf48522944f3c8c3305848f9ec9eab7a4635c0ab367095ec131206e09"
         },
         {
+          "path": "src/api/mediaAccess.ts",
+          "sha256": "5dfc008fd84dcae4234b4028e3f6840fb8f457033ca1b385816fddcf662fcbdc"
+        },
+        {
           "path": "src/components/settings/ObservabilitySettings.tsx",
-          "sha256": "135cd8389e78cf8760bc960bad9e8d523360a50029b1ca72385edaa4b7385c26"
+          "sha256": "97a493b853869541f0354f3b7e17f0344b63e17de105dce55733f59d94cf9046"
         },
         {
           "path": "src/components/settings/XAutomationSettings.tsx",
-          "sha256": "3650ec0353cb94bcdb4f1aaef6cb58eb69629bda0286d445a23d1a6a4bedb99e"
+          "sha256": "1dde7a30e8d6a0aabf192c0bc0d444188d85e4766ab92dda112153da3cd914c2"
         },
         {
           "path": "src/instrument.ts",
@@ -10192,7 +10200,7 @@
           "path": "scripts/check-vite-env.mjs,src/App.tsx,src/components/settings/ObservabilitySettings.tsx",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "57878c64736789b8aa99258a429dffb4978d83b51131b2031a075393496bdfcb"
+          "source_file_sha256": "2acd4c252e8d01863af7002a67e4cafaecfed030167256ef85929c97913a07bb"
         },
         {
           "name": "VITE_SENTRY_DSN",
@@ -10234,7 +10242,7 @@
           "path": "scripts/check-vite-env.mjs,src/components/settings/XAutomationSettings.tsx,src/test/x-automation-settings.test.ts",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "1575d05d9040f2f78af8250df3357388f1483c42fa73ff1ce61c58651dcc149a"
+          "source_file_sha256": "f516345b6d9a06e79d64543d8630ab7093cf12750f27959775b032184ed7998c"
         },
         {
           "name": "VITE_SUPABASE_PUBLISHABLE_KEY",
@@ -10245,10 +10253,10 @@
         },
         {
           "name": "VITE_SUPABASE_URL",
-          "path": "scripts/check-vite-env.mjs,src/components/settings/XAutomationSettings.tsx,src/integrations/supabase/client.ts",
+          "path": "scripts/check-vite-env.mjs,src/api/mediaAccess.ts,src/components/settings/XAutomationSettings.tsx,src/integrations/supabase/client.ts",
           "version_or_ref": null,
           "integrity_or_source_hash": null,
-          "source_file_sha256": "b975f3ef88f19072b5fda95e75ca714dc0eed3b04fbd4eea7fd2aa0af0f2ae7f"
+          "source_file_sha256": "f0e3da28b6ecd1d6649ebe818023cfbb1b7e915eb544e94cebdd33fc668d6f75"
         }
       ]
     }

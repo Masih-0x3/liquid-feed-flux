@@ -1,0 +1,15 @@
+# Dashboard authorized media access
+
+The dashboard reads existing archive assets. It does not acquire arbitrary remote media as a side effect of preview or download. New post processing remains a separate, explicitly confirmed Manual Intake operation.
+
+`get_media_catalog` accepts `tweet_id`. `get_media_access` accepts `tweet_id`, exactly one `media_id` or `render_id`, and `purpose` (`preview` or `download`). Both actions require the canonical admin role. Neither accepts a bucket, path, provider URL or signing expiry from the browser.
+
+For each grant, the server checks the post and matching logical media/render record. Source media must reference an active `media_objects` entry with the same canonical path in `temp-media`. Render output must be completed, within retention, and linked to source media belonging to the same post. The existing bucket must be private. Storage object metadata must agree with the recorded allowlisted MIME and byte size. Missing, deleting, public, unsupported and mismatched objects fail closed.
+
+The server issues a signed storage URL for at most 120 seconds, shortened to the output retention expiry when necessary. The response includes the logical identity, MIME/kind, dimensions, byte size, expiry, purpose and `private_archive` provenance. The signed origin and exact canonical storage path are checked before returning it; responses use `Cache-Control: no-store`. No raw provider URL fallback exists.
+
+`src/components/media/AuthorizedMedia.tsx` is the playback/download boundary. It accepts logical IDs, requests access only after an operator action, validates the grant against the configured backend origin and requested identity, chooses image/video semantics from the verified MIME, and clears access on expiry, role change or selection change. Download grants use a bounded attachment filename. URLs remain in component memory and are not added to shared query caches or persistent browser storage.
+
+Monitoring, Video, Downloader and Manual Intake use this boundary. Manual Intake's ordinary reads no longer issue hour-long path-based signed URLs or expose media storage paths. Posting still uses its server-internal canonical snapshot, saved-caption confirmation, duplicate checks and runtime posting guards. Cached X account identity, when available, is labeled as cached in the posting confirmation.
+
+Validation covers fake storage/DB authorization failures, cross-post IDs, public buckets, missing objects, lifecycle state, expired render retention, unsupported/mismatched MIME, signer origin/path substitution, browser grant validation, expiry and role/selection changes. Existing provider URL containment, Manual Intake persistence and posting guard checks remain in place. These tests do not prove a deployed Storage policy or real transferred media; authenticated storage playback/download and current-deployment acceptance still require a safe deployment environment. The implementation does not change bucket policies, apply migrations or deploy functions.

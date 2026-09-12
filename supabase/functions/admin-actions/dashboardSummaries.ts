@@ -1126,8 +1126,15 @@ async function loadScoringTuningSummary(supabase: any) {
 }
 
 export async function getEnhancedDashboardSummary(supabase: any) {
+  const unavailableSections: string[] = [];
+  const readSection = <T>(section: string, value: Promise<T>, fallback: T | ((error: unknown) => T)): Promise<T> =>
+    withDashboardFallback(section, value.catch((error: unknown) => {
+      unavailableSections.push(section);
+      throw error;
+    }), fallback);
   const { data: base, error } = await supabase.rpc("get_dashboard_summary");
   if (error) logDashboardFallback("base_summary", error);
+  if (error || !base || typeof base !== "object" || Array.isArray(base)) unavailableSections.push("base_summary");
 
   if (base && (typeof base !== "object" || Array.isArray(base))) {
     logDashboardFallback("base_summary", new Error("dashboard_base_invalid_response"));
@@ -1151,7 +1158,7 @@ export async function getEnhancedDashboardSummary(supabase: any) {
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const staleCutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
 
-  const dedupeAvailable = await withDashboardFallback(
+  const dedupeAvailable = await readSection(
     "dedupe_columns",
     hasDedupePostColumns(supabase),
     false,
@@ -1167,12 +1174,12 @@ export async function getEnhancedDashboardSummary(supabase: any) {
     systemPerformance,
     scoringTuning,
   ] = await Promise.all([
-    withDashboardFallback(
+    readSection(
       "posts",
       loadDashboardPosts(supabase, since, dedupeAvailable),
       [] as Array<Record<string, unknown>>,
     ),
-    withDashboardFallback(
+    readSection(
       "telegram_deliveries",
       checkedDashboardRowsQuery(
         supabase.from("deliveries").select(
@@ -1181,7 +1188,7 @@ export async function getEnhancedDashboardSummary(supabase: any) {
       ),
       emptyDashboardRowsResult(),
     ),
-    withDashboardFallback(
+    readSection(
       "x_deliveries",
       checkedDashboardRowsQuery(
         supabase.from("x_deliveries").select(
@@ -1191,7 +1198,7 @@ export async function getEnhancedDashboardSummary(supabase: any) {
       ),
       emptyDashboardRowsResult(),
     ),
-    withDashboardFallback(
+    readSection(
       "queue_breakdown",
       loadDashboardQueueBreakdown(supabase, since, staleCutoff),
       {
@@ -1204,7 +1211,7 @@ export async function getEnhancedDashboardSummary(supabase: any) {
         by_type: [],
       },
     ),
-    withDashboardFallback(
+    readSection(
       "x_local_usage",
       loadDashboardXLocalUsage(supabase, dashboard, since),
       (error) => ({
@@ -1224,7 +1231,7 @@ export async function getEnhancedDashboardSummary(supabase: any) {
         official_usage_synced: false,
       }),
     ),
-    withDashboardFallback(
+    readSection(
       "openai_usage",
       loadOpenAiUsageSummary(supabase, since),
       (error) => ({
@@ -1232,7 +1239,7 @@ export async function getEnhancedDashboardSummary(supabase: any) {
         error: "dashboard_openai_usage_unavailable",
       }),
     ),
-    withDashboardFallback(
+    readSection(
       "process_observability",
       loadProcessObservabilitySummary(supabase, since),
       (error) => ({
@@ -1358,6 +1365,12 @@ export async function getEnhancedDashboardSummary(supabase: any) {
 
   return {
     ...dashboard,
+    data_quality: {
+      unavailable_sections: unavailableSections,
+      observed_at: new Date().toISOString(),
+      post_window_hours: 24,
+      post_row_limit: 10000,
+    },
     ops_status: {
       severity,
       primary_issue: primaryIssue,
