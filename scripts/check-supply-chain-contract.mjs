@@ -72,7 +72,7 @@ const REQUIRED_CI_POST_EVIDENCE_RUNS = REQUIRED_CI_RUNS.slice(4);
 const HOSTED_EVIDENCE_COLLECT_RUN = 'node scripts/collect-supply-chain-evidence.mjs --collect-only --output-dir "$RUNNER_TEMP/xot-supply-chain"';
 const HOSTED_EVIDENCE_TECHNICAL_VALIDATE_RUN = 'node scripts/collect-supply-chain-evidence.mjs --validate-only --technical-only --output-dir "$RUNNER_TEMP/xot-supply-chain"';
 const HOSTED_EVIDENCE_OWNER_VALIDATE_RUN = 'node scripts/collect-supply-chain-evidence.mjs --validate-only --output-dir "$RUNNER_TEMP/xot-supply-chain"';
-const OWNER_POLICY_MODE = "exact-head";
+const OWNER_POLICY_MODE = "exact-evidence";
 const OWNER_POLICY_VARIABLE = "XOT_SUPPLY_OWNER_POLICY_B64";
 const REVIEWED_RENDERER_DOCKER_BASE = "node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e";
 const SHA_RE = /^[a-f0-9]{40}$/;
@@ -241,7 +241,7 @@ function validateCi(root, errors) {
     assertCondition(errors, !hasBypass(steps[collectorIndex].block) && !hasBypass(steps[technicalValidatorIndexes[0]].block) && !hasBypass(steps[ownerValidatorIndexes[0]].block), "hosted supply-chain collection and validation must remain blocking");
     assertCondition(errors, REQUIRED_CI_POST_EVIDENCE_RUNS.every((run, index) => steps[technicalValidatorIndexes[0] + 1 + index]?.run === run), "CI must run the mutable Node/runtime commands only after technical hosted evidence validation");
     assertCondition(errors, ownerValidatorIndexes[0] === acceptedUploadIndexes[0] - 1 && acceptedUploadIndexes[0] === steps.length - 1 && ownerValidatorIndexes[0] > technicalValidatorIndexes[0], "CI must run final owner validation immediately before the accepted-bundle upload");
-    assertCondition(errors, steps[ownerValidatorIndexes[0]].block.some((line) => line.includes(`XOT_SUPPLY_OWNER_POLICY_MODE: ${OWNER_POLICY_MODE}`)), "final hosted supply-chain validation must enable the exact-head owner policy mode");
+    assertCondition(errors, steps[ownerValidatorIndexes[0]].block.some((line) => line.includes(`XOT_SUPPLY_OWNER_POLICY_MODE: ${OWNER_POLICY_MODE}`)), "final hosted supply-chain validation must enable the exact-evidence owner policy mode");
     const expectedOwnerPolicyVariable = `${OWNER_POLICY_VARIABLE}: $` + `{{ vars.${OWNER_POLICY_VARIABLE} }}`;
     assertCondition(errors, steps[ownerValidatorIndexes[0]].block.some((line) => line.includes(expectedOwnerPolicyVariable)), "final hosted supply-chain validation must read the owner policy only from the reviewed repository variable");
     assertCondition(errors, collectorIndex > 0 && collectorIndex < steps.findIndex((step) => step.run === "node scripts/check-runtime-contract.mjs"), "hosted supply-chain evidence must complete before mutable runtime/test commands");

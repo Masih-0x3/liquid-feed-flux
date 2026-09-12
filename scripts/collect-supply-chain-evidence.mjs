@@ -11,10 +11,10 @@ const TRIVY_IMAGE = "aquasec/trivy@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2
 const SYFT_IMAGE = "anchore/syft@sha256:95fe0835e5bebc6f8b1f8acef68d47d63d594ef4c0f25c097ff853b23cbac74c";
 const SHA_RE = /^[a-f0-9]{40}$/;
 const SHA256_RE = /^[a-f0-9]{64}$/;
-const OWNER_POLICY_SCHEMA = "xot-hosted-supply-owner-policy-v1";
+const OWNER_POLICY_SCHEMA = "xot-hosted-supply-owner-policy-v2";
 const OWNER_POLICY_ENV = "XOT_SUPPLY_OWNER_POLICY_B64";
 const OWNER_POLICY_MODE_ENV = "XOT_SUPPLY_OWNER_POLICY_MODE";
-const OWNER_POLICY_MODE = "exact-head";
+const OWNER_POLICY_MODE = "exact-evidence";
 const MAX_OWNER_POLICY_B64_LENGTH = 64 * 1024;
 const OWNER_POLICY_DECISION = "accept_zero_actionable_no_waivers";
 const OWNER_POLICY_BASE_IMAGE_CLASSIFICATIONS = Object.freeze(["reviewed-non-actionable"]);
@@ -229,22 +229,25 @@ function validateOwnerDisposition(value, now = Date.now(), { requireAccepted = f
 }
 
 function decodeBase64Json(value) {
-  if (typeof value !== "string" || value.length === 0) throw new Error("exact-head owner policy is missing");
+  if (typeof value !== "string" || value.length === 0) throw new Error("exact-evidence owner policy is missing");
   if (value.length > MAX_OWNER_POLICY_B64_LENGTH || value.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) {
-    throw new Error("exact-head owner policy base64 is malformed");
+    throw new Error("exact-evidence owner policy base64 is malformed");
   }
   const decoded = Buffer.from(value, "base64");
-  if (decoded.length === 0 || decoded.toString("base64") !== value) throw new Error("exact-head owner policy base64 is malformed");
+  if (decoded.length === 0 || decoded.toString("base64") !== value) throw new Error("exact-evidence owner policy base64 is malformed");
   try {
     return JSON.parse(decoded.toString("utf8"));
   } catch {
-    throw new Error("exact-head owner policy JSON is malformed");
+    throw new Error("exact-evidence owner policy JSON is malformed");
   }
 }
 
+function supplyEvidenceSha256({ actionableIds = [], nonfixableIds = [], observedIds = [] } = {}) {
+  const sort = (ids) => [...ids].sort();
+  return sha256(JSON.stringify({ actionableIds: sort(actionableIds), nonfixableIds: sort(nonfixableIds), observedIds: sort(observedIds) }));
+}
+
 function validateOwnerPolicy(value, {
-  reviewedSha,
-  checkoutSha,
   actionableHighOrCritical,
   observedHighOrCritical,
   nonfixableHighOrCritical,
@@ -254,34 +257,30 @@ function validateOwnerPolicy(value, {
   now = Date.now(),
 } = {}) {
   const errors = [];
-  if (!isPlainObject(value)) return ["exact-head owner policy must be an object"];
+  if (!isPlainObject(value)) return ["exact-evidence owner policy must be an object"];
   const expectedKeys = [
-    "schema", "reviewedSha", "owner", "signedAt", "expiresAt", "decision",
+    "schema", "evidenceSha256", "reviewedSha", "owner", "signedAt", "expiresAt", "decision",
     "actionableHighOrCritical", "observedHighOrCritical", "nonfixableHighOrCritical",
-    "actionableIds", "observedIds", "nonfixableIds", "baseImageClassification", "waiverEntries",
+    "baseImageClassification", "waiverEntries",
   ];
   const unexpectedKeys = Object.keys(value).filter((key) => !expectedKeys.includes(key));
-  if (unexpectedKeys.length > 0) errors.push("exact-head owner policy schema contains unexpected fields");
-  if (value.schema !== OWNER_POLICY_SCHEMA) errors.push("exact-head owner policy schema is invalid");
-  if (value.reviewedSha !== reviewedSha || checkoutSha !== reviewedSha || !SHA_RE.test(value.reviewedSha ?? "")) errors.push("exact-head owner policy is not bound to the exact reviewed SHA");
-  if (value.decision !== OWNER_POLICY_DECISION) errors.push("exact-head owner policy decision must explicitly accept zero actionable findings and no waivers");
-  if (typeof value.owner !== "string" || value.owner.trim().length === 0) errors.push("exact-head owner policy requires a named owner");
+  if (unexpectedKeys.length > 0) errors.push("exact-evidence owner policy schema contains unexpected fields");
+  if (value.schema !== OWNER_POLICY_SCHEMA) errors.push("exact-evidence owner policy schema is invalid");
+  const evidenceSha256 = supplyEvidenceSha256({ actionableIds, observedIds, nonfixableIds });
+  if (!SHA256_RE.test(value.evidenceSha256 ?? "") || value.evidenceSha256 !== evidenceSha256) errors.push(`exact-evidence owner policy is not bound to the current evidence fingerprint (expected evidenceSha256=${evidenceSha256})`);
+  if (!SHA_RE.test(value.reviewedSha ?? "")) errors.push("exact-evidence owner policy requires the reviewed SHA recorded at signing");
+  if (value.decision !== OWNER_POLICY_DECISION) errors.push("exact-evidence owner policy decision must explicitly accept zero actionable findings and no waivers");
+  if (typeof value.owner !== "string" || value.owner.trim().length === 0) errors.push("exact-evidence owner policy requires a named owner");
   const signedAt = Date.parse(value.signedAt ?? "");
-  if (!Number.isFinite(signedAt) || signedAt > now + 5 * 60 * 1000) errors.push("exact-head owner policy requires a valid dated signature");
+  if (!Number.isFinite(signedAt) || signedAt > now + 5 * 60 * 1000) errors.push("exact-evidence owner policy requires a valid dated signature");
   const expiresAt = Date.parse(value.expiresAt ?? "");
-  if (!Number.isFinite(expiresAt) || expiresAt <= now || (Number.isFinite(signedAt) && expiresAt <= signedAt)) errors.push("exact-head owner policy requires a future expiry");
-  if (!OWNER_POLICY_BASE_IMAGE_CLASSIFICATIONS.includes(value.baseImageClassification)) errors.push("exact-head owner policy base-image classification is invalid");
-  if (!Number.isInteger(value.actionableHighOrCritical) || value.actionableHighOrCritical !== 0 || value.actionableHighOrCritical !== actionableHighOrCritical) errors.push("exact-head owner policy must match zero current actionable findings");
-  if (!Number.isInteger(value.observedHighOrCritical) || value.observedHighOrCritical < 0 || value.observedHighOrCritical !== observedHighOrCritical) errors.push("exact-head owner policy observed high or critical count does not match current evidence");
-  if (!Number.isInteger(value.nonfixableHighOrCritical) || value.nonfixableHighOrCritical < 0 || value.nonfixableHighOrCritical !== nonfixableHighOrCritical) errors.push("exact-head owner policy nonfixable count does not match current evidence");
-  if (Number.isInteger(value.observedHighOrCritical) && Number.isInteger(value.actionableHighOrCritical) && Number.isInteger(value.nonfixableHighOrCritical) && value.observedHighOrCritical !== value.actionableHighOrCritical + value.nonfixableHighOrCritical) errors.push("exact-head owner policy counts must satisfy observed = actionable + nonfixable");
-  const policyActionableIds = Array.isArray(value.actionableIds) ? value.actionableIds : [];
-  if (!Array.isArray(value.actionableIds) || policyActionableIds.some((id) => typeof id !== "string" || id.trim().length === 0) || new Set(policyActionableIds).size !== policyActionableIds.length || JSON.stringify(policyActionableIds) !== JSON.stringify(actionableIds)) errors.push("exact-head owner policy actionable IDs do not match current evidence");
-  const policyObservedIds = Array.isArray(value.observedIds) ? value.observedIds : [];
-  if (!Array.isArray(value.observedIds) || policyObservedIds.some((id) => typeof id !== "string" || id.trim().length === 0) || new Set(policyObservedIds).size !== policyObservedIds.length || JSON.stringify(policyObservedIds) !== JSON.stringify(observedIds)) errors.push("exact-head owner policy observed finding IDs do not match current evidence");
-  const policyNonfixableIds = Array.isArray(value.nonfixableIds) ? value.nonfixableIds : [];
-  if (!Array.isArray(value.nonfixableIds) || policyNonfixableIds.some((id) => typeof id !== "string" || id.trim().length === 0) || new Set(policyNonfixableIds).size !== policyNonfixableIds.length || JSON.stringify(policyNonfixableIds) !== JSON.stringify(nonfixableIds)) errors.push("exact-head owner policy nonfixable finding IDs do not match current evidence");
-  if (!Array.isArray(value.waiverEntries) || value.waiverEntries.length !== 0) errors.push("exact-head owner policy must contain no waiver entries");
+  if (!Number.isFinite(expiresAt) || expiresAt <= now || (Number.isFinite(signedAt) && expiresAt <= signedAt)) errors.push("exact-evidence owner policy requires a future expiry");
+  if (!OWNER_POLICY_BASE_IMAGE_CLASSIFICATIONS.includes(value.baseImageClassification)) errors.push("exact-evidence owner policy base-image classification is invalid");
+  if (!Number.isInteger(value.actionableHighOrCritical) || value.actionableHighOrCritical !== 0 || value.actionableHighOrCritical !== actionableHighOrCritical) errors.push("exact-evidence owner policy must match zero current actionable findings");
+  if (!Number.isInteger(value.observedHighOrCritical) || value.observedHighOrCritical < 0 || value.observedHighOrCritical !== observedHighOrCritical) errors.push("exact-evidence owner policy observed high or critical count does not match current evidence");
+  if (!Number.isInteger(value.nonfixableHighOrCritical) || value.nonfixableHighOrCritical < 0 || value.nonfixableHighOrCritical !== nonfixableHighOrCritical) errors.push("exact-evidence owner policy nonfixable count does not match current evidence");
+  if (Number.isInteger(value.observedHighOrCritical) && Number.isInteger(value.actionableHighOrCritical) && Number.isInteger(value.nonfixableHighOrCritical) && value.observedHighOrCritical !== value.actionableHighOrCritical + value.nonfixableHighOrCritical) errors.push("exact-evidence owner policy counts must satisfy observed = actionable + nonfixable");
+  if (!Array.isArray(value.waiverEntries) || value.waiverEntries.length !== 0) errors.push("exact-evidence owner policy must contain no waiver entries");
   return errors;
 }
 
@@ -306,10 +305,12 @@ function evidenceOwnerSummary(directory) {
   };
 }
 
-function acceptedOwnerDisposition(policy, evidence) {
+function acceptedOwnerDisposition(policy, evidence, reviewedSha) {
   return {
     schema: "xot-hosted-supply-owner-disposition-v1",
-    reviewedSha: policy.reviewedSha,
+    reviewedSha,
+    evidenceSha256: supplyEvidenceSha256(evidence),
+    policyReviewedSha: policy.reviewedSha,
     status: "reviewed",
     decision: "accepted",
     owner: policy.owner,
@@ -318,15 +319,15 @@ function acceptedOwnerDisposition(policy, evidence) {
     highOrCritical: policy.actionableHighOrCritical,
     observedHighOrCritical: policy.observedHighOrCritical,
     nonfixableHighOrCritical: policy.nonfixableHighOrCritical,
-    actionableIds: policy.actionableIds,
-    observedIds: policy.observedIds,
-    nonfixableIds: policy.nonfixableIds,
+    actionableIds: evidence.actionableIds,
+    observedIds: evidence.observedIds,
+    nonfixableIds: evidence.nonfixableIds,
     rendererImageId: evidence.rendererImageId,
     requiredOwner: "security/release owner",
     noWaiverReceipt: {
       decision: "no_waivers",
       owner: policy.owner,
-      reviewedSha: policy.reviewedSha,
+      reviewedSha,
       baseImageClassification: policy.baseImageClassification,
       signedAt: policy.signedAt,
       expiresAt: policy.expiresAt,
@@ -338,9 +339,9 @@ function acceptedOwnerDisposition(policy, evidence) {
 function ingestOwnerPolicy(directory, encodedPolicy, { reviewedSha, checkoutSha, now = Date.now() } = {}) {
   const policy = decodeBase64Json(encodedPolicy);
   const summary = evidenceOwnerSummary(directory);
-  const errors = validateOwnerPolicy(policy, { reviewedSha, checkoutSha, ...summary, now });
+  const errors = validateOwnerPolicy(policy, { ...summary, now });
   if (errors.length > 0) throw new Error(errors.join("; "));
-  writeJson(directory, "owner-disposition.json", acceptedOwnerDisposition(policy, summary));
+  writeJson(directory, "owner-disposition.json", acceptedOwnerDisposition(policy, summary, reviewedSha));
   writeArtifactManifest(directory, reviewedSha, checkoutSha);
   writeJson(directory, "validation.json", {
     schema: "xot-hosted-supply-validation-v1",
@@ -734,17 +735,17 @@ function validateOnlyEvidence(outputDirectory, {
   let ownerDisposition = "pending";
   if (!technicalOnly && technicalErrors.length === 0) {
     if (policyMode !== OWNER_POLICY_MODE) {
-      if (encodedPolicy) errors = ["exact-head owner policy mode is not enabled"];
-      else errors = ["exact-head owner policy is missing"];
+      if (encodedPolicy) errors = ["exact-evidence owner policy mode is not enabled"];
+      else errors = ["exact-evidence owner policy is missing"];
     } else if (!encodedPolicy) {
-      errors = ["exact-head owner policy is missing"];
+      errors = ["exact-evidence owner policy is missing"];
     } else {
       try {
         ingestOwnerPolicy(outputDirectory, encodedPolicy, { reviewedSha, checkoutSha, now });
         ownerDisposition = "accepted";
         errors = validateEvidenceDirectory(outputDirectory, reviewedSha, checkoutSha, { requireOwner: true });
       } catch (error) {
-        errors = [error instanceof Error ? error.message : "exact-head owner policy is invalid"];
+        errors = [error instanceof Error ? error.message : "exact-evidence owner policy is invalid"];
       }
     }
   }
@@ -780,6 +781,7 @@ export {
   validateEvidenceDirectory,
   validateOwnerDisposition,
   decodeBase64Json,
+  supplyEvidenceSha256,
   validateOwnerPolicy,
   evidenceOwnerSummary,
   acceptedOwnerDisposition,

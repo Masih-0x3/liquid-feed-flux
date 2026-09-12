@@ -213,17 +213,17 @@ test("quoted step properties cannot make hosted evidence non-blocking", () => wi
   assert.ok(validateSupplyChainContract({ root }).errors.some((error) => error.includes("must remain blocking")));
 }));
 
-test("final owner validation must retain the exact-head policy mode and repository variable", () => withFixture((root) => {
+test("final owner validation must retain the exact-evidence policy mode and repository variable", () => withFixture((root) => {
   const path = join(root, ".github/workflows/ci.yml");
   const original = readFileSync(path, "utf8");
   for (const mutant of [
-    original.replace("          XOT_SUPPLY_OWNER_POLICY_MODE: exact-head\n", ""),
+    original.replace("          XOT_SUPPLY_OWNER_POLICY_MODE: exact-evidence\n", ""),
     original.replace("          XOT_SUPPLY_OWNER_POLICY_B64: ${{ vars.XOT_SUPPLY_OWNER_POLICY_B64 }}\n", ""),
     original.replace("          XOT_SUPPLY_OWNER_POLICY_B64: ${{ vars.XOT_SUPPLY_OWNER_POLICY_B64 }}", "          XOT_SUPPLY_OWNER_POLICY_B64: ${{ secrets.XOT_SUPPLY_OWNER_POLICY_B64 }}"),
   ]) {
     writeFileSync(path, mutant);
     const errors = validateSupplyChainContract({ root }).errors;
-    assert.ok(errors.some((error) => error.includes("exact-head owner policy") || error.includes("owner policy only from the reviewed repository variable")));
+    assert.ok(errors.some((error) => error.includes("exact-evidence owner policy") || error.includes("owner policy only from the reviewed repository variable")));
   }
 }));
 
