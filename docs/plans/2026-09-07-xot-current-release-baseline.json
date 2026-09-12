@@ -8,7 +8,7 @@
   },
   "predecessor": {
     "path": "docs/plans/2026-09-03-xot-e10-preview-migration-boundary-successor-v5.json",
-    "sha256": "bf88befa452ec8f7b34c819543b5546308f91702a7c514e3a24c6878b01b8b9e"
+    "sha256": "9696e240810d70e47ee0d14bcc434777fa4601b78c1a60f0f547197348c2d9d4"
   },
   "candidate": {
     "status": "pending_review",
