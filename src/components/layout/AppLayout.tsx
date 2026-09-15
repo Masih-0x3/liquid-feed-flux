@@ -1,18 +1,169 @@
 import { clearSettingsDraftSession } from '@/components/settings/SettingsDraftSession';
-import { ReactNode, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { ReactNode, Suspense, useEffect, useRef, useState } from 'react';
 import { Navigate, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { navigationItems } from './navigation';
 import { VersionBanner } from './VersionBanner';
 import { BrandLogo } from './BrandLogo';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTheme, type ThemePreference } from '@/contexts/ThemeContext';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { useRuntimeControls } from '@/hooks/useRuntimeControls';
-import { Loader2, LockKeyhole, LogOut, RefreshCw, ShieldAlert, ShieldCheck } from 'lucide-react';
+import {
+  Loader2,
+  LockKeyhole,
+  LogOut,
+  Monitor,
+  Moon,
+  PanelLeftClose,
+  PanelLeftOpen,
+  RefreshCw,
+  ShieldAlert,
+  ShieldCheck,
+  Sun,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface AppLayoutProps {
   children?: ReactNode;
+}
+
+const THEME_OPTIONS: Array<{ value: ThemePreference; label: string; Icon: typeof Sun }> = [
+  { value: 'light', label: 'Light theme', Icon: Sun },
+  { value: 'dark', label: 'Dark theme', Icon: Moon },
+  { value: 'system', label: 'System theme', Icon: Monitor },
+];
+
+function ThemeControls() {
+  const { preference, setPreference } = useTheme();
+  return (
+    <div
+      role="group"
+      aria-label="Theme"
+      className="flex items-center gap-0.5 rounded-md border border-sidebar-border p-0.5"
+    >
+      {THEME_OPTIONS.map(({ value, label, Icon }) => (
+        <button
+          key={value}
+          type="button"
+          aria-label={label}
+          aria-pressed={preference === value}
+          title={label}
+          onClick={() => setPreference(value)}
+          className={cn(
+            'inline-flex h-7 w-7 items-center justify-center rounded-[0.375rem] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            preference === value
+              ? 'bg-sidebar-accent text-foreground'
+              : 'text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-foreground',
+          )}
+        >
+          <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SidebarNav({ collapsed }: { collapsed: boolean }) {
+  return (
+    <aside
+      className={cn(
+        'hidden shrink-0 flex-col border-r border-sidebar-border bg-sidebar md:flex',
+        collapsed ? 'md:w-16' : 'md:w-16 lg:w-[15.5rem]',
+      )}
+    >
+      <div className={cn('flex h-14 shrink-0 items-center gap-2 border-b border-sidebar-border', collapsed ? 'justify-center px-2' : 'justify-center px-2 lg:justify-start lg:px-4')}>
+        <BrandLogo compact className="h-8 w-8 shrink-0 rounded-lg ring-1 ring-sidebar-border" />
+        <div className={cn('min-w-0', collapsed ? 'hidden' : 'hidden lg:block')}>
+          <div className="flex items-center gap-1.5 text-sm font-semibold leading-tight text-foreground">
+            <span>XOT</span>
+            <span
+              aria-label="XOT version 2"
+              title="XOT version 2"
+              className="inline-flex items-center rounded border border-primary/35 bg-primary/10 px-1.5 py-0.5 font-mono text-[9px] font-semibold leading-none tracking-[0.08em] text-primary"
+            >
+              V2
+            </span>
+          </div>
+          <div className="truncate text-[11px] leading-tight text-sidebar-foreground">
+            Operational Panel
+          </div>
+        </div>
+      </div>
+
+      <nav aria-label="Primary navigation" className="flex-1 overflow-y-auto px-2 py-3">
+        <ul className="flex flex-col gap-0.5">
+          {navigationItems.map((item) => (
+            <li key={item.title}>
+              <NavLink
+                to={item.url}
+                end
+                title={item.title}
+                className={({ isActive }) =>
+                  cn(
+                    'group relative flex min-h-10 items-center gap-3 rounded-md px-2.5 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                    collapsed ? 'justify-center' : 'justify-center lg:justify-start',
+                    isActive
+                      ? 'bg-sidebar-accent font-medium text-foreground'
+                      : 'text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-foreground',
+                  )
+                }
+              >
+                {({ isActive }) => (
+                  <>
+                    {isActive && (
+                      <span
+                        aria-hidden="true"
+                        className="absolute left-0 h-5 w-0.5 rounded-full bg-primary"
+                      />
+                    )}
+                    <item.icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                    <span className={cn('whitespace-nowrap', collapsed ? 'sr-only' : 'sr-only lg:not-sr-only')}>
+                      {item.title}
+                    </span>
+                  </>
+                )}
+              </NavLink>
+            </li>
+          ))}
+        </ul>
+      </nav>
+
+      <div className="flex shrink-0 flex-col gap-2 border-t border-sidebar-border px-2 py-3">
+        <ThemeControls />
+      </div>
+    </aside>
+  );
+}
+
+function MobileBottomNav() {
+  return (
+    <nav
+      aria-label="Mobile navigation"
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-sidebar-border bg-sidebar px-1.5 pb-[max(env(safe-area-inset-bottom),0.35rem)] pt-1.5 md:hidden"
+    >
+      <div className="grid grid-cols-3 gap-0.5 min-[360px]:grid-cols-6">
+        {navigationItems.map((item) => (
+          <NavLink
+            key={item.title}
+            to={item.url}
+            end
+            className={({ isActive }) =>
+              cn(
+                'flex min-h-12 min-w-0 flex-col items-center justify-center gap-1 rounded-lg px-0 py-1.5 text-[10px] leading-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                isActive
+                  ? 'bg-sidebar-accent font-medium text-foreground'
+                  : 'text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-foreground',
+              )
+            }
+          >
+            <item.icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <span className="w-full whitespace-nowrap text-center">{item.title}</span>
+          </NavLink>
+        ))}
+      </div>
+    </nav>
+  );
 }
 
 export function AppLayout({ children }: AppLayoutProps) {
@@ -20,12 +171,10 @@ export function AppLayout({ children }: AppLayoutProps) {
   const { controls: runtimeControls, loading: runtimeLoading, error: runtimeError } = useRuntimeControls(status === 'authorised');
   const { toast } = useToast();
   const location = useLocation();
-  const [headerState, setHeaderState] = useState({ docked: false, hidden: false });
+  const [collapsed, setCollapsed] = useState(false);
   const [retryingAuth, setRetryingAuth] = useState(false);
   const mainRef = useRef<HTMLElement | null>(null);
-  const lastScrollTopRef = useRef(0);
-  const hideTimerRef = useRef<number | null>(null);
-  const reduceMotionRef = useRef(false);
+  const isReadOnly = role === 'read_only';
   const isWideOpsRoute = location.pathname.startsWith('/monitoring') || location.pathname.startsWith('/video-renders');
   const activeItem = navigationItems.find((item) =>
     item.url === '/' ? location.pathname === '/' : location.pathname.startsWith(item.url)
@@ -41,40 +190,9 @@ export function AppLayout({ children }: AppLayoutProps) {
       ? `Posting enabled in ${environmentLabel}`
       : 'Posting status unavailable';
 
-  const clearHideTimer = useCallback(() => {
-    if (hideTimerRef.current) {
-      window.clearTimeout(hideTimerRef.current);
-      hideTimerRef.current = null;
-    }
-  }, []);
-
-  const setHeaderVisibility = useCallback((next: { docked: boolean; hidden: boolean }) => {
-    setHeaderState((current) =>
-      current.docked === next.docked && current.hidden === next.hidden ? current : next
-    );
-  }, []);
-
-  const revealHeader = useCallback(() => {
-    clearHideTimer();
-    const scrollTop = mainRef.current?.scrollTop ?? 0;
-    setHeaderVisibility({ docked: scrollTop > 24, hidden: false });
-  }, [clearHideTimer, setHeaderVisibility]);
-
+  // The shell stays mounted; only the route content scrolls back to the top
+  // so the previous page position never leaks into the next task.
   useEffect(() => {
-    const media = window.matchMedia('(prefers-reduced-motion: reduce)');
-    const applyPreference = () => {
-      reduceMotionRef.current = media.matches;
-      if (media.matches) revealHeader();
-    };
-
-    applyPreference();
-    media.addEventListener('change', applyPreference);
-    return () => media.removeEventListener('change', applyPreference);
-  }, [revealHeader]);
-
-  useEffect(() => {
-    clearHideTimer();
-    lastScrollTopRef.current = 0;
     const mainEl = mainRef.current;
     if (mainEl) {
       if (typeof mainEl.scrollTo === 'function') {
@@ -83,68 +201,7 @@ export function AppLayout({ children }: AppLayoutProps) {
         mainEl.scrollTop = 0;
       }
     }
-    setHeaderVisibility({ docked: false, hidden: false });
-  }, [clearHideTimer, location.pathname, setHeaderVisibility]);
-
-  useEffect(() => {
-    const handleIntentToReveal = (event: PointerEvent | TouchEvent | KeyboardEvent) => {
-      if (event instanceof KeyboardEvent) {
-        if (event.key === 'Tab') revealHeader();
-        return;
-      }
-
-      let topEdge: number | undefined;
-      if (typeof TouchEvent !== 'undefined' && event instanceof TouchEvent) {
-        topEdge = event.touches[0]?.clientY;
-      } else if ('clientY' in event) {
-        topEdge = event.clientY;
-      }
-
-      if (typeof topEdge === 'number' && topEdge <= 56) {
-        revealHeader();
-      }
-    };
-
-    window.addEventListener('pointermove', handleIntentToReveal, { passive: true });
-    window.addEventListener('touchstart', handleIntentToReveal, { passive: true });
-    window.addEventListener('keydown', handleIntentToReveal);
-    return () => {
-      window.removeEventListener('pointermove', handleIntentToReveal);
-      window.removeEventListener('touchstart', handleIntentToReveal);
-      window.removeEventListener('keydown', handleIntentToReveal);
-    };
-  }, [revealHeader]);
-
-  const handleMainScroll = useCallback((event: React.UIEvent<HTMLElement>) => {
-    const scrollTop = event.currentTarget.scrollTop;
-    const lastScrollTop = lastScrollTopRef.current;
-    const docked = scrollTop > 24;
-    const scrollingDown = scrollTop > lastScrollTop + 4;
-    const scrollingUp = scrollTop < lastScrollTop - 4;
-
-    lastScrollTopRef.current = scrollTop;
-
-    if (reduceMotionRef.current || scrollTop <= 96 || scrollingUp) {
-      clearHideTimer();
-      setHeaderVisibility({ docked, hidden: false });
-      return;
-    }
-
-    if (scrollingDown) {
-      setHeaderVisibility({ docked: true, hidden: headerState.hidden });
-      if (!headerState.hidden && !hideTimerRef.current) {
-        hideTimerRef.current = window.setTimeout(() => {
-          hideTimerRef.current = null;
-          if (!reduceMotionRef.current && lastScrollTopRef.current > 96) {
-            setHeaderVisibility({ docked: true, hidden: true });
-          }
-        }, 600);
-      }
-      return;
-    }
-
-    setHeaderVisibility({ docked, hidden: headerState.hidden });
-  }, [clearHideTimer, headerState.hidden, setHeaderVisibility]);
+  }, [location.pathname]);
 
   const handleSignOut = async () => {
     try {
@@ -177,8 +234,8 @@ export function AppLayout({ children }: AppLayoutProps) {
   if (status === 'booting' || status === 'authenticated-role-loading') {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="glass-panel p-8 rounded-2xl">
-          <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto" />
+        <div role="status" aria-label="Loading XOT Panel" className="glass-panel p-8">
+          <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto" aria-hidden="true" />
         </div>
       </div>
     );
@@ -188,15 +245,15 @@ export function AppLayout({ children }: AppLayoutProps) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background p-4">
         <div className="glass-panel max-w-md space-y-4 rounded-2xl p-8 text-center">
-          <ShieldAlert className="mx-auto h-12 w-12 text-destructive" />
+          <ShieldAlert className="mx-auto h-12 w-12 text-destructive" aria-hidden="true" />
           <div className="space-y-2">
-            <h2 className="text-xl font-display font-semibold text-glass-foreground">Authentication needs attention</h2>
+            <h2 className="text-xl font-display font-semibold text-foreground">Authentication needs attention</h2>
             <p className="text-sm text-muted-foreground">
               {authError?.message ?? 'We could not verify access to the XOT Panel.'}
             </p>
           </div>
           <Button type="button" onClick={handleAuthRetry} disabled={retryingAuth} className="w-full">
-            <RefreshCw className={`mr-2 h-4 w-4 ${retryingAuth ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`mr-2 h-4 w-4 ${retryingAuth ? 'animate-spin' : ''}`} aria-hidden="true" />
             {retryingAuth ? 'Retrying authentication…' : 'Retry authentication'}
           </Button>
         </div>
@@ -208,19 +265,17 @@ export function AppLayout({ children }: AppLayoutProps) {
     return <Navigate to="/auth" replace />;
   }
 
-  const isReadOnly = role === 'read_only';
-
   if (status === 'denied' || (!isAdmin && !isReadOnly)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="glass-panel p-8 rounded-2xl text-center space-y-4 max-w-md">
-          <ShieldAlert className="w-12 h-12 text-destructive mx-auto" />
-          <h2 className="text-xl font-display font-semibold text-glass-foreground">Access Denied</h2>
+          <ShieldAlert className="w-12 h-12 text-destructive mx-auto" aria-hidden="true" />
+          <h2 className="text-xl font-display font-semibold text-foreground">Access Denied</h2>
           <p className="text-muted-foreground text-sm">
             Your account does not have admin access. Contact your administrator to request access.
           </p>
           <Button type="button" variant="outline" onClick={handleSignOut}>
-            <LogOut className="mr-2 h-4 w-4" />
+            <LogOut className="mr-2 h-4 w-4" aria-hidden="true" />
             Sign out
           </Button>
         </div>
@@ -230,146 +285,135 @@ export function AppLayout({ children }: AppLayoutProps) {
 
   return (
     <div className="relative flex h-svh min-h-svh w-full overflow-hidden bg-background">
-      {isReadOnly && (
-        <div
-          role="status"
-          aria-label="Read-only access"
-          className="fixed inset-x-0 top-0 z-[60] flex min-h-8 items-center justify-center gap-2 border-b border-amber-400/30 bg-amber-500/10 px-3 py-1.5 text-center text-xs font-medium text-amber-100 backdrop-blur-glass"
-        >
-          <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-amber-300" aria-hidden="true" />
-          <span>Read-only access</span>
-          <span className="font-normal text-amber-100/75">Viewing only. Changes are disabled.</span>
-        </div>
-      )}
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        {/* Header */}
-        <header
-          className={cn(
-            'fixed inset-x-0 z-50 flex justify-center px-3 py-2 transition-transform duration-300 ease-out motion-reduce:transform-none motion-reduce:transition-none sm:px-5',
-            isReadOnly ? 'top-8' : 'top-0',
-            headerState.hidden ? '-translate-y-[calc(100%+0.75rem)]' : 'translate-y-0'
-          )}
-          onFocusCapture={revealHeader}
-        >
+      <a
+        href="#main-content"
+        className="sr-only z-50 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground focus:not-sr-only focus:absolute focus:left-3 focus:top-3"
+      >
+        Skip to content
+      </a>
+
+      <SidebarNav collapsed={collapsed} />
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        {isReadOnly && (
           <div
-            className={cn(
-              'grid min-h-12 w-full max-w-[96rem] grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border transition-colors duration-150 ease-out motion-reduce:transition-none sm:gap-3',
-              headerState.docked
-                ? 'rounded-lg border-glass-border/70 bg-background/80 px-2 py-2 shadow-[0_18px_55px_rgba(0,0,0,0.28)] backdrop-blur-glass-lg sm:px-3'
-                : 'rounded-lg border-glass-border/30 bg-background/50 px-2 py-2 shadow-none backdrop-blur-glass sm:px-3'
-            )}
+            role="status"
+            aria-label="Read-only access"
+            className="flex min-h-8 shrink-0 items-center justify-center gap-2 border-b border-warning/30 bg-warning/10 px-3 py-1.5 text-center text-xs font-medium text-warning"
           >
-            <div className="flex min-w-0 items-center gap-2">
-              <BrandLogo compact className="h-8 w-8 shrink-0 rounded-lg ring-1 ring-glass-border/70" />
-              <div className="hidden min-w-0 min-[360px]:block">
-                <div className="flex items-center gap-1.5 text-sm font-display font-semibold leading-tight text-glass-foreground">
-                  <span>XOT</span>
-                  <span
-                    aria-label="XOT version 2"
-                    title="XOT version 2"
-                    className="hidden min-[360px]:inline-flex items-center rounded border border-primary/35 bg-primary/10 px-1.5 py-0.5 font-mono text-[9px] font-semibold leading-none tracking-[0.08em] text-primary"
-                  >
-                    V2
-                  </span>
-                </div>
-                <div className="truncate text-[11px] uppercase leading-tight tracking-[0.14em] text-muted-foreground">
-                  {location.pathname === '/x-account' ? 'My X' : activeItem.title}
-                </div>
-              </div>
-            </div>
+            <ShieldAlert className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span>Read-only access</span>
+            <span className="font-normal text-warning/90">Viewing only. Changes are disabled.</span>
+          </div>
+        )}
 
-            <nav aria-label="Primary navigation" className="col-span-2 row-start-2 hidden min-w-0 justify-center md:flex">
-              <div className="flex w-full min-w-0 items-center gap-1 rounded-md border border-glass-border/40 bg-background/32 px-1 py-1 backdrop-blur-glass">
-                {navigationItems.map((item) => (
-                  <NavLink
-                    key={item.title}
-                    to={item.url}
-                    end
-                    aria-label={item.title}
-                    title={item.title}
-                    className={({ isActive }) =>
-                      cn(
-                        'inline-flex min-h-10 min-w-0 flex-1 shrink-0 items-center justify-center gap-2 rounded px-2 text-xs font-mono font-medium text-muted-foreground transition-colors hover:bg-glass-border/20 hover:text-glass-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70 lg:px-3',
-                        isActive && 'bg-primary/15 text-primary'
-                      )
-                    }
-                  >
-                    <item.icon className="hidden h-3.5 w-3.5 shrink-0 lg:block" />
-                    <span className="whitespace-nowrap">{item.title}</span>
-                  </NavLink>
-                ))}
-              </div>
-            </nav>
-
-            <div className="flex min-w-0 items-center justify-end gap-2">
-              <div
-                role="status"
-                aria-label="Posting status"
-                title={postingStatusLabel}
-                className={cn("flex min-w-0 items-center gap-1.5 rounded border px-1 py-1 text-xs font-medium min-[360px]:px-2", runtimeControls?.posting_mode === 'enabled' && !runtimeError ? "border-success/30 bg-success/10 text-success" : "border-amber-400/30 bg-amber-500/10 text-amber-100")}
-              >
-                {runtimeControls?.posting_mode === "enabled" && !runtimeError ? <ShieldCheck className="hidden h-3.5 w-3.5 shrink-0 min-[360px]:block" aria-hidden="true" /> : <LockKeyhole className="hidden h-3.5 w-3.5 shrink-0 min-[360px]:block" aria-hidden="true" />}
-                <span className="min-w-0 leading-snug"><span className="block sm:hidden">{environmentLabel}</span><span className="sm:hidden">{runtimeError ? 'Status unavailable' : runtimeLoading && !runtimeControls ? 'Checking status' : runtimeControls?.posting_mode === 'enabled' ? 'Enabled' : runtimeControls?.posting_mode === 'blocked' ? 'Posting locked' : 'Status unavailable'}</span><span className="hidden sm:inline">{postingStatusLabel}</span></span>
-              </div>
-              <div className="hidden min-w-0 2xl:flex">
-                <VersionBanner />
-              </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={handleSignOut}
-                className="h-9 shrink-0 rounded-md px-2 text-muted-foreground hover:bg-destructive/15 hover:text-destructive sm:px-3"
-                aria-label="Sign out"
-              >
-                <LogOut className="h-4 w-4" />
-                <span className="ml-2 hidden lg:inline">Sign out</span>
-              </Button>
+        {/* Compact contextual header: route label, posting status, version, account */}
+        <header className="flex min-h-14 shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border/70 bg-background px-3 py-2 sm:px-5">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+              aria-pressed={collapsed}
+              title={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+              onClick={() => setCollapsed((value) => !value)}
+              className="hidden h-8 w-8 shrink-0 rounded-md p-0 text-sidebar-foreground hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring md:inline-flex"
+            >
+              {collapsed ? (
+                <PanelLeftOpen className="h-4 w-4" aria-hidden="true" />
+              ) : (
+                <PanelLeftClose className="h-4 w-4" aria-hidden="true" />
+              )}
+            </Button>
+            <div className="flex min-w-0 items-center gap-2 md:hidden">
+              <BrandLogo compact className="h-7 w-7 shrink-0 rounded-md ring-1 ring-border" />
             </div>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-foreground">
+                {location.pathname === '/x-account' ? 'My X' : activeItem.title}
+              </p>
+              <p className="hidden truncate text-xs text-muted-foreground sm:block">
+                {location.pathname === '/x-account' ? 'Legacy destination (disabled)' : 'XOT operational workspace'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+            <div
+              role="status"
+              aria-label="Posting status"
+              title={postingStatusLabel}
+              className={cn(
+                'flex min-w-0 items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium',
+                runtimeControls?.posting_mode === 'enabled' && !runtimeError
+                  ? 'border-success/30 bg-success/10 text-success'
+                  : 'border-warning/30 bg-warning/10 text-warning',
+              )}
+            >
+              {runtimeControls?.posting_mode === 'enabled' && !runtimeError ? (
+                <ShieldCheck className="hidden h-3.5 w-3.5 shrink-0 sm:block" aria-hidden="true" />
+              ) : (
+                <LockKeyhole className="hidden h-3.5 w-3.5 shrink-0 sm:block" aria-hidden="true" />
+              )}
+              <span className="min-w-0 leading-snug">
+                <span className="block sm:hidden">{environmentLabel}</span>
+                <span className="sm:hidden">
+                  {runtimeError
+                    ? 'Status unavailable'
+                    : runtimeLoading && !runtimeControls
+                      ? 'Checking status'
+                      : runtimeControls?.posting_mode === 'enabled'
+                        ? 'Enabled'
+                        : runtimeControls?.posting_mode === 'blocked'
+                          ? 'Posting locked'
+                          : 'Status unavailable'}
+                </span>
+                <span className="hidden sm:inline">{postingStatusLabel}</span>
+              </span>
+            </div>
+            <div className="hidden min-w-0 2xl:flex">
+              <VersionBanner />
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={handleSignOut}
+              className="h-8 shrink-0 rounded-md px-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label="Sign out"
+            >
+              <LogOut className="h-4 w-4" aria-hidden="true" />
+              <span className="ml-2 hidden lg:inline">Sign out</span>
+            </Button>
           </div>
         </header>
 
-        {/* Main Content */}
+        {/* Main Content — the single scroll owner of the workspace */}
         <main
           ref={mainRef}
-          className={cn(
-            'flex-1 overflow-auto overflow-x-hidden px-2 pb-40 min-[360px]:pb-24 sm:px-5 sm:pb-6',
-            isReadOnly ? 'pt-32 md:pt-44' : 'pt-24 md:pt-36',
-          )}
-          onScroll={handleMainScroll}
+          id="main-content"
+          tabIndex={-1}
+          className="flex-1 overflow-auto overflow-x-hidden bg-canvas px-3 pb-28 min-[360px]:pb-24 sm:px-5 sm:pb-6 md:pb-6"
         >
           <div className={`mx-auto w-full ${isWideOpsRoute ? 'max-w-none' : 'max-w-7xl'}`}>
-            <Suspense key={user?.id ?? 'anonymous'} fallback={<div role="status" className="min-h-60 space-y-4 py-4 text-sm text-muted-foreground"><p>Loading page…</p><div className="h-12 rounded-md bg-muted/40" /><div className="h-40 rounded-md bg-muted/40" /></div>}>{children ?? <Outlet />}</Suspense>
+            <Suspense
+              key={user?.id ?? 'anonymous'}
+              fallback={
+                <div role="status" className="min-h-60 space-y-4 py-4 text-sm text-muted-foreground">
+                  <p>Loading page…</p>
+                  <div className="h-12 rounded-md bg-muted/40" />
+                  <div className="h-40 rounded-md bg-muted/40" />
+                </div>
+              }
+            >
+              {children ?? <Outlet />}
+            </Suspense>
           </div>
         </main>
       </div>
+
       <MobileBottomNav />
     </div>
-  );
-}
-
-function MobileBottomNav() {
-  return (
-    <nav aria-label="Mobile navigation" className="fixed inset-x-0 bottom-0 z-40 border-t border-glass-border bg-background/95 px-1.5 pb-[max(env(safe-area-inset-bottom),0.35rem)] pt-1.5 backdrop-blur-glass md:hidden">
-      <div className="grid grid-cols-3 gap-0.5 min-[360px]:grid-cols-6">
-        {navigationItems.map((item) => (
-          <NavLink
-            key={item.title}
-            to={item.url}
-            end
-            className={({ isActive }) =>
-              `flex min-h-12 min-w-0 flex-col items-center justify-center gap-1 rounded-lg px-0 py-1.5 text-[10px] leading-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
-                isActive
-                  ? 'bg-primary/20 text-primary'
-                  : 'text-muted-foreground hover:bg-glass-border/20 hover:text-glass-foreground'
-              }`
-            }
-          >
-            <item.icon className="h-4 w-4 shrink-0" />
-            <span className="w-full whitespace-nowrap text-center">{item.title}</span>
-          </NavLink>
-        ))}
-      </div>
-    </nav>
   );
 }
