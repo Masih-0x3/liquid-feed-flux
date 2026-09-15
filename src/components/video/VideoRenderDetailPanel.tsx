@@ -26,9 +26,9 @@ import { AuthorizedMedia } from '@/components/media/AuthorizedMedia';
 import { ConfirmMediaAction } from '@/components/media/ConfirmMediaAction';
 
 function statusClass(status?: string | null): string {
-  if (status === 'completed') return 'border-emerald-500/30 bg-emerald-500/15 text-emerald-500';
-  if (status === 'running' || status === 'queued') return 'border-blue-500/30 bg-blue-500/15 text-blue-500';
-  if (status === 'blocked' || status === 'failed') return 'border-red-500/30 bg-red-500/15 text-red-500';
+  if (status === 'completed') return 'border-success/30 bg-success/15 text-success';
+  if (status === 'running' || status === 'queued') return 'border-primary/30 bg-primary/15 text-primary';
+  if (status === 'blocked' || status === 'failed') return 'border-destructive/30 bg-destructive/15 text-destructive';
   return 'border-muted-foreground/30 bg-muted text-muted-foreground';
 }
 
@@ -137,7 +137,7 @@ export function VideoRenderDetailPanel({
       <Card className="glass-card border-dashed">
         <CardContent className="flex flex-col gap-3 p-4 text-sm text-muted-foreground">
           <div className="flex items-center gap-2">
-            <ShieldAlert className="h-4 w-4 text-amber-500" />
+            <ShieldAlert className="h-4 w-4 text-warning" />
             <span>{detail.error || detail.data?.ok === false ? 'Render details could not be loaded. Retry the read to check the current state.' : 'No video render row is available for this post yet.'}</span>
           </div>
           {(detail.error || detail.data?.ok === false) && <Button size="sm" variant="outline" onClick={() => void detail.refetch()}>Reload details</Button>}
@@ -174,7 +174,7 @@ export function VideoRenderDetailPanel({
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
               <Badge className={statusClass(render.status)}>{render.status}</Badge>
-              {render.reviewed_at && <Badge variant="outline" className="border-emerald-500/30 text-emerald-500">Reviewed</Badge>}
+              {render.reviewed_at && <Badge variant="outline" className="border-success/30 text-success">Reviewed</Badge>}
               {showActionLabel && <Badge variant="outline">{actionLabel}</Badge>}
               {render.source_language && render.target_language && (
                 <Badge variant="outline" className="gap-1">
@@ -210,7 +210,7 @@ export function VideoRenderDetailPanel({
         </CardHeader>
         <CardContent className="space-y-4">
           {(render.error || render.block_reason) && (
-            <div className="rounded-md border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">
+            <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
               <div className="flex items-start gap-2">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>

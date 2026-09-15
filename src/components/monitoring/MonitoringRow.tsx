@@ -56,7 +56,7 @@ function EntryTags({ entry }: { entry: MonitoringEntry }) {
       {entry.dup_of_tweet_id && <Badge className="bg-purple-500/15 text-purple-400 border-purple-500/30 text-[10px]">dup</Badge>}
       <MonitoringDedupeBadge entry={entry} />
       <MonitoringAudienceBadge entry={entry} />
-      {entry.feedback_locked && <Badge className="bg-blue-500/15 text-blue-400 border-blue-500/30 text-[10px]">locked</Badge>}
+      {entry.feedback_locked && <Badge className="bg-primary/15 text-primary border-primary/30 text-[10px]">locked</Badge>}
     </>
   );
 }

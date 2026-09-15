@@ -246,7 +246,7 @@ export default function ScoringStudio({ initial }: Props) {
         <div role="status" className="rounded-md border border-primary/30 p-3 text-sm">
           <p className="font-medium">Saved delivery gate: {editor.baseline.enabled && editor.baseline.mode === 'active' ? 'Scoring v2' : 'Legacy content filter and editorial profile'}</p>
           <p className="mt-1 text-muted-foreground">{!editor.baseline.enabled ? 'The v2 scorer is disabled.' : editor.baseline.mode === 'shadow' ? 'V2 evaluates in shadow; its thresholds do not decide delivery. The legacy reference below shows the effective saved gates.' : 'V2 uses the saved active profile’s audience thresholds and caps before translation.'} Duplicate Gate runs first. X has separate posting rules.</p>
-          {editor.isDirty && <p className="mt-1 text-amber-200">The controls below contain an unsaved draft. The saved gate above remains effective.</p>}
+          {editor.isDirty && <p className="mt-1 text-warning">The controls below contain an unsaved draft. The saved gate above remains effective.</p>}
         </div>
         <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
           <section className="space-y-4 rounded-lg border bg-muted/15 p-4">

@@ -40,6 +40,11 @@ const Downloader = lazyWithRetry(() => import("./pages/Downloader"));
 const FoglampHUDDev = import.meta.env.DEV && import.meta.env.VITE_FOGLAMP_HUD === "1"
   ? lazy(() => import("foglamp/hud").then((mod) => ({ default: mod.FoglampHUD })))
   : null;
+// Dev-only primitive/state gallery for the design system (0X3-606); the
+// import.meta.env.DEV gate keeps it out of production builds entirely.
+const DesignStateGallery = import.meta.env.DEV
+  ? lazy(() => import("./pages/DesignStateGallery"))
+  : null;
 
 const queryClient = new QueryClient();
 
@@ -110,6 +115,9 @@ const App = () => (
                 <Route path="x-account" element={<XAccountDisabled />} />
                 <Route path="downloader" element={<Downloader />} />
                 <Route path="settings" element={<Settings />} />
+                {DesignStateGallery && (
+                  <Route path="__design" element={<DesignStateGallery />} />
+                )}
               </Route>
               <Route path="*" element={<NotFound />} />
             </Routes>

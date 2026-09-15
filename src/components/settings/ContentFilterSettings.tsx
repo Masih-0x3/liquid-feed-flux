@@ -195,12 +195,12 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
             </span>
           </CardDescription>
         </CardHeader>
-        <div className="mx-6 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-muted-foreground">
+        <div className="mx-6 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm text-muted-foreground">
           Read-only legacy snapshot. Scoring Studio is the only writable scoring policy. Existing filter values remain visible for compatibility and parity checks.
         </div>
         <CardContent className="space-y-6">
           {hasPendingIncoming && (
-            <div role="alert" className="space-y-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm">
+            <div role="alert" className="space-y-3 rounded-lg border border-warning/40 bg-warning/10 p-4 text-sm">
               <div>
                 <p className="font-medium text-foreground">New saved settings available</p>
                 <p className="mt-1 text-muted-foreground">
@@ -416,9 +416,9 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
                                             <Badge variant="outline">{getAuthorThreshold(handle)}</Badge>
                                           </div>
                                         ) : rule === 'always_deliver' ? (
-                                          <Badge className="bg-green-500/20 text-green-400 border-green-500/30">All</Badge>
+                                          <Badge className="bg-success/20 text-success border-success/30">All</Badge>
                                         ) : rule === 'always_skip' ? (
-                                          <Badge className="bg-red-500/20 text-red-400 border-red-500/30">None</Badge>
+                                          <Badge className="bg-destructive/20 text-destructive border-destructive/30">None</Badge>
                                         ) : (
                                           <span className="text-sm text-muted-foreground">Default ({config.default_threshold})</span>
                                         )}
@@ -483,7 +483,7 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
               </div>
               <div className="flex flex-wrap gap-2">
                 {config.priority_topics.map(topic => (
-                  <Badge key={topic} className="bg-green-500/20 text-green-400 border-green-500/30 gap-1">
+                  <Badge key={topic} className="bg-success/20 text-success border-success/30 gap-1">
                     {topic}
                     {!legacyReadOnly && <X className="w-3 h-3 cursor-pointer" onClick={() => removeTopic('priority', topic)} />}
                   </Badge>

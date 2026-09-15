@@ -423,7 +423,7 @@ export function MonitoringDetailDrawer({
                             ))}
                           </div>
                         ) : (
-                          <p className="rounded-md border border-emerald-500/30 bg-emerald-500/10 p-2 text-emerald-300">
+                          <p className="rounded-md border border-success/30 bg-success/10 p-2 text-success">
                             This post passes the local X gates. Normal cron still respects budget, spacing, media, and prior-post checks.
                           </p>
                         )}
@@ -579,7 +579,7 @@ export function MonitoringDetailDrawer({
                       </div>
                     )}
                     {(selectedScoringV2?.policy_rule_applied || selectedScoringV2?.policy_rule || selectedManualScoringFeedback) && (
-                      <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3">
+                      <div className="rounded-md border border-warning/30 bg-warning/10 p-3">
                         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                           <div>
                             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">V2 tuning</p>

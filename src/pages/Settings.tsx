@@ -281,8 +281,8 @@ export default function Settings() {
       </div>
 
       {isReadOnly && (
-        <Alert className="border-amber-400/30 bg-amber-500/10 text-amber-100" role="status">
-          <Shield className="h-4 w-4 text-amber-300" aria-hidden="true" />
+        <Alert className="border-warning/30 bg-warning/10 text-warning" role="status">
+          <Shield className="h-4 w-4 text-warning" aria-hidden="true" />
           <AlertTitle>Read-only access</AlertTitle>
           <AlertDescription>Settings are available for review. Editing and test actions are disabled.</AlertDescription>
         </Alert>

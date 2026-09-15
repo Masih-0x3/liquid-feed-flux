@@ -38,7 +38,7 @@ function BiasTable({ label, biases }: { label: string; biases: Record<string, nu
           <Badge
             key={key}
             variant="outline"
-            className={val > 0 ? 'border-green-500/40 text-green-400' : 'border-red-500/40 text-red-400'}
+            className={val > 0 ? 'border-success/40 text-success' : 'border-destructive/40 text-destructive'}
           >
             {label === 'Authors' ? `@${key}` : key}
             {' '}
@@ -186,7 +186,7 @@ export default function LearnedSignalsCard() {
                   </Badge>
                   <span
                     className={
-                      ev.polarity > 0 ? 'text-green-400' : ev.polarity < 0 ? 'text-red-400' : 'text-muted-foreground'
+                      ev.polarity > 0 ? 'text-success' : ev.polarity < 0 ? 'text-destructive' : 'text-muted-foreground'
                     }
                   >
                     {ev.polarity > 0 ? `+${ev.polarity}` : ev.polarity}

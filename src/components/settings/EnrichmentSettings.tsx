@@ -491,7 +491,7 @@ export default function EnrichmentSettings() {
       <SettingsSaveStatus label="Enrichment settings" dirty={configDraft.isDirty} {...configSave} onSave={() => { void saveConfig(); }} disabled={configDraft.hasPendingIncoming || invalidResearchThreshold} />
       <SettingsIncomingNotice editor={configDraft} />
       {usingDefaultBaseline && (
-        <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-muted-foreground">
+        <div className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-muted-foreground">
           No saved enrichment configuration exists yet. You are viewing the authoritative default baseline; saving will create the first record.
         </div>
       )}
@@ -524,7 +524,7 @@ export default function EnrichmentSettings() {
             <div className="space-y-2">
               <Label>Require Approval Before Posting</Label>
               <div
-                className={`flex items-start gap-3 p-3 rounded-lg border ${config.require_approval ? 'border-green-500/40 bg-green-500/5' : 'border-red-500/40 bg-red-500/5'}`}
+                className={`flex items-start gap-3 p-3 rounded-lg border ${config.require_approval ? 'border-success/40 bg-success/5' : 'border-destructive/40 bg-destructive/5'}`}
               >
                 <Switch aria-label="Require Approval Before Posting"
                   checked={config.require_approval}
@@ -532,9 +532,9 @@ export default function EnrichmentSettings() {
                 />
                 <div className="text-sm">
                   {config.require_approval ? (
-                    <span className="text-green-400 font-medium">Enabled — enriched drafts must be approved before their text is used on X</span>
+                    <span className="text-success font-medium">Enabled — enriched drafts must be approved before their text is used on X</span>
                   ) : (
-                    <span className="text-red-400 font-medium">Disabled — only auto mode can use approved critic output without review</span>
+                    <span className="text-destructive font-medium">Disabled — only auto mode can use approved critic output without review</span>
                   )}
                 </div>
               </div>

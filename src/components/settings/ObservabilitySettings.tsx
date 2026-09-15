@@ -100,7 +100,7 @@ export default function ObservabilitySettings() {
         <CardContent className="space-y-4">
           <p className="text-xs text-muted-foreground">Local process ledger. Rolling metrics cover the last 24 hours; month-to-date values use the calendar month. Last successful refresh: {dashboardQuery.dataUpdatedAt ? new Date(dashboardQuery.dataUpdatedAt).toLocaleString() : 'unavailable'}.</p>
           {!summary.available && (
-            <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
+            <div className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm">
               <div className="mb-1 flex items-center gap-2 font-medium">
                 <AlertTriangle className="h-4 w-4" />Schema or summary not ready
               </div>

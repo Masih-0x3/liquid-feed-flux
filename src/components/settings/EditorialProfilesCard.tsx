@@ -106,7 +106,7 @@ export default function EditorialProfilesCard({ profiles: initialProfiles, activ
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        <div role="status" className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-muted-foreground">
+        <div role="status" className="rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm text-muted-foreground">
           Read-only legacy snapshot. Edit the canonical scoring policy in Scoring Studio above.
         </div>
         <Collapsible open={profileHelpOpen} onOpenChange={setProfileHelpOpen}>
@@ -237,9 +237,9 @@ export default function EditorialProfilesCard({ profiles: initialProfiles, activ
                       <Badge
                         key={v}
                         className={
-                          tone === 'green' ? 'bg-green-500/20 text-green-400 border-green-500/30 gap-1' :
-                          tone === 'red' ? 'bg-red-500/20 text-red-400 border-red-500/30 gap-1' :
-                          tone === 'blue' ? 'bg-blue-500/20 text-blue-400 border-blue-500/30 gap-1' :
+                          tone === 'green' ? 'bg-success/20 text-success border-success/30 gap-1' :
+                          tone === 'red' ? 'bg-destructive/20 text-destructive border-destructive/30 gap-1' :
+                          tone === 'blue' ? 'bg-primary/20 text-primary border-primary/30 gap-1' :
                           'bg-orange-500/20 text-orange-400 border-orange-500/30 gap-1'
                         }
                       >

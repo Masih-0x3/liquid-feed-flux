@@ -865,22 +865,22 @@ export default function Monitoring() {
       </div>
 
       {readOnly && (
-        <div role="note" className="rounded-md border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+        <div role="note" className="rounded-md border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">
           Read-only access. Editorial mutations, retries, and maintenance actions are disabled. Monitoring data and status remain available.
         </div>
       )}
 
       {!xPostingStatusAvailable ? (
-        <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
-          <AlertCircle className="w-4 h-4 mt-0.5 shrink-0 text-amber-500" />
+        <div className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 px-4 py-3 text-sm">
+          <AlertCircle className="w-4 h-4 mt-0.5 shrink-0 text-warning" />
           <div>
             <p className="font-medium">X posting status unavailable</p>
             <p className="text-muted-foreground">The current X posting setting could not be read. No posting action is enabled.</p>
           </div>
         </div>
       ) : !xPostingEnabled && (
-        <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
-          <AlertCircle className="w-4 h-4 mt-0.5 shrink-0 text-amber-500" />
+        <div className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 px-4 py-3 text-sm">
+          <AlertCircle className="w-4 h-4 mt-0.5 shrink-0 text-warning" />
           <div>
             <p className="font-medium">X posting is off</p>
             <p className="text-muted-foreground">Manual X posting is disabled until it is enabled under <Link to="/settings#x-automation" className="text-primary underline">Settings</Link>.</p>

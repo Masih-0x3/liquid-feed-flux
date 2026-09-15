@@ -50,7 +50,7 @@ export function MonitoringDuplicateGateCard({
         </div>
         {entry.dedupe_reason && <p className="rounded-md border bg-muted/30 p-2">{entry.dedupe_reason}</p>}
         {entry.x_status === 'posted' && entry.duplicate_of?.x_state === 'posted' && (
-          <p className="rounded-md border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-200">
+          <p className="rounded-md border border-destructive/30 bg-destructive/10 p-2 text-xs text-destructive">
             Anomaly: both this duplicate and the matched story were posted to X. This row should be treated as historical leakage; future automatic X posts are now blocked at the poster boundary.
           </p>
         )}
@@ -99,7 +99,7 @@ export function MonitoringDuplicateGateCard({
                   )}
                 </div>
                 {(entry.duplicate_of.coverage_state === 'not_covered' || entry.duplicate_of.coverage_state === 'also_duplicate') && (
-                  <p className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-300">
+                  <p className="rounded-md border border-warning/30 bg-warning/10 p-2 text-xs text-warning">
                     This match is not delivered yet. Future duplicate checks now treat this as a coverage gap instead of silently blocking the newer item.
                   </p>
                 )}

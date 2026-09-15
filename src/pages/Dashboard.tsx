@@ -64,14 +64,14 @@ function formatAge(seconds: number | null | undefined): string {
 
 function severityClasses(severity: DashboardSeverity): string {
   if (severity === 'critical') return 'border-destructive/40 bg-destructive/10 text-destructive';
-  if (severity === 'warning') return 'border-amber-500/40 bg-amber-500/10 text-amber-500';
-  return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500';
+  if (severity === 'warning') return 'border-warning/40 bg-warning/10 text-warning';
+  return 'border-success/40 bg-success/10 text-success';
 }
 
 function statusDot(severity: DashboardSeverity): string {
   if (severity === 'critical') return 'bg-destructive';
-  if (severity === 'warning') return 'bg-amber-500';
-  return 'bg-emerald-500';
+  if (severity === 'warning') return 'bg-warning';
+  return 'bg-success';
 }
 
 function percent(value: number, max: number): number {
@@ -368,7 +368,7 @@ function DashboardContent() {
       value: triageUnavailable ? null : pipelineCounts.needsAttention,
       icon: AlertTriangle,
       route: '/monitoring?filter=needs_attention',
-      tone: pipelineCounts.needsAttention > 0 ? 'text-amber-500' : 'text-muted-foreground',
+      tone: pipelineCounts.needsAttention > 0 ? 'text-warning' : 'text-muted-foreground',
       context: 'Failed/stuck jobs + X failures · 24h',
     },
     {
@@ -392,7 +392,7 @@ function DashboardContent() {
       value: queueUnavailable ? null : pipelineCounts.translationQueue,
       icon: MessageSquare,
       route: '/monitoring?filter=translation_queue',
-      tone: pipelineCounts.translationQueue > 0 ? 'text-amber-500' : 'text-primary',
+      tone: pipelineCounts.translationQueue > 0 ? 'text-warning' : 'text-primary',
       context: `${compactNumber(pipelineCounts.translationQueue)} queued`,
     },
     {
@@ -408,7 +408,7 @@ function DashboardContent() {
       value: queueUnavailable ? null : pipelineCounts.staleJobs,
       icon: TimerReset,
       route: '/monitoring?filter=failed_stuck',
-      tone: pipelineCounts.staleJobs > 0 ? 'text-amber-500' : 'text-muted-foreground',
+      tone: pipelineCounts.staleJobs > 0 ? 'text-warning' : 'text-muted-foreground',
       context: oldestPendingSeconds == null ? `${compactNumber(queueBreakdown.staleRunning)} stale running` : `oldest pending ${formatAge(oldestPendingSeconds)}`,
     },
   ];
@@ -631,7 +631,7 @@ function DashboardContent() {
                 <p className="text-sm font-semibold text-glass-foreground">{primaryAlert.title}</p>
                 <p className="text-xs text-muted-foreground">{primaryAlert.detail}</p>
                 {telemetryIncomplete && operationalAlert.severity !== 'ok' && (
-                  <p className="mt-2 text-xs text-amber-200">Telemetry is incomplete. Some supplemental reads failed; the operational alert above still applies.</p>
+                  <p className="mt-2 text-xs text-warning">Telemetry is incomplete. Some supplemental reads failed; the operational alert above still applies.</p>
                 )}
               </div>
             </div>

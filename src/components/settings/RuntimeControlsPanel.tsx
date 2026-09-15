@@ -136,16 +136,16 @@ export default function RuntimeControlsPanel() {
               })}
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 rounded-md border border-amber-400/30 bg-amber-500/10 p-3 text-sm">
-              <LockKeyhole className="h-4 w-4 shrink-0 text-amber-300" aria-hidden="true" />
-              <span className="font-medium text-amber-100">
+            <div className="flex flex-wrap items-center gap-2 rounded-md border border-warning/30 bg-warning/10 p-3 text-sm">
+              <LockKeyhole className="h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
+              <span className="font-medium text-warning">
                 {controls?.posting_mode === 'blocked'
                   ? `Posting locked in ${controls.environment === 'preview' ? 'Preview' : 'Production'}`
                   : controls?.posting_mode === 'enabled'
                     ? `Posting enabled in ${controls.environment === 'preview' ? 'Preview' : 'Production'}`
                     : 'Posting status unavailable'}
               </span>
-              <span className="text-xs text-amber-100/75">
+              <span className="text-xs text-warning/75">
                 {controls?.posting_mode === 'blocked' ? 'External posting has no enable control.' : 'External posting follows the server runtime gate.'}
               </span>
             </div>
