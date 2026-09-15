@@ -251,6 +251,23 @@
     @apply bg-muted/30 text-muted-foreground border-border;
   }
 
+  /* Amber status alert contrast fix in light mode (WCAG AA compliant) */
+  :root:not(.dark) .border-amber-400\/30 {
+    border-color: hsl(var(--warning) / 0.3);
+  }
+  :root:not(.dark) .bg-amber-500\/10 {
+    background-color: hsl(var(--warning) / 0.1);
+  }
+  :root:not(.dark) .text-amber-100 {
+    color: hsl(var(--warning));
+  }
+  :root:not(.dark) .text-amber-100\/75 {
+    color: hsl(var(--warning) / 0.85);
+  }
+  :root:not(.dark) .text-amber-300 {
+    color: hsl(var(--warning));
+  }
+
   /* Interactive elements */
   .glass-button {
     @apply rounded-md border border-border bg-secondary px-3 py-2 text-sm font-medium text-secondary-foreground transition-colors duration-150;
