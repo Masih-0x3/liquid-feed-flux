@@ -246,14 +246,14 @@ assert.equal(
 );
 
 await expectCode(
-  () => policy.readBoundedRssWebhookRawBody(new Request("https://example.test/webhook", {
+  () => policy.readBoundedRssWebhookBody(new Request("https://example.test/webhook", {
     method: "POST",
     headers: { "content-length": String(policy.MAX_RSS_WEBHOOK_BODY_BYTES + 1) },
   })),
   "rss_webhook_content_length_exceeded",
 );
 await expectCode(
-  () => policy.readBoundedRssWebhookRawBody(new Request("https://example.test/webhook", {
+  () => policy.readBoundedRssWebhookBody(new Request("https://example.test/webhook", {
     method: "POST",
     headers: { "content-encoding": "gzip" },
   })),
@@ -268,7 +268,7 @@ const oversizedStream = new ReadableStream({
   },
 });
 await expectCode(
-  () => policy.readBoundedRssWebhookRawBody(new Request("https://example.test/webhook", {
+  () => policy.readBoundedRssWebhookBody(new Request("https://example.test/webhook", {
     method: "POST",
     body: oversizedStream,
     duplex: "half",
@@ -284,7 +284,7 @@ const fragmentedStream = new ReadableStream({
   },
 });
 await expectCode(
-  () => policy.readBoundedRssWebhookRawBody(new Request("https://example.test/webhook", {
+  () => policy.readBoundedRssWebhookBody(new Request("https://example.test/webhook", {
     method: "POST",
     body: fragmentedStream,
     duplex: "half",
@@ -292,7 +292,7 @@ await expectCode(
   "rss_webhook_body_chunk_limit_exceeded",
 );
 await expectCode(
-  () => policy.readBoundedRssWebhookRawBody(new Request("https://example.test/webhook", {
+  () => policy.readBoundedRssWebhookBody(new Request("https://example.test/webhook", {
     method: "POST",
     body: new Uint8Array([0xc3, 0x28]),
   })),
