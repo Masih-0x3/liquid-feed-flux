@@ -1741,6 +1741,12 @@ function sourceFileIssues(frontendFiles) {
     'clearTimeout',
     'clipboard',
     'cookie',
+    // documentElement: reviewed with the 2026-09 design-system theme layer.
+    // Read/written only by src/contexts/ThemeContext.tsx and public/theme-boot.js
+    // to toggle the `dark` class and color-scheme on <html> before first paint.
+    // No transport, credential, or data-bearing surface; value is a constant
+    // structural reference under CSP with no dynamic dispatch.
+    'documentElement',
     'getElementById',
     'history',
     'innerWidth',

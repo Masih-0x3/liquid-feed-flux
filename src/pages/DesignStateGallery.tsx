@@ -1,6 +1,7 @@
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -28,13 +29,14 @@ import { Loader2, RefreshCw } from 'lucide-react';
  */
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  const headingId = `gallery-${title.replace(/\s+/g, '-').toLowerCase()}`;
   return (
-    <section className="glass-card p-4 sm:p-5" aria-labelledby={`gallery-${title.replace(/\s+/g, '-').toLowerCase()}`}>
-      <h2 id={`gallery-${title.replace(/\s+/g, '-').toLowerCase()}`} className="mb-3 text-base font-semibold text-foreground">
+    <Card className="p-4 sm:p-5" aria-labelledby={headingId}>
+      <h2 id={headingId} className="mb-3 text-base font-semibold text-foreground">
         {title}
       </h2>
       {children}
-    </section>
+    </Card>
   );
 }
 
