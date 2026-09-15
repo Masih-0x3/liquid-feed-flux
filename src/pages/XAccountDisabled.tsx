@@ -7,7 +7,7 @@ export default function XAccountDisabled() {
   return (
     <div className="max-w-3xl space-y-6">
       <div>
-        <h1 className="text-2xl sm:text-3xl font-display font-semibold text-glass-foreground">My X is paused</h1>
+        <h1 className="font-display text-xl font-semibold tracking-tight text-foreground sm:text-2xl">My X is paused</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Follower and following snapshots are disabled to prevent expensive X owned-read usage.
         </p>

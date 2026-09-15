@@ -290,7 +290,7 @@ function DashboardContent() {
     return (
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-display font-bold text-glass-foreground">Dashboard</h1>
+          <h1 className="font-display text-xl font-semibold tracking-tight text-foreground sm:text-2xl">Dashboard</h1>
           <p className="text-muted-foreground mt-1">Monitor your RSS - OpenAI - Telegram pipeline</p>
         </div>
         <Card className="glass-card border-destructive/40">
@@ -548,7 +548,7 @@ function DashboardContent() {
     <div className="space-y-3">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="text-2xl font-display font-bold text-glass-foreground sm:text-3xl">Dashboard</h1>
+          <h1 className="font-display text-xl font-semibold tracking-tight text-foreground sm:text-2xl">Dashboard</h1>
           <p className="text-sm text-muted-foreground sm:text-base">Ops triage for RSS, scoring, Telegram, and X automation</p>
           <p className="mt-1 max-w-3xl text-xs text-muted-foreground">{provenanceCopy}</p>
         </div>

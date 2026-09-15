@@ -129,7 +129,7 @@ export default function Threads() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-display font-bold text-glass-foreground">Threads</h1>
+          <h1 className="font-display text-xl font-semibold tracking-tight text-foreground sm:text-2xl">Threads</h1>
           <p className="text-muted-foreground mt-1">View grouped tweet conversations</p>
           <p role="status" className="mt-1 text-xs text-muted-foreground">{loading ? "Refreshing conversations…" : refreshedAt ? `Last successful read: ${refreshedAt.toLocaleTimeString()}` : "No successful read yet"}</p>
         </div>

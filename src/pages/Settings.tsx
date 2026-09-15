@@ -274,9 +274,9 @@ export default function Settings() {
   };
 
   return (
-    <div className="settings-page space-y-6 animate-fade-in-up [&_:is([id],[data-settings-save],button,input,textarea,select,[role=combobox],[role=switch],[role=slider])]:scroll-mt-4">
+    <div className="settings-page space-y-6 [&_:is([id],[data-settings-save],button,input,textarea,select,[role=combobox],[role=switch],[role=slider])]:scroll-mt-4">
       <div>
-        <h1 className="text-3xl font-display font-bold text-glass-foreground">Settings</h1>
+        <h1 className="font-display text-xl font-semibold tracking-tight text-foreground sm:text-2xl">Settings</h1>
         <p className="text-muted-foreground mt-1">Configure your pipeline integrations and translation prompts</p>
       </div>
 
