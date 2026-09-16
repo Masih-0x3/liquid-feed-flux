@@ -48,6 +48,7 @@ export const APPROVED_APPEND_ONLY_SUCCESSOR_MIGRATIONS = Object.freeze([
   "20260908104000_replace_rss_media_atomically.sql",
   "20260908105000_reclaim_pre_provider_x_deliveries.sql",
   "20260908110000_reserve_x_media_upload_quota.sql",
+  "20260917000000_claim_jobs_lane_fair_admission.sql",
 ]);
 export const CURRENT_ON_DISK_MIGRATION_COUNT =
   CURRENT_CANDIDATE_MIGRATION_COUNT + APPROVED_APPEND_ONLY_SUCCESSOR_MIGRATIONS.length;

@@ -3804,6 +3804,11 @@ const reviewedNonRawMigrationDigests = new Map([
   ['20260908104000_replace_rss_media_atomically.sql', 'd78f335e59f66e4b029bfffafc2f2a983c05b3b9cac7c2e9d65d5a392cfa0a3c'],
   ['20260908105000_reclaim_pre_provider_x_deliveries.sql', 'f49e131553a15da17d5cc4685e3385fd8684f4bd6e70bc9c3b5f175433adc7ee'],
   ['20260908110000_reserve_x_media_upload_quota.sql', 'bc8cf9c61e0eb87a1bf77d839d98573afad32ac7b1c9da2fa9e5e8e4423dd256'],
+  // 0X3-672 lane-fair claim_jobs successor: service-role-only, touches
+  // public.jobs/runtime controls/delivery cutover only. Reviewed by the
+  // queue-fairness disposable-DB harness and worker lifecycle contracts.
+  // It does not change the protected video raw-table grant surface.
+  ['20260917000000_claim_jobs_lane_fair_admission.sql', '976a376f5dda6b97c52b2fc979011e5f542039a40e42b661477d49c05a6740a5'],
 ]);
 const reviewedServiceOnlyXCutoverMigration =
   '20260828120000_repair_effective_x_claim_cutover.sql';

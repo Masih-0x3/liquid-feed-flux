@@ -15,6 +15,108 @@ import { insertPipelineEvent } from "./jobLifecycle.ts";
 const VIDEO_RENDER_VERSION = "persian-subtitles-masihh-v1";
 export const VIDEO_RENDER_DEFER_MS = 30_000;
 
+// 0X3-672: bounded, observable dependency waiting.
+//
+// A deliver job blocked on a source-media download or a video render used to
+// re-claim and defer every 30s indefinitely, with no persisted wait state.
+// Wait state now lives in jobs.result_meta.dependency_wait and the defer
+// interval backs off exponentially to a cap: a stalled prerequisite costs one
+// claim per cap interval instead of ~120/hour, stays observable, and still
+// wakes the moment the prerequisite changes because the next due re-check
+// evaluates the gate again. The wait clock is keyed to the dependency id, so
+// a replacement render/media row starts a fresh cycle count.
+export const DEPENDENCY_DEFER_MAX_MS = 10 * 60_000;
+export const DEPENDENCY_WAIT_STALL_MS = 15 * 60_000;
+const DEPENDENCY_DEFER_JITTER_RATIO = 0.15;
+
+export type DependencyWaitState = {
+  kind: string;
+  dependency_id: string;
+  gate_action: string;
+  since: string;
+  cycles: number;
+  defer_ms: number;
+  last_checked_at: string;
+  stalled_at: string | null;
+};
+
+function isPlainRecordValue(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function readDependencyWait(
+  resultMeta: unknown,
+): DependencyWaitState | null {
+  if (!isPlainRecordValue(resultMeta)) return null;
+  const raw = resultMeta.dependency_wait;
+  if (!isPlainRecordValue(raw)) return null;
+  const sinceMs = Date.parse(typeof raw.since === "string" ? raw.since : "");
+  const cycles = typeof raw.cycles === "number" ? raw.cycles : NaN;
+  if (!Number.isFinite(sinceMs) || !Number.isInteger(cycles) || cycles < 1) {
+    return null;
+  }
+  return {
+    kind: typeof raw.kind === "string" ? raw.kind : "",
+    dependency_id: typeof raw.dependency_id === "string" ? raw.dependency_id : "",
+    gate_action: typeof raw.gate_action === "string" ? raw.gate_action : "",
+    since: new Date(sinceMs).toISOString(),
+    cycles,
+    defer_ms: typeof raw.defer_ms === "number" ? raw.defer_ms : 0,
+    last_checked_at:
+      typeof raw.last_checked_at === "string" ? raw.last_checked_at : "",
+    stalled_at: typeof raw.stalled_at === "string" ? raw.stalled_at : null,
+  };
+}
+
+/**
+ * Advance (or start) the dependency wait record for a job about to defer.
+ * Returns the persisted state, the next defer delay (exponential backoff with
+ * jitter, capped), the total wait so far, and a once-only edge when the wait
+ * first crosses the stall threshold.
+ */
+export function nextDependencyWait(
+  resultMeta: unknown,
+  input: { kind: string; dependencyId: string; gateAction: string },
+  nowMs = Date.now(),
+): {
+  state: DependencyWaitState;
+  deferMs: number;
+  waitMs: number;
+  justStalled: boolean;
+} {
+  const prev = readDependencyWait(resultMeta);
+  const continued = prev !== null && prev.kind === input.kind &&
+    prev.dependency_id === input.dependencyId;
+  const cycles = continued ? prev.cycles + 1 : 1;
+  const sinceMs = continued ? Date.parse(prev.since) : nowMs;
+  const waitMs = Math.max(0, nowMs - sinceMs);
+  const justStalled = continued && prev.stalled_at === null &&
+    waitMs >= DEPENDENCY_WAIT_STALL_MS;
+  const base = Math.min(
+    VIDEO_RENDER_DEFER_MS * 2 ** Math.min(cycles - 1, 4),
+    DEPENDENCY_DEFER_MAX_MS,
+  );
+  const deferMs = Math.min(
+    Math.round(base * (1 + Math.random() * DEPENDENCY_DEFER_JITTER_RATIO)),
+    DEPENDENCY_DEFER_MAX_MS,
+  );
+  const state: DependencyWaitState = {
+    kind: input.kind,
+    dependency_id: input.dependencyId,
+    gate_action: input.gateAction,
+    since: new Date(sinceMs).toISOString(),
+    cycles,
+    defer_ms: deferMs,
+    last_checked_at: new Date(nowMs).toISOString(),
+    stalled_at: continued && prev.stalled_at !== null
+      ? prev.stalled_at
+      : justStalled
+      ? new Date(nowMs).toISOString()
+      : null,
+  };
+  return { state, deferMs, waitMs, justStalled };
+}
+
 type EdgeRuntimeWithWaitUntil = {
   waitUntil?: (promise: Promise<unknown>) => void;
 };
@@ -275,21 +377,38 @@ export async function prepareVideoRenderGate(
   }
 
   if (decision.action === "wait_media") {
-    const { error: downloadQueueError } = await supabase.from("jobs").upsert({
-      type: "download_media",
-      payload: { tweet_id: tweetId, source: "video_render_gate" },
-      status: "pending",
-      priority: 12,
-      idempotency_key: `download_media:video_render:${tweetId}`,
-      next_run_at: new Date().toISOString(),
-      locked_at: null,
-      locked_by: null,
-      lease_expires_at: null,
-      last_error: null,
-      attempts: 0,
-    }, { onConflict: "idempotency_key", ignoreDuplicates: false });
-    if (downloadQueueError) {
-      throw new Error("video_render_download_enqueue_failed");
+    const downloadKey = `download_media:video_render:${tweetId}`;
+    // 0X3-672: don't rewrite an already-open download job on every gate
+    // evaluation — the upsert used to reset attempts and next_run_at every
+    // defer cycle, a hot retry that also kept failures from ever accumulating.
+    // Requeue only when no open job exists; a failed row is still resurrected
+    // by the upsert so the recovery path is preserved.
+    const { data: openDownloads, error: openDownloadsError } = await supabase
+      .from("jobs")
+      .select("id")
+      .eq("idempotency_key", downloadKey)
+      .in("status", ["pending", "running"])
+      .limit(1);
+    if (openDownloadsError) {
+      throw new Error("video_render_download_read_failed");
+    }
+    if (!Array.isArray(openDownloads) || openDownloads.length === 0) {
+      const { error: downloadQueueError } = await supabase.from("jobs").upsert({
+        type: "download_media",
+        payload: { tweet_id: tweetId, source: "video_render_gate" },
+        status: "pending",
+        priority: 12,
+        idempotency_key: downloadKey,
+        next_run_at: new Date().toISOString(),
+        locked_at: null,
+        locked_by: null,
+        lease_expires_at: null,
+        last_error: null,
+        attempts: 0,
+      }, { onConflict: "idempotency_key", ignoreDuplicates: false });
+      if (downloadQueueError) {
+        throw new Error("video_render_download_enqueue_failed");
+      }
     }
     await insertPipelineEvent(
       supabase,

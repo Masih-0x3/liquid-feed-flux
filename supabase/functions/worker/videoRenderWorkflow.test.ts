@@ -2,9 +2,13 @@ import { assert, assertEquals } from "jsr:@std/assert";
 import type { XMediaRow } from "../_shared/mediaSelection.ts";
 import type { VideoRenderRow } from "../_shared/videoRenderGate.ts";
 import {
+  DEPENDENCY_DEFER_MAX_MS,
+  DEPENDENCY_WAIT_STALL_MS,
   enqueuePostDeliveryAfterRenderGate,
   markVideoRenderPosted,
+  nextDependencyWait,
   prepareVideoRenderGate,
+  VIDEO_RENDER_DEFER_MS,
 } from "./videoRenderWorkflow.ts";
 
 type FakeCall = {
@@ -70,6 +74,7 @@ function createFakeSupabase(options: {
   mediaRows?: XMediaRow[];
   renderRows?: VideoRenderRow[];
   deliveries?: Array<Record<string, unknown>>;
+  openJobs?: Array<Record<string, unknown>>;
   rpcData?: Record<string, unknown>;
   rpcError?: { message: string };
 } = {}): FakeSupabase {
@@ -84,6 +89,10 @@ function createFakeSupabase(options: {
         },
         eq(column: string, value: unknown) {
           filters.push({ column, value });
+          return builder;
+        },
+        in(column: string, values: unknown) {
+          filters.push({ column, value: values });
           return builder;
         },
         order(column: string, orderOptions: unknown) {
@@ -130,7 +139,11 @@ function createFakeSupabase(options: {
             filters: [...filters],
           });
           return Promise.resolve({
-            data: table === "deliveries" ? options.deliveries ?? [] : [],
+            data: table === "deliveries"
+              ? options.deliveries ?? []
+              : table === "jobs"
+              ? options.openJobs ?? []
+              : [],
             error: null,
           });
         },
@@ -422,4 +435,120 @@ Deno.test("markVideoRenderPosted uses configured retention hours", async () => {
     .payload as Record<string, unknown>;
   assertEquals(rpc.p_tweet_id, "tweet-1");
   assertEquals(rpc.p_retention_hours, 48);
+});
+
+Deno.test("prepareVideoRenderGate wait_media does not rewrite an already-open download job", async () => {
+  const supabase = createFakeSupabase({
+    settingsValue: { mode: "enabled" },
+    mediaRows: [pendingVideo],
+    renderRows: [],
+    openJobs: [{ id: "job-open-1" }],
+  });
+
+  const gate = await prepareVideoRenderGate(supabase, "tweet-1", "test");
+
+  assertEquals(gate.ready, false);
+  assertEquals(gate.decision.action, "wait_media");
+  assertEquals(
+    callsFor(supabase.calls, "jobs", "upsert").length,
+    0,
+    "an open download_media job must not be re-upserted each gate cycle",
+  );
+  // The open-job probe still ran against the right idempotency key.
+  const probe = callsFor(supabase.calls, "jobs", "limit")[0];
+  assert(probe, "expected an open download_media job probe");
+  assertEquals(
+    (probe.filters ?? []).some((f) =>
+      f.column === "idempotency_key" &&
+      f.value === "download_media:video_render:tweet-1"
+    ),
+    true,
+  );
+});
+
+Deno.test("prepareVideoRenderGate wait_media requeues when no download job is open", async () => {
+  const supabase = createFakeSupabase({
+    settingsValue: { mode: "enabled" },
+    mediaRows: [pendingVideo],
+    renderRows: [],
+    openJobs: [],
+  });
+
+  const gate = await prepareVideoRenderGate(supabase, "tweet-1", "test");
+
+  assertEquals(gate.ready, false);
+  const job = firstCall(supabase.calls, "jobs", "upsert")
+    .payload as Record<string, unknown>;
+  assertEquals(job.type, "download_media");
+  assertEquals(job.idempotency_key, "download_media:video_render:tweet-1");
+});
+
+Deno.test("nextDependencyWait backs off exponentially and stays under the cap", () => {
+  const t0 = Date.parse("2026-09-17T00:00:00.000Z");
+
+  let meta: Record<string, unknown> = {};
+  const defers: number[] = [];
+  for (let i = 0; i < 8; i += 1) {
+    const wait = nextDependencyWait(meta, {
+      kind: "video_render",
+      dependencyId: "media-1",
+      gateAction: "wait_render",
+    }, t0 + i * 60_000);
+    meta = { dependency_wait: wait.state };
+    defers.push(wait.deferMs);
+    assertEquals(wait.state.cycles, i + 1);
+    assertEquals(wait.state.since, new Date(t0).toISOString());
+    assert(wait.deferMs <= DEPENDENCY_DEFER_MAX_MS, "defer exceeds cap");
+  }
+  // Un-jittered bases: 30s, 60s, 120s, 240s, 480s, then pinned at cap zone.
+  assert(defers[0] >= VIDEO_RENDER_DEFER_MS && defers[0] <= VIDEO_RENDER_DEFER_MS * 1.15);
+  assert(defers[1] >= VIDEO_RENDER_DEFER_MS * 2 && defers[1] <= VIDEO_RENDER_DEFER_MS * 2.3);
+  assert(defers[2] >= VIDEO_RENDER_DEFER_MS * 4 && defers[2] <= VIDEO_RENDER_DEFER_MS * 4.6);
+  for (const d of defers.slice(5)) {
+    assert(d >= VIDEO_RENDER_DEFER_MS * 16, "expected max-level backoff");
+    assert(d <= DEPENDENCY_DEFER_MAX_MS, "expected capped backoff");
+  }
+});
+
+Deno.test("nextDependencyWait resets the clock when the dependency changes", () => {
+  const t0 = Date.parse("2026-09-17T00:00:00.000Z");
+
+  const first = nextDependencyWait({}, {
+    kind: "video_render",
+    dependencyId: "media-1",
+    gateAction: "wait_render",
+  }, t0);
+  const second = nextDependencyWait(
+    { dependency_wait: first.state },
+    { kind: "video_render", dependencyId: "media-1", gateAction: "wait_render" },
+    t0 + 60_000,
+  );
+  assertEquals(second.state.cycles, 2);
+
+  const replaced = nextDependencyWait(
+    { dependency_wait: second.state },
+    { kind: "video_render", dependencyId: "media-2", gateAction: "wait_render" },
+    t0 + 120_000,
+  );
+  assertEquals(replaced.state.cycles, 1);
+  assertEquals(replaced.state.since, new Date(t0 + 120_000).toISOString());
+});
+
+Deno.test("nextDependencyWait raises the stalled edge once and remembers it", () => {
+  const t0 = Date.parse("2026-09-17T00:00:00.000Z");
+
+  let meta: Record<string, unknown> = {};
+  let stalledSeen = 0;
+  for (let i = 0; i < 4; i += 1) {
+    const wait = nextDependencyWait(meta, {
+      kind: "video_render",
+      dependencyId: "media-1",
+      gateAction: "wait_render",
+    }, t0 + i * DEPENDENCY_WAIT_STALL_MS);
+    meta = { dependency_wait: wait.state };
+    if (wait.justStalled) stalledSeen += 1;
+  }
+  assertEquals(stalledSeen, 1);
+  const last = meta.dependency_wait as { stalled_at?: string | null };
+  assert(last?.stalled_at, "stalled_at must persist once marked");
 });
