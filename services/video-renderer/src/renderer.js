@@ -569,6 +569,13 @@ async function maybeRunVisionPreflight({ inputPath, workingDir, config, prefligh
     seekSeconds,
   }));
   await measure(metrics, "contact_sheet", () => runCommand(buildContactSheetCommand(inputPath, contactSheetPath), { label: "contact_sheet", stage: "analysis" }));
+  // 0X3-672 W5: local OCR (CPU-bound tesseract) needs only the contact sheet
+  // and is independent of frame generation and the watermark vision call
+  // (provider latency). Start it now so it overlaps the remaining analysis
+  // instead of serializing behind it.
+  const ocrPromise = measure(metrics, "local_ocr", () => runOptionalOcr(contactSheetPath, {
+    tesseractLang: config.tesseractLang,
+  }));
   await measure(metrics, "vision_frames", () => Promise.all(frameSpecs.map((frame) => runCommand(buildFrameSampleCommand(inputPath, frame.path, {
     seekSeconds: frame.seekSeconds,
     width: config.watermarkVisionFrameWidth,
@@ -577,13 +584,11 @@ async function maybeRunVisionPreflight({ inputPath, workingDir, config, prefligh
     tileWidth: config.watermarkInspectionTileWidth,
     tileHeight: config.watermarkInspectionTileHeight,
   }), { label: `vision_inspection_${frame.seekSeconds}`, stage: "analysis" }))));
-  const ocr = await measure(metrics, "local_ocr", () => runOptionalOcr(contactSheetPath, {
-    tesseractLang: config.tesseractLang,
-  }));
+  let ocr;
   let watermarkOnly = null;
   let vision = null;
   if (config.enableVisionPreflight) {
-    watermarkOnly = await measure(metrics, "watermark_vision", () => analyzeRemovableWatermarks({
+    const visionPromise = measure(metrics, "watermark_vision", () => analyzeRemovableWatermarks({
       apiKey: config.openaiApiKey,
       model: config.visionModel,
       framePaths: frameSpecs.map((frame) => frame.path),
@@ -596,8 +601,11 @@ async function maybeRunVisionPreflight({ inputPath, workingDir, config, prefligh
         phase: "preflight",
       }),
     }));
+    [ocr, watermarkOnly] = await Promise.all([ocrPromise, visionPromise]);
     watermarkOnly = normalizeWatermarkOnlyDecision(watermarkOnly);
     vision = visionFromWatermarkOnly(watermarkOnly);
+  } else {
+    ocr = await ocrPromise;
   }
   let watermark = scoreWatermarkSignals({
     stableOverlayScore: preflight.overlayDetection?.stableOverlayScore ?? preflight.watermark?.score ?? 0,
@@ -746,6 +754,16 @@ export async function processRenderRow({ supabase, row, config }) {
     metrics.height = probe.height;
     metrics.duration_ms = probe.durationMs ?? source.duration_ms ?? null;
 
+    // 0X3-672 W5: audio extraction is a free local stage that is independent
+    // of the visual preflight chain. Run it concurrently so it hides under
+    // preflight latency instead of serializing after it. Early-return paths
+    // drain the promise so a blocked render never leaks an unhandled
+    // rejection or an orphaned ffmpeg process.
+    const audioExtractPromise = hasAudioStream(probe)
+      ? measure(metrics, "audio_extract", () => runCommand(buildAudioExtractCommand(inputPath, audioPath), { label: "audio_extract", stage: "analysis" }))
+      : null;
+    audioExtractPromise?.catch(() => null);
+
     let preflight = await measure(metrics, "preflight_visual", () => runVisualPreflight({
       inputPath,
       probe,
@@ -754,6 +772,7 @@ export async function processRenderRow({ supabase, row, config }) {
     preflight = await maybeRunVisionPreflight({ inputPath, workingDir, config: runtimeConfig, preflight, metrics, observability });
     metrics.preflight = preflight;
     if (preflight.block?.blocked) {
+      await audioExtractPromise?.catch(() => null);
       metrics.total_ms = Date.now() - started;
       workflowStatus = "skipped";
       workflowMetadata = {
@@ -796,7 +815,9 @@ export async function processRenderRow({ supabase, row, config }) {
       });
     }
 
-    await measure(metrics, "audio_extract", () => runCommand(buildAudioExtractCommand(inputPath, audioPath), { label: "audio_extract", stage: "analysis" }));
+    // Started concurrently with the preflight chain above; wait for the
+    // extraction to finish before transcription consumes the audio file.
+    await audioExtractPromise;
 
     const contextText = subtitleContextText({ postContext, preflight });
     const transcription = await transcribeWithEnhancedAudioRetry({
