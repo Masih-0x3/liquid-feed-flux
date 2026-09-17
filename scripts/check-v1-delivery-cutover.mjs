@@ -254,6 +254,7 @@ const expectedTail = [zeroWriteMigrationName, pendingReceiptAdoptionMigrationNam
   "20260908105000_reclaim_pre_provider_x_deliveries.sql",
   "20260908110000_reserve_x_media_upload_quota.sql",
   "20260917000000_claim_jobs_lane_fair_admission.sql",
+  "20260917120000_bounded_media_download_resurrection.sql",
 ];
 if (JSON.stringify(migrationNames.slice(-expectedTail.length)) !== JSON.stringify(expectedTail)) {
   throw new Error("reviewed delivery, feedback repair, and remaining-PR successors are not the final active migrations");

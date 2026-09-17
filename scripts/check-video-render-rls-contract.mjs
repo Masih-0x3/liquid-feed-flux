@@ -3809,6 +3809,11 @@ const reviewedNonRawMigrationDigests = new Map([
   // queue-fairness disposable-DB harness and worker lifecycle contracts.
   // It does not change the protected video raw-table grant surface.
   ['20260917000000_claim_jobs_lane_fair_admission.sql', 'de12a1e76c2019633c4c17ee15676ca8f0af588dc8af64d44d6428bc86e3cb7d'],
+  // 0X3-672 bounded resurrection RPC: service-role-only, touches
+  // public.jobs only. Reviewed by the queue-fairness disposable-DB harness
+  // (Scenario L + two-session race probe) and worker tests. It does not
+  // change the protected video raw-table grant surface.
+  ['20260917120000_bounded_media_download_resurrection.sql', '4ee334a5b49ab02c417d87d71dfa5542331aba269f002d3c9e60007b7cf4d5d8'],
 ]);
 const reviewedServiceOnlyXCutoverMigration =
   '20260828120000_repair_effective_x_claim_cutover.sql';

@@ -269,10 +269,10 @@ Deno.test("prepareVideoRenderGate shadow mode queues source-media download but s
   assertEquals(gate.ready, true);
   assertEquals(gate.blocked, false);
   assertEquals(gate.decision.action, "wait_media");
-  const job = firstCall(supabase.calls, "jobs", "upsert")
+  const rpc = firstCall(supabase.calls, "rpc", "enqueue_bounded_media_download")
     .payload as Record<string, unknown>;
-  assertEquals(job.type, "download_media");
-  assertEquals(job.idempotency_key, "download_media:video_render:tweet-1");
+  assertEquals(rpc.p_idempotency_key, "download_media:video_render:tweet-1");
+  assertEquals(rpc.p_tweet_id, "tweet-1");
   const event = firstCall(supabase.calls, "pipeline_events", "insert")
     .payload as Record<string, unknown>;
   const meta = event.meta as Record<string, unknown>;
@@ -440,97 +440,80 @@ Deno.test("markVideoRenderPosted uses configured retention hours", async () => {
   assertEquals(rpc.p_retention_hours, 48);
 });
 
-Deno.test("prepareVideoRenderGate wait_media does not rewrite an already-open download job", async () => {
+Deno.test("prepareVideoRenderGate wait_media leaves an already-open download job untouched", async () => {
   const supabase = createFakeSupabase({
     settingsValue: { mode: "enabled" },
     mediaRows: [pendingVideo],
     renderRows: [],
-    openJobs: [{ id: "job-open-1", status: "pending" }],
+    rpcData: { enqueue_bounded_media_download: "open" },
   });
 
   const gate = await prepareVideoRenderGate(supabase, "tweet-1", "test");
 
   assertEquals(gate.ready, false);
   assertEquals(gate.decision.action, "wait_media");
-  assertEquals(
-    callsFor(supabase.calls, "jobs", "upsert").length,
-    0,
-    "an open download_media job must not be re-upserted each gate cycle",
-  );
-  // The open-job probe still ran against the right idempotency key.
-  const probe = callsFor(supabase.calls, "jobs", "limit")[0];
-  assert(probe, "expected an open download_media job probe");
-  assertEquals(
-    (probe.filters ?? []).some((f) =>
-      f.column === "idempotency_key" &&
-      f.value === "download_media:video_render:tweet-1"
-    ),
-    true,
-  );
-});
-
-Deno.test("prepareVideoRenderGate wait_media requeues when no download job is open", async () => {
-  const supabase = createFakeSupabase({
-    settingsValue: { mode: "enabled" },
-    mediaRows: [pendingVideo],
-    renderRows: [],
-    openJobs: [],
-  });
-
-  const gate = await prepareVideoRenderGate(supabase, "tweet-1", "test");
-
-  assertEquals(gate.ready, false);
-  const job = firstCall(supabase.calls, "jobs", "upsert")
+  const rpc = firstCall(supabase.calls, "rpc", "enqueue_bounded_media_download")
     .payload as Record<string, unknown>;
-  assertEquals(job.type, "download_media");
-  assertEquals(job.idempotency_key, "download_media:video_render:tweet-1");
-  const meta = job.result_meta as Record<string, unknown>;
-  assertEquals(meta.video_render_retry_cycle, 1);
-  assertEquals(meta.video_render_retry_media, "media-2");
-});
-
-Deno.test("prepareVideoRenderGate wait_media resurrects a failed download with an incremented cycle", async () => {
-  const supabase = createFakeSupabase({
-    settingsValue: { mode: "enabled" },
-    mediaRows: [pendingVideo],
-    renderRows: [],
-    openJobs: [{
-      id: "job-failed-1",
-      status: "failed",
-      result_meta: { video_render_retry_cycle: 2, video_render_retry_media: "media-2" },
-    }],
-  });
-
-  const gate = await prepareVideoRenderGate(supabase, "tweet-1", "test");
-
-  assertEquals(gate.ready, false);
-  const job = firstCall(supabase.calls, "jobs", "upsert")
+  assertEquals(rpc.p_idempotency_key, "download_media:video_render:tweet-1");
+  assertEquals(rpc.p_tweet_id, "tweet-1");
+  assertEquals(rpc.p_media_id, "media-2");
+  assertEquals(rpc.p_max_resurrections, 3);
+  // An open row is not flagged exhausted.
+  const event = firstCall(supabase.calls, "pipeline_events", "insert")
     .payload as Record<string, unknown>;
-  const meta = job.result_meta as Record<string, unknown>;
-  assertEquals(meta.video_render_retry_cycle, 3);
-  assertEquals(meta.video_render_retry_media, "media-2");
+  const meta = event.meta as Record<string, unknown>;
+  assertEquals(meta.download_retry_exhausted, undefined);
 });
 
-Deno.test("prepareVideoRenderGate wait_media stops resurrecting after the retry budget", async () => {
+Deno.test("prepareVideoRenderGate wait_media enqueues when no download job exists", async () => {
   const supabase = createFakeSupabase({
     settingsValue: { mode: "enabled" },
     mediaRows: [pendingVideo],
     renderRows: [],
-    openJobs: [{
-      id: "job-failed-2",
-      status: "failed",
-      result_meta: { video_render_retry_cycle: 3, video_render_retry_media: "media-2" },
-    }],
+    rpcData: { enqueue_bounded_media_download: "inserted" },
   });
 
   const gate = await prepareVideoRenderGate(supabase, "tweet-1", "test");
 
   assertEquals(gate.ready, false);
-  assertEquals(
-    callsFor(supabase.calls, "jobs", "upsert").length,
-    0,
-    "an exhausted download job must not receive another fresh retry budget",
-  );
+  const rpc = firstCall(supabase.calls, "rpc", "enqueue_bounded_media_download")
+    .payload as Record<string, unknown>;
+  assertEquals(rpc.p_idempotency_key, "download_media:video_render:tweet-1");
+  assertEquals(rpc.p_media_id, "media-2");
+});
+
+Deno.test("prepareVideoRenderGate wait_media accepts a resurrected download", async () => {
+  const supabase = createFakeSupabase({
+    settingsValue: { mode: "enabled" },
+    mediaRows: [pendingVideo],
+    renderRows: [],
+    rpcData: { enqueue_bounded_media_download: "resurrected" },
+  });
+
+  const gate = await prepareVideoRenderGate(supabase, "tweet-1", "test");
+
+  assertEquals(gate.ready, false);
+  assertEquals(gate.decision.action, "wait_media");
+  const rpc = firstCall(supabase.calls, "rpc", "enqueue_bounded_media_download")
+    .payload as Record<string, unknown>;
+  assertEquals(rpc.p_max_resurrections, 3);
+  const event = firstCall(supabase.calls, "pipeline_events", "insert")
+    .payload as Record<string, unknown>;
+  const meta = event.meta as Record<string, unknown>;
+  assertEquals(meta.download_retry_exhausted, undefined);
+});
+
+Deno.test("prepareVideoRenderGate wait_media surfaces an exhausted download budget", async () => {
+  const supabase = createFakeSupabase({
+    settingsValue: { mode: "enabled" },
+    mediaRows: [pendingVideo],
+    renderRows: [],
+    rpcData: { enqueue_bounded_media_download: "exhausted" },
+  });
+
+  const gate = await prepareVideoRenderGate(supabase, "tweet-1", "test");
+
+  assertEquals(gate.ready, false);
   const event = firstCall(supabase.calls, "pipeline_events", "insert")
     .payload as Record<string, unknown>;
   const meta = event.meta as Record<string, unknown>;
@@ -538,26 +521,20 @@ Deno.test("prepareVideoRenderGate wait_media stops resurrecting after the retry 
   assertEquals(meta.download_retry_exhausted, true);
 });
 
-Deno.test("prepareVideoRenderGate wait_media resets the resurrection budget for a new media row", async () => {
+Deno.test("prepareVideoRenderGate wait_media passes the current media id so the budget follows the dependency", async () => {
   const supabase = createFakeSupabase({
     settingsValue: { mode: "enabled" },
     mediaRows: [{ ...pendingVideo, id: "media-9" }],
     renderRows: [],
-    openJobs: [{
-      id: "job-failed-3",
-      status: "failed",
-      result_meta: { video_render_retry_cycle: 3, video_render_retry_media: "media-2" },
-    }],
+    rpcData: { enqueue_bounded_media_download: "resurrected" },
   });
 
   const gate = await prepareVideoRenderGate(supabase, "tweet-1", "test");
 
   assertEquals(gate.ready, false);
-  const job = firstCall(supabase.calls, "jobs", "upsert")
+  const rpc = firstCall(supabase.calls, "rpc", "enqueue_bounded_media_download")
     .payload as Record<string, unknown>;
-  const meta = job.result_meta as Record<string, unknown>;
-  assertEquals(meta.video_render_retry_cycle, 1);
-  assertEquals(meta.video_render_retry_media, "media-9");
+  assertEquals(rpc.p_media_id, "media-9");
 });
 
 Deno.test("nextDependencyWait backs off exponentially and stays under the cap", () => {

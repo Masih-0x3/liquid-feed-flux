@@ -11,7 +11,6 @@ import type { XMediaRow } from "../_shared/mediaSelection.ts";
 import { requireDeliveryCutover } from "../_shared/deliveryCutover.ts";
 import { requireExternalPosting } from "../_shared/externalPostingGuard.ts";
 import { insertPipelineEvent } from "./jobLifecycle.ts";
-import { isRecordValue } from "./workerUtils.ts";
 
 const VIDEO_RENDER_VERSION = "persian-subtitles-masihh-v1";
 export const VIDEO_RENDER_DEFER_MS = 30_000;
@@ -386,61 +385,23 @@ export async function prepareVideoRenderGate(
     const mediaId = typeof decision.media?.id === "string" && decision.media.id
       ? decision.media.id
       : null;
-    // 0X3-672: don't rewrite an already-open download job on every gate
-    // evaluation — the upsert used to reset attempts and next_run_at every
-    // defer cycle, a hot retry that also kept failures from ever accumulating.
-    // A closed row is resurrected only a bounded number of times: each cycle
-    // spends a full retry budget, so a permanently failing download cannot
-    // receive unlimited fresh budgets on every gate pass. The cycle count is
-    // persisted on the job row's result_meta (keyed to the media row id, so a
-    // genuinely new source video resets the budget) and survives defers.
-    const { data: downloadRows, error: downloadReadError } = await supabase
-      .from("jobs")
-      .select("id,status,result_meta")
-      .eq("idempotency_key", downloadKey)
-      .order("created_at", { ascending: false })
-      .limit(1);
-    if (downloadReadError) {
-      throw new Error("video_render_download_read_failed");
+    // 0X3-672: resurrection is one locked decision in the database, not a
+    // read-then-upsert — a stale evaluation can never overwrite a row that
+    // was claimed or resurrected by a concurrent gate pass. An open row is
+    // left untouched; a closed row is resurrected at most
+    // VIDEO_DOWNLOAD_MAX_RESURRECTIONS times per media identity (tracked in
+    // result_meta); exhaustion is reported without rewriting the row.
+    const { data: downloadEnqueueResult, error: downloadEnqueueError } = await supabase
+      .rpc("enqueue_bounded_media_download", {
+        p_idempotency_key: downloadKey,
+        p_tweet_id: tweetId,
+        p_media_id: mediaId,
+        p_max_resurrections: VIDEO_DOWNLOAD_MAX_RESURRECTIONS,
+      });
+    if (downloadEnqueueError) {
+      throw new Error("video_render_download_enqueue_failed");
     }
-    const existingDownload = Array.isArray(downloadRows) && downloadRows.length > 0
-      ? downloadRows[0]
-      : null;
-    const downloadOpen = existingDownload !== null &&
-      (existingDownload.status === "pending" || existingDownload.status === "running");
-    const existingMeta = isRecordValue(existingDownload?.result_meta)
-      ? existingDownload.result_meta
-      : {};
-    const storedMedia = existingMeta.video_render_retry_media ?? null;
-    const priorCycles = storedMedia === null || storedMedia === mediaId
-      ? Number(existingMeta.video_render_retry_cycle ?? 0)
-      : 0;
-    const downloadExhausted = !downloadOpen &&
-      Number.isFinite(priorCycles) &&
-      priorCycles >= VIDEO_DOWNLOAD_MAX_RESURRECTIONS;
-    if (!downloadOpen && !downloadExhausted) {
-      const { error: downloadQueueError } = await supabase.from("jobs").upsert({
-        type: "download_media",
-        payload: { tweet_id: tweetId, source: "video_render_gate" },
-        status: "pending",
-        priority: 12,
-        idempotency_key: downloadKey,
-        next_run_at: new Date().toISOString(),
-        locked_at: null,
-        locked_by: null,
-        lease_expires_at: null,
-        last_error: null,
-        attempts: 0,
-        result_meta: {
-          ...existingMeta,
-          video_render_retry_cycle: priorCycles + 1,
-          video_render_retry_media: mediaId,
-        },
-      }, { onConflict: "idempotency_key", ignoreDuplicates: false });
-      if (downloadQueueError) {
-        throw new Error("video_render_download_enqueue_failed");
-      }
-    }
+    const downloadExhausted = downloadEnqueueResult === "exhausted";
     await insertPipelineEvent(
       supabase,
       "post",

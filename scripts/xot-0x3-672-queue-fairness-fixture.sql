@@ -316,3 +316,48 @@ SELECT 'FACT_K2_translate=' || count(*) FROM xot672_claim_k2 WHERE type = 'trans
 SELECT 'FACT_K2_fast=' || count(*) FROM xot672_claim_k2 WHERE type NOT IN ('translate', 'enrich', 'deliver');
 SELECT 'FACT_K2_deliver=' || count(*) FROM xot672_claim_k2 WHERE type = 'deliver';
 SELECT 'FACT_K2_total=' || count(*) FROM xot672_claim_k2;
+
+-- ─── Scenario L: atomic bounded download resurrection ───────────────────────
+-- The wait_media gate delegates resurrection to
+-- enqueue_bounded_media_download(), which decides under one row lock. These
+-- facts pin the sequential contract; the harness adds a true two-session
+-- race probe on top.
+INSERT INTO public.jobs (type, payload, status, priority, attempts, next_run_at, created_at, idempotency_key, result_meta)
+VALUES ('download_media',
+        jsonb_build_object('tweet_id', 'xot672-l', 'source', 'video_render_gate'),
+        'failed', 12, 5, now(), now() - interval '1 hour', 'xot672:l:dl',
+        '{"video_render_retry_cycle": 2, "video_render_retry_media": "media-a"}')
+ON CONFLICT (idempotency_key) DO NOTHING;
+
+-- L1: a failed row inside the budget resurrects once, cycle -> 3.
+SELECT 'FACT_L1_result=' || public.enqueue_bounded_media_download('xot672:l:dl', 'xot672-l', 'media-a', 3);
+SELECT 'FACT_L1_status=' || status FROM public.jobs WHERE idempotency_key = 'xot672:l:dl';
+SELECT 'FACT_L1_cycle=' || (result_meta->>'video_render_retry_cycle') FROM public.jobs WHERE idempotency_key = 'xot672:l:dl';
+SELECT 'FACT_L1_attempts=' || attempts FROM public.jobs WHERE idempotency_key = 'xot672:l:dl';
+
+-- L2: the now-pending row is reported open and left untouched.
+SELECT 'FACT_L2_result=' || public.enqueue_bounded_media_download('xot672:l:dl', 'xot672-l', 'media-a', 3);
+SELECT 'FACT_L2_cycle=' || (result_meta->>'video_render_retry_cycle') FROM public.jobs WHERE idempotency_key = 'xot672:l:dl';
+
+-- L3: a stale evaluation cannot touch a row a worker already claimed.
+UPDATE public.jobs
+   SET status = 'running', locked_by = 'xot672-worker', lease_expires_at = now() + interval '5 minutes'
+ WHERE idempotency_key = 'xot672:l:dl';
+SELECT 'FACT_L3_result=' || public.enqueue_bounded_media_download('xot672:l:dl', 'xot672-l', 'media-a', 3);
+SELECT 'FACT_L3_status=' || status FROM public.jobs WHERE idempotency_key = 'xot672:l:dl';
+SELECT 'FACT_L3_lease_kept=' || (lease_expires_at IS NOT NULL) FROM public.jobs WHERE idempotency_key = 'xot672:l:dl';
+SELECT 'FACT_L3_cycle=' || (result_meta->>'video_render_retry_cycle') FROM public.jobs WHERE idempotency_key = 'xot672:l:dl';
+
+-- L4: a row at the budget ceiling is exhausted, not resurrected.
+UPDATE public.jobs
+   SET status = 'failed', locked_by = NULL, lease_expires_at = NULL,
+       result_meta = '{"video_render_retry_cycle": 3, "video_render_retry_media": "media-a"}'
+ WHERE idempotency_key = 'xot672:l:dl';
+SELECT 'FACT_L4_result=' || public.enqueue_bounded_media_download('xot672:l:dl', 'xot672-l', 'media-a', 3);
+SELECT 'FACT_L4_status=' || status FROM public.jobs WHERE idempotency_key = 'xot672:l:dl';
+SELECT 'FACT_L4_cycle=' || (result_meta->>'video_render_retry_cycle') FROM public.jobs WHERE idempotency_key = 'xot672:l:dl';
+
+-- L5: a different media identity resets the budget and resurrects.
+SELECT 'FACT_L5_result=' || public.enqueue_bounded_media_download('xot672:l:dl', 'xot672-l', 'media-b', 3);
+SELECT 'FACT_L5_cycle=' || (result_meta->>'video_render_retry_cycle') FROM public.jobs WHERE idempotency_key = 'xot672:l:dl';
+SELECT 'FACT_L5_media=' || (result_meta->>'video_render_retry_media') FROM public.jobs WHERE idempotency_key = 'xot672:l:dl';
