@@ -327,6 +327,9 @@ try {
     expectFact(facts, "FACT_L5_cycle", (v) => v === "1", "new media identity resets the cycle");
     expectFact(facts, "FACT_L5_media", (v) => v === "media-b", "new media identity stored");
     if (concurrency.overlap !== 0) failures.push(`concurrent claims overlapped ${concurrency.overlap}`);
+    if (concurrency.a !== 15 || concurrency.b !== 15) {
+      failures.push(`concurrent claims a=${concurrency.a} b=${concurrency.b} (expected 15/15 — empty results must not pass)`);
+    }
     if (race.winners !== 1 || race.losers !== 1) {
       failures.push(`resurrection race winners=${race.winners} losers=${race.losers} results=${race.results.join(",")}`);
     }
