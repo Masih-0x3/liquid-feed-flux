@@ -161,6 +161,7 @@ export default function Monitoring() {
   const [editedContent, setEditedContent] = useState('');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerTweetId, setDrawerTweetId] = useState<string | null>(null);
+  const drawerReturnFocusRef = useRef<HTMLElement | null>(null);
   const [timelineState, setTimelineState] = useState<TimelineState>({
     tweetId: null,
     events: [],
@@ -192,7 +193,8 @@ export default function Monitoring() {
   const mutationDisabledTitle = readOnly ? 'Read-only access: this action is disabled.' : undefined;
 
   const { entries, isLoading, hasNextPage, fetchNextPage, isFetchingNextPage, isFetching, error } = useMonitoringDataSearchWithScore(filter, debouncedSearch, scoreBucket);
-  const { data: overview } = useMonitoringOverview(24);
+  const overviewQuery = useMonitoringOverview(24);
+  const overview = overviewQuery.data;
   const { data: xSummary } = useXApiSummary(24);
 
   const deliverThreshold = overview?.threshold ?? 14;
@@ -357,7 +359,8 @@ export default function Monitoring() {
     closeDetails();
   }, [closeDetails]);
 
-  const openDetails = useCallback(async (tweetId: string) => {
+  const openDetails = useCallback(async (tweetId: string, trigger?: HTMLButtonElement | null) => {
+    if (trigger) drawerReturnFocusRef.current = trigger;
     const requestId = ++timelineRequestRef.current;
     setDrawerTweetId(tweetId);
     setDrawerOpen(true);
@@ -834,7 +837,7 @@ export default function Monitoring() {
           <p className="text-sm text-muted-foreground">Editorial triage for scoring, translation, delivery blockers, and X visibility</p>
           <p className="text-xs text-muted-foreground/80">Effective threshold: {deliverThreshold} · source: {thresholdSource}</p>
         </div>
-        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap lg:justify-end">
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap lg:justify-end">
           {!readOnly && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -885,7 +888,7 @@ export default function Monitoring() {
         </div>
       )}
 
-      <MonitoringQueueCards counts={counts} xSummary={xSummary} />
+      <MonitoringQueueCards counts={counts} xSummary={xSummary} loading={!overview && isLoading} stale={Boolean(overviewQuery.error)} updatedAt={overviewQuery.dataUpdatedAt} scope={overview ? 'Latest 10,000 posts and delivery rows; current pipeline state' : 'Overview unavailable — counts cover only loaded posts in this filtered queue'} />
 
       <Card>
         <MonitoringFilters
@@ -907,11 +910,14 @@ export default function Monitoring() {
         />
         <CardContent className="p-0">
           {isLoading ? (
-            <div className="flex min-h-[360px] items-center justify-center"><Loader2 className="w-8 h-8 animate-spin" /></div>
+            <div role="status" className="flex min-h-60 items-center justify-center gap-2 text-sm text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin" />Loading queue…</div>
           ) : error ? (
-            <div className="p-6 text-sm text-destructive">Monitoring failed to load: {(error as Error).message}</div>
+            <div role="alert" className="space-y-3 p-6 text-sm"><p className="text-destructive">Monitoring could not load. Check your connection and retry.</p><Button variant="outline" onClick={invalidate}>Retry queue</Button></div>
           ) : moderationEntries.length === 0 ? (
-            <div className="p-8 text-center text-sm text-muted-foreground">No entries found</div>
+            <div className="space-y-3 p-6 text-center text-sm text-muted-foreground">
+              <p>{searchTerm || filter !== 'all' || scoreBucket !== 'any' ? 'No entries match these filters.' : 'No posts are available in Monitoring yet.'}</p>
+              {searchTerm || filter !== 'all' || scoreBucket !== 'any' ? <Button variant="outline" onClick={() => { setSearchTerm(''); setFilter('all'); setScoreBucket('any'); }}>Clear filters</Button> : <Button variant="outline" onClick={invalidate}>Refresh queue</Button>}
+            </div>
           ) : (
             <>
               <div className="divide-y divide-border lg:hidden">
@@ -1013,6 +1019,12 @@ export default function Monitoring() {
       <MonitoringDetailDrawer
         open={drawerOpen}
         onOpenChange={handleDrawerOpenChange}
+        onRestoreFocus={() => {
+          const trigger = drawerReturnFocusRef.current;
+          drawerReturnFocusRef.current = null;
+          if (trigger?.isConnected) trigger.focus();
+          else document.getElementById('monitoring-post-search')?.focus();
+        }}
         tweetId={drawerTweetId}
         entry={selectedEntry}
         timeline={timeline}
@@ -1082,9 +1094,9 @@ export default function Monitoring() {
                 </p>
               </div>
               <div className="grid gap-2">
-                <Label>Reason tag</Label>
+                <Label htmlFor="manual-reason-tag">Reason tag</Label>
                 <ThemedSelect value={manualReasonTag || 'none'} onValueChange={(value) => setManualReasonTag(value === 'none' ? '' : value as ScoringFeedbackReasonTag)}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger id="manual-reason-tag"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Choose a reason</SelectItem>
                     {SCORING_REASON_TAGS.map((tag) => (
@@ -1103,9 +1115,9 @@ export default function Monitoring() {
                 />
               </div>
               <div className="grid gap-2">
-                <Label>Audience class feedback</Label>
+                <Label htmlFor="manual-audience">Audience class feedback</Label>
                 <ThemedSelect value={manualAudienceClass || 'none'} onValueChange={(value) => setManualAudienceClass(value === 'none' ? '' : value as AudienceClassValue)}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger id="manual-audience"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No class label</SelectItem>
                     <SelectItem value="direct_focus">Direct focus</SelectItem>

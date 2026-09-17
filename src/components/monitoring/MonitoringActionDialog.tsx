@@ -17,6 +17,7 @@ import {
   type PendingAction,
   type PendingBulkAction,
 } from "@/lib/monitoringActions";
+import { useRuntimeControls } from "@/hooks/useRuntimeControls";
 import { Loader2 } from "lucide-react";
 
 interface MonitoringActionDialogProps {
@@ -37,6 +38,7 @@ export function MonitoringActionDialog({
   onConfirmBulkAction,
 }: MonitoringActionDialogProps) {
   const context = actionContextText(pendingAction, pendingBulkAction);
+  const { controls, error } = useRuntimeControls(Boolean(pendingAction || pendingBulkAction));
 
   return (
     <AlertDialog
@@ -54,6 +56,7 @@ export function MonitoringActionDialog({
               : pendingBulkAction ? bulkActionTitle(pendingBulkAction.type, pendingBulkAction.tweetIds.length) : ''}
           </AlertDialogTitle>
           <AlertDialogDescription>
+            <span className="mb-2 block font-medium text-foreground">Environment: {error ? 'unavailable' : controls?.environment ?? 'unavailable'}</span>
             {pendingAction
               ? actionDescription(pendingAction)
               : pendingBulkAction

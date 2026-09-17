@@ -315,7 +315,7 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
                   <span className="text-sm text-muted-foreground">Minimum score to deliver</span>
                   <Badge variant="outline" className="text-lg px-3 py-1">{config.default_threshold}/20</Badge>
                 </div>
-                <Slider
+                <Slider aria-label="Default threshold"
                   value={[config.default_threshold]}
                   onValueChange={([v]) => updateConfig({ ...config, default_threshold: v })}
                   min={1}
@@ -390,7 +390,7 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
                                       </TableCell>
                                       <TableCell>
                                         <Select value={rule} onValueChange={(v) => setAuthorRule(handle, v)} disabled={legacyReadOnly}>
-                                          <SelectTrigger className="w-[180px]">
+                                          <SelectTrigger aria-label={`Legacy scoring rule for @${handle}`} className="w-[180px]">
                                             <SelectValue />
                                           </SelectTrigger>
                                           <SelectContent>
@@ -404,7 +404,7 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
                                       <TableCell>
                                         {rule === 'custom_threshold' ? (
                                           <div className="flex items-center gap-2">
-                                            <Slider
+                                            <Slider aria-label={`Legacy threshold for @${handle}`}
                                               value={[getAuthorThreshold(handle)]}
                                               onValueChange={([v]) => setAuthorRule(handle, 'custom_threshold', v)}
                                               min={1}
@@ -457,7 +457,7 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <Textarea
+            <Textarea aria-label="Editorial guidelines"
               value={config.editorial_guidelines}
               onChange={(e) => updateConfig({ ...config, editorial_guidelines: e.target.value })}
               className="glass-input min-h-[120px]"
@@ -471,7 +471,7 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
                 Hints so the model leans higher when a topic is relevant — not a hard allow-list unless combined with editorial profile rules.
               </p>
               <div className="flex gap-2">
-                <Input
+                <Input aria-label="High Priority Topics (boost score)"
                   value={newPriorityTopic}
                   onChange={(e) => setNewPriorityTopic(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && addTopic('priority')}
@@ -479,7 +479,7 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
                   className="glass-input"
                   disabled={legacyReadOnly}
                 />
-                <Button variant="outline" size="icon" onClick={() => addTopic('priority')} disabled={legacyReadOnly}><Plus className="w-4 h-4" /></Button>
+                <Button variant="outline" size="icon" aria-label="Add high priority topic" onClick={() => addTopic('priority')} disabled={legacyReadOnly}><Plus className="w-4 h-4" /></Button>
               </div>
               <div className="flex flex-wrap gap-2">
                 {config.priority_topics.map(topic => (
@@ -497,7 +497,7 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
                 Hints to de-emphasize matching content; does not automatically skip posts.
               </p>
               <div className="flex gap-2">
-                <Input
+                <Input aria-label="Low Priority Topics (lower score)"
                   value={newLowPriorityTopic}
                   onChange={(e) => setNewLowPriorityTopic(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && addTopic('low_priority')}
@@ -505,7 +505,7 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
                   className="glass-input"
                   disabled={legacyReadOnly}
                 />
-                <Button variant="outline" size="icon" onClick={() => addTopic('low_priority')} disabled={legacyReadOnly}><Plus className="w-4 h-4" /></Button>
+                <Button variant="outline" size="icon" aria-label="Add low priority topic" onClick={() => addTopic('low_priority')} disabled={legacyReadOnly}><Plus className="w-4 h-4" /></Button>
               </div>
               <div className="flex flex-wrap gap-2">
                 {config.low_priority_topics.map(topic => (

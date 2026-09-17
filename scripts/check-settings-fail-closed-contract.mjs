@@ -94,7 +94,7 @@ function assertContract(sources, label) {
     label + " enrichment config baseline state",
   );
   assertIncludes(sources.enrichment, "const [loadError, setLoadError] = useState(false);", label + " enrichment error state");
-  assertIncludes(sources.enrichment, "setConfig(null);", label + " enrichment fail-closed state reset");
+  assertIncludes(sources.enrichment, "setLoadedConfig(null);", label + " enrichment fail-closed state reset");
   assertIncludes(sources.enrichment, "setLoadError(true);", label + " enrichment load failure");
   assertIncludes(sources.enrichment, "function parseEnrichmentConfig(value: unknown): EnrichmentConfig | null", label + " enrichment parser");
   assertIncludes(sources.enrichment, "parseEnrichmentConfig(enrichmentConfig)", label + " enrichment parsed baseline");
@@ -145,14 +145,14 @@ function assertContract(sources, label) {
   assertOrder(
     sources.enrichment,
     "const data = await fetchSettingsRows",
-    "setConfig(parsedConfig);",
+    "setLoadedConfig(parsedConfig);",
     label + " enrichment default construction",
   );
   const enrichmentLoadStart = sources.enrichment.indexOf("async function loadSettings()");
   const enrichmentFetch = sources.enrichment.indexOf("const data = await fetchSettingsRows");
   const enrichmentLoadPrefix = sources.enrichment.slice(enrichmentLoadStart, enrichmentFetch);
-  assertNotIncludes(enrichmentLoadPrefix, "setConfig({", label + " enrichment pre-read writable default");
-  assertNotIncludes(enrichmentLoadPrefix, "setConfig(DEFAULT_CONFIG)", label + " enrichment pre-read writable default");
+  assertNotIncludes(enrichmentLoadPrefix, "setLoadedConfig({", label + " enrichment pre-read writable default");
+  assertNotIncludes(enrichmentLoadPrefix, "setLoadedConfig(DEFAULT_CONFIG)", label + " enrichment pre-read writable default");
   assertOrder(
     sources.enrichment,
     "if (loadError || !config)",
@@ -162,16 +162,16 @@ function assertContract(sources, label) {
 
   assertIncludes(sources.video, "if (configQuery.isLoading)", label + " video loading state");
   assertIncludes(sources.video, "function isVideoRenderConfig(value: unknown): value is VideoRenderConfigValue", label + " video config parser");
-  assertIncludes(sources.video, "if (isVideoRenderConfig(config) && !draft)", label + " video parsed baseline");
-  assertIncludes(sources.video, "useState<VideoRenderConfigValue | null>(null)", label + " video draft baseline");
+  assertIncludes(sources.video, "isVideoRenderConfig(configQuery.data?.config) ? cloneConfig(configQuery.data.config) : null", label + " video parsed baseline");
+  assertIncludes(sources.video, "useSettingsDraft('video-rendering', 'Video rendering settings', incoming)", label + " video draft baseline");
   assertNotIncludes(sources.video, "useState<VideoRenderConfigValue>(DEFAULT_", label + " video draft baseline");
-  assertIncludes(sources.video, "if (configQuery.isError || configQuery.error || !draft)", label + " video error gate");
+  assertIncludes(sources.video, "if (configQuery.isError || configQuery.error || !incoming || !draft)", label + " video error gate");
   assertNotIncludes(sources.video, "if (configQuery.isLoading || !draft)", label + " video permanent spinner");
   assertIncludes(sources.video, "Video rendering settings are unavailable", label + " video error title");
   assertIncludes(sources.video, "configQuery.refetch()", label + " video retry");
   assertOrder(
     sources.video,
-    "if (configQuery.isError || configQuery.error || !draft)",
+    "if (configQuery.isError || configQuery.error || !incoming || !draft)",
     "const set = (patch: Partial<VideoRenderConfigValue>)",
     label + " video error gate",
   );
@@ -202,7 +202,7 @@ function makeEnrichmentWritableDefaultMutant(input) {
 
 function makeVideoSpinnerMutant(input) {
   return input.replace(
-    "if (configQuery.isError || configQuery.error || !draft)",
+    "if (configQuery.isError || configQuery.error || !incoming || !draft)",
     "if (configQuery.isLoading || !draft)",
   );
 }
@@ -217,7 +217,7 @@ function makeEnrichmentParserMutant(input) {
 function makeEnrichmentPreloadDefaultMutant(input) {
   return input.replace(
     "async function loadSettings() {",
-    "async function loadSettings() {" + String.fromCharCode(10) + "    setConfig({ ...DEFAULT_CONFIG });",
+    "async function loadSettings() {" + String.fromCharCode(10) + "    setLoadedConfig({ ...DEFAULT_CONFIG });",
   );
 }
 
@@ -244,7 +244,7 @@ function makeProfileNestedFieldMutant(input) {
 
 function makeVideoParserMutant(input) {
   return input.replace(
-    "if (isVideoRenderConfig(config) && !draft)",
+    "isVideoRenderConfig(configQuery.data?.config) ? cloneConfig(configQuery.data.config) : null",
     "if (config && !draft)",
   );
 }

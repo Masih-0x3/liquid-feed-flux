@@ -301,6 +301,84 @@ Secret/config rollback:
 
 Add new entries at the top.
 
+### 2026-09-12 - Dashboard UI audit and private media review
+
+The owner authorized the 23-issue UI remediation and its production release.
+PR #122 updates dashboard navigation, status presentation, Settings editing and
+read-only access, and private media review. The media broker also resolves the
+existing URL-backed and numeric archive identities while preserving ownership
+and private-media authorization checks.
+
+```text
+Application Git SHA: f59fe3a8e1fc166ef01b0c099bc821b28d3d157e
+GitHub PR: https://github.com/Masih-0x3/liquid-feed-flux/pull/122
+Main GitHub CI: https://github.com/Masih-0x3/liquid-feed-flux/actions/runs/34715469594 (attempt 2 success)
+Candidate GitHub CI: https://github.com/Masih-0x3/liquid-feed-flux/actions/runs/34714692764 (attempt 2 success at 1dfdf9919ebf6ba493bbad3b7767f7470bd4a4de)
+Candidate CircleCI: pipeline 95, job 21, workflow cf58ae81-7a99-4a38-9f71-f4cb23bebfe1 (success at 2026-09-12T19:52:44.034Z)
+Main CircleCI: https://circleci.com/gh/Masih-0x3/liquid-feed-flux/23 (pipeline 96, success at 2026-09-12T20:10:34.634Z)
+Vercel deployment: dpl_7nMBdvrq5nYXEXPdTdKAAD7QBpXc (READY, production, same application SHA)
+Vercel deployed at: 2026-09-12T19:53:49Z
+Vercel aliases checked: https://xot.iraneyes.com and https://xot.vercel.app (both HTTP 200)
+Matching alias ETag: 464d11d96a6e9147e426dc93a3f95af0
+Production build runtime: Node 24.19 / npm 11.17; runtime contract and 85-file build identity check passed
+Supabase project ref: jzirqfzzvlbxwfzndaer
+Migration head before and after: 20260908130948 reserve_x_media_upload_quota (unchanged)
+Selected function code deploy: admin-actions 221 -> 222
+DEPLOY_GIT_SHA: f59fe3a8e1fc166ef01b0c099bc821b28d3d157e (stamped after code deploy succeeded)
+admin-actions after shared SHA stamp: 223 (ACTIVE, verify_jwt=true)
+Smoke observations: 2026-09-12 19:56-20:09 UTC
+Renderer: lightning-xot-1 remains paused; last heartbeat 2026-09-11T16:06:54.409Z, displayed stale at 2026-09-12T20:04:41Z
+Frontend rollback: dpl_HBJf9Wc7MknNXqpSDKRj9Z4m5oG3 / fe1097bfd35f119c29442ac3b3bd6988c67e516a
+Backend rollback: previous admin-actions version 221 / source 407ecce68fc52f17714c3781051073fc1821d329
+```
+
+The function inventory was captured before code deployment, after code deployment,
+and after the shared SHA stamp. Only `admin-actions` received a code deployment.
+Stamping `DEPLOY_GIT_SHA` then incremented every function version once. All ten
+functions remained ACTIVE and retained their prior JWT settings.
+
+| Function | Before | After code deploy | After SHA stamp |
+| --- | ---: | ---: | ---: |
+| webhooks-rssapp | 254 | 254 | 255 |
+| admin-retry | 211 | 211 | 212 |
+| worker | 293 | 293 | 294 |
+| media-cleanup | 215 | 215 | 216 |
+| media-processor | 219 | 219 | 220 |
+| db-cleanup | 179 | 179 | 180 |
+| admin-actions | 221 | 222 | 223 |
+| digest-compiler | 139 | 139 | 140 |
+| x-poster | 169 | 169 | 170 |
+| x-followers-snapshot | 130 | 130 | 131 |
+
+The final candidate passed 345 frontend tests, 586 backend tests, 230 renderer
+tests against unchanged renderer source, 127 source contracts, strict types,
+and the production build. Lint reported zero errors and ten existing warnings.
+GitHub's merged-SHA rerun passed all 161 steps, including final owner acceptance.
+Its accepted hosted artifact is
+`xot-supply-chain-accepted-f59fe3a8e1fc166ef01b0c099bc821b28d3d157e`
+(artifact `10303704880`); independent read-only validation of that artifact passed.
+
+The hosted supply scan contains 367 HIGH/CRITICAL observations, zero actionable
+HIGH/CRITICAL findings, and no waivers. The owner approved those findings on
+September 12. Binding the policy to the merged SHA compared every finding with
+the approved `061be13` scan and retained the original decision, signature time
+`2026-09-12T19:00:06.769Z`, and expiry `2026-10-12T00:50:46.850Z`.
+
+Authenticated desktop checks covered all seven routes, all eight Settings tabs,
+keyboard tab selection, and 404 recovery. They reported the full released backend
+SHA. Live mobile viewport emulation did not take effect; responsive evidence
+remains the earlier local screenshots and tests.
+Source and output video previews both decoded at 1920x1080 with duration 39.168
+seconds, `readyState=4`, and no media error. A download grant was issued, but
+Comet reported `ERR_BLOCKED_BY_CLIENT` and blocked the transfer. A completed
+browser download is therefore unverified, and `0X3-400` remains open. Native
+VoiceOver and motion review at 10% playback speed also remain unverified.
+
+The two cleanup cron jobs remain disabled, and the latest 15 observed worker
+cron invocations succeeded. The renderer's paused/stale state predates this
+release. No migration, renderer replacement, cleanup activation, provider test,
+public post, or historical replay was performed in this release.
+
 ### 2026-09-08 - V2 remediation backend and renderer release
 
 The owner authorized the production update on September 8. This release brings

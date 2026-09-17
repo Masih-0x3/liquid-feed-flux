@@ -18,7 +18,7 @@ describe('read-only mutation inventory', () => {
   ])('%s uses the canonical auth role seam', (relativePath) => {
     const contents = source(relativePath);
     expect(contents).toContain('useAuth');
-    expect(contents).toMatch(/["']read_only["']/);
+    expect(contents).toMatch(/["'](?:read_only|admin)["']/);
   });
 
   it('gates each owned mutation surface and handler', () => {
@@ -41,11 +41,12 @@ describe('read-only mutation inventory', () => {
 
   it('fails closed for Downloader metadata lookup in read-only mode', () => {
     const contents = source('src/pages/Downloader.tsx');
-    expect(contents).toContain('resolve_x_media');
+    expect(contents).toContain('getMediaCatalog');
+    expect(contents).not.toContain('resolve_x_media');
     expect(contents).not.toContain('.mutate(');
     expect(contents).not.toContain('update_');
     expect(contents).toContain('disabled={loading || readOnly}');
     expect(contents).toContain('if (readOnly)');
-    expect(contents).toContain('Media metadata lookup is unavailable for read-only access.');
+    expect(contents).toContain("mediaAccessMessage('media_access_denied')");
   });
 });

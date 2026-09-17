@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -85,11 +85,32 @@ describe("monitoring page", () => {
     monitoringHooks.useXApiSummary.mockReturnValue({ data: undefined });
   });
 
+  it("focuses Details on open and returns to its trigger after Escape", async () => {
+    monitoringHooks.useMonitoringDataSearchWithScore.mockReturnValue({
+      entries: [makeManualScoreEntry()], isLoading: false, hasNextPage: false,
+      fetchNextPage: vi.fn(), isFetchingNextPage: false, isFetching: false, error: null,
+    });
+    renderMonitoring();
+    const trigger = screen.getAllByRole('button', { name: 'Details', exact: true })[0];
+    trigger.focus();
+    fireEvent.click(trigger);
+    const dialog = await screen.findByRole('dialog', { name: 'Pipeline Details' });
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    // jsdom has neither CSS animation playback nor AnimationEvent; deliver the browser's completion signal.
+    const animationEnd = new Event('animationend', { bubbles: true });
+    Object.defineProperty(animationEnd, 'animationName', { value: getComputedStyle(dialog).animationName });
+    fireEvent(dialog, animationEnd);
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
   it("renders the empty state and normalizes URL filter values before fetching", () => {
     renderMonitoring("/monitoring?filter=x-failed");
 
-    expect(screen.getByText("No entries found")).toBeInTheDocument();
+    expect(screen.getByText("No entries match these filters.")).toBeInTheDocument();
     expect(monitoringHooks.useMonitoringDataSearchWithScore).toHaveBeenCalledWith("x_failed", "", "any");
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(monitoringHooks.useMonitoringDataSearchWithScore).toHaveBeenLastCalledWith("all", "", "any");
   });
 
   it("keeps the process HUD off the monitoring workbench while preserving post actions", () => {

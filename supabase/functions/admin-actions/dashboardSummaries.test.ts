@@ -256,6 +256,9 @@ Deno.test("dashboard summary degrades instead of throwing when the base RPC fail
     >;
 
     assertEquals(dashboard.dashboard_error, "dashboard_query_failed");
+    const quality = dashboard.data_quality as { unavailable_sections: string[]; observed_at: string };
+    assertEquals(quality.unavailable_sections.includes("base_summary"), true);
+    assertEquals(Number.isFinite(Date.parse(quality.observed_at)), true);
     assertEquals(dashboard.ops_status, {
       severity: "critical",
       primary_issue: "Dashboard base summary is degraded",

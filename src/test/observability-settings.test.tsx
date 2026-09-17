@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -88,11 +88,13 @@ describe('ObservabilitySettings', () => {
     expect(screen.getByText('Floating HUD')).toBeInTheDocument();
   });
 
-  it('surfaces dashboard summary errors', () => {
+  it('surfaces dashboard summary errors with a local retry', () => {
+    const refetch = vi.fn();
     mockedUseDashboardData.mockReturnValue({
       data: undefined,
       isLoading: false,
       error: new Error('summary unavailable'),
+      refetch,
     } as ReturnType<typeof useDashboardData>);
 
     render(
@@ -102,6 +104,8 @@ describe('ObservabilitySettings', () => {
     );
 
     expect(screen.getByText('Process observability status is unavailable from admin-actions.')).toBeInTheDocument();
-    expect(screen.getByText('summary unavailable')).toBeInTheDocument();
+    expect(screen.getByText(/The local summary could not be loaded/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry observability' }));
+    expect(refetch).toHaveBeenCalledTimes(1);
   });
 });

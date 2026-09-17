@@ -1,7 +1,8 @@
 import { assert } from "jsr:@std/assert";
 
 Deno.test("manual posting guard precedes durable post_requested state and event writes", async () => {
-  const source = await Deno.readTextFile(new URL("./manualVideoIntakeActions.ts", import.meta.url));
+  const moduleSource = await Deno.readTextFile(new URL("./manualVideoIntakeActions.ts", import.meta.url));
+  const source = moduleSource.slice(moduleSource.indexOf("export async function manualVideoIntakePostAdminAction("));
   const guards = [...source.matchAll(/await runManualExternalPostingGuard\(supabase, deps\);/g)]
     .map((match) => match.index ?? -1);
   const state = source.indexOf('status: "post_requested"');

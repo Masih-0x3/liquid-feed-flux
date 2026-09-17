@@ -90,6 +90,14 @@ describe("dashboard data API", () => {
     expect(invokeAdminReadMock).toHaveBeenCalledWith({ action: "get_dashboard_summary" });
   });
 
+  it("preserves unavailable sections and does not label absent diagnostics as successful", async () => {
+    invokeAdminReadMock.mockResolvedValueOnce({ success: true, dashboard: rpcSummary({ data_quality: { unavailable_sections: ["posts", "queue_breakdown"], observed_at: "2026-09-11T20:00:00Z" } }) });
+    const result = await fetchDashboardData();
+    expect(result.dataQuality.unavailableSections).toEqual(["posts", "queue_breakdown"]);
+    expect(result.systemPerformance.success).toBe(false);
+    expect(result.systemPerformance.resources.available).toBe(false);
+  });
+
   it("surfaces admin-action failures instead of falling back to direct RPC", async () => {
     invokeAdminReadMock.mockResolvedValueOnce({ success: false, error: "edge function unavailable" });
 

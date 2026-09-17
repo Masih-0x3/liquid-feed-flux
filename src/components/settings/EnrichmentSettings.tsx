@@ -13,6 +13,9 @@ import { AlertTriangle, ChevronDown, Plus, X, Sparkles, Search, PenTool, Wand2, 
 import { useToast } from '@/hooks/use-toast';
 import { invokeAdminAction } from '@/api/adminActions';
 import { fetchSettingsRows, saveSetting } from '@/api/settingsData';
+import { ConfirmSettingsAction } from '@/components/settings/ConfirmSettingsAction';
+import { useSettingsDraft, useSettingsSave, SettingsSaveStatus, SettingsIncomingNotice } from '@/components/settings/SettingsDrafts';
+import { EnrichmentResearchThreshold } from '@/components/settings/EnrichmentResearchThreshold';
 
 interface EnrichmentConfig {
   enabled: boolean;
@@ -308,12 +311,17 @@ export default function EnrichmentSettings() {
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [generatingProfile, setGeneratingProfile] = useState(false);
-  const [config, setConfig] = useState<EnrichmentConfig | null>(null);
+  const [loadedConfig, setLoadedConfig] = useState<EnrichmentConfig | null>(null);
+  const configDraft = useSettingsDraft('enrichment', 'Enrichment settings', loadedConfig);
+  const { draft: config, updateDraft: setConfig } = configDraft;
   const [usingDefaultBaseline, setUsingDefaultBaseline] = useState(false);
-  const [voiceSamples, setVoiceSamples] = useState<VoiceSamples>({ samples: [], updated_at: null });
-  const [voiceGuide, setVoiceGuide] = useState<VoiceGuide>({ guide: DEFAULT_MASIH_VOICE_GUIDE, updated_at: null });
+  const [loadedSamples, setLoadedSamples] = useState<VoiceSamples>({ samples: [], updated_at: null });
+  const samplesDraft = useSettingsDraft('voice-samples', 'Voice samples', loadedSamples);
+  const { draft: voiceSamples, updateDraft: setVoiceSamples } = samplesDraft;
+  const [loadedGuide, setLoadedGuide] = useState<VoiceGuide>({ guide: DEFAULT_MASIH_VOICE_GUIDE, updated_at: null });
+  const guideDraft = useSettingsDraft('voice-guide', 'Voice guide', loadedGuide);
+  const { draft: voiceGuide, updateDraft: setVoiceGuide } = guideDraft;
   const [voiceProfile, setVoiceProfile] = useState<PersonalVoiceProfile | null>(null);
   const [newSample, setNewSample] = useState('');
   const [newBannedPhrase, setNewBannedPhrase] = useState('');
@@ -326,10 +334,10 @@ export default function EnrichmentSettings() {
   async function loadSettings() {
     setLoading(true);
     setLoadError(false);
-    setConfig(null);
+    setLoadedConfig(null);
     setUsingDefaultBaseline(false);
-    setVoiceSamples({ samples: [], updated_at: null });
-    setVoiceGuide({ guide: DEFAULT_MASIH_VOICE_GUIDE, updated_at: null });
+    setLoadedSamples({ samples: [], updated_at: null });
+    setLoadedGuide({ guide: DEFAULT_MASIH_VOICE_GUIDE, updated_at: null });
     setVoiceProfile(null);
     try {
       const data = await fetchSettingsRows(['enrichment_config', 'voice_samples', 'voice_guide', 'personal_voice_profile']);
@@ -344,7 +352,7 @@ export default function EnrichmentSettings() {
       if (!parsedConfig) {
         throw new Error('invalid_enrichment_config');
       }
-      setConfig(parsedConfig);
+      setLoadedConfig(parsedConfig);
       setUsingDefaultBaseline(enrichmentConfig === undefined || enrichmentConfig === null);
 
       const samples = byKey.get('voice_samples');
@@ -352,7 +360,7 @@ export default function EnrichmentSettings() {
         if (!isRecord(samples) || !Array.isArray(samples.samples) || !samples.samples.every((sample) => typeof sample === 'string')) {
           throw new Error('invalid_voice_samples');
         }
-        setVoiceSamples({
+        setLoadedSamples({
           samples: samples.samples,
           updated_at: typeof samples.updated_at === 'string' ? samples.updated_at : null,
         });
@@ -363,7 +371,7 @@ export default function EnrichmentSettings() {
         if (!isRecord(guide) || (guide.guide !== undefined && typeof guide.guide !== 'string')) {
           throw new Error('invalid_voice_guide');
         }
-        setVoiceGuide({
+        setLoadedGuide({
           guide: typeof guide.guide === 'string' && guide.guide.trim() ? guide.guide : DEFAULT_MASIH_VOICE_GUIDE,
           updated_at: typeof guide.updated_at === 'string' ? guide.updated_at : null,
         });
@@ -376,7 +384,7 @@ export default function EnrichmentSettings() {
         setVoiceProfile(parsedProfile);
       }
     } catch {
-      setConfig(null);
+      setLoadedConfig(null);
       setUsingDefaultBaseline(false);
       setLoadError(true);
       console.warn(JSON.stringify({ component: 'EnrichmentSettings', action: 'settings_load_failed' }));
@@ -385,52 +393,36 @@ export default function EnrichmentSettings() {
     }
   }
 
+  const invalidResearchThreshold = config !== null && (config.skip_research_below_score < 0 || config.skip_research_below_score > 20);
+  const configSave = useSettingsSave(configDraft, async (value) => {
+    if (!value || invalidResearchThreshold) throw new Error('Correct the research threshold before saving');
+    await saveSetting({ key: 'enrichment_config', value });
+  });
+  const guideSave = useSettingsSave(guideDraft, (value) => saveSetting({ key: 'voice_guide', value: { guide: value.guide.trim() || DEFAULT_MASIH_VOICE_GUIDE, updated_at: new Date().toISOString() } }));
+  const samplesSave = useSettingsSave(samplesDraft, (value) => saveSetting({ key: 'voice_samples', value: { ...value, updated_at: new Date().toISOString() } }));
+  const saving = configSave.saving;
   async function saveConfig() {
-    if (!config) return;
-    setSaving(true);
-    try {
-      await saveSetting({ key: 'enrichment_config', value: config });
-      toast({ title: 'Saved', description: 'Enrichment configuration updated.' });
-    } catch (e) {
-      toast({ title: 'Error', description: (e as Error).message, variant: 'destructive' });
-    }
-    setSaving(false);
+    if (!config || invalidResearchThreshold) return;
+    await configSave.save();
   }
-
-  async function saveVoiceSamples(samples: string[]) {
-    const updated = { samples, updated_at: new Date().toISOString() };
-    setVoiceSamples(updated);
-    try {
-      await saveSetting({ key: 'voice_samples', value: updated });
-      toast({ title: 'Saved', description: 'Voice samples updated.' });
-    } catch (e) {
-      toast({ title: 'Error', description: (e as Error).message, variant: 'destructive' });
-    }
-  }
-
-  async function saveVoiceGuideOnly() {
-    const updated = { guide: voiceGuide.guide.trim() || DEFAULT_MASIH_VOICE_GUIDE, updated_at: new Date().toISOString() };
-    setVoiceGuide(updated);
-    try {
-      await saveSetting({ key: 'voice_guide', value: updated });
-      toast({ title: 'Saved', description: '@masihh voice guide updated.' });
-    } catch (e) {
-      toast({ title: 'Error', description: (e as Error).message, variant: 'destructive' });
-    }
+  const saveVoiceGuideOnly = () => { void guideSave.save(); };
+  function saveVoiceSamples(samples: string[]) {
+    setVoiceSamples({ ...voiceSamples, samples });
   }
 
   async function generateVoiceProfile() {
+    const submittedGuide = voiceGuide;
     setGeneratingProfile(true);
     try {
       const data = await invokeAdminAction<{ ok?: boolean; error?: string; profile?: unknown; usage?: unknown }>(
-        { action: 'generate_voice_profile', guide: voiceGuide.guide },
+        { action: 'generate_voice_profile', guide: submittedGuide.guide },
         { throwOnFailure: false },
       );
       if (data?.ok === false) throw new Error(data.error ?? 'Voice profile generation failed');
       const profile = parsePersonalVoiceProfile(data?.profile);
       if (!profile) throw new Error('invalid_personal_voice_profile');
       setVoiceProfile(profile);
-      setVoiceGuide({ guide: voiceGuide.guide, updated_at: new Date().toISOString() });
+      guideDraft.markSaved(submittedGuide);
       toast({ title: 'Profile generated', description: `GPT-5.4 Mini used ${data.usage ?? 'unknown'} tokens.` });
     } catch (e) {
       toast({ title: 'Profile failed', description: (e as Error).message, variant: 'destructive' });
@@ -496,6 +488,8 @@ export default function EnrichmentSettings() {
 
   return (
     <div className="space-y-6">
+      <SettingsSaveStatus label="Enrichment settings" dirty={configDraft.isDirty} {...configSave} onSave={() => { void saveConfig(); }} disabled={configDraft.hasPendingIncoming || invalidResearchThreshold} />
+      <SettingsIncomingNotice editor={configDraft} />
       {usingDefaultBaseline && (
         <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-muted-foreground">
           No saved enrichment configuration exists yet. You are viewing the authoritative default baseline; saving will create the first record.
@@ -503,45 +497,44 @@ export default function EnrichmentSettings() {
       )}
 
       {/* Master Toggle */}
-      <Card>
+      <Card id="enrichment-config" className="scroll-mt-48">
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
+          <div className="flex flex-col items-start justify-between gap-4 sm:flex-row">
+            <div className="min-w-0">
               <CardTitle className="flex items-center gap-2">
-                <Sparkles className="w-5 h-5" />
+                <Sparkles className="w-5 h-5 shrink-0" />
                 AI Commentary Pipeline
               </CardTitle>
               <CardDescription>
                 Creator-analysis drafts are separate from normal Telegram/X delivery. Manual-only mode lets X keep using plain translations.
               </CardDescription>
             </div>
-            <Switch
+            <Switch aria-label="Enable AI commentary pipeline"
               checked={config.enabled}
               onCheckedChange={(enabled) => setConfig({ ...config, enabled })}
             />
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Model</Label>
-              <Input value={config.model} onChange={(e) => setConfig({ ...config, model: e.target.value })} />
+              <Input aria-label="Model" value={config.model} onChange={(e) => setConfig({ ...config, model: e.target.value })} />
             </div>
             <div className="space-y-2">
               <Label>Require Approval Before Posting</Label>
               <div
-                className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${config.require_approval ? 'border-green-500/40 bg-green-500/5' : 'border-red-500/40 bg-red-500/5'}`}
-                onClick={() => setConfig({ ...config, require_approval: !config.require_approval })}
+                className={`flex items-start gap-3 p-3 rounded-lg border ${config.require_approval ? 'border-green-500/40 bg-green-500/5' : 'border-red-500/40 bg-red-500/5'}`}
               >
-                <Switch
+                <Switch aria-label="Require Approval Before Posting"
                   checked={config.require_approval}
                   onCheckedChange={(require_approval) => setConfig({ ...config, require_approval })}
                 />
                 <div className="text-sm">
                   {config.require_approval ? (
-                    <span className="text-green-400 font-medium">Enabled -- enriched drafts must be approved before their text is used on X</span>
+                    <span className="text-green-400 font-medium">Enabled — enriched drafts must be approved before their text is used on X</span>
                   ) : (
-                    <span className="text-red-400 font-medium">Disabled -- only auto mode can use approved critic output without review</span>
+                    <span className="text-red-400 font-medium">Disabled — only auto mode can use approved critic output without review</span>
                   )}
                 </div>
               </div>
@@ -565,7 +558,7 @@ export default function EnrichmentSettings() {
           <div className="space-y-2">
             <Label>Mode</Label>
             <Select value={config.mode} onValueChange={(mode) => setConfig({ ...config, mode: mode as EnrichmentConfig['mode'] })}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger aria-label="Mode"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="creator_analysis">Creator analysis</SelectItem>
                 <SelectItem value="legacy">Legacy commentary</SelectItem>
@@ -575,7 +568,7 @@ export default function EnrichmentSettings() {
           <div className="space-y-2">
             <Label>Pipeline Mode</Label>
             <Select value={config.pipeline_mode} onValueChange={(pipeline_mode) => setConfig({ ...config, pipeline_mode: pipeline_mode as EnrichmentConfig['pipeline_mode'] })}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger aria-label="Pipeline Mode"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="manual_only">Manual only</SelectItem>
                 <SelectItem value="shadow_review">Shadow + review</SelectItem>
@@ -589,7 +582,7 @@ export default function EnrichmentSettings() {
           <div className="space-y-2">
             <Label>Draft Review</Label>
             <Select value={config.review_mode} onValueChange={(review_mode) => setConfig({ ...config, review_mode: review_mode as EnrichmentConfig['review_mode'] })}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger aria-label="Draft Review"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="shadow_review">Shadow + review</SelectItem>
                 <SelectItem value="auto_high_confidence">Auto high-confidence</SelectItem>
@@ -600,7 +593,7 @@ export default function EnrichmentSettings() {
           <div className="space-y-2">
             <Label>Source Attribution</Label>
             <Select value={config.source_attribution_policy} onValueChange={(source_attribution_policy) => setConfig({ ...config, source_attribution_policy: source_attribution_policy as EnrichmentConfig['source_attribution_policy'] })}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger aria-label="Source Attribution"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="compact">Compact attribution</SelectItem>
                 <SelectItem value="always">Always cite source</SelectItem>
@@ -612,7 +605,7 @@ export default function EnrichmentSettings() {
       </Card>
 
       {/* Anti-Aggregator Guard */}
-      <Card>
+      <Card id="enrichment-voice" className="scroll-mt-48">
         <CardHeader>
           <CardTitle>Anti-Aggregator Guard</CardTitle>
           <CardDescription>
@@ -624,27 +617,27 @@ export default function EnrichmentSettings() {
             <div className="space-y-2">
               <Label>Aggregator Review / Reject</Label>
               <div className="grid grid-cols-2 gap-2">
-                <Input type="number" value={config.aggregator_review_threshold} onChange={(e) => setConfig({ ...config, aggregator_review_threshold: +e.target.value })} />
-                <Input type="number" value={config.aggregator_reject_threshold} onChange={(e) => setConfig({ ...config, aggregator_reject_threshold: +e.target.value })} />
+                <Input aria-label="Aggregator review threshold" type="number" value={config.aggregator_review_threshold} onChange={(e) => setConfig({ ...config, aggregator_review_threshold: +e.target.value })} />
+                <Input aria-label="Aggregator reject threshold" type="number" value={config.aggregator_reject_threshold} onChange={(e) => setConfig({ ...config, aggregator_reject_threshold: +e.target.value })} />
               </div>
             </div>
             <div className="space-y-2">
               <Label>AI Voice Review / Reject</Label>
               <div className="grid grid-cols-2 gap-2">
-                <Input type="number" value={config.ai_voice_review_threshold} onChange={(e) => setConfig({ ...config, ai_voice_review_threshold: +e.target.value })} />
-                <Input type="number" value={config.ai_voice_reject_threshold} onChange={(e) => setConfig({ ...config, ai_voice_reject_threshold: +e.target.value })} />
+                <Input aria-label="AI voice review threshold" type="number" value={config.ai_voice_review_threshold} onChange={(e) => setConfig({ ...config, ai_voice_review_threshold: +e.target.value })} />
+                <Input aria-label="AI voice reject threshold" type="number" value={config.ai_voice_reject_threshold} onChange={(e) => setConfig({ ...config, ai_voice_reject_threshold: +e.target.value })} />
               </div>
             </div>
             <div className="space-y-2">
               <Label>Same Source Window / Count</Label>
               <div className="grid grid-cols-2 gap-2">
-                <Input type="number" value={config.same_source_window_hours} onChange={(e) => setConfig({ ...config, same_source_window_hours: +e.target.value })} />
-                <Input type="number" value={config.same_source_review_threshold} onChange={(e) => setConfig({ ...config, same_source_review_threshold: +e.target.value })} />
+                <Input aria-label="Same source window in hours" type="number" value={config.same_source_window_hours} onChange={(e) => setConfig({ ...config, same_source_window_hours: +e.target.value })} />
+                <Input aria-label="Same source post count" type="number" value={config.same_source_review_threshold} onChange={(e) => setConfig({ ...config, same_source_review_threshold: +e.target.value })} />
               </div>
             </div>
             <div className="space-y-2">
               <Label>Minimum Creator Angle Characters</Label>
-              <Input type="number" value={config.min_creator_angle_chars} onChange={(e) => setConfig({ ...config, min_creator_angle_chars: +e.target.value })} />
+              <Input aria-label="Minimum Creator Angle Characters" type="number" value={config.min_creator_angle_chars} onChange={(e) => setConfig({ ...config, min_creator_angle_chars: +e.target.value })} />
             </div>
           </div>
           <div className="space-y-2">
@@ -653,14 +646,14 @@ export default function EnrichmentSettings() {
               {config.banned_phrases.map((phrase) => (
                 <Badge key={phrase} variant="outline" className="gap-1">
                   {phrase}
-                  <button type="button" onClick={() => removeBannedPhrase(phrase)} aria-label={`Remove ${phrase}`}>
+                  <button type="button" className="inline-flex min-h-8 min-w-8 items-center justify-center" onClick={() => removeBannedPhrase(phrase)} aria-label={`Remove ${phrase}`}>
                     <X className="w-3 h-3" />
                   </button>
                 </Badge>
               ))}
             </div>
             <div className="flex gap-2">
-              <Input value={newBannedPhrase} onChange={(e) => setNewBannedPhrase(e.target.value)} placeholder="Add phrase to avoid..." />
+              <Input aria-label="Banned Phrases" value={newBannedPhrase} onChange={(e) => setNewBannedPhrase(e.target.value)} placeholder="Add phrase to avoid..." />
               <Button type="button" variant="outline" onClick={addBannedPhrase} disabled={!newBannedPhrase.trim()}>
                 <Plus className="w-4 h-4 mr-1" />Add
               </Button>
@@ -681,7 +674,10 @@ export default function EnrichmentSettings() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          <SettingsSaveStatus label="Voice guide" dirty={guideDraft.isDirty} {...guideSave} />
+          <SettingsIncomingNotice editor={guideDraft} />
           <Textarea
+            aria-label="Voice and style guide"
             value={voiceGuide.guide}
             onChange={(e) => setVoiceGuide({ ...voiceGuide, guide: e.target.value })}
             rows={12}
@@ -692,10 +688,12 @@ export default function EnrichmentSettings() {
             <Button type="button" variant="outline" onClick={saveVoiceGuideOnly}>
               <Save className="w-4 h-4 mr-2" />Save guide
             </Button>
-            <Button type="button" onClick={generateVoiceProfile} disabled={generatingProfile || !voiceGuide.guide.trim()}>
+            <ConfirmSettingsAction title="Generate and save a voice profile?" description="This sends the current voice guide and saved voice samples to OpenAI. It may incur provider charges and saves the guide plus generated profile on the server. It does not publish a post." confirmLabel="Generate profile" onConfirm={generateVoiceProfile}>
+            <Button type="button" disabled={generatingProfile || !voiceGuide.guide.trim()}>
               {generatingProfile ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Wand2 className="w-4 h-4 mr-2" />}
               Generate profile
             </Button>
+            </ConfirmSettingsAction>
           </div>
           {voiceProfile && (
             <div className="grid gap-3 lg:grid-cols-2">
@@ -739,7 +737,7 @@ export default function EnrichmentSettings() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Textarea
+          <Textarea aria-label="Analyst prompt"
             value={config.analyst_prompt}
             onChange={(e) => setConfig({ ...config, analyst_prompt: e.target.value })}
             rows={6}
@@ -762,17 +760,19 @@ export default function EnrichmentSettings() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
+          <SettingsSaveStatus label="Voice samples" dirty={samplesDraft.isDirty} {...samplesSave} onSave={() => { void samplesSave.save(); }} disabled={samplesDraft.hasPendingIncoming} />
+          <SettingsIncomingNotice editor={samplesDraft} />
           {voiceSamples.samples.map((sample, i) => (
             <div key={i} className="flex items-start gap-2 p-3 bg-muted/40 rounded-lg border">
               <p dir="auto" className="text-sm flex-1 text-right">{sample}</p>
-              <Button variant="ghost" size="icon" className="shrink-0" onClick={() => removeSample(i)}>
+              <Button variant="ghost" size="icon" className="shrink-0" aria-label={`Remove voice sample ${i + 1}`} onClick={() => removeSample(i)}>
                 <X className="w-4 h-4" />
               </Button>
             </div>
           ))}
           {voiceSamples.samples.length < 10 && (
             <div className="flex gap-2">
-              <Textarea
+              <Textarea aria-label="New voice sample"
                 value={newSample}
                 onChange={(e) => setNewSample(e.target.value)}
                 rows={2}
@@ -800,11 +800,11 @@ export default function EnrichmentSettings() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Lookback Window (days)</Label>
               <div className="flex items-center gap-3">
-                <Slider
+                <Slider aria-label="Lookback Window (days)"
                   value={[config.archivist_lookback_days]}
                   onValueChange={([v]) => setConfig({ ...config, archivist_lookback_days: v })}
                   min={1} max={7} step={1} className="flex-1"
@@ -815,7 +815,7 @@ export default function EnrichmentSettings() {
             <div className="space-y-2">
               <Label>Max Posts to Consider</Label>
               <div className="flex items-center gap-3">
-                <Slider
+                <Slider aria-label="Max Posts to Consider"
                   value={[config.archivist_max_posts]}
                   onValueChange={([v]) => setConfig({ ...config, archivist_max_posts: v })}
                   min={3} max={20} step={1} className="flex-1"
@@ -828,7 +828,7 @@ export default function EnrichmentSettings() {
       </Card>
 
       {/* Thresholds */}
-      <Card>
+      <Card id="enrichment-thresholds" className="scroll-mt-48">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Wand2 className="w-5 h-5" />
@@ -836,23 +836,12 @@ export default function EnrichmentSettings() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Skip Research Below Score</Label>
-              <div className="flex items-center gap-3">
-                <Slider
-                  value={[config.skip_research_below_score]}
-                  onValueChange={([v]) => setConfig({ ...config, skip_research_below_score: v })}
-                  min={8} max={20} step={1} className="flex-1"
-                />
-                <span className="text-sm font-mono w-6 text-center">{config.skip_research_below_score}</span>
-              </div>
-              <p className="text-xs text-muted-foreground">Posts below this score get commentary but no web research (saves tokens)</p>
-            </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <EnrichmentResearchThreshold value={config.skip_research_below_score} onChange={(value) => setConfig({ ...config, skip_research_below_score: value })} />
             <div className="space-y-2">
               <Label>Auto-Thread Above Score</Label>
               <div className="flex items-center gap-3">
-                <Slider
+                <Slider aria-label="Auto-Thread Above Score"
                   value={[config.thread_above_score]}
                   onValueChange={([v]) => setConfig({ ...config, thread_above_score: v })}
                   min={14} max={20} step={1} className="flex-1"
@@ -863,7 +852,7 @@ export default function EnrichmentSettings() {
             </div>
             <div className="space-y-2">
               <Label>Research Cache Hours</Label>
-              <Input type="number" value={config.research_cache_hours} onChange={(e) => setConfig({ ...config, research_cache_hours: +e.target.value })} />
+              <Input aria-label="Research Cache Hours" type="number" value={config.research_cache_hours} onChange={(e) => setConfig({ ...config, research_cache_hours: +e.target.value })} />
               <p className="text-xs text-muted-foreground">Reuses web research per source/story to avoid repeated web calls.</p>
             </div>
           </div>
@@ -886,7 +875,7 @@ export default function EnrichmentSettings() {
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <Label>Researcher Prompt</Label>
-                <Textarea
+                <Textarea aria-label="Researcher Prompt"
                   value={config.researcher_prompt}
                   onChange={(e) => setConfig({ ...config, researcher_prompt: e.target.value })}
                   rows={3}
@@ -894,7 +883,7 @@ export default function EnrichmentSettings() {
               </div>
               <div className="space-y-2">
                 <Label>Humanizer Prompt</Label>
-                <Textarea
+                <Textarea aria-label="Humanizer Prompt"
                   value={config.humanizer_prompt}
                   onChange={(e) => setConfig({ ...config, humanizer_prompt: e.target.value })}
                   rows={3}
@@ -902,7 +891,7 @@ export default function EnrichmentSettings() {
               </div>
               <div className="space-y-2">
                 <Label>Archivist Prompt</Label>
-                <Textarea
+                <Textarea aria-label="Archivist Prompt"
                   value={config.archivist_prompt}
                   onChange={(e) => setConfig({ ...config, archivist_prompt: e.target.value })}
                   rows={3}
@@ -910,7 +899,7 @@ export default function EnrichmentSettings() {
               </div>
               <div className="space-y-2">
                 <Label>Composer Prompt</Label>
-                <Textarea
+                <Textarea aria-label="Composer Prompt"
                   value={config.composer_prompt}
                   onChange={(e) => setConfig({ ...config, composer_prompt: e.target.value })}
                   rows={3}
@@ -918,7 +907,7 @@ export default function EnrichmentSettings() {
               </div>
               <div className="space-y-2">
                 <Label>Critic Prompt</Label>
-                <Textarea
+                <Textarea aria-label="Critic Prompt"
                   value={config.critic_prompt}
                   onChange={(e) => setConfig({ ...config, critic_prompt: e.target.value })}
                   rows={3}
@@ -927,27 +916,27 @@ export default function EnrichmentSettings() {
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
                 <div className="space-y-1">
                   <Label className="text-xs">Research Tokens</Label>
-                  <Input type="number" value={config.max_research_tokens} onChange={(e) => setConfig({ ...config, max_research_tokens: +e.target.value })} />
+                  <Input aria-label="Research Tokens" type="number" value={config.max_research_tokens} onChange={(e) => setConfig({ ...config, max_research_tokens: +e.target.value })} />
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Analysis Tokens</Label>
-                  <Input type="number" value={config.max_analysis_tokens} onChange={(e) => setConfig({ ...config, max_analysis_tokens: +e.target.value })} />
+                  <Input aria-label="Analysis Tokens" type="number" value={config.max_analysis_tokens} onChange={(e) => setConfig({ ...config, max_analysis_tokens: +e.target.value })} />
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Humanizer Tokens</Label>
-                  <Input type="number" value={config.max_humanizer_tokens} onChange={(e) => setConfig({ ...config, max_humanizer_tokens: +e.target.value })} />
+                  <Input aria-label="Humanizer Tokens" type="number" value={config.max_humanizer_tokens} onChange={(e) => setConfig({ ...config, max_humanizer_tokens: +e.target.value })} />
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Archivist Tokens</Label>
-                  <Input type="number" value={config.max_archivist_tokens} onChange={(e) => setConfig({ ...config, max_archivist_tokens: +e.target.value })} />
+                  <Input aria-label="Archivist Tokens" type="number" value={config.max_archivist_tokens} onChange={(e) => setConfig({ ...config, max_archivist_tokens: +e.target.value })} />
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Composer Tokens</Label>
-                  <Input type="number" value={config.max_composer_tokens} onChange={(e) => setConfig({ ...config, max_composer_tokens: +e.target.value })} />
+                  <Input aria-label="Composer Tokens" type="number" value={config.max_composer_tokens} onChange={(e) => setConfig({ ...config, max_composer_tokens: +e.target.value })} />
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Critic Tokens</Label>
-                  <Input type="number" value={config.max_critic_tokens} onChange={(e) => setConfig({ ...config, max_critic_tokens: +e.target.value })} />
+                  <Input aria-label="Critic Tokens" type="number" value={config.max_critic_tokens} onChange={(e) => setConfig({ ...config, max_critic_tokens: +e.target.value })} />
                 </div>
               </div>
             </CardContent>
@@ -956,7 +945,7 @@ export default function EnrichmentSettings() {
       </Collapsible>
 
       {/* Save Button */}
-      <Button onClick={saveConfig} disabled={saving} className="w-full bg-gradient-primary hover:opacity-90 text-white">
+      <Button id="enrichment-save" onClick={saveConfig} disabled={saving || invalidResearchThreshold || configDraft.hasPendingIncoming} className="scroll-mt-48 w-full sm:w-auto">
         {saving ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Saving...</> : <><Save className="w-4 h-4 mr-2" />Save Enrichment Settings</>}
       </Button>
     </div>

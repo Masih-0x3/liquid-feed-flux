@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const videoHooks = vi.hoisted(() => ({
@@ -93,7 +93,19 @@ describe('video render detail review states', () => {
     expect(container.querySelector('pre')).toHaveTextContent(expected);
     expect(container.querySelector('pre')).toHaveAttribute('lang', 'fa');
     expect(container.querySelector('pre')).toHaveAttribute('dir', 'rtl');
-    expect(screen.getByText('Media preview unavailable')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Preview rendered output' })).toBeInTheDocument();
+    expect(document.querySelector('video')).toBeNull();
     expect(container.querySelector('video, audio, source, iframe')).toBeNull();
   });
+  it('requires confirmation before a retry can invoke processing', () => {
+    render(<VideoRenderDetailPanel renderId="render-1" status="failed" />);
+    const retry = videoHooks.useRetryVideoRender.mock.results[0].value.mutate;
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(retry).not.toHaveBeenCalled();
+    const confirmation = screen.getByRole('alertdialog');
+    expect(confirmation).toHaveTextContent('paid transcription, translation and rendering resources');
+    fireEvent.click(within(confirmation).getByRole('button', { name: 'Retry render' }));
+    expect(retry).toHaveBeenCalledExactlyOnceWith({ render_id: 'render-1' });
+  });
+
 });

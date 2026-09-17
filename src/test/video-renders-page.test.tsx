@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import '@testing-library/jest-dom/vitest';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -196,6 +197,37 @@ describe('video renders review workflow', () => {
     );
   });
 
+  it('shows loading without false zero or empty-queue conclusions', () => {
+    videoHooks.useVideoRenderOverview.mockReturnValue({data: undefined, isLoading: true, refetch: vi.fn()});
+    videoHooks.useVideoRenderQueue.mockReturnValue({data: undefined, isLoading: true, refetch: vi.fn()});
+    renderPage();
+    expect(screen.getByText('Loading render queue…')).toBeInTheDocument();
+    expect(screen.queryByText(/No backlog/)).toBeNull();
+    expect(screen.queryByText(/No video renders match/)).toBeNull();
+    expect(screen.queryByText('0')).toBeNull();
+  });
+
+  it('retains existing queue records on refresh failure and exposes retry', () => {
+    const refetch = vi.fn();
+    videoHooks.useVideoRenderQueue.mockReturnValue({data: {rows: [renderRow('stale-render', 'failed')]}, isLoading: false, isError: true, refetch});
+    renderPage();
+    expect(screen.getByText('Queue refresh failed. Last successful records are shown.')).toBeInTheDocument();
+    expect(screen.getByRole('button', {name: /stale-render: failed/})).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', {name: 'Retry queue'}));
+    expect(refetch).toHaveBeenCalledOnce();
+  });
+
+  it('bounds long queue excerpts and accessible names while retaining row identity', () => {
+    const row = renderRow('long-render', 'failed');
+    row.post = {tweet_id: row.tweet_id, text_original: 'Long source text '.repeat(2000), url: null, author_handle: 'long_source', created_at: null, delivery_decision: null, final_score: null};
+    videoHooks.useVideoRenderQueue.mockReturnValue({data: {rows: [row]}, isLoading: false, refetch: vi.fn()});
+    renderPage();
+    const button = screen.getByRole('button', {name: /@long_source: failed/});
+    expect(button.getAttribute('aria-label')!.length).toBeLessThan(250);
+    expect(button.textContent!.length).toBeLessThan(400);
+    expect(button.getAttribute('data-render-id')).toBe('long-render');
+  });
+
   it('renders compact selectable queue items without row lifecycle actions', () => {
     const nativeMatchMedia = window.matchMedia;
     const matchMediaSpy = vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({
@@ -241,5 +273,23 @@ describe('video renders review workflow', () => {
     expect(screen.queryByRole('button', { name: 'Back to queue' })).toBeNull();
     expect(document.activeElement).toBe(nextButton);
     matchMediaSpy.mockRestore();
+  });
+
+  it('moves focus into the selected mobile inspector and restores its queue trigger', async () => {
+    const nativeMatchMedia = window.matchMedia;
+    const matchMediaSpy = vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({
+      ...nativeMatchMedia(query),
+      matches: query !== '(min-width: 1024px)',
+    }));
+    try {
+      renderPage();
+      const triggerName = screen.getAllByRole('button', { name: /render_failed/ })[1].getAttribute('aria-label')!;
+      fireEvent.click(screen.getByRole('button', { name: triggerName }));
+      expect(screen.getByLabelText('Selected render inspector')).toHaveFocus();
+      fireEvent.click(screen.getByRole('button', { name: 'Back to queue' }));
+      await waitFor(() => expect(screen.getByRole('button', { name: triggerName })).toHaveFocus());
+    } finally {
+      matchMediaSpy.mockRestore();
+    }
   });
 });
