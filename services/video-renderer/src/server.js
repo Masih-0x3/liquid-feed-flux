@@ -1,4 +1,5 @@
 import http from "node:http";
+import { randomUUID } from "node:crypto";
 import { isAuthorizedRendererRequest, loadConfigFromEnv, loadServerRuntimeFromEnv, normalizeRendererToken, parseRenderPollingEnabled, parseRenderQueueCutoffAt } from "./config.js";
 import { RendererCapacityGate } from "./rendererCapacity.js";
 import { RendererRequestInputError, readBoundedRendererDispatchRequest } from "./rendererRequestPolicy.js";
@@ -13,13 +14,26 @@ function json(res, status, body, headers = {}) {
 }
 
 function publicHealthSnapshot(state) {
+  // 0X3-672: readiness is more than "the HTTP listener answered". A ready
+  // renderer is not draining and is configured to claim work; heartbeat
+  // freshness is reported separately so a monitor can distinguish a live
+  // renderer from a stale heartbeat row.
+  const heartbeatAgeMs = state.lastHeartbeatAt
+    ? Math.max(0, Date.now() - Date.parse(state.lastHeartbeatAt))
+    : null;
   return {
     ok: true,
+    ready: state.renderPollingEffective && !state.shutting_down && state.renderMode !== "disabled",
     running: state.running,
     processed: state.processed,
     failed: state.failed,
     lastError: state.lastError ? "renderer_error" : null,
     shutting_down: state.shutting_down,
+    boot_id: state.bootId,
+    started_at: state.bootedAt,
+    last_heartbeat_at: state.lastHeartbeatAt,
+    heartbeat_age_ms: heartbeatAgeMs,
+    heartbeat_ok: state.lastHeartbeatError == null,
     render_polling_enabled: state.renderPollingEnabled,
     render_polling_effective: state.renderPollingEffective,
     render_polling_block_reason: state.renderPollingBlockReason,
@@ -63,12 +77,23 @@ export function createRendererServer(options = {}) {
   // startRendererServer entry point) omit this and use the Node globals.
   const setInterval = options.setIntervalFn || globalThis.setInterval;
   const clearInterval = options.clearIntervalFn || globalThis.clearInterval;
+  // 0X3-672: each process boot gets a unique id so a fresh heartbeat row is
+  // provably from THIS renderer instance, not a stale row a dead renderer left
+  // behind. Heartbeat freshness/error are tracked for the readiness snapshot.
+  const bootId = randomUUID();
+  const bootedAt = new Date().toISOString();
   const state = {
     running: 0,
     processed: 0,
     failed: 0,
     lastError: null,
     shutting_down: false,
+    bootId,
+    bootedAt,
+    lastHeartbeatAt: null,
+    lastHeartbeatError: null,
+    heartbeatWriteSeq: 0,
+    renderMode: null,
     renderPollingEnabled,
     renderPollingEffective,
     renderPollingBlockReason,
@@ -112,9 +137,19 @@ export function createRendererServer(options = {}) {
   };
 
   const writeHeartbeat = async (status = "online", metadata = {}) => {
+    if (typeof metadata.mode === "string" && metadata.mode.length > 0) {
+      state.renderMode = metadata.mode;
+    }
+    // The row status must reflect claim-readiness, not just liveness: a live
+    // process that cannot claim (polling disabled, or enabled with an invalid
+    // queue cutoff) reports paused/error so the queue-blocked signal and
+    // monitors see the truth.
+    const reportedStatus = status === "online" && !state.renderPollingEffective
+      ? (state.renderPollingEnabled ? "error" : "paused")
+      : status;
     const payload = {
       renderer_id: config.rendererId,
-      status,
+      status: reportedStatus,
       version: runtime.version,
       render_version: config.renderVersion,
       running: state.running,
@@ -124,6 +159,8 @@ export function createRendererServer(options = {}) {
       metadata: {
         pid: process.pid,
         node: process.version,
+        boot_id: bootId,
+        booted_at: bootedAt,
         ...metadata,
         render_polling_enabled: state.renderPollingEnabled,
         render_polling_effective: state.renderPollingEffective,
@@ -131,12 +168,25 @@ export function createRendererServer(options = {}) {
       },
       last_seen_at: new Date().toISOString(),
     };
+    // Heartbeat writes overlap (interval, health, and action heartbeats run
+    // concurrently); only the newest write may publish its outcome, or an
+    // older failure would overwrite a newer success and misreport
+    // heartbeat_ok.
+    const writeSeq = ++state.heartbeatWriteSeq;
     const { error } = await supabase
       .from("video_renderer_heartbeats")
       .upsert(payload, { onConflict: "renderer_id" });
+    const isLatest = writeSeq === state.heartbeatWriteSeq;
     if (error) {
-      state.lastError = `heartbeat: ${error.message}`;
+      if (isLatest) {
+        state.lastHeartbeatError = "heartbeat_write_failed";
+        state.lastError = `heartbeat: ${error.message}`;
+      }
       throw error;
+    }
+    if (isLatest) {
+      state.lastHeartbeatAt = payload.last_seen_at;
+      state.lastHeartbeatError = null;
     }
     return payload;
   };

@@ -1,0 +1,19 @@
+# systemd user timer: renderer watchdog cadence (0X3-672).
+#
+# Install to: ~/.config/systemd/user/xot-renderer-watchdog.timer
+# Enable with: systemctl --user enable --now xot-renderer-watchdog.timer
+#
+# OnBootSec covers Studio boot/resume; OnUnitActiveSec keeps reconciling
+# every two minutes so a cleanly-stopped container is back up before the
+# heartbeat goes stale enough to matter.
+
+[Unit]
+Description=XOT Lightning renderer watchdog timer
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+Unit=xot-renderer-watchdog.service
+
+[Install]
+WantedBy=timers.target
