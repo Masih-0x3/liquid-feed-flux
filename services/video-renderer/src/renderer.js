@@ -572,40 +572,51 @@ async function maybeRunVisionPreflight({ inputPath, workingDir, config, prefligh
   // 0X3-672 W5: local OCR (CPU-bound tesseract) needs only the contact sheet
   // and is independent of frame generation and the watermark vision call
   // (provider latency). Start it now so it overlaps the remaining analysis
-  // instead of serializing behind it.
+  // instead of serializing behind it. If a parallel stage throws, the
+  // controller aborts the tesseract process and the drain reaps it before the
+  // caller's cleanup removes the working directory.
+  const ocrController = new AbortController();
   const ocrPromise = measure(metrics, "local_ocr", () => runOptionalOcr(contactSheetPath, {
     tesseractLang: config.tesseractLang,
+    signal: ocrController.signal,
   }));
-  await measure(metrics, "vision_frames", () => Promise.all(frameSpecs.map((frame) => runCommand(buildFrameSampleCommand(inputPath, frame.path, {
-    seekSeconds: frame.seekSeconds,
-    width: config.watermarkVisionFrameWidth,
-  }), { label: `vision_frame_${frame.seekSeconds}`, stage: "analysis" }))));
-  await measure(metrics, "vision_inspection_sheets", () => Promise.all(frameSpecs.map((frame) => runCommand(buildWatermarkInspectionSheetCommand(frame.path, frame.inspectionPath, {
-    tileWidth: config.watermarkInspectionTileWidth,
-    tileHeight: config.watermarkInspectionTileHeight,
-  }), { label: `vision_inspection_${frame.seekSeconds}`, stage: "analysis" }))));
+  ocrPromise.catch(() => null);
   let ocr;
   let watermarkOnly = null;
   let vision = null;
-  if (config.enableVisionPreflight) {
-    const visionPromise = measure(metrics, "watermark_vision", () => analyzeRemovableWatermarks({
-      apiKey: config.openaiApiKey,
-      model: config.visionModel,
-      framePaths: frameSpecs.map((frame) => frame.path),
-      inspectionPaths: frameSpecs.map((frame) => frame.inspectionPath),
-      imageDetail: config.watermarkVisionImageDetail,
-      temperature: config.watermarkVisionTemperature,
-      topP: config.watermarkVisionTopP,
-      maxOutputTokens: config.watermarkVisionMaxOutputTokens,
-      fetchImpl: observability?.fetch("inspect_watermarks", "vision-checker", {
-        phase: "preflight",
-      }),
-    }));
-    [ocr, watermarkOnly] = await Promise.all([ocrPromise, visionPromise]);
-    watermarkOnly = normalizeWatermarkOnlyDecision(watermarkOnly);
-    vision = visionFromWatermarkOnly(watermarkOnly);
-  } else {
-    ocr = await ocrPromise;
+  try {
+    await measure(metrics, "vision_frames", () => Promise.all(frameSpecs.map((frame) => runCommand(buildFrameSampleCommand(inputPath, frame.path, {
+      seekSeconds: frame.seekSeconds,
+      width: config.watermarkVisionFrameWidth,
+    }), { label: `vision_frame_${frame.seekSeconds}`, stage: "analysis" }))));
+    await measure(metrics, "vision_inspection_sheets", () => Promise.all(frameSpecs.map((frame) => runCommand(buildWatermarkInspectionSheetCommand(frame.path, frame.inspectionPath, {
+      tileWidth: config.watermarkInspectionTileWidth,
+      tileHeight: config.watermarkInspectionTileHeight,
+    }), { label: `vision_inspection_${frame.seekSeconds}`, stage: "analysis" }))));
+    if (config.enableVisionPreflight) {
+      const visionPromise = measure(metrics, "watermark_vision", () => analyzeRemovableWatermarks({
+        apiKey: config.openaiApiKey,
+        model: config.visionModel,
+        framePaths: frameSpecs.map((frame) => frame.path),
+        inspectionPaths: frameSpecs.map((frame) => frame.inspectionPath),
+        imageDetail: config.watermarkVisionImageDetail,
+        temperature: config.watermarkVisionTemperature,
+        topP: config.watermarkVisionTopP,
+        maxOutputTokens: config.watermarkVisionMaxOutputTokens,
+        fetchImpl: observability?.fetch("inspect_watermarks", "vision-checker", {
+          phase: "preflight",
+        }),
+      }));
+      [ocr, watermarkOnly] = await Promise.all([ocrPromise, visionPromise]);
+      watermarkOnly = normalizeWatermarkOnlyDecision(watermarkOnly);
+      vision = visionFromWatermarkOnly(watermarkOnly);
+    } else {
+      ocr = await ocrPromise;
+    }
+  } catch (error) {
+    ocrController.abort();
+    await ocrPromise.catch(() => null);
+    throw error;
   }
   let watermark = scoreWatermarkSignals({
     stableOverlayScore: preflight.overlayDetection?.stableOverlayScore ?? preflight.watermark?.score ?? 0,
@@ -731,6 +742,12 @@ export async function processRenderRow({ supabase, row, config }) {
     row,
     rendererId: runtimeConfig.rendererId,
   }).start();
+  // The overlapped audio-extraction stage (started below) must be cancelled
+  // and reaped before the working directory is removed on any exit path —
+  // otherwise an exception leaks an orphaned ffmpeg writing into a deleted
+  // directory.
+  const audioExtractController = new AbortController();
+  let audioExtractPromise = null;
 
   try {
     await mkdir(workingDir, { recursive: true });
@@ -757,10 +774,11 @@ export async function processRenderRow({ supabase, row, config }) {
     // 0X3-672 W5: audio extraction is a free local stage that is independent
     // of the visual preflight chain. Run it concurrently so it hides under
     // preflight latency instead of serializing after it. Early-return paths
-    // drain the promise so a blocked render never leaks an unhandled
-    // rejection or an orphaned ffmpeg process.
-    const audioExtractPromise = hasAudioStream(probe)
-      ? measure(metrics, "audio_extract", () => runCommand(buildAudioExtractCommand(inputPath, audioPath), { label: "audio_extract", stage: "analysis" }))
+    // drain the promise and the finally block aborts+reaps it, so a blocked
+    // or failed render never leaks an unhandled rejection or an orphaned
+    // ffmpeg process.
+    audioExtractPromise = hasAudioStream(probe)
+      ? measure(metrics, "audio_extract", () => runCommand(buildAudioExtractCommand(inputPath, audioPath), { label: "audio_extract", stage: "analysis", signal: audioExtractController.signal }))
       : null;
     audioExtractPromise?.catch(() => null);
 
@@ -1053,6 +1071,8 @@ export async function processRenderRow({ supabase, row, config }) {
     await maybeInvokePostingFunctions(supabase, data, row.tweet_id);
     throw error;
   } finally {
+    audioExtractController.abort();
+    await audioExtractPromise?.catch(() => null);
     await renderLease.stop();
     await finishWorkflowRun(supabase, workflowRunKey, workflowStatus, workflowMetadata).catch(() => null);
     await removeOwnedWorkdir(workingDir).catch(() => null);

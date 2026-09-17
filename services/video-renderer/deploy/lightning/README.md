@@ -302,7 +302,11 @@ persistence/rollback drill), switch the restart policy:
    With `XOT_RENDERER_DESIRED_STATE=running` in `service.env`, the timer
    restarts the existing image within ~2 minutes of an unplanned exit. To stop
    the renderer intentionally, set `XOT_RENDERER_DESIRED_STATE=stopped` in
-   `service.env` first — the watchdog then preserves the stop.
+   `service.env` first — the watchdog then preserves the stop, and
+   `bootstrap.sh --start` (including the service unit's ExecStart) no-ops, so a
+   host or user-session restart cannot resume a held stop. An explicit
+   environment override (`XOT_RENDERER_DESIRED_STATE=running ./bootstrap.sh
+   --start`) still forces a start for operator recovery.
 5. Verify the unit is enabled and the container restarts through bootstrap
    after a controlled stop/start cycle.
 

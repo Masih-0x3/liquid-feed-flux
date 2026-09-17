@@ -3808,7 +3808,7 @@ const reviewedNonRawMigrationDigests = new Map([
   // public.jobs/runtime controls/delivery cutover only. Reviewed by the
   // queue-fairness disposable-DB harness and worker lifecycle contracts.
   // It does not change the protected video raw-table grant surface.
-  ['20260917000000_claim_jobs_lane_fair_admission.sql', '976a376f5dda6b97c52b2fc979011e5f542039a40e42b661477d49c05a6740a5'],
+  ['20260917000000_claim_jobs_lane_fair_admission.sql', 'de12a1e76c2019633c4c17ee15676ca8f0af588dc8af64d44d6428bc86e3cb7d'],
 ]);
 const reviewedServiceOnlyXCutoverMigration =
   '20260828120000_repair_effective_x_claim_cutover.sql';

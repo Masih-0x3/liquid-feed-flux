@@ -11,6 +11,7 @@ import type { XMediaRow } from "../_shared/mediaSelection.ts";
 import { requireDeliveryCutover } from "../_shared/deliveryCutover.ts";
 import { requireExternalPosting } from "../_shared/externalPostingGuard.ts";
 import { insertPipelineEvent } from "./jobLifecycle.ts";
+import { isRecordValue } from "./workerUtils.ts";
 
 const VIDEO_RENDER_VERSION = "persian-subtitles-masihh-v1";
 export const VIDEO_RENDER_DEFER_MS = 30_000;
@@ -28,6 +29,10 @@ export const VIDEO_RENDER_DEFER_MS = 30_000;
 export const DEPENDENCY_DEFER_MAX_MS = 10 * 60_000;
 export const DEPENDENCY_WAIT_STALL_MS = 15 * 60_000;
 const DEPENDENCY_DEFER_JITTER_RATIO = 0.15;
+// A failed download may be resurrected only this many times per media row;
+// each resurrection spends a full retry budget, so a permanently failing
+// download cannot receive unlimited fresh budgets from every gate pass.
+const VIDEO_DOWNLOAD_MAX_RESURRECTIONS = 3;
 
 export type DependencyWaitState = {
   kind: string;
@@ -378,21 +383,42 @@ export async function prepareVideoRenderGate(
 
   if (decision.action === "wait_media") {
     const downloadKey = `download_media:video_render:${tweetId}`;
+    const mediaId = typeof decision.media?.id === "string" && decision.media.id
+      ? decision.media.id
+      : null;
     // 0X3-672: don't rewrite an already-open download job on every gate
     // evaluation — the upsert used to reset attempts and next_run_at every
     // defer cycle, a hot retry that also kept failures from ever accumulating.
-    // Requeue only when no open job exists; a failed row is still resurrected
-    // by the upsert so the recovery path is preserved.
-    const { data: openDownloads, error: openDownloadsError } = await supabase
+    // A closed row is resurrected only a bounded number of times: each cycle
+    // spends a full retry budget, so a permanently failing download cannot
+    // receive unlimited fresh budgets on every gate pass. The cycle count is
+    // persisted on the job row's result_meta (keyed to the media row id, so a
+    // genuinely new source video resets the budget) and survives defers.
+    const { data: downloadRows, error: downloadReadError } = await supabase
       .from("jobs")
-      .select("id")
+      .select("id,status,result_meta")
       .eq("idempotency_key", downloadKey)
-      .in("status", ["pending", "running"])
+      .order("created_at", { ascending: false })
       .limit(1);
-    if (openDownloadsError) {
+    if (downloadReadError) {
       throw new Error("video_render_download_read_failed");
     }
-    if (!Array.isArray(openDownloads) || openDownloads.length === 0) {
+    const existingDownload = Array.isArray(downloadRows) && downloadRows.length > 0
+      ? downloadRows[0]
+      : null;
+    const downloadOpen = existingDownload !== null &&
+      (existingDownload.status === "pending" || existingDownload.status === "running");
+    const existingMeta = isRecordValue(existingDownload?.result_meta)
+      ? existingDownload.result_meta
+      : {};
+    const storedMedia = existingMeta.video_render_retry_media ?? null;
+    const priorCycles = storedMedia === null || storedMedia === mediaId
+      ? Number(existingMeta.video_render_retry_cycle ?? 0)
+      : 0;
+    const downloadExhausted = !downloadOpen &&
+      Number.isFinite(priorCycles) &&
+      priorCycles >= VIDEO_DOWNLOAD_MAX_RESURRECTIONS;
+    if (!downloadOpen && !downloadExhausted) {
       const { error: downloadQueueError } = await supabase.from("jobs").upsert({
         type: "download_media",
         payload: { tweet_id: tweetId, source: "video_render_gate" },
@@ -405,6 +431,11 @@ export async function prepareVideoRenderGate(
         lease_expires_at: null,
         last_error: null,
         attempts: 0,
+        result_meta: {
+          ...existingMeta,
+          video_render_retry_cycle: priorCycles + 1,
+          video_render_retry_media: mediaId,
+        },
       }, { onConflict: "idempotency_key", ignoreDuplicates: false });
       if (downloadQueueError) {
         throw new Error("video_render_download_enqueue_failed");
@@ -424,6 +455,7 @@ export async function prepareVideoRenderGate(
         shadow: cfg.mode === "shadow",
         reason: decision.reason,
         waiting_for: "source_media_download",
+        ...(downloadExhausted ? { download_retry_exhausted: true } : {}),
       },
     );
     if (cfg.mode === "shadow") {

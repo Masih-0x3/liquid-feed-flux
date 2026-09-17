@@ -83,6 +83,8 @@ SELECT 'FACT_A_admitted_' || type || '=' || count(*) FROM xot672_claim_a GROUP B
 SELECT 'FACT_A_admitted_total=' || count(*) FROM xot672_claim_a;
 SELECT 'FACT_A_admitted_non_deliver=' || count(*) FROM xot672_claim_a WHERE type <> 'deliver';
 SELECT 'FACT_A_admitted_deliver=' || count(*) FROM xot672_claim_a WHERE type = 'deliver';
+SELECT 'FACT_A_admitted_model=' || count(*) FROM xot672_claim_a WHERE type IN ('translate', 'enrich');
+SELECT 'FACT_A_admitted_fast=' || count(*) FROM xot672_claim_a WHERE type NOT IN ('translate', 'enrich', 'deliver');
 SELECT 'FACT_A_claim_state_all_preparing=' || (count(*) FILTER (WHERE claim_state = 'preparing') = count(*))
   FROM xot672_claim_a;
 SELECT 'FACT_A_claim_token_single=' || (count(DISTINCT claim_token) = 1) FROM xot672_claim_a;
@@ -240,3 +242,77 @@ SELECT * FROM public.claim_jobs(20, NULL, 'xot672-worker-j');
 
 SELECT 'FACT_J_deliver_only_backlog_claimed=' || count(*) FROM xot672_claim_j WHERE type = 'deliver';
 SELECT 'FACT_J_total=' || count(*) FROM xot672_claim_j;
+
+-- ─── Scenario K: continuously replenished fast work cannot starve model ─────
+-- The review gap: a *finite* p15 backlog drains in the first batch and then
+-- translations flow. Here the fast backlog stays deep across batches — fresh
+-- hydrations keep arriving — and the model lane must still take its share
+-- every batch. Translations are seeded OLD (outside the fresh window) so it
+-- is the lane reservation, not the fresh-work boost, that admits them.
+-- Cleanup is scoped to fixture rows: historical deliver jobs are immutable
+-- under trg_00_historical_delivery_job_zero_write.
+DELETE FROM public.jobs
+ WHERE status = 'pending' AND idempotency_key LIKE 'xot672:%';
+
+INSERT INTO public.jobs (type, payload, status, priority, attempts, next_run_at, created_at, idempotency_key)
+SELECT 'hydrate_tweet',
+       jsonb_build_object('tweet_id', 'xot672-k-hydrate-' || g),
+       'pending', 15, 0,
+       now() - interval '1 minute',
+       now() - interval '5 hours' + (g || ' seconds')::interval,
+       'xot672:k:hydrate:' || g
+FROM generate_series(1, 80) g;
+
+INSERT INTO public.jobs (type, payload, status, priority, attempts, next_run_at, created_at, idempotency_key)
+SELECT 'dedupe',
+       jsonb_build_object('tweet_id', 'xot672-k-dedupe-' || g),
+       'pending', 30, 0,
+       now() - interval '1 minute',
+       now() - interval '5 hours' + (g || ' seconds')::interval,
+       'xot672:k:dedupe:' || g
+FROM generate_series(1, 40) g;
+
+INSERT INTO public.jobs (type, payload, status, priority, attempts, next_run_at, created_at, idempotency_key)
+SELECT 'translate',
+       jsonb_build_object('tweet_id', 'xot672-k-translate-' || g),
+       'pending', 10, 0,
+       now() - interval '1 minute',
+       now() - interval '8 hours' + (g || ' seconds')::interval,
+       'xot672:k:translate:' || g
+FROM generate_series(1, 30) g;
+
+INSERT INTO public.jobs (type, payload, status, priority, attempts, next_run_at, created_at, idempotency_key)
+SELECT 'deliver',
+       jsonb_build_object('tweet_id', 'xot672-deliver-' || g),
+       'pending', 20, 0,
+       now() - interval '1 minute',
+       now(),
+       'xot672:k:deliver:' || g
+FROM generate_series(1, 10) g;
+
+CREATE TEMP TABLE xot672_claim_k1 AS
+SELECT * FROM public.claim_jobs(20, NULL, 'xot672-worker-k1');
+
+SELECT 'FACT_K1_translate=' || count(*) FROM xot672_claim_k1 WHERE type = 'translate';
+SELECT 'FACT_K1_fast=' || count(*) FROM xot672_claim_k1 WHERE type NOT IN ('translate', 'enrich', 'deliver');
+SELECT 'FACT_K1_deliver=' || count(*) FROM xot672_claim_k1 WHERE type = 'deliver';
+SELECT 'FACT_K1_total=' || count(*) FROM xot672_claim_k1;
+
+-- Replenish the fast lane between claims — the starvation mode the review
+-- flagged is a *sustained* high-priority fast inflow, not a finite backlog.
+INSERT INTO public.jobs (type, payload, status, priority, attempts, next_run_at, created_at, idempotency_key)
+SELECT 'hydrate_tweet',
+       jsonb_build_object('tweet_id', 'xot672-k2-hydrate-' || g),
+       'pending', 15, 0,
+       now() - interval '1 minute',
+       now(),
+       'xot672:k2:hydrate:' || g
+FROM generate_series(1, 40) g;
+
+CREATE TEMP TABLE xot672_claim_k2 AS
+SELECT * FROM public.claim_jobs(20, NULL, 'xot672-worker-k2');
+
+SELECT 'FACT_K2_translate=' || count(*) FROM xot672_claim_k2 WHERE type = 'translate';
+SELECT 'FACT_K2_fast=' || count(*) FROM xot672_claim_k2 WHERE type NOT IN ('translate', 'enrich', 'deliver');
+SELECT 'FACT_K2_deliver=' || count(*) FROM xot672_claim_k2 WHERE type = 'deliver';
+SELECT 'FACT_K2_total=' || count(*) FROM xot672_claim_k2;

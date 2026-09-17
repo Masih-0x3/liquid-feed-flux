@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import test from "node:test";
 import { resolveWatermarkLayout } from "../src/ffmpeg.js";
 import {
@@ -20,6 +21,7 @@ import {
   protectDelogoRegionsFromLowerText,
   recoverDelogoRegions,
   recoverDelogoRegionsFromOcrWords,
+  runOptionalOcr,
   scoreWatermarkSignals,
   selectDelogoRegions,
   selectTargetLanguage,
@@ -1196,4 +1198,43 @@ test("detects wide connected handle-like text just above dense lower thirds", ()
   assert.equal(candidates[0].x <= 30, true);
   assert.equal(candidates[0].x + candidates[0].w >= 79, true);
   assert.equal(candidates[0].y < 66, true);
+});
+
+// 0X3-672 W5 failure-path coverage: the overlapped local-OCR stage must be
+// cancellable. When a parallel stage fails, the caller aborts the controller
+// and the managed tesseract child is terminated and reaped instead of left
+// orphaned against a deleted working directory.
+test("runOptionalOcr aborts its managed tesseract child when the caller cancels", async () => {
+  const groupKills = [];
+  const child = new EventEmitter();
+  child.pid = 67209;
+  child.killCalls = [];
+  child.kill = (signal) => {
+    child.killCalls.push(signal);
+    return true;
+  };
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+
+  const controller = new AbortController();
+  const promise = runOptionalOcr("/tmp/contact-sheet.jpg", {
+    tesseractLang: "eng",
+    signal: controller.signal,
+    spawnImpl: () => child,
+    processImpl: {
+      platform: "linux",
+      kill: (pid, signal) => groupKills.push({ pid, signal }),
+    },
+  });
+  // Let the spawn settle so the abort listener is registered before firing.
+  await new Promise((resolve) => setImmediate(resolve));
+  controller.abort();
+
+  const result = await promise;
+  assert.equal(result.available, false, "aborted OCR must report unavailable, not hang");
+  assert.equal(result.error, "process_cancelled");
+  const terminated =
+    groupKills.some((entry) => entry.signal === "SIGTERM") ||
+    child.killCalls.includes("SIGTERM");
+  assert.ok(terminated, "abort must signal the spawned child (TERM then KILL escalation)");
 });

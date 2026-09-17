@@ -238,6 +238,8 @@ try {
     expectFact(facts, "FACT_A_admitted_total", (v) => Number(v) === 20, "claim A fills the batch");
     expectFact(facts, "FACT_A_admitted_non_deliver", (v) => Number(v) >= 15, "claim A admits model/fast work (>=15)");
     expectFact(facts, "FACT_A_admitted_deliver", (v) => Number(v) <= 5, "claim A caps blocked deliveries (<=5)");
+    expectFact(facts, "FACT_A_admitted_model", (v) => Number(v) >= 10, "claim A reserves the model share (>=10)");
+    expectFact(facts, "FACT_A_admitted_fast", (v) => Number(v) >= 5, "claim A keeps a fast share (>=5)");
     expectFact(facts, "FACT_A_claim_state_all_preparing", (v) => v === "t" || v === "true", "claim A mints preparing claim state");
     expectFact(facts, "FACT_A_claim_token_single", (v) => v === "t" || v === "true", "claim A single claim token");
     expectFact(facts, "FACT_A_attempts_incremented", (v) => v === "t" || v === "true", "claim A increments attempts");
@@ -262,6 +264,17 @@ try {
     expectFact(facts, "FACT_I_fresh_late_claimed_in_batches", (v) => Number(v) > 0 && Number(v) <= 2, "fresh translation claimed within 2 batches");
     // Scenario J: delivery-only backlog still drains at full batch.
     expectFact(facts, "FACT_J_deliver_only_backlog_claimed", (v) => Number(v) === 20, "delivery-only backlog fills batch");
+    // Scenario K: a sustained, replenished fast backlog cannot starve the
+    // model lane — the lane share holds across consecutive batches even when
+    // fresh priority-15/30 work keeps arriving between claims.
+    expectFact(facts, "FACT_K1_total", (v) => Number(v) === 20, "claim K1 fills the batch");
+    expectFact(facts, "FACT_K1_translate", (v) => Number(v) === 10, "claim K1 model lane keeps its share despite deep fast backlog");
+    expectFact(facts, "FACT_K1_fast", (v) => Number(v) === 5, "claim K1 fast lane keeps only its reserve");
+    expectFact(facts, "FACT_K1_deliver", (v) => Number(v) === 5, "claim K1 delivery lane keeps its reserve");
+    expectFact(facts, "FACT_K2_total", (v) => Number(v) === 20, "claim K2 fills the batch");
+    expectFact(facts, "FACT_K2_translate", (v) => Number(v) === 10, "claim K2 model lane survives replenished fast inflow");
+    expectFact(facts, "FACT_K2_fast", (v) => Number(v) === 5, "claim K2 fast lane keeps only its reserve");
+    expectFact(facts, "FACT_K2_deliver", (v) => Number(v) === 5, "claim K2 delivery lane keeps its reserve");
     if (concurrency.overlap !== 0) failures.push(`concurrent claims overlapped ${concurrency.overlap}`);
   }
 
