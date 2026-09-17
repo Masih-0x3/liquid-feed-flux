@@ -1209,8 +1209,12 @@ test("runOptionalOcr aborts its managed tesseract child when the caller cancels"
   const child = new EventEmitter();
   child.pid = 67209;
   child.killCalls = [];
+  // A terminated child emits close; without it the runner walks the whole
+  // TERM->KILL grace chain (~15s) and the test becomes timing-flaky.
+  const emitClose = () => setImmediate(() => child.emit("close", null, "SIGTERM"));
   child.kill = (signal) => {
     child.killCalls.push(signal);
+    emitClose();
     return true;
   };
   child.stdout = new EventEmitter();
@@ -1223,7 +1227,10 @@ test("runOptionalOcr aborts its managed tesseract child when the caller cancels"
     spawnImpl: () => child,
     processImpl: {
       platform: "linux",
-      kill: (pid, signal) => groupKills.push({ pid, signal }),
+      kill: (pid, signal) => {
+        groupKills.push({ pid, signal });
+        emitClose();
+      },
     },
   });
   // Let the spawn settle so the abort listener is registered before firing.

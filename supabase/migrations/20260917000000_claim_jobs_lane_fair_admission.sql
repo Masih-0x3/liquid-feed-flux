@@ -54,6 +54,9 @@ DECLARE
   lane_delivery boolean := false;
   lane_fast boolean := false;
   lane_count int := 0;
+  lane_order text[] := ARRAY[]::text[];
+  allowed_lanes text[] := NULL;
+  undersized boolean := false;
   delivery_reserve int := 0;
   fast_reserve int := 0;
   claimed_model int := 0;
@@ -80,6 +83,22 @@ BEGIN
     WHERE scope_type NOT IN ('translate', 'enrich', 'deliver')
   );
   lane_count := lane_model::int + lane_delivery::int + lane_fast::int;
+  lane_order := ARRAY[]::text[];
+  IF lane_model THEN lane_order := array_append(lane_order, 'model'); END IF;
+  IF lane_fast THEN lane_order := array_append(lane_order, 'fast'); END IF;
+  IF lane_delivery THEN lane_order := array_append(lane_order, 'delivery'); END IF;
+  undersized := batch_size < lane_count;
+  IF undersized THEN
+    -- The batch cannot hold one slot per lane, so static reservations would
+    -- hand the same lanes capacity on every call and starve the rest.
+    -- Instead a cyclic window of batch_size lanes is allowed this call; the
+    -- rotation start varies per call, so every in-scope lane is admitted
+    -- within ceil(lane_count / batch_size) calls on average.
+    SELECT array_agg(lane_order[1 + ((rotation_start + i) % lane_count)])
+      INTO allowed_lanes
+      FROM generate_series(0, batch_size - 1) AS i
+      CROSS JOIN (SELECT floor(random() * lane_count)::int AS rotation_start) AS r;
+  END IF;
 
   -- Reservations bind only across multiple lanes. The fast reserve also
   -- leaves room for the model share and at least one model slot when model
@@ -146,7 +165,10 @@ BEGIN
         j.next_run_at ASC NULLS FIRST,
         j.created_at ASC
       FOR UPDATE SKIP LOCKED
-      LIMIT GREATEST(batch_size - fast_reserve - delivery_reserve, 0)
+      LIMIT CASE WHEN undersized
+        THEN CASE WHEN 'model' = ANY(allowed_lanes) THEN 1 ELSE 0 END
+        ELSE GREATEST(batch_size - fast_reserve - delivery_reserve, 0)
+      END
     )
     RETURNING *;
     GET DIAGNOSTICS claimed_model = ROW_COUNT;
@@ -200,7 +222,10 @@ BEGIN
         j.next_run_at ASC NULLS FIRST,
         j.created_at ASC
       FOR UPDATE SKIP LOCKED
-      LIMIT GREATEST(batch_size - claimed_model - delivery_reserve, 0)
+      LIMIT CASE WHEN undersized
+        THEN CASE WHEN 'fast' = ANY(allowed_lanes) THEN 1 ELSE 0 END
+        ELSE GREATEST(batch_size - claimed_model - delivery_reserve, 0)
+      END
     )
     RETURNING *;
     GET DIAGNOSTICS claimed_fast = ROW_COUNT;
@@ -244,9 +269,16 @@ BEGIN
             AND controls.environment = 'production'
             AND controls.posting_mode = 'enabled'
         )
-      ORDER BY j.priority DESC, j.next_run_at ASC NULLS FIRST, j.created_at ASC
+      ORDER BY
+        j.priority DESC,
+        (j.created_at > now() - fresh_window) DESC,
+        j.next_run_at ASC NULLS FIRST,
+        j.created_at ASC
       FOR UPDATE SKIP LOCKED
-      LIMIT GREATEST(batch_size - claimed_model - claimed_fast, 0)
+      LIMIT CASE WHEN undersized
+        THEN CASE WHEN 'delivery' = ANY(allowed_lanes) THEN 1 ELSE 0 END
+        ELSE GREATEST(batch_size - claimed_model - claimed_fast, 0)
+      END
     )
     RETURNING *;
     GET DIAGNOSTICS claimed_delivery = ROW_COUNT;

@@ -30,6 +30,19 @@ if (!rendererSrc) {
 
 const manifest = JSON.parse(await readFile(join(cohortDir, "manifest.json"), "utf8"));
 const clips = manifest.clips.filter((c) => !only || only.split(",").includes(c.name));
+
+// Truncate on grapheme boundaries — a raw code-unit slice can split a
+// surrogate pair and corrupt the recorded error text.
+const graphemes = new Intl.Segmenter();
+function clipText(value, max = 300) {
+  let out = "";
+  for (const seg of graphemes.segment(String(value))) {
+    if (out.length + seg.segment.length > max) break;
+    out += seg.segment;
+  }
+  return out;
+}
+
 const outDir = join(outRoot, rev);
 await mkdir(outDir, { recursive: true });
 await mkdir(workRoot, { recursive: true });
@@ -49,7 +62,7 @@ for (const clip of clips) {
     const line = stdout.trim().split("\n").pop();
     results.push(JSON.parse(line));
   } catch (error) {
-    results.push({ clip: clip.name, ok: false, error: error.message.slice(0, 300) });
+    results.push({ clip: clip.name, ok: false, error: clipText(error.message) });
   }
   const last = results[results.length - 1];
   console.log(`[${rev}] ${clip.name} ${last.ok ? "ok" : "FAIL"} ${last.total_ms ?? "-"}ms wall=${Date.now() - t0}ms ${last.error ?? ""}`);

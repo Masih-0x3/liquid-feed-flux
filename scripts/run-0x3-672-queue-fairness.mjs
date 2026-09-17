@@ -326,6 +326,14 @@ try {
     expectFact(facts, "FACT_L5_result", (v) => v === "resurrected", "new media identity resurrects");
     expectFact(facts, "FACT_L5_cycle", (v) => v === "1", "new media identity resets the cycle");
     expectFact(facts, "FACT_L5_media", (v) => v === "media-b", "new media identity stored");
+    expectFact(facts, "FACT_L5_prev_media", (v) => v === "media-a", "superseded media identity stays in the row lineage");
+    // Scenario M: batch=2 < 3 lanes. A cyclic admission window rotates per
+    // call, so no lane may be starved to zero across the 15-call sequence —
+    // and a saturated backlog must still fill every undersized batch.
+    expectFact(facts, "FACT_M_total", (v) => Number(v) === 30, "undersized batches still fill: 15 calls x 2 slots");
+    expectFact(facts, "FACT_M_model", (v) => Number(v) >= 2, "model lane is admitted on undersized batches");
+    expectFact(facts, "FACT_M_fast", (v) => Number(v) >= 2, "fast lane is not starved on undersized batches");
+    expectFact(facts, "FACT_M_delivery", (v) => Number(v) >= 2, "delivery lane is admitted on undersized batches");
     if (concurrency.overlap !== 0) failures.push(`concurrent claims overlapped ${concurrency.overlap}`);
     if (concurrency.a !== 15 || concurrency.b !== 15) {
       failures.push(`concurrent claims a=${concurrency.a} b=${concurrency.b} (expected 15/15 — empty results must not pass)`);

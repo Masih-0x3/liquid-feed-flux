@@ -225,7 +225,11 @@ SELECT 'FACT_I_fresh_late_claimed_in_batches=' || batches FROM xot672_fresh_wait
 -- admission (no artificial starvation in the other direction). The earlier
 -- scenarios drained most seeded deliveries, so seed a fresh delivery batch
 -- (reusing the cutover-eligible posts) to guarantee >=20 eligible rows.
-DELETE FROM public.jobs WHERE status = 'pending' AND type <> 'deliver';
+-- Scoped to fixture rows: rows outside the xot672:% namespace are immutable.
+DELETE FROM public.jobs
+ WHERE status = 'pending'
+   AND type <> 'deliver'
+   AND idempotency_key LIKE 'xot672:%';
 
 INSERT INTO public.jobs (type, payload, status, priority, attempts, next_run_at, created_at, idempotency_key)
 SELECT 'deliver',
@@ -361,3 +365,54 @@ SELECT 'FACT_L4_cycle=' || (result_meta->>'video_render_retry_cycle') FROM publi
 SELECT 'FACT_L5_result=' || public.enqueue_bounded_media_download('xot672:l:dl', 'xot672-l', 'media-b', 3);
 SELECT 'FACT_L5_cycle=' || (result_meta->>'video_render_retry_cycle') FROM public.jobs WHERE idempotency_key = 'xot672:l:dl';
 SELECT 'FACT_L5_media=' || (result_meta->>'video_render_retry_media') FROM public.jobs WHERE idempotency_key = 'xot672:l:dl';
+SELECT 'FACT_L5_prev_media=' || (result_meta->>'video_render_retry_prev_media') FROM public.jobs WHERE idempotency_key = 'xot672:l:dl';
+
+-- ─── Scenario M: undersized batches rotate lane admission ───────────────────
+-- batch=2 < 3 in-scope lanes: static reservations cannot express fairness at
+-- this size, so admission rotates a cyclic window of lanes per call. Under a
+-- saturated backlog every lane must receive capacity across calls — no lane
+-- may starve because its reserve computed to zero.
+DELETE FROM public.jobs
+ WHERE status = 'pending' AND idempotency_key LIKE 'xot672:%';
+
+INSERT INTO public.jobs (type, payload, status, priority, attempts, next_run_at, created_at, idempotency_key)
+SELECT 'translate',
+       jsonb_build_object('tweet_id', 'xot672-m-translate-' || g),
+       'pending', 10, 0,
+       now() - interval '1 minute',
+       now() - interval '2 hours' + (g || ' seconds')::interval,
+       'xot672:m:translate:' || g
+FROM generate_series(1, 16) g;
+
+INSERT INTO public.jobs (type, payload, status, priority, attempts, next_run_at, created_at, idempotency_key)
+SELECT 'hydrate_tweet',
+       jsonb_build_object('tweet_id', 'xot672-m-hydrate-' || g),
+       'pending', 15, 0,
+       now() - interval '1 minute',
+       now() - interval '2 hours' + (g || ' seconds')::interval,
+       'xot672:m:hydrate:' || g
+FROM generate_series(1, 16) g;
+
+INSERT INTO public.jobs (type, payload, status, priority, attempts, next_run_at, created_at, idempotency_key)
+SELECT 'deliver',
+       jsonb_build_object('tweet_id', 'xot672-deliver-' || g),
+       'pending', 20, 0,
+       now() - interval '1 minute',
+       now(),
+       'xot672:m:deliver:' || g
+FROM generate_series(1, 16) g;
+
+CREATE TEMP TABLE xot672_m_claims(type text);
+DO $m$
+BEGIN
+  FOR i IN 1..15 LOOP
+    INSERT INTO xot672_m_claims (type)
+      SELECT j.type FROM public.claim_jobs(2, NULL, 'xot672-worker-m') AS j;
+  END LOOP;
+END
+$m$;
+
+SELECT 'FACT_M_total=' || count(*) FROM xot672_m_claims;
+SELECT 'FACT_M_model=' || count(*) FROM xot672_m_claims WHERE type IN ('translate', 'enrich');
+SELECT 'FACT_M_fast=' || count(*) FROM xot672_m_claims WHERE type NOT IN ('translate', 'enrich', 'deliver');
+SELECT 'FACT_M_delivery=' || count(*) FROM xot672_m_claims WHERE type = 'deliver';

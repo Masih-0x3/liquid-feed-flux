@@ -24,13 +24,27 @@ PERSIST_ROOT="${XOT_RENDERER_PERSIST_ROOT:-/teamspace/studios/this_studio/xot-re
 SERVICE_ENV_FILE="${XOT_RENDERER_SERVICE_ENV_FILE:-${PERSIST_ROOT}/runtime/service.env}"
 
 # service.env is the non-secret control file the systemd units already load as
-# an EnvironmentFile. Sourcing it here makes manual watchdog runs behave the
-# same as timer runs.
+# an EnvironmentFile. Manual watchdog runs must behave the same as timer runs,
+# but an explicit caller override still wins (same precedence as bootstrap.sh:
+# environment > service.env > default) — so file values only fill variables
+# that were not already set.
 if [[ -f "${SERVICE_ENV_FILE}" ]]; then
-  set -a
-  # shellcheck disable=SC1090
-  . "${SERVICE_ENV_FILE}"
-  set +a
+  while IFS= read -r env_line || [[ -n "${env_line}" ]]; do
+    env_line="${env_line%$'\r'}"
+    case "${env_line}" in
+      ''|'#'*) continue ;;
+    esac
+    env_key="${env_line%%=*}"
+    env_value="${env_line#*=}"
+    env_value="${env_value%\"}"
+    env_value="${env_value#\"}"
+    env_value="${env_value%\'}"
+    env_value="${env_value#\'}"
+    if [[ "${env_key}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] && [[ -z "${!env_key+x}" ]]; then
+      printf -v "${env_key}" '%s' "${env_value}"
+      export "${env_key?}"
+    fi
+  done < "${SERVICE_ENV_FILE}"
 fi
 
 CONTROL_DIR="${XOT_RENDERER_CONTROL_DIR:-${PERSIST_ROOT}/control/deploy/lightning}"

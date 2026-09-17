@@ -790,6 +790,10 @@ export async function processRenderRow({ supabase, row, config }) {
     preflight = await maybeRunVisionPreflight({ inputPath, workingDir, config: runtimeConfig, preflight, metrics, observability });
     metrics.preflight = preflight;
     if (preflight.block?.blocked) {
+      // The block decision is final and never consumes the audio — abort the
+      // speculative extraction before draining so a slow/hung ffmpeg cannot
+      // hold the render lease and workdir.
+      audioExtractController.abort();
       await audioExtractPromise?.catch(() => null);
       metrics.total_ms = Date.now() - started;
       workflowStatus = "skipped";

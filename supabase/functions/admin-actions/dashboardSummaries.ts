@@ -610,7 +610,10 @@ async function loadDashboardQueueBreakdown(
       pending += 1;
       item.pending += 1;
       const age = intervalAgeSeconds(row.created_at);
-      if (age != null) {
+      // Deferred jobs (next_run_at still in the future) are ineligible for
+      // claiming, so they are not starving — exclude them from the ready-age
+      // metric or a long deferral would misreport as queue starvation.
+      if (age != null && !(typeof row.next_run_at === "string" && row.next_run_at > nowIso)) {
         oldestPendingAgeSeconds = Math.max(oldestPendingAgeSeconds ?? 0, age);
         item.oldestPendingAge = Math.max(item.oldestPendingAge ?? 0, age);
       }

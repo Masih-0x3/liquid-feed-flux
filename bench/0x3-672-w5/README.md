@@ -35,8 +35,11 @@ node harness/compare-paired.mjs --rounds=p1,p2,p3 --probe
 
 ## Measured results (2026-09-17, 3 paired rounds, 63 renders)
 
-- Outputs: **15/15 rendered files MD5-identical** between revisions; duration,
-  resolution, audio presence, and ≤49MB output cap verified by ffprobe.
+- Outputs: **15/15 rendered files MD5-identical** between revisions — the
+  byte-identity check runs in `compare-paired.mjs --probe` (missing,
+  unprobeable, or differing artifacts are reported as issues and fail the
+  run); duration, resolution, audio presence, and ≤49MB output cap are
+  verified per output by ffprobe.
 - Failure parity: the two >160s portrait clips exhaust the encode-retry
   ladder identically on both revisions (`output exceeds max output bytes`).
 - Wall clock (per-clip medians): p50 −1.9%, p95 −9.3%; median delta −793ms.

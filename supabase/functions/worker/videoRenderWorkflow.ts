@@ -402,6 +402,38 @@ export async function prepareVideoRenderGate(
       throw new Error("video_render_download_enqueue_failed");
     }
     const downloadExhausted = downloadEnqueueResult === "exhausted";
+    if (downloadExhausted) {
+      // The download row has no remaining retry path for this media, so the
+      // delivery can never proceed — record a terminal block instead of
+      // deferring forever.
+      await insertPipelineEvent(
+        supabase,
+        "post",
+        tweetId,
+        "video_render",
+        "blocked",
+        null,
+        new Date().toISOString(),
+        "download_retry_exhausted",
+        {
+          source,
+          shadow: cfg.mode === "shadow",
+          reason: decision.reason,
+          waiting_for: "source_media_download",
+          download_retry_exhausted: true,
+        },
+      );
+      if (cfg.mode === "shadow") {
+        return { ready: true, blocked: false, decision, mediaRows };
+      }
+      return {
+        ready: false,
+        blocked: true,
+        blockReason: "download_retry_exhausted",
+        decision,
+        mediaRows,
+      };
+    }
     await insertPipelineEvent(
       supabase,
       "post",
@@ -416,7 +448,6 @@ export async function prepareVideoRenderGate(
         shadow: cfg.mode === "shadow",
         reason: decision.reason,
         waiting_for: "source_media_download",
-        ...(downloadExhausted ? { download_retry_exhausted: true } : {}),
       },
     );
     if (cfg.mode === "shadow") {

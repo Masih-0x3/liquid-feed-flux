@@ -9,7 +9,9 @@
 -- This function performs the whole decision under one row lock:
 --   SELECT ... FOR UPDATE serializes concurrent evaluators, a still-open row
 --   is left untouched, a closed row is resurrected at most
---   p_max_resurrections times per media identity (tracked in result_meta),
+--   p_max_resurrections times per media identity (video_render_retry_cycle
+--   counts resurrections already spent: a fresh row starts at 0, so the row
+--   may be resurrected exactly p_max_resurrections times before exhaustion),
 --   and exhaustion is reported without rewriting the row.
 --
 -- Returns one of: 'inserted' | 'resurrected' | 'open' | 'exhausted'.
@@ -52,7 +54,7 @@ BEGIN
       'pending', 12, 0, now(),
       p_idempotency_key,
       jsonb_build_object(
-        'video_render_retry_cycle', 1,
+        'video_render_retry_cycle', 0,
         'video_render_retry_media', p_media_id
       )
     )
@@ -94,6 +96,13 @@ BEGIN
                'video_render_retry_cycle', next_cycle,
                'video_render_retry_media', p_media_id
              )
+          -- When the media identity changed, keep the superseded identity in
+          -- the row's lineage so audit consumers can still see which media the
+          -- earlier attempts ran against.
+          || CASE WHEN stored_media IS DISTINCT FROM p_media_id
+               THEN jsonb_build_object('video_render_retry_prev_media', stored_media)
+               ELSE '{}'::jsonb
+             END
   WHERE id = existing.id;
 
   RETURN 'resurrected';

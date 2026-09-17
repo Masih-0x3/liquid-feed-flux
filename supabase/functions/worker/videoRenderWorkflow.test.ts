@@ -513,9 +513,15 @@ Deno.test("prepareVideoRenderGate wait_media surfaces an exhausted download budg
 
   const gate = await prepareVideoRenderGate(supabase, "tweet-1", "test");
 
+  // Exhaustion is terminal: the download row can never be reopened for this
+  // media, so the gate reports blocked instead of deferring forever.
   assertEquals(gate.ready, false);
+  assertEquals(gate.blocked, true);
+  assertEquals(gate.blockReason, "download_retry_exhausted");
   const event = firstCall(supabase.calls, "pipeline_events", "insert")
     .payload as Record<string, unknown>;
+  assertEquals(event.status, "blocked");
+  assertEquals(event.error, "download_retry_exhausted");
   const meta = event.meta as Record<string, unknown>;
   assertEquals(meta.waiting_for, "source_media_download");
   assertEquals(meta.download_retry_exhausted, true);

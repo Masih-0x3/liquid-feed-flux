@@ -21,6 +21,18 @@ const revA = arg("a", "before");
 const revB = arg("b", "after");
 const doProbe = process.argv.includes("--probe");
 
+// Truncate on grapheme boundaries — a raw code-unit slice can split a
+// surrogate pair and corrupt the recorded error text.
+const graphemes = new Intl.Segmenter();
+function clipText(value, max = 300) {
+  let out = "";
+  for (const seg of graphemes.segment(String(value))) {
+    if (out.length + seg.segment.length > max) break;
+    out += seg.segment;
+  }
+  return out;
+}
+
 async function loadResults(rev) {
   const raw = await readFile(join(OUT, `results-${rev}.jsonl`), "utf8");
   const rows = raw.trim().split("\n").map(JSON.parse);
@@ -123,7 +135,7 @@ for (const clip of manifest.clips) {
       if (Math.abs(dur - clip.duration_s) > 1.5) qualityIssues.push(`${clip.name}: duration ${dur} vs ${clip.duration_s}`);
       if (hasAudio !== clip.audio) qualityIssues.push(`${clip.name}: audio ${hasAudio} vs expected ${clip.audio}`);
     } catch (e) {
-      qualityIssues.push(`${clip.name}: probe failed ${e.message.slice(0, 80)}`);
+      qualityIssues.push(`${clip.name}: probe failed ${clipText(e.message, 80)}`);
     }
   }
 
