@@ -139,17 +139,6 @@ export async function summarizeStaleXPendingAdminAction(
     rows.push(row as Record<string, unknown>);
   }
   const ids = rows.map((row) => row.id);
-  if (close && ids.length > 0) {
-    const { error: updErr } = await table(supabase, "x_deliveries")
-      .update({
-        status: "skipped",
-        skip_reason: "stale_pending_closed_by_admin",
-        last_error:
-          "Closed by admin maintenance action without retrying or posting",
-      })
-      .in("id", ids);
-    if (updErr) throw updErr;
-  }
   return {
     body: {
       success: true,
