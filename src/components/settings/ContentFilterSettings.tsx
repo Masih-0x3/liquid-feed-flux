@@ -509,7 +509,7 @@ export default function ContentFilterSettings({ initialConfig, translationSettin
               </div>
               <div className="flex flex-wrap gap-2">
                 {config.low_priority_topics.map(topic => (
-                  <Badge key={topic} className="bg-orange-500/20 text-orange-400 border-orange-500/30 gap-1">
+                  <Badge key={topic} className="bg-warning/20 text-warning border-warning/30 gap-1">
                     {topic}
                     {!legacyReadOnly && <X className="w-3 h-3 cursor-pointer" onClick={() => removeTopic('low_priority', topic)} />}
                   </Badge>

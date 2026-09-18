@@ -240,7 +240,7 @@ export default function EditorialProfilesCard({ profiles: initialProfiles, activ
                           tone === 'green' ? 'bg-success/20 text-success border-success/30 gap-1' :
                           tone === 'red' ? 'bg-destructive/20 text-destructive border-destructive/30 gap-1' :
                           tone === 'blue' ? 'bg-primary/20 text-primary border-primary/30 gap-1' :
-                          'bg-orange-500/20 text-orange-400 border-orange-500/30 gap-1'
+                          'bg-warning/20 text-warning border-warning/30 gap-1'
                         }
                       >
                         {v}

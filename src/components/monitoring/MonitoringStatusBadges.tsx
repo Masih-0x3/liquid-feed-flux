@@ -41,7 +41,7 @@ export function MonitoringDedupeBadge({ entry }: MonitoringEntryBadgeProps) {
     : entry.dedupe_status === 'failed' ? 'Dedupe failed'
     : 'Unique';
   const cls =
-    entry.dedupe_status === 'duplicate' ? 'bg-purple-500/15 text-purple-400 border-purple-500/30'
+    entry.dedupe_status === 'duplicate' ? 'bg-primary/15 text-primary border-primary/30'
     : entry.dedupe_status === 'coverage_gap' ? toneClass('warn')
     : entry.dedupe_status === 'related_new_info' || entry.dedupe_status === 'unique' ? toneClass('good')
     : entry.dedupe_status === 'failed' ? toneClass('bad')
@@ -62,7 +62,7 @@ export function MonitoringAudienceBadge({ entry }: MonitoringEntryBadgeProps) {
   const cls =
     entry.audience_class === 'direct_focus' ? 'bg-success/15 text-success border-success/30'
     : entry.audience_class === 'adjacent' ? 'bg-primary/15 text-primary border-primary/30'
-    : entry.audience_class === 'global_exception' ? 'bg-violet-500/15 text-violet-400 border-violet-500/30'
+    : entry.audience_class === 'global_exception' ? 'bg-primary/15 text-primary border-primary/30'
     : 'bg-muted text-muted-foreground border-border';
   const title = [
     entry.scoring_profile_id ? `profile ${entry.scoring_profile_id}` : null,

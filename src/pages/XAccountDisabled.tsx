@@ -24,7 +24,7 @@ export default function XAccountDisabled() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="rounded-md border border-warning/40 bg-warning/10 p-4 text-sm text-warning-foreground">
+          <div className="rounded-md border border-warning/40 bg-warning/10 p-4 text-sm text-warning">
             <div className="flex gap-3">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
               <p>

@@ -34,13 +34,29 @@ const THEME_OPTIONS: Array<{ value: ThemePreference; label: string; Icon: typeof
   { value: 'system', label: 'System theme', Icon: Monitor },
 ];
 
-function ThemeControls() {
+function ThemeControls({ compact = false }: { compact?: boolean }) {
   const { preference, setPreference } = useTheme();
+  if (compact) {
+    const currentIndex = Math.max(0, THEME_OPTIONS.findIndex((option) => option.value === preference));
+    const current = THEME_OPTIONS[currentIndex] ?? THEME_OPTIONS[1];
+    const next = THEME_OPTIONS[(currentIndex + 1) % THEME_OPTIONS.length] ?? THEME_OPTIONS[0];
+    return (
+      <button
+        type="button"
+        aria-label={`Theme: ${current.label}. Switch to ${next.label}`}
+        title={current.label}
+        onClick={() => setPreference(next.value)}
+        className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-sidebar-border text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <current.Icon className="h-3.5 w-3.5" aria-hidden="true" />
+      </button>
+    );
+  }
   return (
     <div
       role="group"
       aria-label="Theme"
-      className="flex items-center gap-0.5 rounded-md border border-sidebar-border p-0.5"
+      className="flex items-center gap-0.5 rounded-md border border-border p-0.5"
     >
       {THEME_OPTIONS.map(({ value, label, Icon }) => (
         <button
@@ -53,8 +69,8 @@ function ThemeControls() {
           className={cn(
             'inline-flex h-7 w-7 items-center justify-center rounded-[0.375rem] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
             preference === value
-              ? 'bg-sidebar-accent text-foreground'
-              : 'text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-foreground',
+              ? 'bg-muted text-foreground'
+              : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
           )}
         >
           <Icon className="h-3.5 w-3.5" aria-hidden="true" />
@@ -130,7 +146,9 @@ function SidebarNav({ collapsed }: { collapsed: boolean }) {
       </nav>
 
       <div className="flex shrink-0 flex-col gap-2 border-t border-sidebar-border px-2 py-3">
-        <ThemeControls />
+        <div className="flex justify-center">
+          <ThemeControls compact />
+        </div>
       </div>
     </aside>
   );
@@ -318,7 +336,7 @@ export function AppLayout({ children }: AppLayoutProps) {
               aria-pressed={collapsed}
               title={collapsed ? 'Expand navigation' : 'Collapse navigation'}
               onClick={() => setCollapsed((value) => !value)}
-              className="hidden h-8 w-8 shrink-0 rounded-md p-0 text-sidebar-foreground hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring md:inline-flex"
+              className="hidden h-8 w-8 shrink-0 rounded-md p-0 text-sidebar-foreground hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring lg:inline-flex"
             >
               {collapsed ? (
                 <PanelLeftOpen className="h-4 w-4" aria-hidden="true" />
@@ -340,6 +358,7 @@ export function AppLayout({ children }: AppLayoutProps) {
           </div>
 
           <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+            <ThemeControls />
             <div
               role="status"
               aria-label="Posting status"

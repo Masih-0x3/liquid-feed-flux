@@ -53,7 +53,7 @@ function EntryTags({ entry }: { entry: MonitoringEntry }) {
   return (
     <>
       {entry.importance_tags?.slice(0, 3).map((tag) => <Badge key={tag} variant="outline" className="text-[10px]">{tag}</Badge>)}
-      {entry.dup_of_tweet_id && <Badge className="bg-purple-500/15 text-purple-400 border-purple-500/30 text-[10px]">dup</Badge>}
+      {entry.dup_of_tweet_id && <Badge className="bg-primary/15 text-primary border-primary/30 text-[10px]">dup</Badge>}
       <MonitoringDedupeBadge entry={entry} />
       <MonitoringAudienceBadge entry={entry} />
       {entry.feedback_locked && <Badge className="bg-primary/15 text-primary border-primary/30 text-[10px]">locked</Badge>}

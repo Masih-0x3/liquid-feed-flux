@@ -32,7 +32,7 @@ export function MonitoringDuplicateHint({ entry }: MonitoringDuplicateHintProps)
 
   return (
     <div className="mt-2 flex flex-wrap items-center gap-1.5 rounded-md border border-purple-500/20 bg-purple-500/5 px-2 py-1.5 text-[11px] text-muted-foreground">
-      <span className="font-medium text-purple-300">Duplicate of {label}</span>
+      <span className="font-medium text-primary">Duplicate of {label}</span>
       <Badge className={`${duplicateCoverageClass(target?.coverage_state)} text-[10px]`}>
         {duplicateCoverageLabel(target?.coverage_state)}
       </Badge>
