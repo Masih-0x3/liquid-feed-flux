@@ -73,6 +73,26 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Desired-state gate (0X3-672): a held stop must survive every startup path.
+# The systemd unit's ExecStart, manual --start runs, and watchdog-triggered
+# starts all converge here, so the control is enforced in this shared path —
+# not only in the watchdog. Precedence: environment override (already loaded
+# by the unit's EnvironmentFile or an operator's explicit override) > the
+# non-secret service.env file > default "running".
+DESIRED_STATE="${XOT_RENDERER_DESIRED_STATE:-}"
+if [[ -z "${DESIRED_STATE}" && -f "${SERVICE_ENV_FILE}" ]]; then
+  DESIRED_STATE="$(
+    sed -n 's/^[[:space:]]*XOT_RENDERER_DESIRED_STATE[[:space:]]*=[[:space:]]*//p' "${SERVICE_ENV_FILE}" \
+      | tail -n 1 | tr -d '\r' | tr -d '"'
+  )"
+fi
+DESIRED_STATE="${DESIRED_STATE:-running}"
+
+if [[ "${DO_START}" -eq 1 && "${DESIRED_STATE}" != "running" ]]; then
+  echo "[bootstrap] desired state is '${DESIRED_STATE}'; held stop preserved — not starting."
+  exit 0
+fi
+
 # Resolve a commit-qualified tag from the persistent source tree if not given.
 if [[ -z "${IMAGE_TAG}" ]]; then
   GIT_SHA="$(git -C "${SOURCE_DIR}" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
