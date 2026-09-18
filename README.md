@@ -58,8 +58,8 @@ RPCs: `claim_jobs`, `get_post_pipeline_status`, `retry_step`, `get_system_health
 
 ### Prerequisites
 
-- Node.js 20+
-- npm 10.8+
+- Node.js 24+
+- npm 11+
 - A reviewed set of public environment values for the bounded checks you run
 
 Local work is a disposable source-editing and validation lane. It does not
