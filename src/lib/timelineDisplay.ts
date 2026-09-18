@@ -167,14 +167,40 @@ function describeError(step: string, raw: string | null | undefined): { title: s
   return { title: formatted.title, detail: formatted.detail ?? raw };
 }
 
-export function describePipelineEvent(event: PipelineEvent): TimelineEventDisplay {
+export function hasTelegramDeliveryReceipt(entry: MonitoringEntry): boolean {
+  return Boolean(entry.is_delivered || ['posted', 'delivered'].includes(entry.delivery_status)
+    || entry.telegram_message_ids?.length || ['posted', 'delivered'].includes(entry.monitoring_state?.telegram_state ?? ''));
+}
+
+export function hasXDeliveryReceipt(entry: MonitoringEntry): boolean {
+  return entry.x_status === 'posted' || entry.monitoring_state?.x_state === 'posted';
+}
+
+/** Queue completion is not proof that translation or external delivery occurred. */
+export function pipelineOutcomeStatus(event: Pick<PipelineEvent, 'step' | 'status' | 'meta'>, entry?: MonitoringEntry | null): string {
+  const status = (event.status || 'unknown').toLowerCase();
+  const meta = event.meta ?? {};
+  if (meta.skipped === true || meta.outcome === 'skipped' || meta.result === 'skipped' || meta.noop === true) return 'skipped';
+  if (!['completed', 'complete', 'success', 'succeeded', 'done'].includes(status) || !entry) return status;
+  const step = event.step.toLowerCase();
+  const skipped = entry.delivery_decision === 'skip' || Boolean(entry.dup_of_tweet_id) || entry.dedupe_status === 'duplicate';
+  if (step.includes('translate') && !entry.is_translated && !entry.text_translated && skipped) return 'skipped';
+  if ((step === 'deliver' || step.includes('telegram')) && !hasTelegramDeliveryReceipt(entry)) return skipped ? 'skipped' : 'completed_without_receipt';
+  if ((step.includes('x_post') || step.includes('force_x')) && !hasXDeliveryReceipt(entry)) return entry.x_status === 'skipped' || skipped ? 'skipped' : 'completed_without_receipt';
+  return status;
+}
+
+export function describePipelineEvent(event: PipelineEvent, entry?: MonitoringEntry | null): TimelineEventDisplay {
   const classified = classifyStep(event.step);
+  const outcome = pipelineOutcomeStatus(event, entry);
+  if (outcome === 'skipped') classified.detail = 'Stage skipped; no external work or delivery is confirmed by this event.';
+  if (outcome === 'completed_without_receipt') classified.detail = 'Queue work finished; no platform delivery receipt is recorded.';
   const error = describeError(event.step, event.error);
   const timestampSource = event.ended_at ?? event.started_at;
   return {
     ...classified,
-    statusLabel: titleCase(event.status || "unknown"),
-    statusTone: statusTone(event.status || ""),
+    statusLabel: outcome === 'completed_without_receipt' ? 'No delivery receipt' : titleCase(outcome),
+    statusTone: statusTone(outcome),
     timestamp: formatTimestamp(timestampSource) ?? "No timestamp",
     rawTimestamp: timestampSource ?? null,
     duration: formatDuration(event.started_at, event.ended_at),
@@ -200,18 +226,18 @@ function latestCompletedDeliveryEvent(events: PipelineEvent[], platform: "Telegr
   const matches = events.filter((event) => {
     const step = event.step.toLowerCase().replace(/[-\s]+/g, "_");
     const status = event.status.toLowerCase();
-    if (!["completed", "posted", "delivered", "success"].includes(status)) return false;
+    if (!["completed", "posted", "delivered", "success"].includes(status) || pipelineOutcomeStatus(event) === "skipped") return false;
     if (platform === "Telegram") return step === "deliver" || step.includes("telegram");
     return step.includes("x_post") || step.includes("x_poster") || step.includes("force_x");
   });
   return matches.sort((a, b) => eventTimestampMs(b) - eventTimestampMs(a))[0] ?? null;
 }
 
-export function buildPipelineTimelineGroups(events: PipelineEvent[]): TimelineEventGroup[] {
+export function buildPipelineTimelineGroups(events: PipelineEvent[], entry?: MonitoringEntry | null): TimelineEventGroup[] {
   const groups = new Map<string, TimelineEventGroup>();
 
   for (const event of events) {
-    const display = describePipelineEvent(event);
+    const display = describePipelineEvent(event, entry);
     const key = `${display.title}:${display.platform}`;
     const existing = groups.get(key);
     if (!existing) {
@@ -254,30 +280,40 @@ export function buildPipelineTimelineGroups(events: PipelineEvent[]): TimelineEv
 }
 
 export function buildDeliverySummary(entry: MonitoringEntry, events: PipelineEvent[] = []): TimelineDeliverySummary[] {
-  const telegramDelivered = entry.is_delivered || entry.delivery_status === "posted";
+  const receiptEvents = events.filter((event) => ['posted', 'delivered'].includes(pipelineOutcomeStatus(event)));
+  const telegramReceipt = latestCompletedDeliveryEvent(receiptEvents, 'Telegram');
+  const xReceipt = latestCompletedDeliveryEvent(receiptEvents, 'X');
+  const telegramDelivered = hasTelegramDeliveryReceipt(entry) || Boolean(telegramReceipt);
+  const telegramSkipped = !telegramDelivered && (entry.delivery_status === "skipped" || entry.delivery_job_status === "skipped" || entry.delivery_decision === "skip" || Boolean(entry.dup_of_tweet_id) || entry.dedupe_status === "duplicate");
   const telegramFailed = entry.delivery_job_status === "failed" || entry.delivery_status === "failed" || Boolean(entry.delivery_error);
-  const telegramPending = ["pending", "running", "queued"].includes(entry.delivery_job_status) || entry.delivery_status === "pending";
+  const telegramBlocked = !telegramSkipped && (entry.delivery_status === "blocked" || entry.delivery_job_status === "blocked" || entry.monitoring_state?.telegram_state === "blocked");
+  const telegramPending = !telegramSkipped && (["pending", "running", "queued"].includes(entry.delivery_job_status) || entry.delivery_status === "pending");
   const messageCount = entry.telegram_message_ids?.length ?? 0;
-  const telegramDeliveryEvent = latestCompletedDeliveryEvent(events, "Telegram");
-  const telegramTimestamp = telegramDeliveryEvent ? eventTimestampSource(telegramDeliveryEvent) : null;
+  const telegramDeliveryEvent = telegramReceipt ?? latestCompletedDeliveryEvent(events, "Telegram");
+  const telegramTimestamp = telegramDelivered && telegramDeliveryEvent ? eventTimestampSource(telegramDeliveryEvent) : null;
 
   const xBadge = formatXBadge(entry);
-  const xPosted = entry.x_status === "posted";
+  const xPosted = hasXDeliveryReceipt(entry) || Boolean(xReceipt);
   const xFailed = entry.x_status === "failed";
   const xSkipped = entry.x_status === "skipped";
   const xPending = entry.x_status === "pending";
-  const xDeliveryEvent = latestCompletedDeliveryEvent(events, "X");
-  const xTimestamp = entry.x_posted_at ?? (xDeliveryEvent ? eventTimestampSource(xDeliveryEvent) : null);
+  const xBlocked = !xSkipped && (entry.x_status === "blocked" || entry.monitoring_state?.x_state === "blocked");
+  const xDeliveryEvent = xReceipt ?? latestCompletedDeliveryEvent(events, "X");
+  const xTimestamp = xPosted ? entry.x_posted_at ?? (xDeliveryEvent ? eventTimestampSource(xDeliveryEvent) : null) : null;
 
   return [
     {
       platform: "Telegram",
-      label: telegramDelivered ? "Delivered" : telegramFailed ? "Failed" : telegramPending ? "Pending" : "Not delivered",
-      tone: telegramDelivered ? "good" : telegramFailed ? "bad" : telegramPending ? "warn" : "muted",
+      label: telegramDelivered ? "Delivered" : telegramFailed ? "Failed" : telegramSkipped ? "Skipped" : telegramBlocked ? "Blocked" : telegramPending ? "Pending" : "Not delivered",
+      tone: telegramDelivered ? "good" : telegramFailed ? "bad" : telegramBlocked || telegramPending ? "warn" : "muted",
       detail: telegramDelivered
-        ? `${messageCount || 1} message${messageCount === 1 ? "" : "s"} sent${telegramTimestamp ? "" : " · delivery time unavailable"}`
+        ? `${messageCount ? `${messageCount} message${messageCount === 1 ? "" : "s"} sent` : "Delivery recorded · message count unavailable"}${telegramTimestamp ? "" : " · delivery time unavailable"}`
         : telegramFailed
           ? (formatPipelineError(entry.delivery_error).title || "Telegram delivery failed")
+          : telegramSkipped
+            ? "Not selected for delivery; no Telegram send is recorded"
+          : telegramBlocked
+            ? "Telegram delivery is blocked; no send is recorded"
           : telegramPending
             ? "Delivery job is still pending or running"
             : "No Telegram delivery row yet",
@@ -287,11 +323,11 @@ export function buildDeliverySummary(entry: MonitoringEntry, events: PipelineEve
     },
     {
       platform: "X",
-      label: xPosted ? "Posted" : xFailed ? "Failed" : xSkipped ? "Skipped" : xPending ? "Pending" : "Not posted",
-      tone: xPosted ? "good" : xFailed ? "bad" : xPending ? "warn" : "muted",
+      label: xPosted ? "Posted" : xFailed ? "Failed" : xSkipped ? "Skipped" : xBlocked ? "Blocked" : xPending ? "Pending" : "Not posted",
+      tone: xPosted ? "good" : xFailed ? "bad" : xBlocked || xPending ? "warn" : "muted",
       detail: xPosted && entry.x_tweet_id
         ? `Tweet ${entry.x_tweet_id}`
-        : xBadge.title,
+        : xPosted ? 'Posting recorded · tweet identifier unavailable' : xBlocked ? 'X posting is blocked; no post is recorded' : xBadge.title,
       timestamp: formatTimestamp(xTimestamp),
       rawTimestamp: xTimestamp,
       timestampLabel: xTimestamp ? (xPosted ? "Posted at" : "Last update") : null,

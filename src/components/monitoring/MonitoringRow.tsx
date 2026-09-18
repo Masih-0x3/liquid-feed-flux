@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode } from "react";
+import { Fragment, useRef, type ReactNode } from "react";
 import { formatDistanceToNow } from "date-fns";
 import { ExternalLink } from "lucide-react";
 
@@ -35,7 +35,7 @@ interface MonitoringRowProps {
   expandedClusters: Set<string>;
   renderRowActions: (entry: MonitoringEntry, compact?: boolean) => ReactNode;
   onSelectChange: (tweetId: string, checked: boolean) => void;
-  onOpenDetails: (tweetId: string) => MaybePromise<void>;
+  onOpenDetails: (tweetId: string, trigger?: HTMLButtonElement | null) => MaybePromise<void>;
   onOpenManualScore: (entry: MonitoringEntry) => void;
   onToggleCluster: (clusterId: string) => void;
   onInspectDuplicateMatch: (tweetId: string) => MaybePromise<void>;
@@ -138,6 +138,9 @@ export function MonitoringMobileCard({
   readOnly,
   mutationDisabledTitle,
 }: MonitoringRowProps) {
+  const sourceButtonRef = useRef<HTMLButtonElement>(null);
+  const excerptButtonRef = useRef<HTMLButtonElement>(null);
+  const detailsButtonRef = useRef<HTMLButtonElement>(null);
   const stage = monitoringStage(entry);
   const decision = formatDecisionReason(entry.decision_reason);
   const decisionLabel = monitoringDecisionLabel(entry, entry.delivery_decision ? decision.title : 'No decision');
@@ -155,7 +158,7 @@ export function MonitoringMobileCard({
           />
         )}
         <div className="min-w-0 flex-1">
-          <button onClick={() => onOpenDetails(entry.tweet_id)} className="block w-full text-left">
+          <button ref={sourceButtonRef} onClick={() => onOpenDetails(entry.tweet_id, sourceButtonRef.current)} className="block w-full text-left">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
               <span className="font-mono text-[11px]">{entry.tweet_id.slice(-10)}</span>
               <span>{formatDistanceToNow(new Date(entry.created_at), { addSuffix: true })}</span>
@@ -173,7 +176,7 @@ export function MonitoringMobileCard({
         <Badge className={toneClass(stage.tone)}>{stage.label}</Badge>
       </div>
 
-      <button onClick={() => onOpenDetails(entry.tweet_id)} className="block w-full text-left text-sm leading-5 hover:text-primary">
+      <button ref={excerptButtonRef} onClick={() => onOpenDetails(entry.tweet_id, excerptButtonRef.current)} className="block w-full text-left text-sm leading-5 hover:text-primary">
         <span className="line-clamp-3">{shortText(entry) || '[No content]'}</span>
       </button>
 
@@ -236,7 +239,7 @@ export function MonitoringMobileCard({
       )}
 
       <div className="grid grid-cols-3 gap-2">
-        <Button variant="outline" size="sm" className="h-9" onClick={() => onOpenDetails(entry.tweet_id)}>
+        <Button ref={detailsButtonRef} variant="outline" size="sm" className="h-9" onClick={() => onOpenDetails(entry.tweet_id, detailsButtonRef.current)}>
           Details
         </Button>
         <Button
@@ -272,6 +275,8 @@ export function MonitoringTableEntryRows({
   readOnly,
   mutationDisabledTitle,
 }: MonitoringRowProps) {
+  const excerptButtonRef = useRef<HTMLButtonElement>(null);
+  const detailsButtonRef = useRef<HTMLButtonElement>(null);
   const stage = monitoringStage(entry);
   const decision = formatDecisionReason(entry.decision_reason);
   const decisionLabel = monitoringDecisionLabel(entry, entry.delivery_decision ? decision.title : 'No decision');
@@ -310,7 +315,7 @@ export function MonitoringTableEntryRows({
           )}
         </TableCell>
         <TableCell className="px-3 py-4">
-          <button onClick={() => onOpenDetails(entry.tweet_id)} className="block w-full text-left text-sm leading-5 hover:text-primary">
+          <button ref={excerptButtonRef} onClick={() => onOpenDetails(entry.tweet_id, excerptButtonRef.current)} className="block w-full text-left text-sm leading-5 hover:text-primary">
             <span className="line-clamp-2">{shortText(entry) || '[No content]'}</span>
           </button>
           <div className="mt-1 flex flex-wrap gap-1">
@@ -341,7 +346,7 @@ export function MonitoringTableEntryRows({
         </TableCell>
         <TableCell className="px-2 py-4">
           <div className="flex items-center justify-end gap-1">
-            <Button variant="outline" size="sm" className="h-8 px-2" onClick={() => onOpenDetails(entry.tweet_id)}>
+            <Button ref={detailsButtonRef} variant="outline" size="sm" className="h-8 px-2" onClick={() => onOpenDetails(entry.tweet_id, detailsButtonRef.current)}>
               Details
             </Button>
             {renderRowActions(entry)}

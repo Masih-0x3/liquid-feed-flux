@@ -125,6 +125,82 @@ describe("timeline display helpers", () => {
     expect(summary[0].detail).toContain("delivery time unavailable");
   });
 
+  it("does not treat a completed skipped delivery job as a Telegram send", () => {
+    const post = entry({ delivery_decision: "skip", delivery_job_status: "completed", delivery_status: "pending" });
+    const completed = event({ step: "deliver", status: "completed", ended_at: "2026-05-23T15:01:00.000Z" });
+    expect(buildDeliverySummary(post, [completed])[0]).toMatchObject({ label: "Skipped", timestamp: null, timestampLabel: null });
+    expect(describePipelineEvent(completed, post)).toMatchObject({ statusLabel: "Skipped", statusTone: "muted" });
+    expect(describePipelineEvent({ ...completed, step: "translate" }, post).statusLabel).toBe("Skipped");
+  });
+
+  it("requires outcome evidence for completed external work and never invents a message count", () => {
+    const completed = event({ step: "deliver", status: "completed" });
+    expect(describePipelineEvent(completed, entry({})).statusLabel).toBe("No delivery receipt");
+    const delivered = buildDeliverySummary(entry({ is_delivered: true }), [completed])[0];
+    expect(delivered.detail).toContain("message count unavailable");
+    expect(delivered.detail).not.toContain("1 message");
+  });
+
+  it("honors explicit skipped metadata even without a post snapshot", () => {
+    const skipped = event({ step: "deliver", status: "completed", meta: { skipped: true } });
+    expect(describePipelineEvent(skipped).statusLabel).toBe("Skipped");
+    expect(buildDeliverySummary(entry({ is_delivered: true }), [skipped])[0].timestamp).toBeNull();
+  });
+
+  it('uses explicit platform receipts when the post snapshot is stale', () => {
+    const post = entry({ delivery_decision: 'skip', x_status: 'skipped' });
+    const receipts = [event({ step: 'deliver', status: 'delivered' }), event({ step: 'x_post', status: 'posted' })];
+    expect(buildDeliverySummary(post, receipts).map((item) => item.label)).toEqual(['Delivered', 'Posted']);
+    expect(buildDeliverySummary(post, [event({ step: 'x_post', status: 'completed' })])[1].timestamp).toBeNull();
+  });
+
+  it.each([
+    { status: 'pending', label: 'Pending', tone: 'warn' },
+    { status: 'blocked', label: 'Blocked', tone: 'warn' },
+    { status: 'failed', label: 'Failed', tone: 'bad' },
+    { status: 'skipped', label: 'Skipped', tone: 'muted' },
+  ])('keeps $status delivery states distinct in the shared row and summary model', ({ status, label, tone }) => {
+    const post = entry({ delivery_status: status, delivery_job_status: 'completed', x_status: status });
+    const summaries = buildDeliverySummary(post);
+    for (const summary of summaries) {
+      expect(summary).toMatchObject({ label, tone, timestamp: null, timestampLabel: null });
+    }
+    expect(describePipelineEvent(event({ step: 'deliver', status }), post).statusLabel).toBe(label);
+    expect(describePipelineEvent(event({ step: 'x_post', status }), post).statusLabel).toBe(label);
+  });
+
+  it('does not call historical queue completion a current blocked send', () => {
+    const post = entry({ delivery_status: 'blocked', delivery_job_status: 'completed' });
+    const historical = event({ step: 'deliver', status: 'completed' });
+    expect(buildDeliverySummary(post, [historical])[0]).toMatchObject({ label: 'Blocked', timestamp: null });
+    expect(describePipelineEvent(historical, post)).toMatchObject({ statusLabel: 'No delivery receipt', statusTone: 'muted' });
+  });
+
+  it('keeps an explicit receipt time instead of a later queue-completion time', () => {
+    const receiptTime = '2026-05-23T15:01:00.000Z';
+    const laterQueueTime = '2026-05-23T16:00:00.000Z';
+    const post = entry({ is_delivered: true, x_status: 'posted' });
+    const history = [
+      event({ step: 'deliver', status: 'delivered', ended_at: receiptTime }),
+      event({ step: 'x_post', status: 'posted', ended_at: receiptTime }),
+      event({ step: 'deliver', status: 'completed', ended_at: laterQueueTime }),
+      event({ step: 'x_post', status: 'completed', ended_at: laterQueueTime }),
+    ];
+    expect(buildDeliverySummary(post, history).map((summary) => summary.rawTimestamp)).toEqual([receiptTime, receiptTime]);
+  });
+
+  it('keeps failed attempts visible when receipts confirm that both platforms received the post', () => {
+    const post = entry({ delivery_status: 'posted', delivery_error: 'Older Telegram failure', x_status: 'posted', x_error: 'Older X failure' });
+    const failedAttempts = [
+      event({ step: 'deliver', status: 'failed', error: 'Older Telegram failure' }),
+      event({ step: 'x_post', status: 'failed', error: 'Older X failure' }),
+    ];
+    expect(buildDeliverySummary(post, failedAttempts).map((summary) => summary.label)).toEqual(['Delivered', 'Posted']);
+    for (const attempt of failedAttempts) {
+      expect(describePipelineEvent(attempt, post)).toMatchObject({ statusLabel: 'Failed', statusTone: 'bad', errorDetail: attempt.error });
+    }
+  });
+
   it("turns raw pipeline steps into readable labels, platforms, and timings", () => {
     const item = describePipelineEvent(event({
       step: "hydrate_tweet",

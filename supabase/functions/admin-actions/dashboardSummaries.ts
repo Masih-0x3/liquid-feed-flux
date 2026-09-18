@@ -507,7 +507,7 @@ async function loadDashboardQueueBreakdown(
         .limit(5000),
       supabase
         .from("jobs")
-        .select("type, status, created_at, locked_at, lease_expires_at")
+        .select("type, status, created_at, locked_at, lease_expires_at, next_run_at, result_meta")
         .in("status", ["pending", "running"])
         .order("created_at", { ascending: true })
         .limit(5000),
@@ -528,6 +528,11 @@ async function loadDashboardQueueBreakdown(
     running: number;
     failed: number;
     resolvedFailed: number;
+    deferred: number;
+    dependencyWaiting: number;
+    stalledDependencyWaits: number;
+    waitKinds: Map<string, number>;
+    oldestPendingAge: number | null;
     queueWaits: number[];
     runs: number[];
   }>();
@@ -541,6 +546,11 @@ async function loadDashboardQueueBreakdown(
         running: 0,
         failed: 0,
         resolvedFailed: 0,
+        deferred: 0,
+        dependencyWaiting: 0,
+        stalledDependencyWaits: 0,
+        waitKinds: new Map<string, number>(),
+        oldestPendingAge: null,
         queueWaits: [],
         runs: [],
       });
@@ -589,15 +599,44 @@ async function loadDashboardQueueBreakdown(
   let pending = 0;
   let running = 0;
   let staleRunning = 0;
+  let deferredPending = 0;
+  let dependencyWaiting = 0;
+  let stalledDependencyWaits = 0;
   let oldestPendingAgeSeconds: number | null = null;
+  const nowIso = new Date().toISOString();
   for (const row of activeRows) {
     const item = ensure(row.type);
     if (row.status === "pending") {
       pending += 1;
       item.pending += 1;
       const age = intervalAgeSeconds(row.created_at);
-      if (age != null) {
+      // Deferred jobs (next_run_at still in the future) are ineligible for
+      // claiming, so they are not starving — exclude them from the ready-age
+      // metric or a long deferral would misreport as queue starvation.
+      if (age != null && !(typeof row.next_run_at === "string" && row.next_run_at > nowIso)) {
         oldestPendingAgeSeconds = Math.max(oldestPendingAgeSeconds ?? 0, age);
+        item.oldestPendingAge = Math.max(item.oldestPendingAge ?? 0, age);
+      }
+      // 0X3-672: surface the truthful wait reason for pending jobs. A pending
+      // job whose next_run_at is still in the future is deferred, not starving
+      // in the claim set; a dependency_wait record names the prerequisite it
+      // is actually waiting on and how many defer cycles it has survived.
+      if (typeof row.next_run_at === "string" && row.next_run_at > nowIso) {
+        deferredPending += 1;
+        item.deferred += 1;
+      }
+      const waitMeta = recordValue(recordValue(row.result_meta).dependency_wait);
+      if (Object.keys(waitMeta).length > 0) {
+        dependencyWaiting += 1;
+        item.dependencyWaiting += 1;
+        const kind = typeof waitMeta.kind === "string" && waitMeta.kind
+          ? waitMeta.kind
+          : "unknown";
+        item.waitKinds.set(kind, (item.waitKinds.get(kind) ?? 0) + 1);
+        if (typeof waitMeta.stalled_at === "string" && waitMeta.stalled_at) {
+          stalledDependencyWaits += 1;
+          item.stalledDependencyWaits += 1;
+        }
       }
     }
     if (row.status === "running") {
@@ -618,6 +657,9 @@ async function loadDashboardQueueBreakdown(
     failed_24h: failed24h,
     resolved_failed_24h: resolvedFailed24h,
     stale_running: staleRunning,
+    deferred_pending: deferredPending,
+    dependency_waiting: dependencyWaiting,
+    stalled_dependency_waits: stalledDependencyWaits,
     oldest_pending_age_seconds: oldestPendingAgeSeconds,
     by_type: [...byType.values()]
       .map((item) => {
@@ -630,6 +672,13 @@ async function loadDashboardQueueBreakdown(
           running: item.running,
           failed: item.failed,
           resolved_failed: item.resolvedFailed,
+          deferred: item.deferred,
+          dependency_waiting: item.dependencyWaiting,
+          stalled_dependency_waits: item.stalledDependencyWaits,
+          dependency_wait_kinds: [...item.waitKinds.entries()]
+            .map(([kind, count]) => ({ kind, count }))
+            .sort((a, b) => b.count - a.count || a.kind.localeCompare(b.kind)),
+          oldest_pending_age_seconds: item.oldestPendingAge,
           queue_wait_p50_seconds: queueSummary.p50_seconds,
           queue_wait_p95_seconds: queueSummary.p95_seconds,
           run_p50_seconds: runSummary.p50_seconds,
@@ -1032,6 +1081,9 @@ export async function getSystemPerformanceSummary(supabase: any) {
       pending: queueBreakdown.pending,
       running: queueBreakdown.running,
       stale_running: queueBreakdown.stale_running,
+      deferred_pending: queueBreakdown.deferred_pending,
+      dependency_waiting: queueBreakdown.dependency_waiting,
+      stalled_dependency_waits: queueBreakdown.stalled_dependency_waits,
       failed_24h: queueBreakdown.failed_24h,
       oldest_pending_age_seconds: queueBreakdown.oldest_pending_age_seconds,
       scheduler_wait_seconds: queueBreakdown.oldest_pending_age_seconds,
@@ -1126,8 +1178,15 @@ async function loadScoringTuningSummary(supabase: any) {
 }
 
 export async function getEnhancedDashboardSummary(supabase: any) {
+  const unavailableSections: string[] = [];
+  const readSection = <T>(section: string, value: Promise<T>, fallback: T | ((error: unknown) => T)): Promise<T> =>
+    withDashboardFallback(section, value.catch((error: unknown) => {
+      unavailableSections.push(section);
+      throw error;
+    }), fallback);
   const { data: base, error } = await supabase.rpc("get_dashboard_summary");
   if (error) logDashboardFallback("base_summary", error);
+  if (error || !base || typeof base !== "object" || Array.isArray(base)) unavailableSections.push("base_summary");
 
   if (base && (typeof base !== "object" || Array.isArray(base))) {
     logDashboardFallback("base_summary", new Error("dashboard_base_invalid_response"));
@@ -1151,7 +1210,7 @@ export async function getEnhancedDashboardSummary(supabase: any) {
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const staleCutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
 
-  const dedupeAvailable = await withDashboardFallback(
+  const dedupeAvailable = await readSection(
     "dedupe_columns",
     hasDedupePostColumns(supabase),
     false,
@@ -1167,12 +1226,12 @@ export async function getEnhancedDashboardSummary(supabase: any) {
     systemPerformance,
     scoringTuning,
   ] = await Promise.all([
-    withDashboardFallback(
+    readSection(
       "posts",
       loadDashboardPosts(supabase, since, dedupeAvailable),
       [] as Array<Record<string, unknown>>,
     ),
-    withDashboardFallback(
+    readSection(
       "telegram_deliveries",
       checkedDashboardRowsQuery(
         supabase.from("deliveries").select(
@@ -1181,7 +1240,7 @@ export async function getEnhancedDashboardSummary(supabase: any) {
       ),
       emptyDashboardRowsResult(),
     ),
-    withDashboardFallback(
+    readSection(
       "x_deliveries",
       checkedDashboardRowsQuery(
         supabase.from("x_deliveries").select(
@@ -1191,7 +1250,7 @@ export async function getEnhancedDashboardSummary(supabase: any) {
       ),
       emptyDashboardRowsResult(),
     ),
-    withDashboardFallback(
+    readSection(
       "queue_breakdown",
       loadDashboardQueueBreakdown(supabase, since, staleCutoff),
       {
@@ -1200,11 +1259,14 @@ export async function getEnhancedDashboardSummary(supabase: any) {
         failed_24h: 0,
         resolved_failed_24h: 0,
         stale_running: 0,
+        deferred_pending: 0,
+        dependency_waiting: 0,
+        stalled_dependency_waits: 0,
         oldest_pending_age_seconds: null,
         by_type: [],
       },
     ),
-    withDashboardFallback(
+    readSection(
       "x_local_usage",
       loadDashboardXLocalUsage(supabase, dashboard, since),
       (error) => ({
@@ -1224,7 +1286,7 @@ export async function getEnhancedDashboardSummary(supabase: any) {
         official_usage_synced: false,
       }),
     ),
-    withDashboardFallback(
+    readSection(
       "openai_usage",
       loadOpenAiUsageSummary(supabase, since),
       (error) => ({
@@ -1232,7 +1294,7 @@ export async function getEnhancedDashboardSummary(supabase: any) {
         error: "dashboard_openai_usage_unavailable",
       }),
     ),
-    withDashboardFallback(
+    readSection(
       "process_observability",
       loadProcessObservabilitySummary(supabase, since),
       (error) => ({
@@ -1358,6 +1420,12 @@ export async function getEnhancedDashboardSummary(supabase: any) {
 
   return {
     ...dashboard,
+    data_quality: {
+      unavailable_sections: unavailableSections,
+      observed_at: new Date().toISOString(),
+      post_window_hours: 24,
+      post_row_limit: 10000,
+    },
     ops_status: {
       severity,
       primary_issue: primaryIssue,

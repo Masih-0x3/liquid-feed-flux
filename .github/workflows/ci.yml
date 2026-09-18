@@ -194,7 +194,7 @@ jobs:
       - name: Enforce final hosted supply-chain owner disposition
         env:
           XOT_REVIEWED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-          XOT_SUPPLY_OWNER_POLICY_MODE: exact-head
+          XOT_SUPPLY_OWNER_POLICY_MODE: exact-evidence
           XOT_SUPPLY_OWNER_POLICY_B64: ${{ vars.XOT_SUPPLY_OWNER_POLICY_B64 }}
         run: node scripts/collect-supply-chain-evidence.mjs --validate-only --output-dir "$RUNNER_TEMP/xot-supply-chain"
       - name: Upload accepted hosted supply-chain evidence

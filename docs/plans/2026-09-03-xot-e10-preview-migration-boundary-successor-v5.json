@@ -21,7 +21,7 @@
   "evidenceOverrides": {
     "src/integrations/supabase/types.ts": "f1dfd39c5ded189ac5bc39dc5ebd7a1f5986475a4f5cfeb333d650aadfe913dd",
     "package.json": "550d068af40dc3a35eabfa8dd1c06b63c3e486b0110d698ced1bff47c729d74d",
-    ".github/workflows/ci.yml": "6d128e9853a95d8985827bec4b8ab591685b30682ba3a875dcda34b536a52328"
+    ".github/workflows/ci.yml": "c88eeb47e814f2cc276230e31cbb5ba52e875e85038d926c4eb0d132e73db69b"
   },
   "supersession": {
     "reason": "Append-only successor that keeps prior Preview evidence immutable while binding the current production-generated types and Node 24 candidate declarations.",

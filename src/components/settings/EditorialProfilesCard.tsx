@@ -12,6 +12,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Sparkles, X, Plus, Loader2, RefreshCw, ChevronDown } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { DEFAULT_AXIS_WEIGHTS, SCORE_AXIS_KEYS, type EditorialProfile, type ScoreAxisKey } from '@/hooks/useSettingsData';
+import { ConfirmSettingsAction } from '@/components/settings/ConfirmSettingsAction';
 import { invokeAdminAction } from '@/api/adminActions';
 
 interface Props {
@@ -166,14 +167,14 @@ export default function EditorialProfilesCard({ profiles: initialProfiles, activ
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Profile name</Label>
-                <Input value={editing.name} onChange={(e) => updateEditing({ name: e.target.value })} disabled={legacyReadOnly} />
+                <Input aria-label="Profile name" value={editing.name} onChange={(e) => updateEditing({ name: e.target.value })} disabled={legacyReadOnly} />
               </div>
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <Label>Threshold</Label>
                   <Badge variant="outline">{editing.threshold}/20</Badge>
                 </div>
-                <Slider value={[editing.threshold]} onValueChange={([v]) => updateEditing({ threshold: v })} min={0} max={20} step={1} disabled={legacyReadOnly} />
+                <Slider aria-label="Legacy delivery threshold" value={[editing.threshold]} onValueChange={([v]) => updateEditing({ threshold: v })} min={0} max={20} step={1} disabled={legacyReadOnly} />
               </div>
             </div>
 
@@ -192,7 +193,7 @@ export default function EditorialProfilesCard({ profiles: initialProfiles, activ
                         {(editing.weights[k] ?? DEFAULT_AXIS_WEIGHTS[k]).toFixed(1)}
                       </Badge>
                     </div>
-                    <Slider
+                    <Slider aria-label={`Legacy ${AXIS_LABELS[k]} weight`}
                       value={[editing.weights[k] ?? DEFAULT_AXIS_WEIGHTS[k]]}
                       onValueChange={([v]) => setWeight(k, v)}
                       min={0} max={5} step={0.1} disabled={legacyReadOnly}
@@ -215,7 +216,7 @@ export default function EditorialProfilesCard({ profiles: initialProfiles, activ
                 <div key={key} className="space-y-2">
                   <Label>{label}</Label>
                   <div className="flex gap-2">
-                    <Input
+                    <Input aria-label={label}
                       value={kwInputs[key] ?? ''}
                       onChange={(e) => setKwInputs({ ...kwInputs, [key]: e.target.value })}
                       onKeyDown={(e) => {
@@ -227,7 +228,7 @@ export default function EditorialProfilesCard({ profiles: initialProfiles, activ
                       placeholder="Add and press Enter"
                       disabled={legacyReadOnly}
                     />
-                    <Button variant="outline" size="icon" onClick={() => { addToList(key, kwInputs[key] ?? ''); setKwInputs({ ...kwInputs, [key]: '' }); }} disabled={legacyReadOnly}>
+                    <Button aria-label={`Add ${label}`} variant="outline" size="icon" onClick={() => { addToList(key, kwInputs[key] ?? ''); setKwInputs({ ...kwInputs, [key]: '' }); }} disabled={legacyReadOnly}>
                       <Plus className="w-4 h-4" />
                     </Button>
                   </div>
@@ -253,7 +254,7 @@ export default function EditorialProfilesCard({ profiles: initialProfiles, activ
 
             <div className="space-y-2">
               <Label>Editorial note (visible to you only — not sent to AI)</Label>
-              <Textarea
+              <Textarea aria-label="Editorial note (visible to you only — not sent to AI)"
                 value={editing.editorial_note ?? ''}
                 onChange={(e) => updateEditing({ editorial_note: e.target.value })}
                 className="min-h-[80px]"
@@ -266,10 +267,12 @@ export default function EditorialProfilesCard({ profiles: initialProfiles, activ
 
         <Separator />
         <div className="flex justify-between items-center gap-3 flex-wrap">
-          <Button variant="outline" onClick={handleRescore} disabled={rescoring} size="sm">
-            {rescoring ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <RefreshCw className="w-4 h-4 mr-2" />}
+          <ConfirmSettingsAction title="Queue re-scoring for recent posts?" description="This queues posts from the last 48 hours that are missing scoring axes. Workers use the saved scoring configuration and may incur OpenAI charges. It does not change the saved profile." confirmLabel="Queue re-scoring" onConfirm={handleRescore}>
+          <Button variant="outline" disabled={rescoring} size="sm">
+            {rescoring ? <Loader2 className="h-auto min-h-11 max-w-full whitespace-normal w-4 h-4 animate-spin mr-2" /> : <RefreshCw className="h-auto min-h-11 max-w-full whitespace-normal w-4 h-4 mr-2" />}
             Re-score last 48h (missing axes only)
           </Button>
+          </ConfirmSettingsAction>
         </div>
       </CardContent>
     </Card>

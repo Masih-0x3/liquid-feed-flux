@@ -26,6 +26,8 @@ export const ADMIN_ACTION_NAMES = [
   'get_video_render_overview',
   'get_video_render_queue',
   'get_video_render_detail',
+  'get_media_catalog',
+  'get_media_access',
   'retry_video_render',
   'set_video_render_reviewed',
   'save_video_render_feedback',

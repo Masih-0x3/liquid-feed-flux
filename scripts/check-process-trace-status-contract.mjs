@@ -61,7 +61,13 @@ async function loadTraceMap(source) {
   });
   const diagnostics = (output.diagnostics ?? []).filter((diagnostic) => diagnostic.category === typescript.DiagnosticCategory.Error);
   if (diagnostics.length > 0) fail('processTraceMap module could not transpile');
-  return import(`data:text/javascript;base64,${Buffer.from(output.outputText).toString('base64')}`);
+  const moduleUrl = (code) => `data:text/javascript;base64,${Buffer.from(code).toString('base64')}`;
+  const compileDependency = (file) => typescript.transpileModule(readFileSync(join(repoRoot, file), 'utf8'), {
+    compilerOptions: { module: typescript.ModuleKind.ESNext, target: typescript.ScriptTarget.ES2022 }, fileName: file,
+  }).outputText;
+  const messagesUrl = moduleUrl(compileDependency('src/lib/pipelineMessages.ts'));
+  const timelineUrl = moduleUrl(compileDependency('src/lib/timelineDisplay.ts').replaceAll('@/lib/pipelineMessages', messagesUrl));
+  return import(moduleUrl(output.outputText.replaceAll('@/lib/timelineDisplay', timelineUrl)));
 }
 
 function entry(overrides = {}) {
@@ -148,15 +154,15 @@ async function assertTraceBehavior(trace) {
     }),
     [{
       step: 'telegram_delivery',
-      status: 'completed',
+      status: 'delivered',
       started_at: '2026-07-23T12:04:00.000Z',
       ended_at: '2026-07-23T12:05:00.000Z',
       error: null,
       meta: {},
     }],
   );
-  assert.equal(node(timelineDeliveredDespiteContradiction, 'telegram').status, 'completed', 'timeline delivery completion must remain terminal evidence');
-  assert.equal(timelineDeliveredDespiteContradiction.summary.status, 'completed', 'timeline delivery completion must dominate a stale terminal skip');
+  assert.equal(node(timelineDeliveredDespiteContradiction, 'telegram').status, 'completed', 'explicit platform delivery receipt must remain terminal evidence');
+  assert.equal(timelineDeliveredDespiteContradiction.summary.status, 'completed', 'explicit platform delivery receipt must dominate a stale terminal skip');
 
   const pending = trace.buildProcessTraceMap(entry({
     delivery_decision: 'deliver',
