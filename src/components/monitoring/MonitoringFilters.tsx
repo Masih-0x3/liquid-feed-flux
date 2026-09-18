@@ -51,10 +51,12 @@ export function MonitoringFilters({
     <CardHeader className="p-3">
       <div className="grid gap-3 xl:grid-cols-[auto_minmax(0,1fr)] xl:items-center">
         <CardTitle className="text-base">Queue</CardTitle>
-        <div className="grid min-w-0 gap-2 sm:grid-cols-1 md:grid-cols-[minmax(18rem,1fr)_13rem_10rem] xl:justify-end">
+        <div className="grid min-w-0 gap-2 sm:grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(10rem,13rem)_minmax(8rem,10rem)] xl:justify-end">
           <div className="relative min-w-0">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
+              id="monitoring-post-search"
+              aria-label="Search monitoring posts"
               value={searchTerm}
               onChange={(event) => onSearchTermChange(event.target.value)}
               placeholder="Search author, source, text, tweet ID"
@@ -62,13 +64,13 @@ export function MonitoringFilters({
             />
           </div>
           <ThemedSelect value={filter} onValueChange={(value) => onFilterChange(value as MonitoringFilter)}>
-            <SelectTrigger className="w-full md:w-52"><SelectValue /></SelectTrigger>
+            <SelectTrigger aria-label="Monitoring state filter" className="w-full"><SelectValue /></SelectTrigger>
             <SelectContent>
               {FILTERS.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
             </SelectContent>
           </ThemedSelect>
           <ThemedSelect value={scoreBucket} onValueChange={(value) => onScoreBucketChange(value as ScoreBucket)}>
-            <SelectTrigger className="w-full md:w-40"><SelectValue /></SelectTrigger>
+            <SelectTrigger aria-label="Score range filter" className="w-full"><SelectValue /></SelectTrigger>
             <SelectContent>
               {SCORE_BUCKETS.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
             </SelectContent>

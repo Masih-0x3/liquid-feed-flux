@@ -1,0 +1,21 @@
+# systemd user unit: one-shot renderer watchdog pass (0X3-672).
+#
+# Install to: ~/.config/systemd/user/xot-renderer-watchdog.service
+# Driven by xot-renderer-watchdog.timer (install both).
+#
+# Each run reconciles container state with the desired state recorded in the
+# non-secret service.env: when XOT_RENDERER_DESIRED_STATE=running and the
+# Compose service is down, watchdog.sh starts the already-built image. This is
+# the recovery path for a cleanly-exited container, which Docker's
+# unless-stopped policy deliberately does not resurrect.
+#
+# No Docker socket mount, no host networking, no Hermes interaction.
+# Template only. Luna owns integration and acceptance.
+
+[Unit]
+Description=XOT Lightning renderer watchdog (one-shot reconcile)
+
+[Service]
+Type=oneshot
+EnvironmentFile=/teamspace/studios/this_studio/xot-renderer/runtime/service.env
+ExecStart=/teamspace/studios/this_studio/xot-renderer/control/deploy/lightning/watchdog.sh

@@ -60,7 +60,10 @@ function formatServerAge(value: number | null | undefined): string {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return '-';
   const seconds = Math.floor(value / 1000);
   if (seconds < 60) return `${seconds}s`;
-  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 24 ? `${hours}h ${minutes % 60}m` : `${Math.floor(hours / 24)}d ${hours % 24}h`;
 }
 
 function rendererHealthLabel(state?: string | null): string {
@@ -119,6 +122,7 @@ export default function VideoRenders() {
   const setReviewed = useSetVideoRenderReviewed();
   const [selectedRenderId, setSelectedRenderId] = useState<string | null>(null);
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
+  const mobileDetailRef = useRef<HTMLDivElement>(null);
   const queueItemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const isLargeScreen = useIsLargeScreen();
 
@@ -131,6 +135,11 @@ export default function VideoRenders() {
     () => rows.find((row) => row.id === selectedRenderId) ?? rows[0] ?? null,
     [rows, selectedRenderId],
   );
+  useEffect(() => {
+    if (!mobileDetailOpen || isLargeScreen) return;
+    mobileDetailRef.current?.scrollIntoView?.({ block: 'start' });
+    mobileDetailRef.current?.focus({ preventScroll: true });
+  }, [isLargeScreen, mobileDetailOpen, selected?.id]);
   const rendererHealth = overview.data?.renderer_health ?? null;
   const rendererState = rendererHealth?.state ?? 'unknown';
 
@@ -144,7 +153,7 @@ export default function VideoRenders() {
   };
 
   const queueList = rows.length === 0 ? (
-    <div className="p-8 text-center text-sm text-muted-foreground">No video renders match this filter.</div>
+    <div className="space-y-3 p-6 text-center text-sm text-muted-foreground"><p>No video renders match this filter.</p><Button variant="outline" size="sm" onClick={() => { setStatusFilter('all'); setShowReviewed(true); }}>Show all renders</Button></div>
   ) : (
     <ul role="list" aria-label="Video render queue" className="divide-y divide-border">
       {rows.map((row: VideoRenderQueueRow, index) => {
@@ -162,6 +171,7 @@ export default function VideoRenders() {
           <li key={row.id}>
             <button
               type="button"
+              aria-label={`${author}: ${row.status}. ${title.slice(0, 180)}${title.length > 180 ? "…" : ""}`}
               aria-current={isSelected ? 'true' : undefined}
               data-render-id={row.id}
               ref={(element) => { queueItemRefs.current[row.id] = element; }}
@@ -193,7 +203,7 @@ export default function VideoRenders() {
                   <span className="truncate font-medium group-hover:text-primary">{author}</span>
                   {row.reviewed_at && <span className="shrink-0 text-[11px] text-emerald-500">Reviewed</span>}
                 </span>
-                <span className="mt-1 block line-clamp-2 text-xs text-muted-foreground">{title}</span>
+                <span dir="auto" className="mt-1 line-clamp-2 break-words text-sm text-muted-foreground">{title.slice(0, 240)}{title.length > 240 ? "…" : ""}</span>
                 <span className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
                   <span>{row.activity_at ? formatDistanceToNow(new Date(row.activity_at), { addSuffix: true }) : 'Age unknown'}</span>
                   {metadata && <span>{metadata}</span>}
@@ -211,7 +221,7 @@ export default function VideoRenders() {
     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div>
         <CardTitle>Render Queue</CardTitle>
-        <CardDescription>Production rows from Supabase, not local golden outputs</CardDescription>
+        <CardDescription>Current render records · filters apply only to this queue</CardDescription>
       </div>
       <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
         <label htmlFor="show-reviewed-renders" className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm text-muted-foreground">
@@ -243,7 +253,7 @@ export default function VideoRenders() {
           </AlertDialog>
         )}
         <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-full sm:w-52"><SelectValue /></SelectTrigger>
+          <SelectTrigger aria-label="Render status filter" className="w-full sm:w-52"><SelectValue /></SelectTrigger>
           <SelectContent>
             {STATUS_OPTIONS.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
           </SelectContent>
@@ -252,16 +262,16 @@ export default function VideoRenders() {
     </div>
   );
 
-  const queueContent = queue.isLoading ? (
-    <div className="flex min-h-60 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
-  ) : queueList;
+  const queueContent = queue.isLoading && !queue.data ? (
+    <div role="status" className="min-h-60 space-y-3 p-4 text-sm text-muted-foreground"><p>Loading render queue…</p>{[0, 1, 2].map((item) => <div key={item} className="h-24 rounded-md bg-muted/50" />)}</div>
+  ) : <>{queue.isError && <div role="alert" className="space-y-2 border-b p-4 text-sm"><p className="text-destructive">{queue.data ? 'Queue refresh failed. Last successful records are shown.' : 'The render queue could not load.'}</p><Button variant="outline" size="sm" onClick={() => void queue.refetch()}>Retry queue</Button></div>}{(queue.data || !queue.isError) && queueList}</>;
 
   const queueSummary = (
     <Card className="glass-card">
       <CardContent className="grid gap-2 p-4 text-sm sm:grid-cols-3">
         <div className="flex items-center gap-2">
           <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-          <span>{compactNumber(overview.data?.counts?.completed ?? 0)} completed</span>
+          <span>{compactNumber(overview.data?.counts?.completed)} completed</span>
         </div>
         <div className="flex items-center gap-2">
           <HardDrive className="h-4 w-4 text-primary" />
@@ -269,7 +279,7 @@ export default function VideoRenders() {
         </div>
         <div className="flex items-center gap-2">
           <Clock className="h-4 w-4 text-blue-500" />
-          <span>{overview.data?.oldest_queued_at ? `Oldest ${formatDistanceToNow(new Date(overview.data.oldest_queued_at), { addSuffix: true })}` : 'No backlog'}</span>
+          <span>{overview.data?.oldest_queued_at ? `Oldest ${formatDistanceToNow(new Date(overview.data.oldest_queued_at), { addSuffix: true })}` : !overview.data ? 'Backlog unavailable' : (overview.data.counts?.queued ?? 0) > 0 ? 'Oldest queued time unavailable' : 'No backlog in 7d snapshot'}</span>
         </div>
       </CardContent>
     </Card>
@@ -287,7 +297,7 @@ export default function VideoRenders() {
   );
 
   return (
-    <div className="w-full space-y-4 animate-fade-in-up">
+    <div className="w-full space-y-4">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-bold sm:text-3xl">
@@ -316,6 +326,7 @@ export default function VideoRenders() {
         </div>
       )}
 
+      <p role="status" className="text-xs text-muted-foreground">{overview.isLoading && !overview.data ? 'Loading overview…' : overview.isError ? overview.data ? 'Overview refresh failed; available values are from the last successful read.' : 'Overview could not load. Use Refresh to try again.' : overview.dataUpdatedAt ? `Overview refreshed ${new Date(overview.dataUpdatedAt).toLocaleTimeString()} · 7d snapshot (up to 5,000 renders); issue counts cover retained failed/blocked renders (up to 5,000).` : 'Overview refresh time unavailable.'}</p>
       <div role="region" aria-label="Render overview" className="grid min-w-0 overflow-hidden rounded-lg border bg-card/40 sm:grid-cols-2 xl:grid-cols-5">
         <div className="min-w-0 border-b p-3 sm:border-r xl:border-b-0">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -343,22 +354,22 @@ export default function VideoRenders() {
         <div className="min-w-0 border-b p-3 sm:border-r xl:border-b-0">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Clock className="h-3.5 w-3.5 text-blue-500" />
-            <span>Queued</span>
+            <span>Queued · created in last 7d</span>
           </div>
-          <p className="mt-1 text-sm font-semibold">{compactNumber(overview.data?.counts?.queued ?? 0)}</p>
+          <p className="mt-1 text-sm font-semibold">{compactNumber(overview.data?.counts?.queued)}</p>
         </div>
         <div className="min-w-0 border-b p-3 xl:border-b-0 xl:border-r">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <AlertTriangle className="h-3.5 w-3.5 text-red-500" />
-            <span>Issues</span>
+            <span>Unreviewed failed / blocked</span>
           </div>
-          <p className="mt-1 text-sm font-semibold">{compactNumber(overview.data?.unreviewed_issues ?? ((overview.data?.counts?.failed ?? 0) + (overview.data?.counts?.blocked ?? 0)))}</p>
-          <p className="mt-1 truncate text-[11px] text-muted-foreground">{compactNumber(overview.data?.reviewed_issues ?? 0)} reviewed</p>
+          <p className="mt-1 text-sm font-semibold">{compactNumber(overview.data?.unreviewed_issues)}</p>
+          <p className="mt-1 truncate text-[11px] text-muted-foreground">{compactNumber(overview.data?.reviewed_issues)} reviewed</p>
         </div>
         <div className="min-w-0 p-3">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <TimerReset className="h-3.5 w-3.5 text-primary" />
-            <span>Median total</span>
+            <span>Median total · last 7d</span>
           </div>
           <p className="mt-1 text-sm font-semibold">{formatMs(overview.data?.medians?.total_ms)}</p>
         </div>
@@ -392,12 +403,12 @@ export default function VideoRenders() {
           ) : (
             <div>
               {mobileDetailOpen && selected ? (
-                <div className="space-y-3">
-                  <Button type="button" variant="ghost" size="sm" onClick={() => setMobileDetailOpen(false)}>
+                <div ref={mobileDetailRef} tabIndex={-1} aria-label="Selected render inspector" className="scroll-mt-28 space-y-3 focus:outline-none">
+                  <Button type="button" variant="ghost" size="sm" onClick={() => { setMobileDetailOpen(false); requestAnimationFrame(() => { if (selected) queueItemRefs.current[selected.id]?.focus(); }); }}>
                     Back to queue
                   </Button>
-                  {queueSummary}
                   {detailContent}
+                  {queueSummary}
                 </div>
               ) : (
                 <Card className="glass-card">

@@ -12,7 +12,8 @@ import { Layers, Plus, X, Save, Loader2 } from 'lucide-react';
 import { useSaveSettings } from '@/hooks/useSettingsData';
 import { useToast } from '@/hooks/use-toast';
 import { invokeAdminAction } from '@/api/adminActions';
-import { useIncomingSettingsDraft } from '@/hooks/useIncomingSettingsDraft';
+import { useSettingsDraft, SettingsSaveStatus } from '@/components/settings/SettingsDrafts';
+import { ConfirmSettingsAction } from '@/components/settings/ConfirmSettingsAction';
 
 export interface StoryMemoryConfig {
   enabled: boolean;
@@ -51,6 +52,7 @@ export default function StoryMemoryCard({ initial }: Props) {
     () => ({ ...DEFAULTS, ...(initial ?? {}) }),
     [initial],
   );
+  const editor = useSettingsDraft('duplicate-gate', 'Duplicate Gate', incomingConfig);
   const {
     draft: cfg,
     dirtyFields,
@@ -60,7 +62,7 @@ export default function StoryMemoryCard({ initial }: Props) {
     reloadIncoming,
     keepEditing,
     markSaved,
-  } = useIncomingSettingsDraft(incomingConfig);
+  } = editor;
   const [authorInput, setAuthorInput] = useState('');
   const [backfilling, setBackfilling] = useState(false);
   const save = useSaveSettings();
@@ -97,7 +99,7 @@ export default function StoryMemoryCard({ initial }: Props) {
   };
 
   return (
-    <Card className="glass-card">
+    <Card id="duplicate-gate" className="glass-card scroll-mt-48">
       <CardHeader>
         <CardTitle className="flex items-center text-glass-foreground">
           <Layers className="w-5 h-5 mr-2" />Duplicate Gate
@@ -107,6 +109,7 @@ export default function StoryMemoryCard({ initial }: Props) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
+        <SettingsSaveStatus label="Duplicate Gate" dirty={editor.isDirty} saving={save.isPending} error={save.error} saved={save.isSuccess} />
         {hasPendingIncoming && (
           <div role="alert" className="space-y-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm">
             <div>
@@ -248,7 +251,7 @@ export default function StoryMemoryCard({ initial }: Props) {
 
           <div className="space-y-2">
             <Label htmlFor="story-memory-adjudicator-model">Adjudicator model</Label>
-            <Input id="story-memory-adjudicator-model" value={cfg.adjudicator_model} onChange={(e) => updateCfg({ ...cfg, adjudicator_model: e.target.value })} placeholder="gpt-5.4-mini" />
+            <Input aria-label="Adjudicator model" id="story-memory-adjudicator-model" value={cfg.adjudicator_model} onChange={(e) => updateCfg({ ...cfg, adjudicator_model: e.target.value })} placeholder="gpt-5.4-mini" />
           </div>
 
           <div className="space-y-2">
@@ -281,7 +284,7 @@ export default function StoryMemoryCard({ initial }: Props) {
         <div className="space-y-2">
           <Label htmlFor="story-memory-bypass-author">Bypass authors</Label>
           <div className="flex gap-2">
-            <Input
+            <Input aria-label="Bypass authors"
               id="story-memory-bypass-author"
               value={authorInput}
               onChange={(e) => setAuthorInput(e.target.value)}
@@ -314,10 +317,12 @@ export default function StoryMemoryCard({ initial }: Props) {
         <Separator />
 
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <Button variant="outline" onClick={handleBackfill} disabled={backfilling || !cfg.enabled}>
+          <ConfirmSettingsAction title="Queue duplicate checks?" description="This scans up to 500 posts from the last 24 hours and queues duplicate checks. Workers may call OpenAI and incur charges. Existing duplicate and runtime gates still apply." confirmLabel="Queue duplicate checks" onConfirm={handleBackfill}>
+          <Button variant="outline" disabled={backfilling || !cfg.enabled}>
             {backfilling ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Backfilling...</> : 'Backfill duplicate gate'}
           </Button>
-          <Button onClick={() => { void saveStoryMemory(); }} disabled={save.isPending || hasPendingIncoming} className="bg-gradient-primary hover:opacity-90 text-white">
+          </ConfirmSettingsAction>
+          <Button onClick={() => { void saveStoryMemory(); }} disabled={save.isPending || hasPendingIncoming} >
             {save.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Save className="w-4 h-4 mr-2" />}
             Save Duplicate Gate
           </Button>

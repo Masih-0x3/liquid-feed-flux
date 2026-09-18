@@ -2,7 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Apple Liquid Glass Design System */
+/* Shared operational surfaces, controls and readable status colors. */
 
 @layer base {
   :root {
@@ -23,7 +23,7 @@
 
     /* Primary colors - vibrant blue for accents */
     --primary: 215 85% 60%;
-    --primary-foreground: 220 15% 95%;
+    --primary-foreground: 220 25% 8%;
     --primary-glow: 215 100% 70%;
 
     /* Secondary glass panels */
@@ -35,13 +35,13 @@
     --muted-foreground: 220 8% 65%;
 
     /* Accent highlights */
-    --accent: 280 70% 55%;
+    --accent: 220 20% 22%;
     --accent-foreground: 220 15% 95%;
-    --accent-glow: 280 80% 65%;
+    --accent-glow: 215 30% 28%;
 
     /* Status colors */
-    --destructive: 0 75% 55%;
-    --destructive-foreground: 220 15% 95%;
+    --destructive: 0 85% 72%;
+    --destructive-foreground: 220 25% 8%;
     
     --success: 140 65% 50%;
     --success-foreground: 220 15% 95%;
@@ -72,8 +72,8 @@
     --blur-xl: 24px;
 
     /* Border radius */
-    --radius: 1rem;
-    --radius-lg: 1.5rem;
+    --radius: 0.625rem;
+    --radius-lg: 0.875rem;
 
     /* Typography */
     --font-display: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
@@ -81,8 +81,8 @@
     --font-mono: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
 
     /* Transitions */
-    --transition-glass: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    --transition-fast: all 0.15s ease-out;
+    --transition-glass: background-color 0.15s ease, border-color 0.15s ease;
+    --transition-fast: color 0.15s ease-out, background-color 0.15s ease-out;
   }
 }
 
@@ -94,10 +94,7 @@
   body {
     @apply bg-background text-foreground font-body antialiased;
     overflow-x: hidden;
-    background-image: 
-      radial-gradient(circle at 20% 80%, rgba(120, 119, 198, 0.3) 0%, transparent 50%),
-      radial-gradient(circle at 80% 20%, rgba(255, 119, 198, 0.15) 0%, transparent 50%),
-      radial-gradient(circle at 40% 40%, rgba(120, 119, 255, 0.2) 0%, transparent 50%);
+
   }
 
   h1, h2, h3, h4, h5, h6 {
@@ -108,33 +105,26 @@
 }
 
 @layer components {
-  /* Glass panel component */
+  /* A quiet base surface; nested groups use a flat surface and dividers. */
   .glass-panel {
-    @apply relative overflow-hidden rounded-xl;
-    background: var(--glass-bg);
+    @apply relative min-w-0 rounded-xl;
+    background: hsl(var(--card));
     border: 1px solid var(--glass-border-color);
-    backdrop-filter: blur(var(--blur-md));
-    box-shadow: var(--glass-shadow);
     transition: var(--transition-glass);
   }
 
-  @media (hover: hover) and (pointer: fine) {
-    .glass-panel:hover {
-      background: rgba(255, 255, 255, 0.08);
-      border-color: rgba(255, 255, 255, 0.15);
-      transform: translateY(-2px);
-      box-shadow: var(--glass-shadow-lg);
-    }
-  }
-
-  /* Glass card surface; CardHeader/CardContent own their spacing. */
   .glass-card {
     @apply glass-panel;
-    background: var(--gradient-glass);
+  }
+
+  .glass-card .glass-card {
+    border-radius: 0.5rem;
+    box-shadow: none;
+    background: hsl(var(--background) / 0.35);
   }
 
   .glass-card-lg {
-    @apply glass-card p-8;
+    @apply glass-card p-4 sm:p-6;
   }
 
   /* Animated gradient background */
@@ -178,18 +168,17 @@
 
   /* Interactive elements */
   .glass-button {
-    @apply glass-panel px-4 py-2 text-sm font-medium transition-all duration-200;
-    @apply active:scale-95;
+    @apply rounded-md border border-border bg-secondary px-4 py-2 text-sm font-medium transition-colors duration-150;
   }
 
   @media (hover: hover) and (pointer: fine) {
     .glass-button:hover {
-      transform: scale(1.03);
+      background: hsl(var(--muted));
     }
   }
 
   .glass-input {
-    @apply glass-panel px-3 py-2 text-sm bg-transparent;
+    @apply min-w-0 rounded-md border border-border bg-background px-3 py-2 text-sm;
     @apply focus:ring-2 focus:ring-primary/50 focus:border-primary/50;
   }
 
@@ -779,5 +768,22 @@
 
   .backdrop-blur-glass-xl {
     backdrop-filter: blur(var(--blur-xl));
+  }
+}
+
+/* Native Persian-capable fonts avoid a serif fallback without remote font requests. */
+:lang(fa) {
+  font-family: "Vazirmatn", "Noto Sans Arabic", "Geeza Pro", "Tahoma", "Arial", sans-serif;
+  line-height: 1.8;
+  unicode-bidi: plaintext;
+  overflow-wrap: anywhere;
+}
+
+/* Respect the preference for every primitive, overlay, route and status indicator. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
   }
 }

@@ -115,7 +115,7 @@ describe("settings scoring control plane contract", () => {
     const editorialProfiles = readComponent("EditorialProfilesCard.tsx");
     const contentFilter = readComponent("ContentFilterSettings.tsx");
 
-    expect(studio).toMatch(/mutateAsync\(\{ key: ['"]scoring_policy['"], value: policy \}/);
+    expect(studio).toMatch(/mutateAsync\(\{ key: ['"]scoring_policy['"], value \}/);
     expect(editorialProfiles).not.toMatch(/mutateAsync\(\{ key: ['"](?:editorial_profiles|active_profile_id)['"]/);
     expect(contentFilter).not.toMatch(/mutateAsync\(\{ key: ['"](?:content_filter|translation_prompt)['"]/);
   });

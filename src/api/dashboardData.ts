@@ -249,6 +249,7 @@ export interface ScoringTuningSummary {
 }
 
 interface RpcResult {
+  data_quality?: { unavailable_sections?: string[]; observed_at?: string };
   metrics: {
     posts_ingested: number;
     posts_translated: number;
@@ -470,7 +471,7 @@ function normalizeSystemPerformance(input: RpcResult['system_performance']): Sys
   const byTypeRows = Array.isArray(queue.by_type) ? queue.by_type as Array<Record<string, unknown>> : [];
   const laneRows = Array.isArray(queue.lane_pressure) ? queue.lane_pressure as Array<Record<string, unknown>> : [];
   return {
-    success: row.success !== false,
+    success: Boolean(input) && row.success !== false,
     error: typeof row.error === 'string' ? row.error : null,
     generatedAt: typeof row.generated_at === 'string' ? row.generated_at : null,
     windows: {
@@ -506,7 +507,7 @@ function normalizeSystemPerformance(input: RpcResult['system_performance']): Sys
       })),
     },
     resources: {
-      available: resources.available !== false,
+      available: Boolean(row.resources) && resources.available !== false,
       error: typeof resources.error === 'string' ? resources.error : null,
       dbBytes: asNumber(resources.db_bytes),
       dbLimitBytes: asNumber(resources.db_limit_bytes, 500_000_000),
@@ -710,5 +711,9 @@ export async function fetchDashboardData() {
   const systemPerformance = normalizeSystemPerformance(rpc.system_performance);
   const scoringTuning = normalizeScoringTuning(rpc.scoring_tuning);
 
-  return { metrics, health, heartbeat, opsStatus, pipelineCounts, queueBreakdown, xLocalUsage, openAiUsage, processObservability, systemPerformance, scoringTuning };
+  const dataQuality = {
+    unavailableSections: Array.isArray(rpc.data_quality?.unavailable_sections) ? rpc.data_quality.unavailable_sections.filter((section) => typeof section === 'string') : [],
+    observedAt: typeof rpc.data_quality?.observed_at === 'string' ? rpc.data_quality.observed_at : null,
+  };
+  return { metrics, health, heartbeat, opsStatus, pipelineCounts, queueBreakdown, xLocalUsage, openAiUsage, processObservability, systemPerformance, scoringTuning, dataQuality };
 }

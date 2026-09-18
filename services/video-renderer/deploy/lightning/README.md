@@ -13,9 +13,11 @@ acceptance.
 
 | File | Purpose |
 | --- | --- |
-| `docker-compose.lightning.yml` | Compose file with all required resource limits, loopback bind, healthcheck, log rotation, dedicated network/volume. |
+| `docker-compose.lightning.yml` | Compose file with all required resource limits, loopback bind, healthcheck, log rotation, dedicated network/volume. Restart defaults to `unless-stopped`. |
 | `bootstrap.sh` | Persistent rebuild + start script. Rebuilds the AMD64 image from the selected source if missing; never prunes, restarts Docker, or touches unrelated projects. |
+| `watchdog.sh` | One-shot reconcile: starts the existing image when the service is down and `XOT_RENDERER_DESIRED_STATE=running`. Covers cleanly-exited containers that `unless-stopped` cannot resurrect (0X3-672). |
 | `xot-renderer.service` | Generic systemd user unit template. It loads non-secret `runtime/service.env` and starts the selected build after acceptance. |
+| `xot-renderer-watchdog.service` / `xot-renderer-watchdog.timer` | systemd user watchdog pair: runs `watchdog.sh` at boot and every 2 minutes thereafter. |
 | `renderer.env.example` | Runtime env template with **no secret values**. Copy to persistent storage, set mode 0600, fill secrets from XOT-owned sources. |
 | `service.env.example` | Non-secret source/image/control selection template. Copy to persistent storage and set mode 0600. |
 
@@ -34,7 +36,10 @@ acceptance.
 - **Logs:** `json-file`, `max-size: 10m`, `max-file: 3`.
 - **Network:** dedicated `xot-renderer-net` (bridge).
 - **Volume:** dedicated `xot-renderer-tmp` (local).
-- **Restart:** `"no"` — until acceptance, the container does not auto-restart.
+- **Restart:** `"unless-stopped"` by default (crash/daemon-restart recovery).
+  `bootstrap.sh --service-profile candidate` still exports `"no"` for
+  pre-acceptance staged runs; the watchdog timer (below) is the reconcile path
+  for cleanly-stopped containers.
 - **Polling breaker:** `RENDER_POLLING_ENABLED` defaults to `0` (disabled). Only explicit accepted values enable polling.
 
 ### Explicitly forbidden
@@ -284,7 +289,25 @@ persistence/rollback drill), switch the restart policy:
    systemctl --user daemon-reload
    systemctl --user enable xot-renderer.service
    ```
-4. Verify the unit is enabled and the container restarts through bootstrap
+4. Enable the watchdog pair so a cleanly-exited container is resurrected
+   (0X3-672 — this is the recovery for the failure mode that stopped the
+   renderer in September: Docker records a SIGTERM-drained exit as "stopped",
+   which `unless-stopped` does not restart):
+   ```bash
+   cp xot-renderer-watchdog.service xot-renderer-watchdog.timer \
+     ~/.config/systemd/user/
+   systemctl --user daemon-reload
+   systemctl --user enable --now xot-renderer-watchdog.timer
+   ```
+   With `XOT_RENDERER_DESIRED_STATE=running` in `service.env`, the timer
+   restarts the existing image within ~2 minutes of an unplanned exit. To stop
+   the renderer intentionally, set `XOT_RENDERER_DESIRED_STATE=stopped` in
+   `service.env` first — the watchdog then preserves the stop, and
+   `bootstrap.sh --start` (including the service unit's ExecStart) no-ops, so a
+   host or user-session restart cannot resume a held stop. An explicit
+   environment override (`XOT_RENDERER_DESIRED_STATE=running ./bootstrap.sh
+   --start`) still forces a start for operator recovery.
+5. Verify the unit is enabled and the container restarts through bootstrap
    after a controlled stop/start cycle.
 
 **Do not set the persistent profile or enable the user unit before acceptance.**

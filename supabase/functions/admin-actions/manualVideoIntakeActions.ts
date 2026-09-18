@@ -48,17 +48,6 @@ type TableQueryBuilder = PromiseLike<QueryResult> & {
   single(): PromiseLike<QueryResult>;
 };
 
-type StorageClient = {
-  storage: {
-    from(bucket: string): {
-      createSignedUrl(
-        path: string,
-        expiresIn: number,
-      ): PromiseLike<{ data?: { signedUrl?: string }; error?: unknown }>;
-    };
-  };
-};
-
 type FunctionsClient = {
   functions: {
     invoke(
@@ -828,18 +817,6 @@ async function buildDraftCaption(
   });
 }
 
-async function signedTempMediaUrl(
-  supabase: SupabaseAdminClient,
-  path: unknown,
-): Promise<string | null> {
-  if (typeof path !== "string" || !path.trim()) return null;
-  const { data, error } = await (supabase as SupabaseAdminClient & StorageClient)
-    .storage.from("temp-media")
-    .createSignedUrl(path, 3600);
-  if (error) return null;
-  return data?.signedUrl ?? null;
-}
-
 async function latestXDelivery(
   supabase: SupabaseAdminClient,
   tweetId: string,
@@ -943,8 +920,6 @@ async function assembleSnapshot(
   const outputRender = requestedRenderId
     ? completedOutputRenders.find((row) => String(row.id) === requestedRenderId) ?? null
     : completedOutputRenders[0] ?? null;
-  const sourceSignedUrl = await signedTempMediaUrl(supabase, sourceMedia?.storage_path);
-  const outputSignedUrl = await signedTempMediaUrl(supabase, outputRender?.output_storage_path);
   const draft = typeof intake.caption_draft === "string" && intake.caption_draft.trim()
     ? intake.caption_draft
     : await buildDraftCaption(supabase, post);
@@ -1017,8 +992,8 @@ async function assembleSnapshot(
     latest_render: latestRender,
     preview: {
       render_id: typeof outputRender?.id === "string" ? outputRender.id : null,
-      source_signed_url: sourceSignedUrl,
-      output_signed_url: outputSignedUrl,
+      source_media_id: typeof sourceMedia?.id === "string" ? sourceMedia.id : null,
+      output_available: Boolean(outputRender?.output_storage_path),
       subtitle_text: outputRender?.translated_srt ?? outputRender?.persian_srt ?? null,
     },
     caption: {
@@ -1030,6 +1005,39 @@ async function assembleSnapshot(
     },
     safety: safetyFlags,
     x_delivery: xDelivery,
+  };
+}
+
+// Normal reads expose logical IDs and operational metadata. Signing is a separate admin action.
+async function assembleClientSnapshot(...args: Parameters<typeof assembleSnapshot>) {
+  const snapshot = await assembleSnapshot(...args);
+  const { data: destinationRow, error: destinationError } = await table(args[0], "settings")
+    .select("value").eq("key", "x_self_id").maybeSingle();
+  const destination = destinationError ? {} : asRecord(asRecord(destinationRow).value);
+  const destinationHandle = typeof destination.username === "string" && /^[A-Za-z0-9_]{1,15}$/.test(destination.username)
+    ? destination.username : null;
+  const safeMedia = snapshot.media.map((row) => ({
+    id: row.id, tweet_id: row.tweet_id, kind: row.kind, ordering: row.ordering,
+    downloaded_at: row.downloaded_at, mime_type: row.mime_type, file_size: row.file_size,
+    duration_ms: row.duration_ms, width: row.width, height: row.height,
+  }));
+  const safeRender = (row: Record<string, unknown>) => ({
+    id: row.id, tweet_id: row.tweet_id, source_media_id: row.source_media_id, status: row.status,
+    has_output: Boolean(row.output_storage_path), output_mime_type: row.output_mime_type,
+    output_file_size: row.output_file_size, duration_ms: row.duration_ms, width: row.width, height: row.height,
+    source_language: row.source_language, target_language: row.target_language,
+    error: row.error ? "render_failed" : null, block_reason: row.block_reason ? "render_blocked" : null,
+    updated_at: row.updated_at, completed_at: row.completed_at,
+    translated_srt: row.translated_srt, persian_srt: row.persian_srt,
+  });
+  return {
+    ...snapshot, media: safeMedia, renders: snapshot.renders.map(safeRender),
+    latest_render: snapshot.latest_render ? safeRender(snapshot.latest_render) : null,
+    destination: {
+      platform: "X", handle: destinationHandle,
+      cached_at: typeof destination.cached_at === "string" ? destination.cached_at : null,
+      identity_status: destinationHandle ? "cached" : "unavailable",
+    },
   };
 }
 
@@ -1061,7 +1069,7 @@ export async function manualVideoIntakeCreateAdminAction(
   const existingActive = asRows(existingRows).find((row) => ACTIVE_STATUSES.has(String(row.status)));
   if (existingActive) {
     return {
-      body: await assembleSnapshot(supabase, existingActive, deps, {
+      body: await assembleClientSnapshot(supabase, existingActive, deps, {
         runDedupe: true,
         queueRender: true,
         updateStatus: true,
@@ -1121,7 +1129,7 @@ export async function manualVideoIntakeCreateAdminAction(
   });
 
   return {
-    body: await assembleSnapshot(supabase, intake, deps, {
+    body: await assembleClientSnapshot(supabase, intake, deps, {
       runDedupe: true,
       queueRender: true,
       updateStatus: true,
@@ -1143,7 +1151,7 @@ export async function manualVideoIntakeGetAdminAction(
   const intake = await loadIntakeByIdOrTweet(supabase, body);
   if (!intake) return { body: { ok: false, error: "manual intake not found" }, status: 404 };
   return {
-    body: await assembleSnapshot(supabase, intake, deps, {
+    body: await assembleClientSnapshot(supabase, intake, deps, {
       runDedupe: body.refresh_dedupe === true,
       queueRender: body.queue_render === true,
       updateStatus: false,
@@ -1192,7 +1200,7 @@ export async function manualVideoIntakeRefreshAdminAction(
   }
   await queueMediaWork(supabase, String(intake.tweet_id), "manual_video_intake_refresh", deps);
   return {
-    body: await assembleSnapshot(supabase, intake, deps, {
+    body: await assembleClientSnapshot(supabase, intake, deps, {
       runDedupe: true,
       queueRender: true,
       updateStatus: true,
@@ -1221,7 +1229,7 @@ export async function manualVideoIntakeSaveCaptionAdminAction(
     caption_chars: caption.length,
   });
   return {
-    body: await assembleSnapshot(supabase, { ...intake, caption_edited: caption }, deps, {
+    body: await assembleClientSnapshot(supabase, { ...intake, caption_edited: caption }, deps, {
       updateStatus: true,
     }),
   };
@@ -1254,7 +1262,7 @@ export async function manualVideoIntakeSetDuplicateOverrideAdminAction(
     intake_id: intake.id,
   });
   return {
-    body: await assembleSnapshot(
+    body: await assembleClientSnapshot(
       supabase,
       { ...intake, duplicate_override: enabled, duplicate_override_reason: enabled ? reason : null },
       deps,

@@ -107,7 +107,7 @@ function assertContract(sources, label) {
   );
   const openDetailsHandler = sliceBetween(
     sources.monitoring,
-    "const openDetails = useCallback(async (tweetId: string) => {",
+    "const openDetails = useCallback(async (tweetId: string, trigger?: HTMLButtonElement | null) => {",
     "useEffect(() => {",
     label + " timeline read handler",
   );
@@ -154,7 +154,7 @@ function assertContract(sources, label) {
   const drawerOpenChangeHandler = sliceBetween(
     sources.monitoring,
     "const handleDrawerOpenChange = useCallback((open: boolean) => {",
-    "const openDetails = useCallback(async (tweetId: string) => {",
+    "const openDetails = useCallback(async (tweetId: string, trigger?: HTMLButtonElement | null) => {",
     label + " drawer change handler",
   );
   assertIncludes(drawerOpenChangeHandler, "closeDetails();", label + " drawer change close invalidation");

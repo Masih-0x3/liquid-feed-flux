@@ -29,7 +29,10 @@ describe("ScoringStudio", () => {
     expect(screen.getByText("Direct focus")).toBeTruthy();
     expect(screen.getByText("Global exception")).toBeTruthy();
     expect(screen.getByText("Neutral axis weights")).toBeTruthy();
-    expect(screen.getByText("Active tuning state")).toBeTruthy();
+    expect(screen.getByText(/Saved delivery gate: Legacy content filter/)).toBeTruthy();
+    expect(screen.getByText(/No score on the 1–20 scale can pass/)).toBeTruthy();
+    expect(screen.queryByRole("slider", { name: "Off topic threshold" })).toBeNull();
+    expect(screen.getByText("Profile tuning reference")).toBeTruthy();
     expect(screen.getByText("Regional escalation auto")).toBeTruthy();
     expect(screen.getByText(/Oil \/ energy shock >=14/)).toBeTruthy();
     expect(screen.getByText(/Global mega-event review pilot/)).toBeTruthy();
@@ -52,8 +55,11 @@ describe("ScoringStudio", () => {
 
     renderStudio();
     fireEvent.click(screen.getByRole("button", { name: /preview with gpt-5\.4 mini/i }));
+    expect(vi.mocked(supabase.functions.invoke)).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Run scoring preview" }));
 
     await waitFor(() => expect(screen.getByText("global_exception")).toBeTruthy());
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     expect(screen.getByText(/Score 16/)).toBeTruthy();
     expect(screen.getAllByText(/Bitcoin milestone/).length).toBeGreaterThan(0);
   });
@@ -70,6 +76,8 @@ for (const { accuracy, correct, evaluated, failed, expected } of [
     });
     renderStudio();
     fireEvent.click(screen.getByRole("button", { name: /run 10-case eval/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Run evaluation" }));
     await waitFor(() => expect(screen.getByText(expected)).toBeTruthy());
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   });
 }

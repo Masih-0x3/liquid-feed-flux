@@ -36,15 +36,10 @@ assert.match(
   /--gradient-primary:\s*linear-gradient\([^;]*hsl\(var\(--primary\)\)[^;]*hsl\(var\(--primary-glow\)\)[^;]*\);/,
   "the primary gradient must continue to derive from the shared primary tokens",
 );
-assert.match(
-  authPage,
-  /className="[^"]*\bbg-gradient-primary\b[^"]*"/,
-  "the login primary action must retain the shared gradient utility",
-);
-assert.ok(
-  gradientCallers.length > 1,
-  "the shared utility must retain more than one active caller",
-);
+const buttonSource = readFileSync(join(repoRoot, "src/components/ui/button.tsx"), "utf8");
+assert.match(buttonSource, /default: "bg-primary text-primary-foreground/, "primary actions must pair the shared background and foreground tokens");
+assert.doesNotMatch(authPage, /className="[^"]*(?:text-white|bg-gradient-primary)[^"]*"/, "login must inherit the shared accessible primary action instead of overriding its contrast");
+assert.match(authPage, /<Button[\s\S]*?type="submit"/, "login must retain the shared Button submit action");
 
 const transpile = typescript.transpileModule(tailwindConfig, {
   compilerOptions: {

@@ -265,9 +265,9 @@ function DashboardContent() {
     if (processHudOpen) processHudQuery.refetch();
   };
 
-  if (isLoading) {
+  if (isLoading && !data) {
     return (
-      <div className="space-y-4 animate-fade-in-up">
+      <div className="space-y-4">
         <div className="flex items-center gap-2">
           <Activity className="h-6 w-6 animate-spin text-primary" />
           <h1 className="text-2xl font-display font-bold text-glass-foreground sm:text-3xl">Loading Dashboard...</h1>
@@ -286,9 +286,9 @@ function DashboardContent() {
     );
   }
 
-  if (isError || !data) {
+  if (!data) {
     return (
-      <div className="space-y-6 animate-fade-in-up">
+      <div className="space-y-6">
         <div>
           <h1 className="text-3xl font-display font-bold text-glass-foreground">Dashboard</h1>
           <p className="text-muted-foreground mt-1">Monitor your RSS - OpenAI - Telegram pipeline</p>
@@ -348,25 +348,32 @@ function DashboardContent() {
     route: opsStatus.recommendedRoute,
     ctaLabel: getOpsCtaLabel(opsStatus, pipelineCounts),
   };
-  const primaryAlert = getPrimaryAlert(opsAlert, storageAlert);
+  const operationalAlert = getPrimaryAlert(opsAlert, storageAlert);
+  const telemetryIncomplete = Boolean(data.dataQuality?.unavailableSections.length);
+  const primaryAlert = telemetryIncomplete && operationalAlert.severity === 'ok'
+    ? { severity: 'warning' as const, title: 'Telemetry is incomplete', detail: 'Some reads failed. Unavailable values are not evidence of an empty or healthy pipeline.', route: '/monitoring', ctaLabel: 'Inspect queue' }
+    : operationalAlert;
   const oldestPendingSeconds = systemPerformance.queue.oldestPendingAgeSeconds ?? queueBreakdown.oldestPendingAgeSeconds;
   const storagePct = systemPerformance.resources.storageUsedPct;
+
+  const unavailable = data.dataQuality?.unavailableSections ?? [];
+  const baseUnavailable = unavailable.includes('base_summary');
+  const postCountsUnavailable = unavailable.includes('posts');
+  const queueUnavailable = unavailable.includes('queue_breakdown');
+  const triageUnavailable = baseUnavailable || postCountsUnavailable || queueUnavailable || unavailable.includes('telegram_deliveries') || unavailable.includes('x_deliveries');
 
   const triageCards = [
     {
       label: 'Needs attention',
-      value: pipelineCounts.needsAttention,
+      value: triageUnavailable ? null : pipelineCounts.needsAttention,
       icon: AlertTriangle,
       route: '/monitoring?filter=needs_attention',
       tone: pipelineCounts.needsAttention > 0 ? 'text-amber-500' : 'text-muted-foreground',
-      context: joinParts([
-        pipelineCounts.failedStuck > 0 ? `${compactNumber(pipelineCounts.failedStuck)} failed` : null,
-        pipelineCounts.readyToDeliver > 0 ? `${compactNumber(pipelineCounts.readyToDeliver)} ready` : null,
-      ]) || 'No active triage',
+      context: 'Failed/stuck jobs + X failures · 24h',
     },
     {
       label: 'Failed/stuck',
-      value: pipelineCounts.failedStuck,
+      value: queueUnavailable ? null : pipelineCounts.failedStuck,
       icon: XCircle,
       route: '/monitoring?filter=failed_stuck',
       tone: pipelineCounts.failedStuck > 0 ? 'text-destructive' : 'text-muted-foreground',
@@ -374,15 +381,15 @@ function DashboardContent() {
     },
     {
       label: 'Ready to deliver',
-      value: pipelineCounts.readyToDeliver,
+      value: triageUnavailable ? null : pipelineCounts.readyToDeliver,
       icon: Send,
       route: '/monitoring?filter=ready_to_deliver',
       tone: 'text-primary',
-      context: `${compactNumber(pipelineCounts.readyToDeliver)} route-ready`,
+      context: 'Translated, unsent posts · created in last 24h',
     },
     {
       label: 'Translation queue',
-      value: pipelineCounts.translationQueue,
+      value: queueUnavailable ? null : pipelineCounts.translationQueue,
       icon: MessageSquare,
       route: '/monitoring?filter=translation_queue',
       tone: pipelineCounts.translationQueue > 0 ? 'text-amber-500' : 'text-primary',
@@ -390,15 +397,15 @@ function DashboardContent() {
     },
     {
       label: 'X failed',
-      value: pipelineCounts.xFailed,
+      value: triageUnavailable ? null : pipelineCounts.xFailed,
       icon: Twitter,
       route: '/monitoring?filter=x_failed',
       tone: pipelineCounts.xFailed > 0 ? 'text-destructive' : 'text-muted-foreground',
-      context: `${compactNumber(xLocalUsage.failedPosts24h)} posts - ${compactNumber(xLocalUsage.failedAttempts24h)} attempts`,
+      context: `${compactNumber(xLocalUsage.available ? xLocalUsage.failedPosts24h : null)} posts - ${compactNumber(xLocalUsage.available ? xLocalUsage.failedAttempts24h : null)} attempts`,
     },
     {
       label: 'Stale jobs',
-      value: pipelineCounts.staleJobs,
+      value: queueUnavailable ? null : pipelineCounts.staleJobs,
       icon: TimerReset,
       route: '/monitoring?filter=failed_stuck',
       tone: pipelineCounts.staleJobs > 0 ? 'text-amber-500' : 'text-muted-foreground',
@@ -407,40 +414,40 @@ function DashboardContent() {
   ];
 
   const funnel = [
-    { label: 'Ingested', value: pipelineCounts.ingested, icon: Activity, note: 'RSS intake', noteTone: 'text-muted-foreground' },
+    { label: 'Ingested', value: baseUnavailable ? null : pipelineCounts.ingested, icon: Activity, note: 'RSS intake', noteTone: 'text-muted-foreground' },
     {
       label: 'Duplicate gate',
-      value: pipelineCounts.duplicateGateAvailable ? pipelineCounts.duplicateGateChecked : null,
+      value: !postCountsUnavailable && pipelineCounts.duplicateGateAvailable ? pipelineCounts.duplicateGateChecked : null,
       icon: ShieldCheck,
-      note: pipelineCounts.duplicateGateAvailable ? `${compactNumber(pipelineCounts.duplicates)} blocked` : 'Schema pending',
+      note: postCountsUnavailable ? 'Unavailable' : pipelineCounts.duplicateGateAvailable ? `${compactNumber(pipelineCounts.duplicates)} blocked` : 'Schema pending',
       noteTone: 'text-muted-foreground',
     },
     {
       label: 'Scored',
-      value: pipelineCounts.scored,
+      value: postCountsUnavailable ? null : pipelineCounts.scored,
       icon: Star,
-      note: `${compactNumber(nonNegativeDelta(pipelineCounts.duplicateGateChecked ?? pipelineCounts.ingested, pipelineCounts.scored))} not scored`,
+      note: postCountsUnavailable || baseUnavailable ? 'Unavailable' : `${compactNumber(nonNegativeDelta(pipelineCounts.duplicateGateChecked ?? pipelineCounts.ingested, pipelineCounts.scored))} not scored`,
       noteTone: nonNegativeDelta(pipelineCounts.duplicateGateChecked ?? pipelineCounts.ingested, pipelineCounts.scored) > 0 ? 'text-warning' : 'text-muted-foreground',
     },
     {
       label: 'Translated',
-      value: pipelineCounts.translated,
+      value: postCountsUnavailable ? null : pipelineCounts.translated,
       icon: MessageSquare,
-      note: `${compactNumber(nonNegativeDelta(pipelineCounts.scored, pipelineCounts.translated))} not translated`,
+      note: postCountsUnavailable ? 'Unavailable' : `${compactNumber(nonNegativeDelta(pipelineCounts.scored, pipelineCounts.translated))} not translated`,
       noteTone: nonNegativeDelta(pipelineCounts.scored, pipelineCounts.translated) > 0 ? 'text-warning' : 'text-muted-foreground',
     },
     {
       label: 'Telegram',
-      value: pipelineCounts.telegramDelivered,
+      value: unavailable.includes('telegram_deliveries') ? null : pipelineCounts.telegramDelivered,
       icon: Send,
-      note: `${compactNumber(nonNegativeDelta(pipelineCounts.translated, pipelineCounts.telegramDelivered))} awaiting Telegram`,
+      note: triageUnavailable ? 'Unavailable' : `${compactNumber(nonNegativeDelta(pipelineCounts.translated, pipelineCounts.telegramDelivered))} awaiting Telegram`,
       noteTone: nonNegativeDelta(pipelineCounts.translated, pipelineCounts.telegramDelivered) > 0 ? 'text-warning' : 'text-muted-foreground',
     },
     {
       label: 'X posted',
-      value: pipelineCounts.xPosted,
+      value: unavailable.includes('x_deliveries') ? null : pipelineCounts.xPosted,
       icon: Twitter,
-      note: `${compactNumber(nonNegativeDelta(pipelineCounts.telegramDelivered, pipelineCounts.xPosted))} not X posted`,
+      note: triageUnavailable ? 'Unavailable' : `${compactNumber(nonNegativeDelta(pipelineCounts.telegramDelivered, pipelineCounts.xPosted))} not X posted`,
       noteTone: nonNegativeDelta(pipelineCounts.telegramDelivered, pipelineCounts.xPosted) > 0 ? 'text-warning' : 'text-muted-foreground',
     },
   ];
@@ -510,27 +517,27 @@ function DashboardContent() {
       label: 'Database',
       icon: Database,
       value: systemPerformance.resources.dbUsedPct == null ? '-' : `${systemPerformance.resources.dbUsedPct}%`,
-      note: formatBytes(systemPerformance.resources.dbBytes),
+      note: systemPerformance.resources.available ? formatBytes(systemPerformance.resources.dbBytes) : 'Resource telemetry unavailable',
       tone: quotaTone(systemPerformance.resources.dbUsedPct),
     },
     {
       label: 'Temp media',
       icon: HardDrive,
       value: systemPerformance.resources.storageUsedPct == null ? '-' : `${systemPerformance.resources.storageUsedPct}%`,
-      note: `${formatBytes(systemPerformance.resources.tempMediaBytes)} / ${compactNumber(systemPerformance.resources.tempMediaObjects)} objects`,
+      note: systemPerformance.resources.available ? `${formatBytes(systemPerformance.resources.tempMediaBytes)} / ${compactNumber(systemPerformance.resources.tempMediaObjects)} objects` : 'Resource telemetry unavailable',
       tone: quotaTone(systemPerformance.resources.storageUsedPct),
     },
     {
       label: 'Edge quota',
       icon: BarChart3,
       value: systemPerformance.resources.edgeCronUsedPct == null ? '-' : `${systemPerformance.resources.edgeCronUsedPct}%`,
-      note: `${compactNumber(systemPerformance.resources.projectedCronInvocationsMonthly)} / ${compactNumber(systemPerformance.resources.edgeMonthlyLimit)} monthly`,
+      note: systemPerformance.resources.available ? `${compactNumber(systemPerformance.resources.projectedCronInvocationsMonthly)} / ${compactNumber(systemPerformance.resources.edgeMonthlyLimit)} monthly` : 'Resource telemetry unavailable',
       tone: quotaTone(systemPerformance.resources.edgeCronUsedPct),
     },
     {
       label: 'Duplicate translate jobs',
       icon: AlertTriangle,
-      value: compactNumber(systemPerformance.resources.duplicateTranslateJobs24h),
+      value: systemPerformance.resources.available ? compactNumber(systemPerformance.resources.duplicateTranslateJobs24h) : 'Unavailable',
       note: 'last 24h',
       tone: systemPerformance.resources.duplicateTranslateJobs24h > 0 ? 'text-warning' : 'text-success',
       help: 'Duplicate translate jobs created in the last 24 hours.',
@@ -538,7 +545,7 @@ function DashboardContent() {
   ];
 
   return (
-    <div className="space-y-3 animate-fade-in-up">
+    <div className="space-y-3">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="text-2xl font-display font-bold text-glass-foreground sm:text-3xl">Dashboard</h1>
@@ -551,10 +558,10 @@ function DashboardContent() {
             Refresh
           </Button>
           <div className="flex items-center gap-2 rounded-md border border-border/60 px-3 py-2 text-sm">
-            {health.isOnline ? <Wifi className="h-4 w-4 text-success" /> : <WifiOff className="h-4 w-4 text-destructive" />}
-            <span>{health.isOnline ? 'Online' : 'Offline'}</span>
+            {baseUnavailable ? <WifiOff className="h-4 w-4 text-muted-foreground" /> : health.isOnline ? <Wifi className="h-4 w-4 text-success" /> : <WifiOff className="h-4 w-4 text-destructive" />}
+            <span>{baseUnavailable ? 'Health unavailable' : health.isOnline ? 'Online' : 'Offline'}</span>
           </div>
-          <div className="text-xs text-muted-foreground">Updated {new Date(dataUpdatedAt).toLocaleTimeString()}</div>
+          <div role="status" className="text-xs text-muted-foreground">{isError ? "Refresh failed · last successful data from " : isFetching ? "Refreshing · last successful read " : "Updated "}{new Date(dataUpdatedAt).toLocaleTimeString()}</div>
         </div>
       </div>
 
@@ -574,7 +581,7 @@ function DashboardContent() {
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="text-base font-semibold text-glass-foreground">Workflow cockpit</h2>
-            <p className="text-xs text-muted-foreground">Current pipeline posture and the next operator decision.</p>
+            <p className="text-xs text-muted-foreground">24h post snapshot (up to 10,000 rows) and current jobs. Monitoring includes older retained posts and evaluates more eligibility gates.</p>
           </div>
           <Activity className="h-5 w-5 shrink-0 text-primary" />
         </div>
@@ -587,7 +594,7 @@ function DashboardContent() {
           </div>
           <div className="rounded-md border border-border/60 bg-background/30 p-3">
             <p className="text-xs text-muted-foreground">Queue</p>
-            <p className="mt-1 text-lg font-semibold tabular-nums text-glass-foreground">{`${compactNumber(queueBreakdown.pending)} pending / ${compactNumber(queueBreakdown.running)} running`}</p>
+            <p className="mt-1 text-lg font-semibold tabular-nums text-glass-foreground">{queueUnavailable ? "Queue unavailable" : `${compactNumber(queueBreakdown.pending)} pending / ${compactNumber(queueBreakdown.running)} running`}</p>
             <p className="mt-1 text-xs text-muted-foreground">Oldest pending {formatAge(oldestPendingSeconds)}</p>
           </div>
           <div className="rounded-md border border-border/60 bg-background/30 p-3">
@@ -623,6 +630,9 @@ function DashboardContent() {
               <div>
                 <p className="text-sm font-semibold text-glass-foreground">{primaryAlert.title}</p>
                 <p className="text-xs text-muted-foreground">{primaryAlert.detail}</p>
+                {telemetryIncomplete && operationalAlert.severity !== 'ok' && (
+                  <p className="mt-2 text-xs text-amber-200">Telemetry is incomplete. Some supplemental reads failed; the operational alert above still applies.</p>
+                )}
               </div>
             </div>
             <Button variant="outline" size="sm" onClick={() => navigate(primaryAlert.route)}>
@@ -720,9 +730,9 @@ function DashboardContent() {
               <div className="rounded-md border border-border/60 p-3">
                 <p className="text-xs text-muted-foreground">X budget</p>
                 <p className={xLocalUsage.budgetUsedPct >= 90 ? 'text-lg font-semibold text-destructive tabular-nums' : xLocalUsage.budgetUsedPct >= 70 ? 'text-lg font-semibold text-warning tabular-nums' : 'text-lg font-semibold text-success tabular-nums'}>
-                  {xLocalUsage.budgetUsedPct}%
+                  {xLocalUsage.available ? `${xLocalUsage.budgetUsedPct}%` : 'Unavailable'}
                 </p>
-                <p className="truncate text-xs text-muted-foreground">{compactNumber(xLocalUsage.monthlyPosts)} / {compactNumber(xLocalUsage.monthlyBudget)}</p>
+                <p className="truncate text-xs text-muted-foreground">{compactNumber(xLocalUsage.available ? xLocalUsage.monthlyPosts : null)} / {compactNumber(xLocalUsage.available ? xLocalUsage.monthlyBudget : null)}</p>
               </div>
               <div className="rounded-md border border-border/60 p-3">
                 <p className="text-xs text-muted-foreground">Ingest</p>
@@ -911,9 +921,9 @@ function DashboardContent() {
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <CardTitle className="text-lg font-display text-glass-foreground">X Cost Guard</CardTitle>
-                    <CardDescription>Latest local estimate</CardDescription>
+                    <CardDescription>Local X ledger · last 24h activity and month-to-date budget</CardDescription>
                   </div>
-                  <Badge variant="outline">{xLocalUsage.available ? 'Ledger' : 'Fallback'}</Badge>
+                  <Badge variant="outline">{xLocalUsage.available ? 'Ledger' : 'Unavailable'}</Badge>
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -921,32 +931,32 @@ function DashboardContent() {
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-muted-foreground">Configured budget</span>
                     <span className={xLocalUsage.budgetUsedPct >= 90 ? 'font-semibold text-destructive' : xLocalUsage.budgetUsedPct >= 70 ? 'font-semibold text-warning' : 'font-semibold text-success'}>
-                      {xLocalUsage.budgetUsedPct}%
+                      {xLocalUsage.available ? `${xLocalUsage.budgetUsedPct}%` : 'Unavailable'}
                     </span>
                   </div>
                   <Progress value={Math.min(100, xLocalUsage.budgetUsedPct)} className="mt-2 h-2" />
-                  <p className="mt-1 text-xs text-muted-foreground">{compactNumber(xLocalUsage.monthlyPosts)} of {compactNumber(xLocalUsage.monthlyBudget)} configured posts</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{compactNumber(xLocalUsage.available ? xLocalUsage.monthlyPosts : null)} of {compactNumber(xLocalUsage.available ? xLocalUsage.monthlyBudget : null)} configured posts</p>
                 </div>
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   <div>
                     <p className="text-xs text-muted-foreground">Local posts 24h</p>
-                    <p className="font-semibold">{compactNumber(xLocalUsage.posts24h)}</p>
+                    <p className="font-semibold">{compactNumber(xLocalUsage.available ? xLocalUsage.posts24h : null)}</p>
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Failed posts 24h</p>
-                    <p className={xLocalUsage.failedPosts24h > 0 ? 'font-semibold text-destructive' : 'font-semibold text-success'}>{compactNumber(xLocalUsage.failedPosts24h)}</p>
+                    <p className={xLocalUsage.failedPosts24h > 0 ? 'font-semibold text-destructive' : 'font-semibold text-success'}>{compactNumber(xLocalUsage.available ? xLocalUsage.failedPosts24h : null)}</p>
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Media uploads</p>
-                    <p className="font-semibold">{compactNumber(xLocalUsage.mediaUploads24h)}</p>
+                    <p className="font-semibold">{compactNumber(xLocalUsage.available ? xLocalUsage.mediaUploads24h : null)}</p>
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Hydration reads</p>
-                    <p className="font-semibold">{compactNumber(xLocalUsage.hydrations24h)}</p>
+                    <p className="font-semibold">{compactNumber(xLocalUsage.available ? xLocalUsage.hydrations24h : null)}</p>
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Failed attempts</p>
-                    <p className={xLocalUsage.failedAttempts24h > 0 ? 'font-semibold text-warning' : 'font-semibold text-success'}>{compactNumber(xLocalUsage.failedAttempts24h)}</p>
+                    <p className={xLocalUsage.failedAttempts24h > 0 ? 'font-semibold text-warning' : 'font-semibold text-success'}>{compactNumber(xLocalUsage.available ? xLocalUsage.failedAttempts24h : null)}</p>
                   </div>
                 </div>
                 <div className="rounded-md border border-border/60 bg-muted/20 p-3 text-xs text-muted-foreground">
@@ -966,7 +976,7 @@ function DashboardContent() {
         </TabsList>
 
         <TabsContent value="pipeline">
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
             <Card className="glass-card">
               <CardHeader>
                 <CardTitle className="text-lg font-display text-glass-foreground">Queue Breakdown</CardTitle>
@@ -983,7 +993,7 @@ function DashboardContent() {
                   ].map(([label, value]) => (
                     <div key={label as string} className="rounded-md border border-border/60 p-3">
                       <p className="text-xs text-muted-foreground">{label}</p>
-                      <p className="text-xl font-semibold tabular-nums">{compactNumber(value as number)}</p>
+                      <p className="text-xl font-semibold tabular-nums">{compactNumber(queueUnavailable ? null : value as number)}</p>
                     </div>
                   ))}
                 </div>
@@ -997,7 +1007,7 @@ function DashboardContent() {
                       <span className={row.failed > 0 ? 'text-destructive' : 'text-muted-foreground'}>{row.failed} failed{row.resolvedFailed > 0 ? ` / ${row.resolvedFailed} resolved` : ''}</span>
                     </div>
                   )) : (
-                    <div className="rounded-md border border-border/60 p-4 text-sm text-muted-foreground">No active queue pressure.</div>
+                    <div className="rounded-md border border-border/60 p-4 text-sm text-muted-foreground">{queueUnavailable ? 'Queue telemetry is unavailable. Refresh to try again.' : 'No active queue pressure.'}</div>
                   )}
                 </div>
               </CardContent>
@@ -1044,7 +1054,7 @@ function DashboardContent() {
           <Card className="glass-card">
             <CardHeader>
               <CardTitle className="text-lg font-display text-glass-foreground">X Usage Details</CardTitle>
-              <CardDescription>Supabase-derived local usage only</CardDescription>
+              <CardDescription>Local X ledger · last 24h · official provider usage is not synced</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {[
@@ -1055,7 +1065,7 @@ function DashboardContent() {
               ].map(([label, value]) => (
                 <div key={label as string} className="rounded-md border border-border/60 p-3">
                   <p className="text-xs text-muted-foreground">{label}</p>
-                  <p className="text-xl font-semibold tabular-nums">{compactNumber(value as number)}</p>
+                  <p className="text-xl font-semibold tabular-nums">{compactNumber(xLocalUsage.available ? value as number : null)}</p>
                 </div>
               ))}
               <div className="rounded-md border border-border/60 p-3 sm:col-span-2 lg:col-span-4">
@@ -1069,7 +1079,7 @@ function DashboardContent() {
         </TabsContent>
 
         <TabsContent value="controls">
-          <DashboardHealth health={health} queue={queueBreakdown} xUsage={xLocalUsage} systemPerformance={systemPerformance} />
+          {triageUnavailable ? <p role="status" className="rounded-md border p-4 text-muted-foreground">Health controls cannot summarize incomplete telemetry. Refresh the dashboard to retry failed reads.</p> : <DashboardHealth health={health} queue={queueBreakdown} xUsage={xLocalUsage} systemPerformance={systemPerformance} />}
         </TabsContent>
       </Tabs>
     </div>

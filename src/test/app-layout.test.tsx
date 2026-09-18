@@ -138,10 +138,10 @@ describe("AppLayout", () => {
     fireEvent.click(screen.getByRole("button", { name: /sign out/i }));
 
     await waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
-    expect(toast).toHaveBeenCalledWith({
+    await waitFor(() => expect(toast).toHaveBeenCalledWith({
       title: "Signed out successfully",
       description: "You have been logged out of the XOT Panel.",
-    });
+    }));
   });
 
   it("keeps all mobile navigation labels readable at narrow widths", () => {

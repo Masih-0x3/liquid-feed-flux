@@ -6,9 +6,13 @@
 # selected renderer source is supplied by XOT_RENDERER_BUILD_SOURCE.
 #
 # This file is a CANDIDATE only. Luna owns integration and acceptance.
-# It is designed for disabled-first staged start: restart policy is "no"
-# until final acceptance, at which point the operator switches it to
-# unless-stopped (see deploy/lightning/README.md "After acceptance").
+# Restart policy defaults to "unless-stopped" so a crash or daemon restart
+# recovers the renderer automatically (0X3-672: the September incident was a
+# graceful SIGTERM under restart "no" that left the container down for days).
+# For pre-acceptance staged runs, bootstrap.sh --service-profile candidate
+# still exports "no" explicitly. An intentionally stopped container stays
+# stopped — and XOT_RENDERER_DESIRED_STATE=stopped also holds the watchdog
+# off (see watchdog.sh / xot-renderer-watchdog.timer).
 #
 # Hard constraints enforced here:
 #   - loopback-only bind 127.0.0.1:${XOT_RENDERER_HOST_PORT:-8797} -> container 8787
@@ -44,7 +48,7 @@ services:
         - linux/amd64
     image: ${XOT_RENDERER_IMAGE_TAG:-xot-video-renderer:lightning-local}
     platform: linux/amd64
-    restart: "${XOT_RENDERER_RESTART_POLICY:-no}"
+    restart: "${XOT_RENDERER_RESTART_POLICY:-unless-stopped}"
     init: true
     env_file:
       - ${XOT_RENDERER_ENV_FILE:-/teamspace/studios/this_studio/xot-renderer/runtime/renderer.env}

@@ -64,31 +64,39 @@ they do **not** prove that either dependency tree has zero advisories.
 The final owner step accepts a reviewed zero-actionable scan through the
 out-of-band GitHub Actions repository variable
 `XOT_SUPPLY_OWNER_POLICY_B64`. The variable contains base64-encoded JSON with
-schema `xot-hosted-supply-owner-policy-v1`, the exact reviewed and checked-out
-SHA, named owner, dated signature, future expiry, observed/actionable/nonfixable
-high-or-critical counts, all observed high-or-critical IDs, exact nonfixable
-IDs, an allowed base-image classification, the decision
+schema `xot-hosted-supply-owner-policy-v2`: the `evidenceSha256` fingerprint of
+the exact observed/actionable/nonfixable high-or-critical finding-ID sets, the
+reviewed head SHA recorded at signing time, named owner, dated signature,
+future expiry, observed/actionable/nonfixable high-or-critical counts, an
+allowed base-image classification, the decision
 `accept_zero_actionable_no_waivers`, and an empty waiver list. The
 workflow enables this path only with the fixed
-`XOT_SUPPLY_OWNER_POLICY_MODE=exact-head` setting. The collector validates the
+`XOT_SUPPLY_OWNER_POLICY_MODE=exact-evidence` setting. The collector validates the
 technical artifact manifest before reading the policy, constructs an accepted
 owner disposition in the runner workspace, refreshes that manifest digest,
 writes `validation.json` as `passed_owner_accepted`, and runs the independent
 final validator. The accepted bundle records the renderer image ID produced by
 that rerun and is uploaded only after the validator passes. Missing, malformed,
-stale, mismatched, actionable, or waived policy data remains blocked. The
-pinned base digest and complete observed-ID list are the owner-policy boundary;
-the run-specific image ID remains evidence rather than a cross-run policy key
-because equivalent Docker builds need not have identical image IDs. Debian
-snapshot pinning is not part of this gate. This avoids
-committing a receipt that changes the exact SHA it is meant to approve; the
-repository variable must be refreshed for each exact-head scan.
+stale, mismatched, actionable, or waived policy data remains blocked.
+
+The evidence fingerprint is the owner-policy boundary: the policy stays valid
+across pushes whose scans produce an identical finding set, so commits that do
+not change dependencies do not require re-issue. Any changed finding set — a
+new advisory, a dependency bump, a scanner database update — changes the
+fingerprint and requires a fresh policy. Issue it with
+`node scripts/issue-supply-owner-policy.mjs --evidence <downloaded-artifact-dir> --owner <name>`
+(or `--fingerprint` plus counts, using the expected fingerprint printed by a
+failing owner-validation step). The run-specific image ID remains evidence
+rather than a cross-run policy key because equivalent Docker builds need not
+have identical image IDs. Debian snapshot pinning is not part of this gate.
+This avoids committing a receipt that changes the exact evidence it is meant
+to approve.
 
 The older cleanup baseline recorded three moderate root production advisories
 and a clean renderer audit. That observation is historical context only, not a
 fresh scan receipt and not an implicit waiver.
 
-## Deliberate non-claims before a green exact-head run
+## Deliberate non-claims before a green exact-evidence run
 
 The source change alone does not provide any of the following:
 
@@ -106,12 +114,13 @@ release-security follow-up and must not be entered as a dependency waiver.
 
 ## Required next evidence before owner acceptance
 
-Run the protected CI job on the exact reviewed SHA and retain the pending
-bundle. Review its complete finding IDs and counts, then set the exact-head
-repository variable and rerun the same SHA. Retain the accepted bundle from the
-green rerun. Any changed finding set needs a new review. Only that combined
-evidence can satisfy the full `SR-SUPPLY-01` acceptance criteria in the
-remediation plan.
+Run the protected CI job and retain the pending bundle. Review its complete
+finding IDs and counts, then issue the policy with
+`node scripts/issue-supply-owner-policy.mjs --evidence <bundle> --owner <name>`,
+set the repository variable, and rerun. Retain the accepted bundle from the
+green run. Any changed finding set needs a new review and re-issue; unchanged
+finding sets do not. Only that combined evidence can satisfy the full
+`SR-SUPPLY-01` acceptance criteria in the remediation plan.
 
 GitHub branch protection must require the blocking `lint-build` check, and
 review/CODEOWNERS policy must protect this workflow, its source checker, and the

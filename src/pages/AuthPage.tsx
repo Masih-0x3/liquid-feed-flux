@@ -175,7 +175,7 @@ export default function AuthPage() {
               <Button
                 type="submit"
                 disabled={loading}
-                className="w-full bg-gradient-primary hover:opacity-90 text-white font-medium"
+                className="w-full font-medium"
               >
                 {loading ? (
                   <>

@@ -1,4 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useMemo, useRef } from 'react';
+import { useSettingsDraft, useSettingsSave, SettingsSaveStatus, SettingsIncomingNotice } from '@/components/settings/SettingsDrafts';
+import { VideoStylePreview } from '@/components/settings/VideoStylePreview';
+import { SettingsNumberField } from '@/components/settings/SettingsNumberField';
 import { Link } from 'react-router-dom';
 import { AlertTriangle, Film, Loader2, RefreshCw, Save, Settings2, Shield, Wand2 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -82,12 +85,24 @@ export default function VideoRenderingSettings() {
   const configQuery = useVideoRenderConfig();
   const overview = useVideoRenderOverview();
   const update = useUpdateVideoRenderConfig();
-  const [draft, setDraft] = useState<VideoRenderConfigValue | null>(null);
-
-  useEffect(() => {
-    const config = configQuery.data?.config;
-    if (isVideoRenderConfig(config) && !draft) setDraft(cloneConfig(config));
-  }, [configQuery.data?.config, draft]);
+  const incoming = useMemo(() => isVideoRenderConfig(configQuery.data?.config) ? cloneConfig(configQuery.data.config) : null, [configQuery.data?.config]);
+  const editor = useSettingsDraft('video-rendering', 'Video rendering settings', incoming);
+  const { draft, updateDraft: setDraft } = editor;
+  const formRef = useRef<HTMLFormElement>(null);
+  const saving = useSettingsSave(editor, async (value) => {
+    if (!value) throw new Error('Configuration unavailable');
+    await update.mutateAsync(value);
+  });
+  const save = () => {
+    const form = formRef.current;
+    if (!form) return;
+    const invalid = form.querySelector(':invalid');
+    // Reveal advanced fields before the browser focuses a validation error.
+    for (let ancestor = invalid?.parentElement; ancestor; ancestor = ancestor.parentElement) {
+      if (ancestor instanceof HTMLDetailsElement) ancestor.open = true;
+    }
+    if (form.reportValidity()) void saving.save();
+  };
 
   if (configQuery.isLoading) {
     return (
@@ -99,7 +114,7 @@ export default function VideoRenderingSettings() {
     );
   }
 
-  if (configQuery.isError || configQuery.error || !draft) {
+  if (configQuery.isError || configQuery.error || !incoming || !draft) {
     return (
       <Card className="glass-card border-destructive/40">
         <CardHeader>
@@ -128,7 +143,9 @@ export default function VideoRenderingSettings() {
   const rendererHealth = overview.data?.renderer_health;
 
   return (
-    <div className="space-y-6">
+    <form ref={formRef} className="space-y-6" onSubmit={(event) => { event.preventDefault(); save(); }}>
+      <SettingsSaveStatus label="Video rendering settings" dirty={editor.isDirty} {...saving} onSave={save} disabled={editor.hasPendingIncoming} />
+      <SettingsIncomingNotice editor={editor} />
       <Alert className="border-amber-500/30 bg-amber-500/10">
         <AlertTriangle className="h-4 w-4" />
         <AlertTitle>Production-safe rollout</AlertTitle>
@@ -138,9 +155,9 @@ export default function VideoRenderingSettings() {
         </AlertDescription>
       </Alert>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="space-y-4">
-          <Card className="glass-card">
+      <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="min-w-0 space-y-4">
+          <Card id="video-mode" className="glass-card scroll-mt-48">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-glass-foreground">
                 <Film className="h-5 w-5 text-primary" />
@@ -152,7 +169,7 @@ export default function VideoRenderingSettings() {
               <div className="space-y-2">
                 <Label>Mode</Label>
                 <Select value={draft.mode} onValueChange={(mode) => set({ mode: mode as VideoRenderConfigValue['mode'], enabled: mode === 'enabled' })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger aria-label="Mode"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="disabled">Disabled</SelectItem>
                     <SelectItem value="shadow">Shadow review</SelectItem>
@@ -164,7 +181,7 @@ export default function VideoRenderingSettings() {
               <div className="space-y-2">
                 <Label>Failure policy</Label>
                 <Select value={draft.failure_policy} onValueChange={(failure_policy) => set({ failure_policy: failure_policy as VideoRenderConfigValue['failure_policy'] })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger aria-label="Failure policy"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="post_original">Post original on render failure</SelectItem>
                     <SelectItem value="block">Block on render failure</SelectItem>
@@ -173,7 +190,7 @@ export default function VideoRenderingSettings() {
               </div>
               <div className="space-y-2">
                 <Label>Processed retention hours</Label>
-                <Input
+                <Input aria-label="Processed retention hours"
                   type="number"
                   min={1}
                   max={168}
@@ -196,7 +213,7 @@ export default function VideoRenderingSettings() {
               <div className="space-y-2">
                 <Label>Transcription provider</Label>
                 <Select value={draft.transcription_provider} onValueChange={(transcription_provider) => set({ transcription_provider: transcription_provider as VideoRenderConfigValue['transcription_provider'] })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger aria-label="Transcription provider"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="deepgram">Deepgram</SelectItem>
                     <SelectItem value="openai">OpenAI fallback</SelectItem>
@@ -205,15 +222,15 @@ export default function VideoRenderingSettings() {
               </div>
               <div className="space-y-2">
                 <Label>Transcription model</Label>
-                <Input value={draft.transcription_model} onChange={(event) => set({ transcription_model: event.target.value })} />
+                <Input aria-label="Transcription model" value={draft.transcription_model} onChange={(event) => set({ transcription_model: event.target.value })} />
               </div>
               <div className="space-y-2">
                 <Label>Translation model</Label>
-                <Input value={draft.translation_model} onChange={(event) => set({ translation_model: event.target.value })} />
+                <Input aria-label="Translation model" value={draft.translation_model} onChange={(event) => set({ translation_model: event.target.value })} />
               </div>
               <div className="space-y-2">
                 <Label>Vision model</Label>
-                <Input value={draft.vision_model} onChange={(event) => set({ vision_model: event.target.value })} />
+                <Input aria-label="Vision model" value={draft.vision_model} onChange={(event) => set({ vision_model: event.target.value })} />
               </div>
               <div className="rounded-md border bg-muted/20 p-3 md:col-span-2 xl:col-span-4">
                 <p className="text-sm font-medium">Target language rule</p>
@@ -222,40 +239,29 @@ export default function VideoRenderingSettings() {
             </CardContent>
           </Card>
 
-          <Card className="glass-card">
+          <Card id="video-style" className="glass-card scroll-mt-48">
             <CardHeader>
               <CardTitle className="text-glass-foreground">Subtitle Style</CardTitle>
-              <CardDescription>Yellow subtitle with black background, tuned from the golden video review.</CardDescription>
+              <CardDescription>Review placement, wrapping and colors before saving. The preview stays local.</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              <div className="md:col-span-2 xl:col-span-3"><VideoStylePreview config={draft} /></div>
               <div className="space-y-2">
                 <Label>Text color</Label>
-                <Input type="color" value={draft.subtitle_style.text_color} onChange={(event) => setSubtitle({ text_color: event.target.value })} />
+                <Input aria-label="Text color" type="color" value={draft.subtitle_style.text_color} onChange={(event) => setSubtitle({ text_color: event.target.value })} />
               </div>
               <div className="space-y-2">
                 <Label>Background color</Label>
-                <Input type="color" value={draft.subtitle_style.background_color} onChange={(event) => setSubtitle({ background_color: event.target.value })} />
+                <Input aria-label="Background color" type="color" value={draft.subtitle_style.background_color} onChange={(event) => setSubtitle({ background_color: event.target.value })} />
               </div>
-              <div className="space-y-2">
-                <Label>Font scale</Label>
-                <Input type="number" step="0.01" min="0.8" max="1.8" value={draft.subtitle_style.font_scale} onChange={(event) => setSubtitle({ font_scale: numberValue(Number(event.target.value), 1.18) })} />
-              </div>
-              <div className="space-y-2">
-                <Label>Max width</Label>
-                <Input type="number" step="0.01" min="0.55" max="0.96" value={draft.subtitle_style.max_width_pct} onChange={(event) => setSubtitle({ max_width_pct: numberValue(Number(event.target.value), 0.92) })} />
-              </div>
-              <div className="space-y-2">
-                <Label>Bottom padding</Label>
-                <Input type="number" step="0.005" min="0.02" max="0.18" value={draft.subtitle_style.bottom_padding_pct} onChange={(event) => setSubtitle({ bottom_padding_pct: numberValue(Number(event.target.value), 0.06) })} />
-              </div>
-              <div className="space-y-2">
-                <Label>Collision gap</Label>
-                <Input type="number" step="0.005" min="0" max="0.08" value={draft.subtitle_style.collision_gap_pct} onChange={(event) => setSubtitle({ collision_gap_pct: numberValue(Number(event.target.value), 0.015) })} />
-              </div>
+              <SettingsNumberField label="Font scale" value={draft.subtitle_style.font_scale} onChange={(value) => setSubtitle({ font_scale: value })} min={0.75} max={1.35} step={0.01} unit="times the renderer’s base font size" />
+              <SettingsNumberField label="Max width" value={draft.subtitle_style.max_width_pct} onChange={(value) => setSubtitle({ max_width_pct: value })} min={0.72} max={0.96} step={0.01} unit="percent of frame width" percent />
+              <SettingsNumberField label="Bottom padding" value={draft.subtitle_style.bottom_padding_pct} onChange={(value) => setSubtitle({ bottom_padding_pct: value })} min={0.025} max={0.14} step={0.005} unit="percent of frame height" percent />
+              <div className="space-y-2"><p className="text-sm font-medium">Collision gap (saved reference)</p><p className="text-sm">{Number((draft.subtitle_style.collision_gap_pct * 100).toFixed(2))}% of frame height</p><p className="text-xs text-muted-foreground">The current renderer computes collision spacing automatically and does not apply this saved field.</p></div>
             </CardContent>
           </Card>
 
-          <Card className="glass-card">
+          <Card id="video-watermark" className="glass-card scroll-mt-48">
             <CardHeader>
               <CardTitle className="text-glass-foreground">Delogo and Watermark</CardTitle>
               <CardDescription>Controls source watermark removal and our @Masihh watermark behavior.</CardDescription>
@@ -265,7 +271,7 @@ export default function VideoRenderingSettings() {
                 <div className="grid gap-2">
                   <Label>Vision mode</Label>
                   <Select value={draft.delogo.vision_mode} onValueChange={(vision_mode) => setDelogo({ vision_mode: vision_mode as VideoRenderConfigValue['delogo']['vision_mode'] })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectTrigger aria-label="Vision mode"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="always">Always inspect</SelectItem>
                       <SelectItem value="auto">Only uncertain videos</SelectItem>
@@ -276,7 +282,7 @@ export default function VideoRenderingSettings() {
                 <div className="grid gap-2">
                   <Label>Delogo engine</Label>
                   <Select value={draft.delogo.engine} onValueChange={(engine) => setDelogo({ engine: engine as VideoRenderConfigValue['delogo']['engine'] })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectTrigger aria-label="Delogo engine"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="opencv">OpenCV selective inpaint</SelectItem>
                       <SelectItem value="ffmpeg">FFmpeg delogo fallback</SelectItem>
@@ -284,43 +290,24 @@ export default function VideoRenderingSettings() {
                   </Select>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-3">
-                  <div className="space-y-2">
-                    <Label>Max regions</Label>
-                    <Input type="number" min="0" max="6" value={draft.delogo.max_regions} onChange={(event) => setDelogo({ max_regions: numberValue(Number(event.target.value), 2) })} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Single area</Label>
-                    <Input type="number" step="0.01" min="0" max="0.25" value={draft.delogo.max_single_area_ratio} onChange={(event) => setDelogo({ max_single_area_ratio: numberValue(Number(event.target.value), 0.1) })} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Total area</Label>
-                    <Input type="number" step="0.01" min="0" max="0.35" value={draft.delogo.max_total_area_ratio} onChange={(event) => setDelogo({ max_total_area_ratio: numberValue(Number(event.target.value), 0.15) })} />
-                  </div>
+                  <SettingsNumberField label="Max regions" value={draft.delogo.max_regions} onChange={(value) => setDelogo({ max_regions: value })} min={0} max={4} step={1} unit="regions" />
+                  <SettingsNumberField label="Single area" value={draft.delogo.max_single_area_ratio} onChange={(value) => setDelogo({ max_single_area_ratio: value })} min={0.01} max={0.3} step={0.01} unit="percent of frame area per region" percent />
+                  <SettingsNumberField label="Total area" value={draft.delogo.max_total_area_ratio} onChange={(value) => setDelogo({ max_total_area_ratio: value })} min={0.02} max={0.45} step={0.01} unit="percent of total frame area" percent />
                 </div>
+                <details className="rounded-md border p-3"><summary className="cursor-pointer text-sm font-medium">Advanced inpainting parameters</summary><div className="mt-3">
                 <div className="grid gap-3 sm:grid-cols-4">
-                  <div className="space-y-2">
-                    <Label>Radius</Label>
-                    <Input type="number" min="1" max="8" value={draft.delogo.opencv_radius} onChange={(event) => setDelogo({ opencv_radius: numberValue(Number(event.target.value), 2) })} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Kernel</Label>
-                    <Input type="number" min="3" max="21" value={draft.delogo.opencv_kernel} onChange={(event) => setDelogo({ opencv_kernel: numberValue(Number(event.target.value), 7) })} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Dilate</Label>
-                    <Input type="number" min="0" max="8" value={draft.delogo.opencv_dilate_iterations} onChange={(event) => setDelogo({ opencv_dilate_iterations: numberValue(Number(event.target.value), 2) })} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Feather</Label>
-                    <Input type="number" min="0" max="12" value={draft.delogo.opencv_feather} onChange={(event) => setDelogo({ opencv_feather: numberValue(Number(event.target.value), 0) })} />
-                  </div>
+                  <SettingsNumberField label="Radius" value={draft.delogo.opencv_radius} onChange={(value) => setDelogo({ opencv_radius: value })} min={1} max={8} step={1} unit="pixels" />
+                  <SettingsNumberField label="Kernel" value={draft.delogo.opencv_kernel} onChange={(value) => setDelogo({ opencv_kernel: value })} min={3} max={21} step={1} unit="pixels" />
+                  <SettingsNumberField label="Dilate" value={draft.delogo.opencv_dilate_iterations} onChange={(value) => setDelogo({ opencv_dilate_iterations: value })} min={0} max={8} step={1} unit="iterations" />
+                  <SettingsNumberField label="Feather" value={draft.delogo.opencv_feather} onChange={(value) => setDelogo({ opencv_feather: value })} min={0} max={12} step={1} unit="pixels" />
                 </div>
+                </div></details>
               </div>
               <div className="space-y-4 rounded-md border bg-muted/20 p-4">
                 <div className="space-y-2">
                   <Label>Apply @Masihh watermark</Label>
                   <Select value={draft.watermark.apply_when} onValueChange={(apply_when) => setWatermark({ apply_when: apply_when as VideoRenderConfigValue['watermark']['apply_when'] })}>
-                    <SelectTrigger>
+                    <SelectTrigger aria-label="Apply @Masihh watermark">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -332,29 +319,17 @@ export default function VideoRenderingSettings() {
                   </Select>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label>Global opacity</Label>
-                    <Input type="number" step="0.01" min="0.04" max="0.45" value={draft.watermark.opacity} onChange={(event) => setWatermark({ opacity: numberValue(Number(event.target.value), 0.16) })} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Top-right opacity</Label>
-                    <Input type="number" step="0.01" min="0.08" max="0.70" value={draft.watermark.top_right_opacity} onChange={(event) => setWatermark({ top_right_opacity: numberValue(Number(event.target.value), 0.34) })} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Delogo-cover opacity</Label>
-                    <Input type="number" step="0.01" min="0.08" max="0.70" value={draft.watermark.cover_opacity} onChange={(event) => setWatermark({ cover_opacity: numberValue(Number(event.target.value), 0.34) })} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Cover padding</Label>
-                    <Input type="number" step="0.005" min="0" max="0.08" value={draft.watermark.cover_padding_pct} onChange={(event) => setWatermark({ cover_padding_pct: numberValue(Number(event.target.value), 0) })} />
-                  </div>
+                  <SettingsNumberField label="Global opacity" value={draft.watermark.opacity} onChange={(value) => setWatermark({ opacity: value })} min={0.03} max={0.35} step={0.01} unit="percent opacity" percent />
+                  <SettingsNumberField label="Top-right opacity" value={draft.watermark.top_right_opacity} onChange={(value) => setWatermark({ top_right_opacity: value })} min={0.12} max={0.7} step={0.01} unit="percent opacity" percent />
+                  <SettingsNumberField label="Delogo-cover opacity" value={draft.watermark.cover_opacity} onChange={(value) => setWatermark({ cover_opacity: value })} min={0.12} max={0.7} step={0.01} unit="percent opacity" percent />
+                  <SettingsNumberField label="Cover padding" value={draft.watermark.cover_padding_pct} onChange={(value) => setWatermark({ cover_padding_pct: value })} min={0} max={0.08} step={0.005} unit="percent of the shorter frame dimension" percent />
                 </div>
                 <Label className="flex items-center gap-2 rounded-md border bg-background/60 p-3">
-                  <Checkbox checked={draft.watermark.multiple} onCheckedChange={(checked) => setWatermark({ multiple: checked === true })} />
+                  <Checkbox aria-label="Multiple low-opacity watermarks" checked={draft.watermark.multiple} onCheckedChange={(checked) => setWatermark({ multiple: checked === true })} />
                   Multiple low-opacity watermarks
                 </Label>
                 <Label className="flex items-center gap-2 rounded-md border bg-background/60 p-3">
-                  <Checkbox checked={draft.watermark.cover_delogo} onCheckedChange={(checked) => setWatermark({ cover_delogo: checked === true })} />
+                  <Checkbox aria-label="Cover delogo distortion with our watermark" checked={draft.watermark.cover_delogo} onCheckedChange={(checked) => setWatermark({ cover_delogo: checked === true })} />
                   Cover delogo distortion with our watermark
                 </Label>
                 <Badge variant="outline" className="w-fit">Default: watermark only when subtitles are added</Badge>
@@ -363,7 +338,7 @@ export default function VideoRenderingSettings() {
           </Card>
         </div>
 
-        <div className="space-y-4">
+        <div className="min-w-0 space-y-4">
           <Card className="glass-card">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -372,8 +347,9 @@ export default function VideoRenderingSettings() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
+              <p className="text-xs text-muted-foreground">All render jobs in the overview snapshot. This excludes other console issue categories such as output verification errors.</p>
               <div className="flex items-center justify-between rounded-md border bg-muted/20 p-3">
-                <span>Mode</span>
+                <span>Draft mode</span>
                 <Badge variant={draft.mode === 'enabled' ? 'default' : 'outline'}>{draft.mode}</Badge>
               </div>
               <div className="flex items-center justify-between rounded-md border bg-muted/20 p-3">
@@ -382,11 +358,11 @@ export default function VideoRenderingSettings() {
               </div>
               <div className="flex items-center justify-between rounded-md border bg-muted/20 p-3">
                 <span>Queued</span>
-                <span className="font-medium">{overview.data?.counts?.queued ?? 0}</span>
+                <span className="font-medium">{overview.data?.counts?.queued ?? 'Unavailable'}</span>
               </div>
               <div className="flex items-center justify-between rounded-md border bg-muted/20 p-3">
-                <span>Failed/blocked</span>
-                <span className="font-medium">{(overview.data?.counts?.failed ?? 0) + (overview.data?.counts?.blocked ?? 0)}</span>
+                <span>Failed or blocked render jobs</span>
+                <span className="font-medium">{overview.data?.counts ? overview.data.counts.failed + overview.data.counts.blocked : 'Unavailable'}</span>
               </div>
               <Button asChild variant="outline" className="w-full">
                 <Link to="/video-renders">Open render console</Link>
@@ -402,22 +378,24 @@ export default function VideoRenderingSettings() {
               </CardTitle>
               <CardDescription>Managed outside the browser.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-2 text-sm text-muted-foreground">
+            <CardContent className="space-y-2 break-words text-sm text-muted-foreground">
               <p>OPENAI_API_KEY, DEEPGRAM_API_KEY, SUPABASE_SERVICE_ROLE_KEY, and VIDEO_RENDERER_TOKEN stay in Supabase/Ubuntu env files.</p>
               <p>This UI stores only non-secret behavior and style settings.</p>
             </CardContent>
           </Card>
 
           <Button
-            className="w-full bg-gradient-primary text-white hover:opacity-90"
-            onClick={() => update.mutate(draft)}
-            disabled={update.isPending}
+            id="video-save"
+            type="button"
+            className="scroll-mt-48 h-auto min-h-11 w-full whitespace-normal"
+            onClick={save}
+            disabled={saving.saving || editor.hasPendingIncoming}
           >
             {update.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
             Save Video Rendering Settings
           </Button>
         </div>
       </div>
-    </div>
+    </form>
   );
 }

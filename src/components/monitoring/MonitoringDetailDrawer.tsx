@@ -1,4 +1,6 @@
 import { useMemo } from "react";
+import { ConfirmSettingsAction } from "@/components/settings/ConfirmSettingsAction";
+import { useRuntimeControls } from "@/hooks/useRuntimeControls";
 import { Activity, AlertTriangle, Ban, Check, Loader2, SlidersHorizontal, Sparkles, Timer, Twitter } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -185,6 +187,7 @@ function ProcessObservabilityPanel({ observability }: { observability?: ProcessO
 interface MonitoringDetailDrawerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onRestoreFocus?: () => void;
   tweetId: string | null;
   entry: MonitoringEntry | null;
   timeline: PipelineEvent[];
@@ -217,6 +220,7 @@ interface MonitoringDetailDrawerProps {
 export function MonitoringDetailDrawer({
   open,
   onOpenChange,
+  onRestoreFocus,
   tweetId,
   entry,
   timeline,
@@ -249,7 +253,7 @@ export function MonitoringDetailDrawer({
     () => entry ? buildDeliverySummary(entry, timeline) : [],
     [entry, timeline],
   );
-  const timelineGroups = useMemo(() => buildPipelineTimelineGroups(timeline), [timeline]);
+  const timelineGroups = useMemo(() => buildPipelineTimelineGroups(timeline, entry), [timeline, entry]);
   const processTraceMap = useMemo(
     () => entry ? buildProcessTraceMap(entry, timeline, entry.process_observability) : null,
     [entry, timeline],
@@ -270,16 +274,26 @@ export function MonitoringDetailDrawer({
   const selectedVoiceScores = selectedVoice?.critic?.variants ?? [];
   const isGenerating = entry ? enrichingTweetIds.has(entry.tweet_id) : false;
   const disabledMutationTitle = readOnly ? mutationDisabledTitle : undefined;
+  const { controls: runtime, error: runtimeError } = useRuntimeControls(open);
+  const enrichmentConfirmation = {
+    title: 'Generate enrichment draft?',
+    description: <p>Destination: {runtimeError ? 'environment unavailable' : runtime?.environment ?? 'environment unavailable'}. This sends the selected post to the configured AI provider and saves a new enrichment draft. Provider charges may apply; the cost is not available here. It does not publish to X or Telegram.</p>,
+    confirmLabel: 'Generate paid draft',
+    disabled: readOnly || isGenerating || !runtime || Boolean(runtimeError),
+    onConfirm: async () => { if (entry && !readOnly) await onGenerateEnrichment(entry.tweet_id); },
+  };
 
   return (
-    <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent className="max-h-[92svh]">
+    <Drawer open={open} onOpenChange={onOpenChange} autoFocus>
+      <DrawerContent className="max-h-[92svh]" onCloseAutoFocus={(event) => {
+        if (onRestoreFocus) { event.preventDefault(); onRestoreFocus(); }
+      }}>
         <DrawerHeader className="px-4 pb-2 pt-3 text-left">
           <DrawerTitle className="text-base sm:text-lg">Pipeline Details</DrawerTitle>
           <DrawerDescription className="break-all">{tweetId}</DrawerDescription>
         </DrawerHeader>
-        <div className="grid max-h-[76svh] gap-3 overflow-y-auto px-3 pb-4 sm:px-4 lg:grid-cols-[1fr_380px]">
-          <div className="space-y-4">
+        <div className="grid max-h-[76svh] gap-3 overflow-y-auto px-3 pb-4 sm:px-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,340px)] lg:items-start">
+          <div className="min-w-0 space-y-4">
             {entry && (
               <>
                 <Card>
@@ -291,7 +305,7 @@ export function MonitoringDetailDrawer({
                       {entry.monitoring_state?.translation_state && <Badge variant="outline">Translation: {entry.monitoring_state.translation_state.replace(/_/g, ' ')}</Badge>}
                     </div>
                     <p className="text-muted-foreground">
-                      {entry.monitoring_state?.primary_blocker ?? 'No current blocker. This item is waiting for the next normal pipeline step or is already complete.'}
+                      {entry.monitoring_state?.primary_blocker ?? (entry.delivery_decision === 'skip' ? 'This post was skipped by the editorial or duplicate gate. Review its score and decision before changing delivery.' : 'No current blocker. This item is waiting for the next normal pipeline step or is already complete.')}
                     </p>
                     {entry.dup_of_tweet_id && (
                       <div className="rounded-md border bg-muted/20 p-3">
@@ -307,22 +321,71 @@ export function MonitoringDetailDrawer({
                     <div className="grid gap-2 sm:grid-cols-3">
                       <div className="rounded-md border p-2">
                         <p className="text-xs text-muted-foreground">Telegram</p>
-                        <p className="font-medium">{entry.monitoring_state?.telegram_state === 'none' ? 'No row' : entry.monitoring_state?.telegram_state ?? entry.delivery_status ?? 'No row'}</p>
+                        <p className="font-medium">{deliverySummary[0]?.label ?? 'Not delivered'}</p>
                       </div>
                       <div className="rounded-md border p-2">
                         <p className="text-xs text-muted-foreground">X</p>
-                        <p className="font-medium">{entry.monitoring_state?.x_state === 'none' ? 'No row' : entry.monitoring_state?.x_state ?? entry.x_status ?? 'No row'}</p>
+                        <p className="font-medium">{deliverySummary[1]?.label ?? 'Not posted'}</p>
                       </div>
                       <div className="rounded-md border p-2">
                         <p className="text-xs text-muted-foreground">Next actions</p>
-                        <p className="font-medium">{entry.monitoring_state?.next_actions?.join(', ') || 'Details'}</p>
+                        <p className="font-medium">{entry.monitoring_state?.next_actions?.map((action) => ({ manual_score: 'Set manual score', translate_only: 'Translate content', retry_delivery: 'Retry delivery', retry_x: 'Retry X post', inspect_duplicate: 'Inspect duplicate', details: 'Review details' }[action] ?? action.replace(/_/g, ' '))).join(', ') || 'Details'}</p>
                       </div>
                     </div>
                   </CardContent>
                 </Card>
 
-                <ProcessObservabilityPanel observability={entry.process_observability} />
-                {processTraceMap && <MonitoringProcessTraceMap traceMap={processTraceMap} />}
+                <Card>
+                  <CardHeader className="pb-2"><CardTitle className="text-sm">Content</CardTitle></CardHeader>
+                  <CardContent className="space-y-3 text-sm">
+                    <div>
+                      <p className="mb-1 text-xs font-medium uppercase text-muted-foreground">Original</p>
+                      <p dir="auto" className="max-h-60 overflow-y-auto whitespace-pre-wrap break-words rounded-md border bg-muted/30 p-3">{entry.text_original || '[No content]'}</p>
+                    </div>
+                    <div>
+                      <div className="mb-1 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <p className="text-xs font-medium uppercase text-muted-foreground">Persian</p>
+                        <div className="grid grid-cols-2 gap-2 sm:flex">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="justify-center"
+                            disabled={readOnly}
+                            title={disabledMutationTitle}
+                            onClick={() => { if (!readOnly) onRequestAction({ type: 'translate', entry }); }}
+                          >Get translation</Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="justify-center"
+                            disabled={readOnly}
+                            title={disabledMutationTitle}
+                            onClick={() => { if (!readOnly) onStartEditTranslation(entry); }}
+                          >Edit</Button>
+                        </div>
+                      </div>
+                      {editingEntry === entry.tweet_id ? (
+                        <div className="space-y-2">
+                          <Textarea aria-label="Edited Persian translation" value={editedContent} onChange={(event) => onEditedContentChange(event.target.value)} disabled={readOnly} className="min-h-[120px]" {...persianContentAttributes} />
+                          <div className="grid grid-cols-2 gap-2 sm:flex">
+                            <Button size="sm" disabled={readOnly} title={disabledMutationTitle} onClick={() => { if (!readOnly) void onSaveEdit(); }}>Save</Button>
+                            <Button size="sm" variant="outline" onClick={onCancelEdit}>Cancel</Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div {...persianContentAttributes} className="rounded-md border bg-card p-3 leading-relaxed">{entry.text_translated || '[Not translated yet]'}</div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <details className="rounded-md border p-3">
+                  <summary className="cursor-pointer text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Process diagnostics and trace</summary>
+                  <div className="mt-3 space-y-3">
+                    <ProcessObservabilityPanel observability={entry.process_observability} />
+                    {processTraceMap && <MonitoringProcessTraceMap traceMap={processTraceMap} />}
+                  </div>
+                </details>
 
                 <Card>
                   <CardHeader className="pb-2">
@@ -425,18 +488,17 @@ export function MonitoringDetailDrawer({
                           </div>
                         )}
                         <div className="grid gap-2 sm:grid-cols-2">
-                          <Button
+                          <ConfirmSettingsAction {...enrichmentConfirmation}><Button
                             size="sm"
                             variant="outline"
-                            disabled={readOnly || isGenerating}
+                            disabled={enrichmentConfirmation.disabled}
                             title={disabledMutationTitle}
-                            onClick={() => { if (!readOnly) void onGenerateEnrichment(entry.tweet_id); }}
                           >
                             {isGenerating
                               ? <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
                               : <Sparkles className="w-3 h-3 mr-1.5" />}
                             {isGenerating ? 'Generating draft' : 'Generate enrichment draft'}
-                          </Button>
+                          </Button></ConfirmSettingsAction>
                           <Button
                             size="sm"
                             disabled={readOnly || !xPostingEnabled}
@@ -460,51 +522,7 @@ export function MonitoringDetailDrawer({
                   mutationDisabledTitle={mutationDisabledTitle}
                 />
 
-                <Card>
-                  <CardHeader className="pb-2"><CardTitle className="text-sm">Content</CardTitle></CardHeader>
-                  <CardContent className="space-y-3 text-sm">
-                    <div>
-                      <p className="mb-1 text-xs font-medium uppercase text-muted-foreground">English</p>
-                      <p className="rounded-md border bg-muted/30 p-3">{entry.text_original || '[No content]'}</p>
-                    </div>
-                    <div>
-                      <div className="mb-1 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                        <p className="text-xs font-medium uppercase text-muted-foreground">Persian</p>
-                        <div className="grid grid-cols-2 gap-2 sm:flex">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="justify-center"
-                            disabled={readOnly}
-                            title={disabledMutationTitle}
-                            onClick={() => { if (!readOnly) onRequestAction({ type: 'translate', entry }); }}
-                          >Get translation</Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="justify-center"
-                            disabled={readOnly}
-                            title={disabledMutationTitle}
-                            onClick={() => { if (!readOnly) onStartEditTranslation(entry); }}
-                          >Edit</Button>
-                        </div>
-                      </div>
-                      {editingEntry === entry.tweet_id ? (
-                        <div className="space-y-2">
-                          <Textarea value={editedContent} onChange={(event) => onEditedContentChange(event.target.value)} disabled={readOnly} className="min-h-[120px]" {...persianContentAttributes} />
-                          <div className="grid grid-cols-2 gap-2 sm:flex">
-                            <Button size="sm" disabled={readOnly} title={disabledMutationTitle} onClick={() => { if (!readOnly) void onSaveEdit(); }}>Save</Button>
-                            <Button size="sm" variant="outline" onClick={onCancelEdit}>Cancel</Button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div {...persianContentAttributes} className="rounded-md border bg-card p-3 leading-relaxed">{entry.text_translated || '[Not translated yet]'}</div>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {entry.has_media && <MediaThumbnails />}
+                {entry.has_media && <MediaThumbnails tweetId={entry.tweet_id} readOnly={readOnly} />}
 
                 <Card>
                   <CardHeader className="pb-2"><CardTitle className="text-sm">Scoring</CardTitle></CardHeader>
@@ -665,12 +683,12 @@ export function MonitoringDetailDrawer({
                     <CardHeader className="pb-2">
                       <div className="flex items-center justify-between">
                         <CardTitle className="text-sm">Enrichment Studio</CardTitle>
-                        <Button size="sm" variant="outline" onClick={() => { if (!readOnly) void onGenerateEnrichment(entry.tweet_id); }} disabled={readOnly || isGenerating} title={disabledMutationTitle}>
+                        <ConfirmSettingsAction {...enrichmentConfirmation}><Button size="sm" variant="outline" disabled={enrichmentConfirmation.disabled} title={disabledMutationTitle}>
                           {isGenerating
                             ? <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
                             : <Sparkles className="w-3 h-3 mr-1.5" />}
                           {isGenerating ? 'Generating' : 'Generate draft'}
-                        </Button>
+                        </Button></ConfirmSettingsAction>
                       </div>
                     </CardHeader>
                     <CardContent className="space-y-2 text-sm">

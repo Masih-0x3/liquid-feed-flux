@@ -52,6 +52,7 @@ import {
   updateVideoRenderConfigAdmin,
 } from "./videoRenderActions.ts";
 import { getXApiSummary } from "./xApiSummary.ts";
+import { getMediaAccess, getMediaCatalog } from "./mediaAccessActions.ts";
 import {
   getSettingsAdminAction,
   getSettingsSamplesAdminAction,
@@ -540,6 +541,18 @@ serve(async (req: Request): Promise<Response> => {
 
       case 'get_video_render_detail': {
         return jsonResponse(await getVideoRenderDetail(supabase, body));
+      }
+
+      case 'get_media_catalog':
+      case 'get_media_access': {
+        const context = { role: authResult.role, storageOrigin: Deno.env.get('SUPABASE_URL') ?? '' };
+        const result = action === 'get_media_catalog'
+          ? await getMediaCatalog(supabase, body, context)
+          : await getMediaAccess(supabase, body, context);
+        return new Response(JSON.stringify(result.body), {
+          status: result.status ?? 200,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+        });
       }
 
       case 'retry_video_render': {
