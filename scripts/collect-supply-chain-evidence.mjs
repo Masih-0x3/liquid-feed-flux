@@ -62,8 +62,15 @@ function npmFindingId(surface, pkg, finding) {
 }
 
 function trivyFindingId(finding) {
+  // The scanned image is tagged with the commit SHA ("xot-renderer:<sha> (debian …)"),
+  // which would rotate every finding ID on every push even when the underlying
+  // package/vulnerability set is identical — defeating the evidence fingerprint's
+  // cross-push stability contract. Strip the tag; package, version, vulnerability,
+  // and OS still fully identify the finding, and the exact image identity is
+  // captured separately in renderer-image-provenance.json (imageId digest).
+  const target = typeof finding.target === "string" ? finding.target.replace(/:[^\s(@]+(?=\s*\()/, "") : finding.target;
   return `trivy:${sha256(JSON.stringify({
-    target: finding.target,
+    target,
     package: finding.package,
     installedVersion: finding.installedVersion,
     vulnerabilityId: finding.vulnerabilityId,

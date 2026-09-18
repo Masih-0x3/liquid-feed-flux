@@ -369,3 +369,73 @@ test("successful render-settings read recovers polling and clears the degraded m
   assert.equal(renderer.state.lastError, null);
   assert.equal(supabase.heartbeats.at(-1).last_error, null);
 });
+
+test("health reports boot identity, heartbeat freshness, and claim readiness", async () => {
+  const supabase = mockSupabase();
+  const renderer = createRendererServer({
+    config: { rendererId: "renderer-test", renderVersion: "v1" },
+    runtime: {
+      renderPollingEnabled: true,
+      renderQueueCutoffAt: "2026-08-25T02:00:00Z",
+    },
+    supabase,
+  });
+
+  const response = await request(renderer.server, { path: "/health" });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.payload.ready, true);
+  assert.match(response.payload.boot_id, /^[0-9a-f-]{36}$/);
+  assert.ok(Date.parse(response.payload.started_at));
+  // The health check itself writes a heartbeat before answering.
+  assert.ok(Date.parse(response.payload.last_heartbeat_at));
+  assert.equal(typeof response.payload.heartbeat_age_ms, "number");
+  assert.equal(response.payload.heartbeat_ok, true);
+});
+
+test("health reports not-ready when polling cannot claim work", async () => {
+  const supabase = mockSupabase();
+  const renderer = createRendererServer({
+    config: { rendererId: "renderer-test", renderVersion: "v1" },
+    runtime: {
+      renderPollingEnabled: false,
+      renderQueueCutoffAt: "2026-08-25T02:00:00Z",
+    },
+    supabase,
+  });
+
+  const response = await request(renderer.server, { path: "/health" });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.payload.ok, true);
+  assert.equal(response.payload.ready, false);
+});
+
+test("each boot writes a unique boot_id into heartbeat metadata", async () => {
+  const supabaseA = settingsSequenceSupabase([]);
+  const supabaseB = settingsSequenceSupabase([]);
+  const runtime = {
+    renderPollingEnabled: true,
+    renderQueueCutoffAt: "2026-08-25T02:00:00Z",
+  };
+  const rendererA = createRendererServer({
+    config: { rendererId: "renderer-test", renderVersion: "v1" },
+    runtime,
+    supabase: supabaseA,
+  });
+  const rendererB = createRendererServer({
+    config: { rendererId: "renderer-test", renderVersion: "v1" },
+    runtime,
+    supabase: supabaseB,
+  });
+
+  await rendererA.writeHeartbeat("online", { action: "test-a" });
+  await rendererB.writeHeartbeat("online", { action: "test-b" });
+
+  const hbA = supabaseA.heartbeats.at(-1);
+  const hbB = supabaseB.heartbeats.at(-1);
+  assert.match(hbA.metadata.boot_id, /^[0-9a-f-]{36}$/);
+  assert.match(hbB.metadata.boot_id, /^[0-9a-f-]{36}$/);
+  assert.notEqual(hbA.metadata.boot_id, hbB.metadata.boot_id);
+  assert.ok(Date.parse(hbA.metadata.booted_at));
+});

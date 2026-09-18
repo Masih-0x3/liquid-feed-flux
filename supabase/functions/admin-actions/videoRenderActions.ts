@@ -598,6 +598,11 @@ export async function getVideoRenderOverview(supabase: SupabaseAdminClient) {
     return sorted[Math.floor(sorted.length / 2)];
   };
 
+  const rendererHealth = classifyVideoRendererHealth(heartbeatRows, healthObservedAtMs);
+  const oldestQueuedMs = oldestQueuedAt ? Date.parse(oldestQueuedAt) : Number.NaN;
+  const oldestQueuedAgeMs = Number.isFinite(oldestQueuedMs)
+    ? Math.max(0, healthObservedAtMs - oldestQueuedMs)
+    : null;
   return {
     ok: true,
     config: cfg.config,
@@ -605,6 +610,11 @@ export async function getVideoRenderOverview(supabase: SupabaseAdminClient) {
     unreviewed_issues: unreviewedIssues,
     reviewed_issues: reviewedIssues,
     oldest_queued_at: oldestQueuedAt,
+    oldest_queued_age_ms: oldestQueuedAgeMs,
+    // 0X3-672 stall signal: queued renders that cannot make progress because
+    // no renderer is reporting a fresh, ready heartbeat. This is the condition
+    // that silently starved deliveries during the September incident.
+    queue_blocked_by_renderer: counts.queued > 0 && rendererHealth.state !== 'healthy',
     medians: {
       render_ms: median(totals.render_ms),
       total_ms: median(totals.total_ms),

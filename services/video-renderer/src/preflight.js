@@ -430,6 +430,9 @@ export async function runOptionalOcr(imagePath, options = {}) {
       label: "ocr_text",
       stage: "ocr",
       maxStdoutBytes: MAX_PROCESS_TEXT_STDOUT_BYTES,
+      signal: options.signal,
+      spawnImpl: options.spawnImpl,
+      processImpl: options.processImpl,
     });
     return { available: true, text: result.stdout.trim(), matches: extractPlatformMatches(result.stdout) };
   } catch (error) {
