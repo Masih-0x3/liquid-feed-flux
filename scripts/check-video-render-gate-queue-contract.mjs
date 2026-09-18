@@ -33,7 +33,10 @@ function assertContract({ source, packageJson, ci }, label = "current source") {
   if (!waitMedia.includes("video_render_download_enqueue_failed")) {
     fail(`${label}: wait_media enqueue failure is not propagated`);
   }
-  if (!waitMedia.includes("const { error: downloadQueueError } = await supabase.from(\"jobs\").upsert({")) {
+  if (!waitMedia.includes('rpc("enqueue_bounded_media_download"')) {
+    fail(`${label}: wait_media queue write is not the locked resurrection RPC`);
+  }
+  if (!waitMedia.includes("error: downloadEnqueueError") || !waitMedia.includes("if (downloadEnqueueError)")) {
     fail(`${label}: wait_media queue write is not result-checked`);
   }
   const deliveryStart = source.indexOf("async function enqueueDeliverJob(");
@@ -46,7 +49,7 @@ function assertContract({ source, packageJson, ci }, label = "current source") {
   if (!deliveryEnqueue.includes('throw new Error("deliver_enqueue_failed");')) {
     fail(`${label}: delivery enqueue failure is not propagated`);
   }
-  if (waitMedia.includes("downloadQueueError.message") ||
+  if (waitMedia.includes("downloadEnqueueError.message") ||
       deliveryEnqueue.includes("deliveryJobError.message") ||
       deliveryEnqueue.includes("existingDelError.message") ||
       deliveryEnqueue.includes("pendingReceiptError.message")) {
@@ -150,7 +153,7 @@ if (process.env.MUTATION_TEST === "1") {
   }), "wait_media enqueue failure continuation");
   assertRejects((source) => ({
     ...source,
-    source: source.source.replace("const { error: downloadQueueError } = await supabase.from(\"jobs\").upsert({", "await supabase.from(\"jobs\").upsert({"),
+    source: source.source.replace("error: downloadEnqueueError } = await supabase", "data: _ignored } = await supabase"),
   }), "wait_media result destructure removal");
   assertRejects((source) => ({
     ...source,

@@ -89,6 +89,7 @@ import {
   extractMediaFromText,
   extractNumericTweetId,
   formatMessageWithTemplate,
+  isRecordValue,
   isTelegramParseError,
   jobError,
   jobLane,
@@ -113,6 +114,7 @@ import {
 import {
   enqueuePostDeliveryAfterRenderGate as enqueuePostDeliveryAfterRenderGateCore,
   markVideoRenderPosted,
+  nextDependencyWait,
   prepareVideoRenderGate,
   VIDEO_RENDER_DEFER_MS,
 } from "./videoRenderWorkflow.ts";
@@ -286,16 +288,19 @@ async function loadScoringCalibrationExamples(
 class JobDeferred extends Error {
   nextRunAt: string;
   meta: Record<string, unknown>;
+  resultMeta: Record<string, unknown> | null;
 
   constructor(
     message: string,
     delayMs = VIDEO_RENDER_DEFER_MS,
     meta: Record<string, unknown> = {},
+    resultMeta: Record<string, unknown> | null = null,
   ) {
     super(message);
     this.name = "JobDeferred";
     this.nextRunAt = new Date(Date.now() + delayMs).toISOString();
     this.meta = meta;
+    this.resultMeta = resultMeta;
   }
 }
 
@@ -1133,6 +1138,15 @@ serve(async (req) => {
             };
           }
           if (error instanceof JobDeferred) {
+            if (error.resultMeta) {
+              // Persist dependency-wait state across defer cycles so the next
+              // claim can continue the same bounded backoff instead of
+              // restarting blind. The claim envelope still fences this write.
+              const currentMeta = isRecordValue(job.result_meta)
+                ? job.result_meta as Record<string, unknown>
+                : {};
+              job.result_meta = { ...currentMeta, ...error.resultMeta };
+            }
             await updateJobOrThrow(supabase, job.id, claimEnvelopedPatch(job, {
               status: "pending",
               next_run_at: error.nextRunAt,
@@ -1143,6 +1157,7 @@ serve(async (req) => {
               claim_state: "idle",
               claim_token: null,
               claim_generation: 0,
+              ...(error.resultMeta ? { result_meta: job.result_meta } : {}),
             }), "defer", job.locked_by);
             await recordPipelineEvent(supabase, job, "queued", undefined, {
               ...laneMetrics,
@@ -3313,13 +3328,55 @@ async function handleDeliverJob(
       return true;
     }
     if (!renderGate.ready) {
+      const gateAction = renderGate.decision.action;
+      // Key the wait clock to the media dependency, not the render row: an
+      // enqueue_render -> wait_render transition keeps the same clock, while a
+      // genuinely new dependency (new source media) resets it.
+      const decisionMedia = "media" in renderGate.decision
+        ? renderGate.decision.media
+        : null;
+      const dependencyId = decisionMedia?.id ?? tweetId;
+      const wait = nextDependencyWait(job.result_meta, {
+        kind: gateAction === "wait_media" ? "media_download" : "video_render",
+        dependencyId,
+        gateAction,
+      });
+      if (wait.justStalled) {
+        await insertPipelineEvent(
+          supabase,
+          "post",
+          tweetId,
+          "video_render",
+          "blocked",
+          null,
+          new Date().toISOString(),
+          "video_render_dependency_stalled",
+          {
+            source: "telegram_delivery",
+            gate_action: gateAction,
+            dependency_wait: wait.state,
+          },
+        );
+        console.log(JSON.stringify({
+          function: "worker",
+          action: "video_render_dependency_stalled",
+          tweet_id: tweetId,
+          gate_action: gateAction,
+          wait_ms: wait.waitMs,
+          cycles: wait.state.cycles,
+        }));
+      }
       throw new JobDeferred(
-        `video_render_pending:${renderGate.decision.action}`,
-        VIDEO_RENDER_DEFER_MS,
+        `video_render_pending:${gateAction}`,
+        wait.deferMs,
         {
           tweet_id: tweetId,
-          gate_action: renderGate.decision.action,
+          gate_action: gateAction,
+          wait_cycles: wait.state.cycles,
+          wait_ms: wait.waitMs,
+          defer_ms: wait.deferMs,
         },
+        { dependency_wait: wait.state },
       );
     }
     const deliveryMedia = applyRenderedVideoPreference(
