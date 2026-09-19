@@ -835,7 +835,7 @@ export default function Monitoring() {
         <div className="min-w-0">
           <h1 className="font-display text-xl font-semibold tracking-tight text-foreground sm:text-2xl">Content Monitoring</h1>
           <p className="text-sm text-muted-foreground">Editorial triage for scoring, translation, delivery blockers, and X visibility</p>
-          <p className="text-xs text-muted-foreground/80">Effective threshold: {deliverThreshold} · source: {thresholdSource}</p>
+          <p className="text-xs text-muted-foreground">Effective threshold: {deliverThreshold} · source: {thresholdSource}</p>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap lg:justify-end">
           {!readOnly && (

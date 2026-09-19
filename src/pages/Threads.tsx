@@ -228,7 +228,7 @@ export default function Threads() {
             ) : threadPosts.length > 0 ? (
               <>
                 <div className="space-y-3">
-                  <h4 className="font-medium text-glass-foreground">Individual Posts:</h4>
+                  <h3 className="font-medium text-glass-foreground">Individual Posts:</h3>
                   {threadPosts.map((post, index) => (
                     <div key={post.tweet_id} className="glass-panel p-3 rounded-lg">
                       <div className="flex items-center justify-between mb-2">
@@ -241,7 +241,7 @@ export default function Threads() {
                   ))}
                 </div>
                 <div className="border-t border-glass-border pt-4">
-                  <h4 className="font-medium text-glass-foreground mb-3">Assembled Thread:</h4>
+                  <h3 className="font-medium text-glass-foreground mb-3">Assembled Thread:</h3>
                   <div className="glass-panel p-4 rounded-lg">
                     <pre dir="auto" className="whitespace-pre-wrap text-sm text-glass-foreground">{assembleThreadBody(threadPosts)}</pre>
                   </div>

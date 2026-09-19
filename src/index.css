@@ -43,17 +43,18 @@
     --accent-glow: 220 40% 60%;
 
     /* Action */
-    --primary: 220 69% 46%;
+    --primary: 220 69% 42%;
     --primary-foreground: 0 0% 100%;
     --primary-glow: 221 65% 58%;
-    --ring: 220 69% 46%;
+    --ring: 220 69% 42%;
 
-    /* Status */
-    --destructive: 351 65% 48%;
+    /* Status. Each role is tuned so the role color clears 4.5:1 against its
+       own 10-15% tint, which is how the status chips and callouts render. */
+    --destructive: 351 65% 44%;
     --destructive-foreground: 0 0% 100%;
-    --success: 153 67% 28%;
+    --success: 153 67% 25%;
     --success-foreground: 0 0% 100%;
-    --warning: 26 90% 37%;
+    --warning: 26 90% 33%;
     --warning-foreground: 0 0% 100%;
 
     /* Fields and structure */
@@ -129,7 +130,7 @@
     --ring: 223 100% 78%;
 
     /* Status */
-    --destructive: 358 86% 64%;
+    --destructive: 358 86% 67%;
     --destructive-foreground: 220 25% 8%;
     --success: 151 65% 54%;
     --success-foreground: 222 20% 8%;
