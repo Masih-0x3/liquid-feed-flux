@@ -216,7 +216,7 @@ export default function XPostingConfig({ initial, isAdmin = false }: Props) {
         <div
           role="status"
           data-testid="x-posting-runtime-status"
-          className={`rounded-lg border p-3 text-sm ${runtimePostingBlocked ? 'border-amber-400/30 bg-amber-500/10 text-amber-100' : 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200'}`}
+          className={`rounded-lg border p-3 text-sm ${runtimePostingBlocked ? 'border-warning/30 bg-warning/10 text-warning' : 'border-success/30 bg-success/10 text-success'}`}
         >
           {runtimeStatusLabel}
         </div>

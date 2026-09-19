@@ -113,7 +113,7 @@ export function SettingsDraftGuard() {
   }, []);
 
   return <>
-    {labels.length > 0 && <p role="status" className="text-sm text-amber-200">Unsaved changes: {labels.join(', ')}. Drafts remain when switching sections.</p>}
+    {labels.length > 0 && <p role="status" className="text-sm text-warning">Unsaved changes: {labels.join(', ')}. Drafts remain when switching sections.</p>}
     <AlertDialog open={destination !== null} onOpenChange={(open) => { if (!open) setDestination(null); }}>
       <AlertDialogContent>
         <AlertDialogHeader>
@@ -147,7 +147,7 @@ export function SettingsSaveStatus({ label, dirty, saving, error, saved, onSave,
 
 export function SettingsIncomingNotice({ editor }: { editor: Pick<IncomingSettingsDraft<unknown>, 'hasPendingIncoming' | 'pendingFields' | 'reloadIncoming' | 'keepEditing'> }) {
   if (!editor.hasPendingIncoming) return null;
-  return <div role="alert" className="space-y-2 rounded-md border border-amber-400/40 bg-amber-500/10 p-3 text-sm">
+  return <div role="alert" className="space-y-2 rounded-md border border-warning/40 bg-warning/10 p-3 text-sm">
     <p>New saved settings are available. Your draft is preserved. Changed fields: {editor.pendingFields.join(', ') || 'none'}.</p>
     <div className="flex flex-wrap gap-2"><Button type="button" size="sm" variant="outline" onClick={editor.reloadIncoming}>Reload saved values</Button><Button type="button" size="sm" variant="outline" onClick={editor.keepEditing}>Keep editing</Button></div>
   </div>;

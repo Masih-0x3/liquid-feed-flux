@@ -50,11 +50,11 @@ import { AuthorizedMedia } from '@/components/media/AuthorizedMedia';
 import { ConfirmMediaAction } from '@/components/media/ConfirmMediaAction';
 
 function statusClass(status?: string | null): string {
-  if (status === 'posted' || status === 'ready') return 'border-emerald-500/30 bg-emerald-500/15 text-emerald-500';
-  if (status === 'rendering' || status === 'render_queued' || status === 'media_downloading' || status === 'translating') return 'border-blue-500/30 bg-blue-500/15 text-blue-500';
-  if (status === 'blocked' || status === 'failed') return 'border-red-500/30 bg-red-500/15 text-red-500';
+  if (status === 'posted' || status === 'ready') return 'border-success/30 bg-success/15 text-success';
+  if (status === 'rendering' || status === 'render_queued' || status === 'media_downloading' || status === 'translating') return 'border-primary/30 bg-primary/15 text-primary';
+  if (status === 'blocked' || status === 'failed') return 'border-destructive/30 bg-destructive/15 text-destructive';
   if (status === 'canceled') return 'border-muted-foreground/30 bg-muted text-muted-foreground';
-  return 'border-amber-500/30 bg-amber-500/15 text-amber-500';
+  return 'border-warning/30 bg-warning/15 text-warning';
 }
 
 function safeBoolean(value: unknown): boolean {
@@ -266,7 +266,7 @@ export function ManualVideoIntakePanel() {
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(300px,0.8fr)_minmax(0,1.2fr)]">
       {readOnly && (
-        <div role="note" className="xl:col-span-2 rounded-md border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+        <div role="note" className="xl:col-span-2 rounded-md border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">
           Read-only access. Manual intake, caption, override, and posting changes are disabled. Existing status remains available. Media previews and downloads require administrator access.
         </div>
       )}
@@ -345,7 +345,7 @@ export function ManualVideoIntakePanel() {
                     </div>
                     <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
                       <span>{row.updated_at ? formatDistanceToNow(new Date(row.updated_at), { addSuffix: true }) : '-'}</span>
-                      {row.posted_x_tweet_id && <span className="text-emerald-500">posted</span>}
+                      {row.posted_x_tweet_id && <span className="text-success">posted</span>}
                     </div>
                   </button>
                 ))
@@ -422,8 +422,8 @@ export function ManualVideoIntakePanel() {
                     )}
 
                     {duplicateBlocked && intake.duplicate_override !== true && (
-                      <Alert className="border-amber-500/40 bg-amber-500/10">
-                        <ShieldAlert className="h-4 w-4 text-amber-500" />
+                      <Alert className="border-warning/40 bg-warning/10">
+                        <ShieldAlert className="h-4 w-4 text-warning" />
                         <AlertTitle>Duplicate Gate</AlertTitle>
                         <AlertDescription>
                           {safeString(safety.dedupe && typeof safety.dedupe === 'object' ? (safety.dedupe as Record<string, unknown>).result && ((safety.dedupe as Record<string, unknown>).result as Record<string, unknown>).reason : null) ?? 'Duplicate review is blocking posting.'}
@@ -432,8 +432,8 @@ export function ManualVideoIntakePanel() {
                     )}
 
                     {(!xPostingEnabled || !xAllowVideo) && (
-                      <Alert className="border-blue-500/40 bg-blue-500/10">
-                        <Ban className="h-4 w-4 text-blue-500" />
+                      <Alert className="border-primary/40 bg-primary/10">
+                        <Ban className="h-4 w-4 text-primary" />
                         <AlertTitle>X Posting Guard</AlertTitle>
                         <AlertDescription>
                           {!xPostingEnabled ? 'X posting is disabled.' : 'Video posting is disabled in X posting settings.'}
@@ -487,7 +487,7 @@ export function ManualVideoIntakePanel() {
                         <div className="grid gap-2">
                           <div className="flex items-center justify-between gap-2">
                             <Label htmlFor="manual-caption">Caption</Label>
-                            <span id="manual-caption-count" className={captionTooLong ? 'text-xs text-red-500' : 'text-xs text-muted-foreground'}>
+                            <span id="manual-caption-count" className={captionTooLong ? 'text-xs text-destructive' : 'text-xs text-muted-foreground'}>
                               {captionDraft.length}/{snapshot?.caption.max_chars ?? 280}
                             </span>
                           </div>
@@ -604,7 +604,7 @@ export function ManualVideoIntakePanel() {
                             </AlertDialogContent>
                           </AlertDialog>
                           {readyToPost ? (
-                            <div className="flex items-center gap-2 text-xs text-emerald-500">
+                            <div className="flex items-center gap-2 text-xs text-success">
                               <CheckCircle2 className="h-3.5 w-3.5" />
                               Ready
                             </div>

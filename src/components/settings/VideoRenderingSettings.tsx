@@ -146,7 +146,7 @@ export default function VideoRenderingSettings() {
     <form ref={formRef} className="space-y-6" onSubmit={(event) => { event.preventDefault(); save(); }}>
       <SettingsSaveStatus label="Video rendering settings" dirty={editor.isDirty} {...saving} onSave={save} disabled={editor.hasPendingIncoming} />
       <SettingsIncomingNotice editor={editor} />
-      <Alert className="border-amber-500/30 bg-amber-500/10">
+      <Alert className="border-warning/30 bg-warning/10">
         <AlertTriangle className="h-4 w-4" />
         <AlertTitle>Production-safe rollout</AlertTitle>
         <AlertDescription>

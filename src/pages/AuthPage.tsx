@@ -127,7 +127,7 @@ export default function AuthPage() {
       <div className="w-full max-w-md space-y-6">
         {/* Header */}
         <div className="text-center space-y-3">
-          <BrandLogo className="mx-auto h-32 w-32 shadow-2xl shadow-primary/20 ring-1 ring-glass-border sm:h-40 sm:w-40" />
+          <BrandLogo className="mx-auto h-24 w-24 ring-1 ring-border sm:h-28 sm:w-28" />
           <h1 className="text-3xl font-display font-bold text-glass-foreground">XOT Panel</h1>
           <p className="text-muted-foreground">Secure access to your RSS → OpenAI → Telegram pipeline</p>
         </div>

@@ -71,10 +71,10 @@ export function formatAge(seconds: number | null | undefined): string {
 }
 
 export function toneClass(tone: MonitoringTone | TimelineTone) {
-  if (tone === 'good') return 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30';
+  if (tone === 'good') return 'bg-success/15 text-success border-success/30';
   if (tone === 'bad') return 'bg-destructive/15 text-destructive border-destructive/30';
-  if (tone === 'warn') return 'bg-amber-500/15 text-amber-500 border-amber-500/30';
-  if (tone === 'info') return 'bg-blue-500/15 text-blue-500 border-blue-500/30';
+  if (tone === 'warn') return 'bg-warning/15 text-warning border-warning/30';
+  if (tone === 'info') return 'bg-primary/15 text-primary border-primary/30';
   return 'bg-muted text-muted-foreground border-border';
 }
 

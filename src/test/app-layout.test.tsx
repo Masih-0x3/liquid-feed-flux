@@ -3,6 +3,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { navigationItems } from "@/components/layout/navigation";
+import { ThemeProvider } from "@/contexts/ThemeContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { useRuntimeControls } from "@/hooks/useRuntimeControls";
@@ -29,23 +30,27 @@ const mockedUseRuntimeControls = vi.mocked(useRuntimeControls);
 
 function renderLayout(path = "/") {
   return render(
-    <MemoryRouter initialEntries={[path]}>
-      <AppLayout>
-        <div>Page content</div>
-      </AppLayout>
-    </MemoryRouter>,
+    <ThemeProvider>
+      <MemoryRouter initialEntries={[path]}>
+        <AppLayout>
+          <div>Page content</div>
+        </AppLayout>
+      </MemoryRouter>
+    </ThemeProvider>,
   );
 }
 
 function renderNestedLayout(path = "/") {
   return render(
-    <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route element={<AppLayout />}>
-          <Route index element={<div>Nested outlet content</div>} />
-        </Route>
-      </Routes>
-    </MemoryRouter>,
+    <ThemeProvider>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route element={<AppLayout />}>
+            <Route index element={<div>Nested outlet content</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>
+    </ThemeProvider>,
   );
 }
 

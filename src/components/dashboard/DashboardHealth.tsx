@@ -257,7 +257,7 @@ export function DashboardHealth({ health, queue, xUsage, systemPerformance }: Pr
         </CardHeader>
         <CardContent className="space-y-4">
           {readOnly && (
-            <p className="rounded-md border border-amber-400/30 bg-amber-500/10 p-3 text-xs text-amber-100" role="note">
+            <p className="rounded-md border border-warning/30 bg-warning/10 p-3 text-xs text-warning" role="note">
               Read-only access. Maintenance actions are disabled. Status and route links remain available.
             </p>
           )}

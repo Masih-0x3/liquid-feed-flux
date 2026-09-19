@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { ConfirmSettingsAction } from "@/components/settings/ConfirmSettingsAction";
 import { useRuntimeControls } from "@/hooks/useRuntimeControls";
-import { Activity, AlertTriangle, Ban, Check, Loader2, SlidersHorizontal, Sparkles, Timer, Twitter } from "lucide-react";
+import { Activity, AlertTriangle, Ban, Check, Loader2, SlidersHorizontal, Sparkles, Timer, Twitter, X } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -288,9 +288,20 @@ export function MonitoringDetailDrawer({
       <DrawerContent className="max-h-[92svh]" onCloseAutoFocus={(event) => {
         if (onRestoreFocus) { event.preventDefault(); onRestoreFocus(); }
       }}>
-        <DrawerHeader className="px-4 pb-2 pt-3 text-left">
+        <DrawerHeader className="relative px-4 pb-2 pt-3 pr-12 text-left">
           <DrawerTitle className="text-base sm:text-lg">Pipeline Details</DrawerTitle>
           <DrawerDescription className="break-all">{tweetId}</DrawerDescription>
+          <DrawerClose asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="absolute right-4 top-3 h-8 w-8 text-muted-foreground hover:text-foreground"
+              aria-label="Close"
+            >
+              <X className="h-4 w-4" />
+              <span className="sr-only">Close</span>
+            </Button>
+          </DrawerClose>
         </DrawerHeader>
         <div className="grid max-h-[76svh] gap-3 overflow-y-auto px-3 pb-4 sm:px-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,340px)] lg:items-start">
           <div className="min-w-0 space-y-4">
@@ -423,7 +434,7 @@ export function MonitoringDetailDrawer({
                             ))}
                           </div>
                         ) : (
-                          <p className="rounded-md border border-emerald-500/30 bg-emerald-500/10 p-2 text-emerald-300">
+                          <p className="rounded-md border border-success/30 bg-success/10 p-2 text-success">
                             This post passes the local X gates. Normal cron still respects budget, spacing, media, and prior-post checks.
                           </p>
                         )}
@@ -579,7 +590,7 @@ export function MonitoringDetailDrawer({
                       </div>
                     )}
                     {(selectedScoringV2?.policy_rule_applied || selectedScoringV2?.policy_rule || selectedManualScoringFeedback) && (
-                      <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3">
+                      <div className="rounded-md border border-warning/30 bg-warning/10 p-3">
                         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                           <div>
                             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">V2 tuning</p>
