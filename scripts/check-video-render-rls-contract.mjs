@@ -1741,12 +1741,6 @@ function sourceFileIssues(frontendFiles) {
     'clearTimeout',
     'clipboard',
     'cookie',
-    // documentElement: reviewed with the 2026-09 design-system theme layer.
-    // Read/written only by src/contexts/ThemeContext.tsx and public/theme-boot.js
-    // to toggle the `dark` class and color-scheme on <html> before first paint.
-    // No transport, credential, or data-bearing surface; value is a constant
-    // structural reference under CSP with no dynamic dispatch.
-    'documentElement',
     'getElementById',
     'history',
     'innerWidth',
@@ -1757,14 +1751,27 @@ function sourceFileIssues(frontendFiles) {
     'setTimeout',
     'visibilityState',
   ]);
-  const isUnreviewedBrowserSurfaceProperty = (node) => (
+  // The 2026-09 design-system theme layer toggles the `dark` class and
+  // color-scheme on <html> before first paint, which requires reaching the
+  // document root. That approval is bound to the two files that own the theme
+  // contract: a global entry would let any browser module traverse to the
+  // document root, and the root is the entry point for every DOM subtree.
+  const reviewedDocumentElementPaths = new Set([
+    'public/theme-boot.js',
+    'src/contexts/ThemeContext.tsx',
+  ]);
+  const isReviewedBrowserSurfaceProperty = (name, file) => (
+    reviewedBrowserSurfaceProperties.has(name)
+    || (name === 'documentElement' && reviewedDocumentElementPaths.has(file.path))
+  );
+  const isUnreviewedBrowserSurfaceProperty = (node, file) => (
     typescript.isPropertyAccessExpression(node)
     && isBrowserGlobalRoot(node.expression)
-    && !reviewedBrowserSurfaceProperties.has(node.name.text)
+    && !isReviewedBrowserSurfaceProperty(node.name.text, file)
   ) || (
     typescript.isElementAccessExpression(node)
     && isBrowserGlobalRoot(node.expression)
-    && !reviewedBrowserSurfaceProperties.has(stringValue(node.argumentExpression) ?? '')
+    && !isReviewedBrowserSurfaceProperty(stringValue(node.argumentExpression) ?? '', file)
   );
   const isBrowserGlobalExpression = (node) => {
     const candidate = unwrapExpression(node);
@@ -3369,7 +3376,7 @@ function sourceFileIssues(frontendFiles) {
       ) {
         issues.push(`${file.path}: browser source may not use computed global transport dispatch`);
       }
-      if (isUnreviewedBrowserSurfaceProperty(node)) {
+      if (isUnreviewedBrowserSurfaceProperty(node, file)) {
         issues.push(`${file.path}: browser source may not read an unreviewed global browser surface`);
       }
       if (isCurrentTargetExpression(node) && !isReviewedCurrentTargetUse(node, file)) {
@@ -5050,6 +5057,27 @@ if (process.env.MUTATION_TEST === '1') {
     frontendFiles: [
       ...source.frontendFiles,
       { path: 'src/rls-contract-aliased-global-transport.ts', source: `const request = globalThis['fetch']; request('/rest' + '/v1/' + ['video', 'renders'].join('_'));` },
+    ],
+  }));
+  expectRejected('unreviewed document root traversal', (source) => ({
+    ...source,
+    frontendFiles: [
+      ...source.frontendFiles,
+      { path: 'src/rls-contract-document-root-traversal.ts', source: `const root = document.documentElement; root.setAttribute('data-scrape', '1');` },
+    ],
+  }));
+  expectRejected('computed unreviewed document root traversal', (source) => ({
+    ...source,
+    frontendFiles: [
+      ...source.frontendFiles,
+      { path: 'src/rls-contract-computed-document-root-traversal.ts', source: `const key = ['document', 'Element'].join(''); const root = document[key as 'documentElement']; root.classList.add('x');` },
+    ],
+  }));
+  expectRejected('window-qualified unreviewed document root traversal', (source) => ({
+    ...source,
+    frontendFiles: [
+      ...source.frontendFiles,
+      { path: 'src/rls-contract-window-document-root-traversal.ts', source: `const root = window.document.documentElement; root.dataset.theme = 'light';` },
     ],
   }));
   expectRejected('direct browser realtime transport', (source) => ({
