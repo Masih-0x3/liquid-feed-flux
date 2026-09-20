@@ -43,7 +43,7 @@ export default function Downloader() {
   return (
     <div className="mx-auto max-w-4xl space-y-5 py-2 sm:py-4">
       <div className="space-y-2">
-        <h1 className="flex items-center gap-3 text-2xl font-semibold sm:text-3xl"><Download className="h-6 w-6 shrink-0 text-primary" />Media downloader</h1>
+        <h1 className="flex items-center gap-2.5 font-display text-xl font-semibold tracking-tight text-foreground sm:text-2xl"><Download className="h-5 w-5 shrink-0 text-primary" aria-hidden="true" />Media downloader</h1>
         <p className="text-muted-foreground">Preview and download supported images and videos already stored in the private archive.</p>
       </div>
       <Card>

@@ -2,66 +2,73 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Shared operational surfaces, controls and readable status colors. */
+/*
+ * XOT operational design system.
+ * Calm, dense workbench surfaces: near-neutral charcoal dark theme and a
+ * pale-gray light theme with a restrained blue action accent. Dark is the
+ * first-use default; the `.dark` class is applied before first paint by
+ * /theme-boot.js and managed by ThemeProvider.
+ */
 
 @layer base {
   :root {
-    /* Base glass colors - deep blues and purples */
-    --background: 220 25% 6%;
-    --foreground: 220 15% 95%;
+    color-scheme: light;
 
-    /* Glass material colors with transparency */
-    --card: 220 20% 12%;
-    --card-foreground: 220 15% 95%;
+    /* Surfaces */
+    --background: 220 18% 97%; /* app background */
+    --canvas: 0 0% 100%; /* working canvas */
+    --card: 210 17% 98%; /* group surface */
+    --card-foreground: 230 9% 14%;
 
-    --glass: 220 30% 15%;
-    --glass-foreground: 220 12% 92%;
-    --glass-border: 220 25% 25%;
+    --sidebar: 220 11% 95%; /* persistent navigation rail */
+    --sidebar-foreground: 223 7% 38%;
+    --sidebar-accent: 214 24% 94%;
+    --sidebar-border: 223 12% 89%;
 
-    --popover: 220 25% 8%;
-    --popover-foreground: 220 15% 95%;
+    --glass: 210 17% 98%; /* legacy alias of the group surface */
+    --glass-foreground: 230 9% 14%;
+    --glass-border: 223 12% 89%;
 
-    /* Primary colors - vibrant blue for accents */
-    --primary: 215 85% 60%;
-    --primary-foreground: 220 25% 8%;
-    --primary-glow: 215 100% 70%;
+    --popover: 0 0% 100%; /* elevated menus, dialogs */
+    --popover-foreground: 230 9% 14%;
 
-    /* Secondary glass panels */
-    --secondary: 220 20% 18%;
-    --secondary-foreground: 220 12% 88%;
+    /* Text */
+    --foreground: 230 9% 14%;
+    --muted-foreground: 223 7% 38%;
+    --secondary: 214 24% 94%;
+    --secondary-foreground: 222 9% 22%;
+    --muted: 214 24% 94%;
+    --accent: 214 24% 94%;
+    --accent-foreground: 230 9% 14%;
+    --accent-glow: 220 40% 60%;
 
-    /* Muted glass elements */
-    --muted: 220 15% 20%;
-    --muted-foreground: 220 8% 65%;
+    /* Action */
+    --primary: 220 69% 42%;
+    --primary-foreground: 0 0% 100%;
+    --primary-glow: 221 65% 58%;
+    --ring: 220 69% 42%;
 
-    /* Accent highlights */
-    --accent: 220 20% 22%;
-    --accent-foreground: 220 15% 95%;
-    --accent-glow: 215 30% 28%;
+    /* Status. Each role is tuned so the role color clears 4.5:1 against its
+       own 10-15% tint, which is how the status chips and callouts render. */
+    --destructive: 351 65% 44%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 153 67% 25%;
+    --success-foreground: 0 0% 100%;
+    --warning: 26 90% 33%;
+    --warning-foreground: 0 0% 100%;
 
-    /* Status colors */
-    --destructive: 0 85% 72%;
-    --destructive-foreground: 220 25% 8%;
-    
-    --success: 140 65% 50%;
-    --success-foreground: 220 15% 95%;
-    
-    --warning: 45 85% 60%;
-    --warning-foreground: 220 15% 95%;
+    /* Fields and structure */
+    --border: 223 12% 89%;
+    --input: 0 0% 100%;
 
-    /* Glass borders and inputs */
-    --border: 220 25% 25%;
-    --input: 220 20% 15%;
-    --ring: 215 85% 60%;
+    /* Shared surface effects (restrained, no decorative glow) */
+    --glass-bg: rgba(16, 18, 22, 0.02);
+    --glass-border-color: rgba(16, 18, 22, 0.1);
+    --glass-shadow: 0 1px 2px rgba(16, 18, 22, 0.06);
+    --glass-shadow-lg: 0 12px 40px rgba(16, 18, 22, 0.14);
 
-    /* Glass effects */
-    --glass-bg: rgba(255, 255, 255, 0.05);
-    --glass-border-color: rgba(255, 255, 255, 0.1);
-    --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-    --glass-shadow-lg: 0 20px 60px rgba(0, 0, 0, 0.4);
-
-    /* Gradients */
-    --gradient-glass: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.02));
+    /* Gradients (derive from the shared tokens; no decorative usage) */
+    --gradient-glass: linear-gradient(135deg, rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.2));
     --gradient-primary: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-glow)));
     --gradient-accent: linear-gradient(135deg, hsl(var(--accent)), hsl(var(--accent-glow)));
 
@@ -71,9 +78,9 @@
     --blur-lg: 16px;
     --blur-xl: 24px;
 
-    /* Border radius */
-    --radius: 0.625rem;
-    --radius-lg: 0.875rem;
+    /* Border radius: controls 8px, panels 12px, outer canvas 16px */
+    --radius: 0.75rem;
+    --radius-lg: 1rem;
 
     /* Typography */
     --font-display: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
@@ -84,6 +91,64 @@
     --transition-glass: background-color 0.15s ease, border-color 0.15s ease;
     --transition-fast: color 0.15s ease-out, background-color 0.15s ease-out;
   }
+
+  .dark {
+    color-scheme: dark;
+
+    /* Surfaces */
+    --background: 220 10% 6%;
+    --canvas: 220 7% 8%;
+    --card: 225 7% 11%;
+    --card-foreground: 220 13% 95%;
+
+    --sidebar: 220 12% 5%;
+    --sidebar-foreground: 224 7% 70%;
+    --sidebar-accent: 225 7% 11%;
+    --sidebar-border: 225 9% 18%;
+
+    --glass: 225 7% 11%;
+    --glass-foreground: 220 13% 95%;
+    --glass-border: 225 9% 18%;
+
+    --popover: 230 8% 15%;
+    --popover-foreground: 220 13% 95%;
+
+    /* Text */
+    --foreground: 220 13% 95%;
+    --muted-foreground: 224 7% 70%;
+    --secondary: 230 8% 15%;
+    --secondary-foreground: 225 9% 91%;
+    --muted: 230 8% 15%;
+    --accent: 230 8% 15%;
+    --accent-foreground: 220 13% 95%;
+    --accent-glow: 225 12% 24%;
+
+    /* Action */
+    --primary: 223 100% 78%;
+    --primary-foreground: 222 45% 11%;
+    --primary-glow: 226 100% 86%;
+    --ring: 223 100% 78%;
+
+    /* Status */
+    --destructive: 358 86% 67%;
+    --destructive-foreground: 220 25% 8%;
+    --success: 151 65% 54%;
+    --success-foreground: 222 20% 8%;
+    --warning: 37 91% 55%;
+    --warning-foreground: 222 20% 8%;
+
+    /* Fields and structure */
+    --border: 225 9% 18%;
+    --input: 220 7% 8%;
+
+    /* Shared surface effects */
+    --glass-bg: rgba(255, 255, 255, 0.03);
+    --glass-border-color: rgba(255, 255, 255, 0.08);
+    --glass-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --glass-shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.55);
+
+    --gradient-glass: linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
+  }
 }
 
 @layer base {
@@ -91,16 +156,37 @@
     @apply border-border;
   }
 
+  html {
+    @apply bg-background;
+  }
+
   body {
     @apply bg-background text-foreground font-body antialiased;
     overflow-x: hidden;
-
   }
 
   h1, h2, h3, h4, h5, h6 {
     font-family: var(--font-display);
     font-weight: 600;
     line-height: 1.2;
+  }
+
+  /* Numeric operational values stay aligned in tables and metric strips. */
+  .tabular-nums,
+  input[type="number"] {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Reduced motion yields an equally usable static interface. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
 
@@ -120,7 +206,7 @@
   .glass-card .glass-card {
     border-radius: 0.5rem;
     box-shadow: none;
-    background: hsl(var(--background) / 0.35);
+    background: hsl(var(--muted) / 0.4);
   }
 
   .glass-card-lg {
@@ -151,24 +237,41 @@
 
   /* Status indicators */
   .status-success {
-    @apply bg-success/20 text-success border-success/30;
+    @apply bg-success/15 text-success border-success/30;
   }
 
   .status-warning {
-    @apply bg-warning/20 text-warning border-warning/30;
+    @apply bg-warning/15 text-warning border-warning/30;
   }
 
   .status-error {
-    @apply bg-destructive/20 text-destructive border-destructive/30;
+    @apply bg-destructive/15 text-destructive border-destructive/30;
   }
 
   .status-pending {
-    @apply bg-muted/20 text-muted-foreground border-muted/30;
+    @apply bg-muted/30 text-muted-foreground border-border;
+  }
+
+  /* Amber status alert contrast fix in light mode (WCAG AA compliant) */
+  :root:not(.dark) .border-amber-400\/30 {
+    border-color: hsl(var(--warning) / 0.3);
+  }
+  :root:not(.dark) .bg-amber-500\/10 {
+    background-color: hsl(var(--warning) / 0.1);
+  }
+  :root:not(.dark) .text-amber-100 {
+    color: hsl(var(--warning));
+  }
+  :root:not(.dark) .text-amber-100\/75 {
+    color: hsl(var(--warning) / 0.85);
+  }
+  :root:not(.dark) .text-amber-300 {
+    color: hsl(var(--warning));
   }
 
   /* Interactive elements */
   .glass-button {
-    @apply rounded-md border border-border bg-secondary px-4 py-2 text-sm font-medium transition-colors duration-150;
+    @apply rounded-md border border-border bg-secondary px-3 py-2 text-sm font-medium text-secondary-foreground transition-colors duration-150;
   }
 
   @media (hover: hover) and (pointer: fine) {
@@ -178,8 +281,8 @@
   }
 
   .glass-input {
-    @apply min-w-0 rounded-md border border-border bg-background px-3 py-2 text-sm;
-    @apply focus:ring-2 focus:ring-primary/50 focus:border-primary/50;
+    @apply min-w-0 rounded-md border border-border bg-input px-3 py-2 text-sm text-foreground;
+    @apply focus:ring-2 focus:ring-primary/50 focus:border-primary/60;
   }
 
   .xot-hud-shell {

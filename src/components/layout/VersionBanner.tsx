@@ -78,7 +78,7 @@ export function VersionBanner() {
       <span
         className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] cursor-default ${
           uiStale
-            ? 'bg-amber-500/10 text-amber-400'
+            ? 'bg-warning/10 text-warning'
             : 'bg-muted/60 text-muted-foreground'
         }`}
         title={
@@ -118,7 +118,7 @@ export function VersionBanner() {
         <span
           className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] cursor-default ${
             apiStale
-              ? 'bg-amber-500/10 text-amber-400'
+              ? 'bg-warning/10 text-warning'
               : 'bg-muted/60 text-muted-foreground'
           }`}
           title={
@@ -137,7 +137,7 @@ export function VersionBanner() {
 
       {bothFresh && (
         <span title="Both dashboard and backend are recently deployed. Everything looks good.">
-          <CheckCircle2 className="w-3 h-3 text-green-500 cursor-default" />
+          <CheckCircle2 className="w-3 h-3 text-success cursor-default" />
         </span>
       )}
     </div>

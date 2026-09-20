@@ -50,9 +50,9 @@ function formatMs(value: number | null | undefined): string {
 }
 
 function statusClass(status?: string): string {
-  if (status === 'completed') return 'border-emerald-500/30 bg-emerald-500/15 text-emerald-500';
-  if (status === 'queued' || status === 'running') return 'border-blue-500/30 bg-blue-500/15 text-blue-500';
-  if (status === 'failed' || status === 'blocked') return 'border-red-500/30 bg-red-500/15 text-red-500';
+  if (status === 'completed') return 'border-success/30 bg-success/15 text-success';
+  if (status === 'queued' || status === 'running') return 'border-primary/30 bg-primary/15 text-primary';
+  if (status === 'failed' || status === 'blocked') return 'border-destructive/30 bg-destructive/15 text-destructive';
   return 'border-muted-foreground/30 bg-muted text-muted-foreground';
 }
 
@@ -201,7 +201,7 @@ export default function VideoRenders() {
               <span className="min-w-0 flex-1">
                 <span className="flex min-w-0 items-center gap-2">
                   <span className="truncate font-medium group-hover:text-primary">{author}</span>
-                  {row.reviewed_at && <span className="shrink-0 text-[11px] text-emerald-500">Reviewed</span>}
+                  {row.reviewed_at && <span className="shrink-0 text-[11px] text-success">Reviewed</span>}
                 </span>
                 <span dir="auto" className="mt-1 line-clamp-2 break-words text-sm text-muted-foreground">{title.slice(0, 240)}{title.length > 240 ? "…" : ""}</span>
                 <span className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
@@ -270,7 +270,7 @@ export default function VideoRenders() {
     <Card className="glass-card">
       <CardContent className="grid gap-2 p-4 text-sm sm:grid-cols-3">
         <div className="flex items-center gap-2">
-          <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+          <CheckCircle2 className="h-4 w-4 text-success" />
           <span>{compactNumber(overview.data?.counts?.completed)} completed</span>
         </div>
         <div className="flex items-center gap-2">
@@ -278,7 +278,7 @@ export default function VideoRenders() {
           <span>{formatBytes(overview.data?.output_bytes_7d)} in 7d</span>
         </div>
         <div className="flex items-center gap-2">
-          <Clock className="h-4 w-4 text-blue-500" />
+          <Clock className="h-4 w-4 text-primary" />
           <span>{overview.data?.oldest_queued_at ? `Oldest ${formatDistanceToNow(new Date(overview.data.oldest_queued_at), { addSuffix: true })}` : !overview.data ? 'Backlog unavailable' : (overview.data.counts?.queued ?? 0) > 0 ? 'Oldest queued time unavailable' : 'No backlog in 7d snapshot'}</span>
         </div>
       </CardContent>
@@ -300,7 +300,7 @@ export default function VideoRenders() {
     <div className="w-full space-y-4">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="flex items-center gap-2 text-2xl font-bold sm:text-3xl">
+          <h1 className="flex items-center gap-2.5 font-display text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
             <Film className="h-7 w-7 text-primary" />
             Video Renders
           </h1>
@@ -321,7 +321,7 @@ export default function VideoRenders() {
       </div>
 
       {readOnly && (
-        <div role="note" className="rounded-md border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+        <div role="note" className="rounded-md border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">
           Read-only access. Review and status data remain available. Retry and review-state changes are disabled.
         </div>
       )}
@@ -338,13 +338,13 @@ export default function VideoRenders() {
         <div className="min-w-0 border-b p-3 xl:border-b-0 xl:border-r" aria-live="polite">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             {rendererState === 'healthy'
-              ? <Wifi className="h-3.5 w-3.5 text-emerald-500" />
+              ? <Wifi className="h-3.5 w-3.5 text-success" />
               : rendererState === 'unavailable'
-                ? <WifiOff className="h-3.5 w-3.5 text-red-500" />
-                : <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />}
+                ? <WifiOff className="h-3.5 w-3.5 text-destructive" />
+                : <AlertTriangle className="h-3.5 w-3.5 text-warning" />}
             <span>Renderer</span>
           </div>
-          <p className={`mt-1 truncate text-sm font-semibold ${rendererState === 'healthy' ? 'text-emerald-500' : rendererState === 'unavailable' ? 'text-red-500' : rendererState === 'blocked' || rendererState === 'stale' ? 'text-amber-500' : 'text-muted-foreground'}`}>{rendererHealthLabel(rendererState)}</p>
+          <p className={`mt-1 truncate text-sm font-semibold ${rendererState === 'healthy' ? 'text-success' : rendererState === 'unavailable' ? 'text-destructive' : rendererState === 'blocked' || rendererState === 'stale' ? 'text-warning' : 'text-muted-foreground'}`}>{rendererHealthLabel(rendererState)}</p>
           {(typeof rendererHealth?.age_ms === 'number' || rendererHealth?.reported_status) && (
             <p className="mt-1 truncate text-[11px] text-muted-foreground">
               {typeof rendererHealth?.age_ms === 'number' ? `Heartbeat ${formatServerAge(rendererHealth.age_ms)}` : `Reported ${rendererHealth.reported_status}`}
@@ -353,14 +353,14 @@ export default function VideoRenders() {
         </div>
         <div className="min-w-0 border-b p-3 sm:border-r xl:border-b-0">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Clock className="h-3.5 w-3.5 text-blue-500" />
+            <Clock className="h-3.5 w-3.5 text-primary" />
             <span>Queued · created in last 7d</span>
           </div>
           <p className="mt-1 text-sm font-semibold">{compactNumber(overview.data?.counts?.queued)}</p>
         </div>
         <div className="min-w-0 border-b p-3 xl:border-b-0 xl:border-r">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <AlertTriangle className="h-3.5 w-3.5 text-red-500" />
+            <AlertTriangle className="h-3.5 w-3.5 text-destructive" />
             <span>Unreviewed failed / blocked</span>
           </div>
           <p className="mt-1 text-sm font-semibold">{compactNumber(overview.data?.unreviewed_issues)}</p>

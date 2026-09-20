@@ -111,7 +111,7 @@ export default function StoryMemoryCard({ initial }: Props) {
       <CardContent className="space-y-6">
         <SettingsSaveStatus label="Duplicate Gate" dirty={editor.isDirty} saving={save.isPending} error={save.error} saved={save.isSuccess} />
         {hasPendingIncoming && (
-          <div role="alert" className="space-y-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm">
+          <div role="alert" className="space-y-3 rounded-lg border border-warning/40 bg-warning/10 p-4 text-sm">
             <div>
               <p className="font-medium text-foreground">New saved settings available</p>
               <p className="mt-1 text-muted-foreground">

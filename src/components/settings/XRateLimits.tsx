@@ -92,7 +92,7 @@ export default function XRateLimits({ initial, monthlyPostsCount, enabled = true
             <p className="text-sm font-medium text-glass-foreground">Local ledger usage</p>
             <Badge variant="outline" className="text-xs">rolling windows</Badge>
           </div>
-          {usageError && <p role="status" className="text-sm text-amber-200">Refresh failed. Displayed usage is from the last successful snapshot.</p>}
+          {usageError && <p role="status" className="text-sm text-warning">Refresh failed. Displayed usage is from the last successful snapshot.</p>}
           <p className="text-xs text-muted-foreground">Last successful refresh: {usageUpdatedAt ? new Date(usageUpdatedAt).toLocaleString() : 'unavailable'}.</p>
           <p className="text-xs text-muted-foreground">Measured local posts against the last saved budgets. These are not the official X billing totals. Last recorded event: {xApiSummary?.latest_event_at ? new Date(xApiSummary.latest_event_at).toLocaleString() : 'unavailable'}.</p>
           <Row label="Posts (last hour)" current={xApiSummary?.posts_last_hour} limit={savedLimits.posts_per_hour} pct={hourPct} />

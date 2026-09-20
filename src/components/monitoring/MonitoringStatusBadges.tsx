@@ -13,10 +13,10 @@ export function MonitoringXBadge({ entry }: MonitoringEntryBadgeProps) {
 
   const { label, title } = formatXBadge(entry);
   const cls =
-    entry.x_status === 'posted' ? 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30'
+    entry.x_status === 'posted' ? 'bg-success/15 text-success border-success/30'
     : entry.x_status === 'failed' ? 'bg-destructive/15 text-destructive border-destructive/30'
     : entry.x_status === 'skipped' ? 'bg-muted text-muted-foreground border-border'
-    : 'bg-amber-500/15 text-amber-500 border-amber-500/30';
+    : 'bg-warning/15 text-warning border-warning/30';
   const badge = <Badge className={cls} title={title}>{label}</Badge>;
 
   return entry.x_status === 'posted' && entry.x_tweet_id ? (
@@ -41,7 +41,7 @@ export function MonitoringDedupeBadge({ entry }: MonitoringEntryBadgeProps) {
     : entry.dedupe_status === 'failed' ? 'Dedupe failed'
     : 'Unique';
   const cls =
-    entry.dedupe_status === 'duplicate' ? 'bg-purple-500/15 text-purple-400 border-purple-500/30'
+    entry.dedupe_status === 'duplicate' ? 'bg-primary/15 text-primary border-primary/30'
     : entry.dedupe_status === 'coverage_gap' ? toneClass('warn')
     : entry.dedupe_status === 'related_new_info' || entry.dedupe_status === 'unique' ? toneClass('good')
     : entry.dedupe_status === 'failed' ? toneClass('bad')
@@ -60,9 +60,9 @@ export function MonitoringAudienceBadge({ entry }: MonitoringEntryBadgeProps) {
   if (!entry.audience_class) return null;
 
   const cls =
-    entry.audience_class === 'direct_focus' ? 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30'
-    : entry.audience_class === 'adjacent' ? 'bg-blue-500/15 text-blue-400 border-blue-500/30'
-    : entry.audience_class === 'global_exception' ? 'bg-violet-500/15 text-violet-400 border-violet-500/30'
+    entry.audience_class === 'direct_focus' ? 'bg-success/15 text-success border-success/30'
+    : entry.audience_class === 'adjacent' ? 'bg-primary/15 text-primary border-primary/30'
+    : entry.audience_class === 'global_exception' ? 'bg-primary/15 text-primary border-primary/30'
     : 'bg-muted text-muted-foreground border-border';
   const title = [
     entry.scoring_profile_id ? `profile ${entry.scoring_profile_id}` : null,
@@ -94,7 +94,7 @@ export function MonitoringScore({ entry, deliverThreshold }: MonitoringScoreProp
   if (score == null) return <span className="text-muted-foreground">—</span>;
 
   return (
-    <span className={score >= deliverThreshold ? 'font-semibold text-emerald-500' : 'font-semibold text-amber-500'}>
+    <span className={score >= deliverThreshold ? 'font-semibold text-success' : 'font-semibold text-warning'}>
       {Number.isInteger(score) ? score : score.toFixed(1)}
       <span className="text-xs text-muted-foreground"> / ≥{deliverThreshold}</span>
     </span>

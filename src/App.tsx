@@ -2,6 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { ThemeProvider } from "@/contexts/ThemeContext";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { lazy, Suspense } from "react";
 import { AlertTriangle, Loader2 } from "lucide-react";
@@ -38,6 +39,11 @@ const XAccountDisabled = lazyWithRetry(() => import("./pages/XAccountDisabled"))
 const Downloader = lazyWithRetry(() => import("./pages/Downloader"));
 const FoglampHUDDev = import.meta.env.DEV && import.meta.env.VITE_FOGLAMP_HUD === "1"
   ? lazy(() => import("foglamp/hud").then((mod) => ({ default: mod.FoglampHUD })))
+  : null;
+// Dev-only primitive/state gallery for the design system (0X3-606); the
+// import.meta.env.DEV gate keeps it out of production builds entirely.
+const DesignStateGallery = import.meta.env.DEV
+  ? lazy(() => import("./pages/DesignStateGallery"))
   : null;
 
 const queryClient = new QueryClient();
@@ -93,27 +99,32 @@ function FoglampHUDMount() {
 const App = () => (
   supabaseConfigError ? <ConfigErrorScreen /> :
   <QueryClientProvider client={queryClient}>
-    <AuthProvider>
-      <Toaster />
-      <BrowserRouter>
-        <FoglampHUDMount />
-        <Suspense fallback={<PageLoader />}>
-          <Routes>
-            <Route path="/auth" element={<AuthPage />} />
-            <Route element={<AppLayout />}>
-              <Route index element={<Dashboard />} />
-              <Route path="monitoring" element={<Monitoring />} />
-              <Route path="video-renders" element={<VideoRenders />} />
-              <Route path="threads" element={<Threads />} />
-              <Route path="x-account" element={<XAccountDisabled />} />
-              <Route path="downloader" element={<Downloader />} />
-              <Route path="settings" element={<Settings />} />
-            </Route>
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </Suspense>
-      </BrowserRouter>
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <Toaster />
+        <BrowserRouter>
+          <FoglampHUDMount />
+          <Suspense fallback={<PageLoader />}>
+            <Routes>
+              <Route path="/auth" element={<AuthPage />} />
+              <Route element={<AppLayout />}>
+                <Route index element={<Dashboard />} />
+                <Route path="monitoring" element={<Monitoring />} />
+                <Route path="video-renders" element={<VideoRenders />} />
+                <Route path="threads" element={<Threads />} />
+                <Route path="x-account" element={<XAccountDisabled />} />
+                <Route path="downloader" element={<Downloader />} />
+                <Route path="settings" element={<Settings />} />
+                {DesignStateGallery && (
+                  <Route path="__design" element={<DesignStateGallery />} />
+                )}
+              </Route>
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </Suspense>
+        </BrowserRouter>
+      </AuthProvider>
+    </ThemeProvider>
   </QueryClientProvider>
 );
 

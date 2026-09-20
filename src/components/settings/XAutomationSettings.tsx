@@ -267,7 +267,7 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
                   {statusLoading ? (
                     <span role="status"><Loader2 className="w-4 h-4 animate-spin text-muted-foreground" /><span className="sr-only">Loading credential status</span></span>
                   ) : statusMap === null ? <Badge variant="outline">Unavailable</Badge> : present ? (
-                    <Badge className="bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/20"><CheckCircle2 className="w-3 h-3 mr-1" />Configured</Badge>
+                    <Badge className="bg-success/15 text-success border-success/30 hover:bg-success/20"><CheckCircle2 className="w-3 h-3 mr-1" />Configured</Badge>
                   ) : (
                     <Badge variant="destructive"><XCircle className="w-3 h-3 mr-1" />Missing</Badge>
                   )}
@@ -298,9 +298,9 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
           )}
 
           {verifyResult && (
-            <div className={`rounded-lg border p-3 text-sm ${verifyResult.ok ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-destructive/30 bg-destructive/5'}`}>
+            <div className={`rounded-lg border p-3 text-sm ${verifyResult.ok ? 'border-success/30 bg-success/5' : 'border-destructive/30 bg-destructive/5'}`}>
               {verifyResult.ok ? (
-                <div className="flex items-center gap-2"><AtSign className="w-4 h-4 text-emerald-300" /><span className="font-medium">Authenticated as @{verifyResult.handle}</span><span className="text-muted-foreground">(id: {verifyResult.id})</span></div>
+                <div className="flex items-center gap-2"><AtSign className="w-4 h-4 text-success" /><span className="font-medium">Authenticated as @{verifyResult.handle}</span><span className="text-muted-foreground">(id: {verifyResult.id})</span></div>
               ) : (
                 <div className="flex items-start gap-2"><XCircle className="w-4 h-4 text-destructive mt-0.5" /><span>{verifyResult.error || 'Unknown error'}</span></div>
               )}
@@ -335,7 +335,7 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
           <SettingsSaveStatus label="Tweet hydration" dirty={hydrationDraft.isDirty} {...hydrationSave} onSave={() => { void hydrationSave.save(); }} disabled={!canMutate || hydrationDraft.hasPendingIncoming} />
           <SettingsIncomingNotice editor={hydrationDraft} />
           <p className="text-xs text-muted-foreground">Local ledger only. Last successful refresh: {xApiUpdatedAt ? new Date(xApiUpdatedAt).toLocaleString() : 'unavailable'}.</p>
-          {xApiError && <p role="status" className="text-sm text-amber-200">Usage refresh failed. Any displayed values are from the last successful snapshot.</p>}
+          {xApiError && <p role="status" className="text-sm text-warning">Usage refresh failed. Any displayed values are from the last successful snapshot.</p>}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
             <div className="p-3 bg-muted/30 rounded-lg">
               <p className="text-xs text-muted-foreground">Local attempts (24h)</p>
@@ -385,7 +385,7 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
               </div>
             </div>
             {backfillResult && (
-              <div className={`rounded-lg border p-3 text-xs ${backfillResult.ok ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-destructive/30 bg-destructive/5'}`}>
+              <div className={`rounded-lg border p-3 text-xs ${backfillResult.ok ? 'border-success/30 bg-success/5' : 'border-destructive/30 bg-destructive/5'}`}>
                 {backfillResult.ok ? (
                   <span>
                     Scanned <strong>{backfillResult.scanned}</strong> · matched <strong>{backfillResult.matched}</strong> · {backfillResult.dry_run ? 'would queue' : 'queued'} <strong>{backfillResult.queued}</strong> hydrate jobs.
@@ -451,10 +451,10 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
           </div>
 
           {tweetResult && (
-            <div className={`rounded-lg border p-3 text-sm space-y-2 ${tweetResult.ok ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-destructive/30 bg-destructive/5'}`}>
+            <div className={`rounded-lg border p-3 text-sm space-y-2 ${tweetResult.ok ? 'border-success/30 bg-success/5' : 'border-destructive/30 bg-destructive/5'}`}>
               {tweetResult.ok ? (
                 <>
-                  <div className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-300" /><span className="font-medium">Tweet posted</span></div>
+                  <div className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-success" /><span className="font-medium">Tweet posted</span></div>
                   {tweetResult.tweet_id && (
                     <a href={`https://x.com/i/status/${tweetResult.tweet_id}`} target="_blank" rel="noreferrer" className="text-primary text-xs inline-flex items-center hover:underline">
                       View on X <ExternalLink className="w-3 h-3 ml-1" />
@@ -489,10 +489,10 @@ export default function XAutomationSettings({ twitterHydration, xPostingConfig, 
           </div>
 
           {hydrateResult && (
-            <div className={`rounded-lg border p-3 text-sm space-y-2 ${hydrateResult.ok ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-destructive/30 bg-destructive/5'}`}>
+            <div className={`rounded-lg border p-3 text-sm space-y-2 ${hydrateResult.ok ? 'border-success/30 bg-success/5' : 'border-destructive/30 bg-destructive/5'}`}>
               {hydrateResult.ok ? (
                 <>
-                  <div className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-300" /><span className="font-medium">Fetched successfully</span>{hydrateResult.lang && <Badge variant="outline" className="text-xs">{hydrateResult.lang}</Badge>}</div>
+                  <div className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-success" /><span className="font-medium">Fetched successfully</span>{hydrateResult.lang && <Badge variant="outline" className="text-xs">{hydrateResult.lang}</Badge>}</div>
                   {hydrateResult.note_tweet && (
                     <div>
                       <Label className="text-xs">note_tweet (full text)</Label>

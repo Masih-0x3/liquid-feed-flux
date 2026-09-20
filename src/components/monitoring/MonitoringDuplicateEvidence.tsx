@@ -32,11 +32,11 @@ export function MonitoringDuplicateHint({ entry }: MonitoringDuplicateHintProps)
 
   return (
     <div className="mt-2 flex flex-wrap items-center gap-1.5 rounded-md border border-purple-500/20 bg-purple-500/5 px-2 py-1.5 text-[11px] text-muted-foreground">
-      <span className="font-medium text-purple-300">Duplicate of {label}</span>
+      <span className="font-medium text-primary">Duplicate of {label}</span>
       <Badge className={`${duplicateCoverageClass(target?.coverage_state)} text-[10px]`}>
         {duplicateCoverageLabel(target?.coverage_state)}
       </Badge>
-      {bothPostedX && <Badge className="border-red-500/30 bg-red-500/15 text-red-300 text-[10px]">Both X posted</Badge>}
+      {bothPostedX && <Badge className="border-destructive/30 bg-destructive/15 text-destructive text-[10px]">Both X posted</Badge>}
       <span className="min-w-0 truncate">{duplicateStatusSummary(target)}</span>
     </div>
   );
@@ -73,7 +73,7 @@ export function MonitoringDuplicateMatch({
             <Badge className={`${duplicateCoverageClass(target?.coverage_state)} text-[10px]`}>
               {duplicateCoverageLabel(target?.coverage_state)}
             </Badge>
-            {bothPostedX && <Badge className="border-red-500/30 bg-red-500/15 text-red-300 text-[10px]">Both X posted</Badge>}
+            {bothPostedX && <Badge className="border-destructive/30 bg-destructive/15 text-destructive text-[10px]">Both X posted</Badge>}
           </div>
           <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground" title={matchedId}>
             {matchedId.slice(-10)}{matchedAge ? ` · ${matchedAge}` : ''}
@@ -93,7 +93,7 @@ export function MonitoringDuplicateMatch({
           </div>
           <p className="text-[11px] text-muted-foreground">{duplicateCoverageDetail(target)}</p>
           {bothPostedX && (
-            <p className="rounded-md border border-red-500/30 bg-red-500/10 p-2 text-[11px] text-red-200">
+            <p className="rounded-md border border-destructive/30 bg-destructive/10 p-2 text-[11px] text-destructive">
               Anomaly: this duplicate and its matched story were both posted to X. New backend guards prevent this for future automatic posts.
             </p>
           )}
@@ -112,7 +112,7 @@ export function MonitoringDuplicateMatch({
 
 function clusterCoverageBadge(cluster: DuplicateCluster) {
   const cls = cluster.has_x_anomaly
-    ? 'border-red-500/30 bg-red-500/15 text-red-300'
+    ? 'border-destructive/30 bg-destructive/15 text-destructive'
     : cluster.coverage_state === 'covered'
       ? toneClass('good')
       : cluster.coverage_state === 'in_pipeline'
@@ -220,7 +220,7 @@ export function MonitoringDuplicateClusterPanel({
         </div>
         <div className="flex flex-wrap gap-1">
           {clusterCoverageBadge(cluster)}
-          {cluster.has_x_anomaly && <Badge className="border-red-500/30 bg-red-500/15 text-red-300 text-[10px]">Both posted to X</Badge>}
+          {cluster.has_x_anomaly && <Badge className="border-destructive/30 bg-destructive/15 text-destructive text-[10px]">Both posted to X</Badge>}
         </div>
       </div>
       <div className="grid gap-2 xl:grid-cols-2">
@@ -240,7 +240,7 @@ export function MonitoringDuplicateClusterPanel({
                   {member.created_at && <p className="text-muted-foreground">{formatDistanceToNow(new Date(member.created_at), { addSuffix: true })}</p>}
                 </div>
                 <div className="text-right">
-                  <p className={score != null && score >= deliverThreshold ? 'font-semibold text-emerald-500' : 'font-semibold text-amber-500'}>{score == null ? '—' : Number.isInteger(score) ? score : score.toFixed(1)}</p>
+                  <p className={score != null && score >= deliverThreshold ? 'font-semibold text-success' : 'font-semibold text-warning'}>{score == null ? '—' : Number.isInteger(score) ? score : score.toFixed(1)}</p>
                   <p className="text-[11px] text-muted-foreground">score</p>
                 </div>
               </div>

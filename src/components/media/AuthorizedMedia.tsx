@@ -46,7 +46,7 @@ export function AuthorizedMedia({ tweetId, mediaId, renderId, title, readOnly = 
   return (
     <section aria-label={title} className="min-w-0 space-y-3 rounded-lg border p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h4 className="text-sm font-medium">{title}</h4>
+        <h3 className="text-sm font-medium">{title}</h3>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" onClick={() => void request('preview')} disabled={readOnly || Boolean(pending)} aria-label={`Preview ${title.toLowerCase()}`}>
             {pending === 'preview' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : grant ? <RefreshCw className="mr-2 h-4 w-4" /> : <PlayCircle className="mr-2 h-4 w-4" />}

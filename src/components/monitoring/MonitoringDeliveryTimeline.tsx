@@ -28,10 +28,10 @@ function relativeTimestamp(rawTimestamp: string | null): string | null {
 }
 
 function timelineDotClass(tone: TimelineEventGroup['statusTone']) {
-  if (tone === 'good') return 'border-emerald-500';
+  if (tone === 'good') return 'border-success';
   if (tone === 'bad') return 'border-destructive';
-  if (tone === 'warn') return 'border-amber-500';
-  if (tone === 'info') return 'border-blue-500';
+  if (tone === 'warn') return 'border-warning';
+  if (tone === 'info') return 'border-primary';
   return 'border-muted-foreground';
 }
 
