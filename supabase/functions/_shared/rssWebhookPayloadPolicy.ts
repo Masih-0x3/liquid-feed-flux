@@ -178,14 +178,6 @@ export async function readBoundedRssWebhookBody(request: Request): Promise<Bound
   }
 }
 
-/**
- * Compatibility helper for callers that only parse JSON. Security-sensitive
- * signed paths should use readBoundedRssWebhookBody and retain the bytes.
- */
-export async function readBoundedRssWebhookRawBody(request: Request): Promise<string> {
-  return (await readBoundedRssWebhookBody(request)).text;
-}
-
 export function buildRssWebhookSignatureInput(timestamp: number, rawBodyBytes: Uint8Array): Uint8Array {
   const prefix = new TextEncoder().encode(`${timestamp}.`);
   const input = new Uint8Array(prefix.byteLength + rawBodyBytes.byteLength);
